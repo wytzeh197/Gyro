@@ -1,0 +1,4 @@
+apps/desktop/src-tauri/gen/
+target/
+node_modules/
+dist/

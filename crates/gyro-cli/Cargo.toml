@@ -1,0 +1,20 @@
+[package]
+name = "gyro-cli"
+description = "Command-line interface for Gyro."
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "gyro"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+gyro-core = { path = "../gyro-core" }
+serde_json.workspace = true
+uuid.workspace = true
