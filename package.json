@@ -1,0 +1,31 @@
+{
+  "name": "@gyro-dev/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source local-first coding agent workspace.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "desktop:dev": "pnpm doctor && pnpm --filter @gyro-dev/desktop tauri dev",
+    "desktop:build": "pnpm --filter @gyro-dev/desktop tauri build",
+    "dev": "pnpm desktop:dev",
+    "doctor": "node scripts/check-dev-env.mjs",
+    "format": "prettier --check .",
+    "lint": "pnpm -r lint",
+    "release:check": "node scripts/check-release-config.mjs",
+    "smoke:workbench": "node scripts/check-workbench-ui.mjs",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3"
+  }
+}
