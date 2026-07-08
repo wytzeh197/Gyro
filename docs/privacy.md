@@ -5,6 +5,7 @@ Gyro is local-first by default.
 ## Defaults
 
 - No telemetry is sent by default.
+- Gyro local access stores device-session material in macOS Keychain and only keeps non-secret local access metadata in config.
 - Provider keys are stored in macOS Keychain.
 - Session logs are stored locally.
 - User repositories are not modified with Gyro metadata unless the user opts in.

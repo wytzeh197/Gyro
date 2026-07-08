@@ -1,0 +1,563 @@
+use crate::{
+    config::{AccountOidcConfig, AccountSessionState, GyroConfig},
+    keychain,
+    paths::GyroPaths,
+};
+use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::Utc;
+use rand::{rngs::OsRng, RngCore};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::{
+    io::{Read, Write},
+    net::TcpListener,
+    process::Command,
+    time::{Duration, Instant},
+};
+use url::{form_urlencoded, Url};
+
+const TOKEN_ACCESS: &str = "access-token";
+const TOKEN_REFRESH: &str = "refresh-token";
+const TOKEN_ID: &str = "id-token";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PkceFlow {
+    pub state: String,
+    pub nonce: String,
+    pub verifier: String,
+    pub challenge: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct OidcDiscovery {
+    authorization_endpoint: String,
+    token_endpoint: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct TokenResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    id_token: Option<String>,
+    expires_in: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct IdTokenClaims {
+    iss: String,
+    sub: String,
+    aud: Audience,
+    exp: i64,
+    nonce: Option<String>,
+    email: Option<String>,
+    name: Option<String>,
+    picture: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum Audience {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Audience {
+    fn contains(&self, expected: &str) -> bool {
+        match self {
+            Self::One(value) => value == expected,
+            Self::Many(values) => values.iter().any(|value| value == expected),
+        }
+    }
+}
+
+pub fn token_storage_key(kind: &str) -> String {
+    format!("account:oidc:{kind}")
+}
+
+pub fn generate_pkce_flow() -> PkceFlow {
+    let verifier = random_urlsafe(32);
+    let state = random_urlsafe(24);
+    let nonce = random_urlsafe(24);
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+
+    PkceFlow {
+        state,
+        nonce,
+        verifier,
+        challenge,
+    }
+}
+
+pub fn stored_account_session(paths: &GyroPaths) -> Result<AccountSessionState> {
+    let config = GyroConfig::load(paths)?;
+    if is_local_device_access(&config.account_oidc) && config.account_session.signed_in {
+        return Ok(config.account_session);
+    }
+
+    if config.account_session.signed_in
+        && keychain::get_api_key(&token_storage_key(TOKEN_ID))?.is_some()
+    {
+        Ok(config.account_session)
+    } else {
+        Ok(AccountSessionState::default())
+    }
+}
+
+pub fn start_account_login(paths: &GyroPaths) -> Result<AccountSessionState> {
+    let mut config = GyroConfig::load(paths)?;
+    let oidc = config.account_oidc.clone();
+    ensure_oidc_configured(&oidc)?;
+
+    if is_local_device_access(&oidc) {
+        return authorize_local_device(paths, &mut config);
+    }
+
+    let discovery = discover_oidc(&oidc)?;
+    let listener = TcpListener::bind(loopback_bind_addr(&oidc)?)
+        .context("bind local OAuth callback listener")?;
+    let callback_port = listener.local_addr()?.port();
+    let redirect_uri = loopback_redirect_uri(&oidc, callback_port)?;
+    let flow = generate_pkce_flow();
+    let authorize_url = authorize_url(&oidc, &discovery, &redirect_uri, &flow)?;
+
+    open_system_browser(authorize_url.as_str())?;
+    let callback = wait_for_callback(listener, &flow.state)?;
+    let token_response = exchange_code(
+        &discovery.token_endpoint,
+        &oidc,
+        &redirect_uri,
+        &flow,
+        &callback.code,
+    )?;
+    let id_token = token_response
+        .id_token
+        .as_deref()
+        .ok_or_else(|| anyhow!("OIDC token response did not include an id_token"))?;
+    let claims = validate_id_token_claims(id_token, &oidc, Some(&flow.nonce))?;
+    store_tokens(&token_response, None)?;
+
+    config.account_session = session_from_claims(&claims, &token_response);
+    config.save(paths)?;
+    Ok(config.account_session)
+}
+
+pub fn refresh_account_session(paths: &GyroPaths) -> Result<AccountSessionState> {
+    let mut config = GyroConfig::load(paths)?;
+    let oidc = config.account_oidc.clone();
+    ensure_oidc_configured(&oidc)?;
+
+    if is_local_device_access(&oidc) {
+        return Ok(config.account_session);
+    }
+
+    let Some(refresh_token) = keychain::get_api_key(&token_storage_key(TOKEN_REFRESH))? else {
+        config.account_session = AccountSessionState::default();
+        config.save(paths)?;
+        return Ok(config.account_session);
+    };
+
+    let discovery = discover_oidc(&oidc)?;
+    let token_response = refresh_tokens(&discovery.token_endpoint, &oidc, &refresh_token)?;
+    let id_token = token_response
+        .id_token
+        .as_deref()
+        .ok_or_else(|| anyhow!("OIDC refresh response did not include an id_token"))?;
+    let claims = validate_id_token_claims(id_token, &oidc, None)?;
+    store_tokens(&token_response, Some(&refresh_token))?;
+
+    config.account_session = session_from_claims(&claims, &token_response);
+    config.save(paths)?;
+    Ok(config.account_session)
+}
+
+pub fn logout_account(paths: &GyroPaths) -> Result<AccountSessionState> {
+    let mut config = GyroConfig::load(paths)?;
+    if !is_local_device_access(&config.account_oidc) {
+        for kind in [TOKEN_ACCESS, TOKEN_REFRESH, TOKEN_ID] {
+            keychain::delete_api_key(&token_storage_key(kind))?;
+        }
+    }
+    config.account_session = AccountSessionState::default();
+    config.save(paths)?;
+    Ok(config.account_session)
+}
+
+fn ensure_oidc_configured(config: &AccountOidcConfig) -> Result<()> {
+    if config.issuer_url.trim().is_empty()
+        || config.client_id.trim().is_empty()
+        || config.redirect_loopback_base.trim().is_empty()
+    {
+        bail!("Gyro local access is missing issuer, client ID, or loopback redirect config");
+    }
+    Ok(())
+}
+
+fn is_local_device_access(config: &AccountOidcConfig) -> bool {
+    config.issuer_url.trim_end_matches('/') == "local-device://gyro"
+        && config.client_id == "gyro-local-device"
+}
+
+fn authorize_local_device(
+    paths: &GyroPaths,
+    config: &mut GyroConfig,
+) -> Result<AccountSessionState> {
+    config.account_session = AccountSessionState {
+        signed_in: true,
+        user_id: Some("local-device".into()),
+        email: None,
+        name: Some("This Mac".into()),
+        avatar_url: None,
+        issuer: Some("local-device://gyro".into()),
+        expires_at: Utc::now()
+            .checked_add_signed(chrono::Duration::days(30))
+            .map(|value| value.to_rfc3339()),
+    };
+    config.save(paths)?;
+    Ok(config.account_session.clone())
+}
+
+fn discover_oidc(config: &AccountOidcConfig) -> Result<OidcDiscovery> {
+    let discovery_url = issuer_url(config)?.join(".well-known/openid-configuration")?;
+    ureq::get(discovery_url.as_str())
+        .call()
+        .map_err(|error| anyhow!("OIDC discovery failed: {error}"))?
+        .into_json()
+        .context("parse OIDC discovery response")
+}
+
+fn authorize_url(
+    config: &AccountOidcConfig,
+    discovery: &OidcDiscovery,
+    redirect_uri: &str,
+    flow: &PkceFlow,
+) -> Result<Url> {
+    let mut url = Url::parse(&discovery.authorization_endpoint)?;
+    url.query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", &config.client_id)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("scope", &config.scopes.join(" "))
+        .append_pair("state", &flow.state)
+        .append_pair("nonce", &flow.nonce)
+        .append_pair("code_challenge", &flow.challenge)
+        .append_pair("code_challenge_method", "S256");
+    Ok(url)
+}
+
+fn exchange_code(
+    token_endpoint: &str,
+    config: &AccountOidcConfig,
+    redirect_uri: &str,
+    flow: &PkceFlow,
+    code: &str,
+) -> Result<TokenResponse> {
+    let body = form_urlencoded::Serializer::new(String::new())
+        .append_pair("grant_type", "authorization_code")
+        .append_pair("client_id", &config.client_id)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("code_verifier", &flow.verifier)
+        .append_pair("code", code)
+        .finish();
+    post_token_request(token_endpoint, &body)
+}
+
+fn refresh_tokens(
+    token_endpoint: &str,
+    config: &AccountOidcConfig,
+    refresh_token: &str,
+) -> Result<TokenResponse> {
+    let body = form_urlencoded::Serializer::new(String::new())
+        .append_pair("grant_type", "refresh_token")
+        .append_pair("client_id", &config.client_id)
+        .append_pair("refresh_token", refresh_token)
+        .finish();
+    post_token_request(token_endpoint, &body)
+}
+
+fn post_token_request(token_endpoint: &str, body: &str) -> Result<TokenResponse> {
+    ureq::post(token_endpoint)
+        .set("content-type", "application/x-www-form-urlencoded")
+        .send_string(body)
+        .map_err(|error| anyhow!("OIDC token request failed: {error}"))?
+        .into_json()
+        .context("parse OIDC token response")
+}
+
+fn store_tokens(response: &TokenResponse, fallback_refresh_token: Option<&str>) -> Result<()> {
+    if let Some(access_token) = response.access_token.as_deref() {
+        keychain::set_api_key(&token_storage_key(TOKEN_ACCESS), access_token)?;
+    }
+    if let Some(id_token) = response.id_token.as_deref() {
+        keychain::set_api_key(&token_storage_key(TOKEN_ID), id_token)?;
+    }
+    if let Some(refresh_token) = response.refresh_token.as_deref().or(fallback_refresh_token) {
+        keychain::set_api_key(&token_storage_key(TOKEN_REFRESH), refresh_token)?;
+    }
+    Ok(())
+}
+
+fn validate_id_token_claims(
+    id_token: &str,
+    config: &AccountOidcConfig,
+    expected_nonce: Option<&str>,
+) -> Result<IdTokenClaims> {
+    let payload = id_token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| anyhow!("id_token is not a compact JWT"))?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload)
+        .context("decode id_token payload")?;
+    let claims: IdTokenClaims =
+        serde_json::from_slice(&decoded).context("parse id_token claims")?;
+    let expected_issuer = issuer_url(config)?.to_string();
+    if claims.iss != expected_issuer {
+        bail!("id_token issuer did not match configured issuer");
+    }
+    if !claims.aud.contains(&config.client_id) {
+        bail!("id_token audience did not include Gyro client ID");
+    }
+    if let Some(expected_nonce) = expected_nonce {
+        if claims.nonce.as_deref() != Some(expected_nonce) {
+            bail!("id_token nonce did not match login request");
+        }
+    }
+    if claims.exp <= Utc::now().timestamp() {
+        bail!("id_token is expired");
+    }
+    Ok(claims)
+}
+
+fn session_from_claims(claims: &IdTokenClaims, response: &TokenResponse) -> AccountSessionState {
+    let expires_at = response
+        .expires_in
+        .and_then(|expires_in| Utc::now().checked_add_signed(chrono::Duration::seconds(expires_in)))
+        .or_else(|| chrono::DateTime::from_timestamp(claims.exp, 0))
+        .map(|value| value.to_rfc3339());
+
+    AccountSessionState {
+        signed_in: true,
+        user_id: Some(claims.sub.clone()),
+        email: claims.email.clone(),
+        name: claims.name.clone(),
+        avatar_url: claims.picture.clone(),
+        issuer: Some(claims.iss.clone()),
+        expires_at,
+    }
+}
+
+fn wait_for_callback(listener: TcpListener, expected_state: &str) -> Result<OAuthCallback> {
+    listener.set_nonblocking(true)?;
+    listener
+        .set_ttl(64)
+        .context("configure OAuth callback listener")?;
+    let started_at = Instant::now();
+    let (mut stream, _) = loop {
+        match listener.accept() {
+            Ok(value) => break value,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if started_at.elapsed() > Duration::from_secs(120) {
+                    bail!("timed out waiting for browser sign-in callback");
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error).context("wait for OAuth callback from browser"),
+        }
+    };
+    stream.set_read_timeout(Some(Duration::from_secs(120)))?;
+    let mut buffer = [0_u8; 8192];
+    let count = stream.read(&mut buffer)?;
+    let request = String::from_utf8_lossy(&buffer[..count]);
+    let callback = parse_callback_request(&request, expected_state);
+    let response = match &callback {
+        Ok(_) => {
+            "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\n\r\n<html><body><h1>Gyro sign-in complete</h1><p>You can return to Gyro.</p></body></html>"
+        }
+        Err(_) => {
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: text/html; charset=utf-8\r\n\r\n<html><body><h1>Gyro sign-in failed</h1><p>You can close this tab and try again.</p></body></html>"
+        }
+    };
+    let _ = stream.write_all(response.as_bytes());
+    callback
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OAuthCallback {
+    code: String,
+}
+
+fn parse_callback_request(request: &str, expected_state: &str) -> Result<OAuthCallback> {
+    let first_line = request
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("OAuth callback request was empty"))?;
+    let path = first_line
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| anyhow!("OAuth callback request was malformed"))?;
+    let url = Url::parse(&format!("http://127.0.0.1{path}"))?;
+    let params = url.query_pairs().collect::<Vec<_>>();
+    let state = params
+        .iter()
+        .find(|(key, _)| key == "state")
+        .map(|(_, value)| value.to_string())
+        .ok_or_else(|| anyhow!("OAuth callback was missing state"))?;
+    if state != expected_state {
+        bail!("OAuth callback state did not match login request");
+    }
+    if let Some(error) = params
+        .iter()
+        .find(|(key, _)| key == "error")
+        .map(|(_, value)| value.to_string())
+    {
+        bail!("OAuth provider returned error: {error}");
+    }
+    let code = params
+        .iter()
+        .find(|(key, _)| key == "code")
+        .map(|(_, value)| value.to_string())
+        .ok_or_else(|| anyhow!("OAuth callback was missing authorization code"))?;
+    Ok(OAuthCallback { code })
+}
+
+fn loopback_bind_addr(config: &AccountOidcConfig) -> Result<String> {
+    let url = Url::parse(&config.redirect_loopback_base)?;
+    let host = url
+        .host_str()
+        .filter(|host| *host == "127.0.0.1" || *host == "localhost")
+        .ok_or_else(|| anyhow!("OAuth loopback redirect must use 127.0.0.1 or localhost"))?;
+    Ok(format!("{host}:0"))
+}
+
+fn loopback_redirect_uri(config: &AccountOidcConfig, port: u16) -> Result<String> {
+    let mut url = Url::parse(&config.redirect_loopback_base)?;
+    url.set_port(Some(port))
+        .map_err(|_| anyhow!("OAuth loopback redirect base cannot use this port"))?;
+    url.set_path("callback");
+    Ok(url.to_string())
+}
+
+fn issuer_url(config: &AccountOidcConfig) -> Result<Url> {
+    let mut url = Url::parse(&config.issuer_url)?;
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+    Ok(url)
+}
+
+fn open_system_browser(url: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg(url).status();
+    #[cfg(target_os = "windows")]
+    let status = Command::new("cmd").args(["/C", "start", url]).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(url).status();
+
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => bail!("open browser command exited with {status}"),
+        Err(error) => Err(error).context("open system browser for Gyro access"),
+    }
+}
+
+fn random_urlsafe(byte_count: usize) -> String {
+    let mut bytes = vec![0_u8; byte_count];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_oidc_config() -> AccountOidcConfig {
+        AccountOidcConfig {
+            issuer_url: "https://auth.example.com/".into(),
+            client_id: "gyro-test".into(),
+            redirect_loopback_base: "http://127.0.0.1".into(),
+            scopes: vec!["openid".into(), "profile".into(), "email".into()],
+        }
+    }
+
+    fn unsigned_id_token(payload: serde_json::Value) -> String {
+        format!(
+            "{}.{}.",
+            URL_SAFE_NO_PAD.encode(br#"{"alg":"none"}"#),
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
+        )
+    }
+
+    #[test]
+    fn pkce_flow_has_s256_challenge_and_state() {
+        let flow = generate_pkce_flow();
+        assert!(flow.verifier.len() >= 43);
+        assert!(flow.state.len() >= 32);
+        assert_ne!(flow.state, flow.nonce);
+        assert_eq!(
+            flow.challenge,
+            URL_SAFE_NO_PAD.encode(Sha256::digest(flow.verifier.as_bytes()))
+        );
+    }
+
+    #[test]
+    fn callback_parser_requires_matching_state() {
+        let request = "GET /callback?code=abc&state=expected HTTP/1.1\r\n\r\n";
+        assert_eq!(
+            parse_callback_request(request, "expected").unwrap(),
+            OAuthCallback { code: "abc".into() }
+        );
+        assert!(parse_callback_request(request, "different").is_err());
+    }
+
+    #[test]
+    fn token_storage_names_are_account_scoped() {
+        assert_eq!(
+            token_storage_key("refresh-token"),
+            "account:oidc:refresh-token"
+        );
+    }
+
+    #[test]
+    fn local_device_access_does_not_require_keychain_tokens() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let session = start_account_login(&paths).unwrap();
+        assert!(session.signed_in);
+        assert_eq!(session.issuer.as_deref(), Some("local-device://gyro"));
+
+        let stored = stored_account_session(&paths).unwrap();
+        assert!(stored.signed_in);
+
+        let refreshed = refresh_account_session(&paths).unwrap();
+        assert!(refreshed.signed_in);
+
+        let logged_out = logout_account(&paths).unwrap();
+        assert!(!logged_out.signed_in);
+    }
+
+    #[test]
+    fn id_token_validation_rejects_wrong_issuer_and_expiry() {
+        let mut payload = serde_json::json!({
+            "iss": "https://auth.example.com/",
+            "sub": "user_123",
+            "aud": "gyro-test",
+            "exp": Utc::now().timestamp() + 60,
+            "nonce": "nonce-1"
+        });
+        let token = unsigned_id_token(payload.clone());
+        assert!(validate_id_token_claims(&token, &test_oidc_config(), Some("nonce-1")).is_ok());
+
+        payload["iss"] = serde_json::json!("https://wrong.example.com/");
+        let wrong_issuer = unsigned_id_token(payload.clone());
+        assert!(
+            validate_id_token_claims(&wrong_issuer, &test_oidc_config(), Some("nonce-1")).is_err()
+        );
+
+        payload["iss"] = serde_json::json!("https://auth.example.com/");
+        payload["exp"] = serde_json::json!(Utc::now().timestamp() - 60);
+        let expired = unsigned_id_token(payload);
+        assert!(validate_id_token_claims(&expired, &test_oidc_config(), Some("nonce-1")).is_err());
+    }
+}

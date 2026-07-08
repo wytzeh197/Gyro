@@ -1,27 +1,41 @@
 use gyro_core::{
-    create_worktree, ipc::AppNotification, AppNotificationKind, Automation, AutomationStatus,
-    AutomationStore, AutomationTriageState, CreateAutomationRequest, CreateSessionContext,
-    GyroConfig, GyroPaths, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode,
+    create_worktree, ipc::AppNotification, logout_account as account_logout,
+    refresh_account_session as account_refresh_session, start_account_login as account_start_login,
+    stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
+    Automation, AutomationStatus, AutomationStore, AutomationTriageState, CreateAutomationRequest,
+    CreateSessionContext, GyroConfig, GyroPaths, Session, SessionEvent, SessionEventKind,
+    SessionOrigin, SessionStore, SessionWorkspaceMode,
 };
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
 const MAX_WORKSPACE_FILE_PREVIEW_BYTES: usize = 256 * 1024;
+const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
+const GUI_CLI_PATHS: &[&str] = &[
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceFile {
     path: String,
     kind: String,
+    depth: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -31,6 +45,25 @@ struct WorkspaceFileContent {
     content: String,
     truncated: bool,
     size_bytes: u64,
+    content_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceFileStat {
+    path: String,
+    kind: String,
+    size_bytes: u64,
+    content_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceFileWriteRequest {
+    workspace_path: String,
+    path: String,
+    content: String,
+    expected_hash: Option<String>,
 }
 
 #[derive(Default)]
@@ -47,6 +80,8 @@ struct TerminalPaneRequest {
     args: Vec<String>,
     workspace_path: Option<String>,
     working_directory: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -62,10 +97,36 @@ struct TerminalPaneSnapshot {
     rows: u16,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHealthRequest {
+    provider_id: String,
+    base_url: Option<String>,
+    api_key_ref: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHealthCheck {
+    provider_id: String,
+    output: String,
+    runtime_status: String,
+    auth_owner: String,
+    auth_command: Option<String>,
+    login_command: Option<String>,
+    account_label: Option<String>,
+    subscription_label: Option<String>,
+    provider_mode: Option<String>,
+    secret_storage: String,
+    privacy_note: String,
+    diagnostics_opt_in: bool,
+}
+
 struct TerminalProcess {
     request: TerminalPaneRequest,
-    stdin: Option<ChildStdin>,
-    child: Child,
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn portable_pty::Child + Send>,
     output: Arc<Mutex<Vec<u8>>>,
     status: String,
     exit_code: Option<i32>,
@@ -96,12 +157,11 @@ impl TerminalProcessManager {
         let process = processes
             .get_mut(pane_id)
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        if let Some(stdin) = process.stdin.as_mut() {
-            stdin.write_all(input.as_bytes())?;
-            stdin.flush()?;
-        } else {
+        if process.status == "done" || process.status == "failed" {
             anyhow::bail!("terminal pane stdin is closed");
         }
+        process.writer.write_all(input.as_bytes())?;
+        process.writer.flush()?;
         Ok(snapshot_terminal_process(process))
     }
 
@@ -126,6 +186,12 @@ impl TerminalProcessManager {
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
         process.cols = cols;
         process.rows = rows;
+        process.master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
         Ok(snapshot_terminal_process(process))
     }
 
@@ -138,7 +204,6 @@ impl TerminalProcessManager {
             .get_mut(pane_id)
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
         let _ = process.child.kill();
-        process.stdin = None;
         process.status = "failed".into();
         Ok(snapshot_terminal_process(process))
     }
@@ -177,10 +242,28 @@ fn list_sessions() -> Result<Vec<Session>, String> {
 }
 
 #[tauri::command]
-fn create_desktop_session(workspace_path: String, title: String) -> Result<Session, String> {
+fn create_desktop_session(
+    workspace_path: String,
+    title: String,
+    provider_id: Option<String>,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+) -> Result<Session, String> {
     let store = open_store()?;
     store
-        .create_session(PathBuf::from(workspace_path), SessionOrigin::Desktop, title)
+        .create_session_with_context(
+            PathBuf::from(workspace_path),
+            SessionOrigin::Desktop,
+            title,
+            CreateSessionContext {
+                provider_id,
+                provider_label,
+                model_id,
+                model_label,
+                ..CreateSessionContext::default()
+            },
+        )
         .map_err(to_string)
 }
 
@@ -190,6 +273,10 @@ fn create_worktree_session(
     title: String,
     branch: String,
     worktree_name: Option<String>,
+    provider_id: Option<String>,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
 ) -> Result<Session, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let store = SessionStore::open(paths.clone()).map_err(to_string)?;
@@ -205,6 +292,10 @@ fn create_worktree_session(
                 workspace_mode: SessionWorkspaceMode::Worktree,
                 branch: plan.branch,
                 worktree_name: Some(plan.worktree_name),
+                provider_id,
+                provider_label,
+                model_id,
+                model_label,
             },
         )
         .map_err(to_string)?;
@@ -225,6 +316,28 @@ fn create_worktree_session(
         .get_session(session.id)
         .map_err(to_string)?
         .ok_or_else(|| "worktree session was not persisted".into())
+}
+
+#[tauri::command]
+fn set_session_model(
+    session_id: String,
+    provider_id: Option<String>,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+) -> Result<Session, String> {
+    let store = open_store()?;
+    let session_id = parse_uuid(&session_id)?;
+    store
+        .update_session_model(
+            session_id,
+            provider_id,
+            provider_label,
+            model_id,
+            model_label,
+        )
+        .map_err(to_string)?
+        .ok_or_else(|| "session not found".into())
 }
 
 #[tauri::command]
@@ -352,9 +465,92 @@ fn append_user_message(session_id: String, message: String) -> Result<SessionEve
 }
 
 #[tauri::command]
+fn append_plan_event(
+    session_id: String,
+    message: Option<String>,
+    payload: serde_json::Value,
+) -> Result<SessionEvent, String> {
+    let store = open_store()?;
+    let session_id = parse_uuid(&session_id)?;
+    let turn_id = payload
+        .get("turnId")
+        .and_then(|value| value.as_str())
+        .map(parse_uuid)
+        .transpose()?;
+    let message = message.unwrap_or_else(|| {
+        let action = payload
+            .get("action")
+            .and_then(|value| value.as_str())
+            .unwrap_or("updated")
+            .replace('-', " ");
+        format!("Plan {action}")
+    });
+    store
+        .append_event_with_turn_id(
+            session_id,
+            SessionEventKind::PlanUpdated,
+            message,
+            payload,
+            turn_id,
+        )
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn append_editor_event(
+    session_id: String,
+    event_kind: String,
+    message: String,
+    payload: serde_json::Value,
+) -> Result<SessionEvent, String> {
+    let store = open_store()?;
+    let session_id = parse_uuid(&session_id)?;
+    let kind = match event_kind.as_str() {
+        "ai-edit-proposed" => SessionEventKind::FileEditProposed,
+        _ => SessionEventKind::SystemEvent,
+    };
+    store
+        .append_event(
+            session_id,
+            kind,
+            message,
+            serde_json::json!({
+                "kind": event_kind,
+                "surface": "desktop-ide",
+                "data": payload,
+            }),
+        )
+        .map_err(to_string)
+}
+
+#[tauri::command]
 fn load_config() -> Result<GyroConfig, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     GyroConfig::load(&paths).map_err(to_string)
+}
+
+#[tauri::command]
+fn get_account_session() -> Result<AccountSessionState, String> {
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    account_stored_session(&paths).map_err(to_string)
+}
+
+#[tauri::command]
+fn start_account_login() -> Result<AccountSessionState, String> {
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    account_start_login(&paths).map_err(to_string)
+}
+
+#[tauri::command]
+fn refresh_account_session() -> Result<AccountSessionState, String> {
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    account_refresh_session(&paths).map_err(to_string)
+}
+
+#[tauri::command]
+fn logout_account() -> Result<AccountSessionState, String> {
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    account_logout(&paths).map_err(to_string)
 }
 
 #[tauri::command]
@@ -365,37 +561,55 @@ fn save_config(config: GyroConfig) -> Result<(), String> {
 
 #[tauri::command]
 fn list_workspace_files(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
+    list_workspace_tree(workspace_path, Some(3))
+}
+
+#[tauri::command]
+fn list_workspace_tree(
+    workspace_path: String,
+    depth: Option<usize>,
+) -> Result<Vec<WorkspaceFile>, String> {
     let root = PathBuf::from(workspace_path)
         .canonicalize()
         .map_err(to_string)?;
+    let max_depth = depth.unwrap_or(4).clamp(1, 8);
     let mut entries = Vec::new();
 
     for entry in WalkDir::new(&root)
         .min_depth(1)
-        .max_depth(3)
+        .max_depth(max_depth)
         .into_iter()
         .filter_entry(|entry| {
             let name = entry.file_name().to_string_lossy();
             !matches!(
                 name.as_ref(),
-                ".git" | "node_modules" | "target" | "dist" | "build"
+                ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
             )
         })
-        .take(400)
+        .take(1200)
     {
         let entry = entry.map_err(to_string)?;
         let path = entry.path().strip_prefix(&root).map_err(to_string)?;
+        let kind = if entry.file_type().is_dir() {
+            "directory".into()
+        } else {
+            "file".into()
+        };
         entries.push(WorkspaceFile {
             path: path.to_string_lossy().to_string(),
-            kind: if entry.file_type().is_dir() {
-                "directory".into()
-            } else {
-                "file".into()
-            },
+            kind,
+            depth: path.components().count(),
         });
     }
 
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_by(|a, b| {
+        let a_parent = Path::new(&a.path).parent();
+        let b_parent = Path::new(&b.path).parent();
+        a_parent
+            .cmp(&b_parent)
+            .then_with(|| a.kind.cmp(&b.kind))
+            .then_with(|| a.path.cmp(&b.path))
+    });
     Ok(entries)
 }
 
@@ -407,9 +621,38 @@ fn read_workspace_file(
     read_workspace_file_impl(&workspace_path, &path).map_err(to_string)
 }
 
+#[tauri::command]
+fn read_workspace_file_full(
+    workspace_path: String,
+    path: String,
+) -> Result<WorkspaceFileContent, String> {
+    read_workspace_file_with_limit(&workspace_path, &path, MAX_WORKSPACE_FILE_EDIT_BYTES)
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn stat_workspace_file(workspace_path: String, path: String) -> Result<WorkspaceFileStat, String> {
+    stat_workspace_file_impl(&workspace_path, &path).map_err(to_string)
+}
+
+#[tauri::command]
+fn write_workspace_file(
+    request: WorkspaceFileWriteRequest,
+) -> Result<WorkspaceFileContent, String> {
+    write_workspace_file_impl(&request).map_err(to_string)
+}
+
 fn read_workspace_file_impl(
     workspace_path: &str,
     path: &str,
+) -> anyhow::Result<WorkspaceFileContent> {
+    read_workspace_file_with_limit(workspace_path, path, MAX_WORKSPACE_FILE_PREVIEW_BYTES)
+}
+
+fn read_workspace_file_with_limit(
+    workspace_path: &str,
+    path: &str,
+    max_bytes: usize,
 ) -> anyhow::Result<WorkspaceFileContent> {
     let root = PathBuf::from(workspace_path).canonicalize()?;
     let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
@@ -420,18 +663,18 @@ fn read_workspace_file_impl(
     }
 
     let mut file = std::fs::File::open(&candidate)?;
-    let mut bytes =
-        Vec::with_capacity(MAX_WORKSPACE_FILE_PREVIEW_BYTES.min(metadata.len() as usize));
+    let mut bytes = Vec::with_capacity(max_bytes.min(metadata.len() as usize));
     Read::by_ref(&mut file)
-        .take((MAX_WORKSPACE_FILE_PREVIEW_BYTES + 1) as u64)
+        .take((max_bytes + 1) as u64)
         .read_to_end(&mut bytes)?;
-    let truncated = bytes.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES;
+    let truncated = bytes.len() > max_bytes;
     if truncated {
-        bytes.truncate(MAX_WORKSPACE_FILE_PREVIEW_BYTES);
+        bytes.truncate(max_bytes);
     }
     if bytes.contains(&0) {
         anyhow::bail!("binary workspace files cannot be previewed");
     }
+    let content_hash = content_hash(&bytes);
     let content = String::from_utf8_lossy(&bytes).to_string();
 
     Ok(WorkspaceFileContent {
@@ -439,7 +682,78 @@ fn read_workspace_file_impl(
         content,
         truncated,
         size_bytes: metadata.len(),
+        content_hash,
     })
+}
+
+fn stat_workspace_file_impl(workspace_path: &str, path: &str) -> anyhow::Result<WorkspaceFileStat> {
+    let root = PathBuf::from(workspace_path).canonicalize()?;
+    let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
+    let metadata = std::fs::metadata(&candidate)?;
+    let kind = if metadata.is_dir() {
+        "directory"
+    } else {
+        "file"
+    }
+    .to_string();
+    let content_hash =
+        if metadata.is_file() && metadata.len() <= MAX_WORKSPACE_FILE_EDIT_BYTES as u64 {
+            let bytes = std::fs::read(&candidate)?;
+            if bytes.contains(&0) {
+                None
+            } else {
+                Some(content_hash(&bytes))
+            }
+        } else {
+            None
+        };
+
+    Ok(WorkspaceFileStat {
+        path: path.to_string(),
+        kind,
+        size_bytes: metadata.len(),
+        content_hash,
+    })
+}
+
+fn write_workspace_file_impl(
+    request: &WorkspaceFileWriteRequest,
+) -> anyhow::Result<WorkspaceFileContent> {
+    let root = PathBuf::from(&request.workspace_path).canonicalize()?;
+    let candidate =
+        gyro_core::security::assert_path_inside_workspace(&root, Path::new(&request.path))?;
+    if candidate.is_dir() {
+        anyhow::bail!("workspace write path is a directory");
+    }
+    let content_bytes = request.content.as_bytes();
+    if content_bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
+        anyhow::bail!("workspace file is too large to edit in Gyro");
+    }
+    if content_bytes.contains(&0) {
+        anyhow::bail!("binary workspace files cannot be edited");
+    }
+    if let Some(expected_hash) = request.expected_hash.as_deref() {
+        let current = std::fs::read(&candidate)?;
+        if current.contains(&0) {
+            anyhow::bail!("binary workspace files cannot be edited");
+        }
+        let current_hash = content_hash(&current);
+        if current_hash != expected_hash {
+            anyhow::bail!("file changed on disk; reload before saving");
+        }
+    }
+
+    std::fs::write(&candidate, content_bytes)?;
+    read_workspace_file_with_limit(
+        &request.workspace_path,
+        &request.path,
+        MAX_WORKSPACE_FILE_EDIT_BYTES,
+    )
+}
+
+fn content_hash(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[tauri::command]
@@ -500,41 +814,174 @@ fn restore_terminal_panes(
     manager.restore().map_err(to_string)
 }
 
+#[tauri::command]
+fn check_provider_health(request: ProviderHealthRequest) -> Result<ProviderHealthCheck, String> {
+    ProviderHealthService::default()
+        .check(request)
+        .map_err(to_string)
+}
+
+#[tauri::command]
+fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck, String> {
+    check_provider_health(ProviderHealthRequest {
+        provider_id,
+        api_key_ref: None,
+        base_url: None,
+    })
+}
+
+#[derive(Default)]
+struct ProviderHealthService;
+
+impl ProviderHealthService {
+    fn check(&self, request: ProviderHealthRequest) -> anyhow::Result<ProviderHealthCheck> {
+        match request.provider_id.as_str() {
+            "openai" => self.check_openai(request),
+            "anthropic" => self.cli_check(
+                "anthropic",
+                "provider-cli",
+                "claude",
+                &["auth", "status"],
+                Some("claude auth login"),
+                "Provider CLI, OS Keychain, or provider-owned files",
+            ),
+            "cursor" => self.cli_check(
+                "cursor",
+                "provider-cli",
+                "cursor-agent",
+                &["login", "status"],
+                Some("cursor-agent login"),
+                "Provider CLI, OS Keychain, or provider-owned files",
+            ),
+            "xai" => Ok(env_provider_health(
+                "xai",
+                request.api_key_ref.as_deref(),
+                &["XAI_API_KEY"],
+            )),
+            "gemini" => Ok(env_provider_health(
+                "gemini",
+                request.api_key_ref.as_deref(),
+                &[
+                    "GEMINI_API_KEY",
+                    "GOOGLE_API_KEY",
+                    "GOOGLE_APPLICATION_CREDENTIALS",
+                ],
+            )),
+            "opencode" => self.cli_check(
+                "opencode",
+                "provider-cli",
+                "opencode",
+                &["auth", "status"],
+                Some("opencode auth login"),
+                "Provider CLI, OS Keychain, or provider-owned files",
+            ),
+            _ => anyhow::bail!("unknown provider `{}`", request.provider_id),
+        }
+    }
+
+    fn check_openai(&self, request: ProviderHealthRequest) -> anyhow::Result<ProviderHealthCheck> {
+        if should_skip_codex_login_for_external_env(
+            request.base_url.as_deref(),
+            request.api_key_ref.as_deref(),
+        ) {
+            return Ok(env_provider_health(
+                "openai",
+                request.api_key_ref.as_deref(),
+                &["OPENAI_API_KEY"],
+            ));
+        }
+
+        self.cli_check(
+            "openai",
+            "provider-cli",
+            "codex",
+            &["login", "status"],
+            Some("codex login --device-auth"),
+            "Provider CLI, OS Keychain, or provider-owned files",
+        )
+    }
+
+    fn cli_check(
+        &self,
+        provider_id: &str,
+        auth_owner: &str,
+        command: &str,
+        args: &[&str],
+        login_command: Option<&str>,
+        secret_storage: &str,
+    ) -> anyhow::Result<ProviderHealthCheck> {
+        let auth_command = std::iter::once(command)
+            .chain(args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let output = match command_output(command, args) {
+            Ok(output) => output,
+            Err(error) => format!("{command} not installed or unavailable: {error}"),
+        };
+        let output = gyro_core::security::redact_secrets(&output);
+        Ok(ProviderHealthCheck {
+            provider_id: provider_id.into(),
+            runtime_status: provider_runtime_status_from_output(&output).into(),
+            auth_owner: auth_owner.into(),
+            auth_command: Some(auth_command),
+            login_command: login_command.map(str::to_string),
+            account_label: provider_account_label(&output),
+            subscription_label: provider_subscription_label(&output),
+            provider_mode: provider_mode_label(&output),
+            secret_storage: secret_storage.into(),
+            privacy_note:
+                "Gyro stores readiness summaries only; provider tokens stay outside Gyro.".into(),
+            diagnostics_opt_in: false,
+            output,
+        })
+    }
+}
+
 fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<TerminalProcess> {
     if request.command.trim().is_empty() {
         anyhow::bail!("terminal command cannot be empty");
     }
 
     let cwd = resolve_terminal_cwd(&request)?;
-    let mut command = Command::new(&request.command);
-    command
-        .args(&request.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let cols = request.cols.unwrap_or(120);
+    let rows = request.rows.unwrap_or(32);
+    let pty_system = native_pty_system();
+    let pair = pty_system.openpty(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    let mut command = CommandBuilder::new(&request.command);
+    command.args(request.args.iter().map(String::as_str));
     if let Some(cwd) = cwd {
-        command.current_dir(cwd);
+        command.cwd(cwd);
+    }
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("TERM_PROGRAM", "Gyro");
+    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    if !request.command.contains('/') {
+        command.env("PATH", augmented_gui_path());
     }
 
-    let mut child = command.spawn()?;
-    let stdin = child.stdin.take();
+    let child = pair.slave.spawn_command(command)?;
     let output = Arc::new(Mutex::new(Vec::new()));
-    if let Some(stdout) = child.stdout.take() {
-        spawn_terminal_reader(stdout, Arc::clone(&output));
-    }
-    if let Some(stderr) = child.stderr.take() {
-        spawn_terminal_reader(stderr, Arc::clone(&output));
-    }
+    let reader = pair.master.try_clone_reader()?;
+    let writer = pair.master.take_writer()?;
+    spawn_terminal_reader(reader, Arc::clone(&output));
+    drop(pair.slave);
 
     Ok(TerminalProcess {
         request,
-        stdin,
+        master: pair.master,
+        writer,
         child,
         output,
         status: "running".into(),
         exit_code: None,
-        cols: 120,
-        rows: 32,
+        cols,
+        rows,
     })
 }
 
@@ -558,6 +1005,190 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
 
     let candidate = Path::new(working_directory);
     gyro_core::security::assert_path_inside_workspace(&workspace, candidate).map(Some)
+}
+
+fn should_skip_codex_login_for_external_env(
+    base_url: Option<&str>,
+    api_key_ref: Option<&str>,
+) -> bool {
+    let base_url = base_url.unwrap_or_default().trim().to_ascii_lowercase();
+    let api_key_ref = api_key_ref.unwrap_or_default().trim().to_ascii_lowercase();
+    let external_base_url = !base_url.is_empty()
+        && !base_url.contains("api.openai.com")
+        && !base_url.contains("chatgpt.com");
+    let env_owned_key = api_key_ref.starts_with("provider-env:")
+        || api_key_ref.starts_with("env:")
+        || api_key_ref.ends_with("_api_key")
+        || api_key_ref.contains("api_key");
+
+    external_base_url && env_owned_key
+}
+
+fn env_provider_health(
+    provider_id: &str,
+    api_key_ref: Option<&str>,
+    fallback_env_names: &[&str],
+) -> ProviderHealthCheck {
+    let mut env_names = Vec::new();
+    if let Some(env_name) = env_name_from_ref(api_key_ref) {
+        env_names.push(env_name);
+    }
+    for env_name in fallback_env_names {
+        if !env_names.iter().any(|candidate| candidate == env_name) {
+            env_names.push((*env_name).to_string());
+        }
+    }
+
+    let present_env = env_names
+        .iter()
+        .find(|env_name| std::env::var_os(env_name.as_str()).is_some())
+        .cloned();
+    let output = if let Some(env_name) = present_env.as_deref() {
+        format!(
+            "{provider_id} provider-env auth available; {env_name} is set; value not read by Gyro."
+        )
+    } else {
+        format!(
+            "{provider_id} provider-env auth missing; configure one of {} outside Gyro.",
+            env_names.join(", ")
+        )
+    };
+
+    ProviderHealthCheck {
+        provider_id: provider_id.into(),
+        runtime_status: if present_env.is_some() {
+            "ready".into()
+        } else {
+            "not-logged-in".into()
+        },
+        auth_owner: "provider-env".into(),
+        auth_command: None,
+        login_command: None,
+        account_label: None,
+        subscription_label: None,
+        provider_mode: Some("environment-owned auth".into()),
+        secret_storage: "Environment variable or provider SDK store".into(),
+        privacy_note: "Gyro stores readiness summaries only; provider tokens stay outside Gyro."
+            .into(),
+        diagnostics_opt_in: false,
+        output,
+    }
+}
+
+fn env_name_from_ref(api_key_ref: Option<&str>) -> Option<String> {
+    let reference = api_key_ref?.trim();
+    let candidate = reference
+        .strip_prefix("provider-env:")
+        .or_else(|| reference.strip_prefix("env:"))
+        .unwrap_or(reference)
+        .trim();
+    if candidate.is_empty() || candidate.contains(':') || candidate.contains('/') {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn provider_runtime_status_from_output(output: &str) -> &'static str {
+    let normalized = output.to_ascii_lowercase();
+    if normalized.contains("not installed")
+        || normalized.contains("command not found")
+        || normalized.contains("no such file")
+    {
+        "not-installed"
+    } else if normalized.contains("not authenticated")
+        || normalized.contains("not logged in")
+        || normalized.contains("logged out")
+        || normalized.contains("\"loggedin\": false")
+        || normalized.contains("auth required")
+    {
+        "not-logged-in"
+    } else if normalized.contains("authenticated")
+        || normalized.contains("logged in")
+        || normalized.contains("\"loggedin\": true")
+        || normalized.contains("ready")
+        || normalized.contains("ok")
+    {
+        "ready"
+    } else if normalized.contains("error")
+        || normalized.contains("failed")
+        || normalized.contains("invalid")
+        || normalized.contains("denied")
+    {
+        "warning"
+    } else {
+        "unknown"
+    }
+}
+
+fn provider_subscription_label(output: &str) -> Option<String> {
+    quoted_field(output, "subscriptionType")
+        .or_else(|| quoted_field(output, "subscriptionTier"))
+        .or_else(|| quoted_field(output, "subscription"))
+}
+
+fn provider_account_label(output: &str) -> Option<String> {
+    quoted_field(output, "email")
+        .or_else(|| quoted_field(output, "account"))
+        .or_else(|| quoted_field(output, "user"))
+}
+
+fn provider_mode_label(output: &str) -> Option<String> {
+    quoted_field(output, "mode").or_else(|| quoted_field(output, "authMode"))
+}
+
+fn quoted_field(output: &str, field: &str) -> Option<String> {
+    let marker = format!("\"{field}\"");
+    let start = output.find(&marker)?;
+    let after_marker = &output[start + marker.len()..];
+    let colon = after_marker.find(':')?;
+    let after_colon = after_marker[colon + 1..].trim_start();
+    let after_quote = after_colon.strip_prefix('"')?;
+    let end = after_quote.find('"')?;
+    Some(after_quote[..end].to_string())
+}
+
+fn command_output(command: &str, args: &[&str]) -> Result<String, String> {
+    let output = command_with_gui_path(command)
+        .args(args)
+        .output()
+        .map_err(to_string)?;
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    let combined = combined.trim().to_string();
+
+    if output.status.success() {
+        Ok(combined)
+    } else if combined.is_empty() {
+        Err(format!("{command} exited with {}", output.status))
+    } else {
+        Ok(combined)
+    }
+}
+
+fn command_with_gui_path(command: &str) -> Command {
+    let mut process = Command::new(command);
+    if !command.contains('/') {
+        process.env("PATH", augmented_gui_path());
+    }
+    process
+}
+
+fn augmented_gui_path() -> String {
+    let mut paths: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|path| !path.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    if let Ok(home) = std::env::var("HOME") {
+        paths.push(format!("{home}/.local/bin"));
+        paths.push(format!("{home}/bin"));
+    }
+    paths.extend(GUI_CLI_PATHS.iter().map(|path| (*path).to_string()));
+    paths.dedup();
+    paths.join(":")
 }
 
 fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<Vec<u8>>>)
@@ -591,8 +1222,7 @@ fn append_terminal_output(output: &Arc<Mutex<Vec<u8>>>, bytes: &[u8]) {
 fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnapshot {
     match process.child.try_wait() {
         Ok(Some(status)) => {
-            process.stdin = None;
-            process.exit_code = status.code();
+            process.exit_code = Some(status.exit_code() as i32);
             process.status = if status.success() {
                 "done".into()
             } else {
@@ -605,7 +1235,6 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
             }
         }
         Err(_) => {
-            process.stdin = None;
             process.status = "failed".into();
         }
     }
@@ -641,32 +1270,45 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            append_editor_event,
+            append_plan_event,
             append_user_message,
             claim_due_automation,
+            check_provider_auth,
+            check_provider_health,
             complete_automation_lease,
             create_automation,
             create_desktop_session,
             create_terminal_pane,
             create_worktree_session,
             delete_session,
+            get_account_session,
             list_automations,
             list_due_automations,
             list_sessions,
             list_workspace_files,
+            list_workspace_tree,
             load_config,
+            logout_account,
             read_workspace_file,
+            read_workspace_file_full,
             read_terminal_output,
             read_session_events,
             recover_automation_leases,
             rename_session,
+            refresh_account_session,
             resize_terminal_pane,
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
             save_config,
+            set_session_model,
             set_automation_status,
+            stat_workspace_file,
+            start_account_login,
             stop_terminal_pane,
             triage_automation,
+            write_workspace_file,
             write_terminal_input
         ])
         .run(tauri::generate_context!())
@@ -796,6 +1438,136 @@ mod tests {
     }
 
     #[test]
+    fn writes_text_file_inside_workspace_with_expected_hash() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("app.ts"), "old\n").unwrap();
+        let content =
+            read_workspace_file_full(workspace.path().to_str().unwrap().into(), "app.ts".into())
+                .unwrap();
+
+        let saved = write_workspace_file_impl(&WorkspaceFileWriteRequest {
+            workspace_path: workspace.path().to_str().unwrap().into(),
+            path: "app.ts".into(),
+            content: "new\n".into(),
+            expected_hash: Some(content.content_hash),
+        })
+        .unwrap();
+
+        assert_eq!(saved.content, "new\n");
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("app.ts")).unwrap(),
+            "new\n"
+        );
+    }
+
+    #[test]
+    fn rejects_write_outside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+
+        let error = write_workspace_file_impl(&WorkspaceFileWriteRequest {
+            workspace_path: workspace.path().to_str().unwrap().into(),
+            path: outside.path().to_str().unwrap().into(),
+            content: "nope\n".into(),
+            expected_hash: None,
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("outside workspace"));
+    }
+
+    #[test]
+    fn rejects_binary_write_content() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("bin.txt"), "old\n").unwrap();
+
+        let error = write_workspace_file_impl(&WorkspaceFileWriteRequest {
+            workspace_path: workspace.path().to_str().unwrap().into(),
+            path: "bin.txt".into(),
+            content: "bad\0content".into(),
+            expected_hash: None,
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("binary workspace files"));
+    }
+
+    #[test]
+    fn rejects_oversized_write_content() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("large.txt"), "old\n").unwrap();
+
+        let error = write_workspace_file_impl(&WorkspaceFileWriteRequest {
+            workspace_path: workspace.path().to_str().unwrap().into(),
+            path: "large.txt".into(),
+            content: "a".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES + 1),
+            expected_hash: None,
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("too large"));
+    }
+
+    #[test]
+    fn rejects_stale_expected_hash() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("app.ts"), "old\n").unwrap();
+        let content =
+            read_workspace_file_full(workspace.path().to_str().unwrap().into(), "app.ts".into())
+                .unwrap();
+        std::fs::write(workspace.path().join("app.ts"), "external\n").unwrap();
+
+        let error = write_workspace_file_impl(&WorkspaceFileWriteRequest {
+            workspace_path: workspace.path().to_str().unwrap().into(),
+            path: "app.ts".into(),
+            content: "new\n".into(),
+            expected_hash: Some(content.content_hash),
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("changed on disk"));
+    }
+
+    #[test]
+    fn provider_health_skips_codex_login_for_external_env_auth() {
+        assert!(should_skip_codex_login_for_external_env(
+            Some("https://gateway.example.test/v1"),
+            Some("provider-env:PORTKEY_API_KEY"),
+        ));
+        assert!(!should_skip_codex_login_for_external_env(
+            Some("https://api.openai.com/v1"),
+            Some("provider-cli:codex"),
+        ));
+    }
+
+    #[test]
+    fn provider_health_redacts_secret_output() {
+        let redacted = gyro_core::security::redact_secrets(
+            "authorization: bearer sk-abcdefghijklmnopqrstuvwxyz123456",
+        );
+
+        assert!(redacted.contains("[REDACTED]"));
+        assert!(!redacted.contains("abcdefghijklmnopqrstuvwxyz"));
+    }
+
+    #[test]
+    fn provider_health_parses_runtime_metadata_without_tokens() {
+        let output = r#"{"loggedIn":true,"email":"dev@example.test","subscriptionType":"max","token":"sk-abcdefghijklmnopqrstuvwxyz123456"}"#;
+        let redacted = gyro_core::security::redact_secrets(output);
+
+        assert_eq!(provider_runtime_status_from_output(&redacted), "ready");
+        assert_eq!(
+            provider_subscription_label(&redacted).as_deref(),
+            Some("max")
+        );
+        assert_eq!(
+            provider_account_label(&redacted).as_deref(),
+            Some("dev@example.test")
+        );
+        assert!(!redacted.contains("abcdefghijklmnopqrstuvwxyz"));
+    }
+
+    #[test]
     fn terminal_manager_runs_command_and_captures_output() {
         let manager = TerminalProcessManager::default();
         let snapshot = manager
@@ -806,6 +1578,8 @@ mod tests {
                 args: vec!["-c".into(), "printf hello".into()],
                 workspace_path: None,
                 working_directory: None,
+                cols: None,
+                rows: None,
             })
             .unwrap();
         assert_eq!(snapshot.status, "running");
@@ -826,6 +1600,8 @@ mod tests {
                 args: vec!["-c".into(), "read line; printf out:$line".into()],
                 workspace_path: None,
                 working_directory: None,
+                cols: None,
+                rows: None,
             })
             .unwrap();
 
@@ -840,6 +1616,30 @@ mod tests {
     }
 
     #[test]
+    fn terminal_manager_uses_real_terminal_environment() {
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-env".into(),
+                title: "Shell".into(),
+                command: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '%s %s %s' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\"".into(),
+                ],
+                workspace_path: None,
+                working_directory: None,
+                cols: None,
+                rows: None,
+            })
+            .unwrap();
+
+        let snapshot = wait_for_terminal_output(&manager, "pane-env", "xterm-256color");
+        assert!(snapshot.output.contains("xterm-256color truecolor Gyro"));
+        assert_eq!(snapshot.status, "done");
+    }
+
+    #[test]
     fn terminal_manager_stops_running_process() {
         let manager = TerminalProcessManager::default();
         manager
@@ -850,6 +1650,8 @@ mod tests {
                 args: vec!["-c".into(), "sleep 5".into()],
                 workspace_path: None,
                 working_directory: None,
+                cols: None,
+                rows: None,
             })
             .unwrap();
 

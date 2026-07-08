@@ -8,6 +8,12 @@ Gyro uses one engine and multiple surfaces.
 - Gyro.app for a native macOS coding workspace.
 - Future IDE integrations should call the same core engine instead of reimplementing session behavior.
 
+The CLI v1 surface is an agent launcher and control plane, not a full terminal
+dashboard. It records trusted local run intent, profile/model hints, approval
+state, workspace/worktree context, and app handoff metadata in the shared
+session store. External agent execution remains explicit through configured CLI
+profiles and future provider adapters.
+
 ## Core Responsibilities
 
 `gyro-core` owns:
@@ -28,9 +34,10 @@ Gyro uses one engine and multiple surfaces.
 1. A surface opens a workspace.
 2. `gyro-core` creates or loads a session.
 3. User messages, system events, command requests, and file-edit proposals are appended to the session JSONL log.
-4. Session metadata is updated in SQLite.
-5. The desktop app subscribes to local IPC notifications so CLI-created sessions can appear in the app.
-6. Command and file-edit execution must pass policy gates before mutation.
+4. CLI launch metadata can include `profileId`, `model`, `workspaceMode`, `branch`, `worktreeName`, and a resume command without requiring a database migration.
+5. Session metadata is updated in SQLite.
+6. The desktop app subscribes to local IPC notifications so CLI-created sessions can appear in the app.
+7. Command and file-edit execution must pass policy gates before mutation.
 
 ## Local Storage
 
