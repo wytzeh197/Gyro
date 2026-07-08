@@ -14,6 +14,8 @@
     "check": "pnpm -r check",
     "desktop:dev": "pnpm doctor && pnpm --filter @gyro-dev/desktop tauri dev",
     "desktop:build": "pnpm --filter @gyro-dev/desktop tauri build",
+    "desktop:bundle": "pnpm --filter @gyro-dev/desktop tauri build --bundles app --no-sign --ci",
+    "desktop:install-local": "pnpm desktop:bundle && node scripts/install-local-app.mjs",
     "dev": "pnpm desktop:dev",
     "doctor": "node scripts/check-dev-env.mjs",
     "format": "prettier --check .",

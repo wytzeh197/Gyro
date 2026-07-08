@@ -1,5 +1,35 @@
 # Launch Plan
 
+## Local App Launch
+
+Use the dev launcher only while developing:
+
+```bash
+pnpm --filter @gyro-dev/desktop tauri dev
+```
+
+For app-like testing, build the macOS bundle and open the bundle:
+
+```bash
+pnpm desktop:bundle
+open target/release/bundle/macos/Gyro.app
+```
+
+For repeat local Finder or Dock testing, install a local app copy:
+
+```bash
+pnpm desktop:install-local
+```
+
+`desktop:install-local` builds `Gyro.app`, copies it to
+`~/Applications/Gyro.app`, attempts an ad-hoc local signature, and opens that app
+bundle. Set `GYRO_SKIP_LOCAL_CODESIGN=1` to skip the ad-hoc signing step.
+
+Avoid opening or pinning `target/debug/gyro-desktop`. It is the raw Tauri debug
+executable, not the macOS app bundle, and it expects the dev server path. When
+opened directly from Finder or the Dock it can show a blank white window and a
+generic `exec` Dock icon.
+
 ## Alpha
 
 Run a private alpha with 20-50 macOS developers.

@@ -5,16 +5,23 @@ import type {
   AutomationTriageState,
   BrowserPreviewDevice,
   BrowserPreviewStatus,
+  ChatSidePanelId,
+  CliLaunchPreset,
   CommandProfile,
   DiffApprovalState,
   DiffFileState,
   DiffSource,
+  EditorBuffer,
+  EditorSelection,
+  EditorTab,
+  IdeAssistantRequest,
   GitReviewAction,
   GitReviewActionId,
   Notification,
   NotificationKind,
   OnboardingStepId,
   ProviderConnectionStatus,
+  ProviderHealthDetails,
   ProviderHandoff,
   ProviderSession,
   ProviderSessionStatus,
@@ -32,21 +39,47 @@ import type {
   WorkbenchMode,
   WorkbenchPaneTab,
   WorkbenchState,
+  WorkbenchPreferences,
   WorkbenchTurn,
+  WorkspaceLayoutId,
 } from "./types";
+import { defaultProviderStatuses as catalogDefaultProviderStatuses } from "./provider-catalog.ts";
+
+export const CLI_LAUNCH_PRESET_MAX_PANES = 8;
 
 export type WorkbenchAction =
   | { type: "reset-state"; state?: WorkbenchState }
   | { type: "select-destination"; destination: AppDestination }
   | { type: "select-surface"; surface: SurfaceId }
+  | { type: "select-workspace-layout"; layout: WorkspaceLayoutId }
   | { type: "set-pane-tab"; tab: WorkbenchPaneTab }
+  | { type: "open-tool-panel"; tab?: WorkbenchPaneTab }
+  | { type: "close-tool-panel" }
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "set-density"; density: WorkbenchDensity }
   | { type: "set-settings-section"; section: SettingsSectionId }
+  | { type: "set-cli-launch-preset"; preset: CliLaunchPreset }
   | { type: "toggle-sidebar-chats" }
   | { type: "toggle-chat-environment-rail" }
   | { type: "set-chat-environment-rail"; open: boolean }
+  | { type: "toggle-chat-plan" }
+  | { type: "set-chat-panel"; panel?: ChatSidePanelId }
+  | { type: "ide-open-tab"; tab: EditorTab }
+  | { type: "ide-close-tab"; path: string }
+  | { type: "ide-select-tab"; path: string }
+  | { type: "ide-upsert-buffer"; buffer: EditorBuffer }
+  | { type: "ide-update-buffer"; path: string; content: string }
+  | {
+      type: "ide-mark-buffer-saved";
+      path: string;
+      content: string;
+      contentHash?: string;
+      sizeBytes: number;
+    }
+  | { type: "ide-mark-buffer-error"; path: string; error: string }
+  | { type: "ide-set-selection"; selection?: EditorSelection }
+  | { type: "ide-record-assistant-request"; request: IdeAssistantRequest }
   | { type: "record-command"; commandId: string }
   | { type: "add-notification"; notification: Notification }
   | { type: "dismiss-notification"; id: string }
@@ -77,6 +110,12 @@ export type WorkbenchAction =
       type: "upsert-restored-terminal-pane";
       pane: TerminalPane;
     }
+  | {
+      type: "move-terminal-pane";
+      sourcePaneId: string;
+      targetPaneId: string;
+    }
+  | { type: "remove-terminal-pane"; paneId: string }
   | {
       type: "run-terminal-pane";
       paneId: string;
@@ -147,6 +186,7 @@ export type WorkbenchAction =
       status: ProviderConnectionStatus;
       summary: string;
       output: string;
+      details?: ProviderHealthDetails;
     }
   | {
       type: "set-provider-readiness";
@@ -192,8 +232,10 @@ export function createInitialWorkbenchState(
   );
 
   return {
-    activeDestination: "chat",
+    activeDestination: "workspace",
+    activeWorkspaceLayout: "thread",
     activePaneTab: "terminal",
+    isToolPanelOpen: false,
     workspaceMode: "local",
     terminalTemplate: 4,
     selectedTaskId: undefined,
@@ -205,19 +247,19 @@ export function createInitialWorkbenchState(
     providerHandoffs,
     providerReadiness: defaultProviderReadiness(),
     activeTurn: overrides.activeTurn,
+    ide: {
+      tabs: [],
+      activePath: undefined,
+      buffers: {},
+      selection: undefined,
+      lastAssistantRequest: undefined,
+    },
     onboarding: {
-      activeStep: "welcome",
+      activeStep: "account",
       completedSteps: [],
     },
-    preferences: {
-      theme: "dark",
-      density: "compact",
-      lastSettingsSection: "general",
-      commandPaletteRecents: [],
-      sidebarChatsCollapsed: false,
-      chatEnvironmentRailOpen: false,
-    },
     ...overrides,
+    preferences: normalizeWorkbenchPreferences(overrides.preferences),
     selectedTerminalPaneId:
       overrides.selectedTerminalPaneId ?? terminalPanes[0]?.id ?? "",
     terminalPanes,
@@ -242,12 +284,56 @@ export function workbenchReducer(
       return action.state ?? createInitialWorkbenchState();
     case "select-destination":
       return { ...state, activeDestination: action.destination };
-    case "select-surface":
-      return { ...state, activeDestination: action.surface };
+    case "select-surface": {
+      const layout = workspaceLayoutForLegacySurface(action.surface);
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: layout,
+        activePaneTab:
+          layout === "terminal-grid" ? "terminal" : state.activePaneTab,
+        isToolPanelOpen:
+          layout === "terminal-grid"
+            ? true
+            : layout === "thread"
+              ? false
+              : state.isToolPanelOpen,
+      };
+    }
+    case "select-workspace-layout":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: action.layout,
+        activePaneTab:
+          action.layout === "terminal-grid" ? "terminal" : state.activePaneTab,
+        isToolPanelOpen:
+          action.layout === "terminal-grid"
+            ? true
+            : action.layout === "thread"
+              ? false
+              : state.isToolPanelOpen,
+      };
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
+    case "open-tool-panel":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activePaneTab: action.tab ?? state.activePaneTab,
+        isToolPanelOpen: true,
+      };
+    case "close-tool-panel":
+      return { ...state, isToolPanelOpen: false };
     case "set-workbench-mode":
-      return { ...state, workspaceMode: action.mode };
+      return {
+        ...state,
+        workspaceMode: action.mode,
+        isToolPanelOpen:
+          state.activeWorkspaceLayout === "thread"
+            ? false
+            : state.isToolPanelOpen,
+      };
     case "set-theme":
       return {
         ...state,
@@ -266,6 +352,14 @@ export function workbenchReducer(
           lastSettingsSection: action.section,
         },
       };
+    case "set-cli-launch-preset":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          cliLaunchPreset: normalizeCliLaunchPreset(action.preset),
+        },
+      };
     case "toggle-sidebar-chats":
       return {
         ...state,
@@ -275,19 +369,189 @@ export function workbenchReducer(
         },
       };
     case "toggle-chat-environment-rail":
+      return chatPanelState(
+        state,
+        state.preferences.activeChatPanel === "environment"
+          ? undefined
+          : "environment",
+      );
+    case "set-chat-environment-rail":
+      return chatPanelState(state, action.open ? "environment" : undefined);
+    case "toggle-chat-plan":
+      return chatPanelState(
+        state,
+        state.preferences.activeChatPanel === "plan" ? undefined : "plan",
+      );
+    case "set-chat-panel":
+      return chatPanelState(state, action.panel);
+    case "ide-open-tab": {
+      const tab = normalizeEditorTab(action.tab);
+      const tabs = state.ide.tabs.some((item) => item.path === tab.path)
+        ? state.ide.tabs.map((item) =>
+            item.path === tab.path ? { ...item, ...tab } : item,
+          )
+        : [...state.ide.tabs, tab];
       return {
         ...state,
-        preferences: {
-          ...state.preferences,
-          chatEnvironmentRailOpen: !state.preferences.chatEnvironmentRailOpen,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        ide: {
+          ...state.ide,
+          tabs,
+          activePath: tab.path,
         },
       };
-    case "set-chat-environment-rail":
+    }
+    case "ide-close-tab": {
+      const tabs = state.ide.tabs.filter((tab) => tab.path !== action.path);
+      const activePath =
+        state.ide.activePath === action.path
+          ? tabs[tabs.length - 1]?.path
+          : state.ide.activePath;
+      const { [action.path]: _closedBuffer, ...buffers } = state.ide.buffers;
       return {
         ...state,
-        preferences: {
-          ...state.preferences,
-          chatEnvironmentRailOpen: action.open,
+        ide: {
+          ...state.ide,
+          activePath,
+          buffers,
+          selection:
+            state.ide.selection?.path === action.path
+              ? undefined
+              : state.ide.selection,
+          tabs,
+        },
+      };
+    }
+    case "ide-select-tab":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        ide: {
+          ...state.ide,
+          activePath: action.path,
+        },
+      };
+    case "ide-upsert-buffer": {
+      const buffer = action.buffer;
+      const tabs = state.ide.tabs.some((tab) => tab.path === buffer.path)
+        ? state.ide.tabs.map((tab) =>
+            tab.path === buffer.path
+              ? { ...tab, dirty: buffer.status === "dirty" }
+              : tab,
+          )
+        : [
+            ...state.ide.tabs,
+            {
+              path: buffer.path,
+              title: workspaceNameFromPath(buffer.path),
+              dirty: buffer.status === "dirty",
+            },
+          ];
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activePath: buffer.path,
+          buffers: {
+            ...state.ide.buffers,
+            [buffer.path]: buffer,
+          },
+          tabs,
+        },
+      };
+    }
+    case "ide-update-buffer": {
+      const existing = state.ide.buffers[action.path];
+      if (!existing) {
+        return state;
+      }
+      const dirty = action.content !== existing.savedContent;
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          buffers: {
+            ...state.ide.buffers,
+            [action.path]: {
+              ...existing,
+              content: action.content,
+              status: dirty ? "dirty" : "ready",
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          tabs: state.ide.tabs.map((tab) =>
+            tab.path === action.path ? { ...tab, dirty } : tab,
+          ),
+        },
+      };
+    }
+    case "ide-mark-buffer-saved": {
+      const existing = state.ide.buffers[action.path];
+      if (!existing) {
+        return state;
+      }
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          buffers: {
+            ...state.ide.buffers,
+            [action.path]: {
+              ...existing,
+              content: action.content,
+              savedContent: action.content,
+              contentHash: action.contentHash,
+              error: undefined,
+              sizeBytes: action.sizeBytes,
+              status: "saved",
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          tabs: state.ide.tabs.map((tab) =>
+            tab.path === action.path ? { ...tab, dirty: false } : tab,
+          ),
+        },
+      };
+    }
+    case "ide-mark-buffer-error": {
+      const existing = state.ide.buffers[action.path];
+      if (!existing) {
+        return state;
+      }
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          buffers: {
+            ...state.ide.buffers,
+            [action.path]: {
+              ...existing,
+              error: action.error,
+              status: action.error.includes("changed on disk")
+                ? "conflict"
+                : "error",
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        },
+      };
+    }
+    case "ide-set-selection":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          selection: action.selection,
+        },
+      };
+    case "ide-record-assistant-request":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          lastAssistantRequest: action.request,
         },
       };
     case "record-command":
@@ -333,16 +597,18 @@ export function workbenchReducer(
     case "add-terminal-pane":
       return {
         ...state,
-        activeDestination: "cli",
+        activeDestination: "workspace",
         activePaneTab: "terminal",
+        isToolPanelOpen: true,
         selectedTerminalPaneId: action.pane.id,
         terminalPanes: [...state.terminalPanes, action.pane],
       };
     case "split-terminal-pane":
       return {
         ...state,
-        activeDestination: "cli",
+        activeDestination: "workspace",
         activePaneTab: "terminal",
+        isToolPanelOpen: true,
         selectedTerminalPaneId: action.pane.id,
         terminalTemplate: action.template,
         terminalPanes: [...state.terminalPanes, action.pane],
@@ -352,6 +618,14 @@ export function workbenchReducer(
     case "set-terminal-pane-status":
       return {
         ...state,
+        activePaneTab:
+          (state.isToolPanelOpen ||
+            state.activeWorkspaceLayout === "terminal-grid") &&
+          (action.status === "running" ||
+            action.status === "waiting" ||
+            action.status === "failed")
+            ? "terminal"
+            : state.activePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? { ...pane, status: action.status, lastEvent: action.event }
@@ -361,6 +635,14 @@ export function workbenchReducer(
     case "sync-terminal-pane-snapshot":
       return {
         ...state,
+        activePaneTab:
+          (state.isToolPanelOpen ||
+            state.activeWorkspaceLayout === "terminal-grid") &&
+          (action.status === "running" ||
+            action.status === "waiting" ||
+            action.status === "failed")
+            ? "terminal"
+            : state.activePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -386,9 +668,35 @@ export function workbenchReducer(
           : [...state.terminalPanes, pane],
       };
     }
+    case "move-terminal-pane":
+      return {
+        ...state,
+        selectedTerminalPaneId: action.sourcePaneId,
+        terminalPanes: moveTerminalPane(
+          state.terminalPanes,
+          action.sourcePaneId,
+          action.targetPaneId,
+        ),
+      };
+    case "remove-terminal-pane": {
+      const nextPanes = state.terminalPanes.filter(
+        (pane) => pane.id !== action.paneId,
+      );
+      return {
+        ...state,
+        selectedTerminalPaneId:
+          state.selectedTerminalPaneId === action.paneId
+            ? (nextPanes[0]?.id ?? "")
+            : state.selectedTerminalPaneId,
+        terminalPanes: nextPanes,
+      };
+    }
     case "run-terminal-pane":
       return {
         ...state,
+        activeDestination: "workspace",
+        activePaneTab: "terminal",
+        isToolPanelOpen: true,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -605,10 +913,9 @@ export function workbenchReducer(
 
       return {
         ...state,
-        activeDestination:
-          state.activeDestination === "cli" ? "cli" : state.activeDestination,
-        activePaneTab:
-          state.activeDestination === "cli" ? "diff" : state.activePaneTab,
+        activeDestination: "workspace",
+        activePaneTab: "diff",
+        isToolPanelOpen: true,
         diffReview: {
           ...normalizeDiffReview(state.diffReview),
           activeTurnId: action.turnId ?? state.diffReview.activeTurnId,
@@ -636,9 +943,9 @@ export function workbenchReducer(
     case "select-diff-file":
       return {
         ...state,
-        activeDestination: state.activeDestination === "cli" ? "cli" : "diff",
-        activePaneTab:
-          state.activeDestination === "cli" ? "diff" : state.activePaneTab,
+        activeDestination: "workspace",
+        activePaneTab: "diff",
+        isToolPanelOpen: true,
         diffReview: {
           ...state.diffReview,
           collapsedDirectories: expandedParentDirectories(
@@ -777,10 +1084,9 @@ export function workbenchReducer(
       ];
       return {
         ...state,
-        activeDestination:
-          state.activeDestination === "cli" ? "cli" : "browser",
-        activePaneTab:
-          state.activeDestination === "cli" ? "browser" : state.activePaneTab,
+        activeDestination: "workspace",
+        activePaneTab: "browser",
+        isToolPanelOpen: true,
         browserPreview: {
           ...state.browserPreview,
           history: nextHistory,
@@ -853,9 +1159,13 @@ export function workbenchReducer(
             ? {
                 ...provider,
                 connectionStatus: action.status,
+                authOwner: action.details?.authOwner ?? provider.authOwner,
+                healthDetails: action.details ?? provider.healthDetails,
                 healthCheckedAt: new Date().toISOString(),
                 healthOutput: action.output,
                 healthSummary: action.summary,
+                runtimeStatus:
+                  action.details?.runtimeStatus ?? provider.runtimeStatus,
               }
             : provider,
         ),
@@ -969,6 +1279,28 @@ export function workbenchReducer(
   }
 }
 
+function moveTerminalPane(
+  panes: TerminalPane[],
+  sourcePaneId: string,
+  targetPaneId: string,
+): TerminalPane[] {
+  if (sourcePaneId === targetPaneId) {
+    return panes;
+  }
+  const sourceIndex = panes.findIndex((pane) => pane.id === sourcePaneId);
+  const targetIndex = panes.findIndex((pane) => pane.id === targetPaneId);
+  if (sourceIndex < 0 || targetIndex < 0) {
+    return panes;
+  }
+  const next = [...panes];
+  const [source] = next.splice(sourceIndex, 1);
+  if (!source) {
+    return panes;
+  }
+  next.splice(targetIndex, 0, source);
+  return next;
+}
+
 export function createTerminalPane(
   id: string,
   profile: CommandProfile,
@@ -1005,6 +1337,78 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     branch:
       pane.branch ?? (workspaceMode === "worktree" ? "gyro/worktree" : "main"),
     worktreeName: pane.worktreeName,
+  };
+}
+
+export function defaultCliLaunchPreset(): CliLaunchPreset {
+  return {
+    entries: [{ profileId: "shell", count: 1 }],
+    focus: "first",
+  };
+}
+
+export function normalizeCliLaunchPreset(
+  preset?: Partial<CliLaunchPreset>,
+  profiles: CommandProfile[] = defaultCommandProfiles(),
+): CliLaunchPreset {
+  const allowedProfileIds = new Set(profiles.map((profile) => profile.id));
+  const entries = Array.isArray(preset?.entries)
+    ? preset.entries
+        .map((entry) => ({
+          count: Math.max(
+            1,
+            Math.min(
+              CLI_LAUNCH_PRESET_MAX_PANES,
+              Number.isFinite(entry?.count) ? Math.floor(entry.count) : 1,
+            ),
+          ),
+          profileId: typeof entry?.profileId === "string" ? entry.profileId : "",
+        }))
+        .filter((entry) => allowedProfileIds.has(entry.profileId))
+    : [];
+
+  const cappedEntries: CliLaunchPreset["entries"] = [];
+  let total = 0;
+  for (const entry of entries) {
+    const remaining = CLI_LAUNCH_PRESET_MAX_PANES - total;
+    if (remaining <= 0) {
+      break;
+    }
+    const count = Math.min(entry.count, remaining);
+    cappedEntries.push({ ...entry, count });
+    total += count;
+  }
+
+  const fallback = defaultCliLaunchPreset();
+  if (cappedEntries.length === 0) {
+    return fallback;
+  }
+  return {
+    label:
+      typeof preset?.label === "string" && preset.label.trim()
+        ? preset.label.trim()
+        : undefined,
+    entries: cappedEntries,
+    focus: preset?.focus === "last" ? "last" : "first",
+  };
+}
+
+function normalizeWorkbenchPreferences(
+  preferences?: Partial<WorkbenchPreferences>,
+): WorkbenchPreferences {
+  return {
+    activeChatPanel: preferences?.activeChatPanel,
+    chatEnvironmentRailOpen: preferences?.chatEnvironmentRailOpen === true,
+    cliLaunchPreset: normalizeCliLaunchPreset(preferences?.cliLaunchPreset),
+    commandPaletteRecents: Array.isArray(preferences?.commandPaletteRecents)
+      ? preferences.commandPaletteRecents.filter(
+          (commandId): commandId is string => typeof commandId === "string",
+        )
+      : [],
+    density: preferences?.density === "comfortable" ? "comfortable" : "compact",
+    lastSettingsSection: preferences?.lastSettingsSection ?? "general",
+    sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
+    theme: preferences?.theme === "light" ? "light" : "dark",
   };
 }
 
@@ -1138,115 +1542,170 @@ export function defaultCommandProfiles(): CommandProfile[] {
 }
 
 export function defaultProviderStatuses(): ProviderStatus[] {
-  return [
-    {
-      id: "openai",
-      displayName: "OpenAI / Codex",
-      connectionStatus: "not-configured",
-      defaultModel: "5.5 Extra High",
-      effort: "extra-high",
-      allowedTools: ["files", "terminal", "diff", "browser"],
-      approvalPolicy: "ask",
-    },
-    {
-      id: "anthropic",
-      displayName: "Anthropic / Claude Code",
-      connectionStatus: "not-configured",
-      defaultModel: "Claude Sonnet",
-      effort: "high",
-      allowedTools: ["files", "terminal", "diff"],
-      approvalPolicy: "ask",
-    },
-    {
-      id: "cursor",
-      displayName: "Cursor Agent",
-      connectionStatus: "not-configured",
-      defaultModel: "Auto",
-      effort: "medium",
-      allowedTools: ["terminal"],
-      approvalPolicy: "ask",
-    },
-    {
-      id: "gemini",
-      displayName: "Gemini CLI",
-      connectionStatus: "not-configured",
-      defaultModel: "Gemini CLI",
-      effort: "medium",
-      allowedTools: ["terminal", "browser"],
-      approvalPolicy: "ask",
-    },
-    {
-      id: "opencode",
-      displayName: "OpenCode",
-      connectionStatus: "not-configured",
-      defaultModel: "Local default",
-      effort: "medium",
-      allowedTools: ["terminal"],
-      approvalPolicy: "ask",
-    },
-    {
-      id: "custom",
-      displayName: "Custom local command",
-      connectionStatus: "disconnected",
-      defaultModel: "Command profile",
-      effort: "low",
-      allowedTools: ["terminal"],
-      approvalPolicy: "ask",
-    },
-  ];
+  return catalogDefaultProviderStatuses();
 }
 
 export function parseProviderHealthOutput(
   providerId: string,
   output: string,
-): Pick<ProviderStatus, "connectionStatus" | "healthSummary"> {
+): Pick<
+  ProviderStatus,
+  "connectionStatus" | "healthSummary" | "runtimeStatus" | "authOwner"
+> & {
+  healthDetails: ProviderHealthDetails;
+} {
   const normalized = output.trim().toLowerCase();
   const providerLabel = providerId === "custom" ? "Custom command" : providerId;
+  const authOwner = inferProviderAuthOwner(providerId, normalized);
+  const secretStorage =
+    authOwner === "provider-env"
+      ? "Environment variable or provider SDK store"
+      : authOwner === "provider-sdk"
+        ? "Provider SDK or OS credential store"
+        : "Provider CLI, OS Keychain, or provider-owned files";
+  const baseDetails: ProviderHealthDetails = {
+    authOwner,
+    diagnosticsOptIn: false,
+    privacyNote:
+      "Gyro stores readiness summaries only; provider tokens stay outside Gyro.",
+    runtimeStatus: "unknown",
+    secretStorage,
+    ...extractProviderHealthMetadata(normalized),
+  };
 
   if (!normalized) {
     return {
+      authOwner,
       connectionStatus: "disconnected",
+      healthDetails: {
+        ...baseDetails,
+        runtimeStatus: "unknown",
+      },
       healthSummary: "No health output returned.",
+      runtimeStatus: "unknown",
+    };
+  }
+
+  if (
+    /\b(command not found|not installed|no such file or directory|cannot find|not recognized)\b/.test(
+      normalized,
+    )
+  ) {
+    return {
+      authOwner,
+      connectionStatus: "not-configured",
+      healthDetails: {
+        ...baseDetails,
+        runtimeStatus: "not-installed",
+      },
+      healthSummary: `${providerLabel} is not installed on this device.`,
+      runtimeStatus: "not-installed",
     };
   }
 
   if (
     /\b(not configured|missing|no api key|no credential|credential missing|unauthenticated|not authenticated|logged out|not logged in|auth required|setup required)\b/.test(
       normalized,
-    )
+    ) ||
+    /"loggedin"\s*:\s*false/.test(normalized)
   ) {
     return {
+      authOwner,
       connectionStatus: "not-configured",
+      healthDetails: {
+        ...baseDetails,
+        runtimeStatus: "not-logged-in",
+      },
       healthSummary: "Credentials or local login are not configured.",
+      runtimeStatus: "not-logged-in",
     };
   }
 
   if (
-    /\b(error|failed|failure|timeout|timed out|unreachable|denied|invalid|crashed|not found)\b/.test(
+    /\b(error|failed|failure|timeout|timed out|unreachable|denied|invalid|crashed|not found|warning)\b/.test(
       normalized,
     )
   ) {
     return {
+      authOwner,
       connectionStatus: "failed",
+      healthDetails: {
+        ...baseDetails,
+        runtimeStatus: "warning",
+      },
       healthSummary: "Health check failed. Inspect the provider setup.",
+      runtimeStatus: "warning",
     };
   }
 
   if (
     /\b(authenticated|logged in|ready|healthy|ok|connected|verified|available)\b/.test(
       normalized,
-    )
+    ) ||
+    /"loggedin"\s*:\s*true/.test(normalized)
   ) {
     return {
+      authOwner,
       connectionStatus: "connected",
+      healthDetails: {
+        ...baseDetails,
+        runtimeStatus: "ready",
+      },
       healthSummary: `${providerLabel} is ready for local handoff.`,
+      runtimeStatus: "ready",
     };
   }
 
   return {
+    authOwner,
     connectionStatus: "disconnected",
+    healthDetails: {
+      ...baseDetails,
+      runtimeStatus: "unknown",
+    },
     healthSummary: "Health output was inconclusive.",
+    runtimeStatus: "unknown",
   };
+}
+
+function inferProviderAuthOwner(
+  providerId: string,
+  output: string,
+): ProviderHealthDetails["authOwner"] {
+  if (
+    providerId === "xai" ||
+    providerId === "gemini" ||
+    /\b(provider-env|environment|env auth|env-owned)\b/.test(output)
+  ) {
+    return "provider-env";
+  }
+  if (/\b(provider-sdk|sdk-owned)\b/.test(output)) {
+    return "provider-sdk";
+  }
+  return "provider-cli";
+}
+
+function extractProviderHealthMetadata(
+  output: string,
+): Partial<ProviderHealthDetails> {
+  const metadata: Partial<ProviderHealthDetails> = {};
+  const subscription = output.match(
+    /"subscription(?:type|tier|label)"\s*:\s*"([^"]+)"/,
+  );
+  const account = output.match(/"(?:account|email|user)"\s*:\s*"([^"]+)"/);
+  const mode = output.match(
+    /"(?:mode|authmode|provider_mode)"\s*:\s*"([^"]+)"/,
+  );
+  if (subscription?.[1]) {
+    metadata.subscriptionLabel = subscription[1];
+  }
+  if (account?.[1]) {
+    metadata.accountLabel = account[1];
+  }
+  if (mode?.[1]) {
+    metadata.providerMode = mode[1];
+  }
+  return metadata;
 }
 
 function defaultTerminalPanes(): TerminalPane[] {
@@ -1403,6 +1862,44 @@ function defaultProviderReadiness() {
   };
 }
 
+function workspaceLayoutForLegacySurface(
+  surface: SurfaceId,
+): WorkspaceLayoutId {
+  if (surface === "cli") {
+    return "terminal-grid";
+  }
+  if (surface === "ide") {
+    return "code";
+  }
+  return "thread";
+}
+
+function chatPanelState(
+  state: WorkbenchState,
+  panel?: ChatSidePanelId,
+): WorkbenchState {
+  return {
+    ...state,
+    preferences: {
+      ...state.preferences,
+      activeChatPanel: panel,
+      chatEnvironmentRailOpen: panel === "environment",
+    },
+  };
+}
+
+function normalizeEditorTab(tab: EditorTab): EditorTab {
+  return {
+    ...tab,
+    title: tab.title || workspaceNameFromPath(tab.path),
+    dirty: tab.dirty === true,
+  };
+}
+
+function workspaceNameFromPath(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
 function browserHistoryState(
   state: WorkbenchState,
   historyIndex: number,
@@ -1412,6 +1909,9 @@ function browserHistoryState(
 
   return {
     ...state,
+    activeDestination: "workspace",
+    activePaneTab: "browser",
+    isToolPanelOpen: true,
     browserPreview: {
       ...state.browserPreview,
       historyIndex,
@@ -1424,6 +1924,7 @@ function browserHistoryState(
 
 function nextOnboardingStep(step: OnboardingStepId): OnboardingStepId {
   const order: OnboardingStepId[] = [
+    "account",
     "welcome",
     "theme",
     "workspace",

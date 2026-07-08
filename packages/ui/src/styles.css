@@ -235,7 +235,36 @@ button {
 }
 
 .gyro-sidebar-actions {
-  padding: 9px 0 12px;
+  padding: 0 0 12px;
+}
+
+.gyro-sidebar-mode-group {
+  background: var(--gyro-sidebar-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 7px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 8px;
+  padding: 2px;
+}
+
+.gyro-sidebar-mode-row {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--gyro-sidebar-text);
+  display: inline-flex;
+  font-size: 12.5px;
+  font-weight: 650;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 0;
+  padding: 0 6px;
+  position: relative;
+  text-align: center;
+  width: 100%;
 }
 
 .gyro-sidebar-action,
@@ -262,6 +291,8 @@ button {
 
 .gyro-sidebar-action:hover,
 .gyro-sidebar-action.is-active,
+.gyro-sidebar-mode-row:hover,
+.gyro-sidebar-mode-row.is-active,
 .gyro-sidebar-row:hover,
 .gyro-sidebar-row.is-active,
 .gyro-footer-button:hover,
@@ -270,6 +301,11 @@ button {
   color: var(--gyro-hover-text);
 }
 
+.gyro-sidebar-mode-row.is-active::before {
+  display: none;
+}
+
+.gyro-sidebar-mode-row span,
 .gyro-sidebar-row span,
 .gyro-sidebar-row small,
 .gyro-footer-button span {
@@ -277,6 +313,86 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gyro-tools-surface {
+  background: var(--gyro-app);
+  display: grid;
+  min-height: 100vh;
+  min-width: 0;
+  padding: clamp(24px, 5vw, 72px);
+}
+
+.gyro-tools-panel {
+  align-content: start;
+  display: grid;
+  gap: 18px;
+  max-width: 880px;
+  min-width: 0;
+  width: 100%;
+}
+
+.gyro-tools-head span {
+  color: var(--gyro-faint);
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 4px;
+}
+
+.gyro-tools-head h1 {
+  color: var(--gyro-text);
+  font-size: 28px;
+  letter-spacing: 0;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.gyro-tools-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.gyro-tools-card {
+  align-content: start;
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  border-radius: 8px;
+  color: var(--gyro-text);
+  display: grid;
+  gap: 8px;
+  min-height: 128px;
+  min-width: 0;
+  padding: 16px;
+  text-align: left;
+}
+
+.gyro-tools-card:hover {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-border-strong);
+}
+
+.gyro-tools-card svg {
+  color: var(--gyro-muted);
+}
+
+.gyro-tools-card strong,
+.gyro-tools-card span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-tools-card strong {
+  font-size: 14px;
+}
+
+.gyro-tools-card span {
+  color: var(--gyro-muted);
+  font-size: 12px;
 }
 
 .gyro-sidebar-row small {
@@ -330,6 +446,64 @@ button {
   color: var(--gyro-muted);
 }
 
+.gyro-sidebar-project-chat-list {
+  display: grid;
+  gap: 2px;
+  min-height: 0;
+  padding: 2px 0 0;
+}
+
+.gyro-sidebar-small-title {
+  color: #8b8e95;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  padding: 13px 8px 5px;
+}
+
+.gyro-sidebar-project-chat-list .gyro-sidebar-small-title:first-child {
+  padding-top: 2px;
+}
+
+.gyro-sidebar-project-chat-list .gyro-sidebar-project-row {
+  margin-bottom: 5px;
+}
+
+.gyro-sidebar-project-group {
+  display: grid;
+  gap: 2px;
+}
+
+.gyro-sidebar-more-button {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: #8b8e95;
+  font-size: 12px;
+  justify-self: start;
+  margin: 0 0 6px 36px;
+  min-height: 22px;
+  padding: 0 6px;
+  text-align: left;
+}
+
+.gyro-sidebar-more-button:hover {
+  background: rgba(255, 255, 255, 0.055);
+  color: #d7d9de;
+}
+
+.gyro-sidebar-collapse-icon {
+  color: #8f939a;
+}
+
+.gyro-sidebar-project-chat-list .gyro-session-row {
+  margin-left: 18px;
+}
+
+.gyro-sidebar-project-chat-list .gyro-sidebar-thread.is-empty {
+  margin-left: 18px;
+}
+
 .gyro-session-row {
   position: relative;
 }
@@ -364,6 +538,25 @@ button {
   text-align: left;
   transition: padding-right 120ms ease;
   width: 100%;
+}
+
+.gyro-sidebar-thread-main.has-model-logo {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+
+.gyro-sidebar-model-logo {
+  align-items: center;
+  color: #b4b7bd;
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  min-width: 16px;
+  width: 16px;
+}
+
+.gyro-sidebar-model-logo .gyro-provider-logo {
+  height: 14px;
+  width: 14px;
 }
 
 .gyro-session-row:hover .gyro-sidebar-thread-main,
@@ -564,10 +757,14 @@ button {
 }
 
 .gyro-sidebar-footer {
+  background: var(--gyro-sidebar);
   border-top: 1px solid var(--gyro-border-soft);
+  bottom: 0;
   flex: 0 0 auto;
+  margin-top: auto;
   padding-top: 6px;
-  position: relative;
+  position: sticky;
+  z-index: 12;
 }
 
 .gyro-account-button {
@@ -686,12 +883,135 @@ button.gyro-account-menu-row:hover {
   margin: 6px 4px;
 }
 
+.gyro-account-gate {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgba(19, 21, 25, 0.98), rgba(35, 37, 41, 0.98)),
+    #17191d;
+  color: #f4f2ed;
+  display: grid;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.gyro-account-panel {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  justify-self: center;
+  max-width: 460px;
+  padding: 28px;
+  width: min(100%, 460px);
+}
+
+.gyro-account-panel-mark {
+  align-items: center;
+  background: #f4f2ed;
+  border-radius: 8px;
+  color: #17191d;
+  display: inline-flex;
+  font-size: 16px;
+  font-weight: 800;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.gyro-account-kicker,
+.gyro-account-provider span {
+  color: rgba(244, 242, 237, 0.62);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.gyro-account-panel h1 {
+  font-size: 28px;
+  line-height: 1.1;
+  margin: 8px 0;
+}
+
+.gyro-account-panel p {
+  color: rgba(244, 242, 237, 0.76);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.gyro-account-provider {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.gyro-account-provider code {
+  color: #f4f2ed;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.gyro-account-error {
+  background: rgba(166, 57, 57, 0.18);
+  border: 1px solid rgba(255, 120, 120, 0.22);
+  border-radius: 8px;
+  color: #ffd6d6;
+  padding: 10px 12px;
+}
+
+.gyro-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.gyro-account-actions button {
+  background: #f4f2ed;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #17191d;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.gyro-account-actions button + button {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f4f2ed;
+}
+
+.gyro-account-actions button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .gyro-main {
   background: var(--gyro-app);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
   min-width: 0;
+  position: relative;
+}
+
+.gyro-main-titlebar-drag-region {
+  height: 58px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 70;
+}
+
+.gyro-chat-empty-drag-region {
+  height: 104px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 65;
 }
 
 .gyro-topbar {
@@ -1261,6 +1581,51 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-muted);
 }
 
+.gyro-chat-surface-controls {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-chat-surface-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--gyro-muted);
+  display: inline-grid;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0;
+  position: relative;
+}
+
+.gyro-chat-surface-button:hover,
+.gyro-chat-surface-button.is-active {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--gyro-text);
+}
+
+.gyro-chat-surface-count {
+  align-items: center;
+  background: var(--gyro-primary-bg);
+  border-radius: 999px;
+  color: var(--gyro-primary-text);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 750;
+  height: 14px;
+  justify-content: center;
+  min-width: 14px;
+  padding: 0 3px;
+  position: absolute;
+  right: -3px;
+  top: -3px;
+}
+
 .gyro-send-button {
   background: var(--gyro-primary-bg);
   border: 0;
@@ -1338,6 +1703,112 @@ button.gyro-account-menu-row:hover {
 
 .gyro-rail-row.is-clickable:hover {
   background: var(--gyro-surface-soft);
+}
+
+.gyro-plan-rail header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-plan-rail header strong,
+.gyro-plan-rail header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-plan-rail header span {
+  color: var(--gyro-faint);
+  font-size: 11px;
+}
+
+.gyro-plan-item {
+  align-items: start;
+  border-radius: 7px;
+  color: var(--gyro-text);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 7px 4px;
+}
+
+.gyro-plan-item + .gyro-plan-item {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
+.gyro-plan-item strong,
+.gyro-plan-item span,
+.gyro-plan-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-plan-item strong {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+
+.gyro-plan-item span,
+.gyro-plan-item small {
+  color: var(--gyro-faint);
+  font-size: 11px;
+}
+
+.gyro-plan-check {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--gyro-border);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 21px;
+  justify-content: center;
+  margin-top: 1px;
+  padding: 0;
+  width: 21px;
+}
+
+.gyro-plan-check:hover {
+  border-color: var(--gyro-border-strong);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-check.is-complete {
+  background: var(--gyro-primary-bg);
+  border-color: var(--gyro-primary-bg);
+  color: var(--gyro-primary-text);
+}
+
+.gyro-plan-check.is-blocked {
+  border-color: var(--gyro-danger);
+  color: var(--gyro-danger);
+}
+
+.gyro-plan-empty {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  padding: 28px 8px;
+  text-align: center;
+}
+
+.gyro-plan-empty strong {
+  color: var(--gyro-text);
+  font-size: 13px;
+}
+
+.gyro-plan-empty span {
+  color: var(--gyro-faint);
+  font-size: 11.5px;
+  line-height: 1.4;
 }
 
 .gyro-cli-surface {
@@ -1921,6 +2392,27 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-muted);
   font-size: 12px;
   padding: 5px 9px;
+}
+
+.gyro-provider-row small {
+  color: var(--gyro-faint);
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 5px;
+}
+
+.gyro-settings-provider-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.gyro-settings-provider-actions .gyro-secondary-button {
+  min-height: 28px;
 }
 
 .gyro-theme-picker {
@@ -3796,6 +4288,44 @@ button.gyro-account-menu-row:hover {
   padding: 12px 14px 0;
 }
 
+.gyro-provider-boundary {
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 14px;
+  overflow: hidden;
+}
+
+.gyro-provider-boundary > div {
+  border-right: 1px solid var(--gyro-border-soft);
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+}
+
+.gyro-provider-boundary > div:last-child {
+  border-right: 0;
+}
+
+.gyro-provider-boundary strong,
+.gyro-provider-boundary span {
+  display: block;
+  min-width: 0;
+}
+
+.gyro-provider-boundary strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+}
+
+.gyro-provider-boundary span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .gyro-provider-card {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border);
@@ -3822,6 +4352,49 @@ button.gyro-account-menu-row:hover {
   display: grid;
   height: 34px;
   justify-content: center;
+}
+
+.gyro-provider-logo {
+  align-items: center;
+  color: currentColor;
+  display: inline-grid;
+  height: 19px;
+  justify-items: center;
+  line-height: 0;
+  width: 19px;
+}
+
+.gyro-provider-logo svg {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.gyro-provider-logo > span {
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  display: inline-flex;
+  font-size: 8px;
+  font-weight: 700;
+  height: 19px;
+  justify-content: center;
+  line-height: 1;
+  width: 19px;
+}
+
+.gyro-provider-logo.is-openai,
+.gyro-provider-logo.is-anthropic,
+.gyro-provider-logo.is-xai,
+.gyro-provider-logo.is-cursor,
+.gyro-provider-logo.is-gemini,
+.gyro-provider-logo.is-opencode {
+  color: #f0ece5;
+}
+
+.gyro-provider-icon .gyro-provider-logo {
+  height: 19px;
+  width: 19px;
 }
 
 .gyro-provider-card-head strong,
@@ -3859,6 +4432,45 @@ button.gyro-account-menu-row:hover {
 
 .gyro-provider-card-body .gyro-settings-row {
   min-height: 46px;
+}
+
+.gyro-provider-model-picker {
+  display: grid;
+  gap: 5px;
+}
+
+.gyro-provider-model-picker button {
+  background: color-mix(in srgb, var(--gyro-surface) 78%, transparent);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 7px;
+  color: var(--gyro-text);
+  display: grid;
+  gap: 2px;
+  min-height: 44px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.gyro-provider-model-picker button:hover,
+.gyro-provider-model-picker button.is-active {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-border-strong);
+}
+
+.gyro-provider-model-picker strong,
+.gyro-provider-model-picker span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-provider-model-picker strong {
+  font-size: 12px;
+}
+
+.gyro-provider-model-picker span {
+  color: var(--gyro-muted);
+  font-size: 11px;
 }
 
 .gyro-provider-health {
@@ -3913,6 +4525,25 @@ button.gyro-account-menu-row:hover {
 
 .gyro-provider-health em {
   font-style: normal;
+}
+
+.gyro-provider-health-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.gyro-provider-health-meta span {
+  background: color-mix(in srgb, var(--gyro-surface) 78%, transparent);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  font-size: 11px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-provider-actions {
@@ -4182,6 +4813,94 @@ button.gyro-account-menu-row:hover {
   max-height: min(520px, calc(100vh - 180px));
   overflow: auto;
   padding: 7px;
+}
+
+.gyro-model-standard-overlay {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.58);
+  display: grid;
+  inset: 0;
+  justify-items: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 32;
+}
+
+.gyro-model-standard-card {
+  background: #202124;
+  border: 1px solid #34363b;
+  border-radius: 8px;
+  box-shadow:
+    0 28px 88px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: #f1eee9;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  width: min(390px, calc(100vw - 40px));
+}
+
+.gyro-model-standard-head {
+  align-items: center;
+  display: grid;
+  gap: 11px;
+  grid-template-columns: 38px minmax(0, 1fr);
+}
+
+.gyro-model-standard-icon {
+  align-items: center;
+  background: #2b2d31;
+  border: 1px solid #3d4047;
+  border-radius: 8px;
+  color: #f1eee9;
+  display: grid;
+  height: 38px;
+  justify-items: center;
+  width: 38px;
+}
+
+.gyro-model-standard-icon .gyro-provider-logo {
+  height: 22px;
+  width: 22px;
+}
+
+.gyro-model-standard-head span,
+.gyro-model-standard-meta {
+  color: #969ba4;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.gyro-model-standard-head h2 {
+  font-size: 18px;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 1px 0 0;
+}
+
+.gyro-model-standard-card p {
+  color: #c8c4bd;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.gyro-model-standard-meta {
+  background: #292a2e;
+  border: 1px solid #383a3f;
+  border-radius: 7px;
+  justify-self: start;
+  padding: 5px 8px;
+}
+
+.gyro-model-standard-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.gyro-model-standard-actions button {
+  min-height: 34px;
 }
 
 .gyro-command-list button {
@@ -5589,6 +6308,10 @@ textarea:focus-visible {
   padding: 0;
 }
 
+.gyro-ide-surface.is-workspace-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .gyro-ide-activitybar {
   align-items: center;
   background: var(--gyro-app);
@@ -5650,12 +6373,16 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
+.gyro-ide-editor-stack.is-editor-only {
+  grid-template-rows: minmax(0, 1fr) 22px;
+}
+
 .gyro-editor-pane {
   background: var(--gyro-pane);
   border: 0;
   border-radius: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -5670,6 +6397,27 @@ textarea:focus-visible {
   min-height: 34px;
 }
 
+.gyro-editor-tabs button .gyro-editor-tab-close {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  margin-left: 6px;
+}
+
+.gyro-editor-tab-actions {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  padding-right: 6px;
+}
+
+.gyro-editor-tab-actions button {
+  border: 0;
+  min-height: 26px;
+  width: 28px;
+}
+
 .gyro-editor-tabs button.is-active {
   background: var(--gyro-pane);
   box-shadow: inset 0 -2px 0 var(--gyro-accent);
@@ -5679,6 +6427,36 @@ textarea:focus-visible {
   background: var(--gyro-pane);
   border-bottom: 1px solid var(--gyro-border-soft);
   min-height: 28px;
+}
+
+.gyro-editor-ai-bar {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-pane) 88%, var(--gyro-surface) 12%);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  display: flex;
+  gap: 6px;
+  min-height: 34px;
+  overflow-x: auto;
+  padding: 5px 8px;
+}
+
+.gyro-editor-ai-bar button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
+.gyro-editor-ai-bar button:disabled {
+  color: var(--gyro-muted);
+  opacity: 0.5;
 }
 
 .gyro-code-surface {
@@ -5691,17 +6469,23 @@ textarea:focus-visible {
 }
 
 .gyro-editor-statusbar {
-  background: var(--gyro-accent);
-  color: var(--gyro-segment-active-text);
+  align-items: center;
+  background: var(--gyro-surface);
+  border-top: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
   display: flex;
   font-size: 11px;
   gap: 12px;
   min-height: 22px;
+  overflow: hidden;
   padding: 3px 10px;
 }
 
 .gyro-editor-statusbar span {
   color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-workbench-pane.is-compact {
@@ -5998,6 +6782,11 @@ textarea:focus-visible {
   text-align: left;
 }
 
+.gyro-provider-row .gyro-settings-provider-actions {
+  justify-self: end;
+  text-align: right;
+}
+
 .gyro-settings-row em,
 .gyro-provider-row code {
   justify-self: end;
@@ -6033,6 +6822,10 @@ textarea:focus-visible {
   .gyro-ide-surface {
     grid-template-columns: 40px 220px minmax(0, 1fr);
   }
+
+  .gyro-ide-surface.is-workspace-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 980px) {
@@ -6042,7 +6835,8 @@ textarea:focus-visible {
   .gyro-chat-surface:has(.gyro-environment-rail),
   .gyro-automation-layout,
   .gyro-diff-review,
-  .gyro-provider-card-grid {
+  .gyro-provider-card-grid,
+  .gyro-tools-grid {
     grid-template-columns: 1fr;
   }
 
@@ -6063,6 +6857,10 @@ textarea:focus-visible {
 
   .gyro-ide-editor-stack {
     grid-template-rows: minmax(360px, 1fr) minmax(220px, 36vh) 22px;
+  }
+
+  .gyro-ide-editor-stack.is-editor-only {
+    grid-template-rows: minmax(360px, 1fr) 22px;
   }
 }
 
@@ -6170,22 +6968,16 @@ textarea:focus-visible {
   }
 }
 
-/* Codex-level chat surface refinement */
+/* Compact agent cockpit refinement */
 .gyro-app-shell.is-chat-shell {
-  grid-template-columns: minmax(320px, 398px) minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar {
-  background:
-    radial-gradient(
-      circle at 100% 46%,
-      rgba(72, 73, 76, 0.22),
-      transparent 36%
-    ),
-    linear-gradient(180deg, #242527 0%, #1f2022 48%, #2a2b2d 100%);
-  border-right-color: #343537;
-  gap: 12px;
-  padding: 12px;
+  background: #151619;
+  border-right-color: #292c31;
+  gap: 6px;
+  padding: 8px 7px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-head {
@@ -6193,44 +6985,69 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell.is-chat-shell .gyro-surface-switch {
-  background: transparent;
-  border-color: transparent;
+  background: #111216;
+  border-color: #25282d;
   box-shadow: none;
-  gap: 8px;
-  height: 30px;
-  justify-content: flex-start;
-  padding: 0 2px;
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-surface-row {
   background: transparent;
   border: 1px solid transparent;
-  color: #9d9fa3;
-  flex: 0 0 28px;
-  height: 28px;
+  border-radius: 5px;
+  color: #9a9fa7;
+  flex: 1 1 0;
+  font-size: 11.5px;
+  height: 22px;
   justify-content: center;
-  padding: 0;
+  min-width: 0;
+  padding: 0 5px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-surface-row span {
-  clip: rect(0 0 0 0);
-  height: 1px;
+  display: inline;
+  min-width: 0;
   overflow: hidden;
-  position: absolute;
+  position: static;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  width: 1px;
+  width: auto;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-surface-row.is-active,
 .gyro-app-shell.is-chat-shell .gyro-surface-row:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #e9e6df;
+  background: #23262b;
+  border-color: #30343a;
+  color: #efede8;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-actions {
-  gap: 8px;
-  margin-top: 8px;
+  gap: 3px;
+  padding-bottom: 6px;
+}
+
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
+  background: #111216;
+  border-color: #25282d;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 2px;
+}
+
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
+  border-radius: 6px;
+  color: #d7d4cf;
+  font-size: 12.5px;
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active {
+  background: #202329;
+  color: #efede8;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action,
@@ -6238,10 +7055,12 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
-  color: #d0cdca;
-  font-size: 15px;
-  min-height: 34px;
-  padding: 0 12px;
+  border-radius: 6px;
+  color: #d7d4cf;
+  font-size: 12.5px;
+  gap: 7px;
+  min-height: 28px;
+  padding: 0 7px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action svg,
@@ -6249,31 +7068,34 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row svg,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread svg,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main svg {
-  color: #a7a8ab;
+  color: #9da3ab;
+  height: 13px;
+  width: 13px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-nav-label,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-section-toggle {
-  color: #85878a;
-  font-size: 15px;
-  font-weight: 520;
-  padding: 14px 12px 8px;
+  color: #8f949d;
+  font-size: 11px;
+  font-weight: 600;
+  min-height: 24px;
+  padding: 6px 6px 2px;
   text-transform: none;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-list {
-  gap: 4px;
+  gap: 2px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread small,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main small,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row small {
-  color: #8b8d90;
-  font-size: 13px;
+  color: #8a8f98;
+  font-size: 11.5px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-session-row {
-  min-height: 36px;
+  min-height: 30px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-session-row.is-active,
@@ -6285,8 +7107,8 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action:hover,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row:hover,
 .gyro-app-shell.is-chat-shell .gyro-session-row:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: transparent;
+  background: #202329;
+  border-color: #2a2e35;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-session-actions {
@@ -6304,35 +7126,187 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
-  border-top-color: rgba(255, 255, 255, 0.07);
-  margin: 0 -12px -12px;
-  padding: 10px 12px 12px;
+  background: #151619;
+  border-top-color: #292c31;
+  margin: auto -7px -8px;
+  padding: 6px 7px 8px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-account-button {
   background: transparent;
   border-color: transparent;
-  min-height: 54px;
+  min-height: 36px;
+  padding: 0 7px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-account-button:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: #202329;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-main {
-  background: #121313;
+  background: #101112;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-chat-utility-bar {
   display: none;
 }
 
+.gyro-workspace-route {
+  background: #101112;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100vh;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gyro-workspace-route.is-terminal-grid {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.gyro-workspace-primary {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gyro-workspace-primary:has(.gyro-composer-popover) {
+  overflow: visible;
+  position: relative;
+  z-index: 60;
+}
+
+.gyro-workspace-route .gyro-chat-surface {
+  height: 100%;
+  min-height: 0;
+}
+
+.gyro-workspace-route .gyro-chat-surface.is-empty {
+  min-height: 0;
+}
+
+.gyro-workspace-tool-panel {
+  background: #17191d;
+  border-top: 1px solid #2b2f35;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(42vh, 430px);
+  min-height: 220px;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.gyro-workspace-tool-panel.is-primary {
+  border-top: 0;
+  max-height: none;
+  min-height: 0;
+}
+
+.gyro-workspace-tool-panel.is-resizable {
+  max-height: min(78vh, 760px);
+  min-height: 96px;
+}
+
+.gyro-tool-panel-resize-handle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  cursor: ns-resize;
+  display: flex;
+  height: 14px;
+  justify-content: center;
+  left: 0;
+  padding: 0;
+  position: absolute;
+  right: 0;
+  top: -7px;
+  z-index: 5;
+}
+
+.gyro-tool-panel-resize-handle span,
+.gyro-tool-panel-reveal-button span {
+  background: #7b818a;
+  border-radius: 999px;
+  display: block;
+  height: 3px;
+  opacity: 0.42;
+  width: 48px;
+}
+
+.gyro-tool-panel-resize-handle:hover span,
+.gyro-tool-panel-resize-handle:focus-visible span,
+.gyro-workspace-tool-panel.is-resizing .gyro-tool-panel-resize-handle span,
+.gyro-tool-panel-reveal-button:hover span,
+.gyro-tool-panel-reveal-button:focus-visible span {
+  background: #d8d4cc;
+  opacity: 0.82;
+}
+
+.gyro-tool-panel-reveal {
+  align-items: center;
+  background: transparent;
+  border-top: 0;
+  display: flex;
+  justify-content: center;
+  min-height: 10px;
+  min-width: 0;
+}
+
+.gyro-tool-panel-reveal-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  cursor: ns-resize;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  min-height: 10px;
+  padding: 0;
+  width: 100%;
+}
+
+.gyro-tool-panel-reveal .gyro-tool-panel-reveal-button span {
+  height: 2px;
+  opacity: 0.26;
+  width: 34px;
+}
+
+.gyro-workspace-tool-panel-head {
+  align-items: center;
+  background: #14161a;
+  border-bottom: 1px solid #252a31;
+  display: flex;
+  gap: 8px;
+  min-height: 38px;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.gyro-workspace-tool-panel-head .gyro-pane-tabs {
+  border-bottom: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gyro-workspace-tool-panel-head .gyro-icon-button {
+  flex: 0 0 auto;
+  height: 28px;
+  width: 28px;
+}
+
+.gyro-workspace-tool-panel > .gyro-workbench-pane {
+  height: 100%;
+}
+
 .gyro-chat-surface {
-  background: #121313;
+  background: #101112;
   grid-template-columns: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   padding: 0;
+  position: relative;
   width: 100%;
 }
 
@@ -6351,41 +7325,64 @@ textarea:focus-visible {
   align-items: center;
   display: grid;
   gap: 32px;
+  justify-self: center;
   justify-items: center;
   margin-top: -8vh;
-  width: min(968px, 100%);
+  width: min(730px, 100%);
 }
 
 .gyro-chat-start h1 {
   color: #f0eee9;
-  font-size: clamp(30px, 2.15vw, 42px);
+  font-size: clamp(28px, 1.9vw, 34px);
   font-weight: 520;
   letter-spacing: 0;
-  line-height: 1.1;
+  line-height: 1.12;
   margin: 0;
   text-align: center;
 }
 
 .gyro-chat-start .gyro-onboarding-steps {
-  background: #1d1e20;
-  border-color: #343538;
+  background: #191b1f;
+  border-color: #2b2f35;
   border-radius: 8px;
-  width: min(968px, 100%);
-}
-
-.gyro-chat-start .gyro-composer-shell,
-.gyro-chat-composer-dock .gyro-composer-shell {
-  background: #2b2b2c;
-  border: 1px solid #3c3d3f;
-  border-radius: 22px;
-  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.28);
-  margin: 0;
-  overflow: hidden;
   width: 100%;
 }
 
 .gyro-chat-start .gyro-composer-shell {
-  min-height: 188px;
+  background: transparent;
+  border: 0;
+  border-radius: 22px;
+  box-shadow: none;
+  margin: 0;
+  min-height: 148px;
+  overflow: visible;
+  width: 100%;
+}
+
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed {
+  background: #29292b;
+  border: 1px solid #3a3b3f;
+  border-radius: 999px;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.24);
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-self: center;
+  max-width: 620px;
+  min-height: 54px;
+  overflow: visible;
+  padding: 0 7px 0 9px;
+  width: min(620px, 100%);
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell {
+  background: #191a1d;
+  border: 1px solid #2b2e34;
+  border-radius: 8px;
+  box-shadow: none;
+  margin: 0;
+  overflow: visible;
+  width: 100%;
 }
 
 .gyro-composer-shell.is-hero {
@@ -6394,80 +7391,529 @@ textarea:focus-visible {
 
 .gyro-chat-start .gyro-composer-shell textarea,
 .gyro-composer-shell.is-hero textarea {
-  font-size: 16px;
-  min-height: 88px;
-  padding: 22px 18px 12px;
+  background: #2b2b2c;
+  border: 1px solid #3c3d3f;
+  border-bottom: 0;
+  border-radius: 21px 21px 0 0;
+  font-size: 15px;
+  min-height: 60px;
+  padding: 17px 12px 7px;
+  position: relative;
+  z-index: 2;
+}
+
+.gyro-chat-start .gyro-composer-shell textarea:focus-visible {
+  outline: 0;
+}
+
+.gyro-chat-start .gyro-composer-shell:focus-within textarea {
+  border-color: #515258;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 -1px 0 rgba(255, 255, 255, 0.015);
+}
+
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed textarea {
+  align-self: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 15px;
+  height: 38px;
+  line-height: 38px;
+  min-height: 38px;
+  overflow: hidden;
+  padding: 0;
+  resize: none;
+}
+
+.gyro-collapsed-context {
+  align-self: center;
+  border-right: 1px solid #4a4b4f;
+  height: 26px;
+  padding-right: 8px;
+}
+
+.gyro-collapsed-context-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: #f0ede8;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+
+.gyro-collapsed-context-button:hover {
+  background: #37383c;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell textarea {
-  font-size: 15px;
-  min-height: 70px;
-  padding: 18px 16px 8px;
+  font-size: 13px;
+  min-height: 50px;
+  padding: 10px 12px 4px;
 }
 
 .gyro-chat-start .gyro-composer-shell textarea::placeholder,
 .gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder {
-  color: #858587;
+  color: #858a92;
+}
+
+.gyro-composer-readiness {
+  background: #191a1d;
+  min-height: 28px;
+  padding: 0 10px;
 }
 
 .gyro-composer-bar {
-  background: #2b2b2c;
+  background: #191a1d;
   border-top: 0;
+  gap: 5px;
+  min-height: 36px;
+  padding: 4px 7px;
+}
+
+.gyro-chat-start .gyro-composer-readiness {
+  background: #2b2b2c;
+}
+
+.gyro-chat-start .gyro-composer-bar {
+  background: #2b2b2c;
+  border: 1px solid #3c3d3f;
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.28);
   gap: 9px;
-  min-height: 56px;
-  padding: 0 14px;
+  margin-bottom: -8px;
+  min-height: 46px;
+  padding: 0 13px 8px;
+  position: relative;
+  z-index: 2;
+}
+
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed .gyro-composer-bar {
+  align-self: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  gap: 6px;
+  margin-bottom: 0;
+  min-height: 38px;
+  padding: 0;
+}
+
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed .gyro-model-chip {
+  background: transparent;
+  border-color: transparent;
+  color: #d0d2d6;
+  min-height: 30px;
+  padding: 0 7px;
+}
+
+.gyro-chat-start
+  .gyro-composer-shell.is-provider-collapsed
+  .gyro-model-chip:hover {
+  background: #35363a;
+  border-color: transparent;
+}
+
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed:focus-within {
+  border-color: #515258;
+}
+
+.gyro-chat-start
+  .gyro-composer-shell.is-provider-collapsed:focus-within
+  textarea {
+  box-shadow: none;
 }
 
 .gyro-composer-context-row {
   align-items: center;
-  background: #232324;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  background: #16181b;
+  border-top: 1px solid #262a30;
   display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 34px;
+  overflow: visible;
+  padding: 0 8px;
+}
+
+.gyro-chat-start .gyro-composer-context-row {
+  background: #202123;
+  border: 1px solid #303236;
+  border-top-color: #24262a;
+  border-radius: 0 0 16px 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 12px 24px rgba(0, 0, 0, 0.18);
   gap: 12px;
-  min-height: 54px;
+  margin: 0 14px;
+  min-height: 44px;
+  padding: 8px 14px 0;
+  position: relative;
+  z-index: 1;
+}
+
+.gyro-composer-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  position: relative;
+}
+
+.gyro-composer-control-model {
+  max-width: 190px;
+}
+
+.gyro-composer-control-model .gyro-model-chip {
+  max-width: 100%;
+}
+
+.gyro-model-chip .gyro-provider-logo {
+  flex: 0 0 auto;
+  height: 15px;
+  width: 15px;
+}
+
+.gyro-composer-reveal {
+  animation: gyro-composer-reveal 180ms ease both;
+}
+
+@keyframes gyro-composer-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gyro-composer-popover {
+  background: #202124;
+  border: 1px solid #34363b;
+  border-radius: 9px;
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  display: grid;
+  gap: 1px;
+  max-height: min(420px, calc(100vh - 32px));
+  max-width: min(232px, calc(100vw - 32px));
+  min-width: 184px;
+  overflow-y: auto;
+  padding: 5px;
+  position: absolute;
+  z-index: 40;
+}
+
+.gyro-composer-popover[data-placement="up"] {
+  bottom: calc(100% + 8px);
+}
+
+.gyro-composer-popover[data-placement="down"] {
+  top: calc(100% + 8px);
+}
+
+.gyro-composer-popover[data-align="start"] {
+  left: 0;
+}
+
+.gyro-composer-popover[data-align="end"] {
+  right: 0;
+}
+
+.gyro-provider-picker {
+  align-items: start;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 156px;
+  max-width: calc(100vw - 32px);
   overflow-x: auto;
-  padding: 0 18px;
+  position: absolute;
+  width: max-content;
+  z-index: 44;
+}
+
+.gyro-provider-picker.has-flyout {
+  grid-template-columns: 156px 190px;
+}
+
+.gyro-provider-picker[data-placement="up"] {
+  bottom: calc(100% + 8px);
+}
+
+.gyro-provider-picker[data-placement="down"] {
+  top: calc(100% + 8px);
+}
+
+.gyro-provider-picker[data-align="start"] {
+  left: 0;
+}
+
+.gyro-provider-picker[data-align="end"] {
+  right: 0;
+}
+
+.gyro-provider-picker .gyro-composer-popover {
+  max-height: min(340px, calc(100vh - 32px));
+  max-width: none;
+  min-width: 0;
+  position: static;
+  width: 100%;
+}
+
+.gyro-provider-picker-menu {
+  width: 156px;
+}
+
+.gyro-provider-model-flyout {
+  width: 190px;
+}
+
+.gyro-composer-popover-title {
+  color: #8f949c;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 4px 7px 5px;
+}
+
+.gyro-composer-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #d9d6d0;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  min-height: 32px;
+  padding: 5px 7px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-composer-menu-item.is-provider {
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
+  min-height: 32px;
+  padding: 4px 7px;
+}
+
+.gyro-composer-menu-item.is-model {
+  color: #cfcac1;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  min-height: 31px;
+  padding: 4px 7px 4px 12px;
+}
+
+.gyro-composer-menu-item.is-warning {
+  background: rgba(255, 154, 72, 0.1);
+  color: #ffb36c;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 40px;
+  margin-bottom: 3px;
+}
+
+.gyro-composer-menu-item:hover,
+.gyro-composer-menu-item.is-active {
+  background: #2b2d31;
+  color: #f3f0eb;
+}
+
+.gyro-composer-menu-item.is-model:hover,
+.gyro-composer-menu-item.is-model.is-active {
+  background: #282a2e;
+}
+
+.gyro-composer-menu-item:disabled {
+  color: #747981;
+  cursor: default;
+}
+
+.gyro-composer-menu-item.is-warning:disabled {
+  color: #ffb36c;
+  opacity: 1;
+}
+
+.gyro-composer-menu-item span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-composer-menu-item > .gyro-provider-logo {
+  display: inline-grid;
+  gap: 0;
+  justify-self: center;
+  min-width: 0;
+}
+
+.gyro-composer-menu-item strong,
+.gyro-composer-menu-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-menu-item strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.gyro-composer-menu-item.is-provider strong {
+  font-size: 12.5px;
+}
+
+.gyro-composer-menu-item small {
+  color: #8f949c;
+  font-size: 11px;
+}
+
+.gyro-composer-menu-item > svg:last-child {
+  color: #ff9a48;
+}
+
+.gyro-composer-menu-item.is-model > svg:first-child,
+.gyro-composer-menu-item.is-action > svg:first-child {
+  color: #9298a1;
 }
 
 .gyro-composer-chip,
 .gyro-composer-tool {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
+  color: #b6bbc3;
+  font-size: 11.5px;
+  min-height: 26px;
+}
+
+.gyro-composer-chip {
+  padding: 0 7px;
+}
+
+.gyro-composer-chip svg {
+  flex: 0 0 auto;
+}
+
+.gyro-composer-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-tool {
+  width: 28px;
+}
+
+.gyro-chat-start .gyro-composer-chip,
+.gyro-chat-start .gyro-composer-tool {
+  background: transparent;
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: 7px;
   color: #b8b6b2;
+  font-size: 12px;
   min-height: 30px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.gyro-chat-start .gyro-composer-tool {
+  width: 30px;
+}
+
+.gyro-chat-start .gyro-composer-shell button:focus-visible {
+  box-shadow: 0 0 0 1px rgba(241, 238, 233, 0.18);
+  outline: 0;
 }
 
 .gyro-composer-chip:hover,
 .gyro-composer-tool:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #f0eee9;
+  background: #303136;
+  border-color: #44464b;
+  color: #f1eee9;
 }
 
 .gyro-composer-chip.is-warning {
-  color: #ff8f3d;
+  background: transparent;
+  background-color: transparent;
+  color: #ff9a48;
+}
+
+.gyro-chat-start .gyro-composer-chip.is-warning:hover {
+  background: rgba(255, 154, 72, 0.14);
+  border-color: rgba(255, 154, 72, 0.24);
+}
+
+.gyro-chat-start .gyro-composer-context-row .gyro-composer-chip {
+  background: transparent;
+  color: #aeb2b8;
+  min-height: 28px;
+}
+
+.gyro-chat-start .gyro-composer-context-row .gyro-composer-chip:hover {
+  background: #292a2d;
+  border-color: #383a3f;
+  color: #f0ede8;
 }
 
 .gyro-send-button {
-  background: #d8d4cc;
+  background: #d9d5cd;
   border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
   color: #151515;
-  height: 40px;
-  width: 40px;
+  height: 31px;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+  width: 31px;
 }
 
 .gyro-send-button:hover {
-  background: #f0eee9;
+  background: #f1eee9;
+  transform: translateY(-1px);
+}
+
+.gyro-send-button:disabled {
+  background: #8f8c86;
+  color: #343332;
+  cursor: default;
+  opacity: 0.62;
+  transform: none;
+}
+
+.gyro-chat-start
+  .gyro-composer-shell.is-provider-collapsed
+  .gyro-send-button:disabled {
+  background: #5d5c5a;
+  box-shadow: none;
+  color: #262523;
+  opacity: 0.74;
 }
 
 .gyro-chat-surface.has-environment {
   gap: 0;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
 }
 
 .gyro-chat-thread-canvas {
   display: grid;
-  grid-template-rows: 56px minmax(0, 1fr) auto;
+  grid-template-rows: 46px minmax(0, 1fr) auto;
   min-height: 100vh;
   min-width: 0;
   overflow: hidden;
@@ -6475,12 +7921,12 @@ textarea:focus-visible {
 
 .gyro-chat-thread-topbar {
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid #25282d;
   display: flex;
-  gap: 16px;
+  gap: 12px;
   justify-content: space-between;
   min-width: 0;
-  padding: 0 28px;
+  padding: 0 18px;
 }
 
 .gyro-chat-thread-topbar > div:first-child {
@@ -6497,41 +7943,50 @@ textarea:focus-visible {
 }
 
 .gyro-chat-thread-topbar strong {
-  color: #f0eee9;
-  font-size: 18px;
-  font-weight: 650;
+  color: #f1eee9;
+  font-size: 14px;
+  font-weight: 640;
 }
 
 .gyro-chat-thread-topbar span {
-  color: #9c9c9c;
-  font-size: 12px;
-  margin-top: 2px;
+  color: #90959d;
+  font-size: 11px;
+  margin-top: 1px;
 }
 
 .gyro-chat-thread-topbar .gyro-thread-pills {
   flex: 0 0 auto;
 }
 
+.gyro-thread-topbar-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 0;
+}
+
 .gyro-chat-thread-topbar .gyro-thread-pills span,
 .gyro-chat-thread-topbar .gyro-thread-pill-button {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #b8b6b2;
+  background: #17191d;
+  border-color: #2b2f35;
+  color: #b6bbc3;
 }
 
 .gyro-chat-transcript {
-  background: #121313;
+  background: #101112;
   display: block;
   min-width: 0;
   overflow: auto;
-  padding: 0 clamp(32px, 7vw, 96px) 32px;
+  padding: 0 clamp(24px, 6vw, 72px) 24px;
 }
 
 .gyro-chat-transcript .gyro-message,
-.gyro-chat-transcript .gyro-agent-run-card {
+.gyro-chat-transcript .gyro-agent-run-card,
+.gyro-chat-transcript .gyro-provider-status-row {
   margin-left: auto;
   margin-right: auto;
-  max-width: 980px;
+  max-width: 920px;
 }
 
 .gyro-chat-transcript .gyro-message {
@@ -6542,34 +7997,117 @@ textarea:focus-visible {
 }
 
 .gyro-chat-transcript .gyro-agent-run-card {
-  background: #1b1c1d;
-  border-color: #333436;
+  background: #17191d;
+  border-color: #2b2f35;
   border-radius: 8px;
 }
 
+.gyro-chat-thread-canvas {
+  animation: gyro-thread-enter 180ms ease both;
+}
+
+@keyframes gyro-thread-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gyro-provider-status-row {
+  align-items: center;
+  background: #17191d;
+  border: 1px solid #2b2f35;
+  border-radius: 8px;
+  color: #d8dce3;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  padding: 12px 14px;
+}
+
+.gyro-provider-status-icon {
+  align-items: center;
+  background: #24272e;
+  border-radius: 999px;
+  color: #b8bec8;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.gyro-provider-status-row.is-ready .gyro-provider-status-icon {
+  color: #8bd6a3;
+}
+
+.gyro-provider-status-row.is-failed .gyro-provider-status-icon {
+  color: #ffb3b3;
+}
+
+.gyro-provider-status-row strong,
+.gyro-provider-status-row span,
+.gyro-provider-status-row small {
+  display: block;
+}
+
+.gyro-provider-status-row strong {
+  font-size: 13px;
+}
+
+.gyro-provider-status-row span,
+.gyro-provider-status-row small {
+  color: #98a0ad;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.gyro-provider-status-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.gyro-provider-status-actions button {
+  background: #22252b;
+  border: 1px solid #343944;
+  border-radius: 999px;
+  color: #c8ced8;
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.gyro-provider-status-actions button:hover {
+  background: #2b2f37;
+  color: #f1f3f6;
+}
+
 .gyro-chat-composer-dock {
-  background: linear-gradient(180deg, rgba(18, 19, 19, 0), #121313 22%);
+  background: #101112;
   min-width: 0;
-  padding: 14px clamp(32px, 7vw, 96px) 30px;
+  padding: 10px clamp(24px, 6vw, 72px) 18px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
   margin: 0 auto;
-  max-width: 980px;
+  max-width: 920px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-bar {
-  min-height: 54px;
+  min-height: 36px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-readiness {
-  background: #2b2b2c;
-  border-top-color: rgba(255, 255, 255, 0.06);
+  background: #191a1d;
+  border-top-color: #262a30;
 }
 
 .gyro-chat-surface.has-environment .gyro-chat-composer-dock {
-  padding-left: 24px;
-  padding-right: 24px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .gyro-chat-surface.has-environment
@@ -6580,34 +8118,394 @@ textarea:focus-visible {
 
 .gyro-chat-surface.has-environment .gyro-environment-rail {
   align-self: start;
-  background: #2b2b2c;
-  border: 1px solid #3c3d3f;
-  border-radius: 24px;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.3);
-  margin: 76px 20px 0 0;
-  max-height: calc(100vh - 104px);
+  background: #191a1d;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  box-shadow:
+    0 16px 32px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  margin: 58px 12px 0 0;
+  max-height: calc(100vh - 76px);
   min-height: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 12px;
   width: auto;
 }
 
 .gyro-chat-surface.has-environment .gyro-rail-section {
-  border-top-color: rgba(255, 255, 255, 0.07);
+  border-top-color: #2b2f35;
 }
 
 .gyro-chat-surface.has-environment .gyro-rail-row {
+  border-radius: 6px;
+  min-height: 30px;
+}
+
+.gyro-chat-surface.has-environment .gyro-rail-row.is-action {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.gyro-chat-surface.has-environment .gyro-rail-row.is-muted {
+  color: #8f949c;
+}
+
+/* Unified Codex-style app sidebar */
+.gyro-app-shell,
+.gyro-app-shell.is-chat-shell {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+
+.gyro-app-shell.is-sidebar-hidden,
+.gyro-app-shell.is-chat-shell.is-sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gyro-sidebar,
+.gyro-app-shell.is-chat-shell .gyro-sidebar {
+  background: #202124;
+  border-right: 1px solid #35383d;
+  gap: 0;
+  padding: 0 9px 0;
+}
+
+.gyro-sidebar-windowbar {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  height: 50px;
+  justify-content: flex-start;
+  min-height: 50px;
+  padding: 9px 5px 6px 84px;
+}
+
+.gyro-sidebar-window-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.gyro-sidebar-window-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #8e9299;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+}
+
+.gyro-sidebar-window-actions button:hover {
+  color: #d7d9dd;
+}
+
+.gyro-sidebar-windowbar.is-settings {
+  gap: 10px;
+  padding-left: 84px;
+}
+
+.gyro-settings-back-button {
+  background: transparent;
+  border: 0;
+}
+
+.gyro-settings-sidebar-title {
+  color: #f0f1f3;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-actions.is-settings-pages {
+  padding-bottom: 12px;
+}
+
+.gyro-sidebar-action.is-settings-page {
+  min-height: 32px;
+}
+
+.gyro-sidebar-restore-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #8e9299;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  left: 93px;
+  padding: 0;
+  position: fixed;
+  top: 14px;
+  width: 20px;
+  z-index: 80;
+}
+
+.gyro-sidebar-restore-button:hover {
+  color: #d7d9dd;
+}
+
+.gyro-sidebar-titlebar-drag-region {
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 34px;
+}
+
+.gyro-sidebar-mode-group,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
+  background: #17181b;
+  border: 1px solid #34373d;
   border-radius: 8px;
-  min-height: 34px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 12px;
+  padding: 2px;
+}
+
+.gyro-sidebar-mode-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
+  border-radius: 6px;
+  color: #d8d9dc;
+  font-size: 12.5px;
+  font-weight: 650;
+  min-height: 27px;
+  padding: 0 6px;
+}
+
+.gyro-sidebar-mode-row:hover,
+.gyro-sidebar-mode-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active {
+  background: #303339;
+  color: #f0f1f3;
+}
+
+.gyro-sidebar-actions,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-actions {
+  gap: 2px;
+  padding: 0 1px 20px;
+}
+
+.gyro-sidebar-action,
+.gyro-sidebar-row,
+.gyro-sidebar-project-row,
+.gyro-sidebar-thread,
+.gyro-sidebar-thread-main,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #d8d9dc;
+  font-size: 13.5px;
+  font-weight: 400;
+  gap: 9px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.gyro-sidebar-action,
+.gyro-sidebar-row,
+.gyro-sidebar-project-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row {
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+}
+
+.gyro-sidebar-action svg,
+.gyro-sidebar-row svg,
+.gyro-sidebar-project-row svg,
+.gyro-sidebar-thread svg,
+.gyro-sidebar-thread-main svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main svg {
+  color: #b4b7bd;
+  height: 14px;
+  width: 14px;
+}
+
+.gyro-sidebar-action:hover,
+.gyro-sidebar-action.is-active,
+.gyro-sidebar-row:hover,
+.gyro-sidebar-row.is-active,
+.gyro-sidebar-project-row:hover,
+.gyro-sidebar-thread:hover,
+.gyro-sidebar-thread.is-active,
+.gyro-sidebar-thread-main:hover,
+.gyro-session-row:hover,
+.gyro-session-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main:hover,
+.gyro-app-shell.is-chat-shell .gyro-session-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-session-row.is-active {
+  background: #303339;
+  border-color: transparent;
+  color: #f0f1f3;
+}
+
+.gyro-sidebar-section {
+  gap: 0;
+  margin: 0 0 16px;
+}
+
+.gyro-sidebar-section.is-grow {
+  min-height: 0;
+}
+
+.gyro-nav-label,
+.gyro-sidebar-section-toggle,
+.gyro-app-shell.is-chat-shell .gyro-nav-label,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-section-toggle {
+  color: #90939a;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  min-height: 27px;
+  margin-left: 0;
+  padding: 6px 8px 4px;
+  text-align: left;
+  text-transform: none;
+}
+
+.gyro-sidebar-list,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-list {
+  gap: 1px;
+}
+
+.gyro-sidebar-project-row small,
+.gyro-sidebar-thread small,
+.gyro-sidebar-thread-main small,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row small,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread small,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main small {
+  color: #969aa2;
+  font-size: 12.5px;
+}
+
+.gyro-sidebar-thread.is-indent {
+  padding-left: 33px;
+}
+
+.gyro-session-row {
+  border-radius: 8px;
+  min-height: 30px;
+}
+
+.gyro-session-row:hover .gyro-sidebar-thread-main,
+.gyro-session-row:focus-within .gyro-sidebar-thread-main,
+.gyro-session-row.is-menu-open .gyro-sidebar-thread-main,
+.gyro-session-row.is-pinned .gyro-sidebar-thread-main {
+  padding-right: 56px;
+}
+
+.gyro-session-actions,
+.gyro-app-shell.is-chat-shell .gyro-session-actions {
+  background: #303339;
+  border-color: #3c4047;
+  box-shadow: none;
+}
+
+.gyro-session-action {
+  color: #d8d9dc;
+}
+
+.gyro-sidebar-footer,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
+  background: #202124;
+  border-top: 0;
+  margin: auto -9px 0;
+  padding: 8px 9px 10px;
+}
+
+.gyro-account-button,
+.gyro-app-shell.is-chat-shell .gyro-account-button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 8px;
+  color: #d8d9dc;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.gyro-account-button:hover,
+.gyro-app-shell.is-chat-shell .gyro-account-button:hover {
+  background: #303339;
+}
+
+.gyro-settings-surface {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.gyro-settings-nav {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #292c31;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: visible;
+  padding: 0 0 10px;
+}
+
+.gyro-settings-nav button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  flex: 0 1 auto;
+  font-size: 12.5px;
+  gap: 7px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 9px;
+}
+
+.gyro-settings-nav button:hover,
+.gyro-settings-nav button.is-active {
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+}
+
+.gyro-settings-content {
+  overflow: visible;
+  padding: 0;
 }
 
 @media (max-width: 1280px) {
   .gyro-app-shell.is-chat-shell {
-    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+    grid-template-columns: 224px minmax(0, 1fr);
   }
 
   .gyro-chat-surface.has-environment {
-    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, 1fr) 320px;
   }
 }
 
@@ -6641,7 +8539,7 @@ textarea:focus-visible {
 
   .gyro-chat-surface.is-empty {
     min-height: 100vh;
-    padding: 24px 12px;
+    padding: 18px 12px;
   }
 
   .gyro-chat-start {
@@ -6651,23 +8549,79 @@ textarea:focus-visible {
   }
 
   .gyro-chat-start h1 {
-    font-size: 28px;
+    font-size: 27px;
   }
 
   .gyro-chat-start .gyro-composer-shell {
     border-radius: 18px;
-    min-height: 176px;
+    min-height: 142px;
+  }
+
+  .gyro-chat-start .gyro-composer-shell.is-provider-collapsed {
+    border-radius: 999px;
+    min-height: 52px;
+    padding: 0 8px 0 14px;
   }
 
   .gyro-composer-bar {
-    flex-wrap: wrap;
-    min-height: 54px;
-    padding: 8px 10px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    min-height: 38px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 5px 7px;
+    scrollbar-width: none;
+  }
+
+  .gyro-composer-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gyro-chat-start .gyro-composer-bar {
+    flex-wrap: nowrap;
+    gap: 3px;
+    min-height: 38px;
+    overflow: visible;
+    padding: 5px 6px;
+  }
+
+  .gyro-chat-start .gyro-composer-spacer {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .gyro-chat-start .gyro-composer-control-approval {
+    flex: 1 1 auto;
+    max-width: min(32vw, 128px);
+  }
+
+  .gyro-chat-start .gyro-composer-control-model {
+    flex: 1 1 auto;
+    max-width: min(25vw, 96px);
+  }
+
+  .gyro-chat-start .gyro-composer-control-approval .gyro-composer-chip,
+  .gyro-chat-start .gyro-composer-control-model .gyro-composer-chip {
+    width: 100%;
+  }
+
+  .gyro-chat-start .gyro-composer-chip.is-warning {
+    flex: 1 1 auto;
+    max-width: min(32vw, 128px);
+  }
+
+  .gyro-chat-start .gyro-model-chip {
+    flex: 1 1 auto;
+    max-width: min(25vw, 96px);
   }
 
   .gyro-composer-context-row {
-    min-height: 48px;
-    padding: 0 12px;
+    min-height: 34px;
+    padding: 0 7px;
+  }
+
+  .gyro-composer-popover {
+    min-width: min(184px, calc(100vw - 28px));
   }
 
   .gyro-composer-chip {
@@ -6675,18 +8629,1632 @@ textarea:focus-visible {
   }
 
   .gyro-chat-thread-topbar {
-    padding: 0 14px;
+    padding: 0 12px;
   }
 
   .gyro-chat-transcript {
-    padding: 0 14px 24px;
+    padding: 0 12px 20px;
   }
 
   .gyro-chat-composer-dock {
-    padding: 12px 12px 18px;
+    padding: 10px 12px 14px;
+  }
+}
+
+/* Premium polish pass */
+:root {
+  --gyro-premium-app: #111214;
+  --gyro-premium-sidebar: #1f2023;
+  --gyro-premium-panel: #17191d;
+  --gyro-premium-panel-strong: #202226;
+  --gyro-premium-control: #292b30;
+  --gyro-premium-control-hover: #34373d;
+  --gyro-premium-line: #34373d;
+  --gyro-premium-line-soft: #292c31;
+  --gyro-premium-text: #f3f0eb;
+  --gyro-premium-muted: #b7b2aa;
+  --gyro-premium-faint: #8e9299;
+  --gyro-premium-accent: #e4ded2;
+  --gyro-premium-shadow: rgba(0, 0, 0, 0.34);
+  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme="light"] {
+  --gyro-premium-app: #f5f4f1;
+  --gyro-premium-sidebar: #ececea;
+  --gyro-premium-panel: #ffffff;
+  --gyro-premium-panel-strong: #f4f3f1;
+  --gyro-premium-control: #e8e8e5;
+  --gyro-premium-control-hover: #dededa;
+  --gyro-premium-line: #d6d5d1;
+  --gyro-premium-line-soft: #e4e3df;
+  --gyro-premium-text: #191b1f;
+  --gyro-premium-muted: #5e6269;
+  --gyro-premium-faint: #888b91;
+  --gyro-premium-accent: #1f242c;
+  --gyro-premium-shadow: rgba(32, 34, 38, 0.14);
+  --gyro-premium-shadow-soft: rgba(32, 34, 38, 0.08);
+}
+
+html {
+  background: var(--gyro-premium-app);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  background: var(--gyro-premium-app);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--gyro-premium-accent) 28%, transparent);
+  color: var(--gyro-premium-text);
+}
+
+* {
+  scrollbar-color: var(--gyro-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--gyro-border-strong) 74%, transparent);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--gyro-premium-accent) 34%, transparent);
+  background-clip: padding-box;
+}
+
+.gyro-app-shell,
+.gyro-app-shell.is-chat-shell {
+  background: var(--gyro-premium-app);
+}
+
+.gyro-sidebar,
+.gyro-app-shell.is-chat-shell .gyro-sidebar {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--gyro-premium-sidebar) 88%, #2a2c31) 0%,
+      var(--gyro-premium-sidebar) 34%
+    ),
+    var(--gyro-premium-sidebar);
+  border-right-color: var(--gyro-premium-line);
+}
+
+:root[data-theme="light"] .gyro-sidebar,
+:root[data-theme="light"] .gyro-app-shell.is-chat-shell .gyro-sidebar {
+  background: var(--gyro-premium-sidebar);
+}
+
+.gyro-sidebar-windowbar {
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--gyro-premium-line) 46%, transparent);
+  margin: 0 -9px 9px;
+  padding-left: 93px;
+  padding-right: 12px;
+}
+
+.gyro-sidebar-window-actions button,
+.gyro-sidebar-restore-button {
+  border-radius: 6px;
+}
+
+.gyro-sidebar-window-actions button:hover,
+.gyro-sidebar-restore-button:hover {
+  background: var(--gyro-premium-control);
+}
+
+.gyro-sidebar-restore-button {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  height: 20px;
+  top: 16px;
+  width: 20px;
+}
+
+.gyro-sidebar-mode-group,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
+  background: color-mix(in srgb, var(--gyro-premium-app) 76%, #000 24%);
+  border-color: var(--gyro-premium-line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+:root[data-theme="light"] .gyro-sidebar-mode-group,
+:root[data-theme="light"]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar-mode-group {
+  background: var(--gyro-premium-panel-strong);
+}
+
+.gyro-sidebar-mode-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row,
+.gyro-sidebar-action,
+.gyro-sidebar-row,
+.gyro-sidebar-project-row,
+.gyro-sidebar-thread,
+.gyro-sidebar-thread-main,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
+  color: var(--gyro-premium-muted);
+}
+
+.gyro-sidebar-mode-row:hover,
+.gyro-sidebar-mode-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row.is-active,
+.gyro-sidebar-action:hover,
+.gyro-sidebar-action.is-active,
+.gyro-sidebar-row:hover,
+.gyro-sidebar-row.is-active,
+.gyro-sidebar-project-row:hover,
+.gyro-sidebar-thread:hover,
+.gyro-sidebar-thread.is-active,
+.gyro-sidebar-thread-main:hover,
+.gyro-session-row:hover,
+.gyro-session-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread:hover,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main:hover,
+.gyro-app-shell.is-chat-shell .gyro-session-row:hover,
+.gyro-app-shell.is-chat-shell .gyro-session-row.is-active {
+  background: var(--gyro-premium-control-hover);
+  color: var(--gyro-premium-text);
+}
+
+.gyro-sidebar-action.is-active::before,
+.gyro-sidebar-row.is-active::before,
+.gyro-sidebar-thread.is-active::before,
+.gyro-session-row.is-active::before {
+  background: var(--gyro-premium-accent);
+  border-radius: 999px;
+  content: "";
+  inset: 7px auto 7px 3px;
+  position: absolute;
+  width: 2px;
+}
+
+.gyro-sidebar-footer,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--gyro-premium-sidebar) 0%, transparent) 0%,
+      var(--gyro-premium-sidebar) 24%
+    ),
+    var(--gyro-premium-sidebar);
+  border-top: 1px solid
+    color-mix(in srgb, var(--gyro-premium-line) 52%, transparent);
+}
+
+.gyro-account-button,
+.gyro-app-shell.is-chat-shell .gyro-account-button {
+  color: var(--gyro-premium-muted);
+}
+
+.gyro-account-button:hover,
+.gyro-app-shell.is-chat-shell .gyro-account-button:hover {
+  color: var(--gyro-premium-text);
+}
+
+.gyro-main,
+.gyro-app-shell.is-chat-shell .gyro-main,
+.gyro-workspace-route,
+.gyro-chat-surface,
+.gyro-chat-surface.is-empty,
+.gyro-chat-transcript,
+.gyro-chat-composer-dock {
+  background: var(--gyro-premium-app);
+}
+
+.gyro-chat-start {
+  gap: 28px;
+  margin-top: -6vh;
+}
+
+.gyro-chat-start h1 {
+  color: var(--gyro-premium-text);
+  font-weight: 560;
+  text-wrap: balance;
+}
+
+.gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed) {
+  background: transparent;
+  border: 0;
+  border-radius: 22px;
+  box-shadow: none;
+  filter: drop-shadow(0 26px 52px var(--gyro-premium-shadow-soft));
+}
+
+.gyro-chat-start .gyro-composer-shell textarea,
+.gyro-composer-shell.is-hero textarea {
+  background: #303136;
+  border: 1px solid #45474d;
+  border-bottom: 0;
+  border-radius: 21px 21px 0 0;
+  box-shadow: none;
+  color: #f3f0eb;
+}
+
+.gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed):focus-within {
+  filter: drop-shadow(0 18px 42px var(--gyro-premium-shadow-soft));
+}
+
+.gyro-chat-start .gyro-composer-shell:focus-within textarea,
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed:focus-within,
+.gyro-chat-composer-dock .gyro-composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--gyro-premium-accent) 44%, #51545b);
+  box-shadow: none;
+}
+
+.gyro-chat-start .gyro-composer-shell:focus-within .gyro-composer-bar {
+  border-color: color-mix(in srgb, var(--gyro-premium-accent) 44%, #51545b);
+}
+
+.gyro-chat-start .gyro-composer-bar {
+  background: #303136;
+  border: 1px solid #45474d;
+  border-radius: 0 0 18px 18px;
+  border-top: 0;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.28);
+  margin-top: -1px;
+}
+
+.gyro-chat-start .gyro-composer-context-row,
+.gyro-composer-popover,
+.gyro-provider-picker .gyro-composer-popover,
+.gyro-session-menu,
+.gyro-account-menu,
+.gyro-command-palette {
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.gyro-composer-popover,
+.gyro-provider-picker .gyro-composer-popover,
+.gyro-session-menu,
+.gyro-account-menu {
+  border-color: color-mix(in srgb, var(--gyro-premium-line) 86%, #fff 14%);
+  box-shadow:
+    0 22px 54px var(--gyro-premium-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+.gyro-composer-menu-item:hover,
+.gyro-composer-menu-item.is-active,
+.gyro-composer-menu-item.is-model:hover,
+.gyro-composer-menu-item.is-model.is-active {
+  background: var(--gyro-premium-control-hover);
+}
+
+.gyro-composer-chip,
+.gyro-composer-tool,
+.gyro-chat-start .gyro-composer-chip,
+.gyro-chat-start .gyro-composer-tool {
+  color: color-mix(in srgb, var(--gyro-premium-muted) 92%, #fff 8%);
+}
+
+.gyro-composer-chip:hover,
+.gyro-composer-tool:hover,
+.gyro-chat-start .gyro-composer-context-row .gyro-composer-chip:hover {
+  background: var(--gyro-premium-control-hover);
+  border-color: color-mix(in srgb, var(--gyro-premium-line) 86%, #fff 14%);
+  color: var(--gyro-premium-text);
+}
+
+.gyro-send-button {
+  background: var(--gyro-premium-accent);
+  box-shadow:
+    0 10px 22px var(--gyro-premium-shadow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.gyro-send-button:hover {
+  background: #f5efe4;
+}
+
+.gyro-chat-thread-topbar {
+  background: color-mix(in srgb, var(--gyro-premium-app) 88%, #1b1d21 12%);
+  border-bottom-color: var(--gyro-premium-line-soft);
+}
+
+.gyro-chat-transcript {
+  padding-top: 8px;
+}
+
+.gyro-chat-transcript .gyro-message {
+  border-radius: 8px;
+}
+
+.gyro-chat-transcript .gyro-agent-run-card,
+.gyro-agent-run-card,
+.gyro-tools-card,
+.gyro-settings-section,
+.gyro-provider-card,
+.gyro-kanban-column,
+.gyro-task-card,
+.gyro-automation-metric,
+.gyro-automation-fact,
+.gyro-automation-prompt,
+.gyro-automation-stop,
+.gyro-automation-result,
+.gyro-browser-page {
+  border-color: var(--gyro-premium-line-soft);
+  box-shadow:
+    0 12px 28px var(--gyro-premium-shadow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.gyro-tools-surface {
+  background: var(--gyro-premium-app);
+}
+
+.gyro-tools-panel {
+  max-width: 940px;
+}
+
+.gyro-tools-card {
+  background: var(--gyro-premium-panel);
+  min-height: 136px;
+}
+
+.gyro-tools-card:hover,
+.gyro-provider-card:hover,
+.gyro-task-card:hover,
+.gyro-kanban-column:hover {
+  border-color: var(--gyro-premium-line);
+  box-shadow:
+    0 16px 34px var(--gyro-premium-shadow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.gyro-workspace-tool-panel {
+  background: var(--gyro-premium-panel);
+  border-top-color: var(--gyro-premium-line);
+  box-shadow: 0 -18px 36px var(--gyro-premium-shadow-soft);
+}
+
+.gyro-workspace-tool-panel.is-primary {
+  box-shadow: none;
+}
+
+.gyro-workspace-tool-panel-head,
+.gyro-pane-tabs,
+.gyro-terminal-tabbar,
+.gyro-terminal-controlbar,
+.gyro-browser-preview-toolbar,
+.gyro-browser-statusbar,
+.gyro-board-toolbar,
+.gyro-automation-toolbar,
+.gyro-provider-hero,
+.gyro-settings-section > header {
+  background: var(--gyro-premium-panel-strong);
+  border-color: var(--gyro-premium-line-soft);
+}
+
+.gyro-pane-tabs button:hover,
+.gyro-terminal-tab:hover,
+.gyro-pane-tabs button.is-active,
+.gyro-terminal-tab.is-active {
+  background: var(--gyro-premium-control);
+  color: var(--gyro-premium-text);
+}
+
+.gyro-terminal-pane,
+.gyro-diff-main,
+.gyro-code-surface,
+.gyro-browser-frame {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.gyro-terminal-pane.is-active {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-premium-accent) 56%,
+    var(--gyro-premium-line)
+  );
+}
+
+.gyro-settings-surface {
+  background: var(--gyro-premium-app);
+}
+
+.gyro-settings-nav {
+  border-bottom-color: var(--gyro-premium-line-soft);
+}
+
+.gyro-settings-nav button:hover,
+.gyro-settings-nav button.is-active {
+  background: var(--gyro-premium-control);
+}
+
+.gyro-settings-row,
+.gyro-provider-row,
+.gyro-provider-health,
+.gyro-provider-session-row,
+.gyro-profile-table-row {
+  border-color: var(--gyro-premium-line-soft);
+}
+
+.gyro-command-overlay,
+.gyro-model-standard-overlay {
+  backdrop-filter: blur(6px);
+}
+
+.gyro-command-palette {
+  border-color: color-mix(in srgb, var(--gyro-premium-line) 82%, #fff 18%);
+  box-shadow:
+    0 28px 80px var(--gyro-premium-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+.gyro-command-list button:hover,
+.gyro-command-list button.is-active {
+  background: var(--gyro-premium-control-hover);
+}
+
+/* Final in-chat alignment with the Codex conversation surface. */
+.gyro-chat-surface:not(.is-empty) {
+  background: #101112;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gyro-chat-surface.has-environment {
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(288px, 316px);
+  padding-right: 14px;
+}
+
+.gyro-chat-thread-canvas {
+  background: transparent;
+  grid-template-rows: 48px minmax(0, 1fr) auto;
+  min-height: 100vh;
+}
+
+.gyro-chat-thread-topbar {
+  background: transparent;
+  border-bottom: 0;
+  padding: 0 clamp(18px, 4vw, 34px);
+}
+
+.gyro-chat-thread-topbar > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.gyro-chat-thread-topbar > div:first-child span {
+  display: none;
+}
+
+.gyro-chat-thread-topbar strong {
+  color: #f3f1ec;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.gyro-chat-transcript {
+  background: transparent;
+  padding: 18px clamp(24px, 9vw, 124px) 22px;
+}
+
+.gyro-chat-transcript .gyro-message,
+.gyro-chat-transcript .gyro-agent-run-card,
+.gyro-chat-transcript .gyro-provider-status-row {
+  max-width: 736px;
+}
+
+.gyro-chat-transcript .gyro-message {
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: 18px;
+  padding: 0;
+}
+
+.gyro-chat-transcript .gyro-message-avatar {
+  display: none;
+}
+
+.gyro-chat-transcript .gyro-message > div:last-child {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #ededed;
+  padding: 0;
+}
+
+.gyro-chat-transcript .gyro-message.is-user {
+  justify-items: end;
+  max-width: 736px;
+}
+
+.gyro-chat-transcript .gyro-message.is-user > div:last-child {
+  background: #2e3034;
+  border: 1px solid #3d4046;
+  border-radius: 16px;
+  color: #f0eee9;
+  max-width: min(100%, 620px);
+  padding: 9px 13px;
+}
+
+.gyro-chat-transcript .gyro-message-meta {
+  color: #8b8d93;
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0;
+  margin-bottom: 6px;
+  text-transform: none;
+}
+
+.gyro-chat-transcript .gyro-message p {
+  font-size: 14px;
+  line-height: 1.62;
+  margin: 0;
+}
+
+.gyro-chat-transcript .gyro-agent-run-card,
+.gyro-agent-run-card.gyro-agent-run-card {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #27292e;
+  border-radius: 0;
+  box-shadow: none;
+  margin-top: 10px;
+  padding: 13px 0 0;
+}
+
+.gyro-provider-status-row {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #27292e;
+  border-radius: 0;
+  box-shadow: none;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  margin-bottom: 18px;
+  padding: 12px 0 0;
+}
+
+.gyro-provider-status-icon {
+  background: #202226;
+  height: 24px;
+  width: 24px;
+}
+
+.gyro-chat-composer-dock {
+  background: transparent;
+  padding: 10px clamp(24px, 9vw, 124px) 16px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell {
+  background: #2f3034;
+  border: 1px solid #474a51;
+  border-radius: 18px;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  max-width: 736px;
+  min-height: 142px;
+  overflow: visible;
+  padding: 0;
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell textarea {
+  color: #ece9e3;
+  min-height: 84px;
+  padding: 14px 14px 8px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-bar {
+  background: transparent;
+  border-top: 0;
+  min-height: 44px;
+  padding: 6px 10px 10px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-chip,
+.gyro-chat-composer-dock .gyro-composer-tool {
+  border-color: transparent;
+  color: #c6c0b7;
+}
+
+.gyro-chat-composer-dock .gyro-send-button {
+  height: 32px;
+  width: 32px;
+}
+
+.gyro-chat-surface.has-environment .gyro-environment-rail {
+  background: #2b2c2f;
+  border-radius: 18px;
+  margin: 58px 0 0;
+  max-height: calc(100vh - 78px);
+  padding: 14px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+@media (max-width: 780px) {
+  .gyro-sidebar-windowbar {
+    margin-bottom: 0;
   }
 
-  .gyro-chat-composer-dock .gyro-composer-shell {
-    border-radius: 18px;
+  .gyro-chat-surface.is-empty {
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .gyro-chat-start {
+    gap: 22px;
+    margin-top: 0;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .gyro-chat-start h1 {
+    max-width: 18ch;
+  }
+
+  .gyro-chat-start .gyro-composer-shell,
+  .gyro-chat-start .gyro-composer-shell textarea,
+  .gyro-chat-start .gyro-composer-bar {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed) {
+    filter: none;
+    overflow: hidden;
+  }
+
+  .gyro-chat-start .gyro-composer-context-row {
+    margin-left: 8px;
+    margin-right: 8px;
+    max-width: calc(100% - 16px);
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .gyro-composer-control,
+  .gyro-composer-label {
+    min-width: 0;
+  }
+
+  .gyro-workspace-tool-panel {
+    box-shadow: 0 -10px 22px var(--gyro-premium-shadow-soft);
+  }
+
+  .gyro-terminal-controlbar,
+  .gyro-browser-preview-toolbar {
+    overflow-x: auto;
+  }
+}
+
+/* Premium hairline refinement */
+:root {
+  --gyro-premium-hairline: color-mix(
+    in srgb,
+    var(--gyro-premium-line) 62%,
+    transparent
+  );
+  --gyro-premium-hairline-soft: color-mix(
+    in srgb,
+    var(--gyro-premium-line-soft) 58%,
+    transparent
+  );
+  --gyro-premium-hairline-strong: color-mix(
+    in srgb,
+    var(--gyro-premium-line) 80%,
+    var(--gyro-premium-accent) 20%
+  );
+  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.035);
+}
+
+:root[data-theme="light"] {
+  --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.72);
+}
+
+.gyro-sidebar,
+.gyro-app-shell.is-chat-shell .gyro-sidebar {
+  border-right-color: var(--gyro-premium-hairline);
+}
+
+.gyro-topbar,
+.gyro-chat-utility-bar,
+.gyro-chat-thread-topbar,
+.gyro-workspace-tool-panel-head,
+.gyro-pane-tabs,
+.gyro-terminal-tabbar,
+.gyro-terminal-controlbar,
+.gyro-browser-preview-toolbar,
+.gyro-browser-statusbar,
+.gyro-board-toolbar,
+.gyro-automation-toolbar,
+.gyro-settings-section > header,
+.gyro-provider-hero {
+  border-color: var(--gyro-premium-hairline-soft);
+}
+
+.gyro-thread-header,
+.gyro-composer-readiness,
+.gyro-composer-bar,
+.gyro-tool-detail-header,
+.gyro-tool-detail-panel pre,
+.gyro-sidebar-footer,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
+  border-color: var(--gyro-premium-hairline-soft);
+}
+
+.gyro-tools-card,
+.gyro-settings-section,
+.gyro-provider-card,
+.gyro-provider-handoff-panel,
+.gyro-provider-policy,
+.gyro-kanban-column,
+.gyro-task-card,
+.gyro-automation-metric,
+.gyro-automation-fact,
+.gyro-automation-prompt,
+.gyro-automation-stop,
+.gyro-automation-result,
+.gyro-browser-page,
+.gyro-agent-run-card,
+.gyro-diff-main,
+.gyro-code-surface,
+.gyro-terminal-pane,
+.gyro-browser-frame,
+.gyro-tool-detail-panel {
+  border-color: transparent;
+  box-shadow:
+    0 10px 24px var(--gyro-premium-shadow-soft),
+    inset 0 0 0 0.5px var(--gyro-premium-hairline),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-settings-row,
+.gyro-provider-row,
+.gyro-provider-health,
+.gyro-provider-session-row,
+.gyro-profile-table-row,
+.gyro-diff-summary-card,
+.gyro-browser-content-grid > div,
+.gyro-browser-skeleton span,
+.gyro-terminal-empty,
+.gyro-terminal-controlbar select,
+.gyro-terminal-controlbar input,
+.gyro-browser-toolbar,
+.gyro-browser-console-pill,
+.gyro-browser-preview-toolbar select,
+.gyro-provider-model-picker button,
+.gyro-provider-handoff-form input,
+.gyro-provider-handoff-form select {
+  border-color: transparent;
+  box-shadow:
+    inset 0 0 0 0.5px var(--gyro-premium-hairline-soft),
+    inset 0 1px 0
+      color-mix(in srgb, var(--gyro-premium-inset-highlight) 72%, transparent);
+}
+
+.gyro-primary-button,
+.gyro-secondary-button,
+.gyro-icon-button,
+.gyro-thread-pills span,
+.gyro-thread-pill-button,
+.gyro-live-pill,
+.gyro-provider-state,
+.gyro-provider-row code,
+.gyro-settings-row em,
+.gyro-provider-actions .gyro-secondary-button,
+.gyro-terminal-action-set button,
+.gyro-terminal-tools button,
+.gyro-browser-preview-toolbar button,
+.gyro-diff-comment,
+.gyro-composer-popover,
+.gyro-provider-picker .gyro-composer-popover,
+.gyro-session-menu,
+.gyro-account-menu,
+.gyro-command-palette,
+.gyro-model-standard-card,
+.gyro-model-chip,
+.gyro-composer-shell {
+  border-color: transparent;
+  box-shadow:
+    inset 0 0 0 0.5px var(--gyro-premium-hairline),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-composer-shell,
+.gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed) {
+  box-shadow:
+    0 18px 38px var(--gyro-premium-shadow-soft),
+    inset 0 0 0 0.5px var(--gyro-premium-hairline-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed) {
+  box-shadow: 0 18px 38px var(--gyro-premium-shadow-soft);
+}
+
+.gyro-chat-start .gyro-composer-shell textarea,
+.gyro-composer-shell.is-hero textarea,
+.gyro-chat-start .gyro-composer-bar {
+  border-color: transparent;
+}
+
+.gyro-chat-start .gyro-composer-context-row {
+  border-color: transparent;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.gyro-model-chip,
+.gyro-model-chip:hover,
+.gyro-model-chip.is-active {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.gyro-chat-start .gyro-composer-shell:focus-within textarea,
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed:focus-within,
+.gyro-chat-composer-dock .gyro-composer-shell:focus-within {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.gyro-chat-start .gyro-composer-shell:focus-within textarea,
+.gyro-chat-start .gyro-composer-shell:focus-within .gyro-composer-bar {
+  border-color: #45474d;
+  box-shadow: none;
+}
+
+.gyro-chat-start .gyro-composer-shell.is-provider-collapsed:focus-within {
+  border-color: #3a3b3f;
+}
+
+.gyro-chat-start
+  .gyro-composer-shell.is-provider-collapsed:focus-within
+  textarea,
+.gyro-chat-start
+  .gyro-composer-shell.is-provider-collapsed:focus-within
+  .gyro-composer-bar {
+  border-color: transparent;
+}
+
+.gyro-session-row.is-nested .gyro-sidebar-thread-main,
+.gyro-session-row.is-nested:hover .gyro-sidebar-thread-main,
+.gyro-session-row.is-nested:focus-within .gyro-sidebar-thread-main,
+.gyro-session-row.is-nested.is-menu-open .gyro-sidebar-thread-main,
+.gyro-session-row.is-nested.is-pinned .gyro-sidebar-thread-main {
+  padding-left: 31px;
+}
+
+.gyro-sidebar-mode-group,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group {
+  border-color: transparent;
+  box-shadow:
+    inset 0 0 0 0.5px var(--gyro-premium-hairline-soft),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-sidebar-action.is-active::before,
+.gyro-sidebar-row.is-active::before,
+.gyro-sidebar-thread.is-active::before,
+.gyro-session-row.is-active::before {
+  inset: 8px auto 8px 4px;
+  opacity: 0.9;
+  width: 1px;
+}
+
+.gyro-pane-tabs button.is-active,
+.gyro-terminal-tab.is-active,
+.gyro-chat-surface-button.is-active,
+.gyro-provider-model-picker button.is-active,
+.gyro-settings-nav button.is-active {
+  box-shadow:
+    inset 0 -1px 0 var(--gyro-premium-accent),
+    inset 0 0 0 0.5px var(--gyro-premium-hairline-soft);
+}
+
+.gyro-sidebar-mode-row.is-active,
+.gyro-surface-row.is-active,
+.gyro-sidebar-action.is-active,
+.gyro-sidebar-row.is-active,
+.gyro-sidebar-thread.is-active,
+.gyro-session-row.is-active {
+  box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft);
+}
+
+.gyro-terminal-pane.is-active {
+  border-color: transparent;
+  box-shadow:
+    0 10px 24px var(--gyro-premium-shadow-soft),
+    inset 0 0 0 0.5px var(--gyro-premium-hairline-strong),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-tools-card:hover,
+.gyro-provider-card:hover,
+.gyro-task-card:hover,
+.gyro-kanban-column:hover,
+.gyro-settings-row:hover,
+.gyro-provider-row:hover,
+.gyro-provider-model-picker button:hover,
+.gyro-secondary-button:hover,
+.gyro-icon-button:hover {
+  border-color: transparent;
+  box-shadow:
+    0 14px 30px var(--gyro-premium-shadow-soft),
+    inset 0 0 0 0.5px var(--gyro-premium-hairline-strong),
+    inset 0 1px 0
+      color-mix(in srgb, var(--gyro-premium-inset-highlight) 86%, transparent);
+}
+
+.gyro-settings-section,
+.gyro-provider-card,
+.gyro-provider-handoff-panel,
+.gyro-provider-policy,
+.gyro-tools-card,
+.gyro-kanban-column,
+.gyro-task-card {
+  background: color-mix(
+    in srgb,
+    var(--gyro-premium-panel) 92%,
+    var(--gyro-premium-panel-strong) 8%
+  );
+}
+
+.gyro-settings-row,
+.gyro-provider-row,
+.gyro-provider-health,
+.gyro-provider-session-row,
+.gyro-profile-table-row {
+  background: color-mix(
+    in srgb,
+    var(--gyro-premium-panel) 72%,
+    var(--gyro-premium-panel-strong) 28%
+  );
+}
+
+.gyro-settings-row span,
+.gyro-provider-row span,
+.gyro-provider-health span,
+.gyro-provider-session-row span,
+.gyro-tools-card span,
+.gyro-provider-card-head span,
+.gyro-provider-model-picker span,
+.gyro-browser-statusbar,
+.gyro-terminal-context,
+.gyro-command-block {
+  color: color-mix(in srgb, var(--gyro-premium-muted) 88%, #fff 12%);
+}
+
+.gyro-settings-section > header strong,
+.gyro-provider-card-head strong,
+.gyro-tools-card strong,
+.gyro-settings-row strong,
+.gyro-provider-row strong {
+  color: var(--gyro-premium-text);
+}
+
+.gyro-command-palette,
+.gyro-composer-popover,
+.gyro-provider-picker .gyro-composer-popover,
+.gyro-session-menu,
+.gyro-account-menu {
+  box-shadow:
+    0 22px 54px var(--gyro-premium-shadow),
+    inset 0 0 0 0.5px var(--gyro-premium-hairline),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+/* Premium in-chat composer finish */
+.gyro-chat-composer-dock {
+  padding-bottom: 15px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 42%),
+    #2b2c2f;
+  border: 1px solid transparent;
+  border-radius: 21px;
+  box-shadow:
+    0 22px 58px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  max-width: 668px;
+  min-height: 104px;
+  overflow: visible;
+}
+
+.gyro-chat-surface.has-environment
+  .gyro-chat-composer-dock
+  .gyro-composer-shell {
+  max-width: 668px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell:focus-within {
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.32),
+    inset 0 0 0 0.5px rgba(244, 239, 231, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell textarea {
+  caret-color: #f1eee8;
+  color: #f0ede7;
+  font-size: 14px;
+  line-height: 1.45;
+  min-height: 56px;
+  padding: 13px 13px 2px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder {
+  color: #86888e;
+}
+
+.gyro-chat-composer-dock .gyro-composer-bar {
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 2px 10px 10px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-chip,
+.gyro-chat-composer-dock .gyro-composer-tool {
+  border-color: transparent;
+  border-radius: 999px;
+  color: #c4c0b8;
+  font-size: 13px;
+  min-height: 28px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-tool {
+  width: 28px;
+}
+
+.gyro-chat-composer-dock .gyro-composer-chip:hover,
+.gyro-chat-composer-dock .gyro-composer-tool:hover {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: transparent;
+  color: #efebe4;
+}
+
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning {
+  color: #ff8a3d;
+}
+
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning:hover {
+  background: rgba(255, 138, 61, 0.085);
+  color: #ff9b57;
+}
+
+.gyro-composer-chip.is-warning,
+.gyro-composer-chip.is-warning:hover,
+.gyro-chat-start .gyro-composer-chip.is-warning,
+.gyro-chat-start .gyro-composer-chip.is-warning:hover,
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning,
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning:hover {
+  background: transparent;
+  border-color: transparent;
+  color: #ff8a3d;
+}
+
+.gyro-chat-composer-dock .gyro-model-chip {
+  color: #d4d0c8;
+  gap: 6px;
+  padding: 0 7px;
+}
+
+.gyro-chat-composer-dock .gyro-model-chip .gyro-provider-logo {
+  opacity: 0.82;
+}
+
+.gyro-chat-composer-dock .gyro-composer-spacer {
+  min-width: 12px;
+}
+
+.gyro-chat-composer-dock .gyro-send-button {
+  background: #c9c4bb;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  color: #25262a;
+  height: 32px;
+  width: 32px;
+}
+
+.gyro-chat-composer-dock .gyro-send-button:hover {
+  background: #ddd8ce;
+}
+
+.gyro-chat-composer-dock .gyro-send-button:disabled {
+  background: #77797f;
+  color: #303135;
+  opacity: 0.76;
+}
+
+/* Simplified live terminal workbench */
+.gyro-workspace-tool-panel.is-resizable {
+  background: #111214;
+  border-top: 1px solid rgba(255, 255, 255, 0.095);
+  box-shadow: none;
+  min-height: 180px;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-tool-panel-resize-handle {
+  height: 10px;
+  top: -5px;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-tool-panel-resize-handle span {
+  background: #696d74;
+  height: 2px;
+  opacity: 0.5;
+  width: 44px;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-workspace-tool-panel-head {
+  background: #151619;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  min-height: 34px;
+  padding: 3px 8px;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs {
+  background: transparent;
+  border: 0;
+  gap: 6px;
+  padding: 0;
+}
+
+.gyro-workspace-tool-panel.is-resizable
+  .gyro-pane-tabs
+  button:not(.gyro-pane-add):not(.is-active) {
+  display: none;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs button,
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs .gyro-pane-add,
+.gyro-workspace-tool-panel.is-resizable
+  .gyro-workspace-tool-panel-head
+  .gyro-icon-button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #8f949d;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 8px;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs button.is-active {
+  background: #25272b;
+  color: #e7e2da;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs .gyro-pane-add,
+.gyro-workspace-tool-panel.is-resizable
+  .gyro-workspace-tool-panel-head
+  .gyro-icon-button {
+  padding: 0;
+}
+
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs button:hover,
+.gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs .gyro-pane-add:hover,
+.gyro-workspace-tool-panel.is-resizable
+  .gyro-workspace-tool-panel-head
+  .gyro-icon-button:hover {
+  background: rgba(255, 255, 255, 0.055);
+  color: #f2eee7;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-toolbar {
+  display: none;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-workspace {
+  background: #08090b;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-grid {
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  padding: 0;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-pane {
+  background: #08090b;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-pane:not(.is-active) {
+  display: none;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-pane
+  header {
+  display: none;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-xterm-host {
+  padding: 10px 16px 12px;
+}
+
+.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-empty {
+  margin: 12px 16px;
+}
+
+.gyro-terminal-workspace {
+  background: #060709;
+  color: #dbe2eb;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.gyro-terminal-toolbar {
+  align-items: center;
+  background: #171a1f;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  display: grid;
+  gap: 8px;
+  grid-template-columns:
+    minmax(132px, 220px) minmax(118px, auto) 32px 32px minmax(0, 1fr);
+  min-height: 40px;
+  padding: 4px 8px;
+}
+
+.gyro-terminal-toolbar select {
+  background: #101318;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #e3e8ef;
+  font: inherit;
+  height: 30px;
+  min-width: 0;
+  padding: 0 28px 0 9px;
+}
+
+.gyro-terminal-toolbar button,
+.gyro-terminal-drag-handle {
+  align-items: center;
+  background: #22262d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #d7dee8;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  min-width: 30px;
+  padding: 0;
+}
+
+.gyro-terminal-toolbar button:hover:not(:disabled),
+.gyro-terminal-drag-handle:hover {
+  background: #303640;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f2f5f8;
+}
+
+.gyro-terminal-toolbar button:disabled {
+  color: #747b86;
+  cursor: default;
+  opacity: 0.6;
+}
+
+.gyro-terminal-preset-button {
+  gap: 7px;
+  min-width: 118px;
+  padding: 0 10px;
+}
+
+.gyro-terminal-preset-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-terminal-tools {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.gyro-terminal-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.gyro-terminal-pane {
+  background: #030506;
+  border: 1px solid rgba(255, 255, 255, 0.068);
+  border-radius: 6px;
+  display: grid;
+  grid-template-rows: 35px minmax(0, 1fr);
+  min-height: 280px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gyro-terminal-pane.is-active {
+  border-color: rgba(192, 200, 212, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(192, 200, 212, 0.08);
+}
+
+.gyro-terminal-pane.is-drop-target {
+  outline: 2px solid rgba(126, 213, 188, 0.72);
+  outline-offset: -2px;
+}
+
+.gyro-terminal-pane[data-dragging="true"] {
+  opacity: 0.58;
+}
+
+.gyro-terminal-pane header {
+  align-items: center;
+  background: #0b0d10;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.058);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(96px, auto);
+  min-width: 0;
+  padding: 3px 7px;
+}
+
+.gyro-terminal-drag-handle {
+  background: transparent;
+  cursor: grab;
+  height: 26px;
+  min-width: 26px;
+}
+
+.gyro-terminal-drag-handle:active {
+  cursor: grabbing;
+}
+
+.gyro-terminal-pane-title {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.gyro-terminal-pane-title strong,
+.gyro-terminal-pane header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-terminal-pane-title strong {
+  color: #eef2f6;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.gyro-terminal-pane-title > span:last-child,
+.gyro-terminal-pane header small {
+  color: #88919d;
+  font-size: 11px;
+}
+
+.gyro-terminal-live-body {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.gyro-xterm-frame {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.gyro-xterm-host {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.gyro-terminal-reconnect {
+  align-items: center;
+  background: rgba(20, 23, 28, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  bottom: 10px;
+  color: #dce3ec;
+  display: inline-flex;
+  font-size: 12px;
+  height: 28px;
+  justify-content: center;
+  padding: 0 10px;
+  position: absolute;
+  right: 10px;
+}
+
+.gyro-terminal-reconnect:hover {
+  background: rgba(38, 43, 51, 0.96);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.gyro-xterm-host .xterm {
+  height: 100%;
+}
+
+.gyro-xterm-host .xterm-viewport {
+  background: transparent !important;
+}
+
+.gyro-terminal-empty {
+  align-items: center;
+  align-self: start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #656d78;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: 14px;
+  max-width: none;
+  min-height: auto;
+  padding: 0;
+  text-align: left;
+}
+
+.gyro-terminal-empty span {
+  display: inline;
+  font-size: 12px;
+}
+
+.gyro-cli-launch-preset {
+  background: #15181d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.gyro-cli-launch-preset header,
+.gyro-cli-launch-preset footer,
+.gyro-cli-launch-preset-row,
+.gyro-cli-launch-stepper,
+.gyro-cli-launch-focus {
+  align-items: center;
+  display: flex;
+}
+
+.gyro-cli-launch-preset header,
+.gyro-cli-launch-preset footer {
+  justify-content: space-between;
+}
+
+.gyro-cli-launch-preset header strong,
+.gyro-cli-launch-preset header span {
+  display: block;
+}
+
+.gyro-cli-launch-preset header span,
+.gyro-cli-launch-preset header small {
+  color: #8d96a3;
+  font-size: 12px;
+}
+
+.gyro-cli-launch-preset-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-cli-launch-preset-row {
+  gap: 8px;
+}
+
+.gyro-cli-launch-preset-row select {
+  background: #0d1014;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #dfe5ee;
+  flex: 1;
+  font: inherit;
+  height: 30px;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.gyro-cli-launch-stepper,
+.gyro-cli-launch-focus {
+  background: #0d1014;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.gyro-cli-launch-stepper button,
+.gyro-cli-launch-focus button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #c9d1dc;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0 8px;
+}
+
+.gyro-cli-launch-stepper span {
+  color: #f1f4f8;
+  min-width: 24px;
+  text-align: center;
+}
+
+.gyro-cli-launch-focus button.is-active {
+  background: #2b313a;
+  color: #ffffff;
+}
+
+@media (max-width: 880px) {
+  .gyro-terminal-toolbar {
+    grid-template-columns: minmax(110px, 1fr) 32px 32px 32px minmax(0, auto);
+  }
+
+  .gyro-terminal-preset-button {
+    min-width: 32px;
+    padding: 0;
+  }
+
+  .gyro-terminal-preset-button span {
+    display: none;
   }
 }

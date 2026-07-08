@@ -1,15 +1,22 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use gyro_core::{
-    config::UpdateChannel, create_worktree, doctor::run_doctor, ipc::notify_running_app, keychain,
-    slugify_worktree_name, AppNotification, AppNotificationKind, CreateSessionContext, GyroConfig,
-    GyroPaths, Session, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
+    config::{CommandProfile, UpdateChannel},
+    create_worktree,
+    doctor::run_doctor,
+    ipc::notify_running_app,
+    keychain, slugify_worktree_name, AppNotification, AppNotificationKind, CreateSessionContext,
+    DoctorStatus, GyroConfig, GyroPaths, Session, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode,
 };
+use serde::Serialize;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+const DEFAULT_SESSION_LIMIT: usize = 20;
 
 #[derive(Debug, Parser)]
 #[command(name = "gyro")]
@@ -23,6 +30,12 @@ struct Cli {
 enum Commands {
     /// Run a one-shot coding task in the current repository.
     Run(RunArgs),
+    /// Resume the latest or selected Gyro session.
+    Resume(ResumeArgs),
+    /// List recent local Gyro sessions.
+    Sessions(SessionsArgs),
+    /// Check CLI, provider, app, and agent readiness.
+    Setup(SetupArgs),
     /// Open or attach sessions in Gyro.app.
     App(AppArgs),
     /// Validate local setup.
@@ -40,8 +53,76 @@ struct RunArgs {
     #[arg(long)]
     workspace: Option<PathBuf>,
 
+    /// CLI profile to use, such as codex or claude-code.
+    #[arg(long)]
+    profile: Option<String>,
+
+    /// Model hint to record for this run.
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Launch Gyro.app if it is not already running.
+    #[arg(long, conflicts_with = "no_open")]
+    open: bool,
+
+    /// Do not notify or open Gyro.app.
+    #[arg(long)]
+    no_open: bool,
+
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    json: bool,
+
     #[command(flatten)]
     worktree: WorktreeArgs,
+}
+
+#[derive(Debug, Args)]
+struct ResumeArgs {
+    /// Session id to resume. Defaults to the latest session.
+    session_id: Option<Uuid>,
+
+    /// Override the recorded CLI profile for this resume.
+    #[arg(long)]
+    profile: Option<String>,
+
+    /// Override the recorded model hint for this resume.
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Launch Gyro.app if it is not already running.
+    #[arg(long, conflicts_with = "no_open")]
+    open: bool,
+
+    /// Do not notify or open Gyro.app.
+    #[arg(long)]
+    no_open: bool,
+
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct SessionsArgs {
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    json: bool,
+
+    /// Only show sessions for this workspace.
+    #[arg(long)]
+    workspace: Option<PathBuf>,
+
+    /// Maximum number of sessions to show.
+    #[arg(long, default_value_t = DEFAULT_SESSION_LIMIT)]
+    limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SetupArgs {
+    /// Emit JSON instead of text.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -120,10 +201,111 @@ enum ConfigCommand {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[allow(dead_code)]
+#[serde(rename_all = "kebab-case")]
+enum CliStatus {
+    Ready,
+    Waiting,
+    Blocked,
+    Running,
+    Done,
+    Failed,
+}
+
+impl CliStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Waiting => "waiting",
+            Self::Blocked => "blocked",
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionCommandOutput {
+    status: CliStatus,
+    session_id: Uuid,
+    title: String,
+    workspace: PathBuf,
+    workspace_mode: SessionWorkspaceMode,
+    branch: String,
+    worktree_name: Option<String>,
+    profile_id: Option<String>,
+    profile_label: Option<String>,
+    model: Option<String>,
+    app_handoff: AppHandoffOutput,
+    resume_command: String,
+    next_command: Option<String>,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppHandoffOutput {
+    requested: bool,
+    opened: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionListOutput {
+    status: CliStatus,
+    count: usize,
+    sessions: Vec<SessionSummaryOutput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSummaryOutput {
+    session_id: Uuid,
+    title: String,
+    workspace: PathBuf,
+    workspace_mode: SessionWorkspaceMode,
+    branch: String,
+    worktree_name: Option<String>,
+    origin: SessionOrigin,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupOutput {
+    status: CliStatus,
+    checks: Vec<SetupCheckOutput>,
+    mcp_instructions: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupCheckOutput {
+    id: String,
+    label: String,
+    status: CliStatus,
+    message: String,
+    next: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OpenBehavior {
+    NotifyRunning,
+    OpenApp,
+    Skip,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Commands::Run(args)) => run_task(args),
+        Some(Commands::Resume(args)) => resume_session(args),
+        Some(Commands::Sessions(args)) => sessions_command(args),
+        Some(Commands::Setup(args)) => setup_command(args),
         Some(Commands::App(args)) => app_command(args),
         Some(Commands::Doctor(args)) => doctor(args),
         Some(Commands::Config(args)) => config_command(args),
@@ -142,6 +324,120 @@ fn workspace_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
         .unwrap_or(std::env::current_dir()?)
         .canonicalize()
         .context("resolve workspace path")
+}
+
+fn open_behavior(open: bool, no_open: bool) -> OpenBehavior {
+    if no_open {
+        OpenBehavior::Skip
+    } else if open {
+        OpenBehavior::OpenApp
+    } else {
+        OpenBehavior::NotifyRunning
+    }
+}
+
+fn select_command_profile<'a>(
+    config: &'a GyroConfig,
+    profile_id: Option<&str>,
+) -> Result<Option<&'a CommandProfile>> {
+    let Some(profile_id) = profile_id else {
+        return Ok(None);
+    };
+    config
+        .command_profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .map(Some)
+        .ok_or_else(|| {
+            anyhow!(
+                "status: blocked\nprofile `{profile_id}` is not configured\nnext: run `gyro config show` to inspect available CLI profiles\nsession saved: no"
+            )
+        })
+}
+
+fn command_in_path(command: &str) -> Option<PathBuf> {
+    let command_path = Path::new(command);
+    if command_path.components().count() > 1 {
+        return command_path.exists().then(|| command_path.to_path_buf());
+    }
+
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(command))
+        .find(|candidate| candidate.exists() && candidate.is_file())
+}
+
+fn profile_status(profile: Option<&CommandProfile>) -> (CliStatus, Option<String>, Option<String>) {
+    let Some(profile) = profile else {
+        return (
+            CliStatus::Waiting,
+            None,
+            Some(
+                "choose a CLI profile with `--profile codex` or inspect setup with `gyro setup`"
+                    .into(),
+            ),
+        );
+    };
+
+    if let Some(path) = command_in_path(&profile.command) {
+        return (
+            CliStatus::Waiting,
+            Some(format!("{} ready at {}", profile.display_name, path.display())),
+            Some(format!(
+                "{} session recorded; open it in Gyro.app or run the agent command from the terminal",
+                profile.display_name
+            )),
+        );
+    }
+
+    (
+        CliStatus::Blocked,
+        Some(format!(
+            "{} command `{}` was not found",
+            profile.display_name, profile.command
+        )),
+        Some(format!(
+            "install `{}` or choose another profile with `--profile <id>`",
+            profile.command
+        )),
+    )
+}
+
+fn model_for(profile: Option<&CommandProfile>, override_model: Option<String>) -> Option<String> {
+    override_model.or_else(|| profile.and_then(|profile| profile.default_model.clone()))
+}
+
+fn profile_label(profile: Option<&CommandProfile>) -> Option<String> {
+    profile.map(|profile| profile.display_name.clone())
+}
+
+fn profile_id(profile: Option<&CommandProfile>) -> Option<String> {
+    profile.map(|profile| profile.id.clone())
+}
+
+fn workspace_mode_label(mode: &SessionWorkspaceMode) -> &'static str {
+    match mode {
+        SessionWorkspaceMode::Local => "local",
+        SessionWorkspaceMode::Worktree => "worktree",
+    }
+}
+
+fn session_summary(session: &Session) -> SessionSummaryOutput {
+    SessionSummaryOutput {
+        session_id: session.id,
+        title: session.title.clone(),
+        workspace: session.workspace_path.clone(),
+        workspace_mode: session.workspace_mode.clone(),
+        branch: session.branch.clone(),
+        worktree_name: session.worktree_name.clone(),
+        origin: session.origin.clone(),
+        updated_at: session.updated_at.to_rfc3339(),
+    }
+}
+
+fn print_json<T: Serialize>(value: &T) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
 }
 
 fn create_cli_session(
@@ -172,6 +468,7 @@ fn create_cli_session(
             workspace_mode: SessionWorkspaceMode::Worktree,
             branch: plan.branch,
             worktree_name: Some(plan.worktree_name),
+            ..CreateSessionContext::default()
         },
     )?;
     store.append_event(
@@ -179,10 +476,12 @@ fn create_cli_session(
         SessionEventKind::SystemEvent,
         "CLI worktree session created.",
         serde_json::json!({
+            "surface": "cli",
+            "workspaceMode": session.workspace_mode.clone(),
             "repoPath": plan.git_root,
             "worktreePath": plan.worktree_path,
-            "branch": session.branch,
-            "worktreeName": session.worktree_name,
+            "branch": session.branch.clone(),
+            "worktreeName": session.worktree_name.clone(),
         }),
     )?;
     Ok(session)
@@ -247,9 +546,13 @@ fn interactive_chat() -> Result<()> {
 
 fn run_task(args: RunArgs) -> Result<()> {
     let (paths, store) = open_store()?;
+    let config = GyroConfig::load(&paths)?;
+    let profile = select_command_profile(&config, args.profile.as_deref())?;
+    let model = model_for(profile, args.model);
     let workspace = workspace_path(args.workspace)?;
     let title = summarize_title(&args.task);
     let session = create_cli_session(&paths, &store, &workspace, title, &args.worktree)?;
+    let (status, profile_message, next_command) = profile_status(profile);
     store.append_event(
         session.id,
         SessionEventKind::UserMessage,
@@ -257,9 +560,31 @@ fn run_task(args: RunArgs) -> Result<()> {
         serde_json::json!({
             "surface": "cli",
             "mode": "run",
-            "workspaceMode": session.workspace_mode,
-            "branch": session.branch,
-            "worktreeName": session.worktree_name,
+            "profileId": profile_id(profile),
+            "profileLabel": profile_label(profile),
+            "providerId": profile.and_then(|profile| profile.provider_id.clone()),
+            "model": model.clone(),
+            "workspaceMode": session.workspace_mode.clone(),
+            "branch": session.branch.clone(),
+            "worktreeName": session.worktree_name.clone(),
+            "resumeCommand": format!("gyro resume {}", session.id),
+        }),
+    )?;
+    store.append_event(
+        session.id,
+        SessionEventKind::CommandRequested,
+        "CLI agent launch recorded.",
+        serde_json::json!({
+            "surface": "cli",
+            "mode": "run",
+            "status": status.as_str(),
+            "profileId": profile_id(profile),
+            "command": profile.map(|profile| profile.command.clone()),
+            "args": profile.map(|profile| profile.args.clone()).unwrap_or_default(),
+            "model": model.clone(),
+            "workspaceMode": session.workspace_mode.clone(),
+            "branch": session.branch.clone(),
+            "worktreeName": session.worktree_name.clone(),
         }),
     )?;
     store.append_event(
@@ -267,28 +592,437 @@ fn run_task(args: RunArgs) -> Result<()> {
         SessionEventKind::ApprovalRequested,
         "Agent task recorded; command and file edits require approval by default.",
         serde_json::json!({
+            "surface": "cli",
             "requireCommandApproval": true,
             "requireFileEditApproval": true,
         }),
     )?;
 
-    println!("Created Gyro session {}", session.id);
-    println!("Workspace: {}", session.workspace_path.display());
-    if session.workspace_mode == SessionWorkspaceMode::Worktree {
-        println!("Branch: {}", session.branch);
-        if let Some(worktree_name) = &session.worktree_name {
-            println!("Worktree: {worktree_name}");
-        }
+    if status == CliStatus::Blocked {
+        store.append_event(
+            session.id,
+            SessionEventKind::SystemEvent,
+            profile_message
+                .clone()
+                .unwrap_or_else(|| "CLI profile is blocked.".into()),
+            serde_json::json!({
+                "surface": "cli",
+                "kind": "profile-readiness",
+                "status": "blocked",
+                "next": next_command.clone(),
+                "sessionSaved": true,
+            }),
+        )?;
     }
-    if notify_session(&paths, &session, AppNotificationKind::OpenSession)? {
-        println!("Notified Gyro.app to open the session.");
+
+    let handoff = perform_app_handoff(
+        &paths,
+        &session,
+        AppNotificationKind::OpenSession,
+        open_behavior(args.open, args.no_open),
+    )?;
+    let message = match status {
+        CliStatus::Blocked => profile_message
+            .unwrap_or_else(|| "session saved, but the selected CLI profile needs setup".into()),
+        _ => "local session saved; approval required before commands or file edits".into(),
+    };
+    let output = SessionCommandOutput {
+        status,
+        session_id: session.id,
+        title: session.title.clone(),
+        workspace: session.workspace_path.clone(),
+        workspace_mode: session.workspace_mode.clone(),
+        branch: session.branch.clone(),
+        worktree_name: session.worktree_name.clone(),
+        profile_id: profile_id(profile),
+        profile_label: profile_label(profile),
+        model,
+        app_handoff: handoff,
+        resume_command: format!("gyro resume {}", session.id),
+        next_command,
+        message,
+    };
+
+    if args.json {
+        print_json(&output)?;
     } else {
-        println!(
-            "Gyro.app is not running. Run `gyro app open {}` to open it.",
-            session.id
-        );
+        print_session_command_output("Run recorded", &output);
     }
     Ok(())
+}
+
+fn resume_session(args: ResumeArgs) -> Result<()> {
+    let (paths, store) = open_store()?;
+    let config = GyroConfig::load(&paths)?;
+    let session = match args.session_id {
+        Some(id) => store
+            .get_session(id)?
+            .ok_or_else(|| anyhow!("session {id} was not found"))?,
+        None => store
+            .latest_session()?
+            .ok_or_else(|| anyhow!("no Gyro sessions exist yet"))?,
+    };
+    let events = store.read_events(session.id)?;
+    let recorded_profile = latest_payload_string(&events, "profileId");
+    let recorded_model = latest_payload_string(&events, "model");
+    let selected_profile_id = args.profile.as_deref().or(recorded_profile.as_deref());
+    let profile = select_command_profile(&config, selected_profile_id)?;
+    let model = model_for(profile, args.model.or(recorded_model));
+    let (status, profile_message, next_command) = profile_status(profile);
+
+    store.append_event(
+        session.id,
+        SessionEventKind::SystemEvent,
+        "CLI resume requested.",
+        serde_json::json!({
+            "surface": "cli",
+            "mode": "resume",
+            "status": status.as_str(),
+            "profileId": profile_id(profile),
+            "profileLabel": profile_label(profile),
+            "providerId": profile.and_then(|profile| profile.provider_id.clone()),
+            "model": model.clone(),
+            "workspaceMode": session.workspace_mode.clone(),
+            "branch": session.branch.clone(),
+            "worktreeName": session.worktree_name.clone(),
+            "resumeCommand": format!("gyro resume {}", session.id),
+        }),
+    )?;
+
+    if status == CliStatus::Blocked {
+        store.append_event(
+            session.id,
+            SessionEventKind::SystemEvent,
+            profile_message
+                .clone()
+                .unwrap_or_else(|| "CLI profile is blocked.".into()),
+            serde_json::json!({
+                "surface": "cli",
+                "kind": "profile-readiness",
+                "status": "blocked",
+                "next": next_command.clone(),
+                "sessionSaved": true,
+            }),
+        )?;
+    }
+
+    let handoff = perform_app_handoff(
+        &paths,
+        &session,
+        AppNotificationKind::OpenSession,
+        open_behavior(args.open, args.no_open),
+    )?;
+    let message = match status {
+        CliStatus::Blocked => profile_message
+            .unwrap_or_else(|| "resume saved, but the selected CLI profile needs setup".into()),
+        _ => "resume recorded; local session remains approval gated".into(),
+    };
+    let output = SessionCommandOutput {
+        status,
+        session_id: session.id,
+        title: session.title.clone(),
+        workspace: session.workspace_path.clone(),
+        workspace_mode: session.workspace_mode.clone(),
+        branch: session.branch.clone(),
+        worktree_name: session.worktree_name.clone(),
+        profile_id: profile_id(profile),
+        profile_label: profile_label(profile),
+        model,
+        app_handoff: handoff,
+        resume_command: format!("gyro resume {}", session.id),
+        next_command,
+        message,
+    };
+
+    if args.json {
+        print_json(&output)?;
+    } else {
+        print_session_command_output("Resume recorded", &output);
+    }
+    Ok(())
+}
+
+fn latest_payload_string(events: &[gyro_core::SessionEvent], key: &str) -> Option<String> {
+    events.iter().rev().find_map(|event| {
+        event
+            .payload
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    })
+}
+
+fn sessions_command(args: SessionsArgs) -> Result<()> {
+    let (_paths, store) = open_store()?;
+    let workspace_filter = args
+        .workspace
+        .map(|workspace| workspace_path(Some(workspace)))
+        .transpose()?;
+    let mut sessions = store.list_sessions()?;
+    if let Some(workspace) = workspace_filter {
+        sessions.retain(|session| session.workspace_path == workspace);
+    }
+    sessions.truncate(args.limit);
+    let summaries = sessions.iter().map(session_summary).collect::<Vec<_>>();
+    let output = SessionListOutput {
+        status: CliStatus::Ready,
+        count: summaries.len(),
+        sessions: summaries,
+    };
+
+    if args.json {
+        print_json(&output)?;
+    } else {
+        print_sessions_output(&output);
+    }
+    Ok(())
+}
+
+fn setup_command(args: SetupArgs) -> Result<()> {
+    let paths = GyroPaths::for_current_user()?;
+    let config = GyroConfig::load(&paths)?;
+    let mut checks = Vec::new();
+
+    let doctor_report = run_doctor(&paths, &config);
+    for check in doctor_report.checks {
+        checks.push(SetupCheckOutput {
+            id: check.id,
+            label: check.label,
+            status: match check.status {
+                DoctorStatus::Pass => CliStatus::Ready,
+                DoctorStatus::Warn => CliStatus::Waiting,
+                DoctorStatus::Fail => CliStatus::Blocked,
+            },
+            message: check.message,
+            next: None,
+        });
+    }
+
+    checks.push(SetupCheckOutput {
+        id: "app-ipc".into(),
+        label: "Gyro.app bridge".into(),
+        status: if paths.socket_path.exists() {
+            CliStatus::Ready
+        } else {
+            CliStatus::Waiting
+        },
+        message: if paths.socket_path.exists() {
+            format!("local app socket ready at {}", paths.socket_path.display())
+        } else {
+            "Gyro.app is not running; CLI sessions will remain resumable".into()
+        },
+        next: if paths.socket_path.exists() {
+            None
+        } else {
+            Some("open Gyro.app or use `gyro app open` after creating a session".into())
+        },
+    });
+
+    for profile in &config.command_profiles {
+        let command_path = command_in_path(&profile.command);
+        checks.push(SetupCheckOutput {
+            id: format!("profile:{}", profile.id),
+            label: format!("CLI profile: {}", profile.display_name),
+            status: if command_path.is_some() {
+                CliStatus::Ready
+            } else {
+                CliStatus::Blocked
+            },
+            message: command_path
+                .map(|path| format!("{} found at {}", profile.command, path.display()))
+                .unwrap_or_else(|| format!("{} was not found on PATH", profile.command)),
+            next: if command_in_path(&profile.command).is_some() {
+                None
+            } else {
+                Some(format!(
+                    "install `{}` or update the `{}` profile command",
+                    profile.command, profile.id
+                ))
+            },
+        });
+    }
+
+    for agent in ["codex", "claude"] {
+        let command_path = command_in_path(agent);
+        let profile_hint = if agent == "claude" {
+            "claude-code"
+        } else {
+            agent
+        };
+        checks.push(SetupCheckOutput {
+            id: format!("agent:{agent}"),
+            label: format!("Agent CLI: {agent}"),
+            status: if command_path.is_some() {
+                CliStatus::Ready
+            } else {
+                CliStatus::Waiting
+            },
+            message: command_path
+                .map(|path| format!("{agent} found at {}", path.display()))
+                .unwrap_or_else(|| format!("{agent} is not installed or not on PATH")),
+            next: if command_in_path(agent).is_some() {
+                None
+            } else {
+                Some(format!(
+                    "install {agent} before selecting it with `gyro run --profile {profile_hint}`"
+                ))
+            },
+        });
+    }
+
+    let enabled_providers = config
+        .model_providers
+        .iter()
+        .filter(|provider| provider.enabled)
+        .collect::<Vec<_>>();
+    if enabled_providers.is_empty() {
+        checks.push(SetupCheckOutput {
+            id: "provider-readiness".into(),
+            label: "Provider readiness".into(),
+            status: CliStatus::Waiting,
+            message: "no model provider is enabled yet".into(),
+            next: Some(
+                "run `gyro config enable-provider openai` or connect a provider in Gyro.app".into(),
+            ),
+        });
+    } else {
+        for provider in enabled_providers {
+            let key_status = keychain::get_api_key(&provider.api_key_ref);
+            let has_key = key_status
+                .as_ref()
+                .ok()
+                .and_then(|value| value.as_ref())
+                .is_some();
+            checks.push(SetupCheckOutput {
+                id: format!("provider:{}", provider.id),
+                label: format!("Provider: {}", provider.display_name),
+                status: if has_key {
+                    CliStatus::Ready
+                } else {
+                    CliStatus::Waiting
+                },
+                message: if has_key {
+                    format!("{} key is stored in Keychain", provider.display_name)
+                } else if let Err(error) = key_status {
+                    format!("could not inspect Keychain entry: {error}")
+                } else {
+                    format!("{} is enabled; no Keychain key found", provider.display_name)
+                },
+                next: if has_key {
+                    None
+                } else {
+                    Some(format!(
+                        "run `gyro config set-provider-key {} --env <ENV_VAR>` or use external CLI auth",
+                        provider.id
+                    ))
+                },
+            });
+        }
+    }
+
+    let status = if checks
+        .iter()
+        .any(|check| check.status == CliStatus::Blocked)
+    {
+        CliStatus::Blocked
+    } else if checks
+        .iter()
+        .any(|check| check.status == CliStatus::Waiting)
+    {
+        CliStatus::Waiting
+    } else {
+        CliStatus::Ready
+    };
+    let output = SetupOutput {
+        status,
+        checks,
+        mcp_instructions: vec![
+            "Codex MCP: `codex mcp add --transport http --header \"Authorization: Bearer <token>\" <name> <url>`".into(),
+            "Claude MCP: `claude mcp add --transport http --header \"Authorization: Bearer <token>\" <name> <url>`".into(),
+            "Gyro v1 only prints MCP setup guidance; it does not edit third-party agent config files.".into(),
+        ],
+    };
+
+    if args.json {
+        print_json(&output)?;
+    } else {
+        print_setup_output(&output);
+    }
+    Ok(())
+}
+
+fn print_session_command_output(title: &str, output: &SessionCommandOutput) {
+    println!("{title}");
+    println!("status: {}", output.status.as_str());
+    println!("session: {}", output.session_id);
+    println!("workspace: {}", output.workspace.display());
+    println!(
+        "mode: {} ({})",
+        workspace_mode_label(&output.workspace_mode),
+        output.branch
+    );
+    if let Some(worktree_name) = &output.worktree_name {
+        println!("worktree: {worktree_name}");
+    }
+    if let Some(profile_label) = &output.profile_label {
+        let model = output
+            .model
+            .as_deref()
+            .map(|model| format!(" · {model}"))
+            .unwrap_or_default();
+        println!("profile: {profile_label}{model}");
+    }
+    println!("approval: required");
+    println!("app: {}", output.app_handoff.message);
+    println!("resume: {}", output.resume_command);
+    if let Some(next) = &output.next_command {
+        println!("next: {next}");
+    }
+    println!("{}", output.message);
+}
+
+fn print_sessions_output(output: &SessionListOutput) {
+    println!("Gyro sessions");
+    println!("status: {}", output.status.as_str());
+    if output.sessions.is_empty() {
+        println!("No sessions found.");
+        return;
+    }
+    println!(
+        "{:<36}  {:<10}  {:<9}  {:<18}  {}",
+        "session", "origin", "mode", "updated", "title"
+    );
+    for session in &output.sessions {
+        println!(
+            "{:<36}  {:<10}  {:<9}  {:<18}  {}",
+            session.session_id,
+            format!("{:?}", session.origin).to_lowercase(),
+            workspace_mode_label(&session.workspace_mode),
+            session.updated_at,
+            session.title
+        );
+        println!("  {}", session.workspace.display());
+    }
+}
+
+fn print_setup_output(output: &SetupOutput) {
+    println!("Gyro setup");
+    println!("status: {}", output.status.as_str());
+    for check in &output.checks {
+        println!(
+            "{:<10} {:<28} {}",
+            check.status.as_str(),
+            check.label,
+            check.message
+        );
+        if let Some(next) = &check.next {
+            println!("           next: {next}");
+        }
+    }
+    println!("MCP setup hints");
+    for instruction in &output.mcp_instructions {
+        println!("  {instruction}");
+    }
 }
 
 fn app_command(args: AppArgs) -> Result<()> {
@@ -320,9 +1054,9 @@ fn app_command(args: AppArgs) -> Result<()> {
                 serde_json::json!({
                     "surface": "cli",
                     "mode": "attach",
-                    "workspaceMode": session.workspace_mode,
-                    "branch": session.branch,
-                    "worktreeName": session.worktree_name,
+                    "workspaceMode": session.workspace_mode.clone(),
+                    "branch": session.branch.clone(),
+                    "worktreeName": session.worktree_name.clone(),
                 }),
             )?;
             open_session_in_app(&paths, &session, AppNotificationKind::AttachSession)
@@ -335,13 +1069,60 @@ fn open_session_in_app(
     session: &Session,
     kind: AppNotificationKind,
 ) -> Result<()> {
-    if notify_session(paths, session, kind.clone())? {
-        println!("Notified Gyro.app about session {}.", session.id);
-        return Ok(());
-    }
-
-    launch_desktop_app(&session.id, kind)?;
+    let handoff = perform_app_handoff(paths, session, kind, OpenBehavior::OpenApp)?;
+    println!("{}", handoff.message);
     Ok(())
+}
+
+fn perform_app_handoff(
+    paths: &GyroPaths,
+    session: &Session,
+    kind: AppNotificationKind,
+    behavior: OpenBehavior,
+) -> Result<AppHandoffOutput> {
+    match behavior {
+        OpenBehavior::Skip => Ok(AppHandoffOutput {
+            requested: false,
+            opened: false,
+            message: format!(
+                "app handoff skipped; resume available with `gyro resume {}`",
+                session.id
+            ),
+        }),
+        OpenBehavior::NotifyRunning => {
+            if notify_session(paths, session, kind)? {
+                Ok(AppHandoffOutput {
+                    requested: true,
+                    opened: true,
+                    message: format!("opened in running Gyro.app session {}", session.id),
+                })
+            } else {
+                Ok(AppHandoffOutput {
+                    requested: true,
+                    opened: false,
+                    message: format!(
+                        "Gyro.app is not running; run `gyro app open {}` to open this session",
+                        session.id
+                    ),
+                })
+            }
+        }
+        OpenBehavior::OpenApp => {
+            if notify_session(paths, session, kind.clone())? {
+                return Ok(AppHandoffOutput {
+                    requested: true,
+                    opened: true,
+                    message: format!("opened in running Gyro.app session {}", session.id),
+                });
+            }
+            launch_desktop_app(&session.id, kind)?;
+            Ok(AppHandoffOutput {
+                requested: true,
+                opened: true,
+                message: format!("launched Gyro.app for session {}", session.id),
+            })
+        }
+    }
 }
 
 fn notify_session(paths: &GyroPaths, session: &Session, kind: AppNotificationKind) -> Result<bool> {
@@ -375,7 +1156,6 @@ fn launch_desktop_app(session_id: &Uuid, kind: AppNotificationKind) -> Result<()
             .status()
             .context("launch Gyro.app")?;
         if status.success() {
-            println!("Launched Gyro.app for session {session_id}.");
             Ok(())
         } else {
             Err(anyhow!(
@@ -451,11 +1231,19 @@ fn config_command(args: ConfigArgs) -> Result<()> {
                 }
                 println!("command profiles:");
                 for profile in &config.command_profiles {
+                    let metadata = match (&profile.provider_id, &profile.default_model) {
+                        (Some(provider), Some(model)) => format!(" [{provider} · {model}]"),
+                        (Some(provider), None) => format!(" [{provider}]"),
+                        (None, Some(model)) => format!(" [{model}]"),
+                        (None, None) => String::new(),
+                    };
                     println!(
-                        "  {} -> {} {}",
+                        "  {} ({}) -> {} {}{}",
                         profile.display_name,
+                        profile.id,
                         profile.command,
-                        profile.args.join(" ")
+                        profile.args.join(" "),
+                        metadata
                     );
                 }
             }
@@ -529,4 +1317,124 @@ fn summarize_title(task: &str) -> String {
         title.truncate(80);
     }
     title
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_run_profile_model_and_json_flags() {
+        let cli = Cli::try_parse_from([
+            "gyro",
+            "run",
+            "--profile",
+            "codex",
+            "--model",
+            "gpt-test",
+            "--no-open",
+            "--json",
+            "inspect this repo",
+        ])
+        .unwrap();
+
+        let Some(Commands::Run(args)) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.profile.as_deref(), Some("codex"));
+        assert_eq!(args.model.as_deref(), Some("gpt-test"));
+        assert!(args.no_open);
+        assert!(args.json);
+        assert_eq!(args.task, "inspect this repo");
+    }
+
+    #[test]
+    fn invalid_profile_selection_is_blocked_before_session_creation() {
+        let config = GyroConfig::default();
+        let error = select_command_profile(&config, Some("missing")).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("status: blocked"));
+        assert!(message.contains("session saved: no"));
+    }
+
+    #[test]
+    fn session_command_output_uses_camel_case_json_shape() {
+        let output = SessionCommandOutput {
+            status: CliStatus::Waiting,
+            session_id: Uuid::nil(),
+            title: "Inspect".into(),
+            workspace: PathBuf::from("/tmp/project"),
+            workspace_mode: SessionWorkspaceMode::Local,
+            branch: "main".into(),
+            worktree_name: None,
+            profile_id: Some("codex".into()),
+            profile_label: Some("Codex CLI".into()),
+            model: Some("gpt-test".into()),
+            app_handoff: AppHandoffOutput {
+                requested: true,
+                opened: false,
+                message: "Gyro.app is not running".into(),
+            },
+            resume_command: "gyro resume 00000000-0000-0000-0000-000000000000".into(),
+            next_command: Some("gyro setup".into()),
+            message: "local session saved".into(),
+        };
+        let value = serde_json::to_value(output).unwrap();
+        assert_eq!(value["status"], "waiting");
+        assert_eq!(value["sessionId"], "00000000-0000-0000-0000-000000000000");
+        assert_eq!(value["workspaceMode"], "local");
+        assert_eq!(value["profileId"], "codex");
+        assert_eq!(value["appHandoff"]["requested"], true);
+    }
+
+    #[test]
+    fn resume_defaults_to_latest_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let first = store
+            .create_session(temp.path(), SessionOrigin::Cli, "first")
+            .unwrap();
+        let second = store
+            .create_session(temp.path(), SessionOrigin::Cli, "second")
+            .unwrap();
+
+        let latest = store.latest_session().unwrap().unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(latest.id, second.id);
+    }
+
+    #[test]
+    fn latest_payload_string_reads_resume_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Cli, "metadata")
+            .unwrap();
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "first",
+                serde_json::json!({ "profileId": "codex", "model": "old" }),
+            )
+            .unwrap();
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "second",
+                serde_json::json!({ "model": "new" }),
+            )
+            .unwrap();
+
+        let events = store.read_events(session.id).unwrap();
+        assert_eq!(
+            latest_payload_string(&events, "profileId").as_deref(),
+            Some("codex")
+        );
+        assert_eq!(
+            latest_payload_string(&events, "model").as_deref(),
+            Some("new")
+        );
+    }
 }

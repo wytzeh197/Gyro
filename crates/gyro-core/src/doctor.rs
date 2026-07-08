@@ -1,4 +1,4 @@
-use crate::{config::GyroConfig, keychain, paths::GyroPaths};
+use crate::{config::GyroConfig, paths::GyroPaths};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
@@ -131,30 +131,19 @@ fn provider_key_check(config: &GyroConfig) -> DoctorCheck {
         };
     }
 
-    let missing = enabled
+    let names = enabled
         .iter()
-        .filter(|provider| {
-            keychain::get_api_key(&provider.api_key_ref)
-                .ok()
-                .flatten()
-                .is_none()
-        })
-        .map(|provider| provider.display_name.clone())
+        .map(|provider| provider.display_name.as_str())
         .collect::<Vec<_>>();
 
     DoctorCheck {
         id: "model-provider".into(),
         label: "Model provider".into(),
-        status: if missing.is_empty() {
-            DoctorStatus::Pass
-        } else {
-            DoctorStatus::Fail
-        },
-        message: if missing.is_empty() {
-            "Enabled providers have keys in Keychain".into()
-        } else {
-            format!("Missing Keychain API keys for {}", missing.join(", "))
-        },
+        status: DoctorStatus::Pass,
+        message: format!(
+            "Enabled provider profiles use external auth: {}",
+            names.join(", ")
+        ),
     }
 }
 

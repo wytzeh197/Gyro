@@ -1,5 +1,13 @@
-body {
-  min-width: 860px;
+@media (min-width: 781px) {
+  body {
+    min-width: 860px;
+  }
+}
+
+@media (max-width: 780px) {
+  body {
+    min-width: 0;
+  }
 }
 
 button {

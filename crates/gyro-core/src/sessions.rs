@@ -65,6 +65,7 @@ pub enum SessionEventKind {
     CommandOutput,
     FileEditProposed,
     ApprovalRequested,
+    PlanUpdated,
     SystemEvent,
 }
 
@@ -110,6 +111,10 @@ pub struct Session {
     pub workspace_mode: SessionWorkspaceMode,
     pub branch: String,
     pub worktree_name: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider_label: Option<String>,
+    pub model_id: Option<String>,
+    pub model_label: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub events_path: PathBuf,
@@ -121,6 +126,10 @@ pub struct CreateSessionContext {
     pub workspace_mode: SessionWorkspaceMode,
     pub branch: String,
     pub worktree_name: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider_label: Option<String>,
+    pub model_id: Option<String>,
+    pub model_label: Option<String>,
 }
 
 impl Default for CreateSessionContext {
@@ -129,6 +138,10 @@ impl Default for CreateSessionContext {
             workspace_mode: SessionWorkspaceMode::Local,
             branch: "main".into(),
             worktree_name: None,
+            provider_id: None,
+            provider_label: None,
+            model_id: None,
+            model_label: None,
         }
     }
 }
@@ -188,6 +201,10 @@ impl SessionStore {
             workspace_mode: context.workspace_mode,
             branch: context.branch,
             worktree_name: context.worktree_name,
+            provider_id: context.provider_id,
+            provider_label: context.provider_label,
+            model_id: context.model_id,
+            model_label: context.model_label,
             created_at: now,
             updated_at: now,
             events_path,
@@ -195,8 +212,8 @@ impl SessionStore {
 
         self.conn.execute(
             "insert into sessions
-             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, created_at, updated_at, events_path)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, created_at, updated_at, events_path)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 session.id.to_string(),
                 session.title,
@@ -205,6 +222,10 @@ impl SessionStore {
                 session.workspace_mode.as_str(),
                 session.branch,
                 session.worktree_name,
+                session.provider_id,
+                session.provider_label,
+                session.model_id,
+                session.model_label,
                 session.created_at.to_rfc3339(),
                 session.updated_at.to_rfc3339(),
                 session.events_path.to_string_lossy()
@@ -221,6 +242,10 @@ impl SessionStore {
                 "workspacePath": session.workspace_path,
                 "branch": session.branch,
                 "worktreeName": session.worktree_name,
+                "providerId": session.provider_id,
+                "providerLabel": session.provider_label,
+                "modelId": session.model_id,
+                "modelLabel": session.model_label,
             }),
         )?;
 
@@ -232,7 +257,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 |row| row_to_session(row),
@@ -245,7 +270,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label
                  from sessions order by updated_at desc limit 1",
                 [],
                 |row| row_to_session(row),
@@ -257,7 +282,7 @@ impl SessionStore {
     pub fn list_sessions(&self) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label
              from sessions order by updated_at desc",
         )?;
         let rows = stmt.query_map([], |row| row_to_session(row))?;
@@ -302,6 +327,34 @@ impl SessionStore {
             params![session_id.to_string()],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn update_session_model(
+        &self,
+        session_id: Uuid,
+        provider_id: Option<String>,
+        provider_label: Option<String>,
+        model_id: Option<String>,
+        model_label: Option<String>,
+    ) -> Result<Option<Session>> {
+        let updated_at = Utc::now();
+        let changed = self.conn.execute(
+            "update sessions
+             set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4, updated_at = ?5
+             where id = ?6",
+            params![
+                provider_id,
+                provider_label,
+                model_id,
+                model_label,
+                updated_at.to_rfc3339(),
+                session_id.to_string(),
+            ],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.get_session(session_id)
     }
 
     pub fn append_event(
@@ -395,6 +448,10 @@ impl SessionStore {
                workspace_mode text not null default 'local',
                branch text not null default 'main',
                worktree_name text,
+               provider_id text,
+               provider_label text,
+               model_id text,
+               model_label text,
                created_at text not null,
                updated_at text not null,
                events_path text not null
@@ -409,6 +466,10 @@ impl SessionStore {
         )?;
         self.ensure_column("branch", "branch text not null default 'main'")?;
         self.ensure_column("worktree_name", "worktree_name text")?;
+        self.ensure_column("provider_id", "provider_id text")?;
+        self.ensure_column("provider_label", "provider_label text")?;
+        self.ensure_column("model_id", "model_id text")?;
+        self.ensure_column("model_label", "model_label text")?;
         Ok(())
     }
 
@@ -437,6 +498,10 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let workspace_mode: String = row.get(7)?;
     let branch: String = row.get(8)?;
     let worktree_name: Option<String> = row.get(9)?;
+    let provider_id: Option<String> = row.get(10)?;
+    let provider_label: Option<String> = row.get(11)?;
+    let model_id: Option<String> = row.get(12)?;
+    let model_label: Option<String> = row.get(13)?;
 
     Ok(Session {
         id: Uuid::parse_str(&id).map_err(parse_error)?,
@@ -446,6 +511,10 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         workspace_mode: SessionWorkspaceMode::from_str(&workspace_mode),
         branch,
         worktree_name,
+        provider_id,
+        provider_label,
+        model_id,
+        model_label,
         created_at: DateTime::parse_from_rfc3339(&created_at)
             .map_err(parse_error)?
             .with_timezone(&Utc),
@@ -527,6 +596,31 @@ mod tests {
     }
 
     #[test]
+    fn appends_plan_update_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "plan session")
+            .unwrap();
+
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::PlanUpdated,
+                "Plan updated",
+                serde_json::json!({
+                    "action": "add-item",
+                    "item": { "id": "inspect", "title": "Inspect the task" },
+                }),
+            )
+            .unwrap();
+
+        let events = store.read_events(session.id).unwrap();
+        assert_eq!(events[1].kind, SessionEventKind::PlanUpdated);
+        assert_eq!(events[1].payload["action"], "add-item");
+    }
+
+    #[test]
     fn stores_worktree_session_context() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -539,6 +633,7 @@ mod tests {
                     workspace_mode: SessionWorkspaceMode::Worktree,
                     branch: "gyro/test-worktree".into(),
                     worktree_name: Some("gyro-test-worktree".into()),
+                    ..CreateSessionContext::default()
                 },
             )
             .unwrap();
@@ -547,6 +642,46 @@ mod tests {
         assert_eq!(stored.workspace_mode, SessionWorkspaceMode::Worktree);
         assert_eq!(stored.branch, "gyro/test-worktree");
         assert_eq!(stored.worktree_name.as_deref(), Some("gyro-test-worktree"));
+    }
+
+    #[test]
+    fn stores_and_updates_session_model() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session_with_context(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "model session",
+                CreateSessionContext {
+                    provider_id: Some("openai".into()),
+                    provider_label: Some("OpenAI".into()),
+                    model_id: Some("gpt-5.5".into()),
+                    model_label: Some("GPT-5.5".into()),
+                    ..CreateSessionContext::default()
+                },
+            )
+            .unwrap();
+
+        let stored = store.get_session(session.id).unwrap().unwrap();
+        assert_eq!(stored.provider_id.as_deref(), Some("openai"));
+        assert_eq!(stored.provider_label.as_deref(), Some("OpenAI"));
+        assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
+        assert_eq!(stored.model_label.as_deref(), Some("GPT-5.5"));
+
+        let updated = store
+            .update_session_model(
+                session.id,
+                Some("anthropic".into()),
+                Some("Anthropic".into()),
+                Some("claude-sonnet-5".into()),
+                Some("Claude Sonnet 5".into()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.provider_id.as_deref(), Some("anthropic"));
+        assert_eq!(updated.model_id.as_deref(), Some("claude-sonnet-5"));
+        assert!(updated.updated_at >= stored.updated_at);
     }
 
     #[test]

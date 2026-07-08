@@ -1,3 +1,4 @@
+pub mod account;
 pub mod automations;
 pub mod config;
 pub mod diff;
@@ -10,11 +11,18 @@ pub mod security;
 pub mod sessions;
 pub mod worktrees;
 
+pub use account::{
+    generate_pkce_flow, logout_account, refresh_account_session, start_account_login,
+    stored_account_session, token_storage_key, PkceFlow,
+};
 pub use automations::{
     Automation, AutomationRun, AutomationRunStatus, AutomationSchedule, AutomationStatus,
     AutomationStore, AutomationTriageState, CreateAutomationRequest,
 };
-pub use config::{CommandProfile, GyroConfig, ModelProviderConfig, UpdateChannel};
+pub use config::{
+    AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
+    ModelProviderConfig, UpdateChannel,
+};
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use ipc::{AppNotification, AppNotificationKind};
 pub use paths::GyroPaths;

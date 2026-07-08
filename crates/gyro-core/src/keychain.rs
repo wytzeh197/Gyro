@@ -19,3 +19,13 @@ pub fn get_api_key(account: &str) -> Result<Option<String>> {
         Err(error) => Err(error).context("read provider API key from keychain"),
     }
 }
+
+pub fn delete_api_key(account: &str) -> Result<()> {
+    match keyring::Entry::new(SERVICE_NAME, account)
+        .context("open macOS keychain entry")?
+        .delete_credential()
+    {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error).context("delete provider API key from keychain"),
+    }
+}

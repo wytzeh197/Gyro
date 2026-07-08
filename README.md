@@ -1,12 +1,15 @@
 # Gyro
 
-Gyro is an open-source, local-first coding agent workspace. It starts as a macOS desktop app plus a CLI, with a shared engine that can later power IDE integrations.
+Gyro is an open-source, local-first agent workbench for trusted coding runs. It starts as a macOS desktop app plus a CLI, with a shared Rust engine that can later power IDE integrations.
 
-The first product goal is simple: open a repo, start an agent session, keep the terminal and chat in one workspace, review proposed edits, approve commands, and continue the same session from either the CLI or Gyro.app.
+The first product goal is simple: open a repo, start or attach an agent session, keep chat, terminal, files, diffs, approvals, and provider state in one workspace, and continue the same run from either the CLI or Gyro.app.
+
+Gyro's design center is trust and control. Device access, sessions, and history stay local by default, provider credentials live in the OS keychain, commands and file edits are approval-gated, and risky or parallel work can move into isolated Git worktrees.
 
 ## Status
 
-Gyro is pre-alpha. This repository contains the v0.1 foundation:
+Gyro is pre-alpha and has not launched v0.1.0 yet. The current repository state
+is pre-launch foundation work for the first private/developer preview:
 
 - Rust core crate for sessions, local storage, config, approval policy, redaction, Keychain access, and app IPC.
 - `gyro` CLI crate with interactive sessions, one-shot task recording, app open/attach commands, doctor checks, and config management.
@@ -36,7 +39,8 @@ packaging/homebrew     Homebrew formula and cask templates
 ## Development
 
 ```bash
-cd "/Users/wytzehemrica/Documents/Gyro"
+git clone https://github.com/wytzeh197/Gyro.git
+cd Gyro
 pnpm install
 pnpm doctor
 pnpm check
@@ -62,12 +66,34 @@ pnpm desktop:dev
 
 `tauri dev` starts Vite through a direct `pnpm exec vite` command. Do not change the Tauri `beforeDevCommand` to the root `pnpm dev` script; that can recurse into another Tauri process and make the app repeatedly close and relaunch.
 
+For local app testing outside the dev server, build and open the macOS app
+bundle instead:
+
+```bash
+pnpm desktop:bundle
+open target/release/bundle/macos/Gyro.app
+```
+
+To install a fresh local copy for Finder or Dock testing:
+
+```bash
+pnpm desktop:install-local
+```
+
+Do not pin or open `target/debug/gyro-desktop` from Finder or the Dock. That is
+the raw debug executable, not `Gyro.app`, and it can open a blank white WebView
+when the Vite dev server is not running.
+
 The CLI binary is defined in `crates/gyro-cli`:
 
 ```bash
 cargo run -p gyro-cli -- doctor
+cargo run -p gyro-cli -- setup
+cargo run -p gyro-cli -- sessions
 cargo run -p gyro-cli -- run "Inspect this repo"
-cargo run -p gyro-cli -- run --worktree "Try the safer refactor path"
+cargo run -p gyro-cli -- run --profile codex --model gpt-5.5 "Inspect this repo"
+cargo run -p gyro-cli -- run --worktree --profile codex "Try the safer refactor path"
+cargo run -p gyro-cli -- resume
 cargo run -p gyro-cli -- app open
 ```
 
@@ -84,11 +110,33 @@ Both the CLI and desktop app use the same store. When Gyro.app is running, the C
 Use `--worktree` on `gyro run` or `gyro app attach` to create an isolated Git worktree under Gyro's application support directory before opening the session:
 
 ```bash
-cargo run -p gyro-cli -- run --worktree "Prototype the terminal restore flow"
+cargo run -p gyro-cli -- run --worktree --profile codex "Prototype the terminal restore flow"
 cargo run -p gyro-cli -- app attach --worktree --branch gyro/restore-flow
 ```
 
 Worktree mode requires the selected workspace to be inside a Git repository. Local mode remains the default.
+
+## CLI Agent Launcher
+
+The CLI surface is an agent launcher and control plane for local sessions:
+
+- `gyro run` records a task, optional CLI profile, optional model hint, approval policy, workspace mode, branch, and resume command.
+- `gyro resume [session-id]` continues the latest or selected session context and preserves recorded profile/model hints unless overridden.
+- `gyro sessions` lists recent local sessions, with `--workspace` and `--json` for scripts.
+- `gyro setup` checks storage, Git, Gyro.app IPC, configured CLI profiles, known agent commands such as Codex and Claude, and provider/Keychain readiness without editing third-party config.
+
+Human output uses stable status labels: `ready`, `waiting`, `blocked`, `running`, `done`, and `failed`. Machine output is only emitted when `--json` is passed.
+
+## Provider Setup
+
+Gyro separates local app access from model-provider auth. Local device/session
+state stays in Gyro's local store, while provider credentials stay with the
+provider CLI, SDK, environment, or macOS Keychain.
+
+The current provider surface tracks OpenAI, Anthropic, xAI, and Gemini. OpenAI
+and Anthropic are CLI-oriented today; xAI and Gemini use environment-owned API
+keys such as `XAI_API_KEY` and `GEMINI_API_KEY`. Provider health checks store
+only readiness summaries and redact token-like output.
 
 ## Open Source
 
@@ -97,6 +145,7 @@ Gyro is licensed under Apache-2.0. Contributions use Developer Certificate of Or
 See:
 
 - [Architecture](docs/architecture.md)
+- [Vision](docs/vision.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Governance](GOVERNANCE.md)
