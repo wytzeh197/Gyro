@@ -373,7 +373,16 @@ impl SessionStore {
         message: impl Into<String>,
         payload: Value,
     ) -> Result<SessionEvent> {
-        let turn_id = Uuid::new_v4();
+        self.append_user_turn_message_with_turn_id(session_id, message, payload, Uuid::new_v4())
+    }
+
+    pub fn append_user_turn_message_with_turn_id(
+        &self,
+        session_id: Uuid,
+        message: impl Into<String>,
+        payload: Value,
+        turn_id: Uuid,
+    ) -> Result<SessionEvent> {
         self.append_event_with_turn_id(
             session_id,
             SessionEventKind::UserMessage,
@@ -593,6 +602,28 @@ mod tests {
 
         let events = store.read_events(session.id).unwrap();
         assert_eq!(events[1].turn_id, Some(turn_id));
+    }
+
+    #[test]
+    fn appends_user_turn_messages_with_existing_turn_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "turn session")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+
+        let event = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "inspect this",
+                serde_json::json!({ "surface": "desktop" }),
+                turn_id,
+            )
+            .unwrap();
+
+        assert_eq!(event.turn_id, Some(turn_id));
+        assert_eq!(event.payload["turnId"], turn_id.to_string());
     }
 
     #[test]

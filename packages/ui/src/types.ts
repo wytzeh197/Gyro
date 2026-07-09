@@ -15,7 +15,12 @@ export type AppDestination =
 
 export type ThemeMode = "dark" | "light";
 
-export type WorkbenchPaneTab = "diff" | "terminal" | "browser";
+export type WorkbenchPaneTab =
+  | "diff"
+  | "terminal"
+  | "browser"
+  | "problems"
+  | "output";
 
 export type WorkbenchDensity = "comfortable" | "compact";
 
@@ -384,6 +389,21 @@ export type EditorTab = {
   title: string;
   dirty: boolean;
   pinned?: boolean;
+  preview?: boolean;
+  groupId?: string;
+};
+
+export type EditorPane = {
+  id: string;
+  path?: string;
+};
+
+export type EditorGroup = {
+  id: string;
+  title: string;
+  activePath?: string;
+  tabs: EditorTab[];
+  panes: EditorPane[];
 };
 
 export type EditorBufferStatus =
@@ -437,6 +457,143 @@ export type IdeAssistantRequest = {
   createdAt: string;
 };
 
+export type IdeViewId =
+  | "explorer"
+  | "search"
+  | "source-control"
+  | "run-test"
+  | "ai"
+  | "settings";
+
+export type IdeLayoutState = {
+  groups: EditorGroup[];
+  activeGroupId: string;
+  minimapEnabled: boolean;
+  restoreOnLaunch: boolean;
+  rightAssistantOpen: boolean;
+};
+
+export type WorkspaceSearchQuery = {
+  query: string;
+  globs?: string[];
+  maxResults?: number;
+};
+
+export type WorkspaceSearchResult = {
+  path: string;
+  lineNumber: number;
+  line: string;
+  ranges?: Array<{ startColumn: number; endColumn: number }>;
+};
+
+export type FileDecoration = {
+  path: string;
+  badge?: string;
+  color?: "modified" | "added" | "deleted" | "warning" | "error";
+  tooltip?: string;
+};
+
+export type ProblemSeverity = "error" | "warning" | "info" | "hint";
+
+export type ProblemDiagnostic = {
+  id: string;
+  path: string;
+  message: string;
+  severity: ProblemSeverity;
+  source?: string;
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber?: number;
+  endColumn?: number;
+};
+
+export type SourceControlResourceState =
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "untracked"
+  | "conflicted"
+  | "staged";
+
+export type SourceControlFile = {
+  path: string;
+  originalPath?: string;
+  state: SourceControlResourceState;
+  staged: boolean;
+};
+
+export type SourceControlState = {
+  provider: "git";
+  available: boolean;
+  branch?: string;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  files: SourceControlFile[];
+  lastCheckedAt?: string;
+  error?: string;
+};
+
+export type TaskDefinition = {
+  id: string;
+  label: string;
+  command: string;
+  args: string[];
+  group: "build" | "test" | "dev" | "custom";
+  cwd?: string;
+  status: "idle" | "running" | "done" | "failed";
+  lastRunAt?: string;
+  outputChannelId?: string;
+};
+
+export type TestTreeItem = {
+  id: string;
+  label: string;
+  path?: string;
+  status: "unknown" | "queued" | "running" | "passed" | "failed" | "skipped";
+  children?: TestTreeItem[];
+};
+
+export type DebugSessionState = {
+  id: string;
+  name: string;
+  adapter: string;
+  status: "configured" | "starting" | "running" | "stopped" | "failed";
+  message?: string;
+};
+
+export type OutputChannel = {
+  id: string;
+  label: string;
+  kind: "terminal" | "task" | "test" | "debug" | "lsp" | "ai" | "system";
+  lines: string[];
+  updatedAt?: string;
+};
+
+export type IdeCommand = {
+  id: string;
+  label: string;
+  category: "file" | "edit" | "view" | "source-control" | "run" | "ai";
+  viewId?: IdeViewId;
+};
+
+export type IdeContribution = {
+  id: string;
+  label: string;
+  views: IdeViewId[];
+  commands: IdeCommand[];
+};
+
+export type IdeAiToolCall = {
+  id: string;
+  name: string;
+  status: "queued" | "running" | "done" | "failed" | "blocked";
+  summary: string;
+  createdAt: string;
+  finishedAt?: string;
+};
+
 export type IdeSessionEventPayloadKind =
   | "editor-file-opened"
   | "editor-selection-changed"
@@ -451,6 +608,20 @@ export type IdeState = {
   buffers: Record<string, EditorBuffer>;
   selection?: EditorSelection;
   lastAssistantRequest?: IdeAssistantRequest;
+  activeView: IdeViewId;
+  layout: IdeLayoutState;
+  searchQuery: WorkspaceSearchQuery;
+  searchResults: WorkspaceSearchResult[];
+  fileDecorations: FileDecoration[];
+  diagnostics: ProblemDiagnostic[];
+  sourceControl: SourceControlState;
+  taskDefinitions: TaskDefinition[];
+  testTree: TestTreeItem[];
+  debugSessions: DebugSessionState[];
+  outputChannels: OutputChannel[];
+  activeOutputChannelId?: string;
+  contributions: IdeContribution[];
+  aiToolCalls: IdeAiToolCall[];
 };
 
 export type WorkbenchState = {

@@ -822,6 +822,7 @@ for (const commandName of [
   "delete_session",
   "read_session_events",
   "append_user_message",
+  "run_provider_chat",
   "append_plan_event",
   "append_editor_event",
   "load_config",
@@ -888,10 +889,14 @@ expect(
     appSource.includes("mergePersistedAndOptimisticEvents") &&
     appSource.includes("updateOptimisticProviderStatus") &&
     appSource.includes("setIsStartingFirstTurn") &&
+    appSource.includes('invoke<ProviderChatResponse>("run_provider_chat"') &&
     appSource.includes('kind: "provider-status"') &&
+    tauriSource.includes("SessionEventKind::AssistantMessage") &&
+    tauriSource.includes("codex") &&
+    tauriSource.includes("exec") &&
     !appSource.includes("I can keep this local. Connect a provider") &&
     !appSource.includes("shouldPreviewToolActivity"),
-  "First send should create an optimistic thread with provider status instead of fake assistant/tool previews.",
+  "First send should create an optimistic thread, call the real provider runner, and persist assistant responses instead of fake previews.",
 );
 expect(
   typeSource.includes("providerId?: ProviderId") &&
@@ -920,8 +925,10 @@ expect(
 expect(
   !surfaceSource.includes("mock-polish") &&
     !surfaceSource.includes("mock-shell") &&
-    surfaceSource.includes("No panes. Press + to start."),
-  "CLI empty state should not render fake tasks or fake running sessions.",
+    surfaceSource.includes("No panes.") &&
+    surfaceSource.includes("gyro-terminal-toolbar is-empty") &&
+    surfaceSource.includes('aria-label="Open command palette"'),
+  "CLI empty state should stay minimal while keeping launch and command palette access.",
 );
 expect(
   appSource.includes("TerminalPaneSnapshot[]") &&
@@ -1041,8 +1048,9 @@ expect(
     surfaceSource.includes('title="CLI Profiles"') &&
     surfaceSource.includes('title="Workspace files"') &&
     surfaceSource.includes('title="Code tools"') &&
-    surfaceSource.includes("Run terminal") &&
-    surfaceSource.includes("Split pane") &&
+    !surfaceSource.includes("Run terminal") &&
+    !surfaceSource.includes("Split pane") &&
+    !surfaceSource.includes("Command search") &&
     surfaceSource.includes("Diff review") &&
     surfaceSource.includes("Browser preview") &&
     !surfaceSource.includes('title="Chats"') &&
@@ -1306,10 +1314,11 @@ expect(
   "Provider picker should keep provider rows compact and show models in a hover flyout without Refresh or Settings rows.",
 );
 expect(
-  surfaceSource.includes("<ProviderLogo providerId={selectedProvider.id} />") &&
+  surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
     surfaceSource.includes(
-      'const modelChipLabel = selectedProvider ? providerModelLabel : "Choose model"',
+      'const modelChipLabel = hasSelectedProvider ? providerModelLabel : "Choose model"',
     ) &&
+    surfaceSource.includes("sessionModel?.modelLabel") &&
     surfaceSource.includes("{modelChipLabel}") &&
     surfaceSource.includes('title="Provider"') &&
     !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
@@ -1405,7 +1414,9 @@ expect(
   !surfaceSource.includes("pane-shell") &&
     !surfaceSource.includes("VITE ready") &&
     !surfaceSource.includes("3 changed") &&
-    surfaceSource.includes("No panes. Press + to start.") &&
+    surfaceSource.includes("No panes.") &&
+    surfaceSource.includes("hasPanes ? (") &&
+    surfaceSource.includes("gyro-terminal-tools") &&
     surfaceSource.includes("No file selected") &&
     surfaceSource.includes("Loading file preview") &&
     appSource.includes(

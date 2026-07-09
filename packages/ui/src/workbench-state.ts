@@ -11,10 +11,23 @@ import type {
   DiffApprovalState,
   DiffFileState,
   DiffSource,
+  DebugSessionState,
   EditorBuffer,
+  EditorGroup,
   EditorSelection,
   EditorTab,
+  IdeAiToolCall,
   IdeAssistantRequest,
+  IdeCommand,
+  IdeContribution,
+  IdeViewId,
+  OutputChannel,
+  ProblemDiagnostic,
+  SourceControlState,
+  TaskDefinition,
+  TestTreeItem,
+  WorkspaceSearchQuery,
+  WorkspaceSearchResult,
   GitReviewAction,
   GitReviewActionId,
   Notification,
@@ -47,6 +60,239 @@ import { defaultProviderStatuses as catalogDefaultProviderStatuses } from "./pro
 
 export const CLI_LAUNCH_PRESET_MAX_PANES = 8;
 
+function createEditorGroup(
+  id: string,
+  title: string,
+  activePath?: string,
+): EditorGroup {
+  const tabs =
+    activePath !== undefined
+      ? [{ path: activePath, title: workspaceNameFromPath(activePath), dirty: false }]
+      : [];
+  return {
+    id,
+    title,
+    activePath,
+    tabs,
+    panes: [{ id: `${id}-pane`, path: activePath }],
+  };
+}
+
+function defaultIdeLayout(): WorkbenchState["ide"]["layout"] {
+  return {
+    groups: [createEditorGroup("group-main", "Main")],
+    activeGroupId: "group-main",
+    minimapEnabled: true,
+    restoreOnLaunch: true,
+    rightAssistantOpen: true,
+  };
+}
+
+function defaultSourceControlState(): SourceControlState {
+  return {
+    provider: "git",
+    available: false,
+    ahead: 0,
+    behind: 0,
+    files: [],
+  };
+}
+
+function defaultOutputChannels(): OutputChannel[] {
+  return [
+    {
+      id: "system",
+      label: "System",
+      kind: "system",
+      lines: [],
+    },
+  ];
+}
+
+function defaultIdeContributions(): IdeContribution[] {
+  const commands: IdeCommand[] = [
+    {
+      id: "workbench.files.open",
+      label: "Open file",
+      category: "file",
+      viewId: "explorer",
+    },
+    {
+      id: "workbench.files.search",
+      label: "Search workspace",
+      category: "view",
+      viewId: "search",
+    },
+    {
+      id: "workbench.scm.refresh",
+      label: "Refresh source control",
+      category: "source-control",
+      viewId: "source-control",
+    },
+    {
+      id: "workbench.tasks.run",
+      label: "Run task",
+      category: "run",
+      viewId: "run-test",
+    },
+    {
+      id: "workbench.ai.askEditor",
+      label: "Ask about editor context",
+      category: "ai",
+      viewId: "ai",
+    },
+  ];
+  return [
+    {
+      id: "gyro-core-ide",
+      label: "Gyro Core IDE",
+      views: ["explorer", "search", "source-control", "run-test", "ai", "settings"],
+      commands,
+    },
+  ];
+}
+
+function syncEditorGroupsForActivePath(
+  layout: WorkbenchState["ide"]["layout"],
+  path?: string,
+): WorkbenchState["ide"]["layout"] {
+  if (!path) {
+    return layout;
+  }
+  const groups =
+    layout.groups.length > 0 ? layout.groups : defaultIdeLayout().groups;
+  const fallbackGroup = groups[0] ?? createEditorGroup("group-main", "Main");
+  const activeGroupId = layout.activeGroupId || fallbackGroup.id;
+  return {
+    ...layout,
+    activeGroupId,
+    groups: groups.map((group, index) => {
+      if (group.id !== activeGroupId && !(index === 0 && !activeGroupId)) {
+        return group;
+      }
+      const hasTab = group.tabs.some((tab) => tab.path === path);
+      const tabs = hasTab
+        ? group.tabs
+        : [...group.tabs, { path, title: workspaceNameFromPath(path), dirty: false }];
+      return {
+        ...group,
+        activePath: path,
+        panes: group.panes.length > 0 ? group.panes : [{ id: `${group.id}-pane` }],
+        tabs,
+      };
+    }),
+  };
+}
+
+function upsertPathInActiveEditorGroup(
+  layout: WorkbenchState["ide"]["layout"],
+  path: string,
+): WorkbenchState["ide"]["layout"] {
+  return syncEditorGroupsForActivePath(layout, path);
+}
+
+function moveTabToEditorGroup(
+  layout: WorkbenchState["ide"]["layout"],
+  path: string,
+  toGroupId: string,
+): WorkbenchState["ide"]["layout"] {
+  let movedTab: EditorTab | undefined;
+  const groupsWithoutTab = layout.groups.map((group) => {
+    const tab = group.tabs.find((item) => item.path === path);
+    if (tab) {
+      movedTab = { ...tab, groupId: toGroupId };
+    }
+    return {
+      ...group,
+      tabs: group.tabs.filter((item) => item.path !== path),
+      activePath: group.activePath === path ? undefined : group.activePath,
+    };
+  });
+  if (!movedTab) {
+    movedTab = { path, title: workspaceNameFromPath(path), dirty: false, groupId: toGroupId };
+  }
+  const tabToMove = movedTab;
+  return {
+    ...layout,
+    activeGroupId: toGroupId,
+    groups: groupsWithoutTab.map((group) =>
+      group.id === toGroupId
+        ? {
+            ...group,
+            activePath: path,
+            tabs: [...group.tabs, tabToMove],
+            panes: group.panes.length > 0 ? group.panes : [{ id: `${group.id}-pane` }],
+          }
+        : group,
+    ),
+  };
+}
+
+function decorationsFromSourceControl(
+  sourceControl: SourceControlState,
+): WorkbenchState["ide"]["fileDecorations"] {
+  return sourceControl.files.map((file) => ({
+    path: file.path,
+    badge:
+      file.state === "modified"
+        ? "M"
+        : file.state === "added" || file.state === "untracked"
+          ? "A"
+          : file.state === "deleted"
+            ? "D"
+            : file.state === "renamed"
+              ? "R"
+              : file.state === "conflicted"
+                ? "!"
+                : "S",
+    color:
+      file.state === "modified"
+        ? "modified"
+        : file.state === "added" || file.state === "untracked"
+          ? "added"
+          : file.state === "deleted"
+            ? "deleted"
+            : file.state === "conflicted"
+              ? "warning"
+              : "modified",
+    tooltip: file.staged ? `${file.state}, staged` : file.state,
+  }));
+}
+
+function upsertOutputChannel(
+  channels: OutputChannel[],
+  channel: OutputChannel,
+): OutputChannel[] {
+  return channels.some((item) => item.id === channel.id)
+    ? channels.map((item) => (item.id === channel.id ? channel : item))
+    : [...channels, channel];
+}
+
+function appendOutputLines(
+  channels: OutputChannel[],
+  channelId: string,
+  lines: string[],
+): OutputChannel[] {
+  const updatedAt = new Date().toISOString();
+  if (!channels.some((channel) => channel.id === channelId)) {
+    return [
+      ...channels,
+      {
+        id: channelId,
+        label: channelId,
+        kind: "system",
+        lines,
+        updatedAt,
+      },
+    ];
+  }
+  return channels.map((channel) =>
+    channel.id === channelId
+      ? { ...channel, lines: [...channel.lines, ...lines], updatedAt }
+      : channel,
+  );
+}
+
 export type WorkbenchAction =
   | { type: "reset-state"; state?: WorkbenchState }
   | { type: "select-destination"; destination: AppDestination }
@@ -68,6 +314,12 @@ export type WorkbenchAction =
   | { type: "ide-open-tab"; tab: EditorTab }
   | { type: "ide-close-tab"; path: string }
   | { type: "ide-select-tab"; path: string }
+  | { type: "ide-split-group"; direction: "right" | "down" }
+  | { type: "ide-close-group"; groupId: string }
+  | { type: "ide-move-tab"; path: string; toGroupId: string }
+  | { type: "ide-select-view"; view: IdeViewId }
+  | { type: "ide-toggle-minimap" }
+  | { type: "ide-toggle-assistant" }
   | { type: "ide-upsert-buffer"; buffer: EditorBuffer }
   | { type: "ide-update-buffer"; path: string; content: string }
   | {
@@ -80,6 +332,23 @@ export type WorkbenchAction =
   | { type: "ide-mark-buffer-error"; path: string; error: string }
   | { type: "ide-set-selection"; selection?: EditorSelection }
   | { type: "ide-record-assistant-request"; request: IdeAssistantRequest }
+  | { type: "ide-set-search-query"; query: WorkspaceSearchQuery }
+  | {
+      type: "ide-set-search-results";
+      query: WorkspaceSearchQuery;
+      results: WorkspaceSearchResult[];
+    }
+  | { type: "ide-set-diagnostics"; diagnostics: ProblemDiagnostic[] }
+  | { type: "ide-set-source-control"; sourceControl: SourceControlState }
+  | { type: "ide-set-tasks"; tasks: TaskDefinition[] }
+  | { type: "ide-set-test-tree"; tests: TestTreeItem[] }
+  | { type: "ide-set-debug-session"; session: DebugSessionState }
+  | { type: "ide-remove-debug-session"; sessionId: string }
+  | { type: "ide-upsert-output-channel"; channel: OutputChannel }
+  | { type: "ide-append-output"; channelId: string; lines: string[] }
+  | { type: "ide-select-output-channel"; channelId: string }
+  | { type: "ide-register-contribution"; contribution: IdeContribution }
+  | { type: "ide-record-ai-tool-call"; toolCall: IdeAiToolCall }
   | { type: "record-command"; commandId: string }
   | { type: "add-notification"; notification: Notification }
   | { type: "dismiss-notification"; id: string }
@@ -253,6 +522,20 @@ export function createInitialWorkbenchState(
       buffers: {},
       selection: undefined,
       lastAssistantRequest: undefined,
+      activeView: "explorer",
+      layout: defaultIdeLayout(),
+      searchQuery: { query: "", maxResults: 200 },
+      searchResults: [],
+      fileDecorations: [],
+      diagnostics: [],
+      sourceControl: defaultSourceControlState(),
+      taskDefinitions: [],
+      testTree: [],
+      debugSessions: [],
+      outputChannels: defaultOutputChannels(),
+      activeOutputChannelId: "system",
+      contributions: defaultIdeContributions(),
+      aiToolCalls: [],
     },
     onboarding: {
       activeStep: "account",
@@ -399,6 +682,7 @@ export function workbenchReducer(
           ...state.ide,
           tabs,
           activePath: tab.path,
+          layout: upsertPathInActiveEditorGroup(state.ide.layout, tab.path),
         },
       };
     }
@@ -431,6 +715,99 @@ export function workbenchReducer(
         ide: {
           ...state.ide,
           activePath: action.path,
+          layout: syncEditorGroupsForActivePath(state.ide.layout, action.path),
+        },
+      };
+    case "ide-split-group": {
+      const group = createEditorGroup(
+        `group-${Date.now()}`,
+        action.direction === "right" ? "Side" : "Below",
+        state.ide.activePath,
+      );
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        ide: {
+          ...state.ide,
+          layout: {
+            ...state.ide.layout,
+            activeGroupId: group.id,
+            groups: [...state.ide.layout.groups, group],
+          },
+        },
+      };
+    }
+    case "ide-close-group": {
+      const remainingGroups = state.ide.layout.groups.filter(
+        (group) => group.id !== action.groupId,
+      );
+      const groups =
+        remainingGroups.length > 0
+          ? remainingGroups
+          : [createEditorGroup("group-main", "Main", state.ide.activePath)];
+      const activeGroupId = groups.some(
+        (group) => group.id === state.ide.layout.activeGroupId,
+      )
+        ? state.ide.layout.activeGroupId
+        : (groups[0]?.id ?? "group-main");
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          layout: {
+            ...state.ide.layout,
+            activeGroupId,
+            groups,
+          },
+        },
+      };
+    }
+    case "ide-move-tab":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          tabs: state.ide.tabs.map((tab) =>
+            tab.path === action.path
+              ? { ...tab, groupId: action.toGroupId }
+              : tab,
+          ),
+          layout: moveTabToEditorGroup(
+            state.ide.layout,
+            action.path,
+            action.toGroupId,
+          ),
+        },
+      };
+    case "ide-select-view":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        ide: { ...state.ide, activeView: action.view },
+      };
+    case "ide-toggle-minimap":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          layout: {
+            ...state.ide.layout,
+            minimapEnabled: !state.ide.layout.minimapEnabled,
+          },
+        },
+      };
+    case "ide-toggle-assistant":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activeView: "ai",
+          layout: {
+            ...state.ide.layout,
+            rightAssistantOpen: !state.ide.layout.rightAssistantOpen,
+          },
         },
       };
     case "ide-upsert-buffer": {
@@ -458,6 +835,10 @@ export function workbenchReducer(
             ...state.ide.buffers,
             [buffer.path]: buffer,
           },
+          layout: upsertPathInActiveEditorGroup(
+            state.ide.layout,
+            buffer.path,
+          ),
           tabs,
         },
       };
@@ -552,6 +933,140 @@ export function workbenchReducer(
         ide: {
           ...state.ide,
           lastAssistantRequest: action.request,
+          activeView: "ai",
+        },
+      };
+    case "ide-set-search-query":
+      return {
+        ...state,
+        ide: { ...state.ide, activeView: "search", searchQuery: action.query },
+      };
+    case "ide-set-search-results":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activeView: "search",
+          searchQuery: action.query,
+          searchResults: action.results,
+        },
+      };
+    case "ide-set-diagnostics":
+      return {
+        ...state,
+        ide: { ...state.ide, diagnostics: action.diagnostics },
+      };
+    case "ide-set-source-control":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activeView: "source-control",
+          sourceControl: action.sourceControl,
+          fileDecorations: decorationsFromSourceControl(action.sourceControl),
+        },
+      };
+    case "ide-set-tasks":
+      return {
+        ...state,
+        ide: { ...state.ide, taskDefinitions: action.tasks },
+      };
+    case "ide-set-test-tree":
+      return {
+        ...state,
+        ide: { ...state.ide, testTree: action.tests },
+      };
+    case "ide-set-debug-session":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activeView: "run-test",
+          debugSessions: state.ide.debugSessions.some(
+            (session) => session.id === action.session.id,
+          )
+            ? state.ide.debugSessions.map((session) =>
+                session.id === action.session.id ? action.session : session,
+              )
+            : [...state.ide.debugSessions, action.session],
+        },
+      };
+    case "ide-remove-debug-session":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          debugSessions: state.ide.debugSessions.filter(
+            (session) => session.id !== action.sessionId,
+          ),
+        },
+      };
+    case "ide-upsert-output-channel":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          outputChannels: upsertOutputChannel(
+            state.ide.outputChannels,
+            action.channel,
+          ),
+          activeOutputChannelId: action.channel.id,
+        },
+      };
+    case "ide-append-output":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          outputChannels: appendOutputLines(
+            state.ide.outputChannels,
+            action.channelId,
+            action.lines,
+          ),
+          activeOutputChannelId: action.channelId,
+        },
+      };
+    case "ide-select-output-channel":
+      return {
+        ...state,
+        activePaneTab: "output",
+        isToolPanelOpen: true,
+        ide: {
+          ...state.ide,
+          activeOutputChannelId: action.channelId,
+        },
+      };
+    case "ide-register-contribution":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          contributions: state.ide.contributions.some(
+            (item) => item.id === action.contribution.id,
+          )
+            ? state.ide.contributions.map((item) =>
+                item.id === action.contribution.id
+                  ? action.contribution
+                  : item,
+              )
+            : [...state.ide.contributions, action.contribution],
+        },
+      };
+    case "ide-record-ai-tool-call":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activeView: "ai",
+          aiToolCalls: state.ide.aiToolCalls.some(
+            (toolCall) => toolCall.id === action.toolCall.id,
+          )
+            ? state.ide.aiToolCalls.map((toolCall) =>
+                toolCall.id === action.toolCall.id
+                  ? action.toolCall
+                  : toolCall,
+              )
+            : [action.toolCall, ...state.ide.aiToolCalls].slice(0, 50),
         },
       };
     case "record-command":

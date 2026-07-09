@@ -10,6 +10,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -66,6 +67,201 @@ struct WorkspaceFileWriteRequest {
     expected_hash: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathCreateRequest {
+    workspace_path: String,
+    path: String,
+    kind: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathRenameRequest {
+    workspace_path: String,
+    from_path: String,
+    to_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathDeleteRequest {
+    workspace_path: String,
+    path: String,
+    expected_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSearchRequest {
+    workspace_path: String,
+    query: String,
+    globs: Option<Vec<String>>,
+    max_results: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSearchResult {
+    path: String,
+    line_number: usize,
+    line: String,
+    ranges: Vec<WorkspaceSearchRange>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSearchRange {
+    start_column: usize,
+    end_column: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceControlFile {
+    path: String,
+    original_path: Option<String>,
+    state: String,
+    staged: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceControlStatus {
+    provider: String,
+    available: bool,
+    branch: Option<String>,
+    upstream: Option<String>,
+    ahead: usize,
+    behind: usize,
+    files: Vec<SourceControlFile>,
+    last_checked_at: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitPathRequest {
+    workspace_path: String,
+    path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStageRequest {
+    workspace_path: String,
+    path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCommitRequest {
+    workspace_path: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdeCommandOutput {
+    status: String,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskDefinitionResult {
+    id: String,
+    label: String,
+    command: String,
+    args: Vec<String>,
+    group: String,
+    cwd: Option<String>,
+    status: String,
+    output_channel_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskRunRequest {
+    workspace_path: String,
+    task_id: String,
+    command: String,
+    args: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TestTreeItemResult {
+    id: String,
+    label: String,
+    path: Option<String>,
+    status: String,
+    children: Vec<TestTreeItemResult>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TestRunRequest {
+    workspace_path: String,
+    test_ids: Option<Vec<String>>,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspStartRequest {
+    workspace_path: String,
+    language_id: String,
+    command: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspRequestPayload {
+    server_id: String,
+    method: String,
+    params: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspSessionResult {
+    server_id: String,
+    language_id: String,
+    command: String,
+    status: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugStartRequest {
+    workspace_path: Option<String>,
+    name: String,
+    adapter: String,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugSendRequest {
+    session_id: String,
+    request: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugSessionResult {
+    id: String,
+    name: String,
+    adapter: String,
+    status: String,
+    message: Option<String>,
+}
+
 #[derive(Default)]
 struct TerminalProcessManager {
     processes: Mutex<HashMap<String, TerminalProcess>>,
@@ -120,6 +316,26 @@ struct ProviderHealthCheck {
     secret_storage: String,
     privacy_note: String,
     diagnostics_opt_in: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderChatRequest {
+    session_id: String,
+    message: String,
+    turn_id: Option<String>,
+    provider_id: String,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+    workspace_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderChatResponse {
+    assistant_event: SessionEvent,
+    status_event: SessionEvent,
 }
 
 struct TerminalProcess {
@@ -452,9 +668,23 @@ fn read_session_events(session_id: String) -> Result<Vec<SessionEvent>, String> 
 }
 
 #[tauri::command]
-fn append_user_message(session_id: String, message: String) -> Result<SessionEvent, String> {
+fn append_user_message(
+    session_id: String,
+    message: String,
+    turn_id: Option<String>,
+) -> Result<SessionEvent, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
+    if let Some(turn_id) = turn_id.as_deref() {
+        return store
+            .append_user_turn_message_with_turn_id(
+                session_id,
+                message,
+                serde_json::json!({ "surface": "desktop" }),
+                parse_uuid(turn_id)?,
+            )
+            .map_err(to_string);
+    }
     store
         .append_user_turn_message(
             session_id,
@@ -462,6 +692,60 @@ fn append_user_message(session_id: String, message: String) -> Result<SessionEve
             serde_json::json!({ "surface": "desktop" }),
         )
         .map_err(to_string)
+}
+
+#[tauri::command]
+fn run_provider_chat(request: ProviderChatRequest) -> Result<ProviderChatResponse, String> {
+    if request.provider_id != "openai" {
+        return Err(format!(
+            "{} chat is not wired yet. OpenAI runs through the local Codex login first.",
+            request.provider_label.as_deref().unwrap_or("Provider")
+        ));
+    }
+
+    let store = open_store()?;
+    let session_id = parse_uuid(&request.session_id)?;
+    let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
+    let response = match run_openai_codex_chat(&request) {
+        Ok(response) => response,
+        Err(error) => {
+            let error = gyro_core::security::redact_secrets(&error.to_string());
+            let _ = append_provider_status_event(
+                &store,
+                session_id,
+                &request,
+                turn_id,
+                "failed",
+                Some(error.as_str()),
+            );
+            return Err(error);
+        }
+    };
+    let status_event =
+        append_provider_status_event(&store, session_id, &request, turn_id, "ready", None)
+            .map_err(to_string)?;
+    let assistant_event = store
+        .append_event_with_turn_id(
+            session_id,
+            SessionEventKind::AssistantMessage,
+            response,
+            serde_json::json!({
+                "kind": "provider-response",
+                "providerId": request.provider_id,
+                "providerLabel": request.provider_label.as_deref().unwrap_or("OpenAI"),
+                "modelId": request.model_id,
+                "modelLabel": request.model_label,
+                "runner": "codex-cli",
+                "authOwner": "chatgpt-local-codex-login",
+            }),
+            turn_id,
+        )
+        .map_err(to_string)?;
+
+    Ok(ProviderChatResponse {
+        assistant_event,
+        status_event,
+    })
 }
 
 #[tauri::command]
@@ -642,6 +926,234 @@ fn write_workspace_file(
     write_workspace_file_impl(&request).map_err(to_string)
 }
 
+#[tauri::command]
+fn watch_workspace(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
+    // V1 exposes a normalized snapshot through the command boundary. A long-lived
+    // watcher can layer event streaming on the same WorkspaceFile shape later.
+    list_workspace_tree(workspace_path, Some(5))
+}
+
+#[tauri::command]
+fn create_workspace_file(request: WorkspacePathCreateRequest) -> Result<WorkspaceFileStat, String> {
+    create_workspace_path_impl(&request).map_err(to_string)
+}
+
+#[tauri::command]
+fn rename_workspace_path(request: WorkspacePathRenameRequest) -> Result<WorkspaceFileStat, String> {
+    rename_workspace_path_impl(&request).map_err(to_string)
+}
+
+#[tauri::command]
+fn delete_workspace_path(request: WorkspacePathDeleteRequest) -> Result<bool, String> {
+    delete_workspace_path_impl(&request).map_err(to_string)
+}
+
+#[tauri::command]
+fn search_workspace(request: WorkspaceSearchRequest) -> Result<Vec<WorkspaceSearchResult>, String> {
+    search_workspace_impl(&request).map_err(to_string)
+}
+
+#[tauri::command]
+fn git_status(workspace_path: String) -> Result<SourceControlStatus, String> {
+    git_status_impl(&workspace_path).map_err(to_string)
+}
+
+#[tauri::command]
+fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let mut command = command_with_gui_path("git");
+    command.arg("-C").arg(root).arg("diff").arg("--");
+    if let Some(path) = request.path {
+        command.arg(path);
+    }
+    run_command_output(command).map_err(to_string)
+}
+
+#[tauri::command]
+fn git_stage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
+    let relative = path.strip_prefix(&root).map_err(to_string)?;
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(&root)
+        .arg("add")
+        .arg("--")
+        .arg(relative);
+    run_command_output(command).map_err(to_string)?;
+    git_status_impl(&request.workspace_path).map_err(to_string)
+}
+
+#[tauri::command]
+fn git_unstage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
+    let relative = path.strip_prefix(&root).map_err(to_string)?;
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(&root)
+        .arg("restore")
+        .arg("--staged")
+        .arg("--")
+        .arg(relative);
+    run_command_output(command).map_err(to_string)?;
+    git_status_impl(&request.workspace_path).map_err(to_string)
+}
+
+#[tauri::command]
+fn git_commit(request: GitCommitRequest) -> Result<IdeCommandOutput, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    if request.message.trim().is_empty() {
+        return Err("commit message is required".into());
+    }
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .arg("commit")
+        .arg("-m")
+        .arg(request.message);
+    run_command_output(command).map_err(to_string)
+}
+
+#[tauri::command]
+fn lsp_start(request: LspStartRequest) -> Result<LspSessionResult, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let command_text = request.command.clone();
+    let mut parts = command_text.split_whitespace();
+    let command_name = parts
+        .next()
+        .ok_or_else(|| "language server command is required".to_string())?;
+    let mut command = command_with_gui_path(command_name);
+    command.arg("--version");
+    command.current_dir(root);
+    let output = command.output();
+    let (status, message) = match output {
+        Ok(output) if output.status.success() => (
+            "ready".to_string(),
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ),
+        Ok(output) => (
+            "warning".to_string(),
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ),
+        Err(error) => ("not-installed".to_string(), error.to_string()),
+    };
+    Ok(LspSessionResult {
+        server_id: format!("{}:{}", request.language_id, command_name),
+        language_id: request.language_id,
+        command: command_text,
+        status,
+        message,
+    })
+}
+
+#[tauri::command]
+fn lsp_request(request: LspRequestPayload) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "serverId": request.server_id,
+        "method": request.method,
+        "params": request.params,
+        "status": "not-running",
+        "message": "Language server process orchestration is scaffolded for Core IDE V1.",
+    }))
+}
+
+#[tauri::command]
+fn lsp_stop(server_id: String) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "serverId": server_id,
+        "status": "stopped",
+    }))
+}
+
+#[tauri::command]
+fn task_discover(workspace_path: String) -> Result<Vec<TaskDefinitionResult>, String> {
+    task_discover_impl(&workspace_path).map_err(to_string)
+}
+
+#[tauri::command]
+fn task_run(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let mut command = command_with_gui_path(&request.command);
+    command.current_dir(root).args(request.args);
+    let mut output = run_command_output(command).map_err(to_string)?;
+    if output.status == "done" {
+        output.stdout = format!("task {} completed\n{}", request.task_id, output.stdout);
+    }
+    Ok(output)
+}
+
+#[tauri::command]
+fn test_discover(workspace_path: String) -> Result<Vec<TestTreeItemResult>, String> {
+    test_discover_impl(&workspace_path).map_err(to_string)
+}
+
+#[tauri::command]
+fn test_run(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let command_name = request.command.unwrap_or_else(|| "cargo".into());
+    let args = request.args.unwrap_or_else(|| vec!["test".into()]);
+    let mut command = command_with_gui_path(&command_name);
+    command.current_dir(root).args(args);
+    let mut output = run_command_output(command).map_err(to_string)?;
+    if let Some(test_ids) = request.test_ids {
+        output.stdout = format!("tests {:?}\n{}", test_ids, output.stdout);
+    }
+    Ok(output)
+}
+
+#[tauri::command]
+fn debug_start(request: DebugStartRequest) -> Result<DebugSessionResult, String> {
+    if let Some(workspace_path) = request.workspace_path.as_deref() {
+        let _ = workspace_root(workspace_path).map_err(to_string)?;
+    }
+    let command = request.command.as_deref().unwrap_or(&request.adapter);
+    let mut probe = command_with_gui_path(command);
+    probe.arg("--version");
+    if let Some(args) = request.args.as_ref() {
+        let _ = args.len();
+    }
+    let (status, message) = match probe.output() {
+        Ok(output) if output.status.success() => (
+            "configured".to_string(),
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
+        ),
+        Ok(output) => (
+            "failed".to_string(),
+            Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        ),
+        Err(error) => ("failed".to_string(), Some(error.to_string())),
+    };
+    Ok(DebugSessionResult {
+        id: format!("debug-{}", Uuid::new_v4()),
+        name: request.name,
+        adapter: request.adapter,
+        status,
+        message,
+    })
+}
+
+#[tauri::command]
+fn debug_send(request: DebugSendRequest) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "sessionId": request.session_id,
+        "status": "not-running",
+        "request": request.request,
+        "message": "Debug Adapter Protocol bridge is scaffolded for Core IDE V1.",
+    }))
+}
+
+#[tauri::command]
+fn debug_stop(session_id: String) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "sessionId": session_id,
+        "status": "stopped",
+    }))
+}
+
 fn read_workspace_file_impl(
     workspace_path: &str,
     path: &str,
@@ -749,6 +1261,441 @@ fn write_workspace_file_impl(
         &request.path,
         MAX_WORKSPACE_FILE_EDIT_BYTES,
     )
+}
+
+fn workspace_root(workspace_path: &str) -> anyhow::Result<PathBuf> {
+    PathBuf::from(workspace_path)
+        .canonicalize()
+        .map_err(anyhow::Error::from)
+}
+
+fn assert_workspace_path(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
+    gyro_core::security::assert_path_inside_workspace(root, Path::new(path))
+}
+
+fn create_workspace_path_impl(
+    request: &WorkspacePathCreateRequest,
+) -> anyhow::Result<WorkspaceFileStat> {
+    let root = workspace_root(&request.workspace_path)?;
+    let candidate = assert_workspace_path(&root, &request.path)?;
+    if candidate.exists() {
+        anyhow::bail!("workspace path already exists");
+    }
+    match request.kind.as_str() {
+        "directory" => std::fs::create_dir_all(&candidate)?,
+        "file" => {
+            if let Some(parent) = candidate.parent() {
+                if !parent.starts_with(&root) {
+                    anyhow::bail!("workspace file parent is outside workspace");
+                }
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)?;
+        }
+        _ => anyhow::bail!("workspace path kind must be file or directory"),
+    }
+    stat_workspace_file_impl(&request.workspace_path, &request.path)
+}
+
+fn rename_workspace_path_impl(
+    request: &WorkspacePathRenameRequest,
+) -> anyhow::Result<WorkspaceFileStat> {
+    let root = workspace_root(&request.workspace_path)?;
+    let from = assert_workspace_path(&root, &request.from_path)?;
+    let to = assert_workspace_path(&root, &request.to_path)?;
+    if !from.exists() {
+        anyhow::bail!("workspace path does not exist");
+    }
+    if to.exists() {
+        anyhow::bail!("target workspace path already exists");
+    }
+    if let Some(parent) = to.parent() {
+        if !parent.starts_with(&root) {
+            anyhow::bail!("target parent is outside workspace");
+        }
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(from, to)?;
+    stat_workspace_file_impl(&request.workspace_path, &request.to_path)
+}
+
+fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::Result<bool> {
+    let root = workspace_root(&request.workspace_path)?;
+    let candidate = assert_workspace_path(&root, &request.path)?;
+    if !candidate.exists() {
+        anyhow::bail!("workspace path does not exist");
+    }
+    let metadata = std::fs::metadata(&candidate)?;
+    if metadata.is_file() {
+        if let Some(expected_hash) = request.expected_hash.as_deref() {
+            let bytes = std::fs::read(&candidate)?;
+            if bytes.contains(&0) {
+                anyhow::bail!("binary workspace files cannot be deleted through hash approval");
+            }
+            let current_hash = content_hash(&bytes);
+            if current_hash != expected_hash {
+                anyhow::bail!("file changed on disk; reload before deleting");
+            }
+        }
+        std::fs::remove_file(candidate)?;
+        return Ok(true);
+    }
+    std::fs::remove_dir(candidate)?;
+    Ok(true)
+}
+
+fn search_workspace_impl(
+    request: &WorkspaceSearchRequest,
+) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
+    let root = workspace_root(&request.workspace_path)?;
+    let query = request.query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let max_results = request.max_results.unwrap_or(200).clamp(1, 1000);
+    let mut command = command_with_gui_path("rg");
+    command
+        .current_dir(&root)
+        .arg("--line-number")
+        .arg("--column")
+        .arg("--no-heading")
+        .arg("--color")
+        .arg("never")
+        .arg("--fixed-strings");
+    if let Some(globs) = request.globs.as_ref() {
+        for glob in globs {
+            command.arg("--glob").arg(glob);
+        }
+    }
+    command.arg(query).arg(".");
+
+    match command.output() {
+        Ok(output) if output.status.success() || output.status.code() == Some(1) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(parse_rg_output(&stdout, query, max_results))
+        }
+        Ok(_) | Err(_) => fallback_search_workspace(&root, query, max_results),
+    }
+}
+
+fn parse_rg_output(output: &str, query: &str, max_results: usize) -> Vec<WorkspaceSearchResult> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(4, ':');
+            let path = parts.next()?.trim_start_matches("./").to_string();
+            let line_number = parts.next()?.parse::<usize>().ok()?;
+            let start_column = parts.next()?.parse::<usize>().ok()?;
+            let text = parts.next().unwrap_or_default().to_string();
+            let end_column = start_column + query.chars().count().max(1);
+            Some(WorkspaceSearchResult {
+                path,
+                line_number,
+                line: text,
+                ranges: vec![WorkspaceSearchRange {
+                    start_column,
+                    end_column,
+                }],
+            })
+        })
+        .take(max_results)
+        .collect()
+}
+
+fn fallback_search_workspace(
+    root: &Path,
+    query: &str,
+    max_results: usize,
+) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
+    let mut results = Vec::new();
+    for entry in WalkDir::new(root)
+        .min_depth(1)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !matches!(
+                name.as_ref(),
+                ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
+            )
+        })
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        if metadata.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES as u64 {
+            continue;
+        }
+        let bytes = std::fs::read(entry.path())?;
+        if bytes.contains(&0) {
+            continue;
+        }
+        let content = String::from_utf8_lossy(&bytes);
+        for (index, line) in content.lines().enumerate() {
+            if let Some(offset) = line.find(query) {
+                let path = entry
+                    .path()
+                    .strip_prefix(root)?
+                    .to_string_lossy()
+                    .to_string();
+                results.push(WorkspaceSearchResult {
+                    path,
+                    line_number: index + 1,
+                    line: line.to_string(),
+                    ranges: vec![WorkspaceSearchRange {
+                        start_column: offset + 1,
+                        end_column: offset + query.len() + 1,
+                    }],
+                });
+                if results.len() >= max_results {
+                    return Ok(results);
+                }
+            }
+        }
+    }
+    Ok(results)
+}
+
+fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+    let root = workspace_root(workspace_path)?;
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .arg("status")
+        .arg("--porcelain=v2")
+        .arg("--branch");
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            return Ok(SourceControlStatus {
+                provider: "git".into(),
+                available: false,
+                branch: None,
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+                files: Vec::new(),
+                last_checked_at: None,
+                error: Some(error.to_string()),
+            });
+        }
+    };
+    if !output.status.success() {
+        return Ok(SourceControlStatus {
+            provider: "git".into(),
+            available: false,
+            branch: None,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            files: Vec::new(),
+            last_checked_at: None,
+            error: Some(String::from_utf8_lossy(&output.stderr).to_string()),
+        });
+    }
+    Ok(parse_git_status_v2(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn parse_git_status_v2(output: &str) -> SourceControlStatus {
+    let mut status = SourceControlStatus {
+        provider: "git".into(),
+        available: true,
+        branch: None,
+        upstream: None,
+        ahead: 0,
+        behind: 0,
+        files: Vec::new(),
+        last_checked_at: None,
+        error: None,
+    };
+
+    for line in output.lines() {
+        if let Some(branch) = line.strip_prefix("# branch.head ") {
+            status.branch = Some(branch.to_string());
+        } else if let Some(upstream) = line.strip_prefix("# branch.upstream ") {
+            status.upstream = Some(upstream.to_string());
+        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            for part in ab.split_whitespace() {
+                if let Some(value) = part.strip_prefix('+') {
+                    status.ahead = value.parse().unwrap_or(0);
+                } else if let Some(value) = part.strip_prefix('-') {
+                    status.behind = value.parse().unwrap_or(0);
+                }
+            }
+        } else if let Some(path) = line.strip_prefix("? ") {
+            status.files.push(SourceControlFile {
+                path: path.to_string(),
+                original_path: None,
+                state: "untracked".into(),
+                staged: false,
+            });
+        } else if line.starts_with("1 ") {
+            let mut parts = line.split_whitespace();
+            let _record = parts.next();
+            let xy = parts.next().unwrap_or("..");
+            let path = parts.nth(6).unwrap_or_default().to_string();
+            status.files.push(SourceControlFile {
+                path,
+                original_path: None,
+                state: git_state_from_xy(xy),
+                staged: xy.chars().next().is_some_and(|value| value != '.'),
+            });
+        } else if line.starts_with("2 ") {
+            let mut parts = line.split_whitespace();
+            let _record = parts.next();
+            let xy = parts.next().unwrap_or("..");
+            let _sub = parts.next();
+            let _modes_and_hashes = (0..5).for_each(|_| {
+                let _ = parts.next();
+            });
+            let _score = parts.next();
+            let rest = parts.collect::<Vec<_>>().join(" ");
+            let mut paths = rest.split('\t');
+            let path = paths.next().unwrap_or_default().to_string();
+            let original_path = paths.next().map(ToOwned::to_owned);
+            status.files.push(SourceControlFile {
+                path,
+                original_path,
+                state: "renamed".into(),
+                staged: xy.chars().next().is_some_and(|value| value != '.'),
+            });
+        } else if line.starts_with("u ") {
+            let path = line
+                .split_whitespace()
+                .last()
+                .unwrap_or_default()
+                .to_string();
+            status.files.push(SourceControlFile {
+                path,
+                original_path: None,
+                state: "conflicted".into(),
+                staged: false,
+            });
+        }
+    }
+    status
+}
+
+fn git_state_from_xy(xy: &str) -> String {
+    if xy.contains('D') {
+        "deleted"
+    } else if xy.contains('A') {
+        "added"
+    } else if xy.contains('R') {
+        "renamed"
+    } else if xy.contains('U') {
+        "conflicted"
+    } else {
+        "modified"
+    }
+    .into()
+}
+
+fn task_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TaskDefinitionResult>> {
+    let root = workspace_root(workspace_path)?;
+    let mut tasks = Vec::new();
+    let package_json = root.join("package.json");
+    if package_json.exists() {
+        let package = std::fs::read_to_string(&package_json)?;
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&package) {
+            if let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) {
+                let runner = if root.join("pnpm-lock.yaml").exists() {
+                    "pnpm"
+                } else {
+                    "npm"
+                };
+                for name in scripts.keys() {
+                    let group = if name.contains("test") {
+                        "test"
+                    } else if name.contains("build") {
+                        "build"
+                    } else if name.contains("dev") || name.contains("start") {
+                        "dev"
+                    } else {
+                        "custom"
+                    };
+                    tasks.push(TaskDefinitionResult {
+                        id: format!("package:{name}"),
+                        label: format!("{runner} {name}"),
+                        command: runner.into(),
+                        args: vec!["run".into(), name.to_string()],
+                        group: group.into(),
+                        cwd: None,
+                        status: "idle".into(),
+                        output_channel_id: Some(format!("task-package-{name}")),
+                    });
+                }
+            }
+        }
+    }
+    if root.join("Cargo.toml").exists() {
+        tasks.push(TaskDefinitionResult {
+            id: "cargo:build".into(),
+            label: "cargo build".into(),
+            command: "cargo".into(),
+            args: vec!["build".into()],
+            group: "build".into(),
+            cwd: None,
+            status: "idle".into(),
+            output_channel_id: Some("task-cargo-build".into()),
+        });
+        tasks.push(TaskDefinitionResult {
+            id: "cargo:test".into(),
+            label: "cargo test".into(),
+            command: "cargo".into(),
+            args: vec!["test".into()],
+            group: "test".into(),
+            cwd: None,
+            status: "idle".into(),
+            output_channel_id: Some("task-cargo-test".into()),
+        });
+    }
+    Ok(tasks)
+}
+
+fn test_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TestTreeItemResult>> {
+    let tasks = task_discover_impl(workspace_path)?;
+    let children = tasks
+        .into_iter()
+        .filter(|task| task.group == "test")
+        .map(|task| TestTreeItemResult {
+            id: task.id,
+            label: task.label,
+            path: None,
+            status: "unknown".into(),
+            children: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    Ok(vec![TestTreeItemResult {
+        id: "workspace-tests".into(),
+        label: "Workspace tests".into(),
+        path: None,
+        status: "unknown".into(),
+        children,
+    }])
+}
+
+fn run_command_output(mut command: Command) -> anyhow::Result<IdeCommandOutput> {
+    let output = command.output()?;
+    let stdout = gyro_core::security::redact_secrets(&String::from_utf8_lossy(&output.stdout));
+    let stderr = gyro_core::security::redact_secrets(&String::from_utf8_lossy(&output.stderr));
+    Ok(IdeCommandOutput {
+        status: if output.status.success() {
+            "done".into()
+        } else {
+            "failed".into()
+        },
+        stdout,
+        stderr,
+    })
 }
 
 fn content_hash(bytes: &[u8]) -> String {
@@ -1167,6 +2114,155 @@ fn command_output(command: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+fn run_openai_codex_chat(request: &ProviderChatRequest) -> anyhow::Result<String> {
+    let output_path =
+        std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
+    let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let prompt = openai_codex_chat_prompt(&request.message, request.workspace_path.as_deref());
+
+    let mut process = command_with_gui_path("codex");
+    process
+        .arg("exec")
+        .arg("--cd")
+        .arg(cwd)
+        .arg("--skip-git-repo-check")
+        .arg("--sandbox")
+        .arg("read-only")
+        .arg("--output-last-message")
+        .arg(&output_path);
+    if let Some(model) = codex_model_arg(request.model_id.as_deref()) {
+        process.arg("--model").arg(model);
+    }
+    process.arg(prompt);
+
+    let output = process.output().map_err(|error| {
+        anyhow::anyhow!(
+            "Could not start OpenAI through Codex CLI. Run `codex login` in Terminal, then try again. {error}"
+        )
+    })?;
+    let last_message = fs::read_to_string(&output_path).unwrap_or_default();
+    let _ = fs::remove_file(&output_path);
+    if output.status.success() {
+        let response = last_message.trim();
+        if !response.is_empty() {
+            return Ok(response.to_string());
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stdout.is_empty() {
+            return Ok(stdout);
+        }
+        anyhow::bail!("OpenAI finished, but Codex did not return a chat response.");
+    }
+
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    let combined = gyro_core::security::redact_secrets(combined.trim());
+    if combined.is_empty() {
+        anyhow::bail!("OpenAI through Codex exited with {}", output.status);
+    }
+    anyhow::bail!("{}", truncate_error_detail(&combined));
+}
+
+fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
+    if let Some(path) = workspace_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Ok(path.canonicalize()?);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Ok(PathBuf::from(home));
+    }
+    std::env::current_dir().map_err(Into::into)
+}
+
+fn openai_codex_chat_prompt(message: &str, workspace_path: Option<&str>) -> String {
+    let workspace = workspace_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or("no selected workspace");
+    format!(
+        "Answer as Gyro's chat model.\n\
+         Keep replies concise by default: 1-3 short sentences unless the user asks for detail.\n\
+         Do not describe the local Codex runner, authentication, system prompts, or implementation details unless asked.\n\
+         If the user asks what model you are, answer with the model label only.\n\
+         Use the selected workspace only as optional context.\n\
+         Do not edit files, start servers, commit, push, or make destructive changes in this chat run.\n\
+         Selected workspace: {workspace}\n\n\
+         User message:\n{message}"
+    )
+}
+
+fn codex_model_arg(model_id: Option<&str>) -> Option<String> {
+    let model = model_id?.trim();
+    if model.is_empty() {
+        return None;
+    }
+    let normalized = model.to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5"
+    ) {
+        return None;
+    }
+    Some(model.to_string())
+}
+
+fn append_provider_status_event(
+    store: &SessionStore,
+    session_id: Uuid,
+    request: &ProviderChatRequest,
+    turn_id: Option<Uuid>,
+    status: &str,
+    error: Option<&str>,
+) -> anyhow::Result<SessionEvent> {
+    let provider_label = request.provider_label.as_deref().unwrap_or("OpenAI");
+    store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::SystemEvent,
+        provider_chat_status_message(status, provider_label),
+        serde_json::json!({
+            "kind": "provider-status",
+            "status": status,
+            "error": error,
+            "turnId": turn_id.map(|id| id.to_string()),
+            "userMessage": request.message.as_str(),
+            "providerId": request.provider_id.as_str(),
+            "providerLabel": provider_label,
+            "modelId": request.model_id.as_deref(),
+            "modelLabel": request.model_label.as_deref(),
+            "runner": "codex-cli",
+            "authOwner": "chatgpt-local-codex-login",
+        }),
+        turn_id,
+    )
+}
+
+fn provider_chat_status_message(status: &str, provider_label: &str) -> String {
+    match status {
+        "failed" => format!("{provider_label} send needs attention"),
+        "ready" => format!("{provider_label} answered"),
+        "running" => format!("{provider_label} is working"),
+        _ => format!("{provider_label} queued this request"),
+    }
+}
+
+fn truncate_error_detail(value: &str) -> String {
+    const MAX_ERROR_DETAIL_CHARS: usize = 4_000;
+    if value.chars().count() <= MAX_ERROR_DETAIL_CHARS {
+        return value.to_string();
+    }
+    value
+        .chars()
+        .take(MAX_ERROR_DETAIL_CHARS)
+        .collect::<String>()
+        + "…"
+}
+
 fn command_with_gui_path(command: &str) -> Command {
     let mut process = Command::new(command);
     if !command.contains('/') {
@@ -1280,9 +2376,19 @@ pub fn run() {
             create_automation,
             create_desktop_session,
             create_terminal_pane,
+            create_workspace_file,
             create_worktree_session,
+            debug_send,
+            debug_start,
+            debug_stop,
             delete_session,
+            delete_workspace_path,
             get_account_session,
+            git_commit,
+            git_diff,
+            git_stage,
+            git_status,
+            git_unstage,
             list_automations,
             list_due_automations,
             list_sessions,
@@ -1290,24 +2396,35 @@ pub fn run() {
             list_workspace_tree,
             load_config,
             logout_account,
+            lsp_request,
+            lsp_start,
+            lsp_stop,
             read_workspace_file,
             read_workspace_file_full,
             read_terminal_output,
             read_session_events,
             recover_automation_leases,
             rename_session,
+            rename_workspace_path,
             refresh_account_session,
             resize_terminal_pane,
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
+            run_provider_chat,
             save_config,
+            search_workspace,
             set_session_model,
             set_automation_status,
             stat_workspace_file,
             start_account_login,
             stop_terminal_pane,
+            task_discover,
+            task_run,
+            test_discover,
+            test_run,
             triage_automation,
+            watch_workspace,
             write_workspace_file,
             write_terminal_input
         ])
@@ -1538,6 +2655,60 @@ mod tests {
             Some("https://api.openai.com/v1"),
             Some("provider-cli:codex"),
         ));
+    }
+
+    #[test]
+    fn codex_chat_omits_seeded_display_models() {
+        assert_eq!(codex_model_arg(Some("gpt-5.5")), None);
+        assert_eq!(codex_model_arg(Some(" gpt-5.4-mini ")), None);
+        assert_eq!(codex_model_arg(Some("o4-mini")), Some("o4-mini".into()));
+    }
+
+    #[test]
+    fn codex_chat_prompt_prefers_concise_answers() {
+        let prompt = openai_codex_chat_prompt("WHAT MODEL are you?", Some("/workspace"));
+
+        assert!(prompt.contains("Keep replies concise by default"));
+        assert!(prompt.contains("answer with the model label only"));
+        assert!(prompt.contains("Do not describe the local Codex runner"));
+        assert!(prompt.contains("Selected workspace: /workspace"));
+    }
+
+    #[test]
+    fn provider_status_event_stores_run_metadata_without_tokens() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "chat session")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        let request = ProviderChatRequest {
+            session_id: session.id.to_string(),
+            message: "hello".into(),
+            turn_id: Some(turn_id.to_string()),
+            provider_id: "openai".into(),
+            provider_label: Some("OpenAI".into()),
+            model_id: Some("gpt-5.5".into()),
+            model_label: Some("GPT-5.5".into()),
+            workspace_path: Some(temp.path().display().to_string()),
+        };
+
+        let event = append_provider_status_event(
+            &store,
+            session.id,
+            &request,
+            Some(turn_id),
+            "ready",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(event.kind, SessionEventKind::SystemEvent);
+        assert_eq!(event.turn_id, Some(turn_id));
+        assert_eq!(event.payload["kind"], "provider-status");
+        assert_eq!(event.payload["runner"], "codex-cli");
+        assert_eq!(event.payload["authOwner"], "chatgpt-local-codex-login");
+        assert!(event.payload.get("token").is_none());
     }
 
     #[test]
