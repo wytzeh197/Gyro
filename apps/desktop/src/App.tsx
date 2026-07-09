@@ -42,6 +42,7 @@ import {
   type GyroConfig,
   type IdeAssistantAction,
   type IdeAssistantRequest,
+  type OutputChannel,
   type ModelProviderConfig,
   type ProviderHealthDetails,
   type ProviderId,
@@ -53,8 +54,11 @@ import {
   type SessionPlanItem,
   type SessionPlanItemStatus,
   type SettingsSectionId,
+  type SourceControlState,
   type Task,
+  type TaskDefinition,
   type TaskStatus,
+  type TestTreeItem,
   type TerminalPaneStatus,
   type TerminalPane,
   type TerminalTemplate,
@@ -63,6 +67,8 @@ import {
   type WorkbenchTurn,
   type WorkspaceFile,
   type WorkspaceFileContent,
+  type WorkspaceSearchQuery,
+  type WorkspaceSearchResult,
   type WorkspaceLayoutId,
 } from "@gyro-dev/ui";
 import {
@@ -109,11 +115,22 @@ type ProviderHealthCheck = {
   diagnosticsOptIn: boolean;
 };
 
+type ProviderChatResponse = {
+  assistantEvent: SessionEvent;
+  statusEvent: SessionEvent;
+};
+
 type WorkspaceFileWriteRequest = {
   workspacePath: string;
   path: string;
   content: string;
   expectedHash?: string;
+};
+
+type IdeCommandOutput = {
+  status: "done" | "failed";
+  stdout: string;
+  stderr: string;
 };
 
 type AutomationDraft = Pick<
@@ -711,10 +728,223 @@ export function App() {
     });
   }, []);
 
+  const refreshIdeServices = useCallback(
+    (root?: string) => {
+      if (!root) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-source-control",
+          sourceControl: {
+            provider: "git",
+            available: true,
+            branch: "preview",
+            ahead: 0,
+            behind: 0,
+            files: [],
+          },
+        });
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: [
+            {
+              id: "preview:typecheck",
+              label: "pnpm typecheck",
+              command: "pnpm",
+              args: ["typecheck"],
+              group: "build",
+              status: "idle",
+              outputChannelId: "task-preview-typecheck",
+            },
+          ],
+        });
+        dispatchWorkbench({
+          type: "ide-set-test-tree",
+          tests: [
+            {
+              id: "preview-tests",
+              label: "Workspace tests",
+              status: "unknown",
+              children: [],
+            },
+          ],
+        });
+        return;
+      }
+
+      void invoke<SourceControlState>("git_status", { workspacePath: root })
+        .then((sourceControl) =>
+          dispatchWorkbench({
+            type: "ide-set-source-control",
+            sourceControl,
+          }),
+        )
+        .catch((error) =>
+          dispatchWorkbench({
+            type: "ide-set-source-control",
+            sourceControl: {
+              provider: "git",
+              available: false,
+              ahead: 0,
+              behind: 0,
+              files: [],
+              error: String(error),
+            },
+          }),
+        );
+
+      void invoke<TaskDefinition[]>("task_discover", { workspacePath: root })
+        .then((tasks) => dispatchWorkbench({ type: "ide-set-tasks", tasks }))
+        .catch(() => dispatchWorkbench({ type: "ide-set-tasks", tasks: [] }));
+
+      void invoke<TestTreeItem[]>("test_discover", { workspacePath: root })
+        .then((tests) =>
+          dispatchWorkbench({ type: "ide-set-test-tree", tests }),
+        )
+        .catch(() =>
+          dispatchWorkbench({ type: "ide-set-test-tree", tests: [] }),
+        );
+    },
+    [],
+  );
+
+  const runWorkspaceSearch = useCallback(
+    async (query: WorkspaceSearchQuery) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      dispatchWorkbench({ type: "ide-set-search-query", query });
+      if (!root || !query.query.trim()) {
+        dispatchWorkbench({
+          type: "ide-set-search-results",
+          query,
+          results: [],
+        });
+        return;
+      }
+      if (!isTauriRuntime()) {
+        const results = previewFiles
+          .filter((file) => file.kind === "file" && file.path.includes(query.query))
+          .slice(0, query.maxResults ?? 200)
+          .map((file) => ({
+            path: file.path,
+            lineNumber: 1,
+            line: `Preview match for ${query.query}`,
+            ranges: [{ startColumn: 1, endColumn: query.query.length + 1 }],
+          }));
+        dispatchWorkbench({
+          type: "ide-set-search-results",
+          query,
+          results,
+        });
+        return;
+      }
+      try {
+        const results = await invoke<WorkspaceSearchResult[]>(
+          "search_workspace",
+          {
+            request: {
+              workspacePath: root,
+              query: query.query,
+              globs: query.globs,
+              maxResults: query.maxResults ?? 200,
+            },
+          },
+        );
+        dispatchWorkbench({
+          type: "ide-set-search-results",
+          query,
+          results,
+        });
+      } catch (error) {
+        notify("command-failed", "Workspace search failed", String(error));
+      }
+    },
+    [activeSession?.workspacePath, notify, workspacePath],
+  );
+
+  const refreshSourceControl = useCallback(() => {
+    refreshIdeServices(activeSession?.workspacePath ?? workspacePath);
+  }, [activeSession?.workspacePath, refreshIdeServices, workspacePath]);
+
+  const stageSourceControlFile = useCallback(
+    async (path: string, staged: boolean) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root || !isTauriRuntime()) {
+        return;
+      }
+      const command = staged ? "git_unstage" : "git_stage";
+      try {
+        const sourceControl = await invoke<SourceControlState>(command, {
+          request: { workspacePath: root, path },
+        });
+        dispatchWorkbench({ type: "ide-set-source-control", sourceControl });
+      } catch (error) {
+        notify("command-failed", "Git action failed", String(error));
+      }
+    },
+    [activeSession?.workspacePath, notify, workspacePath],
+  );
+
+  const runIdeTask = useCallback(
+    async (task: TaskDefinition) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root) {
+        notify("command-failed", "Task blocked", "Open a workspace first");
+        return;
+      }
+      const channelId = task.outputChannelId ?? `task-${task.id}`;
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: channelId,
+          label: task.label,
+          kind: task.group === "test" ? "test" : "task",
+          lines: [`$ ${task.command} ${task.args.join(" ")}`],
+          updatedAt: new Date().toISOString(),
+        } satisfies OutputChannel,
+      });
+      dispatchWorkbench({
+        type: "open-tool-panel",
+        tab: "output",
+      });
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: ["Preview task completed."],
+        });
+        return;
+      }
+      try {
+        const output = await invoke<IdeCommandOutput>("task_run", {
+          request: {
+            workspacePath: root,
+            taskId: task.id,
+            command: task.command,
+            args: task.args,
+          },
+        });
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: [output.stdout, output.stderr].filter(Boolean),
+        });
+      } catch (error) {
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: [String(error)],
+        });
+      }
+    },
+    [activeSession?.workspacePath, notify, workspacePath],
+  );
+
   const openWorkspace = useCallback(async () => {
     if (!isTauriRuntime()) {
       setWorkspacePath(DEFAULT_WORKSPACE_PATH);
       setFiles(previewFiles);
+      refreshIdeServices(DEFAULT_WORKSPACE_PATH);
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "workspace",
@@ -737,6 +967,7 @@ export function App() {
         { depth: 5, workspacePath: selected },
       );
       setFiles(workspaceFiles);
+      refreshIdeServices(selected);
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "workspace",
@@ -747,7 +978,7 @@ export function App() {
       setFiles(previewFiles);
       notify("command-failed", "Workspace open failed", "Using preview files");
     }
-  }, [notify]);
+  }, [notify, refreshIdeServices]);
 
   const selectContextFile = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -755,6 +986,7 @@ export function App() {
       setWorkspacePath(DEFAULT_WORKSPACE_PATH);
       setFiles(previewFiles);
       setSelectedFile(previewFile);
+      refreshIdeServices(DEFAULT_WORKSPACE_PATH);
       dispatchWorkbench({
         type: "ide-open-tab",
         tab: {
@@ -785,6 +1017,7 @@ export function App() {
       const relativePath = relativeFilePath(selected, workspace);
       setWorkspacePath(workspace);
       setSelectedFile(relativePath);
+      refreshIdeServices(workspace);
       setFiles((current) =>
         current.some((file) => file.path === relativePath)
           ? current
@@ -824,7 +1057,7 @@ export function App() {
     } catch {
       notify("command-failed", "File select failed", "No file was selected");
     }
-  }, [notify]);
+  }, [notify, refreshIdeServices]);
 
   const createSession = useCallback(async () => {
     const sessionLayout: WorkspaceLayoutId = "thread";
@@ -1274,7 +1507,11 @@ export function App() {
         providerId,
         status: "checking",
       });
-      notify("provider", "Connecting provider", providerLabel);
+      notify(
+        "provider",
+        providerId === "openai" ? "Checking Codex sign-in" : "Connecting provider",
+        providerLabel,
+      );
 
       if (isTauriRuntime()) {
         try {
@@ -1300,7 +1537,15 @@ export function App() {
             return;
           }
           if (result.connectionStatus === "connected") {
-            notify("provider", "Provider connected", providerLabel);
+            notify(
+              "provider",
+              providerId === "openai"
+                ? "Using Codex sign-in"
+                : "Provider verified",
+              providerId === "openai"
+                ? "OpenAI is available through your local ChatGPT/Codex login."
+                : providerLabel,
+            );
             return;
           }
         } catch (error) {
@@ -1348,7 +1593,7 @@ export function App() {
 
       if (!isTauriRuntime()) {
         setProviderAuthStatus(providerId, "connected");
-        notify("provider", "Preview provider connected", providerLabel);
+        notify("provider", "Preview provider verified", providerLabel);
         return;
       }
 
@@ -1414,7 +1659,15 @@ export function App() {
             check,
           );
           if (result.connectionStatus === "connected") {
-            notify("provider", "Provider connected", providerLabel);
+            notify(
+              "provider",
+              providerId === "openai"
+                ? "Using Codex sign-in"
+                : "Provider verified",
+              providerId === "openai"
+                ? "OpenAI is available through your local ChatGPT/Codex login."
+                : providerLabel,
+            );
             return;
           }
         }
@@ -1953,6 +2206,26 @@ export function App() {
           await invoke<SessionEvent>("append_user_message", {
             sessionId: persistedSession.id,
             message,
+            turnId,
+          });
+          updateOptimisticProviderStatus(
+            optimisticEventsRef,
+            setEvents,
+            persistedSession.id,
+            turnId,
+            "running",
+          );
+          await invoke<ProviderChatResponse>("run_provider_chat", {
+            request: {
+              sessionId: persistedSession.id,
+              message,
+              turnId,
+              providerId: selectedProvider?.id ?? config.selectedProviderId,
+              providerLabel: selectedProvider?.displayName,
+              modelId: sessionModel.modelId,
+              modelLabel: sessionModel.modelLabel,
+              workspacePath: persistedSession.workspacePath,
+            },
           });
           updateOptimisticProviderStatus(
             optimisticEventsRef,
@@ -1971,6 +2244,9 @@ export function App() {
             "failed",
             String(error),
           );
+          if (optimisticSessionId !== session.id) {
+            await refreshEvents(optimisticSessionId);
+          }
           notify("command-failed", "Message fallback", "Chat stayed local");
         } finally {
           setIsStartingFirstTurn(false);
@@ -2013,6 +2289,26 @@ export function App() {
         await invoke<SessionEvent>("append_user_message", {
           sessionId: activeSessionId,
           message,
+          turnId,
+        });
+        updateOptimisticProviderStatus(
+          optimisticEventsRef,
+          setEvents,
+          activeSessionId,
+          turnId,
+          "running",
+        );
+        await invoke<ProviderChatResponse>("run_provider_chat", {
+          request: {
+            sessionId: activeSessionId,
+            message,
+            turnId,
+            providerId: selectedProvider?.id ?? config.selectedProviderId,
+            providerLabel: selectedProvider?.displayName,
+            modelId: sessionModel.modelId,
+            modelLabel: sessionModel.modelLabel,
+            workspacePath: activeSession?.workspacePath ?? workspacePath,
+          },
         });
         updateOptimisticProviderStatus(
           optimisticEventsRef,
@@ -2031,6 +2327,7 @@ export function App() {
           "failed",
           String(error),
         );
+        await refreshEvents(activeSessionId);
         notify("command-failed", "Message fallback", "Chat stayed local");
       }
     },
@@ -2909,7 +3206,15 @@ export function App() {
       );
       if (provider?.authStatus === "connected") {
         setProviderAuthStatus(providerId, "not-connected");
-        notify("provider", "Provider disconnected", provider.displayName);
+        notify(
+          "provider",
+          provider.authMode === "cli"
+            ? "Provider disabled in Gyro"
+            : "Provider disconnected",
+          provider.authMode === "cli"
+            ? `${provider.displayName} was disabled in Gyro. This does not log out of the provider CLI.`
+            : provider.displayName,
+        );
         return;
       }
       connectProvider(providerId);
@@ -2958,7 +3263,9 @@ export function App() {
       notify(
         result.connectionStatus === "connected" ? "provider" : "command-failed",
         result.connectionStatus === "connected"
-          ? "Provider ready"
+          ? providerId === "openai"
+            ? "Codex sign-in verified"
+            : "Provider ready"
           : "Provider needs setup",
         result.healthSummary ?? providerId,
       );
@@ -3311,19 +3618,21 @@ export function App() {
     }
     if (!isTauriRuntime()) {
       setFiles(previewFiles);
+      refreshIdeServices(activeSession.workspacePath);
       return;
     }
     if (!activeSession.workspacePath) {
       setFiles([]);
       return;
     }
+    refreshIdeServices(activeSession.workspacePath);
     void invoke<WorkspaceFile[]>("list_workspace_tree", {
       depth: 5,
       workspacePath: activeSession.workspacePath,
     })
       .then(setFiles)
       .catch(() => setFiles([]));
-  }, [activeSession]);
+  }, [activeSession, refreshIdeServices]);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -3566,6 +3875,7 @@ export function App() {
       cliLaunchPreset={workbench.preferences.cliLaunchPreset}
       diffReview={workbench.diffReview}
       height={isPrimary ? undefined : toolPanelHeight}
+      ide={workbench.ide}
       isPrimary={isPrimary}
       isLaunchingCliPreset={isLaunchingCliPreset}
       isResizable={!isPrimary}
@@ -3625,6 +3935,7 @@ export function App() {
           layout: "code",
         });
       }}
+      onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
       onPaneTabChange={(tab) =>
         dispatchWorkbench({ type: "set-pane-tab", tab })
       }
@@ -3710,6 +4021,7 @@ export function App() {
       activeWorkspaceLayout={activeWorkspaceLayout}
       commandProfiles={commandProfiles}
       files={files}
+      ide={workbench.ide}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
       notifications={workbench.notifications}
       onAddTerminalPane={addTerminalPane}
@@ -3729,6 +4041,15 @@ export function App() {
       onOpenWorkspace={openWorkspace}
       onOpenWorkspaceFile={openEditorFile}
       onOpenToolPanel={openToolPanel}
+      onRefreshSourceControl={refreshSourceControl}
+      onRunIdeTask={runIdeTask}
+      onRunWorkspaceSearch={(query) =>
+        void runWorkspaceSearch({ query, maxResults: 200 })
+      }
+      onSelectIdeView={(view) =>
+        dispatchWorkbench({ type: "ide-select-view", view })
+      }
+      onToggleSourceControlFile={stageSourceControlFile}
       onPinSession={pinSession}
       onRenameSession={renameSession}
       onSelectDestination={selectDestination}
@@ -3793,6 +4114,11 @@ export function App() {
                   dispatchWorkbench({ type: "toggle-chat-plan" })
                 }
                 providerReadiness={workbench.providerReadiness}
+                sessionModel={{
+                  modelLabel: activeSession?.modelLabel,
+                  providerId: activeSession?.providerId,
+                  providerLabel: activeSession?.providerLabel,
+                }}
                 sessionPlan={activeSessionPlan}
                 sessionTitle={activeSession?.title}
                 terminalPanes={workbench.terminalPanes}
@@ -3820,6 +4146,7 @@ export function App() {
                 fileError={selectedFileError}
                 fileLoadState={selectedFileLoadState}
                 files={files}
+                ide={workbench.ide}
                 onAcceptAllDiffs={() =>
                   dispatchWorkbench({
                     type: "set-diff-review-state",
@@ -3914,13 +4241,22 @@ export function App() {
                 onSelectTerminalPane={(paneId) =>
                   dispatchWorkbench({ type: "select-terminal-pane", paneId })
                 }
+                onSplitEditorGroup={(direction) =>
+                  dispatchWorkbench({ type: "ide-split-group", direction })
+                }
                 onSplitTerminalPane={splitTerminalPane}
                 onTerminalUtilityAction={handleTerminalUtilityAction}
+                onToggleAssistant={() =>
+                  dispatchWorkbench({ type: "ide-toggle-assistant" })
+                }
                 onToggleDiffDirectory={(directory) =>
                   dispatchWorkbench({
                     type: "toggle-diff-directory",
                     directory,
                   })
+                }
+                onToggleMinimap={() =>
+                  dispatchWorkbench({ type: "ide-toggle-minimap" })
                 }
                 onUndoDiff={() =>
                   dispatchWorkbench({
@@ -4101,6 +4437,11 @@ export function App() {
           onSetOnboardingStep={(step) =>
             dispatchWorkbench({ type: "set-onboarding-step", step })
           }
+          sessionModel={{
+            modelLabel: activeSession?.modelLabel,
+            providerId: activeSession?.providerId,
+            providerLabel: activeSession?.providerLabel,
+          }}
           workspaceMode={workbench.workspaceMode}
           onToggleEnvironmentRail={() =>
             dispatchWorkbench({ type: "toggle-chat-environment-rail" })
@@ -5519,7 +5860,7 @@ function createOptimisticTurnEvents(
   ];
 }
 
-type OptimisticProviderStatus = "queued" | "ready" | "failed";
+type OptimisticProviderStatus = "queued" | "running" | "ready" | "failed";
 
 function providerStatusPayload(
   status: OptimisticProviderStatus,
@@ -5552,6 +5893,9 @@ function providerStatusMessage(
   }
   if (status === "ready") {
     return `${providerLabel} is ready for the next step`;
+  }
+  if (status === "running") {
+    return `${providerLabel} is working`;
   }
   return `${providerLabel} queued this request`;
 }
@@ -5623,7 +5967,9 @@ function updateOptimisticProviderStatus(
           ? `${providerLabel} send needs attention`
           : status === "ready"
             ? `${providerLabel} is ready for the next step`
-            : `${providerLabel} queued this request`,
+            : status === "running"
+              ? `${providerLabel} is working`
+              : `${providerLabel} queued this request`,
       payload: {
         ...payload,
         error,
