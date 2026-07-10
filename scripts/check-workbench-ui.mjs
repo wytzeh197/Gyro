@@ -1052,15 +1052,21 @@ expect(
       "const merged = limitSessionEventsForUi(persistedEvents)",
     ) &&
     appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
-    appSource.includes("limitSessionEventsForUi(optimisticEvents.map(updateEvent))") &&
+    appSource.includes(
+      "limitSessionEventsForUi(optimisticEvents.map(updateEvent))",
+    ) &&
     appSource.includes("updateOptimisticProviderStatus") &&
     appSource.includes("setIsStartingFirstTurn") &&
     appSource.includes("sendingSessionIdsRef") &&
     appSource.includes("setSessionSending") &&
     appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
     appSource.includes("[activeSessionId, events.length]") &&
-    appSource.includes("shouldSuggestSessionTitle(\n        activeSession,\n        activeSessionHasTranscriptEvents") &&
-    !appSource.includes("shouldSuggestSessionTitle(\n        activeSession,\n        events") &&
+    appSource.includes(
+      "shouldSuggestSessionTitle(\n        activeSession,\n        activeSessionHasTranscriptEvents",
+    ) &&
+    !appSource.includes(
+      "shouldSuggestSessionTitle(\n        activeSession,\n        events",
+    ) &&
     appSource.includes("draftResetToken") &&
     appSource.includes("resetChatDraft") &&
     !appSource.includes("const [draft, setDraft]") &&
@@ -1073,7 +1079,9 @@ expect(
     appSource.includes("mergeProviderResponseEvents") &&
     appSource.includes("response?.statusEvent") &&
     appSource.includes("response?.assistantEvent") &&
-    appSource.includes("startTransition(() => {\n        setEvents((current) => {") &&
+    appSource.includes(
+      "startTransition(() => {\n        setEvents((current) => {",
+    ) &&
     appSource.includes("applyProviderChatResponse(activeSessionId") &&
     appSource.includes("applyProviderChatResponse(persistedSession.id") &&
     !/applyProviderChatResponse\(persistedSession\.id,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
@@ -1095,7 +1103,9 @@ expect(
     ) &&
     providerStreamSource.includes("existing.chunks.push(textDelta)") &&
     providerStreamSource.includes('textDelta: chunks.join("")') &&
-    providerStreamSource.includes("const updatedSessionIds = new Set<string>()") &&
+    providerStreamSource.includes(
+      "const updatedSessionIds = new Set<string>()",
+    ) &&
     appAndStreamSource.includes("upsertStreamingAssistantEvent") &&
     appSource.includes("PROVIDER_STREAM_FLUSH_MS") &&
     appSource.includes("providerStreamBatchRef") &&
@@ -1114,7 +1124,9 @@ expect(
       "deriveActiveTurn(deferredEventsForTurn, activeSession?.title)",
     ) &&
     appSource.includes("const nextTurn = derivedActiveTurn") &&
-    appSource.includes("const activeTurnId = workbench.activeTurn?.id ?? derivedActiveTurn?.id") &&
+    appSource.includes(
+      "const activeTurnId = workbench.activeTurn?.id ?? derivedActiveTurn?.id",
+    ) &&
     appSource.includes("const freshEvents = deferredEventsForTurn.filter") &&
     appSource.includes("let latestUserIndex = -1") &&
     appSource.includes("index = Math.max(0, latestUserIndex)") &&
@@ -1381,8 +1393,7 @@ expect(
   "Chats should persist and restore their selected provider/model locally until deleted.",
 );
 expect(
-  !appSource.includes("enabled: true") &&
-    !surfaceSource.includes("enabled: true"),
+  providerCatalog.every((provider) => provider.enabled === false),
   "Fallback provider configs should not start enabled before setup.",
 );
 expect(
@@ -1412,7 +1423,9 @@ expect(
     appSource.includes("restore_terminal_panes") &&
     appSource.includes("write_terminal_input") &&
     appSource.includes("resize_terminal_pane") &&
-    tauriSource.includes("#[derive(Clone, Default)]\nstruct TerminalProcessManager") &&
+    tauriSource.includes(
+      "#[derive(Clone, Default)]\nstruct TerminalProcessManager",
+    ) &&
     tauriSource.includes("async fn create_terminal_pane") &&
     tauriSource.includes("terminal create worker failed") &&
     tauriSource.includes("async fn write_terminal_input") &&
@@ -1904,7 +1917,13 @@ expect(
     surfaceSource.includes("{modelChipLabel}") &&
     surfaceSource.includes('title="Provider"') &&
     !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
-    styleSource.includes(".gyro-model-chip .gyro-provider-logo"),
+    styleSource.includes(".gyro-model-chip .gyro-provider-logo") &&
+    !styleSource.includes(
+      ".gyro-composer-menu-item:has(.gyro-provider-logo.is-anthropic):hover",
+    ) &&
+    !styleSource.includes(
+      ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
+    ),
   "Composer model chip should show the provider logo and model name only.",
 );
 expect(
@@ -2103,6 +2122,15 @@ for (const className of [
 }
 
 expect(
+  appSource.includes("drawBoldTextInBrightColors: true") &&
+    appSource.includes("minimumContrastRatio: 2.6") &&
+    appSource.includes('brightMagenta: "#f08cff"') &&
+    appSource.includes('magenta: "#d86cff"') &&
+    appSource.includes('brightYellow: "#ffd166"'),
+  "Embedded CLI terminals should preserve visible ANSI accent colors.",
+);
+
+expect(
   !/green|is-green/i.test(surfaceSource) &&
     !/green|is-green/i.test(styleSource),
   "Gyro design surfaces should not use green palette names or green classes.",
@@ -2169,6 +2197,74 @@ for (const secretPattern of [
     `Potential raw secret found: ${secretPattern}`,
   );
 }
+
+expect(
+  surfaceSource.includes("data-active-mode={activeWorkspaceLayout}") &&
+    styleSource.includes(
+      '.gyro-sidebar-mode-group[data-active-mode="terminal-grid"]::before',
+    ) &&
+    styleSource.includes(
+      '.gyro-sidebar-mode-group[data-active-mode="code"]::before',
+    ) &&
+    styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
+    styleSource.includes("@keyframes gyro-native-surface-enter"),
+  "Workspace mode switching should use the shared sliding indicator and restrained surface motion.",
+);
+
+expect(
+  (styleSource.match(/^:root\s*\{/gm) ?? []).length === 1 &&
+    styleSource.includes("--gyro-premium-hairline: rgba(244, 241, 235, 0.1)") &&
+    styleSource.includes("--gyro-premium-radius-md: 9px") &&
+    styleSource.includes("--gyro-premium-motion: 170ms") &&
+    styleSource.includes(':root[data-theme="light"]') &&
+    styleSource.includes("--gyro-premium-hairline: rgba(32, 34, 38, 0.13)"),
+  "The native graphite system should keep one token authority with dark and light hairline parity.",
+);
+
+expect(
+  styleSource.includes(
+    "grid-template-rows: 34px 28px 25px 34px minmax(0, 1fr)",
+  ) &&
+    styleSource.includes(".gyro-ide-editor-stack.is-editor-only") &&
+    styleSource.includes("height: 22px") &&
+    styleSource.includes(".gyro-code-surface .monaco-editor-background"),
+  "The IDE shell should reserve all five editor rows and keep the status bar constrained.",
+);
+
+expect(
+  styleSource.includes("@media (prefers-reduced-motion: reduce)") &&
+    styleSource.includes("animation-duration: 1ms !important") &&
+    styleSource.includes("transition-duration: 1ms !important"),
+  "Premium motion should respect the system reduced-motion preference.",
+);
+
+expect(
+  appSource.includes("theme={workbench.preferences.theme}") &&
+    appSource.includes("function terminalThemeFor") &&
+    appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
+    appSource.includes('background: "#ffffff"') &&
+    appSource.includes('background: "#101722"') &&
+    appSource.includes('brightMagenta: "#f08cff"') &&
+    appSource.includes('brightYellow: "#ffd166"'),
+  "Live terminals should update their xterm palette in place for dark and light themes.",
+);
+
+expect(
+  styleSource.includes(
+    ".gyro-chat-start .gyro-composer-shell.is-hero.has-provider",
+  ) &&
+    styleSource.includes(
+      ".gyro-composer-shell.is-hero.has-provider\n  > .gyro-composer-bar",
+    ) &&
+    styleSource.includes(
+      ".gyro-composer-shell.is-hero.has-provider\n  > .gyro-composer-context-row",
+    ) &&
+    styleSource.includes("Hero composer: one coherent surface") &&
+    styleSource.includes(
+      "border-top: 1px solid var(--gyro-premium-hairline-soft)",
+    ),
+  "The hero composer should render as one bordered surface without nested card borders.",
+);
 
 const requiredViewports = ["1280x720", "1440x900", "2048x1180"];
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

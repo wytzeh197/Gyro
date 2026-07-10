@@ -284,6 +284,7 @@ struct TerminalPaneRequest {
     command: String,
     args: Vec<String>,
     workspace_path: Option<String>,
+    workspace_mode: Option<String>,
     working_directory: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
@@ -2698,12 +2699,16 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
     let workspace = request
         .workspace_path
         .as_deref()
+        .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
         .map(|path| path.canonicalize())
         .transpose()?;
-    let Some(workspace) = workspace else {
+    let Some(mut workspace) = workspace else {
         return Ok(None);
     };
+    if request.workspace_mode.as_deref() != Some("worktree") {
+        workspace = terminal_local_workspace(&workspace).unwrap_or(workspace);
+    }
 
     let Some(working_directory) = request.working_directory.as_deref() else {
         return Ok(Some(workspace));
@@ -2714,6 +2719,37 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
 
     let candidate = Path::new(working_directory);
     gyro_core::security::assert_path_inside_workspace(&workspace, candidate).map(Some)
+}
+
+fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
+    let top_level_output = command_with_gui_path("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()?;
+    if !top_level_output.status.success() {
+        return Ok(workspace.to_path_buf());
+    }
+    let git_top_level =
+        PathBuf::from(String::from_utf8_lossy(&top_level_output.stdout).trim()).canonicalize()?;
+
+    let common_dir_output = command_with_gui_path("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()?;
+    if !common_dir_output.status.success() {
+        return Ok(workspace.to_path_buf());
+    }
+    let git_common_dir = PathBuf::from(String::from_utf8_lossy(&common_dir_output.stdout).trim());
+    let Some(repo_root) = git_common_dir.parent() else {
+        return Ok(workspace.to_path_buf());
+    };
+    let repo_root = repo_root.canonicalize()?;
+    if repo_root != git_top_level {
+        return Ok(repo_root);
+    }
+    Ok(workspace.to_path_buf())
 }
 
 fn terminal_command_path(command: &str) -> String {
@@ -3497,16 +3533,39 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     format!("{}{}", &value[..truncate_at], TEXT_TRUNCATION_SUFFIX)
 }
 
-fn push_bounded(target: &mut String, value: &str, max_chars: usize) -> bool {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct BoundedPushResult {
+    accepted_chars: usize,
+    truncated: bool,
+}
+
+fn push_bounded(
+    target: &mut String,
+    target_chars: &mut usize,
+    value: &str,
+    max_chars: usize,
+) -> BoundedPushResult {
     if value.is_empty() {
-        return false;
+        return BoundedPushResult::default();
     }
-    target.push_str(value);
-    if target.len() > max_chars {
-        *target = truncate_chars(target, max_chars);
-        return true;
+    let remaining_chars = max_chars.saturating_sub(*target_chars);
+    let value_chars = value.chars().count();
+    if value_chars <= remaining_chars {
+        target.push_str(value);
+        *target_chars += value_chars;
+        return BoundedPushResult {
+            accepted_chars: value_chars,
+            truncated: false,
+        };
     }
-    false
+
+    target.extend(value.chars().take(remaining_chars));
+    target.push_str(TEXT_TRUNCATION_SUFFIX);
+    *target_chars += remaining_chars;
+    BoundedPushResult {
+        accepted_chars: remaining_chars,
+        truncated: true,
+    }
 }
 
 struct StreamingCommandOutput {
@@ -3520,7 +3579,10 @@ struct StreamingCommandOutput {
 
 struct StreamingCommandState {
     stdout_text: String,
+    stdout_text_chars: usize,
+    stdout_text_truncated: bool,
     assistant_text: String,
+    assistant_text_chars: usize,
     assistant_text_truncated: bool,
     pending_delta_chunks: Vec<String>,
     pending_delta_chars: usize,
@@ -3532,7 +3594,10 @@ impl StreamingCommandState {
     fn new() -> Self {
         Self {
             stdout_text: String::new(),
+            stdout_text_chars: 0,
+            stdout_text_truncated: false,
             assistant_text: String::new(),
+            assistant_text_chars: 0,
             assistant_text_truncated: false,
             pending_delta_chunks: Vec::new(),
             pending_delta_chars: 0,
@@ -3542,16 +3607,39 @@ impl StreamingCommandState {
     }
 
     fn push_stdout(&mut self, line: &str) {
-        push_bounded(&mut self.stdout_text, line, MAX_CHAT_RESPONSE_CHARS * 4);
+        if self.stdout_text_truncated {
+            return;
+        }
+        self.stdout_text_truncated = push_bounded(
+            &mut self.stdout_text,
+            &mut self.stdout_text_chars,
+            line,
+            MAX_CHAT_RESPONSE_CHARS * 4,
+        )
+        .truncated;
     }
 
     fn push_assistant_delta(&mut self, delta: &str) {
         if self.assistant_text_truncated {
             return;
         }
-        self.assistant_text_truncated =
-            push_bounded(&mut self.assistant_text, delta, MAX_CHAT_RESPONSE_CHARS);
-        self.push_pending_delta(delta);
+        let result = push_bounded(
+            &mut self.assistant_text,
+            &mut self.assistant_text_chars,
+            delta,
+            MAX_CHAT_RESPONSE_CHARS,
+        );
+        self.assistant_text_truncated = result.truncated;
+        if result.truncated {
+            let mut accepted_delta = delta
+                .chars()
+                .take(result.accepted_chars)
+                .collect::<String>();
+            accepted_delta.push_str(TEXT_TRUNCATION_SUFFIX);
+            self.push_pending_delta(&accepted_delta);
+        } else {
+            self.push_pending_delta(delta);
+        }
     }
 
     fn push_assistant_snapshot(&mut self, snapshot: &str) {
@@ -3568,10 +3656,11 @@ impl StreamingCommandState {
     }
 
     fn push_pending_delta(&mut self, delta: &str) {
-        if delta.is_empty() || self.pending_delta_chars >= MAX_CHAT_RESPONSE_CHARS {
+        let max_pending_chars = MAX_CHAT_RESPONSE_CHARS + TEXT_TRUNCATION_SUFFIX.len();
+        if delta.is_empty() || self.pending_delta_chars >= max_pending_chars {
             return;
         }
-        let remaining_chars = MAX_CHAT_RESPONSE_CHARS - self.pending_delta_chars;
+        let remaining_chars = max_pending_chars - self.pending_delta_chars;
         let delta_chars = delta.chars().count();
         if delta_chars <= remaining_chars {
             self.pending_delta_chunks.push(delta.to_string());
@@ -3580,7 +3669,7 @@ impl StreamingCommandState {
         }
         let truncated_delta = delta.chars().take(remaining_chars).collect::<String>();
         self.pending_delta_chunks.push(truncated_delta);
-        self.pending_delta_chars = MAX_CHAT_RESPONSE_CHARS;
+        self.pending_delta_chars = max_pending_chars;
     }
 
     fn take_pending_delta(&mut self) -> String {
@@ -4545,7 +4634,7 @@ mod tests {
         state.push_assistant_snapshot("hello");
 
         assert_eq!(state.assistant_text, "hello");
-        assert_eq!(state.pending_delta, "hello");
+        assert_eq!(state.take_pending_delta(), "hello");
     }
 
     #[test]
@@ -4554,14 +4643,14 @@ mod tests {
         state.push_assistant_delta(&"a".repeat(MAX_CHAT_RESPONSE_CHARS + 32));
 
         assert!(state.assistant_text_truncated);
-        assert!(!state.pending_delta.is_empty());
+        assert!(state.has_pending_delta());
         let capped_text = state.assistant_text.clone();
+        assert_eq!(state.take_pending_delta(), capped_text);
 
-        state.pending_delta.clear();
         state.push_assistant_delta("ignored");
 
         assert_eq!(state.assistant_text, capped_text);
-        assert!(state.pending_delta.is_empty());
+        assert!(!state.has_pending_delta());
     }
 
     #[test]
@@ -4690,11 +4779,95 @@ mod tests {
         assert_eq!(truncate_chars("ééé", 2), "éé...");
 
         let mut streamed = String::new();
-        push_bounded(&mut streamed, "é", 2);
-        push_bounded(&mut streamed, "é", 2);
-        push_bounded(&mut streamed, "é", 2);
+        let mut streamed_chars = 0;
+        assert_eq!(
+            push_bounded(&mut streamed, &mut streamed_chars, "é", 2),
+            BoundedPushResult {
+                accepted_chars: 1,
+                truncated: false,
+            }
+        );
+        assert_eq!(
+            push_bounded(&mut streamed, &mut streamed_chars, "é", 2),
+            BoundedPushResult {
+                accepted_chars: 1,
+                truncated: false,
+            }
+        );
+        assert_eq!(
+            push_bounded(&mut streamed, &mut streamed_chars, "é", 2),
+            BoundedPushResult {
+                accepted_chars: 0,
+                truncated: true,
+            }
+        );
 
         assert_eq!(streamed, "éé...");
+        assert_eq!(streamed_chars, 2);
+    }
+
+    #[test]
+    fn terminal_cwd_ignores_blank_workspace_path() {
+        let request = TerminalPaneRequest {
+            pane_id: "blank-workspace".into(),
+            title: "Shell".into(),
+            command: "zsh".into(),
+            args: Vec::new(),
+            workspace_path: Some("   ".into()),
+            workspace_mode: None,
+            working_directory: None,
+            cols: None,
+            rows: None,
+        };
+
+        assert_eq!(resolve_terminal_cwd(&request).unwrap(), None);
+    }
+
+    #[test]
+    fn terminal_local_cwd_uses_source_repo_for_gyro_worktree() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        run_git(&repo, &["init"]);
+        run_git(&repo, &["config", "user.email", "gyro@example.test"]);
+        run_git(&repo, &["config", "user.name", "Gyro Test"]);
+        std::fs::write(repo.join("README.md"), "# test\n").unwrap();
+        run_git(&repo, &["add", "README.md"]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let plan = create_worktree(
+            &paths,
+            &repo,
+            "gyro/terminal-cwd",
+            Some("gyro-terminal-cwd".into()),
+        )
+        .unwrap();
+
+        let local_request = TerminalPaneRequest {
+            pane_id: "local-cwd".into(),
+            title: "Shell".into(),
+            command: "zsh".into(),
+            args: Vec::new(),
+            workspace_path: Some(plan.worktree_path.display().to_string()),
+            workspace_mode: Some("local".into()),
+            working_directory: Some("Workspace".into()),
+            cols: None,
+            rows: None,
+        };
+        assert_eq!(
+            resolve_terminal_cwd(&local_request).unwrap(),
+            Some(repo.canonicalize().unwrap())
+        );
+
+        let worktree_request = TerminalPaneRequest {
+            workspace_mode: Some("worktree".into()),
+            ..local_request
+        };
+        assert_eq!(
+            resolve_terminal_cwd(&worktree_request).unwrap(),
+            Some(plan.worktree_path.canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -4734,6 +4907,7 @@ mod tests {
                 command: "sh".into(),
                 args: vec!["-c".into(), "printf hello".into()],
                 workspace_path: None,
+                workspace_mode: None,
                 working_directory: None,
                 cols: None,
                 rows: None,
@@ -4767,6 +4941,7 @@ mod tests {
                 command: "zsh".into(),
                 args: vec!["-il".into()],
                 workspace_path: None,
+                workspace_mode: None,
                 working_directory: None,
                 cols: None,
                 rows: None,
@@ -4791,6 +4966,7 @@ mod tests {
                 command: "sh".into(),
                 args: vec!["-c".into(), "read line; printf out:$line".into()],
                 workspace_path: None,
+                workspace_mode: None,
                 working_directory: None,
                 cols: None,
                 rows: None,
@@ -4820,6 +4996,7 @@ mod tests {
                     "printf '%s %s %s' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\"".into(),
                 ],
                 workspace_path: None,
+                workspace_mode: None,
                 working_directory: None,
                 cols: None,
                 rows: None,
@@ -4841,6 +5018,7 @@ mod tests {
                 command: "sh".into(),
                 args: vec!["-c".into(), "sleep 5".into()],
                 workspace_path: None,
+                workspace_mode: None,
                 working_directory: None,
                 cols: None,
                 rows: None,
@@ -4865,5 +5043,20 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         manager.read(pane_id).unwrap()
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

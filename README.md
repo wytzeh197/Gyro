@@ -17,6 +17,15 @@ is pre-launch foundation work for the first private/developer preview:
 - Shared React UI package for chat, files, diffs, terminal profiles, and settings.
 - Release, Homebrew, security, governance, and launch documentation.
 
+## Launch Film
+
+[![Watch the Gyro launch film](docs/media/launch/gyro-launch-poster.png)](docs/media/launch/gyro-launch-film.mp4)
+
+The current launch film is a 22-second, silent product reveal built from the
+real Chat, CLI, IDE, Permissions, and Providers surfaces. Watch the
+[repository master](docs/media/launch/gyro-launch-film.mp4), or see the
+[launch-film notes](docs/media/launch/README.md) for delivery details.
+
 ## Code Upgrade Roadmap
 
 Gyro is an agent harness, not just a chat surface. Code upgrades should strengthen the parts that make agent runs safe, observable, resumable, and portable across app, CLI, and future IDE surfaces.
