@@ -1,5 +1,18 @@
 # Launch Plan
 
+## Launch Film
+
+The canonical repository copy of the current launch film lives with the launch
+documentation:
+
+- [Watch the 22-second silent launch film](media/launch/gyro-launch-film.mp4)
+- [Open the launch poster](media/launch/gyro-launch-poster.png)
+- [Read the asset and delivery notes](media/launch/README.md)
+
+The repository tracks the channel-ready H.264 master and poster. High-bitrate
+mezzanine renders and working production artifacts stay outside ordinary Git
+history so clones remain lightweight.
+
 ## Local App Launch
 
 Use the dev launcher only while developing:

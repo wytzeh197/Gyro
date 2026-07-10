@@ -9,6 +9,9 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Local generated production artifacts and mezzanine media.
+/artifacts/
+
 target/
 
 apps/desktop/src-tauri/target/

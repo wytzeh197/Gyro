@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import Editor, { type OnMount } from "@monaco-editor/react";
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal as XTerm } from "@xterm/xterm";
+import type { OnMount } from "@monaco-editor/react";
+import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
+import type { Terminal as XTermInstance } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   AppChrome,
@@ -76,7 +76,9 @@ import {
   type WorkspaceLayoutId,
 } from "@gyro-dev/ui";
 import {
+  lazy,
   startTransition,
+  Suspense,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -93,6 +95,8 @@ import {
   mergeProviderResponseEvents,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
+
+const MonacoEditor = lazy(() => import("@monaco-editor/react"));
 
 type AppNotification = {
   kind: "open-session" | "attach-session";
@@ -219,7 +223,7 @@ const EMPTY_CONFIG: GyroConfig = {
   commandProfiles: [],
 };
 
-const DEFAULT_WORKSPACE_PATH = "/Users/wytzehemrica/Documents/Gyro";
+const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
 const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
 const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
@@ -1355,7 +1359,7 @@ export function App() {
 
   const openWorkspace = useCallback(async () => {
     if (!isTauriRuntime()) {
-      await activateWorkspacePath(DEFAULT_WORKSPACE_PATH);
+      await activateWorkspacePath(PREVIEW_WORKSPACE_PATH);
       return;
     }
     try {
@@ -1369,7 +1373,7 @@ export function App() {
       }
       await activateWorkspacePath(selected);
     } catch {
-      setWorkspacePath(DEFAULT_WORKSPACE_PATH);
+      setWorkspacePath(PREVIEW_WORKSPACE_PATH);
       setFiles(previewFiles);
       notify("command-failed", "Workspace open failed", "Using preview files");
     }
@@ -1378,10 +1382,10 @@ export function App() {
   const selectContextFile = useCallback(async () => {
     if (!isTauriRuntime()) {
       const previewFile = previewFiles[0]?.path ?? "apps/desktop/src/App.tsx";
-      setWorkspacePath(DEFAULT_WORKSPACE_PATH);
+      setWorkspacePath(PREVIEW_WORKSPACE_PATH);
       setFiles(previewFiles);
       setSelectedFile(previewFile);
-      refreshIdeServices(DEFAULT_WORKSPACE_PATH);
+      refreshIdeServices(PREVIEW_WORKSPACE_PATH);
       dispatchWorkbench({
         type: "ide-open-tab",
         tab: {
@@ -1720,7 +1724,7 @@ export function App() {
           paneId,
           profile,
           "running",
-          workspaceRunMetadata(workbench.workspaceMode, profile.displayName),
+          workspaceRunMetadata("local", profile.displayName),
         );
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
@@ -1764,10 +1768,8 @@ export function App() {
               paneId,
               rows: size?.rows,
               title: profile.displayName,
-              workspacePath:
-                activeSession?.workspacePath ??
-                workspacePath ??
-                DEFAULT_WORKSPACE_PATH,
+              workspacePath: activeSession?.workspacePath ?? workspacePath,
+              workspaceMode: "local",
               workingDirectory: profile.workingDirectory,
             },
           },
@@ -2045,7 +2047,7 @@ export function App() {
         paneId,
         profile,
         "running",
-        workspaceRunMetadata(workbench.workspaceMode, profile.displayName),
+        workspaceRunMetadata("local", profile.displayName),
       );
       dispatchWorkbench({
         type: "select-workspace-layout",
@@ -2070,10 +2072,8 @@ export function App() {
               command: profile.command,
               paneId,
               title: profile.displayName,
-              workspacePath:
-                activeSession?.workspacePath ??
-                workspacePath ??
-                DEFAULT_WORKSPACE_PATH,
+              workspacePath: activeSession?.workspacePath ?? workspacePath,
+              workspaceMode: "local",
               workingDirectory: profile.workingDirectory,
             },
           },
@@ -4599,6 +4599,7 @@ export function App() {
           }
           onWrite={writeTerminalInputToPane}
           pane={pane}
+          theme={workbench.preferences.theme}
         />
       )}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
@@ -5462,6 +5463,7 @@ function LiveTerminalPaneBody({
   onSelect,
   onWrite,
   pane,
+  theme,
 }: {
   isActive: boolean;
   onReconnect: (paneId: string) => void;
@@ -5469,16 +5471,22 @@ function LiveTerminalPaneBody({
   onSelect: (paneId: string) => void;
   onWrite: (paneId: string, input: string) => void;
   pane: TerminalPane;
+  theme: WorkbenchState["preferences"]["theme"];
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const terminalRef = useRef<XTerm | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const terminalRef = useRef<XTermInstance | null>(null);
+  const fitAddonRef = useRef<FitAddonInstance | null>(null);
+  const paneOutputRef = useRef(pane.output ?? "");
   const renderedOutputRef = useRef("");
   const resizeFrameRef = useRef<number | undefined>();
   const lastSizeRef = useRef("");
   const statusRef = useRef(pane.status);
+  const themeRef = useRef(theme);
   const onResizeRef = useRef(onResize);
   const onWriteRef = useRef(onWrite);
+
+  paneOutputRef.current = pane.output ?? "";
+  themeRef.current = theme;
 
   useEffect(() => {
     statusRef.current = pane.status;
@@ -5492,84 +5500,94 @@ function LiveTerminalPaneBody({
       return;
     }
 
-    const terminal = new XTerm({
-      allowTransparency: true,
-      cursorBlink: true,
-      fontFamily:
-        "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
-      fontSize: 12,
-      lineHeight: 1.35,
-      macOptionIsMeta: true,
-      rightClickSelectsWord: true,
-      scrollOnUserInput: true,
-      scrollback: 5000,
-      theme: {
-        background: "#050708",
-        black: "#101419",
-        blue: "#7aa7ff",
-        brightBlack: "#505965",
-        brightBlue: "#9dbdff",
-        brightCyan: "#9ee7df",
-        brightGreen: "#94e9b8",
-        brightMagenta: "#d6b3ff",
-        brightRed: "#ff9c9c",
-        brightWhite: "#f5f7fa",
-        brightYellow: "#ffe59b",
-        cursor: "#e7edf6",
-        cyan: "#71d7cf",
-        foreground: "#d9e0ea",
-        green: "#78dda2",
-        magenta: "#bf95ff",
-        red: "#ff8585",
-        selectionBackground: "#2b3644",
-        white: "#d9e0ea",
-        yellow: "#f5d77a",
-      },
-    });
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    terminal.open(host);
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
+    let disposed = false;
+    let disposeTerminal: (() => void) | undefined;
 
-    const dataDisposable = terminal.onData((data) => {
-      onWriteRef.current(pane.id, data);
-    });
-
-    const fitAndReport = () => {
-      try {
-        fitAddon.fit();
-        const sizeKey = `${terminal.cols}x${terminal.rows}`;
-        if (
-          statusRef.current === "running" &&
-          sizeKey !== lastSizeRef.current
-        ) {
-          lastSizeRef.current = sizeKey;
-          onResizeRef.current(pane.id, terminal.cols, terminal.rows);
+    void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")])
+      .then(([{ Terminal }, { FitAddon }]) => {
+        if (disposed || !hostRef.current) {
+          return;
         }
-      } catch {
-        // The terminal can be hidden during route transitions; the next resize fixes it.
-      }
-    };
 
-    const scheduleFit = () => {
-      if (resizeFrameRef.current) {
-        window.cancelAnimationFrame(resizeFrameRef.current);
-      }
-      resizeFrameRef.current = window.requestAnimationFrame(fitAndReport);
-    };
+        const terminal = new Terminal({
+          allowTransparency: true,
+          cursorBlink: true,
+          drawBoldTextInBrightColors: true,
+          fontFamily:
+            "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+          fontSize: 12,
+          lineHeight: 1.35,
+          macOptionIsMeta: true,
+          minimumContrastRatio: 2.6,
+          rightClickSelectsWord: true,
+          scrollOnUserInput: true,
+          scrollback: 5000,
+          theme: terminalThemeFor(themeRef.current),
+        });
+        const fitAddon = new FitAddon();
+        terminal.loadAddon(fitAddon);
+        terminal.open(hostRef.current);
+        terminalRef.current = terminal;
+        fitAddonRef.current = fitAddon;
 
-    const resizeObserver = new ResizeObserver(scheduleFit);
-    resizeObserver.observe(host);
-    scheduleFit();
+        const initialOutput = paneOutputRef.current;
+        if (initialOutput) {
+          terminal.write(formatTerminalDelta(initialOutput));
+          renderedOutputRef.current = initialOutput;
+        }
+        if (isActive) {
+          terminal.focus();
+        }
+
+        const dataDisposable = terminal.onData((data) => {
+          onWriteRef.current(pane.id, data);
+        });
+
+        const fitAndReport = () => {
+          try {
+            fitAddon.fit();
+            const sizeKey = `${terminal.cols}x${terminal.rows}`;
+            if (
+              statusRef.current === "running" &&
+              sizeKey !== lastSizeRef.current
+            ) {
+              lastSizeRef.current = sizeKey;
+              onResizeRef.current(pane.id, terminal.cols, terminal.rows);
+            }
+          } catch {
+            // The terminal can be hidden during route transitions; the next resize fixes it.
+          }
+        };
+
+        const scheduleFit = () => {
+          if (resizeFrameRef.current) {
+            window.cancelAnimationFrame(resizeFrameRef.current);
+          }
+          resizeFrameRef.current = window.requestAnimationFrame(fitAndReport);
+        };
+
+        const resizeObserver = new ResizeObserver(scheduleFit);
+        resizeObserver.observe(hostRef.current);
+        scheduleFit();
+
+        disposeTerminal = () => {
+          resizeObserver.disconnect();
+          if (resizeFrameRef.current) {
+            window.cancelAnimationFrame(resizeFrameRef.current);
+          }
+          dataDisposable.dispose();
+          terminal.dispose();
+        };
+      })
+      .catch(() => {
+        if (!disposed && hostRef.current) {
+          hostRef.current.textContent = "Terminal renderer failed to load.";
+        }
+      });
 
     return () => {
-      resizeObserver.disconnect();
-      if (resizeFrameRef.current) {
-        window.cancelAnimationFrame(resizeFrameRef.current);
-      }
-      dataDisposable.dispose();
-      terminal.dispose();
+      disposed = true;
+      disposeTerminal?.();
       terminalRef.current = null;
       fitAddonRef.current = null;
       renderedOutputRef.current = "";
@@ -5604,6 +5622,13 @@ function LiveTerminalPaneBody({
     }
   }, [isActive]);
 
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal) {
+      terminal.options.theme = terminalThemeFor(theme);
+    }
+  }, [theme]);
+
   return (
     <div className="gyro-xterm-frame">
       <div
@@ -5632,6 +5657,58 @@ function LiveTerminalPaneBody({
       ) : null}
     </div>
   );
+}
+
+function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
+  if (theme === "light") {
+    return {
+      background: "#ffffff",
+      black: "#1f242c",
+      blue: "#1f66d1",
+      brightBlack: "#5b6470",
+      brightBlue: "#2f7dff",
+      brightCyan: "#008f9a",
+      brightGreen: "#168a50",
+      brightMagenta: "#b034c9",
+      brightRed: "#d92d20",
+      brightWhite: "#171a20",
+      brightYellow: "#a15c00",
+      cursor: "#1f242c",
+      cursorAccent: "#ffffff",
+      cyan: "#007c89",
+      foreground: "#25272d",
+      green: "#087443",
+      magenta: "#9b26b6",
+      red: "#b42318",
+      selectionBackground: "#dfe2e6",
+      white: "#d8d9dc",
+      yellow: "#875200",
+    };
+  }
+
+  return {
+    background: "#101722",
+    black: "#111923",
+    blue: "#6ea8ff",
+    brightBlack: "#7b8491",
+    brightBlue: "#99c2ff",
+    brightCyan: "#7ce7e1",
+    brightGreen: "#7ee2a8",
+    brightMagenta: "#f08cff",
+    brightRed: "#ff8a88",
+    brightWhite: "#f5f7fa",
+    brightYellow: "#ffd166",
+    cursor: "#e7edf6",
+    cursorAccent: "#101722",
+    cyan: "#51d7d0",
+    foreground: "#e2e8f0",
+    green: "#52d985",
+    magenta: "#d86cff",
+    red: "#ff6f6f",
+    selectionBackground: "#374151",
+    white: "#d9e0ea",
+    yellow: "#f2c94c",
+  };
 }
 
 function formatTerminalDelta(value: string) {
@@ -6518,30 +6595,34 @@ function MonacoEditorPane({
   }
 
   return (
-    <Editor
-      height="100%"
-      language={languageForPath(path)}
-      onChange={(value) => onChange(value ?? "")}
-      onMount={handleMount}
-      options={{
-        automaticLayout: true,
-        bracketPairColorization: { enabled: Boolean("editor") },
-        fontFamily:
-          "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
-        fontLigatures: false,
-        fontSize: 13,
-        lineHeight: 20,
-        minimap: { enabled: Boolean("editor"), scale: 0.75 },
-        padding: { top: 14, bottom: 14 },
-        scrollBeyondLastLine: false,
-        smoothScrolling: true,
-        tabSize: 2,
-        wordWrap: "off",
-      }}
-      path={path}
-      theme={theme === "light" ? "vs" : "vs-dark"}
-      value={buffer?.content ?? fileContent?.content ?? ""}
-    />
+    <Suspense
+      fallback={<div className="gyro-code-empty">Loading editor...</div>}
+    >
+      <MonacoEditor
+        height="100%"
+        language={languageForPath(path)}
+        onChange={(value) => onChange(value ?? "")}
+        onMount={handleMount}
+        options={{
+          automaticLayout: true,
+          bracketPairColorization: { enabled: true },
+          fontFamily:
+            "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
+          fontLigatures: false,
+          fontSize: 13,
+          lineHeight: 20,
+          minimap: { enabled: true, scale: 0.75 },
+          padding: { top: 14, bottom: 14 },
+          scrollBeyondLastLine: false,
+          smoothScrolling: true,
+          tabSize: 2,
+          wordWrap: "off",
+        }}
+        path={path}
+        theme={theme === "light" ? "vs" : "vs-dark"}
+        value={buffer?.content ?? fileContent?.content ?? ""}
+      />
+    </Suspense>
   );
 }
 
@@ -6952,7 +7033,9 @@ function applyProviderChatStreamEvent(
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
     limitSessionEventsForUi(
-      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+      updateEvents(
+        optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
+      ),
     ),
   );
   setEvents((current) => {

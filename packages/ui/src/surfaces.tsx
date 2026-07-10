@@ -613,7 +613,11 @@ function WorkspaceSidebarContent({
         />
       </div>
 
-      <div className="gyro-sidebar-mode-group" aria-label="Workspace modes">
+      <div
+        aria-label="Workspace modes"
+        className="gyro-sidebar-mode-group"
+        data-active-mode={activeWorkspaceLayout}
+      >
         <SidebarModeRow
           label="Chat"
           isActive={
