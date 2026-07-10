@@ -5,7 +5,7 @@
 The canonical repository copy of the current launch film lives with the launch
 documentation:
 
-- [Watch the 22-second silent launch film](media/launch/gyro-launch-film.mp4)
+- [Watch the 22-second cinematic launch film](media/launch/gyro-launch-film.mp4)
 - [Open the launch poster](media/launch/gyro-launch-poster.png)
 - [Read the asset and delivery notes](media/launch/README.md)
 

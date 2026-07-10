@@ -20,6 +20,7 @@
     "doctor": "node scripts/check-dev-env.mjs",
     "format": "prettier --check .",
     "lint": "pnpm -r lint",
+    "launch:teaser": "bash scripts/render-launch-teaser.sh",
     "release:check": "node scripts/check-release-config.mjs",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs",
     "test": "pnpm -r test",

@@ -21,8 +21,9 @@ is pre-launch foundation work for the first private/developer preview:
 
 [![Watch the Gyro launch film](docs/media/launch/gyro-launch-poster.png)](docs/media/launch/gyro-launch-film.mp4)
 
-The current launch film is a 22-second, silent product reveal built from the
-real Chat, CLI, IDE, Permissions, and Providers surfaces. Watch the
+The current launch film is a 22-second cinematic teaser built from original
+motion, procedural sound design, and abstract product fragments rather than
+interface screenshots. Watch the
 [repository master](docs/media/launch/gyro-launch-film.mp4), or see the
 [launch-film notes](docs/media/launch/README.md) for delivery details.
 
