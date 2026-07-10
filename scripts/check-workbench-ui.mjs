@@ -14,7 +14,17 @@ import {
   parseProviderHealthOutput,
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
-import { providerCatalog } from "../packages/ui/src/provider-catalog.ts";
+import {
+  normalizedConfig,
+  providerCatalog,
+  providersForConfig,
+} from "../packages/ui/src/provider-catalog.ts";
+import {
+  CHAT_RESPONSE_TRUNCATION_SUFFIX,
+  MAX_CHAT_EVENT_RENDER_COUNT,
+  MAX_CHAT_RESPONSE_CHARS,
+  applyProviderChatStreamDeltas,
+} from "../apps/desktop/src/provider-stream-events.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -30,6 +40,10 @@ function readRepoFile(path) {
 }
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const providerStreamSource = readRepoFile(
+  "apps/desktop/src/provider-stream-events.ts",
+);
+const appAndStreamSource = `${appSource}\n${providerStreamSource}`;
 const indexSource = readRepoFile("packages/ui/src/index.ts");
 const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
@@ -38,6 +52,7 @@ const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
 const typeSource = readRepoFile("packages/ui/src/types.ts");
 const reducerSource = readRepoFile("packages/ui/src/workbench-state.ts");
+const coreHarnessSource = readRepoFile("crates/gyro-core/src/harness.rs");
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 const tauriConfigSource = readRepoFile(
@@ -50,8 +65,107 @@ expect(
     "openai,anthropic,xai,gemini",
   "Composer provider picker should show OpenAI, Anthropic, xAI, and Gemini only.",
 );
+const restoredEnabledConfig = normalizedConfig({
+  updateChannel: "stable",
+  telemetryEnabled: false,
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  modelProviders: [
+    {
+      id: "openai",
+      displayName: "OpenAI",
+      baseUrl: null,
+      apiKeyRef: "provider:openai",
+      enabled: true,
+    },
+  ],
+  commandProfiles: [],
+});
+expect(
+  providersForConfig(restoredEnabledConfig).find(
+    (provider) => provider.id === "openai",
+  )?.authStatus === "connected",
+  "Saved enabled providers should rehydrate as connected when backend config omits authStatus.",
+);
+
+const streamRegressionEvents = [
+  {
+    id: "stream-session-created",
+    sessionId: "stream-session",
+    createdAt: "2026-07-09T00:00:00.000Z",
+    kind: "session-created",
+    message: "Stream session",
+    payload: {},
+  },
+  ...Array.from({ length: MAX_CHAT_EVENT_RENDER_COUNT + 30 }, (_, index) => ({
+    id: `stream-user-${index}`,
+    sessionId: "stream-session",
+    createdAt: "2026-07-09T00:00:00.000Z",
+    turnId: `old-turn-${index}`,
+    kind: "user-message",
+    message: `older message ${index}`,
+    payload: {},
+  })),
+];
+const streamRegressionDeltas = Array.from({ length: 800 }, (_, index) => ({
+  sessionId: "stream-session",
+  turnId: "stream-turn",
+  providerId: "openai",
+  modelId: "gpt-5",
+  eventId: `stream-delta-${index}`,
+  phase: "delta",
+  textDelta: `chunk-${index.toString().padStart(4, "0")}: ${"x".repeat(120)}\n`,
+}));
+const streamOptimisticEventsRef = { current: new Map() };
+let streamRegressionState = streamRegressionEvents;
+let streamRegressionSetCalls = 0;
+applyProviderChatStreamDeltas(
+  streamOptimisticEventsRef,
+  (value) => {
+    streamRegressionSetCalls += 1;
+    streamRegressionState =
+      typeof value === "function" ? value(streamRegressionState) : value;
+  },
+  streamRegressionDeltas,
+);
+const streamingAssistantEvents = streamRegressionState.filter(
+  (event) =>
+    event.kind === "assistant-message" && event.turnId === "stream-turn",
+);
+const [streamingAssistantEvent] = streamingAssistantEvents;
+expect(
+  streamRegressionSetCalls === 1,
+  "Provider stream deltas should be applied in one state update per flushed batch.",
+);
+expect(
+  streamRegressionState.length === MAX_CHAT_EVENT_RENDER_COUNT,
+  "Provider stream delta batches should keep the rendered event list bounded.",
+);
+expect(
+  streamRegressionState[0]?.kind === "session-created",
+  "Provider stream event capping should keep the session-created event.",
+);
+expect(
+  streamingAssistantEvents.length === 1,
+  "Provider stream deltas should merge into one streaming assistant event.",
+);
+expect(
+  streamingAssistantEvent?.message.length ===
+    MAX_CHAT_RESPONSE_CHARS + CHAT_RESPONSE_TRUNCATION_SUFFIX.length &&
+    streamingAssistantEvent?.message.endsWith(CHAT_RESPONSE_TRUNCATION_SUFFIX),
+  "Provider stream deltas should truncate oversized assistant responses once.",
+);
+expect(
+  streamOptimisticEventsRef.current.get("stream-session")?.length === 1,
+  "Provider stream deltas should keep one optimistic streaming assistant event.",
+);
 const codexProfile = profiles.find((profile) => profile.id === "codex");
 expect(Boolean(codexProfile), "Default Codex command profile is missing.");
+const shellProfile = profiles.find((profile) => profile.id === "shell");
+expect(
+  shellProfile?.command === "zsh" && shellProfile.args.includes("-il"),
+  "Default Shell profile should launch an interactive login zsh.",
+);
 
 const initialState = createInitialWorkbenchState();
 expect(
@@ -303,6 +417,18 @@ if (codexProfile) {
     updatedPane?.status === "done" &&
       updatedPane?.output === "terminal output captured",
     "Terminal pane lifecycle failed.",
+  );
+  const unchangedTerminalState = workbenchReducer(state, {
+    type: "sync-terminal-pane-snapshot",
+    paneId: pane.id,
+    status: "done",
+    event: "done (0)",
+    command: "codex --help",
+    output: "terminal output captured",
+  });
+  expect(
+    unchangedTerminalState === state,
+    "Unchanged terminal snapshots should not create new workbench state.",
   );
   const destinationBeforeRestore = state.activeDestination;
   state = workbenchReducer(state, {
@@ -826,6 +952,10 @@ for (const commandName of [
   "append_plan_event",
   "append_editor_event",
   "load_config",
+  "get_account_session",
+  "start_account_login",
+  "refresh_account_session",
+  "logout_account",
   "save_config",
   "list_workspace_files",
   "list_workspace_tree",
@@ -853,6 +983,35 @@ for (const commandName of [
   expect(
     appSource.includes(commandName) || tauriSource.includes(commandName),
     `Desktop app no longer references stable Tauri command ${commandName}.`,
+  );
+}
+
+expect(
+  !/#\[tauri::command\]\s*fn /.test(tauriSource),
+  "Tauri command handlers should be async so command entrypoints do not run synchronous work on the UI-facing command path.",
+);
+
+for (const commandName of [
+  "load_config",
+  "get_account_session",
+  "start_account_login",
+  "refresh_account_session",
+  "logout_account",
+  "list_automations",
+  "list_due_automations",
+  "create_automation",
+  "set_automation_status",
+  "run_automation",
+  "claim_due_automation",
+  "complete_automation_lease",
+  "recover_automation_leases",
+  "triage_automation",
+]) {
+  expect(
+    tauriSource.includes(`async fn ${commandName}`) &&
+      tauriSource.includes(`${commandName}_blocking`) &&
+      tauriSource.includes("spawn_blocking"),
+    `Tauri command ${commandName} should run through a blocking worker.`,
   );
 }
 
@@ -885,18 +1044,322 @@ for (const readinessCall of [
 
 expect(
   appSource.includes("createOptimisticTurnEvents") &&
+    appSource.includes('providerStatusMessage("running", provider)') &&
+    appSource.includes("waitForNextPaint") &&
     appSource.includes("optimisticEventsRef") &&
     appSource.includes("mergePersistedAndOptimisticEvents") &&
+    appAndStreamSource.includes(
+      "const merged = limitSessionEventsForUi(persistedEvents)",
+    ) &&
+    appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
+    appSource.includes("limitSessionEventsForUi(optimisticEvents.map(updateEvent))") &&
     appSource.includes("updateOptimisticProviderStatus") &&
     appSource.includes("setIsStartingFirstTurn") &&
-    appSource.includes('invoke<ProviderChatResponse>("run_provider_chat"') &&
+    appSource.includes("sendingSessionIdsRef") &&
+    appSource.includes("setSessionSending") &&
+    appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
+    appSource.includes("[activeSessionId, events.length]") &&
+    appSource.includes("shouldSuggestSessionTitle(\n        activeSession,\n        activeSessionHasTranscriptEvents") &&
+    !appSource.includes("shouldSuggestSessionTitle(\n        activeSession,\n        events") &&
+    appSource.includes("draftResetToken") &&
+    appSource.includes("resetChatDraft") &&
+    !appSource.includes("const [draft, setDraft]") &&
+    !appSource.includes("onDraftChange={setDraft}") &&
+    appSource.includes("maxDraftLength={MAX_CHAT_MESSAGE_CHARS}") &&
+    /invoke<ProviderChatResponse>\(\s*"run_provider_chat"/.test(appSource) &&
+    appSource.includes("sessionTitleFromMessage") &&
+    appSource.includes("shouldSuggestSessionTitle") &&
+    appSource.includes("applyProviderChatResponse") &&
+    appSource.includes("mergeProviderResponseEvents") &&
+    appSource.includes("response?.statusEvent") &&
+    appSource.includes("response?.assistantEvent") &&
+    appSource.includes("startTransition(() => {\n        setEvents((current) => {") &&
+    appSource.includes("applyProviderChatResponse(activeSessionId") &&
+    appSource.includes("applyProviderChatResponse(persistedSession.id") &&
+    !/applyProviderChatResponse\(persistedSession\.id,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
+      appSource,
+    ) &&
+    !/applyProviderChatResponse\(activeSessionId,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
+      appSource,
+    ) &&
+    appSource.includes("ProviderChatStreamEvent") &&
+    appSource.includes("ProviderResumeCursor") &&
+    appSource.includes("gyro://provider-chat-event") &&
+    appSource.includes("applyProviderChatStreamEvent") &&
+    appSource.includes('streamEvent.phase === "started"') &&
+    appSource.includes('streamEvent.phase === "completed"') &&
+    appSource.includes("applyProviderChatStreamDeltas") &&
+    appSource.includes("batches.map((batch) => ({") &&
+    providerStreamSource.includes(
+      "const coalescedDeltaEvents = new Map<string, PendingStreamDeltaEvent>()",
+    ) &&
+    providerStreamSource.includes("existing.chunks.push(textDelta)") &&
+    providerStreamSource.includes('textDelta: chunks.join("")') &&
+    providerStreamSource.includes("const updatedSessionIds = new Set<string>()") &&
+    appAndStreamSource.includes("upsertStreamingAssistantEvent") &&
+    appSource.includes("PROVIDER_STREAM_FLUSH_MS") &&
+    appSource.includes("providerStreamBatchRef") &&
+    appSource.includes("flushProviderStreamBatches") &&
+    appSource.includes("queueProviderChatStreamEvent") &&
+    appSource.includes("startTransition") &&
+    appSource.includes(
+      "const deferredEventsForPlan = useDeferredValue(events)",
+    ) &&
+    appSource.includes(
+      "deriveSessionPlan(deferredEventsForPlan, activeSessionId)",
+    ) &&
+    appSource.includes("const deferredEventsForTurn = deferredEventsForPlan") &&
+    appSource.includes("const derivedActiveTurn = useMemo") &&
+    appSource.includes(
+      "deriveActiveTurn(deferredEventsForTurn, activeSession?.title)",
+    ) &&
+    appSource.includes("const nextTurn = derivedActiveTurn") &&
+    appSource.includes("const activeTurnId = workbench.activeTurn?.id ?? derivedActiveTurn?.id") &&
+    appSource.includes("const freshEvents = deferredEventsForTurn.filter") &&
+    appSource.includes("let latestUserIndex = -1") &&
+    appSource.includes("index = Math.max(0, latestUserIndex)") &&
+    appSource.includes('if (event.kind !== "plan-updated")') &&
+    !appSource.includes(
+      'events.filter((event) => event.kind === "plan-updated")',
+    ) &&
+    providerStreamSource.includes("appendChatResponseDelta") &&
+    providerStreamSource.includes("events.findIndex") &&
+    providerStreamSource.includes("CHAT_RESPONSE_TRUNCATION_SUFFIX") &&
+    appSource.includes("isStreamingAssistantSessionEvent") &&
+    !appSource.includes("[...events]\n    .reverse()") &&
+    appSource.includes(
+      "}, [workbench.preferences.density, workbench.preferences.theme]);",
+    ) &&
+    appSource.includes("WORKBENCH_PERSIST_DEBOUNCE_MS") &&
+    appSource.includes("WORKBENCH_PERSIST_IDLE_TIMEOUT_MS") &&
+    appSource.includes("persistableWorkbenchState") &&
+    appSource.includes("flushPersistedWorkbenchState") &&
+    appSource.includes("schedulePersistedWorkbenchStateFlush") &&
+    appSource.includes("cancelPersistedWorkbenchStateFlush") &&
+    appSource.includes("const persistableWorkbench = useMemo") &&
+    appSource.includes(
+      "pendingWorkbenchPersistRef.current = persistableWorkbench",
+    ) &&
+    appSource.includes("workbenchPersistIdleRef") &&
+    appSource.includes("requestIdleCallback") &&
+    appSource.includes("JSON.stringify(pending)") &&
+    !appSource.includes("pendingWorkbenchPersistRef.current = workbench") &&
+    !appSource.includes("JSON.stringify(persistableWorkbenchState(pending))") &&
+    appSource.includes("MAX_PERSISTED_TERMINAL_OUTPUT_CHARS") &&
+    appSource.includes("activeTurn: undefined") &&
+    appSource.includes("areWorkbenchTurnsEqual") &&
+    appSource.includes("const eventsRef = useRef<SessionEvent[]>([])") &&
+    appSource.includes("eventsRef.current = events") &&
+    appSource.includes("eventsRef.current.find(") &&
+    !appSource.includes("[connectProvider, events, sendDraft]") &&
+    providerStreamSource.includes('kind: "provider-stream"') &&
+    providerStreamSource.includes("hasSameTurnAssistant") &&
+    appSource.includes("suggestTitle: shouldSuggestTitle") &&
     appSource.includes('kind: "provider-status"') &&
+    surfaceSource.includes("ChatThinkingIndicator") &&
+    surfaceSource.includes("deriveTranscriptState") &&
+    surfaceSource.includes("useDeferredValue") &&
+    surfaceSource.includes("const deferredEvents = useDeferredValue(events)") &&
+    surfaceSource.includes("const transcriptContent = useMemo") &&
+    surfaceSource.includes(
+      "const [localDraft, setLocalDraft] = useState(draft)",
+    ) &&
+    surfaceSource.includes("onSend(localDraft)") &&
+    surfaceSource.includes("const ChatEvent = memo") &&
+    surfaceSource.includes("const transcriptState = useMemo") &&
+    surfaceSource.includes("const transcriptEvents: SessionEvent[] = []") &&
+    surfaceSource.includes("hasAssistantForLatestTurn = false") &&
+    surfaceSource.includes("isStreamingAssistantEvent") &&
+    surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
+    surfaceSource.includes("const shouldUsePlainText") &&
+    surfaceSource.includes(
+      "event.message.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS",
+    ) &&
+    surfaceSource.includes("gyro-response-streaming-text") &&
+    styleSource.includes(".gyro-response-streaming-text") &&
+    surfaceSource.includes("gyro-chat-thinking-indicator") &&
+    styleSource.includes("@keyframes gyro-chat-thinking-dot") &&
+    styleSource.includes(".gyro-chat-transcript .gyro-message.is-thinking") &&
+    surfaceSource.includes("isInternalTranscriptEvent") &&
+    surfaceSource.includes('"provider-diagnostics"') &&
+    styleSource.includes(
+      ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
+    ) &&
+    typeSource.includes("ProviderChatStreamEvent") &&
+    typeSource.includes("ProviderResumeCursor") &&
     tauriSource.includes("SessionEventKind::AssistantMessage") &&
+    tauriSource.includes("ProviderResumeCursor") &&
+    tauriSource.includes("ProviderChatStreamEvent") &&
+    tauriSource.includes("run_provider_chat_with_retry") &&
+    tauriSource.includes("run_provider_chat_once") &&
+    tauriSource.includes("TEXT_TRUNCATION_SUFFIX") &&
+    tauriSource.includes("value.char_indices().nth(max_chars)") &&
+    tauriSource.includes("assistant_text_truncated") &&
+    tauriSource.includes("streaming_state_stops_emitting_after_response_cap") &&
+    tauriSource.includes("run_anthropic_claude_chat") &&
+    tauriSource.includes("codex_chat_args") &&
+    tauriSource.includes("claude_chat_args") &&
+    tauriSource.includes("extract_provider_session_id") &&
+    tauriSource.includes("enum ProviderTextChunk") &&
+    tauriSource.includes("ProviderTextChunk::Snapshot") &&
+    tauriSource.includes("push_assistant_snapshot") &&
+    tauriSource.includes("extract_provider_text_value") &&
+    tauriSource.includes('Some("reasoning" | "reasoning_text")') &&
+    tauriSource.includes("extract_provider_text_delta") &&
+    tauriSource.includes("PROVIDER_CHAT_EVENT") &&
+    tauriSource.includes("clear_provider_session_binding") &&
+    tauriSource.includes("upsert_provider_session_binding") &&
+    tauriSource.includes("validate_chat_message") &&
+    tauriSource.includes("async fn run_provider_chat") &&
+    /spawn_blocking\(move \|\| run_provider_chat_blocking\(app,\s*request\)\)/.test(
+      tauriSource,
+    ) &&
+    tauriSource.includes("async fn save_config") &&
+    tauriSource.includes("config save worker failed") &&
+    tauriSource.includes("async fn create_desktop_session") &&
+    tauriSource.includes("create_desktop_session_blocking") &&
+    tauriSource.includes("desktop session worker failed") &&
+    tauriSource.includes("async fn create_worktree_session") &&
+    tauriSource.includes("create_worktree_session_blocking") &&
+    tauriSource.includes("worktree session worker failed") &&
+    tauriSource.includes("async fn append_user_message") &&
+    tauriSource.includes("append_user_message_blocking") &&
+    tauriSource.includes("user message worker failed") &&
+    tauriSource.includes("async fn set_session_model") &&
+    tauriSource.includes("session model worker failed") &&
+    tauriSource.includes("async fn rename_session") &&
+    tauriSource.includes("session rename worker failed") &&
+    tauriSource.includes("extract_session_title_marker") &&
+    tauriSource.includes("GYRO_SESSION_TITLE:") &&
+    tauriSource.includes("run_streaming_command") &&
+    tauriSource.includes("PROVIDER_STREAM_FLUSH_INTERVAL") &&
+    tauriSource.includes("StreamingCommandState") &&
+    tauriSource.includes("stdin(Stdio::null())") &&
+    tauriSource.includes("sanitize_provider_text_delta") &&
+    tauriSource.includes("extract_codex_agent_message_text") &&
+    tauriSource.includes('"item.completed"') &&
+    tauriSource.includes("CODEX_CHAT_TIMEOUT_SECS") &&
+    tauriSource.includes("ProviderRunPayload::new") &&
+    tauriSource.includes("Some(chat_message_preview(&request.message))") &&
+    tauriSource.includes("async fn list_sessions") &&
+    tauriSource.includes("list_sessions_blocking") &&
+    tauriSource.includes("session list worker failed") &&
+    tauriSource.includes("async fn delete_session") &&
+    tauriSource.includes("delete_session_blocking") &&
+    tauriSource.includes("session delete worker failed") &&
+    tauriSource.includes("async fn append_plan_event") &&
+    tauriSource.includes("append_plan_event_blocking") &&
+    tauriSource.includes("plan event worker failed") &&
+    tauriSource.includes("async fn append_editor_event") &&
+    tauriSource.includes("append_editor_event_blocking") &&
+    tauriSource.includes("editor event worker failed") &&
+    tauriSource.includes("async fn list_workspace_files") &&
+    tauriSource.includes("async fn list_workspace_tree") &&
+    tauriSource.includes("list_workspace_tree_blocking") &&
+    tauriSource.includes("workspace tree worker failed") &&
+    tauriSource.includes("async fn read_workspace_file") &&
+    tauriSource.includes("workspace file read worker failed") &&
+    tauriSource.includes("async fn read_workspace_file_full") &&
+    tauriSource.includes("full workspace file read worker failed") &&
+    tauriSource.includes("async fn stat_workspace_file") &&
+    tauriSource.includes("workspace file stat worker failed") &&
+    tauriSource.includes("async fn write_workspace_file") &&
+    tauriSource.includes("workspace file write worker failed") &&
+    tauriSource.includes("async fn watch_workspace") &&
+    tauriSource.includes("workspace watch worker failed") &&
+    tauriSource.includes("async fn create_workspace_file") &&
+    tauriSource.includes("workspace file create worker failed") &&
+    tauriSource.includes("async fn rename_workspace_path") &&
+    tauriSource.includes("workspace path rename worker failed") &&
+    tauriSource.includes("async fn delete_workspace_path") &&
+    tauriSource.includes("workspace path delete worker failed") &&
+    tauriSource.includes("async fn search_workspace") &&
+    tauriSource.includes("workspace search worker failed") &&
+    tauriSource.includes("async fn git_status") &&
+    tauriSource.includes("git status worker failed") &&
+    tauriSource.includes("async fn git_diff") &&
+    tauriSource.includes("git_diff_blocking") &&
+    tauriSource.includes("git diff worker failed") &&
+    tauriSource.includes("async fn git_stage") &&
+    tauriSource.includes("git_stage_blocking") &&
+    tauriSource.includes("git stage worker failed") &&
+    tauriSource.includes("async fn git_unstage") &&
+    tauriSource.includes("git_unstage_blocking") &&
+    tauriSource.includes("git unstage worker failed") &&
+    tauriSource.includes("async fn git_commit") &&
+    tauriSource.includes("git_commit_blocking") &&
+    tauriSource.includes("git commit worker failed") &&
+    tauriSource.includes("async fn lsp_start") &&
+    tauriSource.includes("lsp_start_blocking") &&
+    tauriSource.includes("lsp start worker failed") &&
+    tauriSource.includes("async fn task_discover") &&
+    tauriSource.includes("task discover worker failed") &&
+    tauriSource.includes("async fn task_run") &&
+    tauriSource.includes("task_run_blocking") &&
+    tauriSource.includes("task run worker failed") &&
+    tauriSource.includes("async fn test_discover") &&
+    tauriSource.includes("test discover worker failed") &&
+    tauriSource.includes("async fn test_run") &&
+    tauriSource.includes("test_run_blocking") &&
+    tauriSource.includes("test run worker failed") &&
+    tauriSource.includes("async fn debug_start") &&
+    tauriSource.includes("debug_start_blocking") &&
+    tauriSource.includes("debug start worker failed") &&
+    tauriSource.includes("async fn check_provider_health") &&
+    tauriSource.includes("check_provider_health_blocking") &&
+    tauriSource.includes("provider health worker failed") &&
+    tauriSource.includes("async fn check_provider_auth") &&
+    tauriSource.includes("provider auth worker failed") &&
+    coreSessionsSource.includes("MAX_SESSION_EVENT_MESSAGE_CHARS") &&
+    coreSessionsSource.includes("MAX_SESSION_EVENTS_READ") &&
+    coreSessionsSource.includes("read_recent_events") &&
+    coreSessionsSource.includes("VecDeque") &&
+    tauriSource.includes("MAX_DESKTOP_SESSION_EVENTS_READ") &&
+    tauriSource.includes("async fn read_session_events") &&
+    tauriSource.includes("read_session_events_blocking") &&
+    tauriSource.includes("session event read worker failed") &&
+    coreSessionsSource.includes("ProviderSessionBinding") &&
+    coreSessionsSource.includes("provider_session_bindings") &&
+    coreSessionsSource.includes("get_provider_session_binding") &&
+    coreHarnessSource.includes("MAX_HARNESS_RESUME_CURSOR_BYTES") &&
+    coreHarnessSource.includes("validate_provider_resume_cursor_value") &&
+    coreSessionsSource.includes("session_events_path") &&
+    coreSessionsSource.includes(
+      "set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4",
+    ) &&
+    !coreSessionsSource.includes("model_label = ?4, updated_at") &&
+    coreSessionsSource.includes(
+      "update sessions set title = ?1 where id = ?2",
+    ) &&
+    !coreSessionsSource.includes(
+      "update sessions set title = ?1, updated_at",
+    ) &&
+    !tauriSource.includes('"userMessage": request.message.as_str()') &&
     tauriSource.includes("codex") &&
     tauriSource.includes("exec") &&
+    tauriSource.includes("claude") &&
+    tauriSource.includes("stream-json") &&
     !appSource.includes("I can keep this local. Connect a provider") &&
     !appSource.includes("shouldPreviewToolActivity"),
   "First send should create an optimistic thread, call the real provider runner, and persist assistant responses instead of fake previews.",
+);
+expect(
+  appSource.includes('"New chat"') &&
+    appSource.includes("normalizeSessionTitleInput") &&
+    appSource.includes(
+      "updateSessionTitle(activeSessionId, provisionalTitle",
+    ) &&
+    styleSource.includes(".gyro-session-row.is-active .gyro-session-actions") &&
+    styleSource.includes(
+      ".gyro-session-row.is-active .gyro-sidebar-thread-main",
+    ) &&
+    surfaceSource.includes('aria-label="Chat options"') &&
+    surfaceSource.includes("<MoreHorizontal size={15} />") &&
+    surfaceSource.includes(
+      '<button onClick={onRename} role="menuitem" type="button">',
+    ) &&
+    surfaceSource.includes("Rename"),
+  "Chat sessions should get first-turn titles and expose rename from the active row three-dot menu.",
 );
 expect(
   typeSource.includes("providerId?: ProviderId") &&
@@ -938,12 +1401,36 @@ expect(
     appSource.includes("launchTerminalPane") &&
     appSource.includes("@xterm/xterm") &&
     appSource.includes("@xterm/addon-fit") &&
+    appSource.includes("selectedTerminalPaneIdRef") &&
+    appSource.includes("TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS") &&
+    appSource.includes("const terminalPaneIdsToPoll = useMemo") &&
+    appSource.includes("isActiveSessionSending") &&
+    appSource.includes("liveTerminalPaneIds.includes(selectedPaneId)") &&
+    appSource.includes("const pollInterval = isActiveSessionSending") &&
+    appSource.includes("selectedPaneId === snapshot.paneId") &&
+    appSource.includes("current === snapshot.output ? current") &&
     appSource.includes("restore_terminal_panes") &&
     appSource.includes("write_terminal_input") &&
     appSource.includes("resize_terminal_pane") &&
+    tauriSource.includes("#[derive(Clone, Default)]\nstruct TerminalProcessManager") &&
+    tauriSource.includes("async fn create_terminal_pane") &&
+    tauriSource.includes("terminal create worker failed") &&
+    tauriSource.includes("async fn write_terminal_input") &&
+    tauriSource.includes("terminal input worker failed") &&
+    tauriSource.includes("async fn read_terminal_output") &&
+    tauriSource.includes("terminal read worker failed") &&
+    tauriSource.includes("async fn resize_terminal_pane") &&
+    tauriSource.includes("terminal resize worker failed") &&
+    tauriSource.includes("async fn stop_terminal_pane") &&
+    tauriSource.includes("terminal stop worker failed") &&
+    tauriSource.includes("async fn restart_terminal_pane") &&
+    tauriSource.includes("terminal restart worker failed") &&
+    tauriSource.includes("async fn restore_terminal_panes") &&
+    tauriSource.includes("terminal restore worker failed") &&
     surfaceSource.includes("renderTerminalPaneBody") &&
     surfaceSource.includes("gyro-terminal-drag-handle") &&
-    reducerSource.includes("upsert-restored-terminal-pane"),
+    reducerSource.includes("upsert-restored-terminal-pane") &&
+    reducerSource.includes("existingPane.command === nextCommand"),
   "Terminal restore and stdin wiring are missing.",
 );
 expect(
@@ -964,6 +1451,10 @@ expect(
     styleSource.includes(".gyro-terminal-preset-button"),
   "CLI preferred launcher UI and state wiring are missing.",
 );
+const spawnTerminalSource = tauriSource.slice(
+  tauriSource.indexOf("fn spawn_terminal_process"),
+  tauriSource.indexOf("fn resolve_terminal_cwd"),
+);
 expect(
   tauriSource.includes("portable_pty") &&
     tauriSource.includes("native_pty_system") &&
@@ -971,7 +1462,8 @@ expect(
     tauriSource.includes('"TERM", "xterm-256color"') &&
     tauriSource.includes('"COLORTERM", "truecolor"') &&
     tauriSource.includes('"TERM_PROGRAM", "Gyro"') &&
-    !tauriSource.includes("Stdio::piped"),
+    tauriSource.includes("terminal_command_path") &&
+    !spawnTerminalSource.includes("Stdio::piped"),
   "Desktop terminal backend should use PTYs instead of piped stdio.",
 );
 expect(
@@ -988,10 +1480,16 @@ expect(
     surfaceSource.includes("Allow this device") &&
     surfaceSource.includes("Gyro local access stays separate") &&
     appSource.includes("GyroAccountGate") &&
+    appSource.includes("gyro-account-context") &&
     appSource.includes("Use this device") &&
     appSource.includes("refresh_account_session") &&
     appSource.includes("start_account_login") &&
     appSource.includes("logout_account") &&
+    !appSource.includes("External Claude/OpenAI logins") &&
+    !appSource.includes('className="gyro-account-provider"') &&
+    styleSource.includes(".gyro-account-panel::before") &&
+    styleSource.includes(".gyro-account-context") &&
+    !styleSource.includes(".gyro-account-provider") &&
     tauriSource.includes("get_account_session") &&
     tauriSource.includes("start_account_login") &&
     tauriSource.includes("refresh_account_session") &&
@@ -1085,6 +1583,36 @@ expect(
   "Chat sidebar should show clean project and recent chat rows, without Scheduled.",
 );
 expect(
+  styleSource.includes(".gyro-sidebar-mode-row:focus-visible") &&
+    styleSource.includes(
+      ".gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row:focus-visible",
+    ) &&
+    styleSource.includes(
+      "box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft)",
+    ),
+  "Sidebar Chat/CLI/IDE tabs should keep a quiet active/focus state without the underglow.",
+);
+expect(
+  appSource.includes("REMOVED_PROJECTS_STORAGE_KEY") &&
+    appSource.includes("visibleSessionsForProjects") &&
+    appSource.includes("requestRemoveProject") &&
+    appSource.includes("confirmRemoveProject") &&
+    appSource.includes("ProjectRemoveConfirmOverlay") &&
+    surfaceSource.includes("onRemoveProject") &&
+    surfaceSource.includes("gyro-sidebar-project-remove") &&
+    surfaceSource.includes("remove-saved-project:") &&
+    surfaceSource.includes("removeAction") &&
+    surfaceSource.includes("Trash2") &&
+    surfaceSource.includes("Remove from Gyro app?") &&
+    surfaceSource.includes("Nothing will be deleted from your Mac.") &&
+    surfaceSource.includes("Remove from app") &&
+    styleSource.includes(".gyro-project-remove-overlay") &&
+    styleSource.includes(".gyro-project-remove-note") &&
+    styleSource.includes(".gyro-project-remove-confirm") &&
+    styleSource.includes(".gyro-project-remove-keep"),
+  "Projects should expose a remove-from-app action with a screen-level confirmation that does not imply local deletion.",
+);
+expect(
   typeSource.includes('| "tools"') &&
     appSource.includes('activeDestination === "tools"') &&
     surfaceSource.includes("ToolsSurface") &&
@@ -1172,10 +1700,24 @@ expect(
     surfaceSource.includes('onComposerAction?.("show-project-context")') &&
     surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
+    appSource.includes("savedProjectsFromSessions") &&
+    appSource.includes("select-saved-project:") &&
+    surfaceSource.includes("savedProjectItems") &&
+    surfaceSource.includes(
+      "select-saved-project:${encodeURIComponent(project.path)}",
+    ) &&
+    surfaceSource.includes("if (isInternalTranscriptEvent(event))") &&
     surfaceSource.includes("gyro-provider-status-row") &&
     styleSource.includes(".gyro-thread-topbar-actions") &&
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
-    styleSource.includes("max-width: 668px") &&
+    styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
+    styleSource.includes(
+      ".gyro-chat-composer-dock .gyro-composer-shell:focus-within",
+    ) &&
+    surfaceSource.includes("!event.shiftKey") &&
+    surfaceSource.includes("event.preventDefault()") &&
+    styleSource.includes("--gyro-chat-content-width: 735px") &&
+    styleSource.includes("max-width: var(--gyro-chat-content-width)") &&
     styleSource.includes("border-radius: 21px") &&
     styleSource.includes("color: #ff8a3d") &&
     styleSource.includes(
@@ -1185,12 +1727,23 @@ expect(
     styleSource.includes(
       "grid-template-columns: minmax(0, 1fr) minmax(288px, 316px)",
     ) &&
-    surfaceSource.includes("{isUser ? null : ("),
+    surfaceSource.includes("function AssistantResponse") &&
+    surfaceSource.includes("gyro-response-body") &&
+    surfaceSource.includes('aria-label="Copy response"') &&
+    styleSource.includes(".gyro-chat-transcript .gyro-message.is-user") &&
+    styleSource.includes("width: min(100%, var(--gyro-chat-content-width))") &&
+    styleSource.includes("max-width: 100%") &&
+    styleSource.includes("pointer-events: none") &&
+    surfaceSource.includes("isUser || isAssistant ? null") &&
+    !surfaceSource.includes("<strong>Workbench activity</strong>") &&
+    !surfaceSource.includes("Open terminal\n          </button>"),
   "First chat should default to a clean Codex-style thread with topbar pills, provider status recovery, and matching docked composer.",
 );
 expect(
   reducerSource.includes("activeChatPanel: panel") &&
-    reducerSource.includes('chatEnvironmentRailOpen: panel === "environment"') &&
+    reducerSource.includes(
+      'chatEnvironmentRailOpen: panel === "environment"',
+    ) &&
     appSource.includes('dispatchWorkbench({ type: "set-chat-panel" });') &&
     !appSource.includes(
       'panel: "environment" });\n        dispatchWorkbench({\n          type: "select-workspace-layout"',
@@ -1256,6 +1809,7 @@ expect(
     appSource.includes('command: "opencode"') &&
     appSource.includes('"check_provider_health"') &&
     appSource.includes("providerHealthRequest(provider, providerId)") &&
+    appSource.includes("configSaveQueueRef.current") &&
     appSource.includes("PROVIDER_AUTH_POLL_ATTEMPTS") &&
     appSource.includes("Gyro will connect automatically.") &&
     appSource.includes(
@@ -1282,9 +1836,23 @@ expect(
     surfaceSource.includes("onToggleProvider?.(provider.id)") &&
     surfaceSource.includes("onTestProvider?.(provider.id)") &&
     surfaceSource.includes("gyro-settings-provider-actions") &&
-    surfaceSource.includes("providerAuthOwnershipDetail(provider.id)") &&
+    surfaceSource.includes("providerAuthSummary(provider.id)") &&
+    !surfaceSource.includes('label="Selected model"') &&
+    !surfaceSource.includes('className="gyro-provider-model-picker"') &&
+    !surfaceSource.includes("Refresh models") &&
     appSource.includes("onTestProvider={testProvider}") &&
     styleSource.includes(".gyro-settings-provider-actions") &&
+    styleSource.includes("/* Minimal provider settings */") &&
+    styleSource.includes(
+      ".gyro-providers-surface {\n  align-content: start;",
+    ) &&
+    styleSource.includes("overflow-y: auto") &&
+    styleSource.includes("padding: 24px clamp(24px, 3vw, 44px) 120px") &&
+    styleSource.includes(".gyro-provider-boundary {\n  display: none;") &&
+    styleSource.includes(
+      ".gyro-provider-card-body .gyro-settings-row {\n  background: transparent;",
+    ) &&
+    styleSource.includes(".gyro-settings-surface .gyro-provider-list") &&
     !surfaceSource.includes(
       "Model-provider OAuth is not wired for this provider yet.",
     ),
@@ -1308,15 +1876,29 @@ expect(
     !surfaceSource.includes(
       "refresh-provider-models:${modelPickerProvider.id}",
     ) &&
+    !surfaceSource.includes("connect-provider:${modelPickerProvider.id}") &&
+    !surfaceSource.includes('kind: "action"') &&
+    surfaceSource.includes(
+      "(provider) => provider.id === config.selectedProviderId",
+    ) &&
+    surfaceSource.includes(
+      "active: provider.id === config.selectedProviderId",
+    ) &&
+    surfaceSource.includes(
+      "modelPickerProvider.id === config.selectedProviderId",
+    ) &&
+    appSource.includes("selectProvider(providerId);") &&
+    appSource.includes("{ notifySuccess: false }") &&
+    !appSource.includes('"Model selected"') &&
     !surfaceSource.includes('action: "select-model"') &&
     styleSource.includes(".gyro-provider-picker.has-flyout") &&
-    styleSource.includes("grid-template-columns: 156px 190px"),
-  "Provider picker should keep provider rows compact and show models in a hover flyout without Refresh or Settings rows.",
+    styleSource.includes("grid-template-columns: 148px 176px"),
+  "Provider picker should keep provider rows compact and show models in a hover flyout without Connect, Refresh, or Settings rows.",
 );
 expect(
   surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
-    surfaceSource.includes(
-      'const modelChipLabel = hasSelectedProvider ? providerModelLabel : "Choose model"',
+    /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
+      surfaceSource,
     ) &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
     surfaceSource.includes("{modelChipLabel}") &&
@@ -1372,6 +1954,10 @@ expect(
     surfaceSource.includes("Claude settings") &&
     surfaceSource.includes("Command policy") &&
     surfaceSource.includes("File edit policy") &&
+    surfaceSource.includes("approvalChipClassName") &&
+    surfaceSource.includes('approvalMode === "direct"') &&
+    surfaceSource.includes('"gyro-composer-chip is-warning"') &&
+    surfaceSource.includes("className={approvalChipClassName}") &&
     appSource.includes("approvalNotificationCopy"),
   "Permission controls should adapt labels to the selected OpenAI or Anthropic provider and backend approval settings.",
 );
@@ -1405,7 +1991,7 @@ expect(
     appSource.includes("suppressSessionAutoSelectRef.current = true") &&
     appSource.includes("setActiveSessionId(undefined)") &&
     appSource.includes("onCreateSession={startNewChat}") &&
-    surfaceSource.includes("const transcriptEvents = events.filter") &&
+    surfaceSource.includes("const transcriptState = useMemo") &&
     surfaceSource.includes("if (transcriptEvents.length === 0)") &&
     surfaceSource.includes('aria-label="New thread"'),
   "New chat should clear the active session and render the start screen from transcript events.",

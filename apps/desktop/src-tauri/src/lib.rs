@@ -3,7 +3,8 @@ use gyro_core::{
     refresh_account_session as account_refresh_session, start_account_login as account_start_login,
     stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
     Automation, AutomationStatus, AutomationStore, AutomationTriageState, CreateAutomationRequest,
-    CreateSessionContext, GyroConfig, GyroPaths, Session, SessionEvent, SessionEventKind,
+    CreateSessionContext, GyroConfig, GyroPaths, HarnessRunStatus, ProviderDiagnosticsPayload,
+    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
     SessionOrigin, SessionStore, SessionWorkspaceMode,
 };
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -13,8 +14,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::process::{Command, Stdio};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -22,6 +24,13 @@ use walkdir::WalkDir;
 const MAX_WORKSPACE_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
+const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
+const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
+const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
+const CODEX_CHAT_TIMEOUT_SECS: u64 = 180;
+const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
+const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
+const TEXT_TRUNCATION_SUFFIX: &str = "...";
 const GUI_CLI_PATHS: &[&str] = &[
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -262,9 +271,9 @@ struct DebugSessionResult {
     message: Option<String>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct TerminalProcessManager {
-    processes: Mutex<HashMap<String, TerminalProcess>>,
+    processes: Arc<Mutex<HashMap<String, TerminalProcess>>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -328,6 +337,8 @@ struct ProviderChatRequest {
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    #[serde(default)]
+    suggest_title: bool,
     workspace_path: Option<String>,
 }
 
@@ -335,7 +346,98 @@ struct ProviderChatRequest {
 #[serde(rename_all = "camelCase")]
 struct ProviderChatResponse {
     assistant_event: SessionEvent,
+    session: Option<Session>,
+    session_title: Option<String>,
     status_event: SessionEvent,
+    resume_cursor: Option<ProviderResumeCursor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderResumeCursor {
+    kind: String,
+    session_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderChatStreamEvent {
+    session_id: String,
+    turn_id: Option<String>,
+    provider_id: String,
+    model_id: Option<String>,
+    event_id: String,
+    phase: String,
+    status: Option<String>,
+    text_delta: Option<String>,
+    message: Option<String>,
+    error: Option<String>,
+}
+
+struct ProviderRunnerOutput {
+    response: String,
+    resume_cursor: Option<ProviderResumeCursor>,
+    retry_count: u32,
+    resumed: bool,
+    output_summary: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProviderAdapterKind {
+    OpenAiCodex,
+    AnthropicClaude,
+    ReadinessOnly,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProviderAdapterDescriptor {
+    kind: ProviderAdapterKind,
+    runner: &'static str,
+    auth_owner: &'static str,
+    timeout_seconds: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticsExportBundle {
+    schema: String,
+    generated_at: String,
+    config_summary: DiagnosticsConfigSummary,
+    provider_health: Vec<ProviderHealthCheck>,
+    recent_run_diagnostics: Vec<serde_json::Value>,
+    sessions: Vec<DiagnosticsSessionSummary>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticsConfigSummary {
+    telemetry_enabled: bool,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
+    provider_count: usize,
+    enabled_provider_ids: Vec<String>,
+    command_profile_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticsSessionSummary {
+    id: String,
+    title: String,
+    origin: String,
+    workspace_mode: String,
+    branch: String,
+    provider_id: Option<String>,
+    model_id: Option<String>,
+    event_count: usize,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticsExportResult {
+    path: String,
+    bundle: DiagnosticsExportBundle,
 }
 
 struct TerminalProcess {
@@ -452,13 +554,41 @@ impl TerminalProcessManager {
 }
 
 #[tauri::command]
-fn list_sessions() -> Result<Vec<Session>, String> {
+async fn list_sessions() -> Result<Vec<Session>, String> {
+    tauri::async_runtime::spawn_blocking(list_sessions_blocking)
+        .await
+        .map_err(|error| format!("session list worker failed: {error}"))?
+}
+
+fn list_sessions_blocking() -> Result<Vec<Session>, String> {
     let store = open_store()?;
     store.list_sessions().map_err(to_string)
 }
 
 #[tauri::command]
-fn create_desktop_session(
+async fn create_desktop_session(
+    workspace_path: String,
+    title: String,
+    provider_id: Option<String>,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+) -> Result<Session, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        create_desktop_session_blocking(
+            workspace_path,
+            title,
+            provider_id,
+            provider_label,
+            model_id,
+            model_label,
+        )
+    })
+    .await
+    .map_err(|error| format!("desktop session worker failed: {error}"))?
+}
+
+fn create_desktop_session_blocking(
     workspace_path: String,
     title: String,
     provider_id: Option<String>,
@@ -484,7 +614,33 @@ fn create_desktop_session(
 }
 
 #[tauri::command]
-fn create_worktree_session(
+async fn create_worktree_session(
+    workspace_path: String,
+    title: String,
+    branch: String,
+    worktree_name: Option<String>,
+    provider_id: Option<String>,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+) -> Result<Session, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        create_worktree_session_blocking(
+            workspace_path,
+            title,
+            branch,
+            worktree_name,
+            provider_id,
+            provider_label,
+            model_id,
+            model_label,
+        )
+    })
+    .await
+    .map_err(|error| format!("worktree session worker failed: {error}"))?
+}
+
+fn create_worktree_session_blocking(
     workspace_path: String,
     title: String,
     branch: String,
@@ -535,64 +691,107 @@ fn create_worktree_session(
 }
 
 #[tauri::command]
-fn set_session_model(
+async fn set_session_model(
     session_id: String,
     provider_id: Option<String>,
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
 ) -> Result<Session, String> {
-    let store = open_store()?;
-    let session_id = parse_uuid(&session_id)?;
-    store
-        .update_session_model(
-            session_id,
-            provider_id,
-            provider_label,
-            model_id,
-            model_label,
-        )
-        .map_err(to_string)?
-        .ok_or_else(|| "session not found".into())
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_id = parse_uuid(&session_id)?;
+        store
+            .update_session_model(
+                session_id,
+                provider_id,
+                provider_label,
+                model_id,
+                model_label,
+            )
+            .map_err(to_string)?
+            .ok_or_else(|| "session not found".into())
+    })
+    .await
+    .map_err(|error| format!("session model worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn rename_session(session_id: String, title: String) -> Result<Session, String> {
-    let store = open_store()?;
-    let session_id = parse_uuid(&session_id)?;
-    store
-        .rename_session(session_id, title)
-        .map_err(to_string)?
-        .ok_or_else(|| "session not found".into())
+async fn rename_session(session_id: String, title: String) -> Result<Session, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_id = parse_uuid(&session_id)?;
+        store
+            .rename_session(session_id, title)
+            .map_err(to_string)?
+            .ok_or_else(|| "session not found".into())
+    })
+    .await
+    .map_err(|error| format!("session rename worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn delete_session(session_id: String) -> Result<bool, String> {
+async fn delete_session(session_id: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || delete_session_blocking(session_id))
+        .await
+        .map_err(|error| format!("session delete worker failed: {error}"))?
+}
+
+fn delete_session_blocking(session_id: String) -> Result<bool, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
     store.delete_session(session_id).map_err(to_string)
 }
 
 #[tauri::command]
-fn list_automations() -> Result<Vec<Automation>, String> {
+async fn list_automations() -> Result<Vec<Automation>, String> {
+    tauri::async_runtime::spawn_blocking(list_automations_blocking)
+        .await
+        .map_err(|error| format!("automation list worker failed: {error}"))?
+}
+
+fn list_automations_blocking() -> Result<Vec<Automation>, String> {
     let store = open_automation_store()?;
     store.list_automations().map_err(to_string)
 }
 
 #[tauri::command]
-fn list_due_automations() -> Result<Vec<Automation>, String> {
+async fn list_due_automations() -> Result<Vec<Automation>, String> {
+    tauri::async_runtime::spawn_blocking(list_due_automations_blocking)
+        .await
+        .map_err(|error| format!("due automation list worker failed: {error}"))?
+}
+
+fn list_due_automations_blocking() -> Result<Vec<Automation>, String> {
     let store = open_automation_store()?;
     store.list_due_automations_now().map_err(to_string)
 }
 
 #[tauri::command]
-fn create_automation(draft: CreateAutomationRequest) -> Result<Automation, String> {
+async fn create_automation(draft: CreateAutomationRequest) -> Result<Automation, String> {
+    tauri::async_runtime::spawn_blocking(move || create_automation_blocking(draft))
+        .await
+        .map_err(|error| format!("automation create worker failed: {error}"))?
+}
+
+fn create_automation_blocking(draft: CreateAutomationRequest) -> Result<Automation, String> {
     let store = open_automation_store()?;
     store.create_automation(draft).map_err(to_string)
 }
 
 #[tauri::command]
-fn set_automation_status(
+async fn set_automation_status(
+    automation_id: String,
+    status: AutomationStatus,
+) -> Result<Automation, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        set_automation_status_blocking(automation_id, status)
+    })
+    .await
+    .map_err(|error| format!("automation status worker failed: {error}"))?
+}
+
+fn set_automation_status_blocking(
     automation_id: String,
     status: AutomationStatus,
 ) -> Result<Automation, String> {
@@ -605,7 +804,13 @@ fn set_automation_status(
 }
 
 #[tauri::command]
-fn run_automation(automation_id: String, summary: String) -> Result<Automation, String> {
+async fn run_automation(automation_id: String, summary: String) -> Result<Automation, String> {
+    tauri::async_runtime::spawn_blocking(move || run_automation_blocking(automation_id, summary))
+        .await
+        .map_err(|error| format!("automation run worker failed: {error}"))?
+}
+
+fn run_automation_blocking(automation_id: String, summary: String) -> Result<Automation, String> {
     let store = open_automation_store()?;
     let automation_id = parse_uuid(&automation_id)?;
     store
@@ -615,7 +820,18 @@ fn run_automation(automation_id: String, summary: String) -> Result<Automation, 
 }
 
 #[tauri::command]
-fn claim_due_automation(
+async fn claim_due_automation(
+    lease_owner: String,
+    lease_seconds: Option<i64>,
+) -> Result<Option<Automation>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        claim_due_automation_blocking(lease_owner, lease_seconds)
+    })
+    .await
+    .map_err(|error| format!("automation claim worker failed: {error}"))?
+}
+
+fn claim_due_automation_blocking(
     lease_owner: String,
     lease_seconds: Option<i64>,
 ) -> Result<Option<Automation>, String> {
@@ -626,7 +842,19 @@ fn claim_due_automation(
 }
 
 #[tauri::command]
-fn complete_automation_lease(
+async fn complete_automation_lease(
+    automation_id: String,
+    lease_owner: String,
+    summary: String,
+) -> Result<Automation, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        complete_automation_lease_blocking(automation_id, lease_owner, summary)
+    })
+    .await
+    .map_err(|error| format!("automation lease complete worker failed: {error}"))?
+}
+
+fn complete_automation_lease_blocking(
     automation_id: String,
     lease_owner: String,
     summary: String,
@@ -640,7 +868,13 @@ fn complete_automation_lease(
 }
 
 #[tauri::command]
-fn recover_automation_leases() -> Result<usize, String> {
+async fn recover_automation_leases() -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(recover_automation_leases_blocking)
+        .await
+        .map_err(|error| format!("automation lease recovery worker failed: {error}"))?
+}
+
+fn recover_automation_leases_blocking() -> Result<usize, String> {
     let store = open_automation_store()?;
     store
         .recover_expired_automation_leases_now()
@@ -648,7 +882,18 @@ fn recover_automation_leases() -> Result<usize, String> {
 }
 
 #[tauri::command]
-fn triage_automation(
+async fn triage_automation(
+    automation_id: String,
+    triage_state: AutomationTriageState,
+) -> Result<Automation, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        triage_automation_blocking(automation_id, triage_state)
+    })
+    .await
+    .map_err(|error| format!("automation triage worker failed: {error}"))?
+}
+
+fn triage_automation_blocking(
     automation_id: String,
     triage_state: AutomationTriageState,
 ) -> Result<Automation, String> {
@@ -661,14 +906,35 @@ fn triage_automation(
 }
 
 #[tauri::command]
-fn read_session_events(session_id: String) -> Result<Vec<SessionEvent>, String> {
+async fn read_session_events(session_id: String) -> Result<Vec<SessionEvent>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_session_events_blocking(session_id))
+        .await
+        .map_err(|error| format!("session event read worker failed: {error}"))?
+}
+
+fn read_session_events_blocking(session_id: String) -> Result<Vec<SessionEvent>, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
-    store.read_events(session_id).map_err(to_string)
+    store
+        .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)
+        .map_err(to_string)
 }
 
 #[tauri::command]
-fn append_user_message(
+async fn append_user_message(
+    session_id: String,
+    message: String,
+    turn_id: Option<String>,
+) -> Result<SessionEvent, String> {
+    let message = validate_chat_message(&message)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        append_user_message_blocking(session_id, message, turn_id)
+    })
+    .await
+    .map_err(|error| format!("user message worker failed: {error}"))?
+}
+
+fn append_user_message_blocking(
     session_id: String,
     message: String,
     turn_id: Option<String>,
@@ -695,61 +961,236 @@ fn append_user_message(
 }
 
 #[tauri::command]
-fn run_provider_chat(request: ProviderChatRequest) -> Result<ProviderChatResponse, String> {
-    if request.provider_id != "openai" {
-        return Err(format!(
-            "{} chat is not wired yet. OpenAI runs through the local Codex login first.",
-            request.provider_label.as_deref().unwrap_or("Provider")
-        ));
-    }
+async fn run_provider_chat(
+    app: tauri::AppHandle,
+    mut request: ProviderChatRequest,
+) -> Result<ProviderChatResponse, String> {
+    request.message = validate_chat_message(&request.message)?;
 
+    tauri::async_runtime::spawn_blocking(move || run_provider_chat_blocking(app, request))
+        .await
+        .map_err(|error| format!("provider chat worker failed: {error}"))?
+}
+
+fn run_provider_chat_blocking(
+    app: tauri::AppHandle,
+    request: ProviderChatRequest,
+) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&request.session_id)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
-    let response = match run_openai_codex_chat(&request) {
+    let run_id = turn_id.unwrap_or_else(Uuid::new_v4);
+    let attempt_id = Uuid::new_v4();
+    let started_at = chrono::Utc::now();
+    let adapter = provider_adapter_for(&request.provider_id);
+    emit_provider_chat_event(
+        &app,
+        &request,
+        "started",
+        Some(HarnessRunStatus::Running),
+        None,
+        Some(provider_chat_status_message(
+            &HarnessRunStatus::Running,
+            request.provider_label.as_deref().unwrap_or("Provider"),
+        )),
+        None,
+    );
+    let _ = append_provider_status_event(
+        &store,
+        session_id,
+        &request,
+        Some(run_id),
+        attempt_id,
+        HarnessRunStatus::Running,
+        None,
+    );
+
+    let binding = store
+        .get_provider_session_binding(session_id, &request.provider_id)
+        .map_err(to_string)?;
+    let runner_output = match run_provider_chat_with_retry(&store, &app, &request, binding) {
         Ok(response) => response,
         Err(error) => {
             let error = gyro_core::security::redact_secrets(&error.to_string());
+            let status = if adapter.kind == ProviderAdapterKind::ReadinessOnly {
+                HarnessRunStatus::Blocked
+            } else {
+                HarnessRunStatus::Failed
+            };
             let _ = append_provider_status_event(
                 &store,
                 session_id,
                 &request,
-                turn_id,
-                "failed",
+                Some(run_id),
+                attempt_id,
+                status.clone(),
                 Some(error.as_str()),
+            );
+            let _ = append_provider_diagnostics_event(
+                &store,
+                session_id,
+                &request,
+                Some(run_id),
+                attempt_id,
+                status.clone(),
+                started_at,
+                0,
+                false,
+                Some(error.as_str()),
+                None,
+            );
+            emit_provider_chat_event(
+                &app,
+                &request,
+                "failed",
+                Some(status),
+                None,
+                None,
+                Some(error.clone()),
             );
             return Err(error);
         }
     };
-    let status_event =
-        append_provider_status_event(&store, session_id, &request, turn_id, "ready", None)
+    let title_extraction =
+        extract_session_title_marker(&runner_output.response, request.suggest_title);
+    let session = if let Some(title) = title_extraction.title.as_deref() {
+        store.rename_session(session_id, title).map_err(to_string)?
+    } else {
+        None
+    };
+    let resume_cursor_value = runner_output
+        .resume_cursor
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(to_string)?;
+    if let Some(resume_cursor_value) = resume_cursor_value {
+        store
+            .upsert_provider_session_binding(
+                session_id,
+                request.provider_id.clone(),
+                request.model_id.clone(),
+                request.model_label.clone(),
+                resume_cursor_value,
+                "ready",
+                None,
+            )
             .map_err(to_string)?;
+    }
+    let status_event = append_provider_status_event(
+        &store,
+        session_id,
+        &request,
+        Some(run_id),
+        attempt_id,
+        HarnessRunStatus::Done,
+        None,
+    )
+    .map_err(to_string)?;
+    append_provider_diagnostics_event(
+        &store,
+        session_id,
+        &request,
+        Some(run_id),
+        attempt_id,
+        HarnessRunStatus::Done,
+        started_at,
+        runner_output.retry_count,
+        runner_output.resumed,
+        None,
+        runner_output.output_summary.as_deref(),
+    )
+    .map_err(to_string)?;
+    let mut assistant_payload = gyro_core::harness_payload_value(&ProviderRunPayload::new(
+        run_id,
+        attempt_id,
+        "desktop",
+        HarnessRunStatus::Done,
+        request.provider_id.clone(),
+        request.provider_label.clone(),
+        request.model_id.clone(),
+        request.model_label.clone(),
+        Some(chat_message_preview(&request.message)),
+        Some(adapter.runner.into()),
+        Some(adapter.auth_owner.into()),
+        runner_output.resumed,
+        runner_output.retry_count,
+        Some(adapter.timeout_seconds),
+    ))
+    .map_err(to_string)?;
+    if let Some(object) = assistant_payload.as_object_mut() {
+        object.insert(
+            "kind".into(),
+            serde_json::Value::String("provider-response".into()),
+        );
+        object.insert(
+            "runKind".into(),
+            serde_json::Value::String("provider-run".into()),
+        );
+        object.insert(
+            "resumeCursor".into(),
+            runner_output
+                .resume_cursor
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(to_string)?
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "sessionTitle".into(),
+            title_extraction
+                .title
+                .as_ref()
+                .map(|title| serde_json::Value::String(title.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
     let assistant_event = store
         .append_event_with_turn_id(
             session_id,
             SessionEventKind::AssistantMessage,
-            response,
-            serde_json::json!({
-                "kind": "provider-response",
-                "providerId": request.provider_id,
-                "providerLabel": request.provider_label.as_deref().unwrap_or("OpenAI"),
-                "modelId": request.model_id,
-                "modelLabel": request.model_label,
-                "runner": "codex-cli",
-                "authOwner": "chatgpt-local-codex-login",
-            }),
-            turn_id,
+            title_extraction.message,
+            assistant_payload,
+            Some(run_id),
         )
         .map_err(to_string)?;
+    emit_provider_chat_event(
+        &app,
+        &request,
+        "completed",
+        Some(HarnessRunStatus::Done),
+        None,
+        Some(provider_chat_status_message(
+            &HarnessRunStatus::Done,
+            request.provider_label.as_deref().unwrap_or("Provider"),
+        )),
+        None,
+    );
 
     Ok(ProviderChatResponse {
         assistant_event,
+        session_title: title_extraction.title,
+        session,
         status_event,
+        resume_cursor: runner_output.resume_cursor,
     })
 }
 
 #[tauri::command]
-fn append_plan_event(
+async fn append_plan_event(
+    session_id: String,
+    message: Option<String>,
+    payload: serde_json::Value,
+) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        append_plan_event_blocking(session_id, message, payload)
+    })
+    .await
+    .map_err(|error| format!("plan event worker failed: {error}"))?
+}
+
+fn append_plan_event_blocking(
     session_id: String,
     message: Option<String>,
     payload: serde_json::Value,
@@ -781,7 +1222,20 @@ fn append_plan_event(
 }
 
 #[tauri::command]
-fn append_editor_event(
+async fn append_editor_event(
+    session_id: String,
+    event_kind: String,
+    message: String,
+    payload: serde_json::Value,
+) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        append_editor_event_blocking(session_id, event_kind, message, payload)
+    })
+    .await
+    .map_err(|error| format!("editor event worker failed: {error}"))?
+}
+
+fn append_editor_event_blocking(
     session_id: String,
     event_kind: String,
     message: String,
@@ -808,48 +1262,97 @@ fn append_editor_event(
 }
 
 #[tauri::command]
-fn load_config() -> Result<GyroConfig, String> {
+async fn load_config() -> Result<GyroConfig, String> {
+    tauri::async_runtime::spawn_blocking(load_config_blocking)
+        .await
+        .map_err(|error| format!("config load worker failed: {error}"))?
+}
+
+fn load_config_blocking() -> Result<GyroConfig, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     GyroConfig::load(&paths).map_err(to_string)
 }
 
 #[tauri::command]
-fn get_account_session() -> Result<AccountSessionState, String> {
+async fn get_account_session() -> Result<AccountSessionState, String> {
+    tauri::async_runtime::spawn_blocking(get_account_session_blocking)
+        .await
+        .map_err(|error| format!("account session worker failed: {error}"))?
+}
+
+fn get_account_session_blocking() -> Result<AccountSessionState, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     account_stored_session(&paths).map_err(to_string)
 }
 
 #[tauri::command]
-fn start_account_login() -> Result<AccountSessionState, String> {
+async fn start_account_login() -> Result<AccountSessionState, String> {
+    tauri::async_runtime::spawn_blocking(start_account_login_blocking)
+        .await
+        .map_err(|error| format!("account login worker failed: {error}"))?
+}
+
+fn start_account_login_blocking() -> Result<AccountSessionState, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     account_start_login(&paths).map_err(to_string)
 }
 
 #[tauri::command]
-fn refresh_account_session() -> Result<AccountSessionState, String> {
+async fn refresh_account_session() -> Result<AccountSessionState, String> {
+    tauri::async_runtime::spawn_blocking(refresh_account_session_blocking)
+        .await
+        .map_err(|error| format!("account refresh worker failed: {error}"))?
+}
+
+fn refresh_account_session_blocking() -> Result<AccountSessionState, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     account_refresh_session(&paths).map_err(to_string)
 }
 
 #[tauri::command]
-fn logout_account() -> Result<AccountSessionState, String> {
+async fn logout_account() -> Result<AccountSessionState, String> {
+    tauri::async_runtime::spawn_blocking(logout_account_blocking)
+        .await
+        .map_err(|error| format!("account logout worker failed: {error}"))?
+}
+
+fn logout_account_blocking() -> Result<AccountSessionState, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     account_logout(&paths).map_err(to_string)
 }
 
 #[tauri::command]
-fn save_config(config: GyroConfig) -> Result<(), String> {
-    let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    config.save(&paths).map_err(to_string)
+async fn save_config(config: GyroConfig) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        config.save(&paths).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("config save worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn list_workspace_files(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
-    list_workspace_tree(workspace_path, Some(3))
+async fn list_workspace_files(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        list_workspace_tree_blocking(workspace_path, Some(3))
+    })
+    .await
+    .map_err(|error| format!("workspace file list worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn list_workspace_tree(
+async fn list_workspace_tree(
+    workspace_path: String,
+    depth: Option<usize>,
+) -> Result<Vec<WorkspaceFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        list_workspace_tree_blocking(workspace_path, depth)
+    })
+    .await
+    .map_err(|error| format!("workspace tree worker failed: {error}"))?
+}
+
+fn list_workspace_tree_blocking(
     workspace_path: String,
     depth: Option<usize>,
 ) -> Result<Vec<WorkspaceFile>, String> {
@@ -898,68 +1401,121 @@ fn list_workspace_tree(
 }
 
 #[tauri::command]
-fn read_workspace_file(
+async fn read_workspace_file(
     workspace_path: String,
     path: String,
 ) -> Result<WorkspaceFileContent, String> {
-    read_workspace_file_impl(&workspace_path, &path).map_err(to_string)
+    tauri::async_runtime::spawn_blocking(move || {
+        read_workspace_file_impl(&workspace_path, &path).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace file read worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn read_workspace_file_full(
+async fn read_workspace_file_full(
     workspace_path: String,
     path: String,
 ) -> Result<WorkspaceFileContent, String> {
-    read_workspace_file_with_limit(&workspace_path, &path, MAX_WORKSPACE_FILE_EDIT_BYTES)
-        .map_err(to_string)
+    tauri::async_runtime::spawn_blocking(move || {
+        read_workspace_file_with_limit(&workspace_path, &path, MAX_WORKSPACE_FILE_EDIT_BYTES)
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("full workspace file read worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn stat_workspace_file(workspace_path: String, path: String) -> Result<WorkspaceFileStat, String> {
-    stat_workspace_file_impl(&workspace_path, &path).map_err(to_string)
+async fn stat_workspace_file(
+    workspace_path: String,
+    path: String,
+) -> Result<WorkspaceFileStat, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        stat_workspace_file_impl(&workspace_path, &path).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace file stat worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn write_workspace_file(
+async fn write_workspace_file(
     request: WorkspaceFileWriteRequest,
 ) -> Result<WorkspaceFileContent, String> {
-    write_workspace_file_impl(&request).map_err(to_string)
+    tauri::async_runtime::spawn_blocking(move || {
+        write_workspace_file_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace file write worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn watch_workspace(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
+async fn watch_workspace(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
     // V1 exposes a normalized snapshot through the command boundary. A long-lived
     // watcher can layer event streaming on the same WorkspaceFile shape later.
-    list_workspace_tree(workspace_path, Some(5))
+    tauri::async_runtime::spawn_blocking(move || {
+        list_workspace_tree_blocking(workspace_path, Some(5))
+    })
+    .await
+    .map_err(|error| format!("workspace watch worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn create_workspace_file(request: WorkspacePathCreateRequest) -> Result<WorkspaceFileStat, String> {
-    create_workspace_path_impl(&request).map_err(to_string)
+async fn create_workspace_file(
+    request: WorkspacePathCreateRequest,
+) -> Result<WorkspaceFileStat, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        create_workspace_path_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace file create worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn rename_workspace_path(request: WorkspacePathRenameRequest) -> Result<WorkspaceFileStat, String> {
-    rename_workspace_path_impl(&request).map_err(to_string)
+async fn rename_workspace_path(
+    request: WorkspacePathRenameRequest,
+) -> Result<WorkspaceFileStat, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        rename_workspace_path_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace path rename worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn delete_workspace_path(request: WorkspacePathDeleteRequest) -> Result<bool, String> {
-    delete_workspace_path_impl(&request).map_err(to_string)
+async fn delete_workspace_path(request: WorkspacePathDeleteRequest) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        delete_workspace_path_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace path delete worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn search_workspace(request: WorkspaceSearchRequest) -> Result<Vec<WorkspaceSearchResult>, String> {
-    search_workspace_impl(&request).map_err(to_string)
+async fn search_workspace(
+    request: WorkspaceSearchRequest,
+) -> Result<Vec<WorkspaceSearchResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || search_workspace_impl(&request).map_err(to_string))
+        .await
+        .map_err(|error| format!("workspace search worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn git_status(workspace_path: String) -> Result<SourceControlStatus, String> {
-    git_status_impl(&workspace_path).map_err(to_string)
+async fn git_status(workspace_path: String) -> Result<SourceControlStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_status_impl(&workspace_path).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("git status worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
+async fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
+    tauri::async_runtime::spawn_blocking(move || git_diff_blocking(request))
+        .await
+        .map_err(|error| format!("git diff worker failed: {error}"))?
+}
+
+fn git_diff_blocking(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let mut command = command_with_gui_path("git");
     command.arg("-C").arg(root).arg("diff").arg("--");
@@ -970,7 +1526,13 @@ fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
 }
 
 #[tauri::command]
-fn git_stage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+async fn git_stage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || git_stage_blocking(request))
+        .await
+        .map_err(|error| format!("git stage worker failed: {error}"))?
+}
+
+fn git_stage_blocking(request: GitStageRequest) -> Result<SourceControlStatus, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
@@ -986,7 +1548,13 @@ fn git_stage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
 }
 
 #[tauri::command]
-fn git_unstage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+async fn git_unstage(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || git_unstage_blocking(request))
+        .await
+        .map_err(|error| format!("git unstage worker failed: {error}"))?
+}
+
+fn git_unstage_blocking(request: GitStageRequest) -> Result<SourceControlStatus, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
@@ -1003,7 +1571,13 @@ fn git_unstage(request: GitStageRequest) -> Result<SourceControlStatus, String> 
 }
 
 #[tauri::command]
-fn git_commit(request: GitCommitRequest) -> Result<IdeCommandOutput, String> {
+async fn git_commit(request: GitCommitRequest) -> Result<IdeCommandOutput, String> {
+    tauri::async_runtime::spawn_blocking(move || git_commit_blocking(request))
+        .await
+        .map_err(|error| format!("git commit worker failed: {error}"))?
+}
+
+fn git_commit_blocking(request: GitCommitRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     if request.message.trim().is_empty() {
         return Err("commit message is required".into());
@@ -1019,7 +1593,13 @@ fn git_commit(request: GitCommitRequest) -> Result<IdeCommandOutput, String> {
 }
 
 #[tauri::command]
-fn lsp_start(request: LspStartRequest) -> Result<LspSessionResult, String> {
+async fn lsp_start(request: LspStartRequest) -> Result<LspSessionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || lsp_start_blocking(request))
+        .await
+        .map_err(|error| format!("lsp start worker failed: {error}"))?
+}
+
+fn lsp_start_blocking(request: LspStartRequest) -> Result<LspSessionResult, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let command_text = request.command.clone();
     let mut parts = command_text.split_whitespace();
@@ -1051,7 +1631,7 @@ fn lsp_start(request: LspStartRequest) -> Result<LspSessionResult, String> {
 }
 
 #[tauri::command]
-fn lsp_request(request: LspRequestPayload) -> Result<serde_json::Value, String> {
+async fn lsp_request(request: LspRequestPayload) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "serverId": request.server_id,
         "method": request.method,
@@ -1062,7 +1642,7 @@ fn lsp_request(request: LspRequestPayload) -> Result<serde_json::Value, String> 
 }
 
 #[tauri::command]
-fn lsp_stop(server_id: String) -> Result<serde_json::Value, String> {
+async fn lsp_stop(server_id: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "serverId": server_id,
         "status": "stopped",
@@ -1070,12 +1650,22 @@ fn lsp_stop(server_id: String) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn task_discover(workspace_path: String) -> Result<Vec<TaskDefinitionResult>, String> {
-    task_discover_impl(&workspace_path).map_err(to_string)
+async fn task_discover(workspace_path: String) -> Result<Vec<TaskDefinitionResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        task_discover_impl(&workspace_path).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("task discover worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn task_run(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
+async fn task_run(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
+    tauri::async_runtime::spawn_blocking(move || task_run_blocking(request))
+        .await
+        .map_err(|error| format!("task run worker failed: {error}"))?
+}
+
+fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let mut command = command_with_gui_path(&request.command);
     command.current_dir(root).args(request.args);
@@ -1087,12 +1677,22 @@ fn task_run(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
 }
 
 #[tauri::command]
-fn test_discover(workspace_path: String) -> Result<Vec<TestTreeItemResult>, String> {
-    test_discover_impl(&workspace_path).map_err(to_string)
+async fn test_discover(workspace_path: String) -> Result<Vec<TestTreeItemResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        test_discover_impl(&workspace_path).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("test discover worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn test_run(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
+async fn test_run(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
+    tauri::async_runtime::spawn_blocking(move || test_run_blocking(request))
+        .await
+        .map_err(|error| format!("test run worker failed: {error}"))?
+}
+
+fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let command_name = request.command.unwrap_or_else(|| "cargo".into());
     let args = request.args.unwrap_or_else(|| vec!["test".into()]);
@@ -1106,7 +1706,13 @@ fn test_run(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
 }
 
 #[tauri::command]
-fn debug_start(request: DebugStartRequest) -> Result<DebugSessionResult, String> {
+async fn debug_start(request: DebugStartRequest) -> Result<DebugSessionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || debug_start_blocking(request))
+        .await
+        .map_err(|error| format!("debug start worker failed: {error}"))?
+}
+
+fn debug_start_blocking(request: DebugStartRequest) -> Result<DebugSessionResult, String> {
     if let Some(workspace_path) = request.workspace_path.as_deref() {
         let _ = workspace_root(workspace_path).map_err(to_string)?;
     }
@@ -1137,7 +1743,7 @@ fn debug_start(request: DebugStartRequest) -> Result<DebugSessionResult, String>
 }
 
 #[tauri::command]
-fn debug_send(request: DebugSendRequest) -> Result<serde_json::Value, String> {
+async fn debug_send(request: DebugSendRequest) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "sessionId": request.session_id,
         "status": "not-running",
@@ -1147,7 +1753,7 @@ fn debug_send(request: DebugSendRequest) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn debug_stop(session_id: String) -> Result<serde_json::Value, String> {
+async fn debug_stop(session_id: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "sessionId": session_id,
         "status": "stopped",
@@ -1704,77 +2310,232 @@ fn content_hash(bytes: &[u8]) -> String {
 }
 
 #[tauri::command]
-fn create_terminal_pane(
+async fn create_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     request: TerminalPaneRequest,
 ) -> Result<TerminalPaneSnapshot, String> {
-    manager.create(request).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.create(request).map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal create worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn write_terminal_input(
+async fn write_terminal_input(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
     input: String,
 ) -> Result<TerminalPaneSnapshot, String> {
-    manager.write(&pane_id, &input).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.write(&pane_id, &input).map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal input worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn read_terminal_output(
+async fn read_terminal_output(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<TerminalPaneSnapshot, String> {
-    manager.read(&pane_id).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.read(&pane_id).map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal read worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn resize_terminal_pane(
+async fn resize_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<TerminalPaneSnapshot, String> {
-    manager.resize(&pane_id, cols, rows).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        manager.resize(&pane_id, cols, rows).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("terminal resize worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn stop_terminal_pane(
+async fn stop_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<TerminalPaneSnapshot, String> {
-    manager.stop(&pane_id).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.stop(&pane_id).map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal stop worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn restart_terminal_pane(
+async fn restart_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<TerminalPaneSnapshot, String> {
-    manager.restart(&pane_id).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.restart(&pane_id).map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal restart worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn restore_terminal_panes(
+async fn restore_terminal_panes(
     manager: tauri::State<'_, TerminalProcessManager>,
 ) -> Result<Vec<TerminalPaneSnapshot>, String> {
-    manager.restore().map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.restore().map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal restore worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn check_provider_health(request: ProviderHealthRequest) -> Result<ProviderHealthCheck, String> {
+async fn check_provider_health(
+    request: ProviderHealthRequest,
+) -> Result<ProviderHealthCheck, String> {
+    tauri::async_runtime::spawn_blocking(move || check_provider_health_blocking(request))
+        .await
+        .map_err(|error| format!("provider health worker failed: {error}"))?
+}
+
+fn check_provider_health_blocking(
+    request: ProviderHealthRequest,
+) -> Result<ProviderHealthCheck, String> {
     ProviderHealthService::default()
         .check(request)
         .map_err(to_string)
 }
 
 #[tauri::command]
-fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck, String> {
-    check_provider_health(ProviderHealthRequest {
-        provider_id,
-        api_key_ref: None,
-        base_url: None,
+async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        check_provider_health_blocking(ProviderHealthRequest {
+            provider_id,
+            api_key_ref: None,
+            base_url: None,
+        })
     })
+    .await
+    .map_err(|error| format!("provider auth worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn export_diagnostics() -> Result<DiagnosticsExportResult, String> {
+    tauri::async_runtime::spawn_blocking(export_diagnostics_blocking)
+        .await
+        .map_err(|error| format!("diagnostics export worker failed: {error}"))?
+}
+
+fn export_diagnostics_blocking() -> Result<DiagnosticsExportResult, String> {
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    paths.ensure().map_err(to_string)?;
+    let config = GyroConfig::load(&paths).map_err(to_string)?;
+    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let sessions = store.list_sessions().map_err(to_string)?;
+    let provider_health = collect_provider_health_for_diagnostics(&config);
+    let mut recent_run_diagnostics = Vec::new();
+    let mut session_summaries = Vec::new();
+
+    for session in sessions.iter().take(25) {
+        let events = store.read_events(session.id).unwrap_or_default();
+        session_summaries.push(DiagnosticsSessionSummary {
+            id: session.id.to_string(),
+            title: gyro_core::sanitize_harness_text(&session.title),
+            origin: session_origin_label(&session.origin).into(),
+            workspace_mode: session_workspace_mode_label(&session.workspace_mode).into(),
+            branch: gyro_core::sanitize_harness_text(&session.branch),
+            provider_id: session.provider_id.clone(),
+            model_id: session.model_id.clone(),
+            event_count: events.len(),
+            updated_at: session.updated_at.to_rfc3339(),
+        });
+
+        for event in events.iter().rev() {
+            let Some(payload) = event.payload.as_object() else {
+                continue;
+            };
+            if payload.get("schema").and_then(|value| value.as_str())
+                == Some(gyro_core::HARNESS_SCHEMA_V1)
+                && payload.get("kind").and_then(|value| value.as_str())
+                    == Some("provider-diagnostics")
+            {
+                recent_run_diagnostics.push(event.payload.clone());
+                if recent_run_diagnostics.len() >= 50 {
+                    break;
+                }
+            }
+        }
+        if recent_run_diagnostics.len() >= 50 {
+            break;
+        }
+    }
+
+    let bundle = DiagnosticsExportBundle {
+        schema: gyro_core::HARNESS_SCHEMA_V1.into(),
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        config_summary: DiagnosticsConfigSummary {
+            telemetry_enabled: config.telemetry_enabled,
+            require_command_approval: config.require_command_approval,
+            require_file_edit_approval: config.require_file_edit_approval,
+            provider_count: config.model_providers.len(),
+            enabled_provider_ids: config
+                .model_providers
+                .iter()
+                .filter(|provider| provider.enabled)
+                .map(|provider| provider.id.clone())
+                .collect(),
+            command_profile_count: config.command_profiles.len(),
+        },
+        provider_health,
+        recent_run_diagnostics,
+        sessions: session_summaries,
+    };
+    let diagnostics_dir = paths.logs_dir.join("diagnostics");
+    fs::create_dir_all(&diagnostics_dir).map_err(to_string)?;
+    let file_name = format!(
+        "gyro-diagnostics-{}.json",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+    let path = diagnostics_dir.join(file_name);
+    let raw = serde_json::to_string_pretty(&bundle).map_err(to_string)?;
+    fs::write(&path, format!("{raw}\n")).map_err(to_string)?;
+
+    Ok(DiagnosticsExportResult {
+        path: path.display().to_string(),
+        bundle,
+    })
+}
+
+fn collect_provider_health_for_diagnostics(config: &GyroConfig) -> Vec<ProviderHealthCheck> {
+    let service = ProviderHealthService::default();
+    config
+        .model_providers
+        .iter()
+        .filter_map(|provider| {
+            service
+                .check(ProviderHealthRequest {
+                    provider_id: provider.id.clone(),
+                    base_url: provider.base_url.clone(),
+                    api_key_ref: Some(provider.api_key_ref.clone()),
+                })
+                .ok()
+        })
+        .collect()
+}
+
+fn session_origin_label(origin: &SessionOrigin) -> &'static str {
+    match origin {
+        SessionOrigin::Cli => "cli",
+        SessionOrigin::Desktop => "desktop",
+    }
+}
+
+fn session_workspace_mode_label(mode: &SessionWorkspaceMode) -> &'static str {
+    match mode {
+        SessionWorkspaceMode::Local => "local",
+        SessionWorkspaceMode::Worktree => "worktree",
+    }
 }
 
 #[derive(Default)]
@@ -1899,7 +2660,8 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
         pixel_width: 0,
         pixel_height: 0,
     })?;
-    let mut command = CommandBuilder::new(&request.command);
+    let command_path = terminal_command_path(&request.command);
+    let mut command = CommandBuilder::new(command_path.as_str());
     command.args(request.args.iter().map(String::as_str));
     if let Some(cwd) = cwd {
         command.cwd(cwd);
@@ -1908,7 +2670,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "Gyro");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-    if !request.command.contains('/') {
+    if !command_path.contains('/') {
         command.env("PATH", augmented_gui_path());
     }
 
@@ -1952,6 +2714,14 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
 
     let candidate = Path::new(working_directory);
     gyro_core::security::assert_path_inside_workspace(&workspace, candidate).map(Some)
+}
+
+fn terminal_command_path(command: &str) -> String {
+    let command = command.trim();
+    if command == "zsh" && Path::new("/bin/zsh").exists() {
+        return "/bin/zsh".into();
+    }
+    command.into()
 }
 
 fn should_skip_codex_login_for_external_env(
@@ -2114,54 +2884,291 @@ fn command_output(command: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn run_openai_codex_chat(request: &ProviderChatRequest) -> anyhow::Result<String> {
+fn run_provider_chat_with_retry(
+    store: &SessionStore,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    binding: Option<ProviderSessionBinding>,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    let binding_cursor = binding
+        .as_ref()
+        .and_then(|binding| provider_resume_cursor_from_binding(binding));
+    match run_provider_chat_once(app, request, binding_cursor.as_ref()) {
+        Ok(mut output) => {
+            output.resumed = binding_cursor.is_some();
+            Ok(output)
+        }
+        Err(error) if binding.is_some() && is_stale_resume_error(&error.to_string()) => {
+            let session_id =
+                parse_uuid(&request.session_id).map_err(|error| anyhow::anyhow!(error))?;
+            let _ = store.clear_provider_session_binding(session_id, &request.provider_id);
+            let mut output = run_provider_chat_once(app, request, None)?;
+            output.retry_count = 1;
+            output.resumed = false;
+            output.output_summary = Some("stale resume cursor cleared and request retried".into());
+            Ok(output)
+        }
+        Err(error) => {
+            if let Some(binding) = binding {
+                let _ = store.upsert_provider_session_binding(
+                    binding.session_id,
+                    binding.provider_id,
+                    binding.model_id,
+                    binding.model_label,
+                    binding.resume_cursor_json,
+                    "failed",
+                    Some(gyro_core::security::redact_secrets(&error.to_string())),
+                );
+            }
+            Err(error)
+        }
+    }
+}
+
+fn run_provider_chat_once(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: Option<&ProviderResumeCursor>,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    match provider_adapter_for(&request.provider_id).kind {
+        ProviderAdapterKind::OpenAiCodex => run_openai_codex_chat(app, request, resume_cursor),
+        ProviderAdapterKind::AnthropicClaude => run_anthropic_claude_chat(app, request, resume_cursor),
+        ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
+            "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
+            request.provider_label.as_deref().unwrap_or("Provider")
+        ),
+    }
+}
+
+fn provider_resume_cursor_from_binding(
+    binding: &ProviderSessionBinding,
+) -> Option<ProviderResumeCursor> {
+    serde_json::from_value::<ProviderResumeCursor>(binding.resume_cursor_json.clone()).ok()
+}
+
+fn run_openai_codex_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: Option<&ProviderResumeCursor>,
+) -> anyhow::Result<ProviderRunnerOutput> {
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let prompt = openai_codex_chat_prompt(&request.message, request.workspace_path.as_deref());
+    let prompt = openai_codex_chat_prompt(
+        &request.message,
+        request.workspace_path.as_deref(),
+        request.suggest_title,
+    );
 
     let mut process = command_with_gui_path("codex");
-    process
-        .arg("exec")
-        .arg("--cd")
-        .arg(cwd)
-        .arg("--skip-git-repo-check")
-        .arg("--sandbox")
-        .arg("read-only")
-        .arg("--output-last-message")
-        .arg(&output_path);
-    if let Some(model) = codex_model_arg(request.model_id.as_deref()) {
-        process.arg("--model").arg(model);
-    }
-    process.arg(prompt);
+    process.current_dir(cwd);
+    process.args(codex_chat_args(
+        resume_cursor.and_then(|cursor| {
+            (cursor.kind == "codex-session").then_some(cursor.session_id.as_str())
+        }),
+        &output_path,
+        request.model_id.as_deref(),
+        &prompt,
+    ));
 
-    let output = process.output().map_err(|error| {
-        anyhow::anyhow!(
-            "Could not start OpenAI through Codex CLI. Run `codex login` in Terminal, then try again. {error}"
-        )
-    })?;
+    let output =
+        run_streaming_command(process, Duration::from_secs(CODEX_CHAT_TIMEOUT_SECS), app, request)
+            .map_err(|error| {
+            anyhow::anyhow!(
+                "Could not complete OpenAI through Codex CLI. Run `codex login` in Terminal if needed, then try again. {error}"
+            )
+        })?;
     let last_message = fs::read_to_string(&output_path).unwrap_or_default();
     let _ = fs::remove_file(&output_path);
-    if output.status.success() {
-        let response = last_message.trim();
+    if output.status_success {
+        let response = sanitize_provider_chat_response(last_message.trim());
         if !response.is_empty() {
-            return Ok(response.to_string());
+            let response_chars = response.chars().count();
+            let provider_session_id = output.provider_session_id.clone();
+            return Ok(ProviderRunnerOutput {
+                response,
+                resume_cursor: provider_session_id
+                    .clone()
+                    .map(|session_id| ProviderResumeCursor {
+                        kind: "codex-session".into(),
+                        session_id,
+                    }),
+                retry_count: 0,
+                resumed: resume_cursor.is_some(),
+                output_summary: Some(provider_output_summary(
+                    "codex-cli",
+                    output.status_label.as_str(),
+                    provider_session_id.as_deref(),
+                    response_chars,
+                )),
+            });
         }
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stdout = sanitize_provider_chat_response(output.stdout.trim());
         if !stdout.is_empty() {
-            return Ok(stdout);
+            let response_chars = stdout.chars().count();
+            let provider_session_id = output.provider_session_id.clone();
+            return Ok(ProviderRunnerOutput {
+                response: stdout,
+                resume_cursor: provider_session_id
+                    .clone()
+                    .map(|session_id| ProviderResumeCursor {
+                        kind: "codex-session".into(),
+                        session_id,
+                    }),
+                retry_count: 0,
+                resumed: resume_cursor.is_some(),
+                output_summary: Some(provider_output_summary(
+                    "codex-cli",
+                    output.status_label.as_str(),
+                    provider_session_id.as_deref(),
+                    response_chars,
+                )),
+            });
         }
         anyhow::bail!("OpenAI finished, but Codex did not return a chat response.");
     }
 
     let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    combined.push_str(&output.stdout);
+    combined.push_str(&output.stderr);
     let combined = gyro_core::security::redact_secrets(combined.trim());
     if combined.is_empty() {
-        anyhow::bail!("OpenAI through Codex exited with {}", output.status);
+        anyhow::bail!("OpenAI through Codex exited with {}", output.status_label);
     }
     anyhow::bail!("{}", truncate_error_detail(&combined));
+}
+
+fn run_anthropic_claude_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: Option<&ProviderResumeCursor>,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let prompt = claude_chat_prompt(
+        &request.message,
+        request.workspace_path.as_deref(),
+        request.suggest_title,
+    );
+    let session_id = resume_cursor
+        .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let mut process = command_with_gui_path("claude");
+    process.current_dir(cwd);
+    process.args(claude_chat_args(
+        resume_cursor
+            .filter(|cursor| cursor.kind == "claude-session")
+            .map(|_| session_id.as_str()),
+        &session_id,
+        request.model_id.as_deref(),
+        &prompt,
+    ));
+
+    let output =
+        run_streaming_command(process, Duration::from_secs(CODEX_CHAT_TIMEOUT_SECS), app, request)
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "Could not complete Anthropic through Claude Code. Run `claude auth login` in Terminal if needed, then try again. {error}"
+                )
+            })?;
+    if output.status_success {
+        let response = sanitize_provider_chat_response(
+            output
+                .assistant_text
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or(output.stdout.trim()),
+        );
+        if response.is_empty() {
+            anyhow::bail!("Anthropic finished, but Claude did not return a chat response.");
+        }
+        let response_chars = response.chars().count();
+        let provider_session_id = session_id.clone();
+        return Ok(ProviderRunnerOutput {
+            response,
+            resume_cursor: Some(ProviderResumeCursor {
+                kind: "claude-session".into(),
+                session_id: provider_session_id.clone(),
+            }),
+            retry_count: 0,
+            resumed: resume_cursor.is_some(),
+            output_summary: Some(provider_output_summary(
+                "claude-code",
+                output.status_label.as_str(),
+                Some(provider_session_id.as_str()),
+                response_chars,
+            )),
+        });
+    }
+
+    let combined =
+        gyro_core::security::redact_secrets(format!("{}{}", output.stdout, output.stderr).trim());
+    if combined.is_empty() {
+        anyhow::bail!(
+            "Anthropic through Claude exited with {}",
+            output.status_label
+        );
+    }
+    anyhow::bail!("{}", truncate_error_detail(&combined));
+}
+
+fn codex_chat_args(
+    resume_session_id: Option<&str>,
+    output_path: &Path,
+    model_id: Option<&str>,
+    prompt: &str,
+) -> Vec<String> {
+    let mut args = vec!["exec".into()];
+    if resume_session_id.is_some() {
+        args.push("resume".into());
+    } else {
+        args.extend([
+            "--skip-git-repo-check".into(),
+            "--sandbox".into(),
+            "read-only".into(),
+        ]);
+    }
+    args.push("--json".into());
+    args.push("--output-last-message".into());
+    args.push(output_path.display().to_string());
+    if resume_session_id.is_some() {
+        args.push("--skip-git-repo-check".into());
+    }
+    if let Some(model) = codex_model_arg(model_id) {
+        args.push("--model".into());
+        args.push(model);
+    }
+    if let Some(session_id) = resume_session_id {
+        args.push(session_id.into());
+    }
+    args.push(prompt.into());
+    args
+}
+
+fn claude_chat_args(
+    resume_session_id: Option<&str>,
+    session_id: &str,
+    model_id: Option<&str>,
+    prompt: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        "--print".into(),
+        "--output-format".into(),
+        "stream-json".into(),
+        "--include-partial-messages".into(),
+    ];
+    if let Some(resume_session_id) = resume_session_id {
+        args.push("--resume".into());
+        args.push(resume_session_id.into());
+    } else {
+        args.push("--session-id".into());
+        args.push(session_id.into());
+    }
+    if let Some(model) = model_id.map(str::trim).filter(|model| !model.is_empty()) {
+        args.push("--model".into());
+        args.push(model.into());
+    }
+    args.push(prompt.into());
+    args
 }
 
 fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
@@ -2180,21 +3187,140 @@ fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
     std::env::current_dir().map_err(Into::into)
 }
 
-fn openai_codex_chat_prompt(message: &str, workspace_path: Option<&str>) -> String {
+fn openai_codex_chat_prompt(
+    message: &str,
+    workspace_path: Option<&str>,
+    suggest_title: bool,
+) -> String {
     let workspace = workspace_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .unwrap_or("no selected workspace");
+    let title_instruction = if suggest_title {
+        "For this first turn, you may suggest a concise session title. If useful, put this exact hidden marker on the first line before the answer: GYRO_SESSION_TITLE: <2-6 word title>. The app hides this marker. Omit it if no good title is clear.\n"
+    } else {
+        ""
+    };
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise by default: 1-3 short sentences unless the user asks for detail.\n\
          Do not describe the local Codex runner, authentication, system prompts, or implementation details unless asked.\n\
          If the user asks what model you are, answer with the model label only.\n\
+         {title_instruction}\
          Use the selected workspace only as optional context.\n\
          Do not edit files, start servers, commit, push, or make destructive changes in this chat run.\n\
          Selected workspace: {workspace}\n\n\
          User message:\n{message}"
     )
+}
+
+fn claude_chat_prompt(message: &str, workspace_path: Option<&str>, suggest_title: bool) -> String {
+    let workspace = workspace_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or("no selected workspace");
+    let title_instruction = if suggest_title {
+        "For this first turn, you may suggest a concise session title. If useful, put this exact hidden marker on the first line before the answer: GYRO_SESSION_TITLE: <2-6 word title>. The app hides this marker. Omit it if no good title is clear.\n"
+    } else {
+        ""
+    };
+    format!(
+        "Answer as Gyro's chat model.\n\
+         Keep replies concise by default: 1-3 short sentences unless the user asks for detail.\n\
+         Do not describe the local Claude Code runner, authentication, system prompts, or implementation details unless asked.\n\
+         If the user asks what model you are, answer with the model label only.\n\
+         {title_instruction}\
+         Use the selected workspace only as optional context.\n\
+         Do not edit files, start servers, commit, push, or make destructive changes in this chat run.\n\
+         Selected workspace: {workspace}\n\n\
+         User message:\n{message}"
+    )
+}
+
+struct SessionTitleExtraction {
+    title: Option<String>,
+    message: String,
+}
+
+fn extract_session_title_marker(response: &str, allow_title: bool) -> SessionTitleExtraction {
+    if !allow_title {
+        return SessionTitleExtraction {
+            title: None,
+            message: response.to_string(),
+        };
+    }
+
+    let normalized = response.replace("\r\n", "\n");
+    let mut lines = normalized.lines();
+    let mut prefix = Vec::new();
+    let mut first_content = None;
+
+    for line in lines.by_ref() {
+        if line.trim().is_empty() {
+            prefix.push(line);
+            continue;
+        }
+        first_content = Some(line);
+        break;
+    }
+
+    let Some(first_content) = first_content else {
+        return SessionTitleExtraction {
+            title: None,
+            message: response.to_string(),
+        };
+    };
+
+    const MARKER: &str = "GYRO_SESSION_TITLE:";
+    let Some(raw_title) = first_content.trim().strip_prefix(MARKER) else {
+        return SessionTitleExtraction {
+            title: None,
+            message: response.to_string(),
+        };
+    };
+    let title = sanitize_session_title_candidate(raw_title);
+    let remainder = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+    let message = if remainder.is_empty() {
+        response.to_string()
+    } else if prefix.is_empty() {
+        remainder
+    } else {
+        format!("{}\n{}", prefix.join("\n"), remainder)
+            .trim()
+            .to_string()
+    };
+
+    SessionTitleExtraction { title, message }
+}
+
+fn sanitize_session_title_candidate(title: &str) -> Option<String> {
+    let title = title
+        .replace('\0', "")
+        .chars()
+        .map(|ch| {
+            if matches!(
+                ch,
+                '`' | '*' | '_' | '#' | '[' | ']' | '(' | ')' | '{' | '}' | '<' | '>' | '|' | '\\'
+            ) {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(|char: char| char.is_ascii_punctuation() || char.is_whitespace())
+        .to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let chars = title.chars().collect::<Vec<_>>();
+    if chars.len() > 80 {
+        return Some(chars.into_iter().take(77).collect::<String>() + "...");
+    }
+    Some(title)
 }
 
 fn codex_model_arg(model_id: Option<&str>) -> Option<String> {
@@ -2217,50 +3343,612 @@ fn append_provider_status_event(
     session_id: Uuid,
     request: &ProviderChatRequest,
     turn_id: Option<Uuid>,
-    status: &str,
+    attempt_id: Uuid,
+    status: HarnessRunStatus,
     error: Option<&str>,
 ) -> anyhow::Result<SessionEvent> {
-    let provider_label = request.provider_label.as_deref().unwrap_or("OpenAI");
+    let provider_label = request.provider_label.as_deref().unwrap_or("Provider");
+    let adapter = provider_adapter_for(&request.provider_id);
+    let payload = ProviderRunPayload::new(
+        turn_id.unwrap_or_else(Uuid::new_v4),
+        attempt_id,
+        "desktop",
+        status.clone(),
+        request.provider_id.clone(),
+        request.provider_label.clone(),
+        request.model_id.clone(),
+        request.model_label.clone(),
+        Some(chat_message_preview(&request.message)),
+        Some(adapter.runner.into()),
+        Some(adapter.auth_owner.into()),
+        false,
+        0,
+        Some(adapter.timeout_seconds),
+    );
+    let mut payload = gyro_core::harness_payload_value(&payload)?;
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "kind".into(),
+            serde_json::Value::String("provider-status".into()),
+        );
+        object.insert(
+            "error".into(),
+            error
+                .map(gyro_core::sanitize_harness_text)
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "turnId".into(),
+            turn_id
+                .map(|id| serde_json::Value::String(id.to_string()))
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
     store.append_event_with_turn_id(
         session_id,
         SessionEventKind::SystemEvent,
-        provider_chat_status_message(status, provider_label),
-        serde_json::json!({
-            "kind": "provider-status",
-            "status": status,
-            "error": error,
-            "turnId": turn_id.map(|id| id.to_string()),
-            "userMessage": request.message.as_str(),
-            "providerId": request.provider_id.as_str(),
-            "providerLabel": provider_label,
-            "modelId": request.model_id.as_deref(),
-            "modelLabel": request.model_label.as_deref(),
-            "runner": "codex-cli",
-            "authOwner": "chatgpt-local-codex-login",
-        }),
+        provider_chat_status_message(&status, provider_label),
+        payload,
         turn_id,
     )
 }
 
-fn provider_chat_status_message(status: &str, provider_label: &str) -> String {
+fn append_provider_diagnostics_event(
+    store: &SessionStore,
+    session_id: Uuid,
+    request: &ProviderChatRequest,
+    turn_id: Option<Uuid>,
+    attempt_id: Uuid,
+    status: HarnessRunStatus,
+    started_at: chrono::DateTime<chrono::Utc>,
+    retry_count: u32,
+    resumed: bool,
+    failure_reason: Option<&str>,
+    output_summary: Option<&str>,
+) -> anyhow::Result<SessionEvent> {
+    let adapter = provider_adapter_for(&request.provider_id);
+    let completed_at = chrono::Utc::now();
+    let payload = ProviderDiagnosticsPayload::new(
+        turn_id.unwrap_or_else(Uuid::new_v4),
+        attempt_id,
+        request.provider_id.clone(),
+        request.model_id.clone(),
+        status.clone(),
+        started_at,
+        completed_at,
+        retry_count,
+        resumed,
+        Some(adapter.timeout_seconds),
+        failure_reason.map(str::to_string),
+        output_summary.map(str::to_string),
+    );
+    store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::SystemEvent,
+        provider_diagnostics_message(&status, request.provider_label.as_deref()),
+        gyro_core::harness_payload_value(&payload)?,
+        turn_id,
+    )
+}
+
+fn provider_chat_status_message(status: &HarnessRunStatus, provider_label: &str) -> String {
     match status {
-        "failed" => format!("{provider_label} send needs attention"),
-        "ready" => format!("{provider_label} answered"),
-        "running" => format!("{provider_label} is working"),
+        HarnessRunStatus::Failed => format!("{provider_label} send needs attention"),
+        HarnessRunStatus::Blocked => format!("{provider_label} is not available for chat yet"),
+        HarnessRunStatus::Done => format!("{provider_label} answered"),
+        HarnessRunStatus::Running => format!("{provider_label} is working"),
+        HarnessRunStatus::Waiting => format!("{provider_label} is waiting for approval"),
+        HarnessRunStatus::Cancelled => format!("{provider_label} was cancelled"),
+        HarnessRunStatus::Queued => format!("{provider_label} queued this request"),
+    }
+}
+
+fn provider_diagnostics_message(status: &HarnessRunStatus, provider_label: Option<&str>) -> String {
+    let provider_label = provider_label.unwrap_or("Provider");
+    match status {
+        HarnessRunStatus::Done => format!("{provider_label} diagnostics recorded"),
+        HarnessRunStatus::Blocked => format!("{provider_label} blocked diagnostics recorded"),
+        HarnessRunStatus::Failed => format!("{provider_label} failure diagnostics recorded"),
         _ => format!("{provider_label} queued this request"),
     }
 }
 
+fn validate_chat_message(message: &str) -> Result<String, String> {
+    let message = message.replace('\0', "").trim().to_string();
+    if message.is_empty() {
+        return Err("chat message is required".into());
+    }
+    if message.chars().count() > MAX_CHAT_MESSAGE_CHARS {
+        return Err(format!(
+            "chat message cannot exceed {MAX_CHAT_MESSAGE_CHARS} characters"
+        ));
+    }
+    Ok(message)
+}
+
+fn chat_message_preview(message: &str) -> String {
+    let normalized = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_chars(&normalized, 160)
+}
+
+fn sanitize_provider_chat_response(response: &str) -> String {
+    let redacted = gyro_core::security::redact_secrets(response.trim());
+    truncate_chars(&redacted, MAX_CHAT_RESPONSE_CHARS)
+}
+
+fn sanitize_provider_text_delta(delta: &str) -> String {
+    let redacted = gyro_core::security::redact_secrets(delta);
+    truncate_chars(&redacted, MAX_CHAT_RESPONSE_CHARS)
+}
+
 fn truncate_error_detail(value: &str) -> String {
     const MAX_ERROR_DETAIL_CHARS: usize = 4_000;
-    if value.chars().count() <= MAX_ERROR_DETAIL_CHARS {
+    truncate_chars(value, MAX_ERROR_DETAIL_CHARS)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.len() <= max_chars {
         return value.to_string();
     }
-    value
-        .chars()
-        .take(MAX_ERROR_DETAIL_CHARS)
-        .collect::<String>()
-        + "…"
+    let Some((truncate_at, _)) = value.char_indices().nth(max_chars) else {
+        return value.to_string();
+    };
+    format!("{}{}", &value[..truncate_at], TEXT_TRUNCATION_SUFFIX)
+}
+
+fn push_bounded(target: &mut String, value: &str, max_chars: usize) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    target.push_str(value);
+    if target.len() > max_chars {
+        *target = truncate_chars(target, max_chars);
+        return true;
+    }
+    false
+}
+
+struct StreamingCommandOutput {
+    status_success: bool,
+    status_label: String,
+    stdout: String,
+    stderr: String,
+    assistant_text: Option<String>,
+    provider_session_id: Option<String>,
+}
+
+struct StreamingCommandState {
+    stdout_text: String,
+    assistant_text: String,
+    assistant_text_truncated: bool,
+    pending_delta_chunks: Vec<String>,
+    pending_delta_chars: usize,
+    provider_session_id: Option<String>,
+    last_emit_at: Instant,
+}
+
+impl StreamingCommandState {
+    fn new() -> Self {
+        Self {
+            stdout_text: String::new(),
+            assistant_text: String::new(),
+            assistant_text_truncated: false,
+            pending_delta_chunks: Vec::new(),
+            pending_delta_chars: 0,
+            provider_session_id: None,
+            last_emit_at: Instant::now(),
+        }
+    }
+
+    fn push_stdout(&mut self, line: &str) {
+        push_bounded(&mut self.stdout_text, line, MAX_CHAT_RESPONSE_CHARS * 4);
+    }
+
+    fn push_assistant_delta(&mut self, delta: &str) {
+        if self.assistant_text_truncated {
+            return;
+        }
+        self.assistant_text_truncated =
+            push_bounded(&mut self.assistant_text, delta, MAX_CHAT_RESPONSE_CHARS);
+        self.push_pending_delta(delta);
+    }
+
+    fn push_assistant_snapshot(&mut self, snapshot: &str) {
+        if snapshot.is_empty() {
+            return;
+        }
+        if self.assistant_text.is_empty() {
+            self.push_assistant_delta(snapshot);
+            return;
+        }
+        if let Some(delta) = snapshot.strip_prefix(&self.assistant_text) {
+            self.push_assistant_delta(delta);
+        }
+    }
+
+    fn push_pending_delta(&mut self, delta: &str) {
+        if delta.is_empty() || self.pending_delta_chars >= MAX_CHAT_RESPONSE_CHARS {
+            return;
+        }
+        let remaining_chars = MAX_CHAT_RESPONSE_CHARS - self.pending_delta_chars;
+        let delta_chars = delta.chars().count();
+        if delta_chars <= remaining_chars {
+            self.pending_delta_chunks.push(delta.to_string());
+            self.pending_delta_chars += delta_chars;
+            return;
+        }
+        let truncated_delta = delta.chars().take(remaining_chars).collect::<String>();
+        self.pending_delta_chunks.push(truncated_delta);
+        self.pending_delta_chars = MAX_CHAT_RESPONSE_CHARS;
+    }
+
+    fn take_pending_delta(&mut self) -> String {
+        self.pending_delta_chars = 0;
+        std::mem::take(&mut self.pending_delta_chunks).join("")
+    }
+
+    fn has_pending_delta(&self) -> bool {
+        !self.pending_delta_chunks.is_empty()
+    }
+
+    fn flush_pending_delta(
+        &mut self,
+        app: &tauri::AppHandle,
+        request: &ProviderChatRequest,
+        force: bool,
+    ) {
+        if !self.has_pending_delta() {
+            return;
+        }
+        if !force && self.last_emit_at.elapsed() < PROVIDER_STREAM_FLUSH_INTERVAL {
+            return;
+        }
+        let delta = self.take_pending_delta();
+        self.last_emit_at = Instant::now();
+        emit_provider_chat_event(
+            app,
+            request,
+            "delta",
+            Some(HarnessRunStatus::Running),
+            Some(delta),
+            None,
+            None,
+        );
+    }
+}
+
+fn run_streaming_command(
+    mut command: Command,
+    timeout: Duration,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<StreamingCommandOutput> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("provider stdout was unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("provider stderr was unavailable"))?;
+    let (stdout_tx, stdout_rx) = mpsc::channel::<String>();
+    let stdout_handle = std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let _ = stdout_tx.send(line.clone());
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buffer = String::new();
+        let mut reader = BufReader::new(stderr);
+        let _ = reader.read_to_string(&mut buffer);
+        buffer
+    });
+
+    let started_at = Instant::now();
+    let mut stream_state = StreamingCommandState::new();
+    let status = loop {
+        while let Ok(line) = stdout_rx.try_recv() {
+            handle_provider_stdout_line(&line, app, request, &mut stream_state);
+        }
+        stream_state.flush_pending_delta(app, request, false);
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("command timed out after {} seconds", timeout.as_secs());
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    };
+    let _ = stdout_handle.join();
+    while let Ok(line) = stdout_rx.try_recv() {
+        handle_provider_stdout_line(&line, app, request, &mut stream_state);
+    }
+    stream_state.flush_pending_delta(app, request, true);
+    let stderr_text = stderr_handle.join().unwrap_or_default();
+    Ok(StreamingCommandOutput {
+        status_success: status.success(),
+        status_label: status.to_string(),
+        stdout: stream_state.stdout_text,
+        stderr: stderr_text,
+        assistant_text: (!stream_state.assistant_text.trim().is_empty())
+            .then_some(stream_state.assistant_text),
+        provider_session_id: stream_state.provider_session_id,
+    })
+}
+
+fn handle_provider_stdout_line(
+    line: &str,
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    stream_state: &mut StreamingCommandState,
+) {
+    stream_state.push_stdout(line);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    if stream_state.provider_session_id.is_none() {
+        stream_state.provider_session_id = extract_provider_session_id(&value);
+    }
+    if let Some(chunk) = extract_provider_text_chunk(&value) {
+        match chunk {
+            ProviderTextChunk::Delta(delta) => {
+                let delta = sanitize_provider_text_delta(&delta);
+                if delta.is_empty() {
+                    return;
+                }
+                stream_state.push_assistant_delta(&delta);
+            }
+            ProviderTextChunk::Snapshot(snapshot) => {
+                let snapshot = sanitize_provider_text_delta(&snapshot);
+                stream_state.push_assistant_snapshot(&snapshot);
+            }
+            ProviderTextChunk::Final(text) => {
+                if !stream_state.assistant_text.trim().is_empty() {
+                    return;
+                }
+                let text = sanitize_provider_text_delta(&text);
+                if text.is_empty() {
+                    return;
+                }
+                stream_state.push_assistant_delta(&text);
+            }
+        }
+        stream_state.flush_pending_delta(app, request, false);
+    }
+}
+
+fn emit_provider_chat_event(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    phase: &str,
+    status: Option<HarnessRunStatus>,
+    text_delta: Option<String>,
+    message: Option<String>,
+    error: Option<String>,
+) {
+    let payload = ProviderChatStreamEvent {
+        session_id: request.session_id.clone(),
+        turn_id: request.turn_id.clone(),
+        provider_id: request.provider_id.clone(),
+        model_id: request.model_id.clone(),
+        event_id: Uuid::new_v4().to_string(),
+        phase: phase.into(),
+        status: status.map(|status| status.as_str().to_string()),
+        text_delta,
+        message,
+        error,
+    };
+    let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
+}
+
+fn extract_provider_session_id(value: &serde_json::Value) -> Option<String> {
+    for key in [
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ] {
+        if let Some(id) = value.get(key).and_then(|item| item.as_str()) {
+            if looks_like_session_id(id) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    match value {
+        serde_json::Value::Array(items) => items.iter().find_map(extract_provider_session_id),
+        serde_json::Value::Object(map) => map.values().find_map(extract_provider_session_id),
+        _ => None,
+    }
+}
+
+fn looks_like_session_id(value: &str) -> bool {
+    let value = value.trim();
+    Uuid::parse_str(value).is_ok()
+        || (value.len() >= 12
+            && value.len() <= 128
+            && value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')))
+}
+
+enum ProviderTextChunk {
+    Delta(String),
+    Snapshot(String),
+    Final(String),
+}
+
+#[cfg(test)]
+fn extract_provider_text_delta(value: &serde_json::Value) -> Option<String> {
+    extract_provider_text_chunk(value).map(|chunk| match chunk {
+        ProviderTextChunk::Delta(text)
+        | ProviderTextChunk::Snapshot(text)
+        | ProviderTextChunk::Final(text) => text,
+    })
+}
+
+fn extract_provider_text_chunk(value: &serde_json::Value) -> Option<ProviderTextChunk> {
+    if let Some(delta) = value.pointer("/delta/text").and_then(|item| item.as_str()) {
+        return Some(ProviderTextChunk::Delta(delta.to_string()));
+    }
+    if let Some(delta) = value
+        .pointer("/message/delta/text")
+        .and_then(|item| item.as_str())
+    {
+        return Some(ProviderTextChunk::Delta(delta.to_string()));
+    }
+    if let Some(delta) = value.get("text_delta").and_then(|item| item.as_str()) {
+        return Some(ProviderTextChunk::Delta(delta.to_string()));
+    }
+    if let Some(delta) = value.get("textDelta").and_then(|item| item.as_str()) {
+        return Some(ProviderTextChunk::Delta(delta.to_string()));
+    }
+    let event_type = value
+        .get("type")
+        .or_else(|| value.get("event"))
+        .and_then(|item| item.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if event_type.contains("delta") {
+        if let Some(delta) = value.get("delta").and_then(extract_provider_text_value) {
+            return Some(ProviderTextChunk::Delta(delta.to_string()));
+        }
+        for key in ["text", "content", "message"] {
+            if let Some(delta) = value.get(key).and_then(extract_provider_text_value) {
+                return Some(ProviderTextChunk::Delta(delta));
+            }
+        }
+    }
+    if event_type.contains("partial") {
+        for key in ["text", "content", "message"] {
+            if let Some(snapshot) = value.get(key).and_then(extract_provider_text_value) {
+                return Some(ProviderTextChunk::Snapshot(snapshot));
+            }
+        }
+    }
+    if let Some(text) = extract_codex_agent_message_text(value) {
+        return Some(ProviderTextChunk::Final(text));
+    }
+    None
+}
+
+fn extract_provider_text_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(items) => {
+            let text = items
+                .iter()
+                .filter_map(extract_provider_text_value)
+                .collect::<String>();
+            (!text.is_empty()).then_some(text)
+        }
+        serde_json::Value::Object(map) => {
+            let item_type = map.get("type").and_then(|item| item.as_str());
+            if matches!(item_type, Some("reasoning" | "reasoning_text")) {
+                return None;
+            }
+            map.get("text")
+                .or_else(|| map.get("content"))
+                .and_then(extract_provider_text_value)
+        }
+        _ => None,
+    }
+}
+
+fn extract_codex_agent_message_text(value: &serde_json::Value) -> Option<String> {
+    let event_type = value
+        .get("type")
+        .or_else(|| value.get("event"))
+        .and_then(|item| item.as_str())
+        .unwrap_or_default();
+    if event_type != "item.completed" {
+        return None;
+    }
+    let item = value.get("item")?;
+    let item_type = item.get("type").and_then(|item| item.as_str())?;
+    let role = item.get("role").and_then(|item| item.as_str());
+    if item_type != "agent_message"
+        && item_type != "assistant_message"
+        && !(item_type == "message" && role == Some("assistant"))
+    {
+        return None;
+    }
+    item.get("text")
+        .or_else(|| item.get("content"))
+        .and_then(extract_provider_text_value)
+}
+
+fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
+    match provider_id {
+        "openai" => ProviderAdapterDescriptor {
+            kind: ProviderAdapterKind::OpenAiCodex,
+            runner: "codex-cli",
+            auth_owner: "chatgpt-local-codex-login",
+            timeout_seconds: CODEX_CHAT_TIMEOUT_SECS,
+        },
+        "anthropic" => ProviderAdapterDescriptor {
+            kind: ProviderAdapterKind::AnthropicClaude,
+            runner: "claude-code",
+            auth_owner: "anthropic-local-claude-login",
+            timeout_seconds: CODEX_CHAT_TIMEOUT_SECS,
+        },
+        "xai" | "gemini" => ProviderAdapterDescriptor {
+            kind: ProviderAdapterKind::ReadinessOnly,
+            runner: "readiness-only",
+            auth_owner: "provider-env",
+            timeout_seconds: 0,
+        },
+        _ => ProviderAdapterDescriptor {
+            kind: ProviderAdapterKind::ReadinessOnly,
+            runner: "readiness-only",
+            auth_owner: "provider-owned",
+            timeout_seconds: 0,
+        },
+    }
+}
+
+fn provider_output_summary(
+    runner: &str,
+    status_label: &str,
+    provider_session_id: Option<&str>,
+    response_chars: usize,
+) -> String {
+    let session_state = if provider_session_id.is_some() {
+        "cursor recorded"
+    } else {
+        "no cursor"
+    };
+    gyro_core::sanitize_harness_text(&format!(
+        "{runner} exited with {status_label}; {response_chars} response chars; {session_state}"
+    ))
+}
+
+fn is_stale_resume_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("not found")
+        || normalized.contains("no such session")
+        || normalized.contains("unknown session")
+        || normalized.contains("missing thread")
+        || normalized.contains("could not resume")
+        || normalized.contains("resume")
 }
 
 fn command_with_gui_path(command: &str) -> Command {
@@ -2383,6 +4071,7 @@ pub fn run() {
             debug_stop,
             delete_session,
             delete_workspace_path,
+            export_diagnostics,
             get_account_session,
             git_commit,
             git_diff,
@@ -2558,9 +4247,12 @@ mod tests {
     fn writes_text_file_inside_workspace_with_expected_hash() {
         let workspace = tempfile::tempdir().unwrap();
         std::fs::write(workspace.path().join("app.ts"), "old\n").unwrap();
-        let content =
-            read_workspace_file_full(workspace.path().to_str().unwrap().into(), "app.ts".into())
-                .unwrap();
+        let content = read_workspace_file_with_limit(
+            workspace.path().to_str().unwrap(),
+            "app.ts",
+            MAX_WORKSPACE_FILE_EDIT_BYTES,
+        )
+        .unwrap();
 
         let saved = write_workspace_file_impl(&WorkspaceFileWriteRequest {
             workspace_path: workspace.path().to_str().unwrap().into(),
@@ -2629,9 +4321,12 @@ mod tests {
     fn rejects_stale_expected_hash() {
         let workspace = tempfile::tempdir().unwrap();
         std::fs::write(workspace.path().join("app.ts"), "old\n").unwrap();
-        let content =
-            read_workspace_file_full(workspace.path().to_str().unwrap().into(), "app.ts".into())
-                .unwrap();
+        let content = read_workspace_file_with_limit(
+            workspace.path().to_str().unwrap(),
+            "app.ts",
+            MAX_WORKSPACE_FILE_EDIT_BYTES,
+        )
+        .unwrap();
         std::fs::write(workspace.path().join("app.ts"), "external\n").unwrap();
 
         let error = write_workspace_file_impl(&WorkspaceFileWriteRequest {
@@ -2666,12 +4361,261 @@ mod tests {
 
     #[test]
     fn codex_chat_prompt_prefers_concise_answers() {
-        let prompt = openai_codex_chat_prompt("WHAT MODEL are you?", Some("/workspace"));
+        let prompt = openai_codex_chat_prompt("WHAT MODEL are you?", Some("/workspace"), true);
 
         assert!(prompt.contains("Keep replies concise by default"));
         assert!(prompt.contains("answer with the model label only"));
         assert!(prompt.contains("Do not describe the local Codex runner"));
+        assert!(prompt.contains("GYRO_SESSION_TITLE:"));
         assert!(prompt.contains("Selected workspace: /workspace"));
+    }
+
+    #[test]
+    fn provider_chat_command_args_use_resume_contracts() {
+        let output_path = PathBuf::from("/tmp/gyro-last-message.txt");
+        let fresh_codex = codex_chat_args(None, &output_path, Some("o4-mini"), "hello");
+        assert_eq!(fresh_codex[0], "exec");
+        assert!(fresh_codex.contains(&"--sandbox".to_string()));
+        assert!(fresh_codex.contains(&"read-only".to_string()));
+        assert!(fresh_codex.contains(&"--json".to_string()));
+        assert!(fresh_codex.contains(&"--output-last-message".to_string()));
+        assert!(fresh_codex.ends_with(&["o4-mini".to_string(), "hello".to_string()]));
+
+        let resumed_codex = codex_chat_args(
+            Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
+            &output_path,
+            None,
+            "again",
+        );
+        assert_eq!(
+            resumed_codex[..3],
+            [
+                "exec".to_string(),
+                "resume".to_string(),
+                "--json".to_string()
+            ]
+        );
+        assert!(resumed_codex.contains(&"--skip-git-repo-check".to_string()));
+        assert!(resumed_codex.ends_with(&[
+            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e".to_string(),
+            "again".to_string()
+        ]));
+
+        let fresh_claude = claude_chat_args(
+            None,
+            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
+            Some("sonnet"),
+            "hello",
+        );
+        assert!(fresh_claude.contains(&"--print".to_string()));
+        assert!(fresh_claude.contains(&"stream-json".to_string()));
+        assert!(fresh_claude.contains(&"--include-partial-messages".to_string()));
+        assert!(fresh_claude.contains(&"--session-id".to_string()));
+        assert!(fresh_claude.ends_with(&["sonnet".to_string(), "hello".to_string()]));
+
+        let resumed_claude = claude_chat_args(
+            Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
+            "unused",
+            None,
+            "again",
+        );
+        assert!(resumed_claude.contains(&"--resume".to_string()));
+        assert!(resumed_claude.ends_with(&[
+            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e".to_string(),
+            "again".to_string()
+        ]));
+    }
+
+    #[test]
+    fn provider_adapter_registry_keeps_xai_and_gemini_readiness_only() {
+        let openai = provider_adapter_for("openai");
+        assert_eq!(openai.kind, ProviderAdapterKind::OpenAiCodex);
+        assert_eq!(openai.runner, "codex-cli");
+
+        let anthropic = provider_adapter_for("anthropic");
+        assert_eq!(anthropic.kind, ProviderAdapterKind::AnthropicClaude);
+        assert_eq!(anthropic.runner, "claude-code");
+
+        for provider_id in ["xai", "gemini"] {
+            let adapter = provider_adapter_for(provider_id);
+            assert_eq!(adapter.kind, ProviderAdapterKind::ReadinessOnly);
+            assert_eq!(adapter.runner, "readiness-only");
+            assert_eq!(adapter.auth_owner, "provider-env");
+        }
+    }
+
+    #[test]
+    fn provider_stream_parsers_extract_cursor_and_text() {
+        let session_id = "019f4612-7e58-7412-9fe9-5f0d6cb29c8e";
+        let nested = serde_json::json!({
+            "type": "session.started",
+            "data": { "sessionId": session_id }
+        });
+        assert_eq!(
+            extract_provider_session_id(&nested).as_deref(),
+            Some(session_id)
+        );
+
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "content_block_delta",
+                "delta": { "text": "hel" }
+            }))
+            .as_deref(),
+            Some("hel")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "partial_message",
+                "text": "lo"
+            }))
+            .as_deref(),
+            Some("lo")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "response.output_text.delta",
+                "delta": " there"
+            }))
+            .as_deref(),
+            Some(" there")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "response.output_text.delta",
+                "delta": { "text": " from object" }
+            }))
+            .as_deref(),
+            Some(" from object")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "partial_message",
+                "content": [
+                    { "type": "text", "text": "hel" },
+                    { "type": "text", "text": "lo" }
+                ]
+            }))
+            .as_deref(),
+            Some("hello")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "agent_message",
+                    "text": "ok"
+                }
+            }))
+            .as_deref(),
+            Some("ok")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        { "type": "output_text", "text": "array " },
+                        { "type": "output_text", "text": "content" }
+                    ]
+                }
+            }))
+            .as_deref(),
+            Some("array content")
+        );
+        assert_eq!(
+            extract_provider_text_delta(&serde_json::json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "reasoning",
+                    "text": "hidden"
+                }
+            })),
+            None
+        );
+    }
+
+    #[test]
+    fn streaming_state_appends_only_new_partial_snapshot_text() {
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_snapshot("hel");
+        state.push_assistant_snapshot("hello");
+        state.push_assistant_snapshot("hello");
+
+        assert_eq!(state.assistant_text, "hello");
+        assert_eq!(state.pending_delta, "hello");
+    }
+
+    #[test]
+    fn streaming_state_stops_emitting_after_response_cap() {
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta(&"a".repeat(MAX_CHAT_RESPONSE_CHARS + 32));
+
+        assert!(state.assistant_text_truncated);
+        assert!(!state.pending_delta.is_empty());
+        let capped_text = state.assistant_text.clone();
+
+        state.pending_delta.clear();
+        state.push_assistant_delta("ignored");
+
+        assert_eq!(state.assistant_text, capped_text);
+        assert!(state.pending_delta.is_empty());
+    }
+
+    #[test]
+    fn provider_resume_cursor_decodes_from_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "chat session")
+            .unwrap();
+        let binding = store
+            .upsert_provider_session_binding(
+                session.id,
+                "anthropic",
+                Some("sonnet".into()),
+                Some("Claude Sonnet".into()),
+                serde_json::json!({
+                    "kind": "claude-session",
+                    "sessionId": "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
+                }),
+                "ready",
+                None,
+            )
+            .unwrap();
+
+        let cursor = provider_resume_cursor_from_binding(&binding).unwrap();
+        assert_eq!(cursor.kind, "claude-session");
+        assert_eq!(cursor.session_id, "019f4612-7e58-7412-9fe9-5f0d6cb29c8e");
+    }
+
+    #[test]
+    fn stale_resume_errors_are_retryable() {
+        assert!(is_stale_resume_error("Could not resume session: not found"));
+        assert!(is_stale_resume_error("missing thread for provider"));
+        assert!(!is_stale_resume_error("rate limit exceeded"));
+    }
+
+    #[test]
+    fn extracts_hidden_session_title_marker() {
+        let extracted =
+            extract_session_title_marker("GYRO_SESSION_TITLE: Fix Model Picker\n\nDone.", true);
+
+        assert_eq!(extracted.title.as_deref(), Some("Fix Model Picker"));
+        assert_eq!(extracted.message, "Done.");
+
+        let untouched =
+            extract_session_title_marker("GYRO_SESSION_TITLE: Fix Model Picker\n\nDone.", false);
+        assert!(untouched.title.is_none());
+        assert!(untouched.message.contains("GYRO_SESSION_TITLE"));
+    }
+
+    #[test]
+    fn provider_text_delta_sanitization_preserves_stream_spacing() {
+        assert_eq!(sanitize_provider_text_delta(" hello "), " hello ");
+        assert_eq!(sanitize_provider_chat_response(" hello "), "hello");
     }
 
     #[test]
@@ -2690,6 +4634,7 @@ mod tests {
             provider_label: Some("OpenAI".into()),
             model_id: Some("gpt-5.5".into()),
             model_label: Some("GPT-5.5".into()),
+            suggest_title: false,
             workspace_path: Some(temp.path().display().to_string()),
         };
 
@@ -2698,7 +4643,8 @@ mod tests {
             session.id,
             &request,
             Some(turn_id),
-            "ready",
+            Uuid::new_v4(),
+            HarnessRunStatus::Done,
             None,
         )
         .unwrap();
@@ -2706,9 +4652,49 @@ mod tests {
         assert_eq!(event.kind, SessionEventKind::SystemEvent);
         assert_eq!(event.turn_id, Some(turn_id));
         assert_eq!(event.payload["kind"], "provider-status");
+        assert_eq!(event.payload["schema"], gyro_core::HARNESS_SCHEMA_V1);
+        assert_eq!(event.payload["runId"], turn_id.to_string());
+        assert_eq!(event.payload["status"], "done");
         assert_eq!(event.payload["runner"], "codex-cli");
         assert_eq!(event.payload["authOwner"], "chatgpt-local-codex-login");
         assert!(event.payload.get("token").is_none());
+        assert!(event.payload.get("userMessage").is_none());
+        assert_eq!(event.payload["messagePreview"], "hello");
+    }
+
+    #[test]
+    fn chat_message_validation_bounds_input() {
+        assert_eq!(
+            validate_chat_message("  hello\0 ").unwrap(),
+            "hello".to_string()
+        );
+        assert!(validate_chat_message(" ").is_err());
+        assert!(validate_chat_message(&"a".repeat(MAX_CHAT_MESSAGE_CHARS + 1)).is_err());
+    }
+
+    #[test]
+    fn provider_chat_response_is_redacted_and_bounded() {
+        let response = format!(
+            "token=sk-abcdefghijklmnopqrstuvwxyz123456 {}",
+            "a".repeat(MAX_CHAT_RESPONSE_CHARS + 32)
+        );
+        let sanitized = sanitize_provider_chat_response(&response);
+
+        assert!(sanitized.contains("[REDACTED]"));
+        assert!(!sanitized.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert!(sanitized.chars().count() <= MAX_CHAT_RESPONSE_CHARS + 3);
+    }
+
+    #[test]
+    fn truncate_chars_keeps_multibyte_boundaries() {
+        assert_eq!(truncate_chars("ééé", 2), "éé...");
+
+        let mut streamed = String::new();
+        push_bounded(&mut streamed, "é", 2);
+        push_bounded(&mut streamed, "é", 2);
+        push_bounded(&mut streamed, "é", 2);
+
+        assert_eq!(streamed, "éé...");
     }
 
     #[test]
@@ -2758,6 +4744,41 @@ mod tests {
         let snapshot = wait_for_terminal_output(&manager, "pane-test", "hello");
         assert!(snapshot.output.contains("hello"));
         assert_eq!(snapshot.status, "done");
+    }
+
+    #[test]
+    fn terminal_shell_profile_uses_system_zsh_fallback() {
+        if Path::new("/bin/zsh").exists() {
+            assert_eq!(terminal_command_path("zsh"), "/bin/zsh");
+        }
+        assert_eq!(terminal_command_path("sh"), "sh");
+    }
+
+    #[test]
+    fn terminal_manager_starts_interactive_zsh_profile() {
+        if !Path::new("/bin/zsh").exists() {
+            return;
+        }
+        let manager = TerminalProcessManager::default();
+        let snapshot = manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-zsh".into(),
+                title: "Shell".into(),
+                command: "zsh".into(),
+                args: vec!["-il".into()],
+                workspace_path: None,
+                working_directory: None,
+                cols: None,
+                rows: None,
+            })
+            .unwrap();
+        assert_eq!(snapshot.status, "running");
+
+        manager
+            .write("pane-zsh", "printf zsh-ready\\nexit\\n")
+            .unwrap();
+        let snapshot = wait_for_terminal_output(&manager, "pane-zsh", "zsh-ready");
+        assert!(snapshot.output.contains("zsh-ready"));
     }
 
     #[test]

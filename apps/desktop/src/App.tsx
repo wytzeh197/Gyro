@@ -13,6 +13,7 @@ import {
   CommandPaletteOverlay,
   IdeSurface,
   ModelStandardPromptOverlay,
+  ProjectRemoveConfirmOverlay,
   ProvidersSurface,
   SettingsSurface,
   TaskBoardSurface,
@@ -40,6 +41,7 @@ import {
   type GyroAccountSession,
   type GyroAccountStatus,
   type GyroConfig,
+  type HarnessRunStatus,
   type IdeAssistantAction,
   type IdeAssistantRequest,
   type OutputChannel,
@@ -47,6 +49,8 @@ import {
   type ProviderHealthDetails,
   type ProviderId,
   type ProviderHandoff,
+  type ProviderChatStreamEvent,
+  type ProviderResumeCursor,
   type ProviderSession,
   type Session,
   type SessionEvent,
@@ -72,13 +76,23 @@ import {
   type WorkspaceLayoutId,
 } from "@gyro-dev/ui";
 import {
+  startTransition,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
 } from "react";
+import {
+  applyProviderChatStreamDeltas,
+  isProviderStatusEvent,
+  limitSessionEventsForUi,
+  mergePersistedAndOptimisticEvents,
+  mergeProviderResponseEvents,
+  upsertStreamingAssistantEvent,
+} from "./provider-stream-events";
 
 type AppNotification = {
   kind: "open-session" | "attach-session";
@@ -117,7 +131,19 @@ type ProviderHealthCheck = {
 
 type ProviderChatResponse = {
   assistantEvent: SessionEvent;
+  resumeCursor?: ProviderResumeCursor | null;
+  session?: Session | null;
+  sessionTitle?: string | null;
   statusEvent: SessionEvent;
+};
+
+type DiagnosticsExportResult = {
+  path: string;
+};
+
+type ProviderStreamBatch = {
+  streamEvent: ProviderChatStreamEvent;
+  textDelta: string;
 };
 
 type WorkspaceFileWriteRequest = {
@@ -170,6 +196,13 @@ type SessionModelSelection = {
   modelLabel?: string;
 };
 
+type SavedProject = {
+  path: string;
+  label: string;
+  detail: string;
+  sessionCount: number;
+};
+
 const EMPTY_CONFIG: GyroConfig = {
   updateChannel: "stable",
   telemetryEnabled: false,
@@ -189,6 +222,7 @@ const EMPTY_CONFIG: GyroConfig = {
 const DEFAULT_WORKSPACE_PATH = "/Users/wytzehemrica/Documents/Gyro";
 const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
 const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
+const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
 const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
@@ -197,6 +231,19 @@ const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const PROVIDER_AUTH_POLL_INTERVAL_MS = 3_000;
 const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
+const MAX_CHAT_MESSAGE_CHARS = 24_000;
+const PROVIDER_STREAM_FLUSH_MS = 80;
+const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
+const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
+const TERMINAL_POLL_INTERVAL_MS = 1_000;
+const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
+const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
+const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
+const MAX_STORED_WORKBENCH_STATE_CHARS = 2_000_000;
+const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
+const MAX_STORED_MODEL_USAGE_CHARS = 100_000;
+const MAX_PINNED_SESSIONS = 200;
+const MAX_REMOVED_PROJECTS = 200;
 const AUTOMATION_SCHEDULER_COMMANDS = {
   claimDue: "claim_due_automation",
   completeLease: "complete_automation_lease",
@@ -291,9 +338,20 @@ function waitFor(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function loadModelUsageMap(): ModelUsageMap {
   try {
-    const stored = window.localStorage.getItem(MODEL_USAGE_STORAGE_KEY);
+    const stored = readBoundedLocalStorage(
+      MODEL_USAGE_STORAGE_KEY,
+      MAX_STORED_MODEL_USAGE_CHARS,
+    );
     if (!stored) {
       return {};
     }
@@ -332,7 +390,7 @@ function loadModelUsageMap(): ModelUsageMap {
 }
 
 function saveModelUsageMap(usage: ModelUsageMap) {
-  window.localStorage.setItem(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
+  safeSetLocalStorage(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
 }
 
 export function App() {
@@ -344,6 +402,7 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const [events, setEvents] = useState<SessionEvent[]>([]);
+  const eventsRef = useRef<SessionEvent[]>([]);
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
   const [workspacePath, setWorkspacePath] = useState<string>();
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
@@ -354,9 +413,16 @@ export function App() {
   const [selectedFileLoadState, setSelectedFileLoadState] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
-  const [draft, setDraft] = useState("");
+  const [draftResetToken, setDraftResetToken] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
+  const providerStreamFlushTimerRef = useRef<number>();
+  const pendingWorkbenchPersistRef = useRef<WorkbenchState>();
+  const workbenchPersistTimerRef = useRef<number>();
+  const workbenchPersistIdleRef = useRef<number>();
+  const selectedTerminalPaneIdRef = useRef(workbench.selectedTerminalPaneId);
   const [accountStatus, setAccountStatus] =
     useState<GyroAccountStatus>("checking");
   const [accountSession, setAccountSession] = useState<GyroAccountSession>({
@@ -367,6 +433,13 @@ export function App() {
   const [isLaunchingCliPreset, setIsLaunchingCliPreset] = useState(false);
   const [pinnedSessionIds, setPinnedSessionIds] =
     useState<string[]>(loadPinnedSessionIds);
+  const [removedProjectPaths, setRemovedProjectPaths] = useState<string[]>(
+    loadRemovedProjectPaths,
+  );
+  const [projectRemoveCandidate, setProjectRemoveCandidate] =
+    useState<SavedProject>();
+  const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
+  const sendingSessionIdsRef = useRef(new Set<string>());
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [modelStandardPrompt, setModelStandardPrompt] =
@@ -393,21 +466,71 @@ export function App() {
     () => sessions.find((session) => session.id === activeSessionId),
     [activeSessionId, sessions],
   );
+  const persistableWorkbench = useMemo(
+    () => persistableWorkbenchState(workbench),
+    [
+      workbench.activeDestination,
+      workbench.activePaneTab,
+      workbench.activeWorkspaceLayout,
+      workbench.automations,
+      workbench.browserPreview,
+      workbench.diffReview,
+      workbench.ide,
+      workbench.isToolPanelOpen,
+      workbench.notifications,
+      workbench.onboarding,
+      workbench.preferences,
+      workbench.providerHandoffs,
+      workbench.providerSessions,
+      workbench.providerStatuses,
+      workbench.selectedAutomationId,
+      workbench.selectedProviderSessionId,
+      workbench.selectedTaskId,
+      workbench.selectedTerminalPaneId,
+      workbench.tasks,
+      workbench.terminalPanes,
+      workbench.terminalTemplate,
+      workbench.workspaceMode,
+    ],
+  );
+  eventsRef.current = events;
+  selectedTerminalPaneIdRef.current = workbench.selectedTerminalPaneId;
+  const deferredEventsForPlan = useDeferredValue(events);
+  const deferredEventsForTurn = deferredEventsForPlan;
   const activeSessionPlan = useMemo(
-    () => deriveSessionPlan(events, activeSessionId),
-    [activeSessionId, events],
+    () => deriveSessionPlan(deferredEventsForPlan, activeSessionId),
+    [activeSessionId, deferredEventsForPlan],
+  );
+  const derivedActiveTurn = useMemo(
+    () => deriveActiveTurn(deferredEventsForTurn, activeSession?.title),
+    [activeSession?.title, deferredEventsForTurn],
+  );
+  const activeSessionHasTranscriptEvents = useMemo(
+    () =>
+      events.some(
+        (event) =>
+          event.kind === "user-message" || event.kind === "assistant-message",
+      ),
+    [activeSessionId, events.length],
   );
   const visibleSessions = useMemo(() => {
     const pinned = new Set(pinnedSessionIds);
-    return [...sessions].sort((first, second) => {
-      const firstPinned = pinned.has(first.id);
-      const secondPinned = pinned.has(second.id);
-      if (firstPinned === secondPinned) {
-        return 0;
-      }
-      return firstPinned ? -1 : 1;
-    });
-  }, [pinnedSessionIds, sessions]);
+    return visibleSessionsForProjects(sessions, removedProjectPaths).sort(
+      (first, second) => {
+        const firstPinned = pinned.has(first.id);
+        const secondPinned = pinned.has(second.id);
+        if (firstPinned === secondPinned) {
+          return 0;
+        }
+        return firstPinned ? -1 : 1;
+      },
+    );
+  }, [pinnedSessionIds, removedProjectPaths, sessions]);
+  const savedProjects = useMemo(
+    () =>
+      savedProjectsFromSessions(sessions, workspacePath, removedProjectPaths),
+    [removedProjectPaths, sessions, workspacePath],
+  );
 
   useEffect(() => {
     if (activeDestination !== "settings") {
@@ -449,6 +572,53 @@ export function App() {
     },
     [],
   );
+  const setSessionSending = useCallback(
+    (sessionId: string, isSending: boolean) => {
+      if (isSending) {
+        sendingSessionIdsRef.current.add(sessionId);
+      } else {
+        sendingSessionIdsRef.current.delete(sessionId);
+      }
+      setSendingSessionIds((current) => {
+        const hasSession = current.includes(sessionId);
+        if (isSending) {
+          return hasSession ? current : [...current, sessionId];
+        }
+        return hasSession ? current.filter((id) => id !== sessionId) : current;
+      });
+    },
+    [],
+  );
+  const replaceSendingSessionId = useCallback(
+    (fromSessionId: string, toSessionId: string) => {
+      sendingSessionIdsRef.current.delete(fromSessionId);
+      sendingSessionIdsRef.current.add(toSessionId);
+      setSendingSessionIds((current) => {
+        const next = current.filter((id) => id !== fromSessionId);
+        return next.includes(toSessionId) ? next : [...next, toSessionId];
+      });
+    },
+    [],
+  );
+  const isActiveSessionSending = activeSessionId
+    ? sendingSessionIds.includes(activeSessionId)
+    : isStartingFirstTurn;
+  const terminalPaneIdsToPoll = useMemo(() => {
+    if (!isActiveSessionSending) {
+      return liveTerminalPaneIds;
+    }
+    const selectedPaneId = workbench.selectedTerminalPaneId;
+    return selectedPaneId && liveTerminalPaneIds.includes(selectedPaneId)
+      ? [selectedPaneId]
+      : [];
+  }, [
+    isActiveSessionSending,
+    liveTerminalPaneIds,
+    workbench.selectedTerminalPaneId,
+  ]);
+  const resetChatDraft = useCallback(() => {
+    setDraftResetToken((token) => token + 1);
+  }, []);
 
   const checkProviderReadiness = useCallback(
     (intent: "chat" | "task" | "handoff", providerId?: string) => {
@@ -506,10 +676,14 @@ export function App() {
   );
 
   const persistConfig = useCallback(
-    async (nextConfig: GyroConfig) => {
+    async (
+      nextConfig: GyroConfig,
+      options: { notifySuccess?: boolean } = {},
+    ) => {
+      const shouldNotifySuccess = options.notifySuccess ?? true;
       const normalizedNextConfig = normalizedConfig(nextConfig);
       setConfig(normalizedNextConfig);
-      window.localStorage.setItem(
+      safeSetLocalStorage(
         PREVIEW_CONFIG_STORAGE_KEY,
         JSON.stringify({
           ...normalizedNextConfig,
@@ -517,12 +691,23 @@ export function App() {
         }),
       );
       if (!isTauriRuntime()) {
-        notify("provider", "Settings saved locally", "Preview config updated");
+        if (shouldNotifySuccess) {
+          notify(
+            "provider",
+            "Settings saved locally",
+            "Preview config updated",
+          );
+        }
         return;
       }
       try {
-        await invoke("save_config", { config: normalizedNextConfig });
-        notify("provider", "Settings saved", "Configuration persisted");
+        configSaveQueueRef.current = configSaveQueueRef.current
+          .catch(() => undefined)
+          .then(() => invoke("save_config", { config: normalizedNextConfig }));
+        await configSaveQueueRef.current;
+        if (shouldNotifySuccess) {
+          notify("provider", "Settings saved", "Configuration persisted");
+        }
       } catch {
         notify(
           "command-failed",
@@ -624,23 +809,29 @@ export function App() {
     }
     try {
       const nextSessions = await invoke<Session[]>("list_sessions");
+      const nextVisibleSessions = visibleSessionsForProjects(
+        nextSessions,
+        removedProjectPaths,
+      );
       setSessions(nextSessions);
       setActiveSessionId((current) => {
         if (current || suppressSessionAutoSelectRef.current) {
           return current;
         }
-        return nextSessions[0]?.id;
+        return nextVisibleSessions[0]?.id;
       });
-      setWorkspacePath((current) => current ?? nextSessions[0]?.workspacePath);
+      setWorkspacePath(
+        (current) => current ?? nextVisibleSessions[0]?.workspacePath,
+      );
     } catch {
       setSessions([]);
     }
-  }, []);
+  }, [removedProjectPaths]);
 
   const refreshEvents = useCallback(async (sessionId: string) => {
     const optimisticEvents = optimisticEventsRef.current.get(sessionId);
     if (!isTauriRuntime()) {
-      setEvents(optimisticEvents ?? []);
+      setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
       return;
     }
     try {
@@ -648,12 +839,206 @@ export function App() {
         sessionId,
       });
       setEvents(
-        mergePersistedAndOptimisticEvents(nextEvents, optimisticEvents),
+        limitSessionEventsForUi(
+          mergePersistedAndOptimisticEvents(nextEvents, optimisticEvents),
+        ),
       );
     } catch {
-      setEvents(optimisticEvents ?? []);
+      setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
     }
   }, []);
+
+  const flushProviderStreamBatches = useCallback(() => {
+    if (providerStreamFlushTimerRef.current !== undefined) {
+      window.clearTimeout(providerStreamFlushTimerRef.current);
+      providerStreamFlushTimerRef.current = undefined;
+    }
+    const batches = Array.from(providerStreamBatchRef.current.values());
+    providerStreamBatchRef.current.clear();
+    startTransition(() => {
+      applyProviderChatStreamDeltas(
+        optimisticEventsRef,
+        setEvents,
+        batches.map((batch) => ({
+          ...batch.streamEvent,
+          textDelta: batch.textDelta,
+        })),
+      );
+    });
+  }, []);
+
+  const scheduleProviderStreamFlush = useCallback(() => {
+    if (providerStreamFlushTimerRef.current !== undefined) {
+      return;
+    }
+    providerStreamFlushTimerRef.current = window.setTimeout(
+      flushProviderStreamBatches,
+      PROVIDER_STREAM_FLUSH_MS,
+    );
+  }, [flushProviderStreamBatches]);
+
+  const queueProviderChatStreamEvent = useCallback(
+    (streamEvent: ProviderChatStreamEvent) => {
+      if (
+        streamEvent.phase === "started" ||
+        streamEvent.phase === "completed" ||
+        streamEvent.phase === "failed"
+      ) {
+        flushProviderStreamBatches();
+        applyProviderChatStreamEvent(
+          optimisticEventsRef,
+          setEvents,
+          streamEvent,
+        );
+        return;
+      }
+      const turnId = streamEvent.turnId ?? undefined;
+      const textDelta = streamEvent.textDelta ?? "";
+      if (
+        streamEvent.phase !== "delta" ||
+        !streamEvent.sessionId ||
+        !turnId ||
+        textDelta === ""
+      ) {
+        return;
+      }
+      const batchKey = providerStreamBatchKey(streamEvent.sessionId, turnId);
+      const existing = providerStreamBatchRef.current.get(batchKey);
+      providerStreamBatchRef.current.set(batchKey, {
+        streamEvent,
+        textDelta: `${existing?.textDelta ?? ""}${textDelta}`,
+      });
+      scheduleProviderStreamFlush();
+    },
+    [flushProviderStreamBatches, scheduleProviderStreamFlush],
+  );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let isMounted = true;
+    let unlistenProviderChat: (() => void) | undefined;
+    void listen<ProviderChatStreamEvent>(
+      "gyro://provider-chat-event",
+      (event) => {
+        if (!isMounted) {
+          return;
+        }
+        queueProviderChatStreamEvent(event.payload);
+      },
+    ).then((unlisten) => {
+      if (!isMounted) {
+        unlisten();
+        return;
+      }
+      unlistenProviderChat = unlisten;
+    });
+    return () => {
+      isMounted = false;
+      if (providerStreamFlushTimerRef.current !== undefined) {
+        window.clearTimeout(providerStreamFlushTimerRef.current);
+        providerStreamFlushTimerRef.current = undefined;
+      }
+      providerStreamBatchRef.current.clear();
+      unlistenProviderChat?.();
+    };
+  }, [flushProviderStreamBatches, queueProviderChatStreamEvent]);
+
+  const applyProviderChatResponse = useCallback(
+    (sessionId: string, response?: ProviderChatResponse) => {
+      const updatedSession = response?.session;
+      const responseEvents = [
+        response?.statusEvent,
+        response?.assistantEvent,
+      ].filter((event): event is SessionEvent => Boolean(event));
+      if (!updatedSession && responseEvents.length === 0) {
+        return;
+      }
+      if (updatedSession) {
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === updatedSession.id ? updatedSession : session,
+          ),
+        );
+      }
+      if (responseEvents.length === 0) {
+        return;
+      }
+      optimisticEventsRef.current.set(
+        sessionId,
+        mergeProviderResponseEvents(
+          optimisticEventsRef.current.get(sessionId) ?? [],
+          responseEvents,
+        ),
+      );
+      startTransition(() => {
+        setEvents((current) => {
+          if (!current.some((event) => event.sessionId === sessionId)) {
+            return current;
+          }
+          return limitSessionEventsForUi(
+            mergeProviderResponseEvents(current, responseEvents),
+          );
+        });
+      });
+    },
+    [],
+  );
+
+  const updateSessionTitle = useCallback(
+    async (
+      sessionId: string,
+      title: string,
+      options: { notifyFailure?: boolean; notifySuccess?: boolean } = {},
+    ) => {
+      const nextTitle = normalizeSessionTitleInput(title);
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session || !nextTitle || nextTitle === session.title) {
+        return;
+      }
+
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === sessionId ? { ...item, title: nextTitle } : item,
+        ),
+      );
+
+      if (!isTauriRuntime()) {
+        if (options.notifySuccess) {
+          notify("terminal", "Chat renamed", nextTitle);
+        }
+        return;
+      }
+
+      try {
+        const renamed = await invoke<Session>("rename_session", {
+          sessionId,
+          title: nextTitle,
+        });
+        setSessions((current) =>
+          current.map((item) => (item.id === sessionId ? renamed : item)),
+        );
+        if (options.notifySuccess) {
+          notify("terminal", "Chat renamed", renamed.title);
+        }
+      } catch {
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === sessionId ? { ...item, title: session.title } : item,
+          ),
+        );
+        if (options.notifyFailure ?? true) {
+          notify(
+            "command-failed",
+            "Rename failed",
+            "The chat name was not changed",
+          );
+        }
+      }
+    },
+    [notify, sessions],
+  );
 
   const refreshAutomations = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -728,86 +1113,79 @@ export function App() {
     });
   }, []);
 
-  const refreshIdeServices = useCallback(
-    (root?: string) => {
-      if (!root) {
-        return;
-      }
-      if (!isTauriRuntime()) {
+  const refreshIdeServices = useCallback((root?: string) => {
+    if (!root) {
+      return;
+    }
+    if (!isTauriRuntime()) {
+      dispatchWorkbench({
+        type: "ide-set-source-control",
+        sourceControl: {
+          provider: "git",
+          available: true,
+          branch: "preview",
+          ahead: 0,
+          behind: 0,
+          files: [],
+        },
+      });
+      dispatchWorkbench({
+        type: "ide-set-tasks",
+        tasks: [
+          {
+            id: "preview:typecheck",
+            label: "pnpm typecheck",
+            command: "pnpm",
+            args: ["typecheck"],
+            group: "build",
+            status: "idle",
+            outputChannelId: "task-preview-typecheck",
+          },
+        ],
+      });
+      dispatchWorkbench({
+        type: "ide-set-test-tree",
+        tests: [
+          {
+            id: "preview-tests",
+            label: "Workspace tests",
+            status: "unknown",
+            children: [],
+          },
+        ],
+      });
+      return;
+    }
+
+    void invoke<SourceControlState>("git_status", { workspacePath: root })
+      .then((sourceControl) =>
+        dispatchWorkbench({
+          type: "ide-set-source-control",
+          sourceControl,
+        }),
+      )
+      .catch((error) =>
         dispatchWorkbench({
           type: "ide-set-source-control",
           sourceControl: {
             provider: "git",
-            available: true,
-            branch: "preview",
+            available: false,
             ahead: 0,
             behind: 0,
             files: [],
+            error: String(error),
           },
-        });
-        dispatchWorkbench({
-          type: "ide-set-tasks",
-          tasks: [
-            {
-              id: "preview:typecheck",
-              label: "pnpm typecheck",
-              command: "pnpm",
-              args: ["typecheck"],
-              group: "build",
-              status: "idle",
-              outputChannelId: "task-preview-typecheck",
-            },
-          ],
-        });
-        dispatchWorkbench({
-          type: "ide-set-test-tree",
-          tests: [
-            {
-              id: "preview-tests",
-              label: "Workspace tests",
-              status: "unknown",
-              children: [],
-            },
-          ],
-        });
-        return;
-      }
+        }),
+      );
 
-      void invoke<SourceControlState>("git_status", { workspacePath: root })
-        .then((sourceControl) =>
-          dispatchWorkbench({
-            type: "ide-set-source-control",
-            sourceControl,
-          }),
-        )
-        .catch((error) =>
-          dispatchWorkbench({
-            type: "ide-set-source-control",
-            sourceControl: {
-              provider: "git",
-              available: false,
-              ahead: 0,
-              behind: 0,
-              files: [],
-              error: String(error),
-            },
-          }),
-        );
+    void invoke<TaskDefinition[]>("task_discover", { workspacePath: root })
+      .then((tasks) => dispatchWorkbench({ type: "ide-set-tasks", tasks }))
+      .catch(() => dispatchWorkbench({ type: "ide-set-tasks", tasks: [] }));
 
-      void invoke<TaskDefinition[]>("task_discover", { workspacePath: root })
-        .then((tasks) => dispatchWorkbench({ type: "ide-set-tasks", tasks }))
-        .catch(() => dispatchWorkbench({ type: "ide-set-tasks", tasks: [] }));
-
-      void invoke<TestTreeItem[]>("test_discover", { workspacePath: root })
-        .then((tests) =>
-          dispatchWorkbench({ type: "ide-set-test-tree", tests }),
-        )
-        .catch(() =>
-          dispatchWorkbench({ type: "ide-set-test-tree", tests: [] }),
-        );
-    },
-    [],
-  );
+    void invoke<TestTreeItem[]>("test_discover", { workspacePath: root })
+      .then((tests) => dispatchWorkbench({ type: "ide-set-test-tree", tests }))
+      .catch(() => dispatchWorkbench({ type: "ide-set-test-tree", tests: [] }));
+  }, []);
 
   const runWorkspaceSearch = useCallback(
     async (query: WorkspaceSearchQuery) => {
@@ -823,7 +1201,9 @@ export function App() {
       }
       if (!isTauriRuntime()) {
         const results = previewFiles
-          .filter((file) => file.kind === "file" && file.path.includes(query.query))
+          .filter(
+            (file) => file.kind === "file" && file.path.includes(query.query),
+          )
           .slice(0, query.maxResults ?? 200)
           .map((file) => ({
             path: file.path,
@@ -940,16 +1320,42 @@ export function App() {
     [activeSession?.workspacePath, notify, workspacePath],
   );
 
-  const openWorkspace = useCallback(async () => {
-    if (!isTauriRuntime()) {
-      setWorkspacePath(DEFAULT_WORKSPACE_PATH);
-      setFiles(previewFiles);
-      refreshIdeServices(DEFAULT_WORKSPACE_PATH);
+  const activateWorkspacePath = useCallback(
+    async (selected: string, notificationTitle = "Workspace opened") => {
+      setRemovedProjectPaths((current) =>
+        current.filter((path) => path !== normalizeProjectPath(selected)),
+      );
+      if (!isTauriRuntime()) {
+        setWorkspacePath(selected);
+        setFiles(previewFiles);
+        refreshIdeServices(selected);
+        dispatchWorkbench({
+          type: "complete-onboarding-step",
+          step: "workspace",
+        });
+        notify("terminal", notificationTitle, "Preview workspace is active");
+        return;
+      }
+
+      const workspaceFiles = await invoke<WorkspaceFile[]>(
+        "list_workspace_tree",
+        { depth: 5, workspacePath: selected },
+      );
+      setWorkspacePath(selected);
+      setFiles(workspaceFiles);
+      refreshIdeServices(selected);
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "workspace",
       });
-      notify("terminal", "Workspace opened", "Preview workspace is active");
+      notify("terminal", notificationTitle, workspaceName(selected));
+    },
+    [notify, refreshIdeServices],
+  );
+
+  const openWorkspace = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      await activateWorkspacePath(DEFAULT_WORKSPACE_PATH);
       return;
     }
     try {
@@ -961,24 +1367,13 @@ export function App() {
       if (typeof selected !== "string") {
         return;
       }
-      setWorkspacePath(selected);
-      const workspaceFiles = await invoke<WorkspaceFile[]>(
-        "list_workspace_tree",
-        { depth: 5, workspacePath: selected },
-      );
-      setFiles(workspaceFiles);
-      refreshIdeServices(selected);
-      dispatchWorkbench({
-        type: "complete-onboarding-step",
-        step: "workspace",
-      });
-      notify("terminal", "Workspace opened", selected);
+      await activateWorkspacePath(selected);
     } catch {
       setWorkspacePath(DEFAULT_WORKSPACE_PATH);
       setFiles(previewFiles);
       notify("command-failed", "Workspace open failed", "Using preview files");
     }
-  }, [notify, refreshIdeServices]);
+  }, [activateWorkspacePath, notify]);
 
   const selectContextFile = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -1015,6 +1410,9 @@ export function App() {
 
       const workspace = parentDirectory(selected);
       const relativePath = relativeFilePath(selected, workspace);
+      setRemovedProjectPaths((current) =>
+        current.filter((path) => path !== normalizeProjectPath(workspace)),
+      );
       setWorkspacePath(workspace);
       setSelectedFile(relativePath);
       refreshIdeServices(workspace);
@@ -1072,6 +1470,7 @@ export function App() {
         sessionLayout,
         workbench.workspaceMode,
         selectedSessionModelFromConfig(config),
+        "New chat",
       );
       setWorkspacePath(session.workspacePath);
       setFiles([]);
@@ -1089,9 +1488,7 @@ export function App() {
       const workspace = workspacePath ?? "";
       const shouldCreateWorktree =
         workbench.workspaceMode === "worktree" && workspace.length > 0;
-      const title = shouldCreateWorktree
-        ? "Worktree session"
-        : "Desktop session";
+      const title = "New chat";
       const metadata = workspaceRunMetadata(
         shouldCreateWorktree ? "worktree" : "local",
         `${title}-${Date.now()}`,
@@ -1122,6 +1519,7 @@ export function App() {
         sessionLayout,
         workbench.workspaceMode,
         selectedSessionModelFromConfig(config),
+        "New chat",
       );
       setWorkspacePath(session.workspacePath);
       setFiles([]);
@@ -1138,10 +1536,10 @@ export function App() {
     setIsStartingFirstTurn(false);
     setActiveSessionId(undefined);
     setEvents([]);
-    setDraft("");
+    resetChatDraft();
     dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     dispatchWorkbench({ type: "close-tool-panel" });
-  }, []);
+  }, [resetChatDraft]);
 
   const pinSession = useCallback(
     (sessionId: string) => {
@@ -1150,7 +1548,7 @@ export function App() {
       setPinnedSessionIds((current) =>
         current.includes(sessionId)
           ? current.filter((id) => id !== sessionId)
-          : [sessionId, ...current],
+          : [sessionId, ...current].slice(0, MAX_PINNED_SESSIONS),
       );
       notify(
         "terminal",
@@ -1172,41 +1570,9 @@ export function App() {
         return;
       }
 
-      if (!isTauriRuntime()) {
-        setSessions((current) =>
-          current.map((item) =>
-            item.id === sessionId
-              ? {
-                  ...item,
-                  title: nextTitle,
-                  updatedAt: new Date().toISOString(),
-                }
-              : item,
-          ),
-        );
-        notify("terminal", "Chat renamed", nextTitle);
-        return;
-      }
-
-      try {
-        const renamed = await invoke<Session>("rename_session", {
-          sessionId,
-          title: nextTitle,
-        });
-        setSessions((current) => [
-          renamed,
-          ...current.filter((item) => item.id !== sessionId),
-        ]);
-        notify("terminal", "Chat renamed", renamed.title);
-      } catch {
-        notify(
-          "command-failed",
-          "Rename failed",
-          "The chat name was not changed",
-        );
-      }
+      await updateSessionTitle(sessionId, nextTitle, { notifySuccess: true });
     },
-    [notify, sessions],
+    [sessions, updateSessionTitle],
   );
 
   const deleteSession = useCallback(
@@ -1240,6 +1606,96 @@ export function App() {
     },
     [activeSessionId, notify, sessions],
   );
+
+  const requestRemoveProject = useCallback(
+    (project: { path: string; label: string }) => {
+      const projectPath = normalizeProjectPath(project.path);
+      if (!projectPath) {
+        return;
+      }
+      const sessionCount = sessions.filter(
+        (session) =>
+          normalizeProjectPath(session.workspacePath) === projectPath,
+      ).length;
+      setProjectRemoveCandidate({
+        path: projectPath,
+        label: project.label || workspaceName(projectPath),
+        detail: projectPath,
+        sessionCount,
+      });
+    },
+    [sessions],
+  );
+
+  const confirmRemoveProject = useCallback(() => {
+    if (!projectRemoveCandidate) {
+      return;
+    }
+    const projectPath = normalizeProjectPath(projectRemoveCandidate.path);
+    if (!projectPath) {
+      setProjectRemoveCandidate(undefined);
+      return;
+    }
+
+    const projectSessionIds = new Set(
+      sessions
+        .filter(
+          (session) =>
+            normalizeProjectPath(session.workspacePath) === projectPath,
+        )
+        .map((session) => session.id),
+    );
+    const nextRemovedProjectPaths = removedProjectPaths.includes(projectPath)
+      ? removedProjectPaths
+      : [projectPath, ...removedProjectPaths].slice(0, MAX_REMOVED_PROJECTS);
+    const nextVisibleSessions = visibleSessionsForProjects(
+      sessions,
+      nextRemovedProjectPaths,
+    );
+    const activeProjectPath = normalizeProjectPath(
+      activeSession?.workspacePath ?? workspacePath,
+    );
+
+    setRemovedProjectPaths(nextRemovedProjectPaths);
+    setPinnedSessionIds((current) =>
+      current.filter((sessionId) => !projectSessionIds.has(sessionId)),
+    );
+    for (const sessionId of projectSessionIds) {
+      optimisticEventsRef.current.delete(sessionId);
+    }
+
+    if (
+      activeProjectPath === projectPath ||
+      (activeSessionId && projectSessionIds.has(activeSessionId))
+    ) {
+      const nextSession = nextVisibleSessions[0];
+      setActiveSessionId(nextSession?.id);
+      setWorkspacePath(nextSession?.workspacePath);
+      setFiles([]);
+      setSelectedFile(undefined);
+      setSelectedFileContent(undefined);
+      setEvents([]);
+      dispatchWorkbench({
+        type: "select-workspace-layout",
+        layout: "thread",
+      });
+    }
+
+    notify(
+      "terminal",
+      "Project removed from Gyro app",
+      projectRemoveCandidate.label,
+    );
+    setProjectRemoveCandidate(undefined);
+  }, [
+    activeSession?.workspacePath,
+    activeSessionId,
+    notify,
+    projectRemoveCandidate,
+    removedProjectPaths,
+    sessions,
+    workspacePath,
+  ]);
 
   const launchTerminalPane = useCallback(
     async ({
@@ -1331,13 +1787,16 @@ export function App() {
         setTerminalOutput(snapshot.output);
         return true;
       } catch (error) {
+        const output = `Failed to start ${profile.displayName}\n${String(error)}`;
         dispatchWorkbench({
-          type: "set-terminal-pane-status",
+          type: "sync-terminal-pane-snapshot",
+          command: process.displayCommand,
           paneId,
+          output,
           status: "failed",
           event: "process failed to start",
         });
-        setTerminalOutput(String(error));
+        setTerminalOutput(output);
         return false;
       }
     },
@@ -1372,7 +1831,6 @@ export function App() {
                 providerLabel: model.providerLabel,
                 modelId: model.modelId,
                 modelLabel: model.modelLabel,
-                updatedAt: new Date().toISOString(),
               }
             : session,
         ),
@@ -1411,11 +1869,14 @@ export function App() {
       const providers = providersForConfig(config);
       const provider = providers.find((item) => item.id === providerId);
       const model = provider ? getProviderModel(provider) : undefined;
-      void persistConfig({
-        ...config,
-        selectedProviderId: providerId,
-        modelProviders: providers,
-      });
+      void persistConfig(
+        {
+          ...config,
+          selectedProviderId: providerId,
+          modelProviders: providers,
+        },
+        { notifySuccess: false },
+      );
       if (activeSessionId && provider) {
         void saveSessionModel(activeSessionId, {
           providerId,
@@ -1424,13 +1885,8 @@ export function App() {
           modelLabel: model?.displayName,
         });
       }
-      notify(
-        "provider",
-        "Provider selected",
-        provider?.displayName ?? providerId,
-      );
     },
-    [activeSessionId, config, notify, persistConfig, saveSessionModel],
+    [activeSessionId, config, persistConfig, saveSessionModel],
   );
 
   const setProviderAuthStatus = useCallback(
@@ -1444,11 +1900,14 @@ export function App() {
             }
           : provider,
       );
-      void persistConfig({
-        ...config,
-        selectedProviderId: providerId,
-        modelProviders: providers,
-      });
+      void persistConfig(
+        {
+          ...config,
+          selectedProviderId: providerId,
+          modelProviders: providers,
+        },
+        { notifySuccess: false },
+      );
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
@@ -1497,11 +1956,14 @@ export function App() {
           ? { ...item, authStatus: "connecting" as const, enabled: false }
           : item,
       );
-      void persistConfig({
-        ...config,
-        selectedProviderId: providerId,
-        modelProviders: providers,
-      });
+      void persistConfig(
+        {
+          ...config,
+          selectedProviderId: providerId,
+          modelProviders: providers,
+        },
+        { notifySuccess: false },
+      );
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
@@ -1509,7 +1971,9 @@ export function App() {
       });
       notify(
         "provider",
-        providerId === "openai" ? "Checking Codex sign-in" : "Connecting provider",
+        providerId === "openai"
+          ? "Checking Codex sign-in"
+          : "Connecting provider",
         providerLabel,
       );
 
@@ -1766,13 +2230,6 @@ export function App() {
           modelLabel: selectedModel?.displayName ?? modelId,
         });
       }
-      notify(
-        "provider",
-        "Model selected",
-        selectedModel
-          ? `${provider?.displayName ?? providerId} · ${selectedModel.displayName}`
-          : modelId,
-      );
       if (provider && selectedModel) {
         recordModelSelection(
           providerId,
@@ -1785,7 +2242,6 @@ export function App() {
     [
       activeSessionId,
       config,
-      notify,
       persistConfig,
       recordModelSelection,
       saveSessionModel,
@@ -1912,14 +2368,7 @@ export function App() {
       if (action.startsWith("select-provider:")) {
         const providerId = action.replace("select-provider:", "");
         if (isProviderId(providerId)) {
-          const provider = providersForConfig(config).find(
-            (item) => item.id === providerId,
-          );
-          if (provider?.authStatus === "connected") {
-            selectProvider(providerId);
-          } else {
-            connectProvider(providerId);
-          }
+          selectProvider(providerId);
         }
         return;
       }
@@ -1973,6 +2422,62 @@ export function App() {
           "",
         ) as WorkbenchState["workspaceMode"];
         setComposerWorkspaceMode(nextMode);
+        return;
+      }
+
+      if (action.startsWith("remove-saved-project:")) {
+        const encodedPath = action.replace("remove-saved-project:", "");
+        try {
+          const selectedPath = normalizeProjectPath(
+            decodeURIComponent(encodedPath),
+          );
+          if (!selectedPath) {
+            return;
+          }
+          const project = savedProjects.find(
+            (item) => normalizeProjectPath(item.path) === selectedPath,
+          );
+          setProjectRemoveCandidate({
+            path: selectedPath,
+            label: project?.label ?? workspaceName(selectedPath),
+            detail: project?.detail ?? selectedPath,
+            sessionCount:
+              project?.sessionCount ??
+              sessions.filter(
+                (session) =>
+                  normalizeProjectPath(session.workspacePath) === selectedPath,
+              ).length,
+          });
+        } catch {
+          notify(
+            "command-failed",
+            "Project remove failed",
+            "The saved project path could not be read.",
+          );
+        }
+        return;
+      }
+
+      if (action.startsWith("select-saved-project:")) {
+        const encodedPath = action.replace("select-saved-project:", "");
+        try {
+          const selectedPath = decodeURIComponent(encodedPath);
+          void activateWorkspacePath(selectedPath, "Project selected").catch(
+            () => {
+              notify(
+                "command-failed",
+                "Project unavailable",
+                "The saved project folder could not be opened.",
+              );
+            },
+          );
+        } catch {
+          notify(
+            "command-failed",
+            "Project select failed",
+            "The saved project path could not be read.",
+          );
+        }
         return;
       }
 
@@ -2065,6 +2570,7 @@ export function App() {
     },
     [
       activeSession?.workspacePath,
+      activateWorkspacePath,
       checkProviderReadiness,
       connectProvider,
       config,
@@ -2073,9 +2579,11 @@ export function App() {
       openToolPanel,
       openWorkspace,
       persistConfig,
+      savedProjects,
       selectProvider,
       selectProviderModel,
       selectContextFile,
+      sessions,
       workbench.workspaceMode,
       workspacePath,
     ],
@@ -2112,11 +2620,30 @@ export function App() {
 
   const sendDraft = useCallback(
     async (overrideMessage?: string) => {
-      const message = (overrideMessage ?? draft).trim();
+      const message = normalizeChatMessage(overrideMessage ?? "");
       if (message === "") {
         return;
       }
+      if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
+        notify(
+          "command-failed",
+          "Message too long",
+          `Keep chat messages under ${MAX_CHAT_MESSAGE_CHARS.toLocaleString()} characters.`,
+        );
+        return;
+      }
       if (!activeSessionId && isStartingFirstTurn) {
+        return;
+      }
+      if (
+        activeSessionId &&
+        sendingSessionIdsRef.current.has(activeSessionId)
+      ) {
+        notify(
+          "terminal",
+          "Message already sending",
+          "Wait for this turn to finish before sending another message.",
+        );
         return;
       }
       if (!checkProviderReadiness("chat")) {
@@ -2139,6 +2666,13 @@ export function App() {
         (provider) => provider.id === config.selectedProviderId,
       );
       const sessionModel = selectedSessionModelFromConfig(config);
+      const shouldSuggestTitle = shouldSuggestSessionTitle(
+        activeSession,
+        activeSessionHasTranscriptEvents,
+      );
+      const provisionalTitle = shouldSuggestTitle
+        ? sessionTitleFromMessage(message)
+        : undefined;
 
       if (!activeSessionId) {
         setIsStartingFirstTurn(true);
@@ -2152,6 +2686,7 @@ export function App() {
           "thread",
           workbench.workspaceMode,
           sessionModel,
+          provisionalTitle,
         );
         const optimisticEvents = createOptimisticTurnEvents(
           session.id,
@@ -2159,15 +2694,17 @@ export function App() {
           turnId,
           selectedProvider,
         );
+        let sendingSessionId = session.id;
         optimisticEventsRef.current.set(session.id, optimisticEvents);
         suppressSessionAutoSelectRef.current = false;
+        setSessionSending(session.id, true);
         setWorkspacePath(session.workspacePath);
         setFiles(previewFiles);
         setSessions((current) => [session, ...current]);
         setActiveSessionId(session.id);
-        setEvents(optimisticEvents);
-        setDraft("");
-        notify("terminal", "Message queued", "Starting chat");
+        setEvents(limitSessionEventsForUi(optimisticEvents));
+        resetChatDraft();
+        notify("terminal", "Message sending", "Starting chat");
 
         if (!isTauriRuntime()) {
           updateOptimisticProviderStatus(
@@ -2175,18 +2712,21 @@ export function App() {
             setEvents,
             session.id,
             turnId,
-            "ready",
+            "done",
           );
+          setSessionSending(session.id, false);
           setIsStartingFirstTurn(false);
           return;
         }
 
         let optimisticSessionId = session.id;
         try {
+          await waitForNextPaint();
           const persistedSession = await createTauriThreadSession(
             workspacePath,
             workbench.workspaceMode,
             sessionModel,
+            provisionalTitle,
           );
           optimisticSessionId = persistedSession.id;
           const migratedEvents = rekeySessionEvents(
@@ -2195,46 +2735,39 @@ export function App() {
           );
           optimisticEventsRef.current.delete(session.id);
           optimisticEventsRef.current.set(persistedSession.id, migratedEvents);
+          replaceSendingSessionId(session.id, persistedSession.id);
+          sendingSessionId = persistedSession.id;
           setSessions((current) => [
             persistedSession,
             ...current.filter((item) => item.id !== session.id),
           ]);
           setWorkspacePath(persistedSession.workspacePath);
           setActiveSessionId(persistedSession.id);
-          setEvents(migratedEvents);
+          setEvents(limitSessionEventsForUi(migratedEvents));
 
           await invoke<SessionEvent>("append_user_message", {
             sessionId: persistedSession.id,
             message,
             turnId,
           });
-          updateOptimisticProviderStatus(
-            optimisticEventsRef,
-            setEvents,
-            persistedSession.id,
-            turnId,
-            "running",
-          );
-          await invoke<ProviderChatResponse>("run_provider_chat", {
-            request: {
-              sessionId: persistedSession.id,
-              message,
-              turnId,
-              providerId: selectedProvider?.id ?? config.selectedProviderId,
-              providerLabel: selectedProvider?.displayName,
-              modelId: sessionModel.modelId,
-              modelLabel: sessionModel.modelLabel,
-              workspacePath: persistedSession.workspacePath,
+          const providerResponse = await invoke<ProviderChatResponse>(
+            "run_provider_chat",
+            {
+              request: {
+                sessionId: persistedSession.id,
+                message,
+                turnId,
+                providerId: selectedProvider?.id ?? config.selectedProviderId,
+                providerLabel: selectedProvider?.displayName,
+                modelId: sessionModel.modelId,
+                modelLabel: sessionModel.modelLabel,
+                suggestTitle: shouldSuggestTitle,
+                workspacePath: persistedSession.workspacePath,
+              },
             },
-          });
-          updateOptimisticProviderStatus(
-            optimisticEventsRef,
-            setEvents,
-            persistedSession.id,
-            turnId,
-            "ready",
           );
-          await refreshEvents(persistedSession.id);
+          applyProviderChatResponse(persistedSession.id, providerResponse);
+          optimisticEventsRef.current.delete(persistedSession.id);
         } catch (error) {
           updateOptimisticProviderStatus(
             optimisticEventsRef,
@@ -2249,6 +2782,7 @@ export function App() {
           }
           notify("command-failed", "Message fallback", "Chat stayed local");
         } finally {
+          setSessionSending(sendingSessionId, false);
           setIsStartingFirstTurn(false);
         }
         return;
@@ -2260,6 +2794,11 @@ export function App() {
         turnId,
         selectedProvider,
       );
+      if (provisionalTitle) {
+        void updateSessionTitle(activeSessionId, provisionalTitle, {
+          notifyFailure: false,
+        });
+      }
       void saveSessionModel(activeSessionId, sessionModel);
       optimisticEventsRef.current.set(
         activeSessionId,
@@ -2268,11 +2807,14 @@ export function App() {
           optimisticEvents,
         ),
       );
+      setSessionSending(activeSessionId, true);
       dispatchWorkbench({ type: "set-chat-panel" });
       setEvents((current) =>
-        mergePersistedAndOptimisticEvents(current, optimisticEvents),
+        limitSessionEventsForUi(
+          mergePersistedAndOptimisticEvents(current, optimisticEvents),
+        ),
       );
-      setDraft("");
+      resetChatDraft();
 
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
@@ -2280,44 +2822,37 @@ export function App() {
           setEvents,
           activeSessionId,
           turnId,
-          "ready",
+          "done",
         );
+        setSessionSending(activeSessionId, false);
         notify("terminal", "Message added", "Local optimistic event");
         return;
       }
       try {
+        await waitForNextPaint();
         await invoke<SessionEvent>("append_user_message", {
           sessionId: activeSessionId,
           message,
           turnId,
         });
-        updateOptimisticProviderStatus(
-          optimisticEventsRef,
-          setEvents,
-          activeSessionId,
-          turnId,
-          "running",
-        );
-        await invoke<ProviderChatResponse>("run_provider_chat", {
-          request: {
-            sessionId: activeSessionId,
-            message,
-            turnId,
-            providerId: selectedProvider?.id ?? config.selectedProviderId,
-            providerLabel: selectedProvider?.displayName,
-            modelId: sessionModel.modelId,
-            modelLabel: sessionModel.modelLabel,
-            workspacePath: activeSession?.workspacePath ?? workspacePath,
+        const providerResponse = await invoke<ProviderChatResponse>(
+          "run_provider_chat",
+          {
+            request: {
+              sessionId: activeSessionId,
+              message,
+              turnId,
+              providerId: selectedProvider?.id ?? config.selectedProviderId,
+              providerLabel: selectedProvider?.displayName,
+              modelId: sessionModel.modelId,
+              modelLabel: sessionModel.modelLabel,
+              suggestTitle: shouldSuggestTitle,
+              workspacePath: activeSession?.workspacePath ?? workspacePath,
+            },
           },
-        });
-        updateOptimisticProviderStatus(
-          optimisticEventsRef,
-          setEvents,
-          activeSessionId,
-          turnId,
-          "ready",
         );
-        await refreshEvents(activeSessionId);
+        applyProviderChatResponse(activeSessionId, providerResponse);
+        optimisticEventsRef.current.delete(activeSessionId);
       } catch (error) {
         updateOptimisticProviderStatus(
           optimisticEventsRef,
@@ -2329,19 +2864,27 @@ export function App() {
         );
         await refreshEvents(activeSessionId);
         notify("command-failed", "Message fallback", "Chat stayed local");
+      } finally {
+        setSessionSending(activeSessionId, false);
       }
     },
     [
       activeSessionId,
+      activeSession,
       activeSession?.workspacePath,
+      activeSessionHasTranscriptEvents,
+      applyProviderChatResponse,
       checkProviderReadiness,
       config,
-      draft,
       isStartingFirstTurn,
       notify,
       openWorkspace,
+      replaceSendingSessionId,
       refreshEvents,
+      resetChatDraft,
       saveSessionModel,
+      setSessionSending,
+      updateSessionTitle,
       workbench.workspaceMode,
       workspacePath,
     ],
@@ -2351,7 +2894,17 @@ export function App() {
     (action: string, event: SessionEvent) => {
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
-      const userMessage = stringFromRecord(payload, "userMessage");
+      const turnId = turnIdFromSessionEvent(event);
+      const userMessage =
+        (turnId
+          ? eventsRef.current.find(
+              (item) =>
+                item.kind === "user-message" &&
+                (turnIdFromSessionEvent(item) ?? item.id) === turnId,
+            )?.message
+          : undefined) ??
+        stringFromRecord(payload, "userMessage") ??
+        stringFromRecord(payload, "messagePreview");
 
       if (action === "open-providers") {
         dispatchWorkbench({
@@ -2663,6 +3216,7 @@ export function App() {
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
     const status = terminalStatusFromSnapshot(snapshot.status);
+    const selectedPaneId = selectedTerminalPaneIdRef.current;
     dispatchWorkbench({
       type: "sync-terminal-pane-snapshot",
       paneId: snapshot.paneId,
@@ -2674,7 +3228,11 @@ export function App() {
       output: snapshot.output,
       status,
     });
-    setTerminalOutput(snapshot.output);
+    if (!selectedPaneId || selectedPaneId === snapshot.paneId) {
+      setTerminalOutput((current) =>
+        current === snapshot.output ? current : snapshot.output,
+      );
+    }
   }, []);
 
   const refreshTerminalPane = useCallback(
@@ -2816,7 +3374,10 @@ export function App() {
     const focusedPaneId =
       preset.focus === "last" ? paneIds[paneIds.length - 1] : paneIds[0];
     if (focusedPaneId) {
-      dispatchWorkbench({ type: "select-terminal-pane", paneId: focusedPaneId });
+      dispatchWorkbench({
+        type: "select-terminal-pane",
+        paneId: focusedPaneId,
+      });
     }
     notify(
       failures > 0 ? "command-failed" : "terminal",
@@ -3502,27 +4063,63 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = workbench.preferences.theme;
     document.documentElement.dataset.density = workbench.preferences.density;
-    window.localStorage.setItem(THEME_STORAGE_KEY, workbench.preferences.theme);
-    const persistedWorkbench: WorkbenchState = {
-      ...workbench,
-      ide: {
-        ...workbench.ide,
-        buffers: {},
-        selection: undefined,
-      },
-    };
-    window.localStorage.setItem(
-      WORKBENCH_STORAGE_KEY,
-      JSON.stringify(persistedWorkbench),
-    );
-  }, [workbench]);
+    safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
+  }, [workbench.preferences.density, workbench.preferences.theme]);
 
   useEffect(() => {
-    window.localStorage.setItem(
+    pendingWorkbenchPersistRef.current = persistableWorkbench;
+    if (
+      workbenchPersistTimerRef.current !== undefined ||
+      workbenchPersistIdleRef.current !== undefined
+    ) {
+      return;
+    }
+    workbenchPersistTimerRef.current = window.setTimeout(() => {
+      workbenchPersistTimerRef.current = undefined;
+      schedulePersistedWorkbenchStateFlush(
+        pendingWorkbenchPersistRef,
+        workbenchPersistIdleRef,
+      );
+    }, WORKBENCH_PERSIST_DEBOUNCE_MS);
+  }, [persistableWorkbench]);
+
+  useEffect(
+    () => () => {
+      if (workbenchPersistTimerRef.current !== undefined) {
+        window.clearTimeout(workbenchPersistTimerRef.current);
+        workbenchPersistTimerRef.current = undefined;
+      }
+      cancelPersistedWorkbenchStateFlush(workbenchPersistIdleRef);
+      flushPersistedWorkbenchState(pendingWorkbenchPersistRef);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    safeSetLocalStorage(
       PINNED_SESSIONS_STORAGE_KEY,
       JSON.stringify(pinnedSessionIds),
     );
   }, [pinnedSessionIds]);
+
+  useEffect(() => {
+    safeSetLocalStorage(
+      REMOVED_PROJECTS_STORAGE_KEY,
+      JSON.stringify(removedProjectPaths),
+    );
+  }, [removedProjectPaths]);
+
+  useEffect(() => {
+    const selectedPane = workbench.terminalPanes.find(
+      (pane) => pane.id === workbench.selectedTerminalPaneId,
+    );
+    if (!selectedPane) {
+      return;
+    }
+    setTerminalOutput((current) =>
+      current === selectedPane.output ? current : selectedPane.output,
+    );
+  }, [workbench.selectedTerminalPaneId, workbench.terminalPanes]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3530,6 +4127,7 @@ export function App() {
       if (event.key === "Escape") {
         setIsCommandPaletteOpen(false);
         setModelStandardPrompt(undefined);
+        setProjectRemoveCandidate(undefined);
         return;
       }
       if (!isCommand) {
@@ -3740,25 +4338,32 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (!isTauriRuntime() || liveTerminalPaneIds.length === 0) {
+    if (!isTauriRuntime() || terminalPaneIdsToPoll.length === 0) {
       return;
     }
+    const pollInterval = isActiveSessionSending
+      ? TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS
+      : TERMINAL_POLL_INTERVAL_MS;
 
     const interval = window.setInterval(() => {
-      for (const paneId of liveTerminalPaneIds) {
+      for (const paneId of terminalPaneIdsToPoll) {
         void refreshTerminalPane(paneId);
       }
-    }, 1000);
+    }, pollInterval);
 
     return () => window.clearInterval(interval);
-  }, [liveTerminalPaneIds, refreshTerminalPane]);
+  }, [isActiveSessionSending, refreshTerminalPane, terminalPaneIdsToPoll]);
 
   useEffect(() => {
+    const nextTurn = derivedActiveTurn;
+    if (areWorkbenchTurnsEqual(workbench.activeTurn, nextTurn)) {
+      return;
+    }
     dispatchWorkbench({
       type: "reconcile-active-turn",
-      turn: deriveActiveTurn(events, activeSession?.title),
+      turn: nextTurn,
     });
-  }, [activeSession?.title, events]);
+  }, [derivedActiveTurn, workbench.activeTurn]);
 
   useEffect(() => {
     const turn = workbench.activeTurn;
@@ -3794,10 +4399,8 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const activeTurnId =
-      workbench.activeTurn?.id ??
-      deriveActiveTurn(events, activeSession?.title)?.id;
-    const freshEvents = events.filter(
+    const activeTurnId = workbench.activeTurn?.id ?? derivedActiveTurn?.id;
+    const freshEvents = deferredEventsForTurn.filter(
       (event) =>
         (event.kind === "file-edit-proposed" ||
           event.kind === "approval-requested") &&
@@ -3826,7 +4429,12 @@ export function App() {
         notify("approval", "Approval requested", event.message);
       }
     });
-  }, [activeSession?.title, events, notify, workbench.activeTurn?.id]);
+  }, [
+    derivedActiveTurn?.id,
+    deferredEventsForTurn,
+    notify,
+    workbench.activeTurn?.id,
+  ]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -4052,6 +4660,7 @@ export function App() {
       onToggleSourceControlFile={stageSourceControlFile}
       onPinSession={pinSession}
       onRenameSession={renameSession}
+      onRemoveProject={requestRemoveProject}
       onSelectDestination={selectDestination}
       onSelectSession={(sessionId) => {
         suppressSessionAutoSelectRef.current = false;
@@ -4085,12 +4694,13 @@ export function App() {
                 browserPreview={workbench.browserPreview}
                 config={config}
                 diffReview={workbench.diffReview}
-                draft={draft}
+                draftResetToken={draftResetToken}
                 events={events}
                 branchName={activeSession?.branch}
                 isEnvironmentRailOpen={activeChatPanel === "environment"}
-                isComposerSending={isStartingFirstTurn}
+                isComposerSending={isActiveSessionSending}
                 isToolPanelOpen={workbench.isToolPanelOpen}
+                maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
                 onboarding={workbench.onboarding}
                 onAgentAction={(action) =>
                   notify("terminal", "Agent action", action)
@@ -4099,7 +4709,6 @@ export function App() {
                   dispatchWorkbench({ type: "complete-onboarding-step", step })
                 }
                 onComposerAction={handleComposerAction}
-                onDraftChange={setDraft}
                 onOpenToolPanel={openToolPanel}
                 onPlanItemStatusChange={changePlanItemStatus}
                 onProviderStatusAction={handleProviderStatusAction}
@@ -4114,6 +4723,7 @@ export function App() {
                   dispatchWorkbench({ type: "toggle-chat-plan" })
                 }
                 providerReadiness={workbench.providerReadiness}
+                savedProjects={savedProjects}
                 sessionModel={{
                   modelLabel: activeSession?.modelLabel,
                   providerId: activeSession?.providerId,
@@ -4308,7 +4918,19 @@ export function App() {
             dispatchWorkbench({ type: "set-density", density })
           }
           onExportDiagnostics={() =>
-            notify("terminal", "Diagnostics exported", "Local redacted bundle")
+            isTauriRuntime()
+              ? void invoke<DiagnosticsExportResult>("export_diagnostics")
+                  .then((result) =>
+                    notify("terminal", "Diagnostics exported", result.path),
+                  )
+                  .catch((error) =>
+                    notify(
+                      "command-failed",
+                      "Diagnostics export failed",
+                      String(error),
+                    ),
+                  )
+              : notify("terminal", "Diagnostics exported", "Preview bundle")
           }
           onResetUiState={() => dispatchWorkbench({ type: "reset-state" })}
           onSectionChange={(section: SettingsSectionId) =>
@@ -4382,31 +5004,6 @@ export function App() {
               commandProfiles: [...commandProfiles, customProfile],
             });
           }}
-          onProviderModelChange={(providerId, modelId) => {
-            if (isProviderId(providerId)) {
-              selectProviderModel(providerId, modelId);
-            }
-          }}
-          onRefreshProviderModels={(providerId) => {
-            if (!isProviderId(providerId)) {
-              return;
-            }
-            const provider = providersForConfig(config).find(
-              (item) => item.id === providerId,
-            );
-            void persistConfig({
-              ...config,
-              selectedProviderId: providerId,
-              modelProviders: providersForConfig(config),
-            });
-            notify(
-              "provider",
-              "Models refreshed",
-              provider
-                ? `${provider.displayName} is using the seeded model catalog.`
-                : "Seeded model catalog is current.",
-            );
-          }}
           onQueueProviderHandoff={queueProviderHandoff}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
@@ -4419,17 +5016,17 @@ export function App() {
         <ChatSurface
           activeChatPanel={activeChatPanel}
           config={config}
-          draft={draft}
+          draftResetToken={draftResetToken}
           events={[]}
           isEnvironmentRailOpen={activeChatPanel === "environment"}
-          isComposerSending={isStartingFirstTurn}
+          isComposerSending={isActiveSessionSending}
           isToolPanelOpen={workbench.isToolPanelOpen}
+          maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           onboarding={workbench.onboarding}
           onCompleteOnboardingStep={(step) =>
             dispatchWorkbench({ type: "complete-onboarding-step", step })
           }
           onComposerAction={handleComposerAction}
-          onDraftChange={setDraft}
           onOpenToolPanel={openToolPanel}
           onPlanItemStatusChange={changePlanItemStatus}
           onProviderStatusAction={handleProviderStatusAction}
@@ -4450,6 +5047,7 @@ export function App() {
             dispatchWorkbench({ type: "toggle-chat-plan" })
           }
           providerReadiness={workbench.providerReadiness}
+          savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           showOnboardingSteps
           workspacePath={workspacePath}
@@ -4463,6 +5061,15 @@ export function App() {
           providerId={modelStandardPrompt.providerId}
           providerLabel={modelStandardPrompt.providerLabel}
           selectionCount={modelStandardPrompt.count}
+        />
+      ) : null}
+      {projectRemoveCandidate ? (
+        <ProjectRemoveConfirmOverlay
+          onKeep={() => setProjectRemoveCandidate(undefined)}
+          onRemove={confirmRemoveProject}
+          projectLabel={projectRemoveCandidate.label}
+          projectPath={projectRemoveCandidate.path}
+          sessionCount={projectRemoveCandidate.sessionCount}
         />
       ) : null}
       {isCommandPaletteOpen ? (
@@ -4483,8 +5090,11 @@ export function App() {
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState();
-  const legacyTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  const stored = window.localStorage.getItem(WORKBENCH_STORAGE_KEY);
+  const legacyTheme = readBoundedLocalStorage(THEME_STORAGE_KEY, 16);
+  const stored = readBoundedLocalStorage(
+    WORKBENCH_STORAGE_KEY,
+    MAX_STORED_WORKBENCH_STATE_CHARS,
+  );
   if (!stored) {
     return {
       ...base,
@@ -4794,33 +5404,38 @@ function GyroAccountGate({
     oidc?.clientId === "gyro-local-device";
   const detail =
     status === "checking"
-      ? "Checking whether this Mac is already allowed..."
+      ? "Checking local access..."
       : status === "signing-in"
-        ? "Authorizing this local Gyro instance..."
+        ? "Authorizing this device..."
         : isLocalDevice
-          ? "Authorize this device to use the local Gyro instance. Claude, OpenAI, and other paid accounts stay external in Providers."
-          : "Authorize Gyro access. Model-provider OAuth stays separate in Providers.";
+          ? "Enable Gyro locally. Provider accounts stay in their own CLIs and apps."
+          : "Authorize Gyro access. Provider accounts stay separate.";
+  const accessModeLabel = isLocalDevice
+    ? "This Mac"
+    : (oidc?.issuerUrl ?? "Not configured");
 
   return (
     <main className="gyro-account-gate" aria-label="Gyro local access">
       <section className="gyro-account-panel">
-        <div className="gyro-account-panel-mark">G</div>
-        <div>
-          <span className="gyro-account-kicker">Local access</span>
-          <h1>Use Gyro on this Mac</h1>
-          <p>{detail}</p>
+        <div className="gyro-account-heading">
+          <div className="gyro-account-panel-mark" aria-hidden="true">
+            G
+          </div>
+          <div>
+            <span className="gyro-account-kicker">Local access</span>
+            <h1>Use Gyro on this Mac</h1>
+          </div>
         </div>
-        <div className="gyro-account-provider">
-          <span>Access mode</span>
-          <code>
-            {isLocalDevice
-              ? "Local device session"
-              : (oidc?.issuerUrl ?? "not configured")}
-          </code>
-        </div>
-        <div className="gyro-account-provider">
-          <span>Provider accounts</span>
-          <code>External Claude/OpenAI logins</code>
+        <p className="gyro-account-copy">{detail}</p>
+        <div className="gyro-account-context" aria-label="Access details">
+          <span title={accessModeLabel}>
+            <i aria-hidden="true" />
+            {accessModeLabel}
+          </span>
+          <span>
+            <i aria-hidden="true" />
+            Provider logins stay external
+          </span>
         </div>
         {error ? <p className="gyro-account-error">{error}</p> : null}
         <div className="gyro-account-actions">
@@ -5024,7 +5639,10 @@ function formatTerminalDelta(value: string) {
 }
 
 function loadPreviewConfig(): GyroConfig {
-  const stored = window.localStorage.getItem(PREVIEW_CONFIG_STORAGE_KEY);
+  const stored = readBoundedLocalStorage(
+    PREVIEW_CONFIG_STORAGE_KEY,
+    MAX_STORED_PREVIEW_CONFIG_CHARS,
+  );
   if (!stored) {
     return normalizedConfig(EMPTY_CONFIG);
   }
@@ -5039,18 +5657,254 @@ function loadPreviewConfig(): GyroConfig {
 }
 
 function loadPinnedSessionIds(): string[] {
-  const stored = window.localStorage.getItem(PINNED_SESSIONS_STORAGE_KEY);
+  const stored = readBoundedLocalStorage(
+    PINNED_SESSIONS_STORAGE_KEY,
+    MAX_STORED_PREVIEW_CONFIG_CHARS,
+  );
   if (!stored) {
     return [];
   }
   try {
     const parsed = JSON.parse(stored);
     return Array.isArray(parsed)
-      ? parsed.filter((id): id is string => typeof id === "string")
+      ? parsed
+          .filter((id): id is string => typeof id === "string")
+          .slice(0, MAX_PINNED_SESSIONS)
       : [];
   } catch {
     return [];
   }
+}
+
+function loadRemovedProjectPaths(): string[] {
+  const stored = readBoundedLocalStorage(
+    REMOVED_PROJECTS_STORAGE_KEY,
+    MAX_STORED_PREVIEW_CONFIG_CHARS,
+  );
+  if (!stored) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((path): path is string => typeof path === "string")
+          .map(normalizeProjectPath)
+          .filter(Boolean)
+          .slice(0, MAX_REMOVED_PROJECTS)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeProjectPath(path?: string) {
+  return path?.trim().replace(/\/+$/, "") ?? "";
+}
+
+function visibleSessionsForProjects(
+  sessions: Session[],
+  removedProjectPaths: string[],
+) {
+  const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
+  return sessions.filter(
+    (session) => !removed.has(normalizeProjectPath(session.workspacePath)),
+  );
+}
+
+function readBoundedLocalStorage(key: string, maxChars: number) {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (!stored || stored.length > maxChars) {
+      return undefined;
+    }
+    return stored;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeSetLocalStorage(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Local storage can be unavailable or quota-limited in preview contexts.
+  }
+}
+
+function flushPersistedWorkbenchState(ref: { current?: WorkbenchState }) {
+  const pending = ref.current;
+  if (!pending) {
+    return;
+  }
+  ref.current = undefined;
+  safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
+}
+
+function schedulePersistedWorkbenchStateFlush(
+  pendingRef: { current?: WorkbenchState },
+  idleRef: { current?: number },
+) {
+  if (idleRef.current !== undefined) {
+    return;
+  }
+  const idleWindow = window as Window & {
+    cancelIdleCallback?: (handle: number) => void;
+    requestIdleCallback?: (
+      callback: () => void,
+      options?: { timeout?: number },
+    ) => number;
+  };
+  if (idleWindow.requestIdleCallback) {
+    idleRef.current = idleWindow.requestIdleCallback(
+      () => {
+        idleRef.current = undefined;
+        flushPersistedWorkbenchState(pendingRef);
+      },
+      { timeout: WORKBENCH_PERSIST_IDLE_TIMEOUT_MS },
+    );
+    return;
+  }
+  idleRef.current = window.setTimeout(() => {
+    idleRef.current = undefined;
+    flushPersistedWorkbenchState(pendingRef);
+  }, 0);
+}
+
+function cancelPersistedWorkbenchStateFlush(ref: { current?: number }) {
+  if (ref.current === undefined) {
+    return;
+  }
+  const idleWindow = window as Window & {
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (idleWindow.cancelIdleCallback) {
+    idleWindow.cancelIdleCallback(ref.current);
+  }
+  window.clearTimeout(ref.current);
+  ref.current = undefined;
+}
+
+function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
+  return {
+    ...workbench,
+    activeTurn: undefined,
+    terminalPanes: workbench.terminalPanes.map((pane) => ({
+      ...pane,
+      output: truncatePersistedText(
+        pane.output,
+        MAX_PERSISTED_TERMINAL_OUTPUT_CHARS,
+      ),
+    })),
+    providerReadiness: {
+      status: "idle",
+      message: "",
+    },
+    providerStatuses: workbench.providerStatuses.map((provider) => ({
+      ...provider,
+      healthOutput: undefined,
+    })),
+    ide: {
+      ...workbench.ide,
+      buffers: {},
+      selection: undefined,
+      outputChannels: workbench.ide.outputChannels.map(
+        persistableOutputChannel,
+      ),
+    },
+  };
+}
+
+function persistableOutputChannel(channel: OutputChannel): OutputChannel {
+  return {
+    ...channel,
+    lines: channel.lines.slice(-MAX_PERSISTED_OUTPUT_CHANNEL_LINES),
+  };
+}
+
+function truncatePersistedText(value: string, maxChars: number) {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `...${value.slice(-maxChars)}`;
+}
+
+function normalizeChatMessage(value: string) {
+  return value.replace(/\u0000/g, "").trim();
+}
+
+function normalizeSessionTitleInput(value: string) {
+  const normalized = value
+    .replace(/\u0000/g, "")
+    .replace(/[`*_#[\](){}<>|\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[\s:;,.!?'"-]+|[\s:;,.!?'"-]+$/g, "");
+  if (!normalized) {
+    return undefined;
+  }
+  const chars = Array.from(normalized);
+  return chars.length > 80 ? `${chars.slice(0, 77).join("")}...` : normalized;
+}
+
+function sessionTitleFromMessage(message: string) {
+  const cleaned = normalizeChatMessage(message)
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\/\w+\s+/, "")
+    .split(/[.!?\n]/)[0]
+    ?.replace(
+      /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
+      "",
+    )
+    .trim();
+  const words = (cleaned ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((word) => {
+      if (/^[A-Z0-9]{2,}$/.test(word)) {
+        return word;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    });
+  return normalizeSessionTitleInput(words.join(" ")) ?? "New chat";
+}
+
+function shouldSuggestSessionTitle(
+  session: Session | undefined,
+  hasTranscriptEvents: boolean,
+) {
+  if (!session) {
+    return true;
+  }
+  if (!isGenericSessionTitle(session.title)) {
+    return false;
+  }
+  return !hasTranscriptEvents;
+}
+
+function isGenericSessionTitle(title: string) {
+  return [
+    "Desktop session",
+    "New chat",
+    "Worktree session",
+    "CLI workspace",
+    "Worktree CLI workspace",
+  ].includes(title.trim());
+}
+
+function chatMessageLength(value: string) {
+  return Array.from(value).length;
+}
+
+function chatMessagePreview(value: string) {
+  const normalized = normalizeChatMessage(value).replace(/\s+/g, " ");
+  const chars = Array.from(normalized);
+  if (chars.length <= 160) {
+    return normalized;
+  }
+  return `${chars.slice(0, 160).join("")}...`;
 }
 
 function getCommandProfile(
@@ -5176,45 +6030,71 @@ function deriveActiveTurn(
   events: SessionEvent[],
   sessionTitle = "Desktop session",
 ): WorkbenchTurn | undefined {
-  const latestUserEvent = [...events]
-    .reverse()
-    .find((event) => event.kind === "user-message");
+  let latestUserEvent: SessionEvent | undefined;
+  let latestUserIndex = -1;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind === "user-message") {
+      latestUserEvent = event;
+      latestUserIndex = index;
+      break;
+    }
+  }
   if (!latestUserEvent) {
     return undefined;
   }
 
   const turnId = turnIdFromSessionEvent(latestUserEvent) ?? latestUserEvent.id;
-  const turnEvents = events.filter(
-    (event) =>
-      (turnIdFromSessionEvent(event) ?? event.id) === turnId ||
+  const changedFiles = new Set<string>();
+  let approvalsPending = 0;
+  let lastEvent = latestUserEvent;
+  let hasCommandRequest = false;
+  let hasCommandOutput = false;
+  let hasStreamingAssistant = false;
+
+  for (
+    let index = Math.max(0, latestUserIndex);
+    index < events.length;
+    index += 1
+  ) {
+    const event = events[index];
+    if (!event) {
+      continue;
+    }
+    const eventTurnId = turnIdFromSessionEvent(event);
+    const isTurnEvent =
+      (eventTurnId ?? event.id) === turnId ||
       (event.kind !== "user-message" &&
-        !turnIdFromSessionEvent(event) &&
-        event.createdAt >= latestUserEvent.createdAt),
-  );
-  const changedFiles = new Set(
-    turnEvents
-      .filter((event) => event.kind === "file-edit-proposed")
-      .map(pathFromSessionEvent),
-  );
-  const approvalsPending = turnEvents.filter(
-    (event) => event.kind === "approval-requested",
-  ).length;
-  const lastEvent = turnEvents.at(-1) ?? latestUserEvent;
-  const hasCommandRequest = turnEvents.some(
-    (event) => event.kind === "command-requested",
-  );
-  const hasCommandOutput = turnEvents.some(
-    (event) => event.kind === "command-output",
-  );
+        !eventTurnId &&
+        event.createdAt >= latestUserEvent.createdAt);
+    if (!isTurnEvent) {
+      continue;
+    }
+    lastEvent = event;
+    if (event.kind === "file-edit-proposed") {
+      changedFiles.add(pathFromSessionEvent(event));
+    } else if (event.kind === "approval-requested") {
+      approvalsPending += 1;
+    } else if (event.kind === "command-requested") {
+      hasCommandRequest = true;
+    } else if (event.kind === "command-output") {
+      hasCommandOutput = true;
+    } else if (isStreamingAssistantSessionEvent(event)) {
+      hasStreamingAssistant = true;
+    }
+  }
+
   const status =
     approvalsPending > 0
       ? "waiting"
-      : hasCommandOutput ||
-          (!hasCommandRequest && lastEvent.kind === "assistant-message")
-        ? "done"
-        : hasCommandRequest
-          ? "running"
-          : "queued";
+      : hasStreamingAssistant
+        ? "running"
+        : hasCommandOutput ||
+            (!hasCommandRequest && lastEvent.kind === "assistant-message")
+          ? "done"
+          : hasCommandRequest
+            ? "running"
+            : "queued";
 
   return {
     id: turnId,
@@ -5223,28 +6103,61 @@ function deriveActiveTurn(
     status,
     startedAt: latestUserEvent.createdAt,
     updatedAt: lastEvent.createdAt,
-    lastEvent: lastEvent.message,
+    lastEvent:
+      lastEvent.kind === "assistant-message"
+        ? "Assistant response received"
+        : lastEvent.message,
     changedFiles: changedFiles.size,
     approvalsPending,
   };
+}
+
+function isStreamingAssistantSessionEvent(event: SessionEvent) {
+  const payload = recordFromUnknown(event.payload);
+  return (
+    event.kind === "assistant-message" &&
+    payload?.kind === "provider-stream" &&
+    payload.streaming === true
+  );
+}
+
+function areWorkbenchTurnsEqual(
+  current: WorkbenchTurn | undefined,
+  next: WorkbenchTurn | undefined,
+) {
+  if (!current || !next) {
+    return current === next;
+  }
+  return (
+    current.id === next.id &&
+    current.sessionId === next.sessionId &&
+    current.sessionTitle === next.sessionTitle &&
+    current.status === next.status &&
+    current.startedAt === next.startedAt &&
+    current.updatedAt === next.updatedAt &&
+    current.lastEvent === next.lastEvent &&
+    current.changedFiles === next.changedFiles &&
+    current.approvalsPending === next.approvalsPending
+  );
 }
 
 function deriveSessionPlan(
   events: SessionEvent[],
   sessionId?: string,
 ): SessionPlan {
-  const planEvents = events.filter((event) => event.kind === "plan-updated");
-  const firstEvent = planEvents[0];
-  const latestEvent = planEvents.at(-1);
   let plan: SessionPlan = {
     sessionId,
     title: "Plan",
     items: [],
-    createdAt: firstEvent?.createdAt,
-    updatedAt: latestEvent?.createdAt,
   };
 
-  for (const event of planEvents) {
+  for (const event of events) {
+    if (event.kind !== "plan-updated") {
+      continue;
+    }
+    if (!plan.createdAt) {
+      plan = { ...plan, createdAt: event.createdAt };
+    }
     const payload = recordFromUnknown(event.payload);
     const action = stringFromRecord(payload, "action") ?? "replace";
     const sourceTurnId =
@@ -5472,6 +6385,74 @@ function workspaceContentToEditorBuffer(
 
 function workspaceName(path?: string) {
   return path?.split("/").filter(Boolean).at(-1) ?? "Untitled";
+}
+
+function savedProjectsFromSessions(
+  sessions: Session[],
+  currentWorkspacePath?: string,
+  removedProjectPaths: string[] = [],
+): SavedProject[] {
+  const projects = new Map<
+    string,
+    { path: string; label: string; lastUsedAt: number; sessionCount: number }
+  >();
+  const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
+
+  const upsertProject = (
+    path: string | undefined,
+    updatedAt?: string,
+    options: { includeRemoved?: boolean } = {},
+  ) => {
+    if (!path) {
+      return;
+    }
+    const normalizedPath = normalizeProjectPath(path);
+    if (!normalizedPath) {
+      return;
+    }
+    if (removed.has(normalizedPath) && !options.includeRemoved) {
+      return;
+    }
+    const existing = projects.get(normalizedPath);
+    const lastUsedAt = updatedAt
+      ? new Date(updatedAt).getTime() || 0
+      : Date.now();
+    projects.set(normalizedPath, {
+      path: normalizedPath,
+      label: workspaceName(normalizedPath),
+      lastUsedAt: Math.max(existing?.lastUsedAt ?? 0, lastUsedAt),
+      sessionCount: (existing?.sessionCount ?? 0) + (updatedAt ? 1 : 0),
+    });
+  };
+
+  upsertProject(currentWorkspacePath, undefined, { includeRemoved: true });
+  sessions.forEach((session) =>
+    upsertProject(session.workspacePath, session.updatedAt),
+  );
+
+  const currentPath = normalizeProjectPath(currentWorkspacePath);
+  return [...projects.values()]
+    .sort((first, second) => {
+      if (first.path === currentPath) {
+        return -1;
+      }
+      if (second.path === currentPath) {
+        return 1;
+      }
+      return second.lastUsedAt - first.lastUsedAt;
+    })
+    .slice(0, 6)
+    .map((project) => ({
+      path: project.path,
+      label: project.label,
+      detail:
+        project.path === currentPath
+          ? "Current project"
+          : `${project.sessionCount || 1} chat${
+              project.sessionCount === 1 ? "" : "s"
+            }`,
+      sessionCount: project.sessionCount,
+    }));
 }
 
 function parentDirectory(path: string) {
@@ -5706,20 +6687,22 @@ function createPreviewSession(
   model: Partial<
     Pick<Session, "modelId" | "modelLabel" | "providerId" | "providerLabel">
   > = {},
+  titleOverride?: string,
   sessionId = `preview-${Date.now()}`,
 ): Session {
   const now = new Date().toISOString();
   const metadata = workspaceRunMetadata(mode, layout);
+  const defaultTitle =
+    layout === "terminal-grid"
+      ? mode === "worktree"
+        ? "Worktree CLI workspace"
+        : "CLI workspace"
+      : mode === "worktree"
+        ? "Worktree session"
+        : "Desktop session";
   return {
     id: sessionId,
-    title:
-      layout === "terminal-grid"
-        ? mode === "worktree"
-          ? "Worktree CLI workspace"
-          : "CLI workspace"
-        : mode === "worktree"
-          ? "Worktree session"
-          : "Desktop session",
+    title: normalizeSessionTitleInput(titleOverride ?? "") ?? defaultTitle,
     workspacePath: "",
     origin: layout === "terminal-grid" ? "cli" : "desktop",
     workspaceMode: metadata.workspaceMode,
@@ -5739,10 +6722,13 @@ async function createTauriThreadSession(
   workspacePath: string | undefined,
   mode: WorkbenchState["workspaceMode"],
   model: ReturnType<typeof selectedSessionModelFromConfig>,
+  titleOverride?: string,
 ): Promise<Session> {
   const workspace = workspacePath ?? "";
   const shouldCreateWorktree = mode === "worktree" && workspace.length > 0;
-  const title = shouldCreateWorktree ? "Worktree session" : "Desktop session";
+  const title =
+    normalizeSessionTitleInput(titleOverride ?? "") ??
+    (shouldCreateWorktree ? "Worktree session" : "Desktop session");
   const metadata = workspaceRunMetadata(
     shouldCreateWorktree ? "worktree" : "local",
     `${title}-${Date.now()}`,
@@ -5854,13 +6840,13 @@ function createOptimisticTurnEvents(
       turnId,
       createdAt: now,
       kind: "system-event",
-      message: providerStatusMessage("queued", provider),
-      payload: providerStatusPayload("queued", message, turnId, provider),
+      message: providerStatusMessage("running", provider),
+      payload: providerStatusPayload("running", message, turnId, provider),
     },
   ];
 }
 
-type OptimisticProviderStatus = "queued" | "running" | "ready" | "failed";
+type OptimisticProviderStatus = HarnessRunStatus | "ready";
 
 function providerStatusPayload(
   status: OptimisticProviderStatus,
@@ -5875,11 +6861,11 @@ function providerStatusPayload(
     error,
     modelId: model?.id,
     modelLabel: model?.displayName,
+    messagePreview: chatMessagePreview(userMessage),
     providerId: provider?.id,
     providerLabel: provider?.displayName ?? "Provider",
     status,
     turnId,
-    userMessage,
   };
 }
 
@@ -5890,6 +6876,18 @@ function providerStatusMessage(
   const providerLabel = provider?.displayName ?? "Provider";
   if (status === "failed") {
     return `${providerLabel} send needs attention`;
+  }
+  if (status === "blocked") {
+    return `${providerLabel} is not available for chat yet`;
+  }
+  if (status === "cancelled") {
+    return `${providerLabel} was cancelled`;
+  }
+  if (status === "waiting") {
+    return `${providerLabel} is waiting`;
+  }
+  if (status === "done") {
+    return `${providerLabel} answered`;
   }
   if (status === "ready") {
     return `${providerLabel} is ready for the next step`;
@@ -5908,38 +6906,61 @@ function rekeySessionEvents(events: SessionEvent[], sessionId: string) {
   }));
 }
 
-function mergePersistedAndOptimisticEvents(
-  persistedEvents: SessionEvent[],
-  optimisticEvents?: SessionEvent[],
-) {
-  if (!optimisticEvents || optimisticEvents.length === 0) {
-    return persistedEvents;
-  }
-  const merged = [...persistedEvents];
-  for (const event of optimisticEvents) {
-    const hasSameId = merged.some((item) => item.id === event.id);
-    const hasSameTurnUser =
-      event.kind === "user-message" &&
-      merged.some(
-        (item) =>
-          item.kind === "user-message" &&
-          (item.turnId === event.turnId || item.message === event.message),
-      );
-    const hasSameTurnProviderStatus =
-      isProviderStatusEvent(event) &&
-      merged.some(
-        (item) => isProviderStatusEvent(item) && item.turnId === event.turnId,
-      );
-    if (!hasSameId && !hasSameTurnUser && !hasSameTurnProviderStatus) {
-      merged.push(event);
-    }
-  }
-  return merged;
+function providerStreamBatchKey(sessionId: string, turnId: string) {
+  return `${sessionId}:${turnId}`;
 }
 
-function isProviderStatusEvent(event: SessionEvent) {
-  const payload = recordFromUnknown(event.payload);
-  return event.kind === "system-event" && payload?.kind === "provider-status";
+function applyProviderChatStreamEvent(
+  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
+  setEvents: (
+    value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
+  ) => void,
+  streamEvent: ProviderChatStreamEvent,
+) {
+  const turnId = streamEvent.turnId ?? undefined;
+  if (!streamEvent.sessionId || !turnId) {
+    return;
+  }
+  if (streamEvent.phase === "started" || streamEvent.phase === "completed") {
+    updateOptimisticProviderStatus(
+      optimisticEventsRef,
+      setEvents,
+      streamEvent.sessionId,
+      turnId,
+      streamEvent.status ??
+        (streamEvent.phase === "completed" ? "done" : "running"),
+    );
+    return;
+  }
+  if (streamEvent.phase === "failed") {
+    updateOptimisticProviderStatus(
+      optimisticEventsRef,
+      setEvents,
+      streamEvent.sessionId,
+      turnId,
+      streamEvent.status ?? "failed",
+      streamEvent.error ?? undefined,
+    );
+    return;
+  }
+  const textDelta = streamEvent.textDelta ?? "";
+  if (streamEvent.phase !== "delta" || textDelta === "") {
+    return;
+  }
+  const updateEvents = (items: SessionEvent[]) =>
+    upsertStreamingAssistantEvent(items, streamEvent, turnId, textDelta);
+  optimisticEventsRef.current.set(
+    streamEvent.sessionId,
+    limitSessionEventsForUi(
+      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+    ),
+  );
+  setEvents((current) => {
+    if (!current.some((event) => event.sessionId === streamEvent.sessionId)) {
+      return current;
+    }
+    return limitSessionEventsForUi(updateEvents(current));
+  });
 }
 
 function updateOptimisticProviderStatus(
@@ -5957,24 +6978,18 @@ function updateOptimisticProviderStatus(
       return event;
     }
     const payload = recordFromUnknown(event.payload);
-    const userMessage = stringFromRecord(payload, "userMessage") ?? "";
     const providerLabel =
       stringFromRecord(payload, "providerLabel") ?? "Provider";
     return {
       ...event,
-      message:
-        status === "failed"
-          ? `${providerLabel} send needs attention`
-          : status === "ready"
-            ? `${providerLabel} is ready for the next step`
-            : status === "running"
-              ? `${providerLabel} is working`
-              : `${providerLabel} queued this request`,
+      message: providerStatusMessage(status, {
+        id: stringFromRecord(payload, "providerId") ?? "openai",
+        displayName: providerLabel,
+      } as ModelProviderConfig),
       payload: {
         ...payload,
         error,
         status,
-        userMessage,
       },
     };
   };
@@ -5982,8 +6997,8 @@ function updateOptimisticProviderStatus(
   if (optimisticEvents) {
     optimisticEventsRef.current.set(
       sessionId,
-      optimisticEvents.map(updateEvent),
+      limitSessionEventsForUi(optimisticEvents.map(updateEvent)),
     );
   }
-  setEvents((current) => current.map(updateEvent));
+  setEvents((current) => limitSessionEventsForUi(current.map(updateEvent)));
 }

@@ -17,6 +17,28 @@ is pre-launch foundation work for the first private/developer preview:
 - Shared React UI package for chat, files, diffs, terminal profiles, and settings.
 - Release, Homebrew, security, governance, and launch documentation.
 
+## Code Upgrade Roadmap
+
+Gyro is an agent harness, not just a chat surface. Code upgrades should strengthen the parts that make agent runs safe, observable, resumable, and portable across app, CLI, and future IDE surfaces.
+
+Priority upgrades:
+
+- Agent run contract: make session lifecycle, turns, provider calls, tool requests, approvals, file edits, diffs, and terminal events first-class typed contracts shared by `gyro-core`, CLI, and desktop.
+- Provider adapter boundary: keep OpenAI, Anthropic, xAI, Gemini, and future agents behind a small adapter interface with health checks, model capability metadata, timeout policy, and redacted diagnostics.
+- Run orchestration: centralize queued, running, waiting, blocked, failed, done, retry, cancel, and resume behavior so every surface shows the same state.
+- Safety harness: keep command execution, file writes, worktree isolation, path validation, approval policy, and secret redaction in shared core logic rather than UI-only flows.
+- Performance boundaries: move blocking SQLite, filesystem, process, and provider work off the UI thread; cap event reads; debounce persistence; keep chat and model selection responsive.
+- Observability: add structured run timing, provider-call diagnostics, terminal lifecycle events, and exportable redacted debug bundles for local troubleshooting.
+- Test harness: add golden session logs, fake provider runners, CLI-app roundtrip tests, Tauri command contract tests, approval-policy tests, and UI smoke checks for critical flows.
+
+## Model Harness V1
+
+Gyro V1 treats the existing `turnId` as the run id for model and CLI handoff work. App, CLI, and future IDE surfaces should use the shared harness status vocabulary: `queued`, `running`, `waiting`, `blocked`, `done`, `failed`, and `cancelled`.
+
+Provider chat runs go through the desktop provider adapter boundary. OpenAI runs through the local Codex CLI, Anthropic runs through Claude Code, and xAI/Gemini remain readiness-only until execution adapters are deliberately implemented. Gyro stores readiness, run metadata, resume cursors, and redacted diagnostics; provider credentials remain owned by provider CLIs, SDKs, environment variables, Keychain references, or provider-owned stores.
+
+Command requests, terminal runs, file-edit proposals, diff proposals, and approvals should be recorded as typed harness payloads before mutation. The local diagnostics export writes a redacted bundle with config summary, provider health, recent provider-run diagnostics, and session metadata without secrets or full message bodies.
+
 ## Repository Layout
 
 ```text
@@ -125,7 +147,7 @@ The CLI surface is an agent launcher and control plane for local sessions:
 - `gyro sessions` lists recent local sessions, with `--workspace` and `--json` for scripts.
 - `gyro setup` checks storage, Git, Gyro.app IPC, configured CLI profiles, known agent commands such as Codex and Claude, and provider/Keychain readiness without editing third-party config.
 
-Human output uses stable status labels: `ready`, `waiting`, `blocked`, `running`, `done`, and `failed`. Machine output is only emitted when `--json` is passed.
+Human output uses stable status labels: `ready`, `queued`, `waiting`, `blocked`, `running`, `done`, `failed`, and `cancelled`. Machine output is only emitted when `--json` is passed.
 
 ## Provider Setup
 
@@ -134,9 +156,10 @@ state stays in Gyro's local store, while provider credentials stay with the
 provider CLI, SDK, environment, or macOS Keychain.
 
 The current provider surface tracks OpenAI, Anthropic, xAI, and Gemini. OpenAI
-and Anthropic are CLI-oriented today; xAI and Gemini use environment-owned API
-keys such as `XAI_API_KEY` and `GEMINI_API_KEY`. Provider health checks store
-only readiness summaries and redact token-like output.
+and Anthropic are runnable through provider-owned local CLIs today; xAI and
+Gemini are readiness-only until their execution adapters are intentionally
+implemented. Provider health checks store only readiness summaries and redact
+token-like output.
 
 ## Open Source
 

@@ -67,7 +67,13 @@ function createEditorGroup(
 ): EditorGroup {
   const tabs =
     activePath !== undefined
-      ? [{ path: activePath, title: workspaceNameFromPath(activePath), dirty: false }]
+      ? [
+          {
+            path: activePath,
+            title: workspaceNameFromPath(activePath),
+            dirty: false,
+          },
+        ]
       : [];
   return {
     id,
@@ -146,7 +152,14 @@ function defaultIdeContributions(): IdeContribution[] {
     {
       id: "gyro-core-ide",
       label: "Gyro Core IDE",
-      views: ["explorer", "search", "source-control", "run-test", "ai", "settings"],
+      views: [
+        "explorer",
+        "search",
+        "source-control",
+        "run-test",
+        "ai",
+        "settings",
+      ],
       commands,
     },
   ];
@@ -173,11 +186,15 @@ function syncEditorGroupsForActivePath(
       const hasTab = group.tabs.some((tab) => tab.path === path);
       const tabs = hasTab
         ? group.tabs
-        : [...group.tabs, { path, title: workspaceNameFromPath(path), dirty: false }];
+        : [
+            ...group.tabs,
+            { path, title: workspaceNameFromPath(path), dirty: false },
+          ];
       return {
         ...group,
         activePath: path,
-        panes: group.panes.length > 0 ? group.panes : [{ id: `${group.id}-pane` }],
+        panes:
+          group.panes.length > 0 ? group.panes : [{ id: `${group.id}-pane` }],
         tabs,
       };
     }),
@@ -209,7 +226,12 @@ function moveTabToEditorGroup(
     };
   });
   if (!movedTab) {
-    movedTab = { path, title: workspaceNameFromPath(path), dirty: false, groupId: toGroupId };
+    movedTab = {
+      path,
+      title: workspaceNameFromPath(path),
+      dirty: false,
+      groupId: toGroupId,
+    };
   }
   const tabToMove = movedTab;
   return {
@@ -221,7 +243,10 @@ function moveTabToEditorGroup(
             ...group,
             activePath: path,
             tabs: [...group.tabs, tabToMove],
-            panes: group.panes.length > 0 ? group.panes : [{ id: `${group.id}-pane` }],
+            panes:
+              group.panes.length > 0
+                ? group.panes
+                : [{ id: `${group.id}-pane` }],
           }
         : group,
     ),
@@ -835,10 +860,7 @@ export function workbenchReducer(
             ...state.ide.buffers,
             [buffer.path]: buffer,
           },
-          layout: upsertPathInActiveEditorGroup(
-            state.ide.layout,
-            buffer.path,
-          ),
+          layout: upsertPathInActiveEditorGroup(state.ide.layout, buffer.path),
           tabs,
         },
       };
@@ -1045,9 +1067,7 @@ export function workbenchReducer(
             (item) => item.id === action.contribution.id,
           )
             ? state.ide.contributions.map((item) =>
-                item.id === action.contribution.id
-                  ? action.contribution
-                  : item,
+                item.id === action.contribution.id ? action.contribution : item,
               )
             : [...state.ide.contributions, action.contribution],
         },
@@ -1062,9 +1082,7 @@ export function workbenchReducer(
             (toolCall) => toolCall.id === action.toolCall.id,
           )
             ? state.ide.aiToolCalls.map((toolCall) =>
-                toolCall.id === action.toolCall.id
-                  ? action.toolCall
-                  : toolCall,
+                toolCall.id === action.toolCall.id ? action.toolCall : toolCall,
               )
             : [action.toolCall, ...state.ide.aiToolCalls].slice(0, 50),
         },
@@ -1130,34 +1148,62 @@ export function workbenchReducer(
       };
     case "set-terminal-template":
       return { ...state, terminalTemplate: action.template };
-    case "set-terminal-pane-status":
+    case "set-terminal-pane-status": {
+      const nextActivePaneTab =
+        (state.isToolPanelOpen ||
+          state.activeWorkspaceLayout === "terminal-grid") &&
+        (action.status === "running" ||
+          action.status === "waiting" ||
+          action.status === "failed")
+          ? "terminal"
+          : state.activePaneTab;
+      if (
+        state.activePaneTab === nextActivePaneTab &&
+        state.terminalPanes.some(
+          (pane) =>
+            pane.id === action.paneId &&
+            pane.status === action.status &&
+            pane.lastEvent === action.event,
+        )
+      ) {
+        return state;
+      }
       return {
         ...state,
-        activePaneTab:
-          (state.isToolPanelOpen ||
-            state.activeWorkspaceLayout === "terminal-grid") &&
-          (action.status === "running" ||
-            action.status === "waiting" ||
-            action.status === "failed")
-            ? "terminal"
-            : state.activePaneTab,
+        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? { ...pane, status: action.status, lastEvent: action.event }
             : pane,
         ),
       };
-    case "sync-terminal-pane-snapshot":
+    }
+    case "sync-terminal-pane-snapshot": {
+      const existingPane = state.terminalPanes.find(
+        (pane) => pane.id === action.paneId,
+      );
+      const nextCommand = action.command ?? existingPane?.command;
+      const nextActivePaneTab =
+        (state.isToolPanelOpen ||
+          state.activeWorkspaceLayout === "terminal-grid") &&
+        (action.status === "running" ||
+          action.status === "waiting" ||
+          action.status === "failed")
+          ? "terminal"
+          : state.activePaneTab;
+      if (
+        existingPane &&
+        state.activePaneTab === nextActivePaneTab &&
+        existingPane.command === nextCommand &&
+        existingPane.lastEvent === action.event &&
+        existingPane.output === action.output &&
+        existingPane.status === action.status
+      ) {
+        return state;
+      }
       return {
         ...state,
-        activePaneTab:
-          (state.isToolPanelOpen ||
-            state.activeWorkspaceLayout === "terminal-grid") &&
-          (action.status === "running" ||
-            action.status === "waiting" ||
-            action.status === "failed")
-            ? "terminal"
-            : state.activePaneTab,
+        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -1170,6 +1216,7 @@ export function workbenchReducer(
             : pane,
         ),
       };
+    }
     case "upsert-restored-terminal-pane": {
       const pane = normalizeTerminalPane(action.pane);
       const exists = state.terminalPanes.some((item) => item.id === pane.id);
@@ -1877,7 +1924,8 @@ export function normalizeCliLaunchPreset(
               Number.isFinite(entry?.count) ? Math.floor(entry.count) : 1,
             ),
           ),
-          profileId: typeof entry?.profileId === "string" ? entry.profileId : "",
+          profileId:
+            typeof entry?.profileId === "string" ? entry.profileId : "",
         }))
         .filter((entry) => allowedProfileIds.has(entry.profileId))
     : [];
@@ -2008,7 +2056,7 @@ export function defaultCommandProfiles(): CommandProfile[] {
       id: "shell",
       displayName: "Shell",
       command: "zsh",
-      args: ["-l"],
+      args: ["-il"],
       workingDirectory: "Workspace",
     },
     {

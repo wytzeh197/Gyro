@@ -20,3 +20,31 @@ textarea:focus-visible {
   outline: 2px solid #2457a7;
   outline-offset: 2px;
 }
+
+.gyro-root-error {
+  align-items: flex-start;
+  background: #f7f2ea;
+  color: #1d2329;
+  display: flex;
+  flex-direction: column;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  gap: 8px;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.gyro-root-error strong {
+  font-size: 18px;
+}
+
+.gyro-root-error span {
+  color: #5c6670;
+  max-width: 720px;
+}
