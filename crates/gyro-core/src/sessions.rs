@@ -4,10 +4,16 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+const MAX_SESSION_TITLE_CHARS: usize = 160;
+const MAX_SESSION_EVENT_MESSAGE_CHARS: usize = 64_000;
+const MAX_SESSION_EVENT_PAYLOAD_BYTES: usize = 128 * 1024;
+const MAX_SESSION_EVENTS_READ: usize = 1_000;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -122,6 +128,19 @@ pub struct Session {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderSessionBinding {
+    pub session_id: Uuid,
+    pub provider_id: String,
+    pub model_id: Option<String>,
+    pub model_label: Option<String>,
+    pub resume_cursor_json: Value,
+    pub status: String,
+    pub last_error: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateSessionContext {
     pub workspace_mode: SessionWorkspaceMode,
     pub branch: String,
@@ -188,14 +207,15 @@ impl SessionStore {
     ) -> Result<Session> {
         let now = Utc::now();
         let id = Uuid::new_v4();
-        let events_path = self.paths.sessions_dir.join(format!("{id}.jsonl"));
+        let title = normalize_session_title(title)?;
+        let events_path = self.session_events_path(id)?;
         let workspace_path = workspace_path
             .as_ref()
             .canonicalize()
             .unwrap_or_else(|_| workspace_path.as_ref().to_path_buf());
         let session = Session {
             id,
-            title: title.into(),
+            title,
             workspace_path,
             origin,
             workspace_mode: context.workspace_mode,
@@ -296,14 +316,11 @@ impl SessionStore {
         title: impl Into<String>,
     ) -> Result<Option<Session>> {
         let title = title.into().trim().to_string();
-        if title.is_empty() {
-            return Err(anyhow!("session title cannot be empty"));
-        }
+        let title = normalize_session_title(title)?;
 
-        let updated_at = Utc::now();
         let changed = self.conn.execute(
-            "update sessions set title = ?1, updated_at = ?2 where id = ?3",
-            params![title, updated_at.to_rfc3339(), session_id.to_string()],
+            "update sessions set title = ?1 where id = ?2",
+            params![title, session_id.to_string()],
         )?;
         if changed == 0 {
             return Ok(None);
@@ -316,11 +333,16 @@ impl SessionStore {
             return Ok(false);
         };
 
-        if session.events_path.starts_with(&self.paths.sessions_dir) && session.events_path.exists()
-        {
-            std::fs::remove_file(&session.events_path)
-                .with_context(|| format!("remove {}", session.events_path.display()))?;
+        let events_path = self.session_events_path(session.id)?;
+        if events_path.exists() {
+            std::fs::remove_file(&events_path)
+                .with_context(|| format!("remove {}", events_path.display()))?;
         }
+
+        self.conn.execute(
+            "delete from provider_session_bindings where session_id = ?1",
+            params![session_id.to_string()],
+        )?;
 
         let changed = self.conn.execute(
             "delete from sessions where id = ?1",
@@ -337,17 +359,15 @@ impl SessionStore {
         model_id: Option<String>,
         model_label: Option<String>,
     ) -> Result<Option<Session>> {
-        let updated_at = Utc::now();
         let changed = self.conn.execute(
             "update sessions
-             set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4, updated_at = ?5
-             where id = ?6",
+             set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4
+             where id = ?5",
             params![
                 provider_id,
                 provider_label,
                 model_id,
                 model_label,
-                updated_at.to_rfc3339(),
                 session_id.to_string(),
             ],
         )?;
@@ -355,6 +375,80 @@ impl SessionStore {
             return Ok(None);
         }
         self.get_session(session_id)
+    }
+
+    pub fn get_provider_session_binding(
+        &self,
+        session_id: Uuid,
+        provider_id: &str,
+    ) -> Result<Option<ProviderSessionBinding>> {
+        self.conn
+            .query_row(
+                "select session_id, provider_id, model_id, model_label, resume_cursor_json, status, last_error, updated_at
+                 from provider_session_bindings
+                 where session_id = ?1 and provider_id = ?2",
+                params![session_id.to_string(), provider_id],
+                |row| row_to_provider_session_binding(row),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn upsert_provider_session_binding(
+        &self,
+        session_id: Uuid,
+        provider_id: impl Into<String>,
+        model_id: Option<String>,
+        model_label: Option<String>,
+        resume_cursor_json: Value,
+        status: impl Into<String>,
+        last_error: Option<String>,
+    ) -> Result<ProviderSessionBinding> {
+        self.get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let provider_id = normalize_provider_binding_text("provider id", provider_id.into())?;
+        let status = normalize_provider_binding_text("provider binding status", status.into())?;
+        let resume_cursor_json = validate_provider_resume_cursor(resume_cursor_json)?;
+        let resume_cursor_text = serde_json::to_string(&resume_cursor_json)?;
+        let updated_at = Utc::now();
+
+        self.conn.execute(
+            "insert into provider_session_bindings
+             (session_id, provider_id, model_id, model_label, resume_cursor_json, status, last_error, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             on conflict(session_id, provider_id) do update set
+               model_id = excluded.model_id,
+               model_label = excluded.model_label,
+               resume_cursor_json = excluded.resume_cursor_json,
+               status = excluded.status,
+               last_error = excluded.last_error,
+               updated_at = excluded.updated_at",
+            params![
+                session_id.to_string(),
+                provider_id,
+                model_id,
+                model_label,
+                resume_cursor_text,
+                status,
+                last_error,
+                updated_at.to_rfc3339(),
+            ],
+        )?;
+
+        self.get_provider_session_binding(session_id, &provider_id)?
+            .ok_or_else(|| anyhow!("provider session binding was not persisted"))
+    }
+
+    pub fn clear_provider_session_binding(
+        &self,
+        session_id: Uuid,
+        provider_id: &str,
+    ) -> Result<bool> {
+        let changed = self.conn.execute(
+            "delete from provider_session_bindings where session_id = ?1 and provider_id = ?2",
+            params![session_id.to_string(), provider_id],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn append_event(
@@ -403,14 +497,17 @@ impl SessionStore {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let message = normalize_session_event_message(message)?;
+        let payload = validate_session_event_payload(payload)?;
         let mut event = SessionEvent::new(session_id, kind, message, payload);
         event.turn_id = turn_id;
         let encoded = serde_json::to_string(&event)?;
+        let events_path = self.session_events_path(session.id)?;
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&session.events_path)
-            .with_context(|| format!("open {}", session.events_path.display()))?;
+            .open(&events_path)
+            .with_context(|| format!("open {}", events_path.display()))?;
         writeln!(file, "{encoded}")?;
 
         self.conn.execute(
@@ -421,30 +518,64 @@ impl SessionStore {
     }
 
     pub fn read_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        self.read_recent_events(session_id, MAX_SESSION_EVENTS_READ)
+    }
+
+    pub fn read_recent_events(
+        &self,
+        session_id: Uuid,
+        max_recent_events: usize,
+    ) -> Result<Vec<SessionEvent>> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
 
-        if !session.events_path.exists() {
+        if !events_path.exists() {
             return Ok(Vec::new());
         }
 
-        let file = std::fs::File::open(&session.events_path)
-            .with_context(|| format!("open {}", session.events_path.display()))?;
-        BufReader::new(file)
-            .lines()
-            .enumerate()
-            .map(|(line_number, line)| {
-                let line = line?;
-                serde_json::from_str::<SessionEvent>(&line).with_context(|| {
-                    format!(
-                        "parse session event {} at line {}",
-                        session.events_path.display(),
-                        line_number + 1
-                    )
-                })
-            })
-            .collect()
+        let file = std::fs::File::open(&events_path)
+            .with_context(|| format!("open {}", events_path.display()))?;
+        let mut first_line: Option<(usize, String)> = None;
+        let mut recent_lines: VecDeque<(usize, String)> =
+            VecDeque::with_capacity(max_recent_events.saturating_add(1));
+        for (line_number, line) in BufReader::new(file).lines().enumerate() {
+            let line = line?;
+            if first_line.is_none() {
+                first_line = Some((line_number, line.clone()));
+            }
+            if max_recent_events > 0 {
+                recent_lines.push_back((line_number, line));
+                if recent_lines.len() > max_recent_events {
+                    recent_lines.pop_front();
+                }
+            }
+        }
+
+        let mut events = recent_lines
+            .into_iter()
+            .map(|(line_number, line)| parse_session_event_line(&events_path, line_number, &line))
+            .collect::<Result<Vec<_>>>()?;
+        if let Some((line_number, line)) = first_line {
+            let first_event = parse_session_event_line(&events_path, line_number, &line)?;
+            if first_event.kind == SessionEventKind::SessionCreated
+                && !events.iter().any(|item| item.id == first_event.id)
+            {
+                events.insert(0, first_event);
+            }
+        }
+        Ok(events)
+    }
+
+    fn session_events_path(&self, session_id: Uuid) -> Result<PathBuf> {
+        let path = self.paths.sessions_dir.join(format!("{session_id}.jsonl"));
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() {
+                return Err(anyhow!("session event file cannot be a symlink"));
+            }
+        }
+        Ok(path)
     }
 
     fn initialize(&self) -> Result<()> {
@@ -467,7 +598,22 @@ impl SessionStore {
              );
 
              create index if not exists idx_sessions_updated_at
-             on sessions(updated_at desc);",
+             on sessions(updated_at desc);
+
+             create table if not exists provider_session_bindings (
+               session_id text not null,
+               provider_id text not null,
+               model_id text,
+               model_label text,
+               resume_cursor_json text not null,
+               status text not null,
+               last_error text,
+               updated_at text not null,
+               primary key (session_id, provider_id)
+             );
+
+             create index if not exists idx_provider_session_bindings_updated_at
+             on provider_session_bindings(updated_at desc);",
         )?;
         self.ensure_column(
             "workspace_mode",
@@ -494,6 +640,32 @@ impl SessionStore {
             .execute_batch(&format!("alter table sessions add column {definition};"))?;
         Ok(())
     }
+}
+
+fn row_to_provider_session_binding(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProviderSessionBinding> {
+    let session_id: String = row.get(0)?;
+    let provider_id: String = row.get(1)?;
+    let model_id: Option<String> = row.get(2)?;
+    let model_label: Option<String> = row.get(3)?;
+    let resume_cursor_json: String = row.get(4)?;
+    let status: String = row.get(5)?;
+    let last_error: Option<String> = row.get(6)?;
+    let updated_at: String = row.get(7)?;
+
+    Ok(ProviderSessionBinding {
+        session_id: Uuid::parse_str(&session_id).map_err(parse_error)?,
+        provider_id,
+        model_id,
+        model_label,
+        resume_cursor_json: serde_json::from_str(&resume_cursor_json).map_err(parse_error)?,
+        status,
+        last_error,
+        updated_at: DateTime::parse_from_rfc3339(&updated_at)
+            .map_err(parse_error)?
+            .with_timezone(&Utc),
+    })
 }
 
 fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
@@ -536,6 +708,65 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
 
 fn parse_error(error: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+}
+
+fn parse_session_event_line(
+    events_path: &Path,
+    line_number: usize,
+    line: &str,
+) -> Result<SessionEvent> {
+    serde_json::from_str::<SessionEvent>(line).with_context(|| {
+        format!(
+            "parse session event {} at line {}",
+            events_path.display(),
+            line_number + 1
+        )
+    })
+}
+
+fn normalize_session_title(title: impl Into<String>) -> Result<String> {
+    let title = title.into().trim().to_string();
+    if title.is_empty() {
+        return Err(anyhow!("session title cannot be empty"));
+    }
+    if title.chars().count() > MAX_SESSION_TITLE_CHARS {
+        return Err(anyhow!(
+            "session title cannot exceed {MAX_SESSION_TITLE_CHARS} characters"
+        ));
+    }
+    Ok(title)
+}
+
+fn normalize_session_event_message(message: impl Into<String>) -> Result<String> {
+    let message = message.into().replace('\0', "");
+    if message.chars().count() > MAX_SESSION_EVENT_MESSAGE_CHARS {
+        return Err(anyhow!(
+            "session event message cannot exceed {MAX_SESSION_EVENT_MESSAGE_CHARS} characters"
+        ));
+    }
+    Ok(message)
+}
+
+fn validate_session_event_payload(payload: Value) -> Result<Value> {
+    let encoded = serde_json::to_vec(&payload)?;
+    if encoded.len() > MAX_SESSION_EVENT_PAYLOAD_BYTES {
+        return Err(anyhow!(
+            "session event payload cannot exceed {MAX_SESSION_EVENT_PAYLOAD_BYTES} bytes"
+        ));
+    }
+    Ok(payload)
+}
+
+fn normalize_provider_binding_text(label: &str, value: String) -> Result<String> {
+    let value = value.replace('\0', "").trim().to_string();
+    if value.is_empty() {
+        return Err(anyhow!("{label} cannot be empty"));
+    }
+    Ok(value)
+}
+
+fn validate_provider_resume_cursor(cursor: Value) -> Result<Value> {
+    crate::harness::validate_provider_resume_cursor_value(cursor)
 }
 
 fn payload_with_turn_id(payload: Value, turn_id: Uuid) -> Value {
@@ -652,6 +883,87 @@ mod tests {
     }
 
     #[test]
+    fn reads_recent_events_without_parsing_full_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "long session")
+            .unwrap();
+
+        for index in 0..12 {
+            store
+                .append_event(
+                    session.id,
+                    SessionEventKind::UserMessage,
+                    format!("message {index}"),
+                    serde_json::json!({ "index": index }),
+                )
+                .unwrap();
+        }
+
+        let events = store.read_recent_events(session.id, 3).unwrap();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].kind, SessionEventKind::SessionCreated);
+        assert_eq!(events[1].message, "message 9");
+        assert_eq!(events[2].message, "message 10");
+        assert_eq!(events[3].message, "message 11");
+    }
+
+    #[test]
+    fn rejects_oversized_session_event_messages() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "bounded session")
+            .unwrap();
+        let message = "a".repeat(MAX_SESSION_EVENT_MESSAGE_CHARS + 1);
+
+        let error = store
+            .append_event(
+                session.id,
+                SessionEventKind::UserMessage,
+                message,
+                serde_json::json!({ "source": "test" }),
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("session event message"));
+    }
+
+    #[test]
+    fn ignores_tampered_session_event_paths_for_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "path session")
+            .unwrap();
+        let outside_path = temp.path().join("outside.jsonl");
+        store
+            .conn
+            .execute(
+                "update sessions set events_path = ?1 where id = ?2",
+                rusqlite::params![outside_path.to_string_lossy(), session.id.to_string()],
+            )
+            .unwrap();
+
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::UserMessage,
+                "hello",
+                serde_json::json!({ "source": "test" }),
+            )
+            .unwrap();
+
+        assert!(!outside_path.exists());
+        assert!(store
+            .paths
+            .sessions_dir
+            .join(format!("{}.jsonl", session.id))
+            .exists());
+    }
+
+    #[test]
     fn stores_worktree_session_context() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -712,7 +1024,104 @@ mod tests {
             .unwrap();
         assert_eq!(updated.provider_id.as_deref(), Some("anthropic"));
         assert_eq!(updated.model_id.as_deref(), Some("claude-sonnet-5"));
-        assert!(updated.updated_at >= stored.updated_at);
+        assert_eq!(updated.updated_at, stored.updated_at);
+    }
+
+    #[test]
+    fn stores_updates_and_clears_provider_session_bindings() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "binding session")
+            .unwrap();
+
+        let binding = store
+            .upsert_provider_session_binding(
+                session.id,
+                "openai",
+                Some("gpt-5.5".into()),
+                Some("GPT-5.5".into()),
+                serde_json::json!({ "kind": "codex-session", "sessionId": Uuid::new_v4() }),
+                "ready",
+                None,
+            )
+            .unwrap();
+        assert_eq!(binding.session_id, session.id);
+        assert_eq!(binding.provider_id, "openai");
+        assert_eq!(binding.status, "ready");
+        assert_eq!(binding.resume_cursor_json["kind"], "codex-session");
+
+        let updated = store
+            .upsert_provider_session_binding(
+                session.id,
+                "openai",
+                Some("gpt-5.4".into()),
+                Some("GPT-5.4".into()),
+                serde_json::json!({ "kind": "codex-session", "sessionId": Uuid::new_v4() }),
+                "failed",
+                Some("stale cursor".into()),
+            )
+            .unwrap();
+        assert_eq!(updated.model_id.as_deref(), Some("gpt-5.4"));
+        assert_eq!(updated.last_error.as_deref(), Some("stale cursor"));
+
+        assert!(store
+            .clear_provider_session_binding(session.id, "openai")
+            .unwrap());
+        assert!(store
+            .get_provider_session_binding(session.id, "openai")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn rejects_oversized_provider_resume_cursors() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "binding session")
+            .unwrap();
+
+        let error = store
+            .upsert_provider_session_binding(
+                session.id,
+                "openai",
+                None,
+                None,
+                serde_json::json!({ "kind": "codex-session", "blob": "a".repeat(crate::harness::MAX_HARNESS_RESUME_CURSOR_BYTES + 1) }),
+                "ready",
+                None,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("provider resume cursor"));
+    }
+
+    #[test]
+    fn deleting_session_clears_provider_session_bindings() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "binding session")
+            .unwrap();
+
+        store
+            .upsert_provider_session_binding(
+                session.id,
+                "openai",
+                None,
+                None,
+                serde_json::json!({ "kind": "codex-session", "sessionId": Uuid::new_v4() }),
+                "ready",
+                None,
+            )
+            .unwrap();
+
+        assert!(store.delete_session(session.id).unwrap());
+        assert!(store
+            .get_provider_session_binding(session.id, "openai")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -730,7 +1139,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(renamed.title, "new title");
-        assert!(renamed.updated_at >= renamed.created_at);
+        assert_eq!(renamed.updated_at, session.updated_at);
         assert_eq!(store.latest_session().unwrap().unwrap().title, "new title");
 
         assert!(store

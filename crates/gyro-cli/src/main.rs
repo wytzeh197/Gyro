@@ -5,9 +5,10 @@ use gyro_core::{
     create_worktree,
     doctor::run_doctor,
     ipc::notify_running_app,
-    keychain, slugify_worktree_name, AppNotification, AppNotificationKind, CreateSessionContext,
-    DoctorStatus, GyroConfig, GyroPaths, Session, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode,
+    keychain, slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
+    CreateSessionContext, DoctorStatus, GyroConfig, GyroPaths, HarnessRunStatus,
+    ProviderRunPayload, Session, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::io::{self, Write};
@@ -422,6 +423,182 @@ fn workspace_mode_label(mode: &SessionWorkspaceMode) -> &'static str {
     }
 }
 
+fn cli_status_to_harness(status: CliStatus) -> HarnessRunStatus {
+    match status {
+        CliStatus::Ready | CliStatus::Waiting => HarnessRunStatus::Waiting,
+        CliStatus::Blocked => HarnessRunStatus::Blocked,
+        CliStatus::Running => HarnessRunStatus::Running,
+        CliStatus::Done => HarnessRunStatus::Done,
+        CliStatus::Failed => HarnessRunStatus::Failed,
+    }
+}
+
+fn cli_provider_run_payload(
+    run_id: Uuid,
+    attempt_id: Uuid,
+    mode: &str,
+    status: HarnessRunStatus,
+    profile: Option<&CommandProfile>,
+    model: Option<String>,
+    session: &Session,
+) -> Result<serde_json::Value> {
+    let provider_id = profile
+        .and_then(|profile| profile.provider_id.clone())
+        .unwrap_or_else(|| "local-cli".into());
+    let payload = ProviderRunPayload::new(
+        run_id,
+        attempt_id,
+        "cli",
+        status,
+        provider_id,
+        profile_label(profile),
+        model.clone(),
+        model.clone(),
+        Some(session.title.clone()),
+        profile.map(|profile| profile.command.clone()),
+        Some("provider-cli-or-local-shell".into()),
+        mode == "resume",
+        0,
+        None,
+    );
+    let mut value = gyro_core::harness_payload_value(&payload)?;
+    insert_cli_metadata(&mut value, mode, profile, model, session);
+    Ok(value)
+}
+
+fn cli_terminal_request_payload(
+    run_id: Uuid,
+    mode: &str,
+    status: HarnessRunStatus,
+    profile: Option<&CommandProfile>,
+    model: Option<String>,
+    session: &Session,
+) -> Result<serde_json::Value> {
+    let payload = TerminalRequestPayload::new(
+        run_id,
+        "cli",
+        profile
+            .map(|profile| profile.command.clone())
+            .unwrap_or_else(|| "unconfigured-profile".into()),
+        profile
+            .map(|profile| profile.args.clone())
+            .unwrap_or_default(),
+        Some(session.workspace_path.display().to_string()),
+        status,
+    );
+    gyro_core::validate_mutation_approval_policy("terminal-request", payload.approval_required)?;
+    let mut value = gyro_core::harness_payload_value(&payload)?;
+    insert_cli_metadata(&mut value, mode, profile, model, session);
+    Ok(value)
+}
+
+fn cli_approval_payload(run_id: Uuid, mode: &str) -> Result<serde_json::Value> {
+    let payload = ApprovalRequestPayload::new(
+        run_id,
+        "command-and-file-edits",
+        "Commands and file edits require approval before execution.",
+        "ask",
+    );
+    let mut value = gyro_core::harness_payload_value(&payload)?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert("mode".into(), serde_json::Value::String(mode.into()));
+        object.insert(
+            "requireCommandApproval".into(),
+            serde_json::Value::Bool(true),
+        );
+        object.insert(
+            "requireFileEditApproval".into(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    Ok(value)
+}
+
+fn cli_profile_readiness_payload(
+    run_id: Uuid,
+    attempt_id: Uuid,
+    mode: &str,
+    profile: Option<&CommandProfile>,
+    model: Option<String>,
+    session: &Session,
+    next_command: Option<String>,
+) -> Result<serde_json::Value> {
+    let mut value = cli_provider_run_payload(
+        run_id,
+        attempt_id,
+        mode,
+        HarnessRunStatus::Blocked,
+        profile,
+        model,
+        session,
+    )?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "kind".into(),
+            serde_json::Value::String("profile-readiness".into()),
+        );
+        object.insert(
+            "next".into(),
+            next_command
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert("sessionSaved".into(), serde_json::Value::Bool(true));
+    }
+    Ok(value)
+}
+
+fn insert_cli_metadata(
+    value: &mut serde_json::Value,
+    mode: &str,
+    profile: Option<&CommandProfile>,
+    model: Option<String>,
+    session: &Session,
+) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.insert("mode".into(), serde_json::Value::String(mode.into()));
+    object.insert(
+        "profileId".into(),
+        profile_id(profile)
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "profileLabel".into(),
+        profile_label(profile)
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "model".into(),
+        model
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "workspaceMode".into(),
+        serde_json::Value::String(workspace_mode_label(&session.workspace_mode).into()),
+    );
+    object.insert(
+        "branch".into(),
+        serde_json::Value::String(session.branch.clone()),
+    );
+    object.insert(
+        "worktreeName".into(),
+        session
+            .worktree_name
+            .clone()
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    object.insert(
+        "resumeCommand".into(),
+        serde_json::Value::String(format!("gyro resume {}", session.id)),
+    );
+}
+
 fn session_summary(session: &Session) -> SessionSummaryOutput {
     SessionSummaryOutput {
         session_id: session.id,
@@ -526,17 +703,37 @@ fn interactive_chat() -> Result<()> {
             continue;
         }
 
-        store.append_event(
+        let turn_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
+        store.append_event_with_turn_id(
             session.id,
             SessionEventKind::UserMessage,
             input,
-            serde_json::json!({ "surface": "cli" }),
+            cli_provider_run_payload(
+                turn_id,
+                attempt_id,
+                "chat",
+                HarnessRunStatus::Queued,
+                None,
+                None,
+                &session,
+            )?,
+            Some(turn_id),
         )?;
-        store.append_event(
+        store.append_event_with_turn_id(
             session.id,
             SessionEventKind::SystemEvent,
             "Message saved. Model execution is configured through providers.",
-            serde_json::json!({ "status": "queued-for-agent" }),
+            cli_provider_run_payload(
+                turn_id,
+                attempt_id,
+                "chat",
+                HarnessRunStatus::Waiting,
+                None,
+                None,
+                &session,
+            )?,
+            Some(turn_id),
         )?;
         println!("saved to session {}", session.id);
     }
@@ -553,65 +750,62 @@ fn run_task(args: RunArgs) -> Result<()> {
     let title = summarize_title(&args.task);
     let session = create_cli_session(&paths, &store, &workspace, title, &args.worktree)?;
     let (status, profile_message, next_command) = profile_status(profile);
-    store.append_event(
+    let turn_id = Uuid::new_v4();
+    let attempt_id = Uuid::new_v4();
+    store.append_event_with_turn_id(
         session.id,
         SessionEventKind::UserMessage,
-        args.task,
-        serde_json::json!({
-            "surface": "cli",
-            "mode": "run",
-            "profileId": profile_id(profile),
-            "profileLabel": profile_label(profile),
-            "providerId": profile.and_then(|profile| profile.provider_id.clone()),
-            "model": model.clone(),
-            "workspaceMode": session.workspace_mode.clone(),
-            "branch": session.branch.clone(),
-            "worktreeName": session.worktree_name.clone(),
-            "resumeCommand": format!("gyro resume {}", session.id),
-        }),
+        args.task.clone(),
+        cli_provider_run_payload(
+            turn_id,
+            attempt_id,
+            "run",
+            HarnessRunStatus::Queued,
+            profile,
+            model.clone(),
+            &session,
+        )?,
+        Some(turn_id),
     )?;
-    store.append_event(
+    store.append_event_with_turn_id(
         session.id,
         SessionEventKind::CommandRequested,
         "CLI agent launch recorded.",
-        serde_json::json!({
-            "surface": "cli",
-            "mode": "run",
-            "status": status.as_str(),
-            "profileId": profile_id(profile),
-            "command": profile.map(|profile| profile.command.clone()),
-            "args": profile.map(|profile| profile.args.clone()).unwrap_or_default(),
-            "model": model.clone(),
-            "workspaceMode": session.workspace_mode.clone(),
-            "branch": session.branch.clone(),
-            "worktreeName": session.worktree_name.clone(),
-        }),
+        cli_terminal_request_payload(
+            turn_id,
+            "run",
+            cli_status_to_harness(status),
+            profile,
+            model.clone(),
+            &session,
+        )?,
+        Some(turn_id),
     )?;
-    store.append_event(
+    store.append_event_with_turn_id(
         session.id,
         SessionEventKind::ApprovalRequested,
         "Agent task recorded; command and file edits require approval by default.",
-        serde_json::json!({
-            "surface": "cli",
-            "requireCommandApproval": true,
-            "requireFileEditApproval": true,
-        }),
+        cli_approval_payload(turn_id, "run")?,
+        Some(turn_id),
     )?;
 
     if status == CliStatus::Blocked {
-        store.append_event(
+        store.append_event_with_turn_id(
             session.id,
             SessionEventKind::SystemEvent,
             profile_message
                 .clone()
                 .unwrap_or_else(|| "CLI profile is blocked.".into()),
-            serde_json::json!({
-                "surface": "cli",
-                "kind": "profile-readiness",
-                "status": "blocked",
-                "next": next_command.clone(),
-                "sessionSaved": true,
-            }),
+            cli_profile_readiness_payload(
+                turn_id,
+                attempt_id,
+                "run",
+                profile,
+                model.clone(),
+                &session,
+                next_command.clone(),
+            )?,
+            Some(turn_id),
         )?;
     }
 
@@ -669,40 +863,63 @@ fn resume_session(args: ResumeArgs) -> Result<()> {
     let profile = select_command_profile(&config, selected_profile_id)?;
     let model = model_for(profile, args.model.or(recorded_model));
     let (status, profile_message, next_command) = profile_status(profile);
+    let turn_id = Uuid::new_v4();
+    let attempt_id = Uuid::new_v4();
 
-    store.append_event(
+    store.append_event_with_turn_id(
         session.id,
         SessionEventKind::SystemEvent,
         "CLI resume requested.",
-        serde_json::json!({
-            "surface": "cli",
-            "mode": "resume",
-            "status": status.as_str(),
-            "profileId": profile_id(profile),
-            "profileLabel": profile_label(profile),
-            "providerId": profile.and_then(|profile| profile.provider_id.clone()),
-            "model": model.clone(),
-            "workspaceMode": session.workspace_mode.clone(),
-            "branch": session.branch.clone(),
-            "worktreeName": session.worktree_name.clone(),
-            "resumeCommand": format!("gyro resume {}", session.id),
-        }),
+        cli_provider_run_payload(
+            turn_id,
+            attempt_id,
+            "resume",
+            cli_status_to_harness(status),
+            profile,
+            model.clone(),
+            &session,
+        )?,
+        Some(turn_id),
+    )?;
+    store.append_event_with_turn_id(
+        session.id,
+        SessionEventKind::CommandRequested,
+        "CLI agent resume recorded.",
+        cli_terminal_request_payload(
+            turn_id,
+            "resume",
+            cli_status_to_harness(status),
+            profile,
+            model.clone(),
+            &session,
+        )?,
+        Some(turn_id),
+    )?;
+    store.append_event_with_turn_id(
+        session.id,
+        SessionEventKind::ApprovalRequested,
+        "Agent resume recorded; command and file edits require approval by default.",
+        cli_approval_payload(turn_id, "resume")?,
+        Some(turn_id),
     )?;
 
     if status == CliStatus::Blocked {
-        store.append_event(
+        store.append_event_with_turn_id(
             session.id,
             SessionEventKind::SystemEvent,
             profile_message
                 .clone()
                 .unwrap_or_else(|| "CLI profile is blocked.".into()),
-            serde_json::json!({
-                "surface": "cli",
-                "kind": "profile-readiness",
-                "status": "blocked",
-                "next": next_command.clone(),
-                "sessionSaved": true,
-            }),
+            cli_profile_readiness_payload(
+                turn_id,
+                attempt_id,
+                "resume",
+                profile,
+                model.clone(),
+                &session,
+                next_command.clone(),
+            )?,
+            Some(turn_id),
         )?;
     }
 
@@ -1385,6 +1602,58 @@ mod tests {
         assert_eq!(value["workspaceMode"], "local");
         assert_eq!(value["profileId"], "codex");
         assert_eq!(value["appHandoff"]["requested"], true);
+    }
+
+    #[test]
+    fn cli_harness_payloads_keep_resume_metadata_and_approval_gate() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Cli, "Inspect harness")
+            .unwrap();
+        let profile = CommandProfile {
+            id: "codex".into(),
+            display_name: "Codex CLI".into(),
+            command: "codex".into(),
+            args: vec!["exec".into()],
+            working_directory: None,
+            provider_id: Some("openai".into()),
+            default_model: Some("gpt-test".into()),
+            readiness: gyro_core::config::CommandProfileReadiness::Ready,
+        };
+        let run_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
+
+        let run_payload = cli_provider_run_payload(
+            run_id,
+            attempt_id,
+            "run",
+            HarnessRunStatus::Queued,
+            Some(&profile),
+            Some("gpt-test".into()),
+            &session,
+        )
+        .unwrap();
+        let command_payload = cli_terminal_request_payload(
+            run_id,
+            "run",
+            HarnessRunStatus::Waiting,
+            Some(&profile),
+            Some("gpt-test".into()),
+            &session,
+        )
+        .unwrap();
+        let approval_payload = cli_approval_payload(run_id, "run").unwrap();
+
+        assert_eq!(run_payload["schema"], gyro_core::HARNESS_SCHEMA_V1);
+        assert_eq!(run_payload["runId"], run_id.to_string());
+        assert_eq!(run_payload["status"], "queued");
+        assert_eq!(run_payload["profileId"], "codex");
+        assert_eq!(run_payload["model"], "gpt-test");
+        assert_eq!(command_payload["kind"], "terminal-request");
+        assert_eq!(command_payload["approvalRequired"], true);
+        assert_eq!(approval_payload["kind"], "approval-request");
+        assert_eq!(approval_payload["requireFileEditApproval"], true);
     }
 
     #[test]

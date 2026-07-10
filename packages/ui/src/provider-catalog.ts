@@ -168,7 +168,9 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       models.some((model) => model.id === savedProvider.selectedModelId)
         ? savedProvider.selectedModelId
         : catalogProvider.selectedModelId;
-    const authStatus = savedProvider?.authStatus ?? catalogProvider.authStatus;
+    const authStatus =
+      savedProvider?.authStatus ??
+      (savedProvider?.enabled ? "connected" : catalogProvider.authStatus);
 
     return {
       ...catalogProvider,

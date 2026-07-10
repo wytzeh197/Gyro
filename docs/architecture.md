@@ -39,6 +39,32 @@ profiles and future provider adapters.
 6. The desktop app subscribes to local IPC notifications so CLI-created sessions can appear in the app.
 7. Command and file-edit execution must pass policy gates before mutation.
 
+## Model Harness Contract
+
+Gyro is a model harness: it launches, observes, controls, and resumes provider
+runs through one local contract. V1 keeps the existing session table and treats
+`turnId` as the run id for provider and CLI handoff events.
+
+Shared harness payloads live in `gyro-core` and serialize into the existing
+append-only JSONL log. The V1 run statuses are `queued`, `running`, `waiting`,
+`blocked`, `done`, `failed`, and `cancelled`. Provider runs, provider
+diagnostics, approval requests, terminal requests, file-edit proposals, and diff
+proposals should use typed payloads so desktop, CLI, and future IDE surfaces can
+render the same state.
+
+The desktop provider adapter registry currently routes OpenAI chat through the
+local Codex CLI and Anthropic chat through Claude Code. xAI and Gemini are
+readiness-only in V1: health checks can report setup state, but chat execution
+returns a blocked run instead of pretending to start. Provider credentials stay
+outside Gyro in provider CLIs, SDKs, environment variables, Keychain references,
+or provider-owned files.
+
+Provider diagnostics are redacted and metadata-only: provider id, model id,
+timing, retry count, resumed/not-resumed state, timeout/failure reason, and
+sanitized output summary. The diagnostics export command bundles config summary,
+provider health, recent provider-run diagnostics, and session metadata without
+secrets or full message bodies.
+
 ## Local Storage
 
 Default macOS location:

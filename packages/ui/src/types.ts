@@ -16,11 +16,7 @@ export type AppDestination =
 export type ThemeMode = "dark" | "light";
 
 export type WorkbenchPaneTab =
-  | "diff"
-  | "terminal"
-  | "browser"
-  | "problems"
-  | "output";
+  "diff" | "terminal" | "browser" | "problems" | "output";
 
 export type WorkbenchDensity = "comfortable" | "compact";
 
@@ -270,8 +266,16 @@ export type ProviderStatus = {
   approvalPolicy: "ask" | "allow";
 };
 
-export type ProviderSessionStatus =
-  "ready" | "queued" | "running" | "waiting" | "done" | "failed";
+export type HarnessRunStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "blocked"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type ProviderSessionStatus = "ready" | HarnessRunStatus;
 
 export type ProviderSession = {
   id: string;
@@ -287,6 +291,45 @@ export type ProviderSession = {
   lastEvent: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProviderResumeCursor = {
+  kind: "codex-session" | "claude-session" | string;
+  sessionId: string;
+};
+
+export type ProviderChatStreamPhase =
+  "started" | "delta" | "completed" | "failed";
+
+export type ProviderChatStreamEvent = {
+  sessionId: string;
+  turnId?: string | null;
+  providerId: string;
+  modelId?: string | null;
+  eventId: string;
+  phase: ProviderChatStreamPhase;
+  status?: HarnessRunStatus | null;
+  textDelta?: string | null;
+  message?: string | null;
+  error?: string | null;
+};
+
+export type ProviderRunDiagnostics = {
+  schema: "gyro.harness.v1";
+  kind: "provider-diagnostics";
+  runId: string;
+  attemptId: string;
+  providerId: string;
+  modelId?: string | null;
+  status: HarnessRunStatus;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  retryCount: number;
+  resumed: boolean;
+  timeoutSeconds?: number | null;
+  failureReason?: string | null;
+  outputSummary?: string | null;
 };
 
 export type ProviderHandoffStatus =
@@ -458,12 +501,7 @@ export type IdeAssistantRequest = {
 };
 
 export type IdeViewId =
-  | "explorer"
-  | "search"
-  | "source-control"
-  | "run-test"
-  | "ai"
-  | "settings";
+  "explorer" | "search" | "source-control" | "run-test" | "ai" | "settings";
 
 export type IdeLayoutState = {
   groups: EditorGroup[];
