@@ -1185,15 +1185,14 @@ Deliver:
 
 - One version source propagated to Cargo, package metadata, Tauri, updater
   manifests, release notes, filenames, and the application UI.
-- Stable, beta, and nightly channel rules with no accidental cross-channel
-  update.
+- One Stable update stream backed by published non-prerelease GitHub Releases.
 - Immutable release metadata containing version, architecture, size, checksum,
   signature, minimum macOS version, and artifact URL.
 
 Exit gate:
 
-- Tag, app bundle, DMG, updater manifest, website manifest, and release notes all
-  report the same version and channel.
+- Tag, app bundle, DMG, updater manifest, and release notes all report the same
+  version and GitHub release source.
 
 ### Workstream 2: Signed macOS artifacts
 

@@ -5,11 +5,29 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const configPath = resolve(repoRoot, "apps/desktop/src-tauri/tauri.conf.json");
+const configPath = process.env.GYRO_TAURI_CONFIG_PATH
+  ? resolve(process.env.GYRO_TAURI_CONFIG_PATH)
+  : resolve(repoRoot, "apps/desktop/src-tauri/tauri.conf.json");
 const config = JSON.parse(readFileSync(configPath, "utf8"));
+const rootPackage = JSON.parse(
+  readFileSync(resolve(repoRoot, "package.json"), "utf8"),
+);
+const desktopPackage = JSON.parse(
+  readFileSync(resolve(repoRoot, "apps/desktop/package.json"), "utf8"),
+);
+const uiPackage = JSON.parse(
+  readFileSync(resolve(repoRoot, "packages/ui/package.json"), "utf8"),
+);
+const cargoManifest = readFileSync(resolve(repoRoot, "Cargo.toml"), "utf8");
+const releaseWorkflow = readFileSync(
+  resolve(repoRoot, ".github/workflows/release.yml"),
+  "utf8",
+);
 
 const pubkey = config.plugins?.updater?.pubkey;
 const failures = [];
+const githubLatestEndpoint =
+  "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json";
 
 if (!pubkey) {
   failures.push("plugins.updater.pubkey is missing.");
@@ -25,6 +43,67 @@ if (config.bundle?.createUpdaterArtifacts !== true) {
   failures.push(
     "bundle.createUpdaterArtifacts must be true for direct app updates.",
   );
+}
+
+if (
+  config.plugins?.updater?.endpoints?.length !== 1 ||
+  config.plugins.updater.endpoints[0] !== githubLatestEndpoint
+) {
+  failures.push(
+    `plugins.updater.endpoints must contain only ${githubLatestEndpoint}.`,
+  );
+}
+
+const cargoVersion = cargoManifest.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+const versions = new Map([
+  ["root package", rootPackage.version],
+  ["desktop package", desktopPackage.version],
+  ["UI package", uiPackage.version],
+  ["Cargo workspace", cargoVersion],
+  ["Tauri config", config.version],
+]);
+const expectedVersion = rootPackage.version;
+for (const [label, version] of versions) {
+  if (version !== expectedVersion) {
+    failures.push(
+      `${label} version ${version ?? "missing"} does not match ${expectedVersion}.`,
+    );
+  }
+}
+
+const tag = process.env.GITHUB_REF_NAME;
+if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
+  failures.push(`Git tag ${tag} does not match version ${expectedVersion}.`);
+}
+
+for (const marker of [
+  "uploadUpdaterJson: true",
+  "uploadUpdaterSignatures: true",
+  "releaseDraft: true",
+  "prerelease: false",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+]) {
+  if (!releaseWorkflow.includes(marker)) {
+    failures.push(`Release workflow is missing ${marker}.`);
+  }
+}
+
+if (process.env.CI) {
+  for (const variable of [
+    "APPLE_CERTIFICATE",
+    "APPLE_CERTIFICATE_PASSWORD",
+    "APPLE_SIGNING_IDENTITY",
+    "APPLE_ID",
+    "APPLE_PASSWORD",
+    "APPLE_TEAM_ID",
+    "TAURI_SIGNING_PRIVATE_KEY",
+    "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+  ]) {
+    if (!process.env[variable]?.trim()) {
+      failures.push(`${variable} is missing from the release environment.`);
+    }
+  }
 }
 
 if (failures.length > 0) {

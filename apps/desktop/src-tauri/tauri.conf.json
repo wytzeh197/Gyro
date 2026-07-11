@@ -50,7 +50,7 @@
     "updater": {
       "pubkey": "GYRO_DEV_UPDATER_PUBKEY_REPLACE_BEFORE_RELEASE",
       "endpoints": [
-        "https://updates.gyro.dev/{{target}}/{{arch}}/{{current_version}}"
+        "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

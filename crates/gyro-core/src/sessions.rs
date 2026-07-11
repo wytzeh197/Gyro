@@ -121,6 +121,7 @@ pub struct Session {
     pub provider_label: Option<String>,
     pub model_id: Option<String>,
     pub model_label: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub events_path: PathBuf,
@@ -133,6 +134,7 @@ pub struct ProviderSessionBinding {
     pub provider_id: String,
     pub model_id: Option<String>,
     pub model_label: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub resume_cursor_json: Value,
     pub status: String,
     pub last_error: Option<String>,
@@ -149,6 +151,7 @@ pub struct CreateSessionContext {
     pub provider_label: Option<String>,
     pub model_id: Option<String>,
     pub model_label: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 impl Default for CreateSessionContext {
@@ -161,6 +164,7 @@ impl Default for CreateSessionContext {
             provider_label: None,
             model_id: None,
             model_label: None,
+            reasoning_effort: None,
         }
     }
 }
@@ -225,6 +229,7 @@ impl SessionStore {
             provider_label: context.provider_label,
             model_id: context.model_id,
             model_label: context.model_label,
+            reasoning_effort: context.reasoning_effort,
             created_at: now,
             updated_at: now,
             events_path,
@@ -232,8 +237,8 @@ impl SessionStore {
 
         self.conn.execute(
             "insert into sessions
-             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, created_at, updated_at, events_path)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             (id, title, workspace_path, origin, workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, created_at, updated_at, events_path)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 session.id.to_string(),
                 session.title,
@@ -246,6 +251,7 @@ impl SessionStore {
                 session.provider_label,
                 session.model_id,
                 session.model_label,
+                session.reasoning_effort,
                 session.created_at.to_rfc3339(),
                 session.updated_at.to_rfc3339(),
                 session.events_path.to_string_lossy()
@@ -266,6 +272,7 @@ impl SessionStore {
                 "providerLabel": session.provider_label,
                 "modelId": session.model_id,
                 "modelLabel": session.model_label,
+                "reasoningEffort": session.reasoning_effort,
             }),
         )?;
 
@@ -277,7 +284,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 |row| row_to_session(row),
@@ -290,7 +297,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort
                  from sessions order by updated_at desc limit 1",
                 [],
                 |row| row_to_session(row),
@@ -302,7 +309,7 @@ impl SessionStore {
     pub fn list_sessions(&self) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort
              from sessions order by updated_at desc",
         )?;
         let rows = stmt.query_map([], |row| row_to_session(row))?;
@@ -358,16 +365,18 @@ impl SessionStore {
         provider_label: Option<String>,
         model_id: Option<String>,
         model_label: Option<String>,
+        reasoning_effort: Option<String>,
     ) -> Result<Option<Session>> {
         let changed = self.conn.execute(
             "update sessions
-             set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4
-             where id = ?5",
+             set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4, reasoning_effort = ?5
+             where id = ?6",
             params![
                 provider_id,
                 provider_label,
                 model_id,
                 model_label,
+                reasoning_effort,
                 session_id.to_string(),
             ],
         )?;
@@ -384,7 +393,7 @@ impl SessionStore {
     ) -> Result<Option<ProviderSessionBinding>> {
         self.conn
             .query_row(
-                "select session_id, provider_id, model_id, model_label, resume_cursor_json, status, last_error, updated_at
+                "select session_id, provider_id, model_id, model_label, reasoning_effort, resume_cursor_json, status, last_error, updated_at
                  from provider_session_bindings
                  where session_id = ?1 and provider_id = ?2",
                 params![session_id.to_string(), provider_id],
@@ -400,6 +409,7 @@ impl SessionStore {
         provider_id: impl Into<String>,
         model_id: Option<String>,
         model_label: Option<String>,
+        reasoning_effort: Option<String>,
         resume_cursor_json: Value,
         status: impl Into<String>,
         last_error: Option<String>,
@@ -414,11 +424,12 @@ impl SessionStore {
 
         self.conn.execute(
             "insert into provider_session_bindings
-             (session_id, provider_id, model_id, model_label, resume_cursor_json, status, last_error, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             (session_id, provider_id, model_id, model_label, reasoning_effort, resume_cursor_json, status, last_error, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              on conflict(session_id, provider_id) do update set
                model_id = excluded.model_id,
                model_label = excluded.model_label,
+               reasoning_effort = excluded.reasoning_effort,
                resume_cursor_json = excluded.resume_cursor_json,
                status = excluded.status,
                last_error = excluded.last_error,
@@ -428,6 +439,7 @@ impl SessionStore {
                 provider_id,
                 model_id,
                 model_label,
+                reasoning_effort,
                 resume_cursor_text,
                 status,
                 last_error,
@@ -592,6 +604,7 @@ impl SessionStore {
                provider_label text,
                model_id text,
                model_label text,
+               reasoning_effort text,
                created_at text not null,
                updated_at text not null,
                events_path text not null
@@ -605,6 +618,7 @@ impl SessionStore {
                provider_id text not null,
                model_id text,
                model_label text,
+               reasoning_effort text,
                resume_cursor_json text not null,
                status text not null,
                last_error text,
@@ -625,6 +639,24 @@ impl SessionStore {
         self.ensure_column("provider_label", "provider_label text")?;
         self.ensure_column("model_id", "model_id text")?;
         self.ensure_column("model_label", "model_label text")?;
+        self.ensure_column("reasoning_effort", "reasoning_effort text")?;
+        self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
+        Ok(())
+    }
+
+    fn ensure_provider_binding_column(&self, column_name: &str, definition: &str) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare("pragma table_info(provider_session_bindings)")?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if columns.iter().any(|column| column == column_name) {
+            return Ok(());
+        }
+        self.conn.execute_batch(&format!(
+            "alter table provider_session_bindings add column {definition};"
+        ))?;
         Ok(())
     }
 
@@ -649,16 +681,18 @@ fn row_to_provider_session_binding(
     let provider_id: String = row.get(1)?;
     let model_id: Option<String> = row.get(2)?;
     let model_label: Option<String> = row.get(3)?;
-    let resume_cursor_json: String = row.get(4)?;
-    let status: String = row.get(5)?;
-    let last_error: Option<String> = row.get(6)?;
-    let updated_at: String = row.get(7)?;
+    let reasoning_effort: Option<String> = row.get(4)?;
+    let resume_cursor_json: String = row.get(5)?;
+    let status: String = row.get(6)?;
+    let last_error: Option<String> = row.get(7)?;
+    let updated_at: String = row.get(8)?;
 
     Ok(ProviderSessionBinding {
         session_id: Uuid::parse_str(&session_id).map_err(parse_error)?,
         provider_id,
         model_id,
         model_label,
+        reasoning_effort,
         resume_cursor_json: serde_json::from_str(&resume_cursor_json).map_err(parse_error)?,
         status,
         last_error,
@@ -683,6 +717,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let provider_label: Option<String> = row.get(11)?;
     let model_id: Option<String> = row.get(12)?;
     let model_label: Option<String> = row.get(13)?;
+    let reasoning_effort: Option<String> = row.get(14)?;
 
     Ok(Session {
         id: Uuid::parse_str(&id).map_err(parse_error)?,
@@ -696,6 +731,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         provider_label,
         model_id,
         model_label,
+        reasoning_effort,
         created_at: DateTime::parse_from_rfc3339(&created_at)
             .map_err(parse_error)?
             .with_timezone(&Utc),
@@ -1001,6 +1037,7 @@ mod tests {
                     provider_label: Some("OpenAI".into()),
                     model_id: Some("gpt-5.5".into()),
                     model_label: Some("GPT-5.5".into()),
+                    reasoning_effort: Some("high".into()),
                     ..CreateSessionContext::default()
                 },
             )
@@ -1011,6 +1048,7 @@ mod tests {
         assert_eq!(stored.provider_label.as_deref(), Some("OpenAI"));
         assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
         assert_eq!(stored.model_label.as_deref(), Some("GPT-5.5"));
+        assert_eq!(stored.reasoning_effort.as_deref(), Some("high"));
 
         let updated = store
             .update_session_model(
@@ -1019,6 +1057,7 @@ mod tests {
                 Some("Anthropic".into()),
                 Some("claude-sonnet-5".into()),
                 Some("Claude Sonnet 5".into()),
+                None,
             )
             .unwrap()
             .unwrap();
@@ -1041,6 +1080,7 @@ mod tests {
                 "openai",
                 Some("gpt-5.5".into()),
                 Some("GPT-5.5".into()),
+                Some("high".into()),
                 serde_json::json!({ "kind": "codex-session", "sessionId": Uuid::new_v4() }),
                 "ready",
                 None,
@@ -1049,6 +1089,7 @@ mod tests {
         assert_eq!(binding.session_id, session.id);
         assert_eq!(binding.provider_id, "openai");
         assert_eq!(binding.status, "ready");
+        assert_eq!(binding.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(binding.resume_cursor_json["kind"], "codex-session");
 
         let updated = store
@@ -1057,6 +1098,7 @@ mod tests {
                 "openai",
                 Some("gpt-5.4".into()),
                 Some("GPT-5.4".into()),
+                Some("medium".into()),
                 serde_json::json!({ "kind": "codex-session", "sessionId": Uuid::new_v4() }),
                 "failed",
                 Some("stale cursor".into()),
@@ -1088,6 +1130,7 @@ mod tests {
                 "openai",
                 None,
                 None,
+                None,
                 serde_json::json!({ "kind": "codex-session", "blob": "a".repeat(crate::harness::MAX_HARNESS_RESUME_CURSOR_BYTES + 1) }),
                 "ready",
                 None,
@@ -1109,6 +1152,7 @@ mod tests {
             .upsert_provider_session_binding(
                 session.id,
                 "openai",
+                None,
                 None,
                 None,
                 serde_json::json!({ "kind": "codex-session", "sessionId": Uuid::new_v4() }),

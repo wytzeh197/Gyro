@@ -25,6 +25,12 @@ import {
   MAX_CHAT_RESPONSE_CHARS,
   applyProviderChatStreamDeltas,
 } from "../apps/desktop/src/provider-stream-events.ts";
+import {
+  shouldShowSidebarUpdate,
+  updatePrimaryActionLabel,
+  updateProgressPercent,
+  updateSidebarLabel,
+} from "../packages/ui/src/update-state.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -57,6 +63,9 @@ const reducerSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const coreHarnessSource = readRepoFile("crates/gyro-core/src/harness.rs");
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const updateControllerSource = readRepoFile(
+  "apps/desktop/src/update-controller.ts",
+);
 const tauriConfigSource = readRepoFile(
   "apps/desktop/src-tauri/tauri.conf.json",
 );
@@ -67,8 +76,43 @@ expect(
     "openai,anthropic,xai,gemini",
   "Composer provider picker should show OpenAI, Anthropic, xAI, and Gemini only.",
 );
+const availableUpdate = {
+  status: "available",
+  currentVersion: "0.1.0",
+  nextVersion: "0.2.0",
+};
+expect(
+  shouldShowSidebarUpdate(availableUpdate) &&
+    !shouldShowSidebarUpdate({ status: "current", currentVersion: "0.2.0" }) &&
+    !shouldShowSidebarUpdate({
+      status: "failed",
+      currentVersion: "0.1.0",
+      silentFailure: true,
+    }) &&
+    updateSidebarLabel(availableUpdate) === "Update Gyro" &&
+    updatePrimaryActionLabel(availableUpdate) === "Update to 0.2.0" &&
+    updateSidebarLabel({
+      status: "downloading",
+      currentVersion: "0.1.0",
+      progressPercent: 64,
+    }) === "Downloading 64%" &&
+    updateProgressPercent(64, 100) === 64 &&
+    updateProgressPercent(10, undefined) === undefined,
+  "Update state should drive sidebar visibility, labels, and bounded progress.",
+);
+const openAiCatalog = providerCatalog.find((provider) => provider.id === "openai");
+expect(
+  openAiCatalog?.models.slice(0, 3).map((model) => model.id).join(",") ===
+    "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
+    openAiCatalog.selectedModelId === "gpt-5.6-sol" &&
+    openAiCatalog.models.slice(0, 3).every(
+      (model) =>
+        model.supportedReasoningEfforts?.join(",") ===
+        "low,medium,high,xhigh,max,ultra",
+    ),
+  "OpenAI should expose all GPT-5.6 variants with their supported effort levels.",
+);
 const restoredEnabledConfig = normalizedConfig({
-  updateChannel: "stable",
   telemetryEnabled: false,
   requireCommandApproval: true,
   requireFileEditApproval: true,
@@ -83,6 +127,14 @@ const restoredEnabledConfig = normalizedConfig({
   ],
   commandProfiles: [],
 });
+expect(
+  restoredEnabledConfig.modelProviders
+    .find((provider) => provider.id === "openai")
+    ?.models.slice(0, 3)
+    .map((model) => model.id)
+    .join(",") === "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
+  "Saved legacy provider configs should merge in the current GPT-5.6 catalog.",
+);
 expect(
   providersForConfig(restoredEnabledConfig).find(
     (provider) => provider.id === "openai",
@@ -2055,6 +2107,34 @@ expect(
   "Local app launch docs and scripts should steer users to Gyro.app instead of the raw debug executable.",
 );
 expect(
+  surfaceSource.indexOf('className="gyro-sidebar-update"') > -1 &&
+    surfaceSource.indexOf('className="gyro-sidebar-update"') <
+      surfaceSource.indexOf('className="gyro-account-button"') &&
+    surfaceSource.includes('aria-haspopup="dialog"') &&
+    surfaceSource.includes('role="progressbar"') &&
+    surfaceSource.includes("updatePrimaryActionLabel(state)") &&
+    styleSource.includes(".gyro-sidebar-update-button") &&
+    styleSource.includes(".gyro-update-popover") &&
+    updateControllerSource.includes('import.meta.env.DEV') &&
+    updateControllerSource.includes('allowDowngrades: false') &&
+    !updateControllerSource.includes("X-Gyro-Channel") &&
+    updateControllerSource.includes('await update.download') &&
+    updateControllerSource.includes('await update.install()') &&
+    updateControllerSource.includes('invoke("restart_app")') &&
+    appSource.includes("const updateRestartBlockers") &&
+    appSource.includes('buffer.status') &&
+    tauriSource.includes("fn restart_app") &&
+    tauriConfigSource.includes(
+      "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
+    ) &&
+    !tauriConfigSource.includes("updates.gyro.dev") &&
+    surfaceSource.includes('value="Stable via GitHub Releases"') &&
+    !surfaceSource.includes('label="Release channel"') &&
+    !surfaceSource.includes('value="Valid"') &&
+    !surfaceSource.includes('value="Today"'),
+  "Signed updates should use one contextual action above Settings with progress, blockers, and development safety.",
+);
+expect(
   appSource.includes("const handleComposerAction") &&
     appSource.includes('case "select-model"') &&
     appSource.includes('destination: "providers"') &&
@@ -2074,6 +2154,8 @@ expect(
     surfaceSource.includes("composerProjectLabel") &&
     surfaceSource.includes("isGeneratedGyroWorkspace") &&
     surfaceSource.includes("startProjectLabel") &&
+    surfaceSource.includes("What should we work on?") &&
+    !surfaceSource.includes(': "Gyro";') &&
     surfaceSource.includes("gyroLogoTransparentDark") &&
     surfaceSource.includes("gyroLogoTransparentLight") &&
     surfaceSource.includes("gyro-chat-start-brand-word") &&
@@ -2202,8 +2284,12 @@ expect(
     styleSource.includes(".gyro-composer-menu-trailing") &&
     styleSource.includes(".gyro-composer-menu-item.is-provider:disabled") &&
     styleSource.includes(".gyro-provider-picker.has-flyout") &&
-    styleSource.includes("grid-template-columns: 148px 176px"),
-  "Provider picker should keep provider rows compact and show models in a hover flyout without Connect, Refresh, or Settings rows.",
+    styleSource.includes('.gyro-provider-picker[data-flyout-side="right"]') &&
+    styleSource.includes('left: calc(100% + 4px)') &&
+    styleSource.includes('.gyro-provider-picker[data-flyout-side="left"]') &&
+    surfaceSource.includes("getBoundingClientRect") &&
+    surfaceSource.includes("availableRight < modelFlyoutWidth + 8"),
+  "Provider picker should stay anchored and open its model flyout right unless the viewport requires a left fallback.",
 );
 expect(
   surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
@@ -2211,7 +2297,8 @@ expect(
       surfaceSource,
     ) &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
-    surfaceSource.includes("{modelChipLabel}") &&
+    surfaceSource.includes("{modelChipDetail}") &&
+    surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
     surfaceSource.includes('title="Provider"') &&
     !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
     styleSource.includes(".gyro-model-chip .gyro-provider-logo") &&
@@ -2221,7 +2308,7 @@ expect(
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer model chip should show the provider logo and model name only.",
+  "Composer model chip should show the provider logo, model name, and selected effort.",
 );
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&

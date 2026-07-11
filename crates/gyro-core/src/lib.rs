@@ -22,7 +22,7 @@ pub use automations::{
 };
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
-    ModelProviderConfig, UpdateChannel,
+    ModelProviderConfig,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use harness::{
