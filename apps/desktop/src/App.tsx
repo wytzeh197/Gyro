@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as XTermInstance } from "@xterm/xterm";
@@ -17,6 +18,7 @@ import {
   ProvidersSurface,
   SettingsSurface,
   TaskBoardSurface,
+  TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
   WorkspaceToolPanelPeek,
@@ -36,7 +38,9 @@ import {
   type ChatSidePanelId,
   type CliLaunchPreset,
   type CommandProfile,
+  type DebugSessionState,
   type EditorBuffer,
+  type EditorRevealTarget,
   type EditorSelection,
   type GyroAccountSession,
   type GyroAccountStatus,
@@ -44,6 +48,7 @@ import {
   type HarnessRunStatus,
   type IdeAssistantAction,
   type IdeAssistantRequest,
+  type LanguageServerState,
   type OutputChannel,
   type ModelProviderConfig,
   type ProviderHealthDetails,
@@ -52,6 +57,7 @@ import {
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
   type ProviderSession,
+  type ProblemDiagnostic,
   type Session,
   type SessionEvent,
   type SessionPlan,
@@ -71,6 +77,7 @@ import {
   type WorkbenchTurn,
   type WorkspaceFile,
   type WorkspaceFileContent,
+  type WorkspaceFileStat,
   type WorkspaceSearchQuery,
   type WorkspaceSearchResult,
   type WorkspaceLayoutId,
@@ -114,8 +121,24 @@ type TerminalPaneSnapshot = {
   output: string;
   status: "running" | "done" | "failed";
   exitCode?: number | null;
+  workingDirectory?: string;
   cols: number;
   rows: number;
+};
+
+type LspSessionResult = {
+  serverId: string;
+  languageId: string;
+  command: string;
+  status: string;
+  message: string;
+};
+
+type LspBridgeResponse = {
+  status: string;
+  result?: unknown;
+  error?: unknown;
+  messages?: unknown[];
 };
 
 type ProviderHealthCheck = {
@@ -411,6 +434,8 @@ export function App() {
   const [workspacePath, setWorkspacePath] = useState<string>();
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const [editorRevealTarget, setEditorRevealTarget] =
+    useState<EditorRevealTarget>();
   const [selectedFileContent, setSelectedFileContent] =
     useState<WorkspaceFileContent>();
   const [selectedFileError, setSelectedFileError] = useState("");
@@ -419,6 +444,12 @@ export function App() {
   >("idle");
   const [draftResetToken, setDraftResetToken] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalSourceControlByPane, setTerminalSourceControlByPane] =
+    useState<Record<string, SourceControlState>>({});
+  const [
+    terminalSourceControlLoadingPaneId,
+    setTerminalSourceControlLoadingPaneId,
+  ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
@@ -427,6 +458,8 @@ export function App() {
   const workbenchPersistTimerRef = useRef<number>();
   const workbenchPersistIdleRef = useRef<number>();
   const selectedTerminalPaneIdRef = useRef(workbench.selectedTerminalPaneId);
+  const terminalPanesRef = useRef(workbench.terminalPanes);
+  const terminalSourceControlRequestRef = useRef<Record<string, number>>({});
   const [accountStatus, setAccountStatus] =
     useState<GyroAccountStatus>("checking");
   const [accountSession, setAccountSession] = useState<GyroAccountSession>({
@@ -448,6 +481,8 @@ export function App() {
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [modelStandardPrompt, setModelStandardPrompt] =
     useState<ModelStandardPrompt>();
+  const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
+    useState<TerminalPane>();
   const [toolPanelHeight, setToolPanelHeight] = useState(
     DEFAULT_TOOL_PANEL_HEIGHT,
   );
@@ -456,6 +491,8 @@ export function App() {
   const ingestedSessionEventIds = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
+  const languageServerIdsRef = useRef<Record<string, string>>({});
+  const languageServerOpenedDocsRef = useRef(new Set<string>());
 
   const activeDestination = workbench.activeDestination;
   const activeWorkspaceLayout = workbench.activeWorkspaceLayout;
@@ -499,6 +536,7 @@ export function App() {
   );
   eventsRef.current = events;
   selectedTerminalPaneIdRef.current = workbench.selectedTerminalPaneId;
+  terminalPanesRef.current = workbench.terminalPanes;
   const deferredEventsForPlan = useDeferredValue(events);
   const deferredEventsForTurn = deferredEventsForPlan;
   const activeSessionPlan = useMemo(
@@ -620,6 +658,16 @@ export function App() {
     liveTerminalPaneIds,
     workbench.selectedTerminalPaneId,
   ]);
+  const selectedTerminalPane = useMemo(
+    () =>
+      workbench.terminalPanes.find(
+        (pane) => pane.id === workbench.selectedTerminalPaneId,
+      ) ?? workbench.terminalPanes[0],
+    [workbench.selectedTerminalPaneId, workbench.terminalPanes],
+  );
+  const selectedTerminalSourceControl = selectedTerminalPane
+    ? terminalSourceControlByPane[selectedTerminalPane.id]
+    : undefined;
   const resetChatDraft = useCallback(() => {
     setDraftResetToken((token) => token + 1);
   }, []);
@@ -1130,6 +1178,9 @@ export function App() {
           branch: "preview",
           ahead: 0,
           behind: 0,
+          additions: 0,
+          deletions: 0,
+          statsPartial: false,
           files: [],
         },
       });
@@ -1176,6 +1227,9 @@ export function App() {
             available: false,
             ahead: 0,
             behind: 0,
+            additions: 0,
+            deletions: 0,
+            statsPartial: false,
             files: [],
             error: String(error),
           },
@@ -1250,6 +1304,82 @@ export function App() {
     refreshIdeServices(activeSession?.workspacePath ?? workspacePath);
   }, [activeSession?.workspacePath, refreshIdeServices, workspacePath]);
 
+  const refreshTerminalSourceControl = useCallback(
+    async (paneId: string) => {
+      const pane = terminalPanesRef.current.find((item) => item.id === paneId);
+      const root =
+        pane?.workingDirectory ?? activeSession?.workspacePath ?? workspacePath;
+      if (!pane || !root) {
+        return;
+      }
+      const requestId =
+        (terminalSourceControlRequestRef.current[paneId] ?? 0) + 1;
+      terminalSourceControlRequestRef.current[paneId] = requestId;
+      setTerminalSourceControlLoadingPaneId(paneId);
+
+      if (!isTauriRuntime()) {
+        setTerminalSourceControlByPane((current) => ({
+          ...current,
+          [paneId]: {
+            provider: "git",
+            available: true,
+            branch: pane.branch || "preview",
+            ahead: 0,
+            behind: 0,
+            additions: 0,
+            deletions: 0,
+            statsPartial: false,
+            files: [],
+            repoRoot: root,
+            lastCheckedAt: new Date().toISOString(),
+          },
+        }));
+        setTerminalSourceControlLoadingPaneId((current) =>
+          current === paneId ? undefined : current,
+        );
+        return;
+      }
+
+      try {
+        const sourceControl = await invoke<SourceControlState>("git_status", {
+          workspacePath: root,
+        });
+        if (terminalSourceControlRequestRef.current[paneId] !== requestId) {
+          return;
+        }
+        setTerminalSourceControlByPane((current) => ({
+          ...current,
+          [paneId]: sourceControl,
+        }));
+      } catch (error) {
+        if (terminalSourceControlRequestRef.current[paneId] !== requestId) {
+          return;
+        }
+        setTerminalSourceControlByPane((current) => ({
+          ...current,
+          [paneId]: {
+            provider: "git",
+            available: false,
+            ahead: 0,
+            behind: 0,
+            additions: 0,
+            deletions: 0,
+            statsPartial: false,
+            files: [],
+            error: String(error),
+          },
+        }));
+      } finally {
+        if (terminalSourceControlRequestRef.current[paneId] === requestId) {
+          setTerminalSourceControlLoadingPaneId((current) =>
+            current === paneId ? undefined : current,
+          );
+        }
+      }
+    },
+    [activeSession?.workspacePath, workspacePath],
+  );
+
   const stageSourceControlFile = useCallback(
     async (path: string, staged: boolean) => {
       const root = activeSession?.workspacePath ?? workspacePath;
@@ -1264,6 +1394,31 @@ export function App() {
         dispatchWorkbench({ type: "ide-set-source-control", sourceControl });
       } catch (error) {
         notify("command-failed", "Git action failed", String(error));
+      }
+    },
+    [activeSession?.workspacePath, notify, workspacePath],
+  );
+
+  const discardSourceControlFile = useCallback(
+    async (path: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root || !isTauriRuntime()) {
+        return;
+      }
+      try {
+        const sourceControl = await invoke<SourceControlState>("git_discard", {
+          request: { workspacePath: root, path },
+        });
+        dispatchWorkbench({ type: "ide-set-source-control", sourceControl });
+        const workspaceFiles = await invoke<WorkspaceFile[]>(
+          "watch_workspace",
+          {
+            workspacePath: root,
+          },
+        );
+        setFiles(workspaceFiles);
+      } catch (error) {
+        notify("command-failed", "Discard failed", String(error));
       }
     },
     [activeSession?.workspacePath, notify, workspacePath],
@@ -1322,6 +1477,479 @@ export function App() {
       }
     },
     [activeSession?.workspacePath, notify, workspacePath],
+  );
+
+  const startIdeDebugSession = useCallback(
+    async (command: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root) {
+        notify("command-failed", "Debug blocked", "Open a workspace first");
+        return;
+      }
+      const adapter = command.trim().split(/\s+/)[0]?.split(/[\\/]/).pop();
+      if (!adapter) {
+        return;
+      }
+      const channelId = "debug-adapter";
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: channelId,
+          label: "Debug Adapter",
+          kind: "debug",
+          lines: [`Initializing ${command}`],
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-debug-session",
+          session: {
+            id: `debug-preview-${Date.now()}`,
+            name: `Debug (${adapter})`,
+            adapter,
+            status: "configured",
+            message: "Preview adapter initialized",
+            capabilities: [],
+          },
+        });
+        return;
+      }
+      try {
+        const session = await invoke<DebugSessionState>("debug_start", {
+          request: {
+            workspacePath: root,
+            name: `Debug (${adapter})`,
+            adapter,
+            command,
+            args: [],
+          },
+        });
+        dispatchWorkbench({ type: "ide-set-debug-session", session });
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: [
+            `${session.name}: ${session.message ?? "adapter ready"}`,
+            session.capabilities?.length
+              ? `Capabilities: ${session.capabilities.join(", ")}`
+              : "No optional capabilities reported",
+          ],
+        });
+      } catch (error) {
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: [String(error)],
+        });
+        notify("command-failed", "Debug adapter unavailable", String(error));
+      }
+    },
+    [activeSession?.workspacePath, notify, workspacePath],
+  );
+
+  const sendIdeDebugCommand = useCallback(
+    async (session: DebugSessionState, command: string) => {
+      const channelId = "debug-adapter";
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-debug-session",
+          session: {
+            ...session,
+            status: command === "pause" ? "paused" : "running",
+            message: `${command} sent in preview`,
+          },
+        });
+        return;
+      }
+      try {
+        const result = await invoke<Record<string, unknown>>("debug_send", {
+          request: {
+            sessionId: session.id,
+            request: {
+              command,
+              arguments: ["continue", "pause", "next"].includes(command)
+                ? { threadId: 1 }
+                : {},
+            },
+          },
+        });
+        const response = result.response as
+          { success?: boolean; message?: string } | undefined;
+        const succeeded = response?.success !== false;
+        dispatchWorkbench({
+          type: "ide-set-debug-session",
+          session: {
+            ...session,
+            status: succeeded
+              ? command === "pause"
+                ? "paused"
+                : command === "threads"
+                  ? session.status
+                  : "running"
+              : session.status,
+            message: succeeded
+              ? `${command} completed`
+              : (response?.message ?? `${command} was rejected`),
+            lastEvent: command,
+          },
+        });
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: [JSON.stringify(result, null, 2)],
+        });
+      } catch (error) {
+        dispatchWorkbench({
+          type: "ide-set-debug-session",
+          session: { ...session, message: String(error) },
+        });
+        dispatchWorkbench({
+          type: "ide-append-output",
+          channelId,
+          lines: [String(error)],
+        });
+      }
+    },
+    [],
+  );
+
+  const stopIdeDebugSession = useCallback(
+    async (session: DebugSessionState) => {
+      try {
+        if (isTauriRuntime()) {
+          await invoke("debug_stop", { sessionId: session.id });
+        }
+        dispatchWorkbench({
+          type: "ide-set-debug-session",
+          session: {
+            ...session,
+            status: "stopped",
+            message: "Adapter stopped",
+          },
+        });
+      } catch (error) {
+        dispatchWorkbench({
+          type: "ide-set-debug-session",
+          session: { ...session, status: "failed", message: String(error) },
+        });
+      }
+    },
+    [],
+  );
+
+  const refreshWorkspaceTree = useCallback(async () => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root) {
+      return;
+    }
+    if (!isTauriRuntime()) {
+      setFiles(previewFiles);
+      return;
+    }
+    try {
+      const workspaceFiles = await invoke<WorkspaceFile[]>("watch_workspace", {
+        workspacePath: root,
+      });
+      setFiles(workspaceFiles);
+    } catch (error) {
+      notify("command-failed", "Workspace refresh failed", String(error));
+    }
+  }, [activeSession?.workspacePath, notify, workspacePath]);
+
+  const createWorkspacePath = useCallback(
+    async (kind: "file" | "directory", parentPath?: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root) {
+        notify("command-failed", "Create blocked", "Open a workspace first");
+        return;
+      }
+      const entered = window.prompt(
+        kind === "directory" ? "New folder path" : "New file path",
+        parentPath ? `${parentPath}/` : "",
+      );
+      const path = entered?.trim().replace(/^\/+/, "");
+      if (!path) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        setFiles((current) => [
+          ...current.filter((file) => file.path !== path),
+          {
+            path,
+            kind,
+            depth: path.split("/").length,
+          },
+        ]);
+        if (kind === "file") {
+          setSelectedFile(path);
+          dispatchWorkbench({
+            type: "ide-upsert-buffer",
+            buffer: {
+              path,
+              content: "",
+              savedContent: "",
+              sizeBytes: 0,
+              truncated: false,
+              status: "ready",
+              updatedAt: new Date().toISOString(),
+            },
+          });
+        }
+        return;
+      }
+      try {
+        await invoke("create_workspace_file", {
+          request: { workspacePath: root, path, kind },
+        });
+        await refreshWorkspaceTree();
+        notify(
+          "tests-passed",
+          kind === "file" ? "File created" : "Folder created",
+          path,
+        );
+        if (kind === "file") {
+          setSelectedFile(path);
+          dispatchWorkbench({
+            type: "ide-open-tab",
+            tab: { path, title: workspaceName(path), dirty: false },
+          });
+        }
+      } catch (error) {
+        notify("command-failed", "Create failed", String(error));
+      }
+    },
+    [activeSession?.workspacePath, notify, refreshWorkspaceTree, workspacePath],
+  );
+
+  const renameWorkspacePath = useCallback(
+    async (fromPath: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root || !fromPath) {
+        return;
+      }
+      if (workbench.ide.buffers[fromPath]?.status === "dirty") {
+        notify(
+          "command-failed",
+          "Rename blocked",
+          "Save or revert the file first",
+        );
+        return;
+      }
+      const entered = window.prompt("Rename workspace path", fromPath);
+      const toPath = entered?.trim().replace(/^\/+/, "");
+      if (!toPath || toPath === fromPath) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        setFiles((current) =>
+          current.map((file) =>
+            file.path === fromPath || file.path.startsWith(`${fromPath}/`)
+              ? {
+                  ...file,
+                  path: `${toPath}${file.path.slice(fromPath.length)}`,
+                }
+              : file,
+          ),
+        );
+      } else {
+        try {
+          await invoke("rename_workspace_path", {
+            request: { workspacePath: root, fromPath, toPath },
+          });
+          await refreshWorkspaceTree();
+        } catch (error) {
+          notify("command-failed", "Rename failed", String(error));
+          return;
+        }
+      }
+      if (workbench.ide.buffers[fromPath]) {
+        dispatchWorkbench({ type: "ide-close-tab", path: fromPath });
+        setSelectedFile(toPath);
+        dispatchWorkbench({
+          type: "ide-open-tab",
+          tab: { path: toPath, title: workspaceName(toPath), dirty: false },
+        });
+      }
+      notify("tests-passed", "Path renamed", toPath);
+    },
+    [
+      activeSession?.workspacePath,
+      notify,
+      refreshWorkspaceTree,
+      workbench.ide.buffers,
+      workspacePath,
+    ],
+  );
+
+  const deleteWorkspacePath = useCallback(
+    async (path: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root || !path) {
+        return;
+      }
+      const buffer = workbench.ide.buffers[path];
+      if (buffer?.status === "dirty") {
+        notify(
+          "command-failed",
+          "Delete blocked",
+          "Save or revert the file first",
+        );
+        return;
+      }
+      if (!window.confirm(`Delete ${path}? This cannot be undone in Gyro.`)) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        setFiles((current) =>
+          current.filter(
+            (file) => file.path !== path && !file.path.startsWith(`${path}/`),
+          ),
+        );
+      } else {
+        try {
+          await invoke("delete_workspace_path", {
+            request: {
+              workspacePath: root,
+              path,
+              expectedHash: buffer?.contentHash,
+            },
+          });
+          await refreshWorkspaceTree();
+        } catch (error) {
+          notify("command-failed", "Delete failed", String(error));
+          return;
+        }
+      }
+      dispatchWorkbench({ type: "ide-close-tab", path });
+      if (selectedFile === path) {
+        setSelectedFile(undefined);
+      }
+      notify("tests-passed", "Path deleted", path);
+    },
+    [
+      activeSession?.workspacePath,
+      notify,
+      refreshWorkspaceTree,
+      selectedFile,
+      workbench.ide.buffers,
+      workspacePath,
+    ],
+  );
+
+  const openSourceControlDiffForRoot = useCallback(
+    async (root: string, path: string, staged: boolean) => {
+      const channelId = `git-diff:${path}`;
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: channelId,
+          label: `Diff: ${workspaceName(path)}`,
+          kind: "system",
+          lines: ["Loading Git diff..."],
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      dispatchWorkbench({ type: "ide-select-output-channel", channelId });
+      dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-upsert-output-channel",
+          channel: {
+            id: channelId,
+            label: `Diff: ${workspaceName(path)}`,
+            kind: "system",
+            lines: [`Preview diff for ${path}`],
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        return;
+      }
+      try {
+        const output = await invoke<IdeCommandOutput>("git_diff", {
+          request: { workspacePath: root, path, staged },
+        });
+        dispatchWorkbench({
+          type: "ide-upsert-output-channel",
+          channel: {
+            id: channelId,
+            label: `Diff: ${workspaceName(path)}`,
+            kind: "system",
+            lines: [output.stdout || output.stderr || "No diff output."],
+            updatedAt: new Date().toISOString(),
+          },
+        });
+      } catch (error) {
+        notify("command-failed", "Git diff failed", String(error));
+      }
+    },
+    [notify],
+  );
+
+  const openSourceControlDiff = useCallback(
+    async (path: string, staged: boolean) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (root) {
+        await openSourceControlDiffForRoot(root, path, staged);
+      }
+    },
+    [activeSession?.workspacePath, openSourceControlDiffForRoot, workspacePath],
+  );
+
+  const reviewTerminalChanges = useCallback(
+    (file?: SourceControlState["files"][number]) => {
+      if (!selectedTerminalSourceControl?.available) {
+        return;
+      }
+      dispatchWorkbench({
+        type: "ide-set-source-control",
+        sourceControl: selectedTerminalSourceControl,
+      });
+      dispatchWorkbench({ type: "ide-select-view", view: "source-control" });
+      dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
+      if (file && selectedTerminalSourceControl.repoRoot) {
+        void openSourceControlDiffForRoot(
+          selectedTerminalSourceControl.repoRoot,
+          file.path,
+          file.staged,
+        );
+      }
+    },
+    [openSourceControlDiffForRoot, selectedTerminalSourceControl],
+  );
+
+  const commitSourceControl = useCallback(
+    async (message: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root || !message.trim()) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        notify("tests-passed", "Commit created", message);
+        return;
+      }
+      try {
+        const output = await invoke<IdeCommandOutput>("git_commit", {
+          request: { workspacePath: root, message: message.trim() },
+        });
+        dispatchWorkbench({
+          type: "ide-upsert-output-channel",
+          channel: {
+            id: "git",
+            label: "Git",
+            kind: "system",
+            lines: [output.stdout, output.stderr].filter(Boolean),
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        refreshIdeServices(root);
+        notify("tests-passed", "Commit created", message.trim());
+      } catch (error) {
+        notify("command-failed", "Commit failed", String(error));
+      }
+    },
+    [activeSession?.workspacePath, notify, refreshIdeServices, workspacePath],
   );
 
   const activateWorkspacePath = useCallback(
@@ -1724,7 +2352,11 @@ export function App() {
           paneId,
           profile,
           "running",
-          workspaceRunMetadata("local", profile.displayName),
+          workspaceRunMetadata(
+            "local",
+            profile.displayName,
+            activeSession?.workspacePath ?? workspacePath,
+          ),
         );
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
@@ -1779,6 +2411,7 @@ export function App() {
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
           command: snapshot.command,
+          workingDirectory: snapshot.workingDirectory,
           event:
             snapshot.exitCode === null || snapshot.exitCode === undefined
               ? snapshot.status
@@ -2047,7 +2680,11 @@ export function App() {
         paneId,
         profile,
         "running",
-        workspaceRunMetadata("local", profile.displayName),
+        workspaceRunMetadata(
+          "local",
+          profile.displayName,
+          activeSession?.workspacePath ?? workspacePath,
+        ),
       );
       dispatchWorkbench({
         type: "select-workspace-layout",
@@ -2082,6 +2719,7 @@ export function App() {
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
           command: snapshot.command,
+          workingDirectory: snapshot.workingDirectory,
           event:
             snapshot.exitCode === null || snapshot.exitCode === undefined
               ? snapshot.status
@@ -2491,13 +3129,6 @@ export function App() {
         case "select-folder":
           void openWorkspace();
           break;
-        case "add-photos":
-        case "add-document":
-        case "add-pdf":
-        case "add-spreadsheet":
-        case "add-slides":
-          notify("terminal", "Attach", "Coming soon");
-          break;
         case "add-goal":
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
@@ -2557,13 +3188,6 @@ export function App() {
         case "open-browser-panel":
           openToolPanel("browser");
           break;
-        case "dictate":
-          notify(
-            "terminal",
-            "Dictation unavailable",
-            "Voice input is not enabled in this build.",
-          );
-          break;
         default:
           notify("terminal", "Composer action", action);
       }
@@ -2609,9 +3233,10 @@ export function App() {
       if (!pane) {
         return;
       }
-      const title = pane.title.endsWith(" (renamed)")
-        ? pane.title.replace(" (renamed)", "")
-        : `${pane.title} (renamed)`;
+      const title = window.prompt("Rename terminal", pane.title)?.trim();
+      if (!title || title === pane.title) {
+        return;
+      }
       dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
       notify("terminal", "Terminal renamed", title);
     },
@@ -3004,6 +3629,19 @@ export function App() {
     [appendEditorEvent, files],
   );
 
+  const openEditorLocation = useCallback(
+    (path: string, lineNumber = 1, column = 1) => {
+      openEditorFile(path);
+      setEditorRevealTarget({
+        path,
+        lineNumber: Math.max(1, lineNumber),
+        column: Math.max(1, column),
+        nonce: Date.now(),
+      });
+    },
+    [openEditorFile],
+  );
+
   const closeEditorTab = useCallback(
     (path: string) => {
       dispatchWorkbench({ type: "ide-close-tab", path });
@@ -3221,6 +3859,7 @@ export function App() {
       type: "sync-terminal-pane-snapshot",
       paneId: snapshot.paneId,
       command: snapshot.command,
+      workingDirectory: snapshot.workingDirectory,
       event:
         snapshot.exitCode === null || snapshot.exitCode === undefined
           ? snapshot.status
@@ -3334,6 +3973,14 @@ export function App() {
     ],
   );
 
+  const runCommandProfile = useCallback(
+    (profileId: string) => {
+      setActiveProfileId(profileId);
+      void runProfile(profileId);
+    },
+    [runProfile],
+  );
+
   const launchCliPreset = useCallback(async () => {
     const preset = normalizeCliLaunchPreset(
       workbench.preferences.cliLaunchPreset,
@@ -3426,8 +4073,40 @@ export function App() {
         // Closing the UI should still succeed if the backing PTY is already gone.
       }
     }
+    setTerminalSourceControlByPane((current) => {
+      if (!(paneId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[paneId];
+      return next;
+    });
     dispatchWorkbench({ type: "remove-terminal-pane", paneId });
   }, []);
+
+  const requestCloseTerminalPane = useCallback(
+    (paneId: string) => {
+      const pane = workbench.terminalPanes.find((item) => item.id === paneId);
+      if (!pane) {
+        return;
+      }
+      if (pane.status === "running" || pane.status === "waiting") {
+        setTerminalTerminateCandidate(pane);
+        return;
+      }
+      void closeTerminalPane(paneId);
+    },
+    [closeTerminalPane, workbench.terminalPanes],
+  );
+
+  const confirmTerminateTerminal = useCallback(() => {
+    if (!terminalTerminateCandidate) {
+      return;
+    }
+    const paneId = terminalTerminateCandidate.id;
+    setTerminalTerminateCandidate(undefined);
+    void closeTerminalPane(paneId);
+  }, [closeTerminalPane, terminalTerminateCandidate]);
 
   const restartTerminalPane = useCallback(
     async (paneId: string) => {
@@ -3533,6 +4212,20 @@ export function App() {
     [notify, refreshTerminalPane, workbench.selectedTerminalPaneId],
   );
 
+  const openBrowserPreviewExternal = useCallback(async () => {
+    try {
+      const url = normalizedPreviewUrl(workbench.browserPreview.url);
+      if (isTauriRuntime()) {
+        await openUrl(url);
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+      notify("terminal", "Opened in browser", url);
+    } catch (error) {
+      notify("command-failed", "Browser open failed", String(error));
+    }
+  }, [notify, workbench.browserPreview.url]);
+
   const createTask = useCallback(() => {
     const metadata = workspaceRunMetadata(
       workbench.workspaceMode,
@@ -3567,15 +4260,28 @@ export function App() {
   }, [notify, workbench.workspaceMode]);
 
   const dispatchTask = useCallback(
-    (taskId: string) => {
+    async (taskId: string) => {
       if (!checkProviderReadiness("task", "openai")) {
         return;
       }
       const task = workbench.tasks.find((item) => item.id === taskId);
+      if (!task) {
+        notify("command-failed", "Task not found", taskId);
+        return;
+      }
+      if (task.terminalPaneId) {
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "terminal-grid",
+        });
+        dispatchWorkbench({
+          type: "select-terminal-pane",
+          paneId: task.terminalPaneId,
+        });
+        return;
+      }
       const profile = getCommandProfile(commandProfiles, "codex");
-      const metadata =
-        task ??
-        workspaceRunMetadata(workbench.workspaceMode, `task-${Date.now()}`);
+      const metadata = task;
       const pane = createTerminalPane(
         `pane-task-${Date.now()}`,
         profile,
@@ -3587,17 +4293,36 @@ export function App() {
         },
       );
       dispatchWorkbench({ type: "dispatch-task", taskId, pane });
+      const started = await launchTerminalPane({
+        paneId: pane.id,
+        profile: {
+          ...profile,
+          args: [...profile.args, task.title],
+        },
+        startingOutput: `Starting ${profile.displayName}: ${task.title}`,
+      });
+      if (!started) {
+        dispatchWorkbench({
+          type: "move-task",
+          taskId,
+          status: "in-review",
+          event: "agent failed to start",
+        });
+        notify("command-failed", "Task dispatch failed", task.title);
+        return;
+      }
       notify(
-        "approval",
-        "Task dispatched",
+        "terminal",
+        "Task running",
         metadata.workspaceMode === "worktree"
-          ? `Agent waiting in ${metadata.worktreeName}`
-          : "Agent waiting in terminal pane",
+          ? `Agent started for ${metadata.worktreeName}`
+          : "Agent started in terminal pane",
       );
     },
     [
       checkProviderReadiness,
       commandProfiles,
+      launchTerminalPane,
       notify,
       workbench.tasks,
       workbench.workspaceMode,
@@ -3634,8 +4359,28 @@ export function App() {
       const automation = workbench.automations.find(
         (item) => item.id === automationId,
       );
-      const summary =
-        "Local run queued for provider session and CLI pane handoff";
+      if (!automation) {
+        notify("command-failed", "Automation not found", automationId);
+        return;
+      }
+      const profileId = automation.provider.toLowerCase().includes("claude")
+        ? "claude"
+        : "codex";
+      const profile = getCommandProfile(commandProfiles, profileId);
+      const paneId = `pane-automation-${Date.now()}`;
+      const started = await launchTerminalPane({
+        paneId,
+        profile: {
+          ...profile,
+          args: [...profile.args, automation.prompt],
+        },
+        startingOutput: `Starting ${automation.title}`,
+      });
+      if (!started) {
+        notify("command-failed", "Automation run failed", automation.title);
+        return;
+      }
+      const summary = `${profile.displayName} started in terminal pane`;
 
       if (isTauriRuntime()) {
         try {
@@ -3644,7 +4389,7 @@ export function App() {
             summary,
           });
           dispatchWorkbench({ type: "upsert-automation", automation: updated });
-          notify("approval", "Automation run ready", updated.title);
+          notify("terminal", "Automation running", updated.title);
         } catch {
           notify(
             "command-failed",
@@ -3660,13 +4405,9 @@ export function App() {
         automationId,
         summary,
       });
-      notify(
-        "approval",
-        "Automation run ready",
-        automation?.title ?? automationId,
-      );
+      notify("terminal", "Automation running", automation.title);
     },
-    [notify, workbench.automations],
+    [commandProfiles, launchTerminalPane, notify, workbench.automations],
   );
 
   const toggleAutomation = useCallback(
@@ -3923,14 +4664,14 @@ export function App() {
           addTerminalPane();
           break;
         case "run-codex":
-          runProfile("codex");
+          runCommandProfile("codex");
           dispatchWorkbench({
             type: "select-workspace-layout",
             layout: "terminal-grid",
           });
           break;
         case "run-claude":
-          runProfile("claude");
+          runCommandProfile("claude");
           dispatchWorkbench({
             type: "select-workspace-layout",
             layout: "terminal-grid",
@@ -3971,6 +4712,16 @@ export function App() {
             destination: "settings",
           });
           break;
+        case "configure-cli-launcher":
+          dispatchWorkbench({
+            type: "set-settings-section",
+            section: "cli-profiles",
+          });
+          dispatchWorkbench({
+            type: "select-destination",
+            destination: "settings",
+          });
+          break;
         case "toggle-theme":
           dispatchWorkbench({
             type: "set-theme",
@@ -3994,21 +4745,16 @@ export function App() {
             void runAutomation(workbench.selectedAutomationId);
           }
           break;
-        case "dispatch-agent":
-          if (workbench.selectedTaskId) {
-            dispatchTask(workbench.selectedTaskId);
-          }
-          break;
       }
     },
     [
       addTerminalPane,
       createAutomation,
       createTask,
-      dispatchTask,
       notify,
       openWorkspace,
       runAutomation,
+      runCommandProfile,
       runProfile,
       splitTerminalPane,
       startNewChat,
@@ -4095,6 +4841,40 @@ export function App() {
     [],
   );
 
+  const requestLanguageFeature = useCallback(
+    async (path: string, method: string, params: Record<string, unknown>) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      const descriptor = languageServerDescriptorForPath(path);
+      if (!root || !descriptor || !isTauriRuntime()) {
+        return undefined;
+      }
+      const stateId = `${descriptor.languageId}:${descriptor.command}`;
+      const serverId = languageServerIdsRef.current[stateId];
+      if (!serverId) {
+        return undefined;
+      }
+      const response = await invoke<LspBridgeResponse>("lsp_request", {
+        request: {
+          serverId,
+          method,
+          params: {
+            ...params,
+            textDocument: { uri: workspaceFileUri(root, path) },
+          },
+        },
+      });
+      const diagnostics = diagnosticsFromLspMessages(response.messages, root);
+      if (diagnostics) {
+        dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
+      }
+      if (response.status === "error") {
+        throw new Error(JSON.stringify(response.error ?? "LSP request failed"));
+      }
+      return response.result;
+    },
+    [activeSession?.workspacePath, workspacePath],
+  );
+
   useEffect(() => {
     safeSetLocalStorage(
       PINNED_SESSIONS_STORAGE_KEY,
@@ -4133,7 +4913,24 @@ export function App() {
       if (!isCommand) {
         return;
       }
-      if (event.key.toLowerCase() === "k") {
+      if (
+        event.key.toLowerCase() === "s" &&
+        workbench.activeWorkspaceLayout === "code" &&
+        workbench.ide.activePath
+      ) {
+        event.preventDefault();
+        void saveEditorBuffer(workbench.ide.activePath);
+      } else if (event.key.toLowerCase() === "f" && event.shiftKey) {
+        event.preventDefault();
+        dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
+        dispatchWorkbench({ type: "ide-select-view", view: "search" });
+      } else if (event.key === "`") {
+        event.preventDefault();
+        openToolPanel("terminal");
+      } else if (
+        event.key.toLowerCase() === "k" ||
+        event.key.toLowerCase() === "p"
+      ) {
         event.preventDefault();
         setIsCommandPaletteOpen(true);
       } else if (event.key.toLowerCase() === "n") {
@@ -4170,7 +4967,15 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [addTerminalPane, splitTerminalPane, startNewChat]);
+  }, [
+    addTerminalPane,
+    openToolPanel,
+    saveEditorBuffer,
+    splitTerminalPane,
+    startNewChat,
+    workbench.activeWorkspaceLayout,
+    workbench.ide.activePath,
+  ]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -4338,6 +5143,295 @@ export function App() {
   ]);
 
   useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    const buffer = selectedFile
+      ? workbench.ide.buffers[selectedFile]
+      : undefined;
+    if (!root || !isTauriRuntime()) {
+      return;
+    }
+    let polling = false;
+    const pollWorkspace = async () => {
+      if (polling) {
+        return;
+      }
+      polling = true;
+      try {
+        const workspaceFiles = await invoke<WorkspaceFile[]>(
+          "watch_workspace",
+          {
+            workspacePath: root,
+          },
+        );
+        setFiles((current) =>
+          workspaceTreeSignature(current) ===
+          workspaceTreeSignature(workspaceFiles)
+            ? current
+            : workspaceFiles,
+        );
+        if (!selectedFile || !buffer?.contentHash) {
+          return;
+        }
+        const stat = await invoke<WorkspaceFileStat>("stat_workspace_file", {
+          workspacePath: root,
+          path: selectedFile,
+        });
+        if (!stat.contentHash || stat.contentHash === buffer.contentHash) {
+          return;
+        }
+        if (buffer.status === "dirty") {
+          dispatchWorkbench({
+            type: "ide-mark-buffer-error",
+            path: selectedFile,
+            error:
+              "File changed on disk; reload or preserve your buffer before saving.",
+          });
+          notify(
+            "command-failed",
+            "File changed on disk",
+            `${selectedFile} has external changes`,
+          );
+          return;
+        }
+        const content = await invoke<WorkspaceFileContent>(
+          "read_workspace_file_full",
+          { workspacePath: root, path: selectedFile },
+        );
+        setSelectedFileContent(content);
+        dispatchWorkbench({
+          type: "ide-upsert-buffer",
+          buffer: workspaceContentToEditorBuffer(content),
+        });
+      } catch {
+        // Polling is opportunistic; direct operations still surface errors.
+      } finally {
+        polling = false;
+      }
+    };
+    const interval = window.setInterval(() => void pollWorkspace(), 2500);
+    return () => window.clearInterval(interval);
+  }, [
+    activeSession?.workspacePath,
+    notify,
+    selectedFile,
+    selectedFile ? workbench.ide.buffers[selectedFile]?.contentHash : undefined,
+    selectedFile ? workbench.ide.buffers[selectedFile]?.status : undefined,
+    workspacePath,
+  ]);
+
+  useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    const descriptor = selectedFile
+      ? languageServerDescriptorForPath(selectedFile)
+      : undefined;
+    if (!root || !selectedFile || !descriptor || !isTauriRuntime()) {
+      return;
+    }
+    let cancelled = false;
+    const stateId = `${descriptor.languageId}:${descriptor.command}`;
+    const startingState: LanguageServerState = {
+      id: stateId,
+      languageId: descriptor.languageId,
+      command: descriptor.command,
+      status: "starting",
+      activePath: selectedFile,
+      message: `Starting ${descriptor.command}`,
+    };
+    dispatchWorkbench({
+      type: "ide-set-language-server",
+      server: startingState,
+    });
+    void invoke<LspSessionResult>("lsp_start", {
+      request: {
+        workspacePath: root,
+        languageId: descriptor.languageId,
+        command: descriptor.command,
+      },
+    })
+      .then(async (session) => {
+        if (cancelled) {
+          return;
+        }
+        languageServerIdsRef.current[stateId] = session.serverId;
+        dispatchWorkbench({
+          type: "ide-set-language-server",
+          server: {
+            ...startingState,
+            serverId: session.serverId,
+            status: "ready",
+            message: session.message,
+          },
+        });
+        dispatchWorkbench({
+          type: "ide-upsert-output-channel",
+          channel: {
+            id: `lsp:${descriptor.languageId}`,
+            label: `${descriptor.languageId} language server`,
+            kind: "lsp",
+            lines: [session.message],
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        const content =
+          workbench.ide.buffers[selectedFile]?.content ??
+          (selectedFileContent?.path === selectedFile
+            ? selectedFileContent.content
+            : "");
+        const uri = workspaceFileUri(root, selectedFile);
+        const documentKey = `${session.serverId}:${uri}`;
+        if (languageServerOpenedDocsRef.current.has(documentKey)) {
+          return;
+        }
+        languageServerOpenedDocsRef.current.add(documentKey);
+        const response = await invoke<LspBridgeResponse>("lsp_request", {
+          request: {
+            serverId: session.serverId,
+            method: "textDocument/didOpen",
+            params: {
+              textDocument: {
+                uri,
+                languageId: descriptor.languageId,
+                version: 1,
+                text: content,
+              },
+            },
+          },
+        });
+        const diagnostics = diagnosticsFromLspMessages(response.messages, root);
+        if (diagnostics) {
+          dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
+        }
+        window.setTimeout(() => {
+          void invoke<LspBridgeResponse>("lsp_request", {
+            request: {
+              serverId: session.serverId,
+              method: "$/gyro/poll",
+              params: {},
+            },
+          })
+            .then((pollResponse) => {
+              const publishedDiagnostics = diagnosticsFromLspMessages(
+                pollResponse.messages,
+                root,
+              );
+              if (publishedDiagnostics) {
+                dispatchWorkbench({
+                  type: "ide-set-diagnostics",
+                  diagnostics: publishedDiagnostics,
+                });
+              }
+            })
+            .catch(() => undefined);
+        }, 350);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        const message = String(error);
+        dispatchWorkbench({
+          type: "ide-set-language-server",
+          server: {
+            ...startingState,
+            status: message.toLowerCase().includes("not found")
+              ? "not-installed"
+              : "error",
+            message,
+          },
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSession?.workspacePath,
+    selectedFile,
+    selectedFileContent?.contentHash,
+    workspacePath,
+  ]);
+
+  useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    const descriptor = selectedFile
+      ? languageServerDescriptorForPath(selectedFile)
+      : undefined;
+    const content = selectedFile
+      ? workbench.ide.buffers[selectedFile]?.content
+      : undefined;
+    if (
+      !root ||
+      !selectedFile ||
+      !descriptor ||
+      content === undefined ||
+      !isTauriRuntime()
+    ) {
+      return;
+    }
+    const stateId = `${descriptor.languageId}:${descriptor.command}`;
+    const serverId = languageServerIdsRef.current[stateId];
+    if (!serverId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const uri = workspaceFileUri(root, selectedFile);
+      void invoke<LspBridgeResponse>("lsp_request", {
+        request: {
+          serverId,
+          method: "textDocument/didChange",
+          params: {
+            textDocument: { uri, version: Date.now() },
+            contentChanges: [{ text: content }],
+          },
+        },
+      })
+        .then((response) => {
+          const immediate = diagnosticsFromLspMessages(response.messages, root);
+          if (immediate) {
+            dispatchWorkbench({
+              type: "ide-set-diagnostics",
+              diagnostics: immediate,
+            });
+          }
+          window.setTimeout(() => {
+            void invoke<LspBridgeResponse>("lsp_request", {
+              request: { serverId, method: "$/gyro/poll", params: {} },
+            }).then((pollResponse) => {
+              const diagnostics = diagnosticsFromLspMessages(
+                pollResponse.messages,
+                root,
+              );
+              if (diagnostics) {
+                dispatchWorkbench({
+                  type: "ide-set-diagnostics",
+                  diagnostics,
+                });
+              }
+            });
+          }, 300);
+        })
+        .catch(() => undefined);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeSession?.workspacePath,
+    selectedFile,
+    selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
+    workspacePath,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (!isTauriRuntime()) {
+        return;
+      }
+      for (const serverId of Object.values(languageServerIdsRef.current)) {
+        void invoke("lsp_stop", { serverId });
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
     if (!isTauriRuntime() || terminalPaneIdsToPoll.length === 0) {
       return;
     }
@@ -4353,6 +5447,62 @@ export function App() {
 
     return () => window.clearInterval(interval);
   }, [isActiveSessionSending, refreshTerminalPane, terminalPaneIdsToPoll]);
+
+  useEffect(() => {
+    const pane = selectedTerminalPane;
+    const cliIsVisible =
+      activeDestination === "workspace" &&
+      activeWorkspaceLayout === "terminal-grid";
+    if (!pane || !cliIsVisible) {
+      return;
+    }
+
+    void refreshTerminalSourceControl(pane.id);
+    const handleFocus = () => void refreshTerminalSourceControl(pane.id);
+    window.addEventListener("focus", handleFocus);
+    const interval =
+      pane.status === "running" || pane.status === "waiting"
+        ? window.setInterval(
+            () => void refreshTerminalSourceControl(pane.id),
+            6000,
+          )
+        : undefined;
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      if (interval !== undefined) {
+        window.clearInterval(interval);
+      }
+    };
+  }, [
+    activeDestination,
+    activeWorkspaceLayout,
+    refreshTerminalSourceControl,
+    selectedTerminalPane?.id,
+    selectedTerminalPane?.status,
+    selectedTerminalPane?.workingDirectory,
+  ]);
+
+  useEffect(() => {
+    const pane = selectedTerminalPane;
+    if (
+      !pane ||
+      activeDestination !== "workspace" ||
+      activeWorkspaceLayout !== "terminal-grid"
+    ) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => void refreshTerminalSourceControl(pane.id),
+      900,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [
+    activeDestination,
+    activeWorkspaceLayout,
+    refreshTerminalSourceControl,
+    selectedTerminalPane?.id,
+    selectedTerminalPane?.output,
+  ]);
 
   useEffect(() => {
     const nextTurn = derivedActiveTurn;
@@ -4482,6 +5632,10 @@ export function App() {
       browserPreview={workbench.browserPreview}
       cliLaunchPreset={workbench.preferences.cliLaunchPreset}
       diffReview={workbench.diffReview}
+      terminalSourceControl={selectedTerminalSourceControl}
+      isTerminalSourceControlLoading={
+        terminalSourceControlLoadingPaneId === selectedTerminalPane?.id
+      }
       height={isPrimary ? undefined : toolPanelHeight}
       ide={workbench.ide}
       isPrimary={isPrimary}
@@ -4511,9 +5665,7 @@ export function App() {
       onBrowserNavigate={(url) =>
         dispatchWorkbench({ type: "browser-navigate", url })
       }
-      onBrowserOpenExternal={() =>
-        notify("terminal", "Open external", workbench.browserPreview.url)
-      }
+      onBrowserOpenExternal={openBrowserPreviewExternal}
       onBrowserReload={() => dispatchWorkbench({ type: "browser-reload" })}
       onBrowserScreenshot={() =>
         dispatchWorkbench({ type: "browser-screenshot" })
@@ -4522,7 +5674,7 @@ export function App() {
         dispatchWorkbench({ type: "set-browser-url", url })
       }
       onCollapse={() => dispatchWorkbench({ type: "close-tool-panel" })}
-      onCloseTerminalPane={closeTerminalPane}
+      onCloseTerminalPane={requestCloseTerminalPane}
       onClose={() => dispatchWorkbench({ type: "close-tool-panel" })}
       onCommentDiff={(path) =>
         dispatchWorkbench({ type: "add-diff-comment", path })
@@ -4534,6 +5686,13 @@ export function App() {
           type: "move-terminal-pane",
           sourcePaneId,
           targetPaneId,
+        })
+      }
+      onSetTerminalPaneLayout={(paneId, layout) =>
+        dispatchWorkbench({
+          type: "set-terminal-pane-layout",
+          paneId,
+          layout,
         })
       }
       onOpenDiffInEditor={(path) => {
@@ -4566,9 +5725,16 @@ export function App() {
       }
       onRenameTerminalPane={renameTerminalPane}
       onRestartTerminalPane={restartTerminalPane}
+      onRefreshTerminalSourceControl={() => {
+        if (selectedTerminalPane) {
+          void refreshTerminalSourceControl(selectedTerminalPane.id);
+        }
+      }}
+      onReviewTerminalChanges={reviewTerminalChanges}
       onRunGitReviewAction={(actionId) =>
         dispatchWorkbench({ type: "run-git-review-action", actionId })
       }
+      onRunCommandProfile={runCommandProfile}
       onRunProfile={runProfile}
       onSelectDiffFile={(path) =>
         dispatchWorkbench({ type: "select-diff-file", path })
@@ -4592,6 +5758,15 @@ export function App() {
       renderTerminalPaneBody={(pane) => (
         <LiveTerminalPaneBody
           isActive={pane.id === workbench.selectedTerminalPaneId}
+          onBell={(paneId) => {
+            if (paneId !== selectedTerminalPaneIdRef.current) {
+              dispatchWorkbench({
+                type: "set-terminal-pane-attention",
+                paneId,
+                attention: "waiting",
+              });
+            }
+          }}
           onReconnect={restartTerminalPane}
           onResize={resizeTerminalPane}
           onSelect={(paneId) =>
@@ -4628,12 +5803,12 @@ export function App() {
       activeSessionId={activeSessionId}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
-      commandProfiles={commandProfiles}
       files={files}
       ide={workbench.ide}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
       notifications={workbench.notifications}
       onAddTerminalPane={addTerminalPane}
+      onCloseTerminalPane={requestCloseTerminalPane}
       onCreateSession={startNewChat}
       onDeleteSession={deleteSession}
       onDismissNotification={(id) =>
@@ -4648,10 +5823,20 @@ export function App() {
       }
       onOpenSettingsSection={openSettingsSection}
       onOpenWorkspace={openWorkspace}
-      onOpenWorkspaceFile={openEditorFile}
+      onOpenWorkspaceFile={openEditorLocation}
+      onRefreshWorkspace={refreshWorkspaceTree}
+      onCreateWorkspacePath={createWorkspacePath}
+      onRenameWorkspacePath={renameWorkspacePath}
+      onDeleteWorkspacePath={deleteWorkspacePath}
       onOpenToolPanel={openToolPanel}
+      onOpenSourceControlDiff={openSourceControlDiff}
+      onCommitSourceControl={commitSourceControl}
       onRefreshSourceControl={refreshSourceControl}
+      onDiscardSourceControlFile={discardSourceControlFile}
       onRunIdeTask={runIdeTask}
+      onStartDebugSession={startIdeDebugSession}
+      onSendDebugCommand={sendIdeDebugCommand}
+      onStopDebugSession={stopIdeDebugSession}
       onRunWorkspaceSearch={(query) =>
         void runWorkspaceSearch({ query, maxResults: 200 })
       }
@@ -4672,6 +5857,9 @@ export function App() {
           layout: "thread",
         });
       }}
+      onSelectTerminalPane={(paneId) =>
+        dispatchWorkbench({ type: "select-terminal-pane", paneId })
+      }
       onSelectWorkspaceLayout={selectWorkspaceLayout}
       onSettingsBack={returnFromSettings}
       onSettingsSectionChange={(section: SettingsSectionId) =>
@@ -4752,6 +5940,7 @@ export function App() {
                 diffReview={workbench.diffReview}
                 activeBuffer={activeEditorBuffer}
                 editorSelection={workbench.ide.selection}
+                editorRevealTarget={editorRevealTarget}
                 editorTabs={workbench.ide.tabs}
                 fileContent={selectedFileContent}
                 fileError={selectedFileError}
@@ -4786,13 +5975,7 @@ export function App() {
                 onBrowserNavigate={(url) =>
                   dispatchWorkbench({ type: "browser-navigate", url })
                 }
-                onBrowserOpenExternal={() =>
-                  notify(
-                    "terminal",
-                    "Open external",
-                    workbench.browserPreview.url,
-                  )
-                }
+                onBrowserOpenExternal={openBrowserPreviewExternal}
                 onBrowserReload={() =>
                   dispatchWorkbench({ type: "browser-reload" })
                 }
@@ -4815,8 +5998,8 @@ export function App() {
                 onPaneTabChange={(tab) =>
                   dispatchWorkbench({ type: "set-pane-tab", tab })
                 }
-                onOpenDiffInEditor={(path) => {
-                  openEditorFile(path);
+                onOpenDiffInEditor={(path, lineNumber, column) => {
+                  openEditorLocation(path, lineNumber, column);
                   dispatchWorkbench({
                     type: "select-workspace-layout",
                     layout: "code",
@@ -4849,9 +6032,39 @@ export function App() {
                   dispatchWorkbench({ type: "select-diff-file", path })
                 }
                 onSelectFile={openEditorFile}
+                onSelectEditorGroup={(groupId) => {
+                  const group = workbench.ide.layout.groups.find(
+                    (item) => item.id === groupId,
+                  );
+                  dispatchWorkbench({ type: "ide-select-group", groupId });
+                  if (group?.activePath) {
+                    setSelectedFile(group.activePath);
+                  }
+                }}
+                onMoveEditorTab={(path, toGroupId) =>
+                  dispatchWorkbench({
+                    type: "ide-move-tab",
+                    path,
+                    toGroupId,
+                  })
+                }
                 onSelectTerminalPane={(paneId) =>
                   dispatchWorkbench({ type: "select-terminal-pane", paneId })
                 }
+                onCloseEditorGroup={(groupId) => {
+                  const remaining = workbench.ide.layout.groups.filter(
+                    (group) => group.id !== groupId,
+                  );
+                  const nextGroup =
+                    remaining.find(
+                      (group) =>
+                        group.id === workbench.ide.layout.activeGroupId,
+                    ) ?? remaining[0];
+                  dispatchWorkbench({ type: "ide-close-group", groupId });
+                  if (nextGroup?.activePath) {
+                    setSelectedFile(nextGroup.activePath);
+                  }
+                }}
                 onSplitEditorGroup={(direction) =>
                   dispatchWorkbench({ type: "ide-split-group", direction })
                 }
@@ -4885,6 +6098,7 @@ export function App() {
                 renderEditor={(props) => (
                   <MonacoEditorPane
                     {...props}
+                    onLspRequest={requestLanguageFeature}
                     theme={workbench.preferences.theme}
                   />
                 )}
@@ -5071,6 +6285,17 @@ export function App() {
           projectLabel={projectRemoveCandidate.label}
           projectPath={projectRemoveCandidate.path}
           sessionCount={projectRemoveCandidate.sessionCount}
+        />
+      ) : null}
+      {terminalTerminateCandidate ? (
+        <TerminalTerminateConfirmOverlay
+          onCancel={() => setTerminalTerminateCandidate(undefined)}
+          onTerminate={confirmTerminateTerminal}
+          terminalLabel={
+            commandProfiles.find(
+              (profile) => profile.id === terminalTerminateCandidate.profileId,
+            )?.displayName ?? terminalTerminateCandidate.title
+          }
         />
       ) : null}
       {isCommandPaletteOpen ? (
@@ -5347,7 +6572,11 @@ function sanitizeStoredBrowserPreview(
   if (!browserPreview) {
     return base.browserPreview;
   }
-  if (browserPreview.verificationMessage === "Agent verification passed") {
+  if (
+    browserPreview.verificationMessage === "Agent verification passed" ||
+    browserPreview.url?.includes("localhost:1420") ||
+    browserPreview.url?.includes("127.0.0.1:1420")
+  ) {
     return base.browserPreview;
   }
   return {
@@ -5458,6 +6687,7 @@ function GyroAccountGate({
 
 function LiveTerminalPaneBody({
   isActive,
+  onBell,
   onReconnect,
   onResize,
   onSelect,
@@ -5466,6 +6696,7 @@ function LiveTerminalPaneBody({
   theme,
 }: {
   isActive: boolean;
+  onBell: (paneId: string) => void;
   onReconnect: (paneId: string) => void;
   onResize: (paneId: string, cols: number, rows: number) => void;
   onSelect: (paneId: string) => void;
@@ -5483,6 +6714,7 @@ function LiveTerminalPaneBody({
   const statusRef = useRef(pane.status);
   const themeRef = useRef(theme);
   const onResizeRef = useRef(onResize);
+  const onBellRef = useRef(onBell);
   const onWriteRef = useRef(onWrite);
 
   paneOutputRef.current = pane.output ?? "";
@@ -5491,8 +6723,9 @@ function LiveTerminalPaneBody({
   useEffect(() => {
     statusRef.current = pane.status;
     onResizeRef.current = onResize;
+    onBellRef.current = onBell;
     onWriteRef.current = onWrite;
-  }, [onResize, onWrite, pane.status]);
+  }, [onBell, onResize, onWrite, pane.status]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -5542,6 +6775,9 @@ function LiveTerminalPaneBody({
         const dataDisposable = terminal.onData((data) => {
           onWriteRef.current(pane.id, data);
         });
+        const bellDisposable = terminal.onBell(() => {
+          onBellRef.current(pane.id);
+        });
 
         const fitAndReport = () => {
           try {
@@ -5576,6 +6812,7 @@ function LiveTerminalPaneBody({
             window.cancelAnimationFrame(resizeFrameRef.current);
           }
           dataDisposable.dispose();
+          bellDisposable.dispose();
           terminal.dispose();
         };
       })
@@ -5868,6 +7105,7 @@ function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
     activeTurn: undefined,
     terminalPanes: workbench.terminalPanes.map((pane) => ({
       ...pane,
+      attention: undefined,
       output: truncatePersistedText(
         pane.output,
         MAX_PERSISTED_TERMINAL_OUTPUT_CHARS,
@@ -5984,6 +7222,154 @@ function chatMessagePreview(value: string) {
   return `${chars.slice(0, 160).join("")}...`;
 }
 
+function normalizedPreviewUrl(value: string) {
+  const trimmed = value.trim();
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed)
+    ? trimmed
+    : `http://${trimmed}`;
+  const url = new URL(candidate);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Preview URLs must use http or https");
+  }
+  return url.toString();
+}
+
+function languageServerDescriptorForPath(path: string) {
+  const extension = path.split(".").pop()?.toLowerCase();
+  switch (extension) {
+    case "ts":
+    case "tsx":
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return {
+        languageId:
+          extension === "tsx"
+            ? "typescriptreact"
+            : extension === "jsx"
+              ? "javascriptreact"
+              : extension?.startsWith("j") ||
+                  extension === "mjs" ||
+                  extension === "cjs"
+                ? "javascript"
+                : "typescript",
+        command: "typescript-language-server --stdio",
+      };
+    case "rs":
+      return { languageId: "rust", command: "rust-analyzer" };
+    case "json":
+    case "jsonc":
+      return {
+        languageId: "json",
+        command: "vscode-json-language-server --stdio",
+      };
+    case "css":
+    case "scss":
+    case "less":
+      return {
+        languageId: extension,
+        command: "vscode-css-language-server --stdio",
+      };
+    case "html":
+    case "htm":
+      return {
+        languageId: "html",
+        command: "vscode-html-language-server --stdio",
+      };
+    default:
+      return undefined;
+  }
+}
+
+function workspaceFileUri(workspacePath: string, relativePath: string) {
+  const fullPath =
+    `${workspacePath.replace(/[\\/]+$/, "")}/${relativePath.replace(/^[/\\]+/, "")}`
+      .replaceAll("\\", "/")
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+  return `file://${fullPath}`;
+}
+
+function diagnosticsFromLspMessages(
+  messages: unknown[] | undefined,
+  workspacePath: string,
+): ProblemDiagnostic[] | undefined {
+  if (!messages) {
+    return undefined;
+  }
+  let sawDiagnostics = false;
+  const diagnostics: ProblemDiagnostic[] = [];
+  for (const message of messages) {
+    if (
+      !isRecord(message) ||
+      message.method !== "textDocument/publishDiagnostics"
+    ) {
+      continue;
+    }
+    const params = isRecord(message.params) ? message.params : undefined;
+    if (!params || typeof params.uri !== "string") {
+      continue;
+    }
+    sawDiagnostics = true;
+    const path = lspRelativePath(params.uri, workspacePath);
+    const values = Array.isArray(params.diagnostics) ? params.diagnostics : [];
+    values.forEach((value, index) => {
+      if (!isRecord(value) || typeof value.message !== "string") {
+        return;
+      }
+      const range = isRecord(value.range) ? value.range : undefined;
+      const start = range && isRecord(range.start) ? range.start : undefined;
+      const end = range && isRecord(range.end) ? range.end : undefined;
+      const severityValue =
+        typeof value.severity === "number" ? value.severity : 3;
+      const severity: ProblemDiagnostic["severity"] =
+        severityValue === 1
+          ? "error"
+          : severityValue === 2
+            ? "warning"
+            : severityValue === 4
+              ? "hint"
+              : "info";
+      diagnostics.push({
+        id: `${path}:${numberField(start, "line")}:${index}:${value.message}`,
+        path,
+        message: value.message,
+        severity,
+        source: typeof value.source === "string" ? value.source : undefined,
+        startLineNumber: numberField(start, "line") + 1,
+        startColumn: numberField(start, "character") + 1,
+        endLineNumber: numberField(end, "line") + 1,
+        endColumn: numberField(end, "character") + 1,
+      });
+    });
+  }
+  return sawDiagnostics ? diagnostics : undefined;
+}
+
+function lspRelativePath(uri: string, workspacePath: string) {
+  try {
+    const absolutePath = decodeURIComponent(uri.replace(/^file:\/\//, ""));
+    const normalizedRoot = workspacePath
+      .replaceAll("\\", "/")
+      .replace(/\/$/, "");
+    return absolutePath.startsWith(`${normalizedRoot}/`)
+      ? absolutePath.slice(normalizedRoot.length + 1)
+      : absolutePath;
+  } catch {
+    return uri;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function numberField(value: Record<string, unknown> | undefined, key: string) {
+  return typeof value?.[key] === "number" ? value[key] : 0;
+}
+
 function getCommandProfile(
   profiles: CommandProfile[],
   preferredId?: string,
@@ -6047,7 +7433,7 @@ function terminalPaneFromSnapshot(
       snapshot.paneId,
       profile,
       terminalStatusFromSnapshot(snapshot.status),
-      workspaceRunMetadata(mode, snapshot.title),
+      workspaceRunMetadata(mode, snapshot.title, snapshot.workingDirectory),
     ),
     command: snapshot.command,
     lastEvent:
@@ -6547,24 +7933,188 @@ function relativeFilePath(path: string, parent: string) {
     : workspaceName(normalizedPath);
 }
 
+function workspaceTreeSignature(files: WorkspaceFile[]) {
+  return files
+    .map((file) => `${file.kind}:${file.path}:${file.depth ?? ""}`)
+    .join("\n");
+}
+
 function MonacoEditorPane({
   buffer,
   fileContent,
   loadState,
+  minimapEnabled,
   onChange,
+  onLspRequest,
   onSelectionChange,
   path,
+  revealTarget,
   theme,
 }: {
   buffer?: EditorBuffer;
   fileContent?: WorkspaceFileContent;
   loadState: "idle" | "loading" | "ready" | "error";
+  minimapEnabled: boolean;
   onChange: (value: string) => void;
+  onLspRequest?: (
+    path: string,
+    method: string,
+    params: Record<string, unknown>,
+  ) => Promise<unknown>;
   onSelectionChange: (selection?: EditorSelection) => void;
   path?: string;
+  revealTarget?: EditorRevealTarget;
   theme: WorkbenchState["preferences"]["theme"];
 }) {
-  const handleMount: OnMount = (editor) => {
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
+  const revealEditorTarget = useCallback(
+    (editor: Parameters<OnMount>[0]) => {
+      if (!revealTarget || revealTarget.path !== path) {
+        return;
+      }
+      const position = {
+        lineNumber: revealTarget.lineNumber,
+        column: revealTarget.column,
+      };
+      editor.setPosition(position);
+      editor.revealPositionInCenter(position);
+      editor.focus();
+    },
+    [path, revealTarget],
+  );
+  useEffect(() => {
+    if (editorRef.current) {
+      revealEditorTarget(editorRef.current);
+    }
+  }, [revealEditorTarget, revealTarget?.nonce]);
+  useEffect(
+    () => () => {
+      languageRegistrationsRef.current.forEach((registration) =>
+        registration.dispose(),
+      );
+      languageRegistrationsRef.current = [];
+    },
+    [],
+  );
+
+  const handleMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+    revealEditorTarget(editor);
+    languageRegistrationsRef.current.forEach((registration) =>
+      registration.dispose(),
+    );
+    languageRegistrationsRef.current = [];
+    if (path && onLspRequest) {
+      const language = languageForPath(path);
+      const completionRegistration =
+        monaco.languages.registerCompletionItemProvider(language, {
+          triggerCharacters: [".", '"', "'", "/", "<", ":"],
+          provideCompletionItems: async (model, position, context) => {
+            try {
+              const result = await onLspRequest(
+                path,
+                "textDocument/completion",
+                {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                  context: {
+                    triggerKind: context.triggerKind,
+                    triggerCharacter: context.triggerCharacter,
+                  },
+                },
+              );
+              const resultRecord = isRecord(result) ? result : undefined;
+              const items = Array.isArray(result)
+                ? result
+                : Array.isArray(resultRecord?.items)
+                  ? resultRecord.items
+                  : [];
+              const word = model.getWordUntilPosition(position);
+              const fallbackRange = new monaco.Range(
+                position.lineNumber,
+                word.startColumn,
+                position.lineNumber,
+                word.endColumn,
+              );
+              return {
+                suggestions: items.flatMap((value) => {
+                  if (!isRecord(value)) {
+                    return [];
+                  }
+                  const label = completionLabel(value.label);
+                  if (!label) {
+                    return [];
+                  }
+                  const textEdit = isRecord(value.textEdit)
+                    ? value.textEdit
+                    : undefined;
+                  const rangeValue = textEdit?.range ?? value.range;
+                  const range =
+                    monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
+                  const insertText =
+                    typeof textEdit?.newText === "string"
+                      ? textEdit.newText
+                      : typeof value.insertText === "string"
+                        ? value.insertText
+                        : label;
+                  return [
+                    {
+                      label,
+                      detail:
+                        typeof value.detail === "string"
+                          ? value.detail
+                          : undefined,
+                      documentation: completionDocumentation(
+                        value.documentation,
+                      ),
+                      insertText,
+                      kind: monacoCompletionKind(monaco, value.kind),
+                      range,
+                    },
+                  ];
+                }),
+              };
+            } catch {
+              return { suggestions: [] };
+            }
+          },
+        });
+      const hoverRegistration = monaco.languages.registerHoverProvider(
+        language,
+        {
+          provideHover: async (_model, position) => {
+            try {
+              const result = await onLspRequest(path, "textDocument/hover", {
+                position: {
+                  line: position.lineNumber - 1,
+                  character: position.column - 1,
+                },
+              });
+              if (!isRecord(result)) {
+                return null;
+              }
+              const markdown = lspMarkdown(result.contents);
+              if (!markdown) {
+                return null;
+              }
+              return {
+                contents: [{ value: markdown }],
+                range: monacoRangeFromLsp(monaco, result.range),
+              };
+            } catch {
+              return null;
+            }
+          },
+        },
+      );
+      languageRegistrationsRef.current = [
+        completionRegistration,
+        hoverRegistration,
+      ];
+    }
     editor.onDidChangeCursorSelection((event) => {
       const model = editor.getModel();
       if (!model || !path) {
@@ -6611,7 +8161,7 @@ function MonacoEditorPane({
           fontLigatures: false,
           fontSize: 13,
           lineHeight: 20,
-          minimap: { enabled: true, scale: 0.75 },
+          minimap: { enabled: minimapEnabled, scale: 0.75 },
           padding: { top: 14, bottom: 14 },
           scrollBeyondLastLine: false,
           smoothScrolling: true,
@@ -6652,6 +8202,92 @@ function languageForPath(path: string) {
     default:
       return "plaintext";
   }
+}
+
+function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const start = isRecord(value.start) ? value.start : undefined;
+  const end = isRecord(value.end) ? value.end : undefined;
+  if (!start || !end) {
+    return undefined;
+  }
+  return new monaco.Range(
+    numberField(start, "line") + 1,
+    numberField(start, "character") + 1,
+    numberField(end, "line") + 1,
+    numberField(end, "character") + 1,
+  );
+}
+
+function monacoCompletionKind(monaco: Parameters<OnMount>[1], value: unknown) {
+  const kinds = monaco.languages.CompletionItemKind;
+  switch (value) {
+    case 2:
+      return kinds.Method;
+    case 3:
+      return kinds.Function;
+    case 4:
+      return kinds.Constructor;
+    case 5:
+      return kinds.Field;
+    case 6:
+      return kinds.Variable;
+    case 7:
+      return kinds.Class;
+    case 8:
+      return kinds.Interface;
+    case 9:
+      return kinds.Module;
+    case 10:
+      return kinds.Property;
+    case 13:
+      return kinds.Enum;
+    case 14:
+      return kinds.Keyword;
+    case 15:
+      return kinds.Snippet;
+    case 21:
+      return kinds.Constant;
+    default:
+      return kinds.Text;
+  }
+}
+
+function completionLabel(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  return isRecord(value) && typeof value.label === "string"
+    ? value.label
+    : undefined;
+}
+
+function completionDocumentation(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (isRecord(value) && typeof value.value === "string") {
+    return { value: value.value };
+  }
+  return undefined;
+}
+
+function lspMarkdown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(lspMarkdown).filter(Boolean).join("\n\n");
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+  if (typeof value.language === "string" && typeof value.value === "string") {
+    return `\`\`\`${value.language}\n${value.value}\n\`\`\``;
+  }
+  return typeof value.value === "string" ? value.value : "";
 }
 
 function createTurnId() {
@@ -6877,15 +8513,17 @@ function createPreviewAutomation(draft: AutomationDraft): Automation {
 function workspaceRunMetadata(
   mode: WorkbenchState["workspaceMode"],
   label: string,
+  workingDirectory?: string,
 ) {
   if (mode === "local") {
-    return { workspaceMode: mode, branch: "main" };
+    return { workspaceMode: mode, branch: "main", workingDirectory };
   }
   const slug = slugify(label || "task");
   return {
     workspaceMode: mode,
     branch: `gyro/${slug}`,
     worktreeName: `gyro-${slug}`,
+    workingDirectory,
   };
 }
 
