@@ -1,6 +1,6 @@
 use crate::{config::GyroConfig, paths::GyroPaths};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::{path::PathBuf, process::Command};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -87,24 +87,32 @@ fn shell_check() -> DoctorCheck {
 
 fn app_install_check() -> DoctorCheck {
     #[cfg(target_os = "macos")]
-    let installed = std::path::Path::new("/Applications/Gyro.app").exists();
+    let installed_path = {
+        let system_app = PathBuf::from("/Applications/Gyro.app");
+        let user_app = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join("Applications/Gyro.app"));
+        first_installed_app(std::iter::once(system_app).chain(user_app))
+    };
     #[cfg(not(target_os = "macos"))]
-    let installed = false;
+    let installed_path: Option<PathBuf> = None;
 
     DoctorCheck {
         id: "desktop-app".into(),
         label: "Gyro.app".into(),
-        status: if installed {
+        status: if installed_path.is_some() {
             DoctorStatus::Pass
         } else {
             DoctorStatus::Warn
         },
-        message: if installed {
-            "Installed in /Applications".into()
-        } else {
-            "Gyro.app was not found in /Applications".into()
-        },
+        message: installed_path
+            .map(|path| format!("Installed at {}", path.display()))
+            .unwrap_or_else(|| "Gyro.app was not found in /Applications or ~/Applications".into()),
     }
+}
+
+fn first_installed_app(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|path| path.exists())
 }
 
 fn update_channel_check(config: &GyroConfig) -> DoctorCheck {
@@ -161,5 +169,24 @@ fn storage_check(paths: &GyroPaths) -> DoctorCheck {
             status: DoctorStatus::Fail,
             message: error.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_installed_app;
+    use std::fs;
+
+    #[test]
+    fn finds_user_application_when_system_application_is_missing() {
+        let root = std::env::temp_dir().join(format!("gyro-doctor-{}", std::process::id()));
+        let system_app = root.join("system/Gyro.app");
+        let user_app = root.join("user/Applications/Gyro.app");
+        fs::create_dir_all(&user_app).expect("create user application fixture");
+
+        let installed = first_installed_app([system_app, user_app.clone()]);
+
+        assert_eq!(installed, Some(user_app));
+        fs::remove_dir_all(root).expect("remove doctor fixture");
     }
 }

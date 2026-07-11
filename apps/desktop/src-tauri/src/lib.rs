@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
@@ -26,6 +26,7 @@ const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
+const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_CHAT_TIMEOUT_SECS: u64 = 180;
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
@@ -132,6 +133,8 @@ struct SourceControlFile {
     original_path: Option<String>,
     state: String,
     staged: bool,
+    additions: usize,
+    deletions: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -143,6 +146,10 @@ struct SourceControlStatus {
     upstream: Option<String>,
     ahead: usize,
     behind: usize,
+    repo_root: Option<String>,
+    additions: usize,
+    deletions: usize,
+    stats_partial: bool,
     files: Vec<SourceControlFile>,
     last_checked_at: Option<String>,
     error: Option<String>,
@@ -153,6 +160,7 @@ struct SourceControlStatus {
 struct GitPathRequest {
     workspace_path: String,
     path: Option<String>,
+    staged: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -269,11 +277,54 @@ struct DebugSessionResult {
     adapter: String,
     status: String,
     message: Option<String>,
+    capabilities: Vec<String>,
 }
 
 #[derive(Clone, Default)]
 struct TerminalProcessManager {
     processes: Arc<Mutex<HashMap<String, TerminalProcess>>>,
+}
+
+#[derive(Clone, Default)]
+struct LanguageServerManager {
+    processes: Arc<Mutex<HashMap<String, LanguageServerProcess>>>,
+}
+
+struct LanguageServerProcess {
+    child: Child,
+    stdin: ChildStdin,
+    messages: mpsc::Receiver<Result<serde_json::Value, String>>,
+    next_request_id: u64,
+    language_id: String,
+    command: String,
+}
+
+#[derive(Clone, Default)]
+struct DebugAdapterManager {
+    processes: Arc<Mutex<HashMap<String, DebugAdapterProcess>>>,
+}
+
+struct DebugAdapterProcess {
+    child: Child,
+    stdin: ChildStdin,
+    messages: mpsc::Receiver<Result<serde_json::Value, String>>,
+    next_sequence: u64,
+    name: String,
+    adapter: String,
+}
+
+impl Drop for LanguageServerProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for DebugAdapterProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -299,6 +350,7 @@ struct TerminalPaneSnapshot {
     output: String,
     status: String,
     exit_code: Option<i32>,
+    working_directory: Option<String>,
     cols: u16,
     rows: u16,
 }
@@ -443,6 +495,7 @@ struct DiagnosticsExportResult {
 
 struct TerminalProcess {
     request: TerminalPaneRequest,
+    working_directory: Option<PathBuf>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send>,
@@ -1451,8 +1504,8 @@ async fn write_workspace_file(
 
 #[tauri::command]
 async fn watch_workspace(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
-    // V1 exposes a normalized snapshot through the command boundary. A long-lived
-    // watcher can layer event streaming on the same WorkspaceFile shape later.
+    // The renderer polls this normalized snapshot while a workspace is active.
+    // Hash-based stat checks handle open-file conflicts independently.
     tauri::async_runtime::spawn_blocking(move || {
         list_workspace_tree_blocking(workspace_path, Some(5))
     })
@@ -1519,7 +1572,11 @@ async fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
 fn git_diff_blocking(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let mut command = command_with_gui_path("git");
-    command.arg("-C").arg(root).arg("diff").arg("--");
+    command.arg("-C").arg(root).arg("diff");
+    if request.staged.unwrap_or(false) {
+        command.arg("--cached");
+    }
+    command.arg("--");
     if let Some(path) = request.path {
         command.arg(path);
     }
@@ -1572,6 +1629,58 @@ fn git_unstage_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
 }
 
 #[tauri::command]
+async fn git_discard(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || git_discard_blocking(request))
+        .await
+        .map_err(|error| format!("git discard worker failed: {error}"))?
+}
+
+fn git_discard_blocking(request: GitStageRequest) -> Result<SourceControlStatus, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
+    let relative = path.strip_prefix(&root).map_err(to_string)?;
+    let mut status_command = command_with_gui_path("git");
+    status_command
+        .arg("-C")
+        .arg(&root)
+        .args(["status", "--porcelain=v1", "--"])
+        .arg(relative);
+    let status = run_command_output(status_command).map_err(to_string)?;
+    let state = status.stdout.lines().next().unwrap_or_default();
+    let is_untracked = state.starts_with("??");
+    let is_added = state.as_bytes().first() == Some(&b'A');
+
+    if is_added {
+        let mut unstage = command_with_gui_path("git");
+        unstage
+            .arg("-C")
+            .arg(&root)
+            .args(["rm", "--cached", "-f", "--"])
+            .arg(relative);
+        run_command_output(unstage).map_err(to_string)?;
+    } else if !is_untracked {
+        let mut restore = command_with_gui_path("git");
+        restore.arg("-C").arg(&root).arg("restore");
+        if state.as_bytes().first().is_some_and(|value| *value != b' ') {
+            restore.args(["--source=HEAD", "--staged", "--worktree"]);
+        } else {
+            restore.arg("--worktree");
+        }
+        restore.arg("--").arg(relative);
+        run_command_output(restore).map_err(to_string)?;
+    }
+
+    if is_untracked || is_added {
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(to_string)?;
+        } else if path.exists() {
+            std::fs::remove_file(&path).map_err(to_string)?;
+        }
+    }
+    git_status_impl(&request.workspace_path).map_err(to_string)
+}
+
+#[tauri::command]
 async fn git_commit(request: GitCommitRequest) -> Result<IdeCommandOutput, String> {
     tauri::async_runtime::spawn_blocking(move || git_commit_blocking(request))
         .await
@@ -1594,60 +1703,402 @@ fn git_commit_blocking(request: GitCommitRequest) -> Result<IdeCommandOutput, St
 }
 
 #[tauri::command]
-async fn lsp_start(request: LspStartRequest) -> Result<LspSessionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || lsp_start_blocking(request))
-        .await
-        .map_err(|error| format!("lsp start worker failed: {error}"))?
+async fn lsp_start(
+    request: LspStartRequest,
+    manager: tauri::State<'_, LanguageServerManager>,
+) -> Result<LspSessionResult, String> {
+    manager.start(request).map_err(to_string)
 }
 
-fn lsp_start_blocking(request: LspStartRequest) -> Result<LspSessionResult, String> {
-    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let command_text = request.command.clone();
-    let mut parts = command_text.split_whitespace();
-    let command_name = parts
-        .next()
-        .ok_or_else(|| "language server command is required".to_string())?;
-    let mut command = command_with_gui_path(command_name);
-    command.arg("--version");
-    command.current_dir(root);
-    let output = command.output();
-    let (status, message) = match output {
-        Ok(output) if output.status.success() => (
-            "ready".to_string(),
-            String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        ),
-        Ok(output) => (
-            "warning".to_string(),
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ),
-        Err(error) => ("not-installed".to_string(), error.to_string()),
+#[tauri::command]
+async fn lsp_request(
+    request: LspRequestPayload,
+    manager: tauri::State<'_, LanguageServerManager>,
+) -> Result<serde_json::Value, String> {
+    manager.request(request).map_err(to_string)
+}
+
+#[tauri::command]
+async fn lsp_stop(
+    server_id: String,
+    manager: tauri::State<'_, LanguageServerManager>,
+) -> Result<serde_json::Value, String> {
+    manager.stop(&server_id).map_err(to_string)
+}
+
+impl LanguageServerManager {
+    fn start(&self, request: LspStartRequest) -> anyhow::Result<LspSessionResult> {
+        let root = workspace_root(&request.workspace_path)?;
+        let command_text = request.command.trim().to_string();
+        let mut parts = command_text.split_whitespace();
+        let command_name = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("language server command is required"))?;
+        let mut args = parts.map(ToOwned::to_owned).collect::<Vec<_>>();
+        if language_server_needs_stdio_arg(command_name) && !args.iter().any(|arg| arg == "--stdio")
+        {
+            args.push("--stdio".into());
+        }
+
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
+        if let Some((server_id, process)) = processes.iter_mut().find(|(_, process)| {
+            process.language_id == request.language_id && process.command == command_text
+        }) {
+            if process.child.try_wait()?.is_none() {
+                return Ok(LspSessionResult {
+                    server_id: server_id.clone(),
+                    language_id: request.language_id,
+                    command: command_text,
+                    status: "ready".into(),
+                    message: "Language server is already running".into(),
+                });
+            }
+        }
+
+        let mut command = command_with_gui_path(command_name);
+        command
+            .args(args)
+            .current_dir(&root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().map_err(|error| {
+            anyhow::anyhow!("failed to start language server {command_name}: {error}")
+        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("language server stdin unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("language server stdout unavailable"))?;
+        let mut process = LanguageServerProcess {
+            child,
+            stdin,
+            messages: spawn_lsp_message_reader(stdout),
+            next_request_id: 2,
+            language_id: request.language_id.clone(),
+            command: command_text.clone(),
+        };
+        let root_uri = workspace_file_uri(&root);
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "processId": std::process::id(),
+                    "clientInfo": { "name": "Gyro", "version": env!("CARGO_PKG_VERSION") },
+                    "rootUri": root_uri,
+                    "workspaceFolders": [{ "uri": root_uri, "name": root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace") }],
+                    "capabilities": {
+                        "workspace": { "workspaceFolders": true, "configuration": true },
+                        "textDocument": {
+                            "publishDiagnostics": { "relatedInformation": true },
+                            "completion": { "completionItem": { "snippetSupport": true } },
+                            "hover": { "contentFormat": ["markdown", "plaintext"] },
+                            "definition": { "linkSupport": true }
+                        }
+                    }
+                }
+            }),
+        )?;
+        let (initialize_response, startup_messages) =
+            receive_lsp_response(&mut process, 1, Duration::from_secs(12))?;
+        if let Some(error) = initialize_response.get("error") {
+            anyhow::bail!("language server initialize failed: {error}");
+        }
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "initialized",
+                "params": {}
+            }),
+        )?;
+        let capability_count = initialize_response
+            .pointer("/result/capabilities")
+            .and_then(|value| value.as_object())
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let server_id = format!("{}:{}", request.language_id, Uuid::new_v4());
+        processes.insert(server_id.clone(), process);
+        Ok(LspSessionResult {
+            server_id,
+            language_id: request.language_id,
+            command: command_text,
+            status: "ready".into(),
+            message: format!(
+                "Initialized with {capability_count} capabilities and {} startup messages",
+                startup_messages.len()
+            ),
+        })
+    }
+
+    fn request(&self, request: LspRequestPayload) -> anyhow::Result<serde_json::Value> {
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
+        let process = processes
+            .get_mut(&request.server_id)
+            .ok_or_else(|| anyhow::anyhow!("language server is not running"))?;
+        if let Some(status) = process.child.try_wait()? {
+            anyhow::bail!("language server exited with {status}");
+        }
+
+        if request.method == "$/gyro/poll" {
+            let messages = drain_lsp_messages(process)?;
+            return Ok(serde_json::json!({
+                "serverId": request.server_id,
+                "status": "ok",
+                "messages": messages,
+            }));
+        }
+
+        if lsp_method_is_notification(&request.method) {
+            write_lsp_message(
+                &mut process.stdin,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": request.method,
+                    "params": request.params,
+                }),
+            )?;
+            let messages = drain_lsp_messages(process)?;
+            return Ok(serde_json::json!({
+                "serverId": request.server_id,
+                "status": "sent",
+                "messages": messages,
+            }));
+        }
+
+        let request_id = process.next_request_id;
+        process.next_request_id += 1;
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": request.method,
+                "params": request.params,
+            }),
+        )?;
+        let (response, messages) =
+            receive_lsp_response(process, request_id, Duration::from_secs(15))?;
+        Ok(serde_json::json!({
+            "serverId": request.server_id,
+            "status": if response.get("error").is_some() { "error" } else { "ok" },
+            "result": response.get("result").cloned(),
+            "error": response.get("error").cloned(),
+            "messages": messages,
+        }))
+    }
+
+    fn stop(&self, server_id: &str) -> anyhow::Result<serde_json::Value> {
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
+        let Some(mut process) = processes.remove(server_id) else {
+            return Ok(serde_json::json!({
+                "serverId": server_id,
+                "status": "stopped",
+            }));
+        };
+        let request_id = process.next_request_id;
+        process.next_request_id += 1;
+        let _ = write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "shutdown",
+                "params": null,
+            }),
+        );
+        let _ = receive_lsp_response(&mut process, request_id, Duration::from_secs(2));
+        let _ = write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({ "jsonrpc": "2.0", "method": "exit", "params": null }),
+        );
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+        Ok(serde_json::json!({
+            "serverId": server_id,
+            "status": "stopped",
+        }))
+    }
+}
+
+fn language_server_needs_stdio_arg(command: &str) -> bool {
+    let name = Path::new(command)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(command);
+    matches!(
+        name,
+        "typescript-language-server"
+            | "vscode-json-language-server"
+            | "vscode-css-language-server"
+            | "vscode-html-language-server"
+    )
+}
+
+fn lsp_method_is_notification(method: &str) -> bool {
+    method == "initialized"
+        || method == "exit"
+        || method == "workspace/didChangeConfiguration"
+        || method == "workspace/didChangeWatchedFiles"
+        || method.starts_with("textDocument/did")
+        || method.starts_with("$/")
+}
+
+fn spawn_lsp_message_reader(
+    stdout: ChildStdout,
+) -> mpsc::Receiver<Result<serde_json::Value, String>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            match read_lsp_message(&mut reader) {
+                Ok(message) => {
+                    if sender.send(Ok(message)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(error.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+    receiver
+}
+
+fn write_lsp_message(writer: &mut impl Write, value: &serde_json::Value) -> anyhow::Result<()> {
+    let body = serde_json::to_vec(value)?;
+    if body.len() > MAX_LSP_MESSAGE_BYTES {
+        anyhow::bail!("language server message exceeds size limit");
+    }
+    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
+    writer.write_all(&body)?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn read_lsp_message(reader: &mut impl BufRead) -> anyhow::Result<serde_json::Value> {
+    let mut content_length = None;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 {
+            anyhow::bail!("language server output closed");
+        }
+        if header == "\r\n" || header == "\n" {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = Some(value.trim().parse::<usize>()?);
+            }
+        }
+    }
+    let content_length =
+        content_length.ok_or_else(|| anyhow::anyhow!("missing LSP Content-Length header"))?;
+    if content_length > MAX_LSP_MESSAGE_BYTES {
+        anyhow::bail!("language server message exceeds size limit");
+    }
+    let mut body = vec![0; content_length];
+    reader.read_exact(&mut body)?;
+    Ok(serde_json::from_slice(&body)?)
+}
+
+fn receive_lsp_response(
+    process: &mut LanguageServerProcess,
+    request_id: u64,
+    timeout: Duration,
+) -> anyhow::Result<(serde_json::Value, Vec<serde_json::Value>)> {
+    let deadline = Instant::now() + timeout;
+    let mut messages = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("language server request timed out");
+        }
+        let message = process
+            .messages
+            .recv_timeout(remaining)
+            .map_err(|error| anyhow::anyhow!("language server response failed: {error}"))?
+            .map_err(anyhow::Error::msg)?;
+        if message.get("id").and_then(|value| value.as_u64()) == Some(request_id) {
+            return Ok((message, messages));
+        }
+        handle_lsp_server_message(process, &message)?;
+        messages.push(message);
+    }
+}
+
+fn drain_lsp_messages(
+    process: &mut LanguageServerProcess,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let mut messages = Vec::new();
+    for _ in 0..128 {
+        let message = match process.messages.try_recv() {
+            Ok(message) => message.map_err(anyhow::Error::msg)?,
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                anyhow::bail!("language server output disconnected")
+            }
+        };
+        handle_lsp_server_message(process, &message)?;
+        messages.push(message);
+    }
+    Ok(messages)
+}
+
+fn handle_lsp_server_message(
+    process: &mut LanguageServerProcess,
+    message: &serde_json::Value,
+) -> anyhow::Result<()> {
+    let Some(id) = message.get("id") else {
+        return Ok(());
     };
-    Ok(LspSessionResult {
-        server_id: format!("{}:{}", request.language_id, command_name),
-        language_id: request.language_id,
-        command: command_text,
-        status,
-        message,
-    })
+    let Some(method) = message.get("method").and_then(|value| value.as_str()) else {
+        return Ok(());
+    };
+    let result = if method == "workspace/configuration" {
+        let count = message
+            .pointer("/params/items")
+            .and_then(|value| value.as_array())
+            .map(|items| items.len())
+            .unwrap_or(0);
+        serde_json::Value::Array(vec![serde_json::Value::Null; count])
+    } else {
+        serde_json::Value::Null
+    };
+    write_lsp_message(
+        &mut process.stdin,
+        &serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+    )
 }
 
-#[tauri::command]
-async fn lsp_request(request: LspRequestPayload) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({
-        "serverId": request.server_id,
-        "method": request.method,
-        "params": request.params,
-        "status": "not-running",
-        "message": "Language server process orchestration is scaffolded for Core IDE V1.",
-    }))
-}
-
-#[tauri::command]
-async fn lsp_stop(server_id: String) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({
-        "serverId": server_id,
-        "status": "stopped",
-    }))
+fn workspace_file_uri(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    let mut encoded = String::with_capacity(value.len() + 8);
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b':' | b'.' | b'-' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    format!("file://{encoded}")
 }
 
 #[tauri::command]
@@ -1707,58 +2158,305 @@ fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String
 }
 
 #[tauri::command]
-async fn debug_start(request: DebugStartRequest) -> Result<DebugSessionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || debug_start_blocking(request))
+async fn debug_start(
+    request: DebugStartRequest,
+    manager: tauri::State<'_, DebugAdapterManager>,
+) -> Result<DebugSessionResult, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.start(request).map_err(to_string))
         .await
         .map_err(|error| format!("debug start worker failed: {error}"))?
 }
 
-fn debug_start_blocking(request: DebugStartRequest) -> Result<DebugSessionResult, String> {
-    if let Some(workspace_path) = request.workspace_path.as_deref() {
-        let _ = workspace_root(workspace_path).map_err(to_string)?;
+#[tauri::command]
+async fn debug_send(
+    request: DebugSendRequest,
+    manager: tauri::State<'_, DebugAdapterManager>,
+) -> Result<serde_json::Value, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.send(request).map_err(to_string))
+        .await
+        .map_err(|error| format!("debug request worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn debug_stop(
+    session_id: String,
+    manager: tauri::State<'_, DebugAdapterManager>,
+) -> Result<serde_json::Value, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.stop(&session_id).map_err(to_string))
+        .await
+        .map_err(|error| format!("debug stop worker failed: {error}"))?
+}
+
+impl DebugAdapterManager {
+    fn start(&self, request: DebugStartRequest) -> anyhow::Result<DebugSessionResult> {
+        let root = request
+            .workspace_path
+            .as_deref()
+            .map(workspace_root)
+            .transpose()?;
+        let command_text = request
+            .command
+            .as_deref()
+            .unwrap_or(&request.adapter)
+            .trim();
+        let mut command_parts = command_text.split_whitespace();
+        let command_name = command_parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("debug adapter command is required"))?;
+        let mut args = command_parts.map(ToOwned::to_owned).collect::<Vec<_>>();
+        args.extend(request.args.clone().unwrap_or_default());
+        let mut command = command_with_gui_path(command_name);
+        command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if let Some(root) = root.as_ref() {
+            command.current_dir(root);
+        }
+        let mut child = command.spawn().map_err(|error| {
+            anyhow::anyhow!("failed to start debug adapter {command_name}: {error}")
+        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("debug adapter stdin unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("debug adapter stdout unavailable"))?;
+        let mut process = DebugAdapterProcess {
+            child,
+            stdin,
+            messages: spawn_lsp_message_reader(stdout),
+            next_sequence: 2,
+            name: request.name.clone(),
+            adapter: request.adapter.clone(),
+        };
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "seq": 1,
+                "type": "request",
+                "command": "initialize",
+                "arguments": {
+                    "clientID": "gyro",
+                    "clientName": "Gyro",
+                    "adapterID": request.adapter,
+                    "pathFormat": "path",
+                    "linesStartAt1": true,
+                    "columnsStartAt1": true,
+                    "supportsVariableType": true,
+                    "supportsVariablePaging": true,
+                    "supportsRunInTerminalRequest": false,
+                    "supportsMemoryReferences": true,
+                    "supportsProgressReporting": true,
+                    "supportsInvalidatedEvent": true
+                }
+            }),
+        )?;
+        let (response, events) = receive_dap_response(&mut process, 1, Duration::from_secs(12))?;
+        if response.get("success").and_then(|value| value.as_bool()) == Some(false) {
+            let message = response
+                .get("message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("debug adapter initialize failed");
+            anyhow::bail!("{message}");
+        }
+        let capabilities = response
+            .get("body")
+            .and_then(|value| value.as_object())
+            .map(|body| {
+                body.iter()
+                    .filter_map(|(key, value)| {
+                        value
+                            .as_bool()
+                            .is_some_and(|value| value)
+                            .then_some(key.clone())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let session_id = format!("debug-{}", Uuid::new_v4());
+        let message = Some(format!(
+            "Initialized with {} capabilities and {} startup events",
+            capabilities.len(),
+            events.len()
+        ));
+        let result = DebugSessionResult {
+            id: session_id.clone(),
+            name: request.name,
+            adapter: request.adapter,
+            status: "configured".into(),
+            message,
+            capabilities,
+        };
+        self.processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?
+            .insert(session_id, process);
+        Ok(result)
     }
-    let command = request.command.as_deref().unwrap_or(&request.adapter);
-    let mut probe = command_with_gui_path(command);
-    probe.arg("--version");
-    if let Some(args) = request.args.as_ref() {
-        let _ = args.len();
+
+    fn send(&self, request: DebugSendRequest) -> anyhow::Result<serde_json::Value> {
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?;
+        let process = processes
+            .get_mut(&request.session_id)
+            .ok_or_else(|| anyhow::anyhow!("debug session is not running"))?;
+        if let Some(status) = process.child.try_wait()? {
+            anyhow::bail!("debug adapter exited with {status}");
+        }
+        let command = request
+            .request
+            .get("command")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow::anyhow!("debug request command is required"))?;
+        if command == "$/gyro/poll" {
+            let events = drain_dap_messages(process)?;
+            return Ok(redact_json_strings(serde_json::json!({
+                "sessionId": request.session_id,
+                "name": process.name,
+                "adapter": process.adapter,
+                "status": "ok",
+                "events": events,
+            })));
+        }
+        let sequence = process.next_sequence;
+        process.next_sequence += 1;
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "seq": sequence,
+                "type": "request",
+                "command": command,
+                "arguments": request.request.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({})),
+            }),
+        )?;
+        let (response, events) = receive_dap_response(process, sequence, Duration::from_secs(20))?;
+        Ok(redact_json_strings(serde_json::json!({
+            "sessionId": request.session_id,
+            "status": if response.get("success").and_then(|value| value.as_bool()) == Some(false) { "error" } else { "ok" },
+            "response": response,
+            "events": events,
+        })))
     }
-    let (status, message) = match probe.output() {
-        Ok(output) if output.status.success() => (
-            "configured".to_string(),
-            Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
-        ),
-        Ok(output) => (
-            "failed".to_string(),
-            Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-        ),
-        Err(error) => ("failed".to_string(), Some(error.to_string())),
+
+    fn stop(&self, session_id: &str) -> anyhow::Result<serde_json::Value> {
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?;
+        let Some(mut process) = processes.remove(session_id) else {
+            return Ok(serde_json::json!({ "sessionId": session_id, "status": "stopped" }));
+        };
+        let sequence = process.next_sequence;
+        let _ = write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "seq": sequence,
+                "type": "request",
+                "command": "disconnect",
+                "arguments": { "terminateDebuggee": false }
+            }),
+        );
+        let _ = receive_dap_response(&mut process, sequence, Duration::from_secs(2));
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+        Ok(serde_json::json!({ "sessionId": session_id, "status": "stopped" }))
+    }
+}
+
+fn receive_dap_response(
+    process: &mut DebugAdapterProcess,
+    request_sequence: u64,
+    timeout: Duration,
+) -> anyhow::Result<(serde_json::Value, Vec<serde_json::Value>)> {
+    let deadline = Instant::now() + timeout;
+    let mut events = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("debug adapter request timed out");
+        }
+        let message = process
+            .messages
+            .recv_timeout(remaining)
+            .map_err(|error| anyhow::anyhow!("debug adapter response failed: {error}"))?
+            .map_err(anyhow::Error::msg)?;
+        if message.get("type").and_then(|value| value.as_str()) == Some("response")
+            && message.get("request_seq").and_then(|value| value.as_u64()) == Some(request_sequence)
+        {
+            return Ok((message, events));
+        }
+        handle_dap_adapter_request(process, &message)?;
+        events.push(message);
+    }
+}
+
+fn drain_dap_messages(process: &mut DebugAdapterProcess) -> anyhow::Result<Vec<serde_json::Value>> {
+    let mut messages = Vec::new();
+    for _ in 0..128 {
+        let message = match process.messages.try_recv() {
+            Ok(message) => message.map_err(anyhow::Error::msg)?,
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                anyhow::bail!("debug adapter output disconnected")
+            }
+        };
+        handle_dap_adapter_request(process, &message)?;
+        messages.push(message);
+    }
+    Ok(messages)
+}
+
+fn handle_dap_adapter_request(
+    process: &mut DebugAdapterProcess,
+    message: &serde_json::Value,
+) -> anyhow::Result<()> {
+    if message.get("type").and_then(|value| value.as_str()) != Some("request") {
+        return Ok(());
+    }
+    let Some(request_sequence) = message.get("seq").and_then(|value| value.as_u64()) else {
+        return Ok(());
     };
-    Ok(DebugSessionResult {
-        id: format!("debug-{}", Uuid::new_v4()),
-        name: request.name,
-        adapter: request.adapter,
-        status,
-        message,
-    })
+    let command = message
+        .get("command")
+        .and_then(|value| value.as_str())
+        .unwrap_or("adapterRequest");
+    let sequence = process.next_sequence;
+    process.next_sequence += 1;
+    write_lsp_message(
+        &mut process.stdin,
+        &serde_json::json!({
+            "seq": sequence,
+            "type": "response",
+            "request_seq": request_sequence,
+            "command": command,
+            "success": false,
+            "message": format!("Gyro does not support adapter request {command} yet")
+        }),
+    )
 }
 
-#[tauri::command]
-async fn debug_send(request: DebugSendRequest) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({
-        "sessionId": request.session_id,
-        "status": "not-running",
-        "request": request.request,
-        "message": "Debug Adapter Protocol bridge is scaffolded for Core IDE V1.",
-    }))
-}
-
-#[tauri::command]
-async fn debug_stop(session_id: String) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({
-        "sessionId": session_id,
-        "status": "stopped",
-    }))
+fn redact_json_strings(mut value: serde_json::Value) -> serde_json::Value {
+    fn redact(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::String(text) => {
+                *text = gyro_core::security::redact_secrets(text);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(redact),
+            serde_json::Value::Object(map) => map.values_mut().for_each(redact),
+            _ => {}
+        }
+    }
+    redact(&mut value);
+    value
 }
 
 fn read_workspace_file_impl(
@@ -2073,10 +2771,11 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
     let mut command = command_with_gui_path("git");
     command
         .arg("-C")
-        .arg(root)
+        .arg(&root)
         .arg("status")
         .arg("--porcelain=v2")
-        .arg("--branch");
+        .arg("--branch")
+        .arg("--untracked-files=all");
     let output = match command.output() {
         Ok(output) => output,
         Err(error) => {
@@ -2087,6 +2786,10 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
                 upstream: None,
                 ahead: 0,
                 behind: 0,
+                repo_root: None,
+                additions: 0,
+                deletions: 0,
+                stats_partial: false,
                 files: Vec::new(),
                 last_checked_at: None,
                 error: Some(error.to_string()),
@@ -2101,14 +2804,21 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             upstream: None,
             ahead: 0,
             behind: 0,
+            repo_root: None,
+            additions: 0,
+            deletions: 0,
+            stats_partial: false,
             files: Vec::new(),
             last_checked_at: None,
             error: Some(String::from_utf8_lossy(&output.stderr).to_string()),
         });
     }
-    Ok(parse_git_status_v2(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    let mut status = parse_git_status_v2(&String::from_utf8_lossy(&output.stdout));
+    let repo_root = git_repo_root(&root).unwrap_or(root);
+    apply_git_diff_stats(&repo_root, &mut status);
+    status.repo_root = Some(repo_root.display().to_string());
+    status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
+    Ok(status)
 }
 
 fn parse_git_status_v2(output: &str) -> SourceControlStatus {
@@ -2119,6 +2829,10 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         upstream: None,
         ahead: 0,
         behind: 0,
+        repo_root: None,
+        additions: 0,
+        deletions: 0,
+        stats_partial: false,
         files: Vec::new(),
         last_checked_at: None,
         error: None,
@@ -2143,6 +2857,8 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
                 original_path: None,
                 state: "untracked".into(),
                 staged: false,
+                additions: 0,
+                deletions: 0,
             });
         } else if line.starts_with("1 ") {
             let mut parts = line.split_whitespace();
@@ -2154,6 +2870,8 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
                 original_path: None,
                 state: git_state_from_xy(xy),
                 staged: xy.chars().next().is_some_and(|value| value != '.'),
+                additions: 0,
+                deletions: 0,
             });
         } else if line.starts_with("2 ") {
             let mut parts = line.split_whitespace();
@@ -2173,6 +2891,8 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
                 original_path,
                 state: "renamed".into(),
                 staged: xy.chars().next().is_some_and(|value| value != '.'),
+                additions: 0,
+                deletions: 0,
             });
         } else if line.starts_with("u ") {
             let path = line
@@ -2185,10 +2905,133 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
                 original_path: None,
                 state: "conflicted".into(),
                 staged: false,
+                additions: 0,
+                deletions: 0,
             });
         }
     }
     status
+}
+
+fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(workspace)
+        .args(["rev-parse", "--show-toplevel"]);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
+    let (tracked, tracked_partial) = git_numstat(repo_root);
+    status.stats_partial = tracked_partial;
+
+    for (additions, deletions) in tracked.values() {
+        status.additions = status.additions.saturating_add(*additions);
+        status.deletions = status.deletions.saturating_add(*deletions);
+    }
+
+    for file in &mut status.files {
+        if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
+            file.original_path
+                .as_ref()
+                .and_then(|path| tracked.get(path))
+        }) {
+            file.additions = *additions;
+            file.deletions = *deletions;
+        }
+        if file.state == "untracked" {
+            let (additions, partial) = untracked_text_additions(repo_root, &file.path);
+            file.additions = additions;
+            status.additions = status.additions.saturating_add(additions);
+            status.stats_partial |= partial;
+        }
+    }
+}
+
+fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["diff", "--numstat", "--no-renames", "HEAD", "--"]);
+    let output = match command.output() {
+        Ok(output) if output.status.success() => output,
+        _ => return git_numstat_without_head(repo_root),
+    };
+    parse_git_numstat(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn git_numstat_without_head(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
+    let mut totals = HashMap::new();
+    let mut partial = false;
+    for args in [
+        &["diff", "--numstat", "--no-renames", "--cached", "--"][..],
+        &["diff", "--numstat", "--no-renames", "--"][..],
+    ] {
+        let mut command = command_with_gui_path("git");
+        command.arg("-C").arg(repo_root).args(args);
+        let Ok(output) = command.output() else {
+            partial = true;
+            continue;
+        };
+        if !output.status.success() {
+            partial = true;
+            continue;
+        }
+        let (stats, output_partial) = parse_git_numstat(&String::from_utf8_lossy(&output.stdout));
+        partial |= output_partial;
+        for (path, (additions, deletions)) in stats {
+            let entry = totals.entry(path).or_insert((0usize, 0usize));
+            entry.0 = entry.0.saturating_add(additions);
+            entry.1 = entry.1.saturating_add(deletions);
+        }
+    }
+    (totals, partial)
+}
+
+fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
+    let mut totals = HashMap::new();
+    let mut partial = false;
+    for line in output.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let additions = parts.next().unwrap_or_default();
+        let deletions = parts.next().unwrap_or_default();
+        let path = parts.next().unwrap_or_default();
+        if path.is_empty() {
+            continue;
+        }
+        let (Ok(additions), Ok(deletions)) = (additions.parse(), deletions.parse()) else {
+            partial = true;
+            continue;
+        };
+        totals.insert(path.to_string(), (additions, deletions));
+    }
+    (totals, partial)
+}
+
+fn untracked_text_additions(repo_root: &Path, relative_path: &str) -> (usize, bool) {
+    let path = repo_root.join(relative_path);
+    let Ok(metadata) = fs::metadata(&path) else {
+        return (0, true);
+    };
+    if !metadata.is_file() || metadata.len() > MAX_WORKSPACE_FILE_EDIT_BYTES as u64 {
+        return (0, metadata.is_file());
+    }
+    let Ok(bytes) = fs::read(path) else {
+        return (0, true);
+    };
+    if bytes.contains(&0) {
+        return (0, false);
+    }
+    let lines = bytes.iter().filter(|byte| **byte == b'\n').count()
+        + usize::from(!bytes.is_empty() && bytes.last() != Some(&b'\n'));
+    (lines, false)
 }
 
 fn git_state_from_xy(xy: &str) -> String {
@@ -2664,13 +3507,10 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     let command_path = terminal_command_path(&request.command);
     let mut command = CommandBuilder::new(command_path.as_str());
     command.args(request.args.iter().map(String::as_str));
-    if let Some(cwd) = cwd {
+    if let Some(cwd) = cwd.as_ref() {
         command.cwd(cwd);
     }
-    command.env("TERM", "xterm-256color");
-    command.env("COLORTERM", "truecolor");
-    command.env("TERM_PROGRAM", "Gyro");
-    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    configure_terminal_environment(&mut command);
     if !command_path.contains('/') {
         command.env("PATH", augmented_gui_path());
     }
@@ -2684,6 +3524,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
 
     Ok(TerminalProcess {
         request,
+        working_directory: cwd,
         master: pair.master,
         writer,
         child,
@@ -2693,6 +3534,17 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
         cols,
         rows,
     })
+}
+
+fn configure_terminal_environment(command: &mut CommandBuilder) {
+    command.env_remove("NO_COLOR");
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("TERM_PROGRAM", "Gyro");
+    command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    command.env("CLICOLOR", "1");
+    command.env("CLICOLOR_FORCE", "1");
+    command.env("FORCE_COLOR", "1");
 }
 
 fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<PathBuf>> {
@@ -4127,6 +4979,10 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
         output,
         status: process.status.clone(),
         exit_code: process.exit_code,
+        working_directory: process
+            .working_directory
+            .as_ref()
+            .map(|path| path.display().to_string()),
         cols: process.cols,
         rows: process.rows,
     }
@@ -4138,6 +4994,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TerminalProcessManager::default())
+        .manage(LanguageServerManager::default())
+        .manage(DebugAdapterManager::default())
         .setup(|app| {
             start_cli_ipc_listener(app.handle().clone());
             Ok(())
@@ -4164,6 +5022,7 @@ pub fn run() {
             get_account_session,
             git_commit,
             git_diff,
+            git_discard,
             git_stage,
             git_status,
             git_unstage,
@@ -4284,6 +5143,218 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lsp_json_rpc_framing_round_trips() {
+        let value = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "textDocument/hover",
+            "params": { "line": 4 }
+        });
+        let mut framed = Vec::new();
+        write_lsp_message(&mut framed, &value).unwrap();
+
+        let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
+
+        assert_eq!(decoded, value);
+        assert!(String::from_utf8_lossy(&framed).starts_with("Content-Length: "));
+    }
+
+    #[test]
+    fn lsp_json_rpc_framing_accepts_case_insensitive_header() {
+        let body = br#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
+        let framed = format!("content-length: {}\r\n\r\n", body.len())
+            .into_bytes()
+            .into_iter()
+            .chain(body.iter().copied())
+            .collect::<Vec<_>>();
+
+        let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
+
+        assert_eq!(decoded["method"], "initialized");
+    }
+
+    #[test]
+    fn workspace_file_uri_encodes_spaces_without_losing_path_shape() {
+        let uri = workspace_file_uri(Path::new("/tmp/Gyro Workspace/src/main.ts"));
+
+        assert_eq!(uri, "file:///tmp/Gyro%20Workspace/src/main.ts");
+    }
+
+    #[test]
+    fn lsp_notification_detection_covers_document_lifecycle() {
+        assert!(lsp_method_is_notification("textDocument/didOpen"));
+        assert!(lsp_method_is_notification("textDocument/didChange"));
+        assert!(lsp_method_is_notification("$/cancelRequest"));
+        assert!(!lsp_method_is_notification("textDocument/hover"));
+    }
+
+    #[test]
+    fn dap_json_rpc_framing_round_trips() {
+        let value = serde_json::json!({
+            "seq": 4,
+            "type": "request",
+            "command": "threads",
+            "arguments": {}
+        });
+        let mut framed = Vec::new();
+        write_lsp_message(&mut framed, &value).unwrap();
+
+        let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
+
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn debug_adapter_manager_runs_request_lifecycle() {
+        if command_with_gui_path("python3")
+            .arg("--version")
+            .output()
+            .map(|output| !output.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let workspace = tempfile::tempdir().unwrap();
+        let adapter_path = workspace.path().join("fake_adapter.py");
+        std::fs::write(
+            &adapter_path,
+            r#"import json, sys
+
+def read_message():
+    length = None
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            return None
+        if line in (b'\r\n', b'\n'):
+            break
+        if line.lower().startswith(b'content-length:'):
+            length = int(line.split(b':', 1)[1].strip())
+    return json.loads(sys.stdin.buffer.read(length))
+
+def send(message):
+    body = json.dumps(message).encode()
+    sys.stdout.buffer.write(f'Content-Length: {len(body)}\r\n\r\n'.encode() + body)
+    sys.stdout.buffer.flush()
+
+while True:
+    message = read_message()
+    if message is None:
+        break
+    command = message.get('command', '')
+    body = {'supportsConfigurationDoneRequest': True} if command == 'initialize' else {'threads': [{'id': 1, 'name': 'main'}]}
+    send({'seq': message['seq'] + 100, 'type': 'response', 'request_seq': message['seq'], 'command': command, 'success': True, 'body': body})
+    if command == 'disconnect':
+        break
+"#,
+        )
+        .unwrap();
+        let manager = DebugAdapterManager::default();
+        let session = manager
+            .start(DebugStartRequest {
+                workspace_path: Some(workspace.path().to_string_lossy().to_string()),
+                name: "Fake debug".into(),
+                adapter: "fake".into(),
+                command: Some(format!("python3 {}", adapter_path.display())),
+                args: None,
+            })
+            .unwrap();
+
+        assert_eq!(session.status, "configured");
+        assert!(session
+            .capabilities
+            .contains(&"supportsConfigurationDoneRequest".to_string()));
+        let response = manager
+            .send(DebugSendRequest {
+                session_id: session.id.clone(),
+                request: serde_json::json!({ "command": "threads" }),
+            })
+            .unwrap();
+        assert_eq!(response["response"]["body"]["threads"][0]["name"], "main");
+        assert_eq!(manager.stop(&session.id).unwrap()["status"], "stopped");
+    }
+
+    #[test]
+    fn debug_adapter_payloads_redact_secrets_recursively() {
+        let value = redact_json_strings(serde_json::json!({
+            "output": "Authorization: Bearer super-secret-value",
+            "nested": ["OPENAI_API_KEY=sk-test-secret"]
+        }));
+
+        assert!(!value.to_string().contains("super-secret-value"));
+        assert!(!value.to_string().contains("sk-test-secret"));
+    }
+
+    #[test]
+    fn git_discard_restores_tracked_files_and_removes_untracked_files() {
+        let workspace = tempfile::tempdir().unwrap();
+        run_git(workspace.path(), &["init"]);
+        run_git(
+            workspace.path(),
+            &["config", "user.email", "gyro@example.test"],
+        );
+        run_git(workspace.path(), &["config", "user.name", "Gyro Tests"]);
+        std::fs::write(workspace.path().join("tracked.txt"), "original\n").unwrap();
+        run_git(workspace.path(), &["add", "tracked.txt"]);
+        run_git(workspace.path(), &["commit", "-m", "initial"]);
+        std::fs::write(workspace.path().join("tracked.txt"), "changed\n").unwrap();
+
+        git_discard_blocking(GitStageRequest {
+            workspace_path: workspace.path().to_string_lossy().to_string(),
+            path: "tracked.txt".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("tracked.txt")).unwrap(),
+            "original\n"
+        );
+
+        std::fs::write(workspace.path().join("untracked.txt"), "temporary\n").unwrap();
+        git_discard_blocking(GitStageRequest {
+            workspace_path: workspace.path().to_string_lossy().to_string(),
+            path: "untracked.txt".into(),
+        })
+        .unwrap();
+        assert!(!workspace.path().join("untracked.txt").exists());
+    }
+
+    #[test]
+    fn language_server_manager_initializes_rust_analyzer_when_available() {
+        if command_with_gui_path("rust-analyzer")
+            .arg("--version")
+            .output()
+            .map(|output| !output.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join("src")).unwrap();
+        std::fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[package]\nname = \"lsp-check\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(workspace.path().join("src/lib.rs"), "pub fn ready() {}\n").unwrap();
+        let manager = LanguageServerManager::default();
+
+        let session = manager
+            .start(LspStartRequest {
+                workspace_path: workspace.path().to_string_lossy().to_string(),
+                language_id: "rust".into(),
+                command: "rust-analyzer".into(),
+            })
+            .unwrap();
+
+        assert_eq!(session.status, "ready");
+        assert!(session.message.contains("capabilities"));
+        assert_eq!(
+            manager.stop(&session.server_id).unwrap()["status"],
+            "stopped"
+        );
+    }
 
     #[test]
     fn reads_text_file_inside_workspace() {
@@ -5009,6 +6080,172 @@ mod tests {
     }
 
     #[test]
+    fn terminal_environment_enables_color_and_removes_no_color() {
+        let mut command = CommandBuilder::new("sh");
+        command.env("NO_COLOR", "1");
+
+        configure_terminal_environment(&mut command);
+
+        assert!(command.get_env("NO_COLOR").is_none());
+        assert_eq!(
+            command.get_env("TERM").and_then(|value| value.to_str()),
+            Some("xterm-256color")
+        );
+        assert_eq!(
+            command
+                .get_env("COLORTERM")
+                .and_then(|value| value.to_str()),
+            Some("truecolor")
+        );
+        assert_eq!(
+            command
+                .get_env("CLICOLOR_FORCE")
+                .and_then(|value| value.to_str()),
+            Some("1")
+        );
+        assert_eq!(
+            command
+                .get_env("FORCE_COLOR")
+                .and_then(|value| value.to_str()),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn terminal_manager_preserves_ansi_color_sequences() {
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-color".into(),
+                title: "Shell".into(),
+                command: "sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '\\033[35mYOLO\\033[0m \\033[36m/model\\033[0m'".into(),
+                ],
+                workspace_path: None,
+                workspace_mode: None,
+                working_directory: None,
+                cols: None,
+                rows: None,
+            })
+            .unwrap();
+
+        let snapshot = wait_for_terminal_output(&manager, "pane-color", "YOLO");
+        assert!(snapshot.output.contains("\u{1b}[35mYOLO\u{1b}[0m"));
+        assert!(snapshot.output.contains("\u{1b}[36m/model\u{1b}[0m"));
+        assert_eq!(snapshot.status, "done");
+    }
+
+    #[test]
+    fn terminal_snapshot_keeps_resolved_working_directory() {
+        let workspace = tempfile::tempdir().unwrap();
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-cwd".into(),
+                title: "Shell".into(),
+                command: "sh".into(),
+                args: vec!["-c".into(), "pwd".into()],
+                workspace_path: Some(workspace.path().display().to_string()),
+                workspace_mode: Some("local".into()),
+                working_directory: None,
+                cols: None,
+                rows: None,
+            })
+            .unwrap();
+
+        let snapshot = wait_for_terminal_output(
+            &manager,
+            "pane-cwd",
+            &workspace.path().display().to_string(),
+        );
+        assert_eq!(
+            snapshot.working_directory.as_deref(),
+            Some(workspace.path().canonicalize().unwrap().to_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn git_status_reports_clean_and_live_line_stats() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("tracked.txt"), "alpha\nbeta\n").unwrap();
+        fs::write(repo.path().join("old.txt"), "rename me\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+
+        let clean = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(clean.available);
+        assert!(clean.files.is_empty());
+        assert_eq!((clean.additions, clean.deletions), (0, 0));
+
+        fs::write(repo.path().join("tracked.txt"), "alpha\ngamma\ndelta\n").unwrap();
+        fs::write(repo.path().join("new.txt"), "one\ntwo\n").unwrap();
+        run_git(repo.path(), &["mv", "old.txt", "renamed.txt"]);
+
+        let changed = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert_eq!(changed.branch.as_deref(), Some("main"));
+        assert_eq!(
+            changed.repo_root.as_deref(),
+            repo.path().canonicalize().unwrap().to_str()
+        );
+        assert!(changed.additions >= 5);
+        assert!(changed.deletions >= 2);
+        assert!(changed.files.iter().any(|file| file.path == "tracked.txt"));
+        assert!(changed
+            .files
+            .iter()
+            .any(|file| file.path == "new.txt" && file.additions == 2));
+        assert!(changed.files.iter().any(|file| file.state == "renamed"));
+        assert!(!changed.stats_partial);
+    }
+
+    #[test]
+    fn git_status_handles_unborn_binary_large_and_non_git_workspaces() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("staged.txt"), "first\nsecond\n").unwrap();
+        run_git(repo.path(), &["add", "staged.txt"]);
+        fs::write(repo.path().join("untracked.txt"), "third\n").unwrap();
+        fs::write(repo.path().join("binary.bin"), [0, 1, 2, 3]).unwrap();
+        fs::write(
+            repo.path().join("large.txt"),
+            vec![b'x'; MAX_WORKSPACE_FILE_EDIT_BYTES + 1],
+        )
+        .unwrap();
+
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(status.available);
+        assert!(status.additions >= 3);
+        assert!(status.stats_partial);
+        assert!(status
+            .files
+            .iter()
+            .any(|file| file.path == "binary.bin" && file.additions == 0));
+        assert!(status
+            .files
+            .iter()
+            .any(|file| file.path == "large.txt" && file.additions == 0));
+
+        let folder = tempfile::tempdir().unwrap();
+        let unavailable = git_status_impl(folder.path().to_str().unwrap()).unwrap();
+        assert!(!unavailable.available);
+        assert_eq!((unavailable.additions, unavailable.deletions), (0, 0));
+    }
+
+    #[test]
+    fn git_status_parser_marks_conflicts() {
+        let status = parse_git_status_v2(
+            "# branch.head main\nu UU N... 100644 100644 100644 100644 a b c conflicted.txt\n",
+        );
+        assert!(status
+            .files
+            .iter()
+            .any(|file| file.path == "conflicted.txt" && file.state == "conflicted"));
+    }
+
+    #[test]
     fn terminal_manager_stops_running_process() {
         let manager = TerminalProcessManager::default();
         manager
@@ -5043,6 +6280,12 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         manager.read(pane_id).unwrap()
+    }
+
+    fn init_git_repo(repo: &Path) {
+        run_git(repo, &["init", "-b", "main"]);
+        run_git(repo, &["config", "user.name", "Gyro Test"]);
+        run_git(repo, &["config", "user.email", "gyro@example.test"]);
     }
 
     fn run_git(repo: &Path, args: &[&str]) {

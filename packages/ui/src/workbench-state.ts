@@ -21,6 +21,7 @@ import type {
   IdeCommand,
   IdeContribution,
   IdeViewId,
+  LanguageServerState,
   OutputChannel,
   ProblemDiagnostic,
   SourceControlState,
@@ -45,6 +46,7 @@ import type {
   Task,
   TaskStatus,
   TerminalPane,
+  TerminalPaneLayout,
   TerminalPaneStatus,
   TerminalTemplate,
   ThemeMode,
@@ -88,6 +90,7 @@ function defaultIdeLayout(): WorkbenchState["ide"]["layout"] {
   return {
     groups: [createEditorGroup("group-main", "Main")],
     activeGroupId: "group-main",
+    splitDirection: "right",
     minimapEnabled: true,
     restoreOnLaunch: true,
     rightAssistantOpen: true,
@@ -100,6 +103,9 @@ function defaultSourceControlState(): SourceControlState {
     available: false,
     ahead: 0,
     behind: 0,
+    additions: 0,
+    deletions: 0,
+    statsPartial: false,
     files: [],
   };
 }
@@ -339,6 +345,7 @@ export type WorkbenchAction =
   | { type: "ide-open-tab"; tab: EditorTab }
   | { type: "ide-close-tab"; path: string }
   | { type: "ide-select-tab"; path: string }
+  | { type: "ide-select-group"; groupId: string }
   | { type: "ide-split-group"; direction: "right" | "down" }
   | { type: "ide-close-group"; groupId: string }
   | { type: "ide-move-tab"; path: string; toGroupId: string }
@@ -369,6 +376,8 @@ export type WorkbenchAction =
   | { type: "ide-set-test-tree"; tests: TestTreeItem[] }
   | { type: "ide-set-debug-session"; session: DebugSessionState }
   | { type: "ide-remove-debug-session"; sessionId: string }
+  | { type: "ide-set-language-server"; server: LanguageServerState }
+  | { type: "ide-remove-language-server"; serverId: string }
   | { type: "ide-upsert-output-channel"; channel: OutputChannel }
   | { type: "ide-append-output"; channelId: string; lines: string[] }
   | { type: "ide-select-output-channel"; channelId: string }
@@ -399,6 +408,12 @@ export type WorkbenchAction =
       status: TerminalPaneStatus;
       event: string;
       command?: string;
+      workingDirectory?: string;
+    }
+  | {
+      type: "set-terminal-pane-attention";
+      paneId: string;
+      attention?: "waiting" | "failed";
     }
   | {
       type: "upsert-restored-terminal-pane";
@@ -408,6 +423,11 @@ export type WorkbenchAction =
       type: "move-terminal-pane";
       sourcePaneId: string;
       targetPaneId: string;
+    }
+  | {
+      type: "set-terminal-pane-layout";
+      paneId: string;
+      layout: TerminalPaneLayout;
     }
   | { type: "remove-terminal-pane"; paneId: string }
   | {
@@ -524,6 +544,28 @@ export function createInitialWorkbenchState(
   const diffReview = normalizeDiffReview(
     overrides.diffReview ?? defaultDiffReview(),
   );
+  const ideDefaults: WorkbenchState["ide"] = {
+    tabs: [],
+    activePath: undefined,
+    buffers: {},
+    selection: undefined,
+    lastAssistantRequest: undefined,
+    activeView: "explorer",
+    layout: defaultIdeLayout(),
+    searchQuery: { query: "", maxResults: 200 },
+    searchResults: [],
+    fileDecorations: [],
+    diagnostics: [],
+    sourceControl: defaultSourceControlState(),
+    taskDefinitions: [],
+    testTree: [],
+    debugSessions: [],
+    languageServers: [],
+    outputChannels: defaultOutputChannels(),
+    activeOutputChannelId: "system",
+    contributions: defaultIdeContributions(),
+    aiToolCalls: [],
+  };
 
   return {
     activeDestination: "workspace",
@@ -541,32 +583,21 @@ export function createInitialWorkbenchState(
     providerHandoffs,
     providerReadiness: defaultProviderReadiness(),
     activeTurn: overrides.activeTurn,
-    ide: {
-      tabs: [],
-      activePath: undefined,
-      buffers: {},
-      selection: undefined,
-      lastAssistantRequest: undefined,
-      activeView: "explorer",
-      layout: defaultIdeLayout(),
-      searchQuery: { query: "", maxResults: 200 },
-      searchResults: [],
-      fileDecorations: [],
-      diagnostics: [],
-      sourceControl: defaultSourceControlState(),
-      taskDefinitions: [],
-      testTree: [],
-      debugSessions: [],
-      outputChannels: defaultOutputChannels(),
-      activeOutputChannelId: "system",
-      contributions: defaultIdeContributions(),
-      aiToolCalls: [],
-    },
     onboarding: {
       activeStep: "account",
       completedSteps: [],
     },
     ...overrides,
+    ide: {
+      ...ideDefaults,
+      ...overrides.ide,
+      layout: {
+        ...ideDefaults.layout,
+        ...overrides.ide?.layout,
+        groups: overrides.ide?.layout?.groups ?? ideDefaults.layout.groups,
+      },
+      languageServers: overrides.ide?.languageServers ?? [],
+    },
     preferences: normalizeWorkbenchPreferences(overrides.preferences),
     selectedTerminalPaneId:
       overrides.selectedTerminalPaneId ?? terminalPanes[0]?.id ?? "",
@@ -718,6 +749,21 @@ export function workbenchReducer(
           ? tabs[tabs.length - 1]?.path
           : state.ide.activePath;
       const { [action.path]: _closedBuffer, ...buffers } = state.ide.buffers;
+      const groups = state.ide.layout.groups.map((group) => {
+        const groupTabs = group.tabs.filter((tab) => tab.path !== action.path);
+        const activePath =
+          group.activePath === action.path
+            ? groupTabs[groupTabs.length - 1]?.path
+            : group.activePath;
+        return {
+          ...group,
+          activePath,
+          tabs: groupTabs,
+          panes: group.panes.map((pane) =>
+            pane.path === action.path ? { ...pane, path: activePath } : pane,
+          ),
+        };
+      });
       return {
         ...state,
         ide: {
@@ -729,6 +775,7 @@ export function workbenchReducer(
               ? undefined
               : state.ide.selection,
           tabs,
+          layout: { ...state.ide.layout, groups },
         },
       };
     }
@@ -743,6 +790,27 @@ export function workbenchReducer(
           layout: syncEditorGroupsForActivePath(state.ide.layout, action.path),
         },
       };
+    case "ide-select-group": {
+      const group = state.ide.layout.groups.find(
+        (item) => item.id === action.groupId,
+      );
+      if (!group) {
+        return state;
+      }
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        ide: {
+          ...state.ide,
+          activePath: group.activePath ?? state.ide.activePath,
+          layout: {
+            ...state.ide.layout,
+            activeGroupId: group.id,
+          },
+        },
+      };
+    }
     case "ide-split-group": {
       const group = createEditorGroup(
         `group-${Date.now()}`,
@@ -758,6 +826,7 @@ export function workbenchReducer(
           layout: {
             ...state.ide.layout,
             activeGroupId: group.id,
+            splitDirection: action.direction,
             groups: [...state.ide.layout.groups, group],
           },
         },
@@ -1023,6 +1092,30 @@ export function workbenchReducer(
           ),
         },
       };
+    case "ide-set-language-server":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          languageServers: state.ide.languageServers.some(
+            (server) => server.id === action.server.id,
+          )
+            ? state.ide.languageServers.map((server) =>
+                server.id === action.server.id ? action.server : server,
+              )
+            : [...state.ide.languageServers, action.server],
+        },
+      };
+    case "ide-remove-language-server":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          languageServers: state.ide.languageServers.filter(
+            (server) => server.serverId !== action.serverId,
+          ),
+        },
+      };
     case "ide-upsert-output-channel":
       return {
         ...state,
@@ -1126,7 +1219,15 @@ export function workbenchReducer(
         })),
       };
     case "select-terminal-pane":
-      return { ...state, selectedTerminalPaneId: action.paneId };
+      return {
+        ...state,
+        selectedTerminalPaneId: action.paneId,
+        terminalPanes: state.terminalPanes.map((pane) =>
+          pane.id === action.paneId && pane.attention === "waiting"
+            ? { ...pane, attention: undefined }
+            : pane,
+        ),
+      };
     case "add-terminal-pane":
       return {
         ...state,
@@ -1173,7 +1274,13 @@ export function workbenchReducer(
         activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
-            ? { ...pane, status: action.status, lastEvent: action.event }
+            ? {
+                ...pane,
+                status: action.status,
+                lastEvent: action.event,
+                attention:
+                  action.status === "failed" ? "failed" : pane.attention,
+              }
             : pane,
         ),
       };
@@ -1212,6 +1319,10 @@ export function workbenchReducer(
                 lastEvent: action.event,
                 output: action.output,
                 status: action.status,
+                attention:
+                  action.status === "failed" ? "failed" : pane.attention,
+                workingDirectory:
+                  action.workingDirectory ?? pane.workingDirectory,
               }
             : pane,
         ),
@@ -1225,11 +1336,22 @@ export function workbenchReducer(
         selectedTerminalPaneId: state.selectedTerminalPaneId || pane.id,
         terminalPanes: exists
           ? state.terminalPanes.map((item) =>
-              item.id === pane.id ? { ...item, ...pane } : item,
+              item.id === pane.id
+                ? { ...item, ...pane, layout: pane.layout ?? item.layout }
+                : item,
             )
           : [...state.terminalPanes, pane],
       };
     }
+    case "set-terminal-pane-attention":
+      return {
+        ...state,
+        terminalPanes: state.terminalPanes.map((pane) =>
+          pane.id === action.paneId
+            ? { ...pane, attention: action.attention }
+            : pane,
+        ),
+      };
     case "move-terminal-pane":
       return {
         ...state,
@@ -1238,6 +1360,14 @@ export function workbenchReducer(
           state.terminalPanes,
           action.sourcePaneId,
           action.targetPaneId,
+        ),
+      };
+    case "set-terminal-pane-layout":
+      return {
+        ...state,
+        selectedTerminalPaneId: action.paneId,
+        terminalPanes: state.terminalPanes.map((pane) =>
+          pane.id === action.paneId ? { ...pane, layout: action.layout } : pane,
         ),
       };
     case "remove-terminal-pane": {
@@ -1268,6 +1398,7 @@ export function workbenchReducer(
                 output: action.output,
                 profileId: action.profileId,
                 status: "waiting",
+                attention: undefined,
               }
             : pane,
         ),
@@ -1871,6 +2002,7 @@ export function createTerminalPane(
     workspaceMode?: WorkbenchMode;
     branch?: string;
     worktreeName?: string;
+    workingDirectory?: string;
   } = {},
 ): TerminalPane {
   const workspaceMode = options.workspaceMode ?? "local";
@@ -1887,18 +2019,28 @@ export function createTerminalPane(
       options.branch ??
       (workspaceMode === "worktree" ? "gyro/worktree" : "main"),
     worktreeName: options.worktreeName,
+    workingDirectory: options.workingDirectory,
     createdAt: new Date().toISOString(),
   };
 }
 
 function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
   const workspaceMode = pane.workspaceMode ?? "local";
+  const layout = ["auto", "wide", "compact"].includes(pane.layout ?? "")
+    ? pane.layout
+    : undefined;
   return {
     ...pane,
     workspaceMode,
     branch:
       pane.branch ?? (workspaceMode === "worktree" ? "gyro/worktree" : "main"),
     worktreeName: pane.worktreeName,
+    workingDirectory: pane.workingDirectory,
+    attention:
+      pane.attention === "waiting" || pane.attention === "failed"
+        ? pane.attention
+        : undefined,
+    layout,
   };
 }
 
@@ -1971,7 +2113,7 @@ function normalizeWorkbenchPreferences(
     density: preferences?.density === "comfortable" ? "comfortable" : "compact",
     lastSettingsSection: preferences?.lastSettingsSection ?? "general",
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
-    theme: preferences?.theme === "light" ? "light" : "dark",
+    theme: preferences?.theme === "dark" ? "dark" : "light",
   };
 }
 
@@ -2403,8 +2545,8 @@ function parentDirectoriesForPath(filePath: string) {
 
 function defaultBrowserPreview() {
   return {
-    url: "http://localhost:1420",
-    history: ["http://localhost:1420"],
+    url: "http://localhost:3000",
+    history: ["http://localhost:3000"],
     historyIndex: 0,
     device: "desktop" as const,
     consoleErrors: 0,

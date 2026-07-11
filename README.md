@@ -183,4 +183,5 @@ See:
 - [Contributing](CONTRIBUTING.md)
 - [Governance](GOVERNANCE.md)
 - [Roadmap](ROADMAP.md)
+- [Product readiness audit](docs/product-readiness-audit.md)
 - [Release process](docs/release.md)

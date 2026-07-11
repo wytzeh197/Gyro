@@ -38,8 +38,10 @@ export type SettingsSectionId =
 
 export type TerminalPaneStatus =
   "restored" | "running" | "waiting" | "done" | "failed";
+export type TerminalPaneAttention = "waiting" | "failed";
 
 export type TerminalTemplate = 1 | 2 | 4 | 6 | 8 | 12 | 16;
+export type TerminalPaneLayout = "auto" | "wide" | "compact";
 
 export type TerminalPane = {
   id: string;
@@ -52,6 +54,9 @@ export type TerminalPane = {
   workspaceMode: WorkbenchMode;
   branch: string;
   worktreeName?: string;
+  workingDirectory?: string;
+  attention?: TerminalPaneAttention;
+  layout?: TerminalPaneLayout;
   createdAt: string;
 };
 
@@ -480,6 +485,13 @@ export type EditorSelection = {
   text: string;
 };
 
+export type EditorRevealTarget = {
+  path: string;
+  lineNumber: number;
+  column: number;
+  nonce: number;
+};
+
 export type IdeAssistantAction =
   | "explain-selection"
   | "fix-selection"
@@ -506,6 +518,7 @@ export type IdeViewId =
 export type IdeLayoutState = {
   groups: EditorGroup[];
   activeGroupId: string;
+  splitDirection: "right" | "down";
   minimapEnabled: boolean;
   restoreOnLaunch: boolean;
   rightAssistantOpen: boolean;
@@ -559,6 +572,8 @@ export type SourceControlFile = {
   originalPath?: string;
   state: SourceControlResourceState;
   staged: boolean;
+  additions: number;
+  deletions: number;
 };
 
 export type SourceControlState = {
@@ -568,6 +583,10 @@ export type SourceControlState = {
   upstream?: string;
   ahead: number;
   behind: number;
+  repoRoot?: string;
+  additions: number;
+  deletions: number;
+  statsPartial: boolean;
   files: SourceControlFile[];
   lastCheckedAt?: string;
   error?: string;
@@ -597,8 +616,22 @@ export type DebugSessionState = {
   id: string;
   name: string;
   adapter: string;
-  status: "configured" | "starting" | "running" | "stopped" | "failed";
+  status:
+    "configured" | "starting" | "running" | "paused" | "stopped" | "failed";
   message?: string;
+  capabilities?: string[];
+  lastEvent?: string;
+};
+
+export type LanguageServerState = {
+  id: string;
+  serverId?: string;
+  languageId: string;
+  command: string;
+  status:
+    "starting" | "ready" | "not-installed" | "warning" | "error" | "stopped";
+  message?: string;
+  activePath?: string;
 };
 
 export type OutputChannel = {
@@ -656,6 +689,7 @@ export type IdeState = {
   taskDefinitions: TaskDefinition[];
   testTree: TestTreeItem[];
   debugSessions: DebugSessionState[];
+  languageServers: LanguageServerState[];
   outputChannels: OutputChannel[];
   activeOutputChannelId?: string;
   contributions: IdeContribution[];

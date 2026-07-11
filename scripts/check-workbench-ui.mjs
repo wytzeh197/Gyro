@@ -48,6 +48,8 @@ const indexSource = readRepoFile("packages/ui/src/index.ts");
 const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
 const launchDocsSource = readRepoFile("docs/launch.md");
+const roadmapSource = readRepoFile("ROADMAP.md");
+const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
 const typeSource = readRepoFile("packages/ui/src/types.ts");
@@ -168,6 +170,41 @@ expect(
 );
 
 const initialState = createInitialWorkbenchState();
+const { languageServers: _legacyLanguageServers, ...legacyIdeState } =
+  initialState.ide;
+const migratedIdeState = createInitialWorkbenchState({
+  ...initialState,
+  ide: legacyIdeState,
+});
+expect(
+  Array.isArray(migratedIdeState.ide.languageServers) &&
+    migratedIdeState.ide.languageServers.length === 0,
+  "Persisted IDE state from before language servers should hydrate safely.",
+);
+let editorGroupState = workbenchReducer(initialState, {
+  type: "ide-open-tab",
+  tab: { path: "src/main.ts", title: "main.ts", dirty: false },
+});
+editorGroupState = workbenchReducer(editorGroupState, {
+  type: "ide-split-group",
+  direction: "right",
+});
+const splitGroupId = editorGroupState.ide.layout.activeGroupId;
+expect(
+  editorGroupState.ide.layout.groups.length === 2 &&
+    editorGroupState.ide.layout.groups.every(
+      (group) => group.activePath === "src/main.ts",
+    ),
+  "Splitting the editor should create a second live group with the active file.",
+);
+editorGroupState = workbenchReducer(editorGroupState, {
+  type: "ide-close-group",
+  groupId: splitGroupId,
+});
+expect(
+  editorGroupState.ide.layout.groups.length === 1,
+  "Closing an editor group should preserve one usable editor group.",
+);
 expect(
   initialState.terminalPanes.length === 0,
   "Initial workbench state should start without demo terminal panes.",
@@ -389,7 +426,9 @@ expect(
 );
 
 if (codexProfile) {
-  const pane = createTerminalPane("pane-smoke", codexProfile, "restored");
+  const pane = createTerminalPane("pane-smoke", codexProfile, "restored", {
+    workingDirectory: "/tmp/gyro-worktree",
+  });
   state = workbenchReducer(state, { type: "add-terminal-pane", pane });
   state = workbenchReducer(state, {
     type: "run-terminal-pane",
@@ -411,12 +450,29 @@ if (codexProfile) {
     event: "done (0)",
     command: "codex --help",
     output: "terminal output captured",
+    workingDirectory: "/tmp/gyro-worktree-resolved",
   });
   const updatedPane = state.terminalPanes.find((item) => item.id === pane.id);
   expect(
     updatedPane?.status === "done" &&
-      updatedPane?.output === "terminal output captured",
+      updatedPane?.output === "terminal output captured" &&
+      updatedPane?.workingDirectory === "/tmp/gyro-worktree-resolved" &&
+      updatedPane?.attention === "failed",
     "Terminal pane lifecycle failed.",
+  );
+  state = workbenchReducer(state, {
+    type: "set-terminal-pane-attention",
+    paneId: pane.id,
+    attention: "waiting",
+  });
+  state = workbenchReducer(state, {
+    type: "select-terminal-pane",
+    paneId: pane.id,
+  });
+  expect(
+    state.terminalPanes.find((item) => item.id === pane.id)?.attention ===
+      undefined,
+    "Focusing a terminal should clear waiting attention.",
   );
   const unchangedTerminalState = workbenchReducer(state, {
     type: "sync-terminal-pane-snapshot",
@@ -429,6 +485,20 @@ if (codexProfile) {
   expect(
     unchangedTerminalState === state,
     "Unchanged terminal snapshots should not create new workbench state.",
+  );
+  let terminalLayoutState = workbenchReducer(state, {
+    type: "set-terminal-pane-layout",
+    paneId: pane.id,
+    layout: "wide",
+  });
+  terminalLayoutState = workbenchReducer(terminalLayoutState, {
+    type: "upsert-restored-terminal-pane",
+    pane: createTerminalPane(pane.id, codexProfile, "running"),
+  });
+  expect(
+    terminalLayoutState.terminalPanes.find((item) => item.id === pane.id)
+      ?.layout === "wide",
+    "Terminal pane layout should persist across backend snapshot restores.",
   );
   const destinationBeforeRestore = state.activeDestination;
   state = workbenchReducer(state, {
@@ -1298,12 +1368,16 @@ expect(
     tauriSource.includes("async fn git_unstage") &&
     tauriSource.includes("git_unstage_blocking") &&
     tauriSource.includes("git unstage worker failed") &&
+    tauriSource.includes("async fn git_discard") &&
+    tauriSource.includes("git_discard_blocking") &&
+    tauriSource.includes("git discard worker failed") &&
     tauriSource.includes("async fn git_commit") &&
     tauriSource.includes("git_commit_blocking") &&
     tauriSource.includes("git commit worker failed") &&
     tauriSource.includes("async fn lsp_start") &&
-    tauriSource.includes("lsp_start_blocking") &&
-    tauriSource.includes("lsp start worker failed") &&
+    tauriSource.includes("struct LanguageServerManager") &&
+    tauriSource.includes("receive_lsp_response") &&
+    tauriSource.includes("write_lsp_message") &&
     tauriSource.includes("async fn task_discover") &&
     tauriSource.includes("task discover worker failed") &&
     tauriSource.includes("async fn task_run") &&
@@ -1315,8 +1389,13 @@ expect(
     tauriSource.includes("test_run_blocking") &&
     tauriSource.includes("test run worker failed") &&
     tauriSource.includes("async fn debug_start") &&
-    tauriSource.includes("debug_start_blocking") &&
-    tauriSource.includes("debug start worker failed") &&
+    tauriSource.includes("struct DebugAdapterManager") &&
+    tauriSource.includes("impl DebugAdapterManager") &&
+    tauriSource.includes("fn start(&self, request: DebugStartRequest)") &&
+    tauriSource.includes("manager.start(request).map_err(to_string)") &&
+    tauriSource.includes("receive_dap_response") &&
+    tauriSource.includes("handle_dap_adapter_request") &&
+    tauriSource.includes("redact_json_strings") &&
     tauriSource.includes("async fn check_provider_health") &&
     tauriSource.includes("check_provider_health_blocking") &&
     tauriSource.includes("provider health worker failed") &&
@@ -1399,10 +1478,109 @@ expect(
 expect(
   !surfaceSource.includes("mock-polish") &&
     !surfaceSource.includes("mock-shell") &&
-    surfaceSource.includes("No panes.") &&
+    surfaceSource.includes('aria-label="No terminal panes"') &&
+    surfaceSource.includes('"gyro-terminal-workspace is-empty"') &&
     surfaceSource.includes("gyro-terminal-toolbar is-empty") &&
-    surfaceSource.includes('aria-label="Open command palette"'),
-  "CLI empty state should stay minimal while keeping launch and command palette access.",
+    surfaceSource.includes("AgentLauncherMenu") &&
+    surfaceSource.includes('className="gyro-terminal-agent-button"') &&
+    surfaceSource.includes(
+      'hasPanes ? (\n          <div className="gyro-terminal-tools">',
+    ) &&
+    styleSource.includes(".gyro-terminal-toolbar.is-empty") &&
+    styleSource.includes("align-self: center") &&
+    styleSource.includes("justify-self: center") &&
+    styleSource.includes("var(--gyro-premium-hairline-strong)") &&
+    styleSource.includes(".gyro-terminal-preset-button > svg") &&
+    styleSource.includes("flex: 0 0 auto") &&
+    styleSource.includes("padding: 0 12px") &&
+    surfaceSource.includes("<Plus size={14} />"),
+  "CLI empty state should center only the two launch controls.",
+);
+expect(
+  surfaceSource.includes("const canStopActivePane =") &&
+    surfaceSource.includes('aria-label="Split terminal"') &&
+    surfaceSource.includes('aria-label="Stop active terminal"') &&
+    surfaceSource.includes("<Command size={15} />") &&
+    surfaceSource.includes("<Columns2 size={15} />") &&
+    surfaceSource.includes("<Square size={14} />"),
+  "CLI toolbar icons should match commands, splitting, and stopping a live terminal.",
+);
+expect(
+  styleSource.includes(
+    ".gyro-workspace-tool-panel.is-primary .gyro-terminal-grid",
+  ) &&
+    styleSource.includes("grid-template-columns: repeat(2, minmax(0, 1fr))") &&
+    styleSource.includes("overflow-x: hidden") &&
+    styleSource.includes("overflow-y: auto") &&
+    styleSource.includes(
+      ".gyro-terminal-pane:nth-child(odd):last-child:not(",
+    ) &&
+    styleSource.includes(
+      '.gyro-terminal-grid:not(:has(> .gyro-terminal-pane[data-layout="wide"]))',
+    ) &&
+    styleSource.includes("grid-column: 1 / -1"),
+  "Odd primary terminal counts should expand the final pane across the full row.",
+);
+expect(
+  typeSource.includes(
+    'export type TerminalPaneLayout = "auto" | "wide" | "compact"',
+  ) &&
+    reducerSource.includes('case "set-terminal-pane-layout"') &&
+    appSource.includes('type: "set-terminal-pane-layout"') &&
+    surfaceSource.includes("Expand row") &&
+    surfaceSource.includes("Fit to grid") &&
+    surfaceSource.includes("Move first") &&
+    surfaceSource.includes("Move last") &&
+    surfaceSource.includes('data-layout={pane.layout ?? "auto"}') &&
+    styleSource.includes('.gyro-terminal-pane[data-layout="wide"]') &&
+    styleSource.includes('.gyro-terminal-pane[data-layout="compact"]'),
+  "Terminal panes should support persisted structural layout and movement actions.",
+);
+expect(
+  surfaceSource.includes("gyro-sidebar-terminal-close") &&
+    surfaceSource.includes("gyro-terminal-pane-close") &&
+    surfaceSource.includes("onCloseTerminalPane?.(pane.id)") &&
+    appSource.includes("onCloseTerminalPane={requestCloseTerminalPane}") &&
+    styleSource.includes(
+      ".gyro-terminal-pane.is-active .gyro-terminal-pane-close",
+    ) &&
+    styleSource.includes(
+      ".gyro-sidebar-terminal-row:hover .gyro-sidebar-terminal-close",
+    ),
+  "Terminal panes should expose minimal close controls in the grid and sidebar.",
+);
+expect(
+  surfaceSource.includes("TerminalTerminateConfirmOverlay") &&
+    surfaceSource.includes("Terminate terminal?") &&
+    surfaceSource.includes('role="alertdialog"') &&
+    appSource.includes('pane.status === "running"') &&
+    appSource.includes('pane.status === "waiting"') &&
+    appSource.includes("terminalTerminateCandidate") &&
+    styleSource.includes(".gyro-terminal-terminate-card"),
+  "Running terminal panes should confirm before their PTY is terminated.",
+);
+expect(
+  typeSource.includes(
+    'export type TerminalPaneAttention = "waiting" | "failed"',
+  ) &&
+    typeSource.includes("workingDirectory?: string") &&
+    typeSource.includes("statsPartial: boolean") &&
+    reducerSource.includes('case "set-terminal-pane-attention"') &&
+    surfaceSource.includes("TerminalDiffControl") &&
+    surfaceSource.includes("gyro-terminal-diff-popover") &&
+    surfaceSource.includes("Review in IDE") &&
+    surfaceSource.includes("gyro-terminal-attention is-waiting") &&
+    surfaceSource.includes("gyro-terminal-attention is-failed") &&
+    styleSource.includes(".gyro-terminal-awareness") &&
+    styleSource.includes(".gyro-terminal-diff-stats") &&
+    styleSource.includes(".gyro-terminal-pane.needs-waiting") &&
+    appSource.includes("terminalSourceControlByPane") &&
+    appSource.includes("terminalSourceControlRequestRef") &&
+    appSource.includes("openSourceControlDiffForRoot") &&
+    appSource.includes("terminal.onBell") &&
+    tauriSource.includes("apply_git_diff_stats") &&
+    tauriSource.includes("untracked_text_additions"),
+  "The CLI awareness layer should show selected-pane Git changes and exceptional terminal attention.",
 );
 expect(
   appSource.includes("TerminalPaneSnapshot[]") &&
@@ -1475,6 +1653,9 @@ expect(
     tauriSource.includes('"TERM", "xterm-256color"') &&
     tauriSource.includes('"COLORTERM", "truecolor"') &&
     tauriSource.includes('"TERM_PROGRAM", "Gyro"') &&
+    tauriSource.includes('env_remove("NO_COLOR")') &&
+    tauriSource.includes('"CLICOLOR_FORCE", "1"') &&
+    tauriSource.includes('"FORCE_COLOR", "1"') &&
     tauriSource.includes("terminal_command_path") &&
     !spawnTerminalSource.includes("Stdio::piped"),
   "Desktop terminal backend should use PTYs instead of piped stdio.",
@@ -1534,11 +1715,28 @@ expect(
     ) &&
     surfaceSource.includes("data-tauri-drag-region") &&
     !surfaceSource.includes("gyro-sidebar-traffic-lights") &&
+    !styleSource.includes(
+      ".gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar {",
+    ) &&
+    !styleSource.includes(
+      ".gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-mode-group",
+    ) &&
     tauriConfigSource.includes('"titleBarStyle": "Overlay"') &&
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     surfaceSource.includes("New chat") &&
     surfaceSource.includes('aria-label="Workspace modes"') &&
+    surfaceSource.includes("function restingSidebarWidth()") &&
+    surfaceSource.includes("ideSidebarMinimumWidth * 2") &&
+    surfaceSource.includes('aria-label="Resize IDE sidebar"') &&
+    surfaceSource.includes('role="separator"') &&
+    surfaceSource.includes("onDoubleClick") &&
+    surfaceSource.includes("resizeIdeSidebarWithKeyboard") &&
+    surfaceSource.includes("requestAnimationFrame") &&
+    surfaceSource.includes("appShellRef.current?.style.setProperty") &&
+    styleSource.includes(".gyro-ide-sidebar-resizer") &&
+    styleSource.includes("grid-template-columns 180ms") &&
+    styleSource.includes("will-change: grid-template-columns") &&
     surfaceSource.includes('label="Chat"') &&
     surfaceSource.includes('label="CLI"') &&
     surfaceSource.includes('label="IDE"') &&
@@ -1556,8 +1754,9 @@ expect(
     surfaceSource.includes("projectSidebarName") &&
     surfaceSource.includes("SessionSidebarRow") &&
     surfaceSource.includes('title="Terminal panes"') &&
-    surfaceSource.includes('title="CLI Profiles"') &&
-    surfaceSource.includes('title="Workspace files"') &&
+    !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
+    !surfaceSource.includes("visibleCommandProfiles") &&
+    surfaceSource.includes('title="Explorer"') &&
     surfaceSource.includes('title="Code tools"') &&
     !surfaceSource.includes("Run terminal") &&
     !surfaceSource.includes("Split pane") &&
@@ -1568,6 +1767,74 @@ expect(
     !surfaceSource.includes("primarySidebarActionForLayout") &&
     !surfaceSource.includes('<SidebarSection title="Layouts">'),
   "Mode-specific sidebar should keep overlay chrome while giving Chat, CLI, and IDE distinct content.",
+);
+
+expect(
+  surfaceSource.includes("function AgentLauncherMenu") &&
+    surfaceSource.includes("function TerminalActionsMenu") &&
+    surfaceSource.includes("onRunCommandProfile?.(profile.id)") &&
+    surfaceSource.includes("<span>Quick Start</span>") &&
+    surfaceSource.includes("cliProfileShortLabel") &&
+    surfaceSource.includes("gyro-profile-readiness-dot") &&
+    !surfaceSource.includes(
+      'className="gyro-agent-launcher-heading">Start a terminal',
+    ) &&
+    surfaceSource.includes("Setup needed") &&
+    surfaceSource.includes("New Terminal") &&
+    surfaceSource.includes("Start Codex CLI") &&
+    surfaceSource.includes("Start Claude Code") &&
+    surfaceSource.includes("Set CLI launch preset") &&
+    surfaceSource.includes("Refresh output") &&
+    surfaceSource.includes("Close pane") &&
+    !surfaceSource.includes('aria-label="Run selected command profile"') &&
+    !surfaceSource.includes('className="gyro-terminal-add"') &&
+    appSource.includes("const runCommandProfile = useCallback") &&
+    appSource.includes("setActiveProfileId(profileId)") &&
+    appSource.includes("void runProfile(profileId)") &&
+    appSource.includes("onRunCommandProfile={runCommandProfile}") &&
+    appSource.includes('case "configure-cli-launcher"') &&
+    styleSource.includes(".gyro-agent-launcher-menu") &&
+    styleSource.includes(".gyro-terminal-agent-button") &&
+    styleSource.includes(".gyro-terminal-actions-menu"),
+  "CLI toolbar agent launcher should start real command profiles while the sidebar stays pane-only.",
+);
+
+expect(
+  appSource.includes('import { openUrl } from "@tauri-apps/plugin-opener"') &&
+    appSource.includes("openBrowserPreviewExternal") &&
+    surfaceSource.includes('title="Local browser preview"') &&
+    surfaceSource.includes("normalizedBrowserPreviewUrl") &&
+    surfaceSource.includes("<iframe") &&
+    !surfaceSource.includes("gyro-browser-skeleton") &&
+    !surfaceSource.includes("Screenshot {preview.screenshotCount}") &&
+    reducerSource.includes('url: "http://localhost:3000"') &&
+    tauriConfigSource.includes("frame-src http://localhost:*") &&
+    tauriConfigSource.includes("http://127.0.0.1:*") &&
+    styleSource.includes(".gyro-browser-page iframe"),
+  "Browser preview should render a real local URL and open it externally without simulated screenshot chrome.",
+);
+
+expect(
+  appSource.includes("const started = await launchTerminalPane") &&
+    appSource.includes("agent failed to start") &&
+    appSource.includes("task.terminalPaneId") &&
+    appSource.includes("Automation running") &&
+    surfaceSource.includes("Move to todo") &&
+    surfaceSource.includes("Move to review") &&
+    surfaceSource.includes('label: "Open providers"') &&
+    !surfaceSource.includes('id: "dispatch-agent"') &&
+    !surfaceSource.includes('aria-label="Dictate message"') &&
+    !surfaceSource.includes("onClick={() => undefined}") &&
+    !appSource.includes("Coming soon"),
+  "Visible task, automation, provider, chat, and IDE controls should execute or be omitted instead of acting as placeholders.",
+);
+
+expect(
+  roadmapSource.includes("Private Alpha Exit Gate") &&
+    roadmapSource.includes("Partially implemented and still gated") &&
+    readinessAuditSource.includes("Functional Readiness Matrix") &&
+    readinessAuditSource.includes("Highest-Risk Gaps"),
+  "The roadmap should distinguish implemented foundations from private-alpha blockers.",
 );
 const chatSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("{!isCliSidebar && !isIdeSidebar ? ("),
@@ -1639,6 +1906,9 @@ expect(
   surfaceSource.includes("function SettingsSidebarContent") &&
     surfaceSource.includes("settingsSidebarItems") &&
     surfaceSource.includes('aria-label="Settings navigation"') &&
+    surfaceSource.includes('aria-label="Search settings"') &&
+    surfaceSource.includes("gyro-settings-sidebar-group") &&
+    surfaceSource.includes("No settings found") &&
     surfaceSource.includes('aria-label="Back from settings"') &&
     surfaceSource.includes("gyro-settings-back-button") &&
     surfaceSource.includes('onOpenSettingsSection("general")') &&
@@ -1678,7 +1948,7 @@ expect(
     styleSource.includes(".gyro-tool-panel-reveal-button") &&
     styleSource.includes('[data-active-tab="terminal"]') &&
     styleSource.includes(".gyro-terminal-toolbar {\n  display: none;") &&
-    styleSource.includes("button:not(.gyro-pane-add):not(.is-active)"),
+    !styleSource.includes("button:not(.gyro-pane-add):not(.is-active)"),
   "Bottom workspace tool panel should support a compact chat tray, drag resizing, drag-to-collapse, and a reveal handle.",
 );
 expect(
@@ -1713,6 +1983,12 @@ expect(
     surfaceSource.includes('onComposerAction?.("show-project-context")') &&
     surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
+    surfaceSource.includes("diffAdditions") &&
+    surfaceSource.includes("diffDeletions") &&
+    surfaceSource.includes("gyro-thread-diff-pill") &&
+    surfaceSource.includes('onOpenToolPanel?.("diff")') &&
+    styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
+    styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
     appSource.includes("savedProjectsFromSessions") &&
     appSource.includes("select-saved-project:") &&
     surfaceSource.includes("savedProjectItems") &&
@@ -1723,10 +1999,16 @@ expect(
     surfaceSource.includes("gyro-provider-status-row") &&
     styleSource.includes(".gyro-thread-topbar-actions") &&
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
+    surfaceSource.includes('popoverPlacement="up"') &&
+    surfaceSource.includes('variant="hero"') &&
     styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell:focus-within",
     ) &&
+    styleSource.includes(
+      ".gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider",
+    ) &&
+    styleSource.includes("width: min(820px, calc(100vw - 96px))") &&
     surfaceSource.includes("!event.shiftKey") &&
     surfaceSource.includes("event.preventDefault()") &&
     styleSource.includes("--gyro-chat-content-width: 735px") &&
@@ -1791,10 +2073,17 @@ expect(
     surfaceSource.includes("projectLabel") &&
     surfaceSource.includes("composerProjectLabel") &&
     surfaceSource.includes("isGeneratedGyroWorkspace") &&
-    surfaceSource.includes("hasStartWorkspace") &&
+    surfaceSource.includes("startProjectLabel") &&
+    surfaceSource.includes("gyroLogoTransparentDark") &&
+    surfaceSource.includes("gyroLogoTransparentLight") &&
+    surfaceSource.includes("gyro-chat-start-brand-word") &&
     surfaceSource.includes(
-      "What should we build in ${workspaceName(workspacePath)}?",
+      'style={{ width: "min(860px, calc(100vw - 96px))" }}',
     ) &&
+    surfaceSource.includes('width: "min(820px, calc(100vw - 96px))"') &&
+    styleSource.includes("width: min(860px, calc(100vw - 96px))") &&
+    styleSource.includes("width: min(820px, 100%)") &&
+    surfaceSource.includes("What should we do in ") &&
     surfaceSource.includes("Choose folder") &&
     surfaceSource.includes("branchLabel") &&
     surfaceSource.includes('action: "select-file"') &&
@@ -1895,8 +2184,14 @@ expect(
       "(provider) => provider.id === config.selectedProviderId",
     ) &&
     surfaceSource.includes(
-      "active: provider.id === config.selectedProviderId",
+      "active: isConnected && provider.id === config.selectedProviderId",
     ) &&
+    surfaceSource.includes(
+      'trailingLabel: isConnected ? undefined : "Unavailable"',
+    ) &&
+    surfaceSource.includes("showChevron: isConnected") &&
+    surfaceSource.includes("disabled: !isConnected") &&
+    surfaceSource.includes("item.providerId && !item.disabled") &&
     surfaceSource.includes(
       "modelPickerProvider.id === config.selectedProviderId",
     ) &&
@@ -1904,6 +2199,8 @@ expect(
     appSource.includes("{ notifySuccess: false }") &&
     !appSource.includes('"Model selected"') &&
     !surfaceSource.includes('action: "select-model"') &&
+    styleSource.includes(".gyro-composer-menu-trailing") &&
+    styleSource.includes(".gyro-composer-menu-item.is-provider:disabled") &&
     styleSource.includes(".gyro-provider-picker.has-flyout") &&
     styleSource.includes("grid-template-columns: 148px 176px"),
   "Provider picker should keep provider rows compact and show models in a hover flyout without Connect, Refresh, or Settings rows.",
@@ -1953,32 +2250,43 @@ expect(
 );
 expect(
   surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
-    surfaceSource.includes('label: "Photos"') &&
-    surfaceSource.includes('label: "Spreadsheet"') &&
-    surfaceSource.includes('label: "Slides"') &&
+    surfaceSource.includes('label: "File"') &&
+    surfaceSource.includes('label: "Folder"') &&
+    surfaceSource.includes('label: "Goal"') &&
     surfaceSource.includes('label: "Plan"') &&
+    surfaceSource.includes('label: "Search"') &&
     surfaceSource.includes('title="Add"') &&
+    !surfaceSource.includes('label: "Photos"') &&
+    !surfaceSource.includes('label: "Spreadsheet"') &&
+    !surfaceSource.includes('label: "Slides"') &&
     !surfaceSource.includes("Attach a folder or file") &&
     !surfaceSource.includes("Find commands and files") &&
-    appSource.includes('case "add-photos":') &&
+    appSource.includes('case "select-file":') &&
     appSource.includes('case "add-plan":') &&
+    !appSource.includes("Coming soon") &&
     appSource.includes('type: "set-chat-panel", panel: "plan"') &&
     styleSource.includes("min-height: 32px"),
-  "Composer add popover should stay compact and include richer context types.",
+  "Composer add popover should stay compact and expose only working context actions.",
 );
 expect(
   surfaceSource.includes("OpenAI permissions") &&
     surfaceSource.includes("Anthropic permissions") &&
-    surfaceSource.includes("Codex settings") &&
-    surfaceSource.includes("Claude settings") &&
+    surfaceSource.includes("Default Permissions") &&
+    surfaceSource.includes("Full Access") &&
+    !surfaceSource.includes('action: "toggle-access"') &&
+    !surfaceSource.includes("Codex settings") &&
+    !surfaceSource.includes("Claude settings") &&
     surfaceSource.includes("Command policy") &&
     surfaceSource.includes("File edit policy") &&
     surfaceSource.includes("approvalChipClassName") &&
     surfaceSource.includes('approvalMode === "direct"') &&
+    surfaceSource.includes('approvalMode !== "direct"') &&
+    surfaceSource.includes('kind: "permission-direct"') &&
+    styleSource.includes(".gyro-composer-menu-item.is-permission-direct") &&
     surfaceSource.includes('"gyro-composer-chip is-warning"') &&
     surfaceSource.includes("className={approvalChipClassName}") &&
     appSource.includes("approvalNotificationCopy"),
-  "Permission controls should adapt labels to the selected OpenAI or Anthropic provider and backend approval settings.",
+  "Permission controls should expose only Default Permissions and orange Full Access while keeping backend settings separate.",
 );
 expect(
   styleSource.includes(".gyro-tool-panel-reveal") &&
@@ -2019,7 +2327,7 @@ expect(
   !surfaceSource.includes("pane-shell") &&
     !surfaceSource.includes("VITE ready") &&
     !surfaceSource.includes("3 changed") &&
-    surfaceSource.includes("No panes.") &&
+    surfaceSource.includes('aria-label="No terminal panes"') &&
     surfaceSource.includes("hasPanes ? (") &&
     surfaceSource.includes("gyro-terminal-tools") &&
     surfaceSource.includes("No file selected") &&
@@ -2030,8 +2338,37 @@ expect(
     tauriSource.includes("write_workspace_file") &&
     appSource.includes("<MonacoEditorPane") &&
     surfaceSource.includes("renderEditor") &&
-    surfaceSource.includes("gyro-editor-ai-bar"),
+    surfaceSource.includes("gyro-editor-ai-bar") &&
+    surfaceSource.includes("gyro-editor-contextbar") &&
+    !surfaceSource.includes("gyro-editor-workbench-row"),
   "IDE and terminal panels should not seed fake activity or skip real file previews.",
+);
+expect(
+  surfaceSource.includes("function EditorGroupPane") &&
+    surfaceSource.includes('aria-label="Split editor down"') &&
+    surfaceSource.includes('aria-label="Editor AI companion"') &&
+    surfaceSource.includes("gyro-sidebar-explorer-toolbar") &&
+    surfaceSource.includes('aria-label="New file"') &&
+    surfaceSource.includes('aria-label="Source control message"') &&
+    surfaceSource.includes('aria-label="Debug adapter command"') &&
+    surfaceSource.includes("Discard all local changes in") &&
+    surfaceSource.includes("task.id === test.id") &&
+    appSource.includes("const createWorkspacePath = useCallback") &&
+    appSource.includes("const renameWorkspacePath = useCallback") &&
+    appSource.includes("const deleteWorkspacePath = useCallback") &&
+    appSource.includes("const openSourceControlDiff = useCallback") &&
+    appSource.includes("const startIdeDebugSession = useCallback") &&
+    appSource.includes("const sendIdeDebugCommand = useCallback") &&
+    appSource.includes("const stopIdeDebugSession = useCallback") &&
+    appSource.includes('method: "textDocument/didOpen"') &&
+    appSource.includes('method: "textDocument/didChange"') &&
+    reducerSource.includes('case "ide-select-group"') &&
+    reducerSource.includes('case "ide-set-language-server"') &&
+    tauriSource.includes("impl LanguageServerManager") &&
+    tauriSource.includes("spawn_lsp_message_reader") &&
+    styleSource.includes(".gyro-editor-groups.is-split-right") &&
+    styleSource.includes(".gyro-ide-assistant-composer"),
+  "Core IDE controls should operate real editor groups, workspace files, Git review, AI context, and language-server lifecycles.",
 );
 expect(
   !surfaceSource.includes("Keychain ready") &&
@@ -2138,8 +2475,17 @@ expect(
 expect(
   appSource.includes('activeWorkspaceLayout === "terminal-grid"') &&
     appSource.includes("renderWorkspaceToolPanel(true)") &&
-    surfaceSource.includes('aria-label="Workspace tools"'),
-  "Terminal Grid should route through the shared workspace tool panel.",
+    surfaceSource.includes('aria-label="Workspace tools"') &&
+    surfaceSource.includes("{!isPrimary ? (") &&
+    styleSource.includes(
+      ".gyro-workspace-tool-panel.is-primary {\n  border-top: 0;\n  grid-template-rows: minmax(0, 1fr);",
+    ),
+  "Terminal Grid should use the shared panel body without the IDE tool-tab header.",
+);
+expect(
+  surfaceSource.includes('activeTab === "terminal" && onAddPane') &&
+    surfaceSource.includes('aria-label="New terminal"'),
+  "The add control should appear only beside the terminal panel that it affects.",
 );
 expect(
   surfaceSource.includes("showEmbeddedPanel = true") &&
@@ -2147,7 +2493,8 @@ expect(
     surfaceSource.includes('"is-workspace-shell"') &&
     surfaceSource.includes('"is-editor-only"') &&
     surfaceSource.includes("onOpenWorkspaceFile?.(file.path)") &&
-    appSource.includes("onOpenWorkspaceFile={openEditorFile}") &&
+    (appSource.includes("onOpenWorkspaceFile={openEditorFile}") ||
+      appSource.includes("onOpenWorkspaceFile={openEditorLocation}")) &&
     !surfaceSource.includes(
       '.filter((file) => file.kind === "file")\n          .slice(0, 3)',
     ) &&
@@ -2213,12 +2560,16 @@ expect(
 
 expect(
   (styleSource.match(/^:root\s*\{/gm) ?? []).length === 1 &&
-    styleSource.includes("--gyro-premium-hairline: rgba(244, 241, 235, 0.1)") &&
-    styleSource.includes("--gyro-premium-radius-md: 9px") &&
-    styleSource.includes("--gyro-premium-motion: 170ms") &&
+    styleSource.includes(
+      "--gyro-premium-hairline: rgba(225, 233, 244, 0.075)",
+    ) &&
+    styleSource.includes("--gyro-premium-radius-md: 7px") &&
+    styleSource.includes("--gyro-premium-motion: 130ms") &&
+    styleSource.includes("--gyro-accent: #7aa7ff") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-premium-hairline: rgba(32, 34, 38, 0.13)"),
-  "The native graphite system should keep one token authority with dark and light hairline parity.",
+    styleSource.includes("--gyro-premium-hairline: rgba(23, 27, 34, 0.1)") &&
+    styleSource.includes("--gyro-accent: #356fd6"),
+  "The premium graphite system should keep one token authority with thin hairlines, fast motion, and dark/light accent parity.",
 );
 
 expect(
@@ -2264,6 +2615,77 @@ expect(
       "border-top: 1px solid var(--gyro-premium-hairline-soft)",
     ),
   "The hero composer should render as one bordered surface without nested card borders.",
+);
+
+for (const heroThemeToken of [
+  "--gyro-hero-heading",
+  "--gyro-hero-composer",
+  "--gyro-hero-context",
+  "--gyro-hero-border",
+  "--gyro-hero-text",
+  "--gyro-hero-muted",
+  "--gyro-hero-placeholder",
+  "--gyro-hero-send",
+  "--gyro-hero-shadow",
+]) {
+  expect(
+    (styleSource.match(new RegExp(heroThemeToken, "g")) ?? []).length >= 3,
+    `Hero composer theme token should be defined in both themes and consumed: ${heroThemeToken}`,
+  );
+}
+
+expect(
+  styleSource.includes("color: var(--gyro-hero-heading)") &&
+    styleSource.includes("background: var(--gyro-hero-composer)") &&
+    styleSource.includes("background: var(--gyro-hero-context)") &&
+    styleSource.includes("caret-color: var(--gyro-hero-text)") &&
+    styleSource.includes("color: var(--gyro-hero-placeholder)") &&
+    styleSource.includes("opacity: 1") &&
+    styleSource.includes("background: var(--gyro-hero-send)"),
+  "The welcome and in-chat composer text, caret, and placeholder should consume semantic colors in both light and dark mode.",
+);
+
+expect(
+  styleSource.includes(
+    ".gyro-app-shell.is-chat-shell .gyro-account-button:hover",
+  ) &&
+    styleSource.includes(
+      "background: color-mix(in srgb, var(--gyro-text) 5%, transparent)",
+    ),
+  "The persistent Settings footer should use a subtle theme-aware hover instead of a dark navigation pill.",
+);
+
+for (const compactMenuSelector of [
+  ".gyro-composer-popover-title",
+  ".gyro-composer-menu-item:disabled",
+  ".gyro-account-menu-row.is-muted",
+  ".gyro-agent-launcher-menu strong",
+  ".gyro-terminal-actions-menu button.is-danger",
+]) {
+  expect(
+    styleSource.includes(compactMenuSelector),
+    `Compact menu state should have explicit theme parity: ${compactMenuSelector}`,
+  );
+}
+
+expect(
+  styleSource.includes(
+    "var(--gyro-accent) 12%,\n    var(--gyro-surface-raised) 88%",
+  ) &&
+    styleSource.includes(
+      "color-mix(in srgb, var(--gyro-faint) 82%, var(--gyro-muted) 18%)",
+    ),
+  "Open menus should keep selected and disabled rows readable in both themes.",
+);
+
+expect(
+  surfaceSource.includes('kind: "permission-direct"') &&
+    styleSource.includes(".gyro-composer-menu-item.is-permission-direct") &&
+    styleSource.includes(
+      ':root[data-theme="light"] .gyro-chat-start .gyro-composer-chip.is-warning',
+    ) &&
+    styleSource.includes("color: var(--gyro-warn)"),
+  "Full Access should retain its warning color in the menu and selected composer chip.",
 );
 
 const requiredViewports = ["1280x720", "1440x900", "2048x1180"];
