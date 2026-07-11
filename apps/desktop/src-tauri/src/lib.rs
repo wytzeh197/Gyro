@@ -390,6 +390,7 @@ struct ProviderChatRequest {
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    reasoning_effort: Option<String>,
     #[serde(default)]
     suggest_title: bool,
     workspace_path: Option<String>,
@@ -620,6 +621,11 @@ fn list_sessions_blocking() -> Result<Vec<Session>, String> {
 }
 
 #[tauri::command]
+async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.restart()
+}
+
+#[tauri::command]
 async fn create_desktop_session(
     workspace_path: String,
     title: String,
@@ -627,6 +633,7 @@ async fn create_desktop_session(
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     tauri::async_runtime::spawn_blocking(move || {
         create_desktop_session_blocking(
@@ -636,6 +643,7 @@ async fn create_desktop_session(
             provider_label,
             model_id,
             model_label,
+            reasoning_effort,
         )
     })
     .await
@@ -649,6 +657,7 @@ fn create_desktop_session_blocking(
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     let store = open_store()?;
     store
@@ -661,6 +670,7 @@ fn create_desktop_session_blocking(
                 provider_label,
                 model_id,
                 model_label,
+                reasoning_effort,
                 ..CreateSessionContext::default()
             },
         )
@@ -677,6 +687,7 @@ async fn create_worktree_session(
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     tauri::async_runtime::spawn_blocking(move || {
         create_worktree_session_blocking(
@@ -688,6 +699,7 @@ async fn create_worktree_session(
             provider_label,
             model_id,
             model_label,
+            reasoning_effort,
         )
     })
     .await
@@ -703,6 +715,7 @@ fn create_worktree_session_blocking(
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let store = SessionStore::open(paths.clone()).map_err(to_string)?;
@@ -722,6 +735,7 @@ fn create_worktree_session_blocking(
                 provider_label,
                 model_id,
                 model_label,
+                reasoning_effort,
             },
         )
         .map_err(to_string)?;
@@ -751,6 +765,7 @@ async fn set_session_model(
     provider_label: Option<String>,
     model_id: Option<String>,
     model_label: Option<String>,
+    reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store()?;
@@ -762,6 +777,7 @@ async fn set_session_model(
                 provider_label,
                 model_id,
                 model_label,
+                reasoning_effort,
             )
             .map_err(to_string)?
             .ok_or_else(|| "session not found".into())
@@ -1125,6 +1141,7 @@ fn run_provider_chat_blocking(
                 request.provider_id.clone(),
                 request.model_id.clone(),
                 request.model_label.clone(),
+                request.reasoning_effort.clone(),
                 resume_cursor_value,
                 "ready",
                 None,
@@ -1173,6 +1190,14 @@ fn run_provider_chat_blocking(
     ))
     .map_err(to_string)?;
     if let Some(object) = assistant_payload.as_object_mut() {
+        object.insert(
+            "reasoningEffort".into(),
+            request
+                .reasoning_effort
+                .clone()
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
         object.insert(
             "kind".into(),
             serde_json::Value::String("provider-response".into()),
@@ -3803,6 +3828,7 @@ fn run_provider_chat_with_retry(
                     binding.provider_id,
                     binding.model_id,
                     binding.model_label,
+                    binding.reasoning_effort,
                     binding.resume_cursor_json,
                     "failed",
                     Some(gyro_core::security::redact_secrets(&error.to_string())),
@@ -3839,6 +3865,19 @@ fn run_openai_codex_chat(
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    if request.reasoning_effort.is_some()
+        && codex_reasoning_effort_arg(
+            request.model_id.as_deref(),
+            request.reasoning_effort.as_deref(),
+        )
+        .is_none()
+    {
+        anyhow::bail!(
+            "{} does not support the selected {} reasoning effort in this Gyro runtime.",
+            request.model_label.as_deref().unwrap_or("This model"),
+            request.reasoning_effort.as_deref().unwrap_or("unknown")
+        );
+    }
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
@@ -3856,6 +3895,7 @@ fn run_openai_codex_chat(
         }),
         &output_path,
         request.model_id.as_deref(),
+        request.reasoning_effort.as_deref(),
         &prompt,
     ));
 
@@ -4003,6 +4043,7 @@ fn codex_chat_args(
     resume_session_id: Option<&str>,
     output_path: &Path,
     model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec!["exec".into()];
@@ -4024,6 +4065,10 @@ fn codex_chat_args(
     if let Some(model) = codex_model_arg(model_id) {
         args.push("--model".into());
         args.push(model);
+    }
+    if let Some(effort) = codex_reasoning_effort_arg(model_id, reasoning_effort) {
+        args.push("--config".into());
+        args.push(format!("model_reasoning_effort=\"{effort}\""));
     }
     if let Some(session_id) = resume_session_id {
         args.push(session_id.into());
@@ -4226,6 +4271,27 @@ fn codex_model_arg(model_id: Option<&str>) -> Option<String> {
     Some(model.to_string())
 }
 
+fn codex_reasoning_effort_arg(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Option<String> {
+    let effort = reasoning_effort?.trim().to_ascii_lowercase();
+    let model = model_id?.trim().to_ascii_lowercase();
+    let supported = match model.as_str() {
+        "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
+            matches!(
+                effort.as_str(),
+                "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+            )
+        }
+        "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5" => {
+            matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh")
+        }
+        _ => false,
+    };
+    supported.then_some(effort)
+}
+
 fn append_provider_status_event(
     store: &SessionStore,
     session_id: Uuid,
@@ -4255,6 +4321,14 @@ fn append_provider_status_event(
     );
     let mut payload = gyro_core::harness_payload_value(&payload)?;
     if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "reasoningEffort".into(),
+            request
+                .reasoning_effort
+                .clone()
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
         object.insert(
             "kind".into(),
             serde_json::Value::String("provider-status".into()),
@@ -4311,11 +4385,22 @@ fn append_provider_diagnostics_event(
         failure_reason.map(str::to_string),
         output_summary.map(str::to_string),
     );
+    let mut payload = gyro_core::harness_payload_value(&payload)?;
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "reasoningEffort".into(),
+            request
+                .reasoning_effort
+                .clone()
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
     store.append_event_with_turn_id(
         session_id,
         SessionEventKind::SystemEvent,
         provider_diagnostics_message(&status, request.provider_label.as_deref()),
-        gyro_core::harness_payload_value(&payload)?,
+        payload,
         turn_id,
     )
 }
@@ -5040,6 +5125,7 @@ pub fn run() {
             read_workspace_file_full,
             read_terminal_output,
             read_session_events,
+            restart_app,
             recover_automation_leases,
             rename_session,
             rename_workspace_path,
@@ -5533,17 +5619,26 @@ while True:
     #[test]
     fn provider_chat_command_args_use_resume_contracts() {
         let output_path = PathBuf::from("/tmp/gyro-last-message.txt");
-        let fresh_codex = codex_chat_args(None, &output_path, Some("o4-mini"), "hello");
+        let fresh_codex = codex_chat_args(
+            None,
+            &output_path,
+            Some("gpt-5.6-sol"),
+            Some("max"),
+            "hello",
+        );
         assert_eq!(fresh_codex[0], "exec");
         assert!(fresh_codex.contains(&"--sandbox".to_string()));
         assert!(fresh_codex.contains(&"read-only".to_string()));
         assert!(fresh_codex.contains(&"--json".to_string()));
         assert!(fresh_codex.contains(&"--output-last-message".to_string()));
-        assert!(fresh_codex.ends_with(&["o4-mini".to_string(), "hello".to_string()]));
+        assert!(fresh_codex.contains(&"gpt-5.6-sol".to_string()));
+        assert!(fresh_codex.contains(&"model_reasoning_effort=\"max\"".to_string()));
+        assert_eq!(fresh_codex.last(), Some(&"hello".to_string()));
 
         let resumed_codex = codex_chat_args(
             Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
             &output_path,
+            None,
             None,
             "again",
         );
@@ -5737,6 +5832,7 @@ while True:
                 "anthropic",
                 Some("sonnet".into()),
                 Some("Claude Sonnet".into()),
+                None,
                 serde_json::json!({
                     "kind": "claude-session",
                     "sessionId": "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
@@ -5794,6 +5890,7 @@ while True:
             provider_label: Some("OpenAI".into()),
             model_id: Some("gpt-5.5".into()),
             model_label: Some("GPT-5.5".into()),
+            reasoning_effort: Some("high".into()),
             suggest_title: false,
             workspace_path: Some(temp.path().display().to_string()),
         };
@@ -5815,6 +5912,7 @@ while True:
         assert_eq!(event.payload["schema"], gyro_core::HARNESS_SCHEMA_V1);
         assert_eq!(event.payload["runId"], turn_id.to_string());
         assert_eq!(event.payload["status"], "done");
+        assert_eq!(event.payload["reasoningEffort"], "high");
         assert_eq!(event.payload["runner"], "codex-cli");
         assert_eq!(event.payload["authOwner"], "chatgpt-local-codex-login");
         assert!(event.payload.get("token").is_none());

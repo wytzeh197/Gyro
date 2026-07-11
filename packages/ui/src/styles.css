@@ -8137,18 +8137,16 @@ textarea:focus-visible {
 
 .gyro-provider-picker {
   align-items: start;
-  display: grid;
-  gap: 4px;
-  grid-template-columns: 148px;
-  max-width: calc(100vw - 32px);
-  overflow-x: auto;
+  display: block;
+  max-width: min(148px, calc(100vw - 32px));
+  overflow: visible;
   position: absolute;
-  width: max-content;
+  width: 148px;
   z-index: 44;
 }
 
 .gyro-provider-picker.has-flyout {
-  grid-template-columns: 148px 176px;
+  width: 148px;
 }
 
 .gyro-provider-picker[data-placement="up"] {
@@ -8180,7 +8178,34 @@ textarea:focus-visible {
 }
 
 .gyro-provider-model-flyout {
-  width: 176px;
+  position: absolute !important;
+  top: 0;
+  width: 220px !important;
+}
+
+.gyro-provider-picker[data-flyout-side="right"]
+  .gyro-provider-model-flyout {
+  left: calc(100% + 4px);
+}
+
+.gyro-provider-picker[data-flyout-side="left"]
+  .gyro-provider-model-flyout {
+  right: calc(100% + 4px);
+}
+
+.gyro-composer-popover-section-title {
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  color: #8f949c;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-top: 5px;
+  padding: 9px 7px 4px;
+  text-transform: uppercase;
+}
+
+.gyro-composer-menu-item.is-effort {
+  min-height: 30px;
 }
 
 .gyro-composer-popover-title {
@@ -13100,6 +13125,138 @@ body,
   box-shadow: none;
   color: var(--gyro-premium-text);
   transform: none;
+}
+
+.gyro-sidebar-update {
+  margin: 0 4px 4px;
+  position: relative;
+}
+
+.gyro-sidebar-update-button {
+  align-items: center;
+  background: color-mix(in srgb, #5f8fff 13%, transparent);
+  border: 1px solid color-mix(in srgb, #6d98ff 34%, transparent);
+  border-radius: var(--gyro-premium-radius-sm);
+  color: color-mix(in srgb, #a9c1ff 88%, var(--gyro-premium-text));
+  display: grid;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 8px;
+  grid-template-columns: 18px minmax(0, 1fr) 8px;
+  min-height: 34px;
+  padding: 5px 7px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-sidebar-update-button:hover,
+.gyro-sidebar-update-button[aria-expanded="true"] {
+  background: color-mix(in srgb, #5f8fff 20%, transparent);
+}
+
+.gyro-sidebar-update-button:focus-visible,
+.gyro-update-primary:focus-visible,
+.gyro-update-popover header button:focus-visible {
+  outline: 2px solid #6d98ff;
+  outline-offset: 2px;
+}
+
+.gyro-sidebar-update-dot {
+  background: #72a1ff;
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgb(91 143 255 / 70%);
+  height: 6px;
+  width: 6px;
+}
+
+.gyro-sidebar-update-button .is-spinning {
+  animation: gyro-update-spin 900ms linear infinite;
+}
+
+.gyro-update-popover {
+  background: color-mix(in srgb, var(--gyro-app) 92%, #202738 8%);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 12px;
+  bottom: calc(100% + 7px);
+  box-shadow: 0 16px 42px rgb(0 0 0 / 38%);
+  color: var(--gyro-premium-text);
+  display: grid;
+  gap: 10px;
+  left: 0;
+  padding: 12px;
+  position: absolute;
+  width: min(286px, calc(100vw - 28px));
+  z-index: 80;
+}
+
+.gyro-update-popover header {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.gyro-update-popover header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.gyro-update-popover header span,
+.gyro-update-popover p,
+.gyro-update-popover small,
+.gyro-update-popover li {
+  color: var(--gyro-premium-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.gyro-update-popover p,
+.gyro-update-popover ul {
+  margin: 0;
+}
+
+.gyro-update-popover header button {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-premium-muted);
+  padding: 2px;
+}
+
+.gyro-update-progress {
+  background: rgb(255 255 255 / 8%);
+  border-radius: 999px;
+  height: 4px;
+  overflow: hidden;
+}
+
+.gyro-update-progress span {
+  background: #6d98ff;
+  display: block;
+  height: 100%;
+  transition: width 160ms ease;
+}
+
+.gyro-update-primary {
+  background: #668ff5;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 7px 10px;
+}
+
+.gyro-update-primary:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+@keyframes gyro-update-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .gyro-sidebar-action.is-active,

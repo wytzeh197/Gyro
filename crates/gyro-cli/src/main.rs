@@ -1,11 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use gyro_core::{
-    config::{CommandProfile, UpdateChannel},
-    create_worktree,
-    doctor::run_doctor,
-    ipc::notify_running_app,
-    keychain, slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
+    config::CommandProfile, create_worktree, doctor::run_doctor, ipc::notify_running_app, keychain,
+    slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
     CreateSessionContext, DoctorStatus, GyroConfig, GyroPaths, HarnessRunStatus,
     ProviderRunPayload, Session, SessionEventKind, SessionOrigin, SessionStore,
     SessionWorkspaceMode, TerminalRequestPayload,
@@ -186,7 +183,7 @@ enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Set the update channel.
+    /// Confirm the Stable GitHub Releases update source.
     SetUpdateChannel { channel: String },
     /// Enable a configured model provider.
     EnableProvider { provider_id: String },
@@ -1424,7 +1421,7 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&config)?);
             } else {
-                println!("update channel: {:?}", config.update_channel);
+                println!("update source: Stable via GitHub Releases");
                 println!(
                     "telemetry: {}",
                     if config.telemetry_enabled {
@@ -1466,9 +1463,9 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             }
         }
         ConfigCommand::SetUpdateChannel { channel } => {
-            config.update_channel = parse_update_channel(&channel)?;
+            require_stable_update_source(&channel)?;
             config.save(&paths)?;
-            println!("update channel set to {:?}", config.update_channel);
+            println!("update source set to Stable via GitHub Releases");
         }
         ConfigCommand::EnableProvider { provider_id } => {
             let display_name = {
@@ -1512,12 +1509,13 @@ fn config_command(args: ConfigArgs) -> Result<()> {
     Ok(())
 }
 
-fn parse_update_channel(channel: &str) -> Result<UpdateChannel> {
-    match channel {
-        "stable" => Ok(UpdateChannel::Stable),
-        "beta" => Ok(UpdateChannel::Beta),
-        "nightly" => Ok(UpdateChannel::Nightly),
-        _ => Err(anyhow!("expected update channel stable, beta, or nightly")),
+fn require_stable_update_source(channel: &str) -> Result<()> {
+    if channel == "stable" {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Gyro supports only the stable GitHub Releases update source"
+        ))
     }
 }
 
@@ -1539,6 +1537,13 @@ fn summarize_title(task: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_update_channel_command_accepts_only_stable() {
+        assert!(require_stable_update_source("stable").is_ok());
+        assert!(require_stable_update_source("beta").is_err());
+        assert!(require_stable_update_source("nightly").is_err());
+    }
 
     #[test]
     fn parses_run_profile_model_and_json_flags() {

@@ -32,6 +32,7 @@ import {
   normalizedConfig,
   parseProviderHealthOutput,
   providersForConfig,
+  selectedReasoningEffort,
   workbenchReducer,
   type AppDestination,
   type Automation,
@@ -56,6 +57,7 @@ import {
   type ProviderHandoff,
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
+  type ReasoningEffort,
   type ProviderSession,
   type ProblemDiagnostic,
   type Session,
@@ -72,6 +74,7 @@ import {
   type TerminalPaneStatus,
   type TerminalPane,
   type TerminalTemplate,
+  type UpdateState,
   type WorkbenchPaneTab,
   type WorkbenchState,
   type WorkbenchTurn,
@@ -102,6 +105,7 @@ import {
   mergeProviderResponseEvents,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
+import { useGyroUpdater } from "./update-controller";
 
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
 
@@ -221,6 +225,7 @@ type SessionModelSelection = {
   providerLabel?: string;
   modelId?: string;
   modelLabel?: string;
+  reasoningEffort?: ReasoningEffort;
 };
 
 type SavedProject = {
@@ -231,7 +236,7 @@ type SavedProject = {
 };
 
 const EMPTY_CONFIG: GyroConfig = {
-  updateChannel: "stable",
+  automaticUpdateChecks: true,
   telemetryEnabled: false,
   requireCommandApproval: true,
   requireFileEditApproval: true,
@@ -2467,6 +2472,7 @@ export function App() {
                 providerLabel: model.providerLabel,
                 modelId: model.modelId,
                 modelLabel: model.modelLabel,
+                reasoningEffort: model.reasoningEffort,
               }
             : session,
         ),
@@ -2483,6 +2489,7 @@ export function App() {
           providerLabel: model.providerLabel,
           modelId: model.modelId,
           modelLabel: model.modelLabel,
+          reasoningEffort: model.reasoningEffort,
         });
         setSessions((current) =>
           current.map((session) =>
@@ -2519,6 +2526,7 @@ export function App() {
           providerLabel: provider.displayName,
           modelId: model?.id ?? provider.selectedModelId,
           modelLabel: model?.displayName,
+          reasoningEffort: selectedReasoningEffort(provider),
         });
       }
     },
@@ -2842,7 +2850,7 @@ export function App() {
 
   const selectProviderModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
-      const providers = providersForConfig(config).map((provider) =>
+      let providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, selectedModelId: modelId }
           : provider,
@@ -2851,6 +2859,14 @@ export function App() {
       const selectedModel = provider
         ? getProviderModel(provider, modelId)
         : undefined;
+      const reasoningEffort = provider
+        ? selectedReasoningEffort(provider)
+        : undefined;
+      providers = providers.map((item) =>
+        item.id === providerId
+          ? { ...item, selectedReasoningEffort: reasoningEffort }
+          : item,
+      );
       void persistConfig({
         ...config,
         selectedProviderId: providerId,
@@ -2867,6 +2883,7 @@ export function App() {
           providerLabel: provider.displayName,
           modelId,
           modelLabel: selectedModel?.displayName ?? modelId,
+          reasoningEffort,
         });
       }
       if (provider && selectedModel) {
@@ -2885,6 +2902,41 @@ export function App() {
       recordModelSelection,
       saveSessionModel,
     ],
+  );
+
+  const selectProviderReasoningEffort = useCallback(
+    (providerId: ProviderId, effort: ReasoningEffort) => {
+      const providers = providersForConfig(config).map((provider) =>
+        provider.id === providerId
+          ? { ...provider, selectedReasoningEffort: effort }
+          : provider,
+      );
+      const provider = providers.find((item) => item.id === providerId);
+      const model = provider ? getProviderModel(provider) : undefined;
+      if (!provider || !model?.supportedReasoningEfforts?.includes(effort)) {
+        notify(
+          "command-failed",
+          "Effort unavailable",
+          "The selected model does not support that reasoning effort.",
+        );
+        return;
+      }
+      void persistConfig({
+        ...config,
+        selectedProviderId: providerId,
+        modelProviders: providers,
+      });
+      if (activeSessionId) {
+        void saveSessionModel(activeSessionId, {
+          providerId,
+          providerLabel: provider.displayName,
+          modelId: model.id,
+          modelLabel: model.displayName,
+          reasoningEffort: effort,
+        });
+      }
+    },
+    [activeSessionId, config, notify, persistConfig, saveSessionModel],
   );
 
   const acceptModelStandardPrompt = useCallback(() => {
@@ -3024,6 +3076,23 @@ export function App() {
         const [, providerId, modelId] = action.split(":");
         if (isProviderId(providerId) && modelId) {
           selectProviderModel(providerId, modelId);
+        }
+        return;
+      }
+
+      if (action.startsWith("select-provider-effort:")) {
+        const [, providerId, effort] = action.split(":");
+        if (
+          isProviderId(providerId) &&
+          effort &&
+          ["low", "medium", "high", "xhigh", "max", "ultra"].includes(
+            effort,
+          )
+        ) {
+          selectProviderReasoningEffort(
+            providerId,
+            effort as ReasoningEffort,
+          );
         }
         return;
       }
@@ -3207,6 +3276,7 @@ export function App() {
       savedProjects,
       selectProvider,
       selectProviderModel,
+      selectProviderReasoningEffort,
       selectContextFile,
       sessions,
       workbench.workspaceMode,
@@ -3387,6 +3457,7 @@ export function App() {
                 providerLabel: selectedProvider?.displayName,
                 modelId: sessionModel.modelId,
                 modelLabel: sessionModel.modelLabel,
+                reasoningEffort: sessionModel.reasoningEffort,
                 suggestTitle: shouldSuggestTitle,
                 workspacePath: persistedSession.workspacePath,
               },
@@ -3395,6 +3466,12 @@ export function App() {
           applyProviderChatResponse(persistedSession.id, providerResponse);
           optimisticEventsRef.current.delete(persistedSession.id);
         } catch (error) {
+          dispatchWorkbench({
+            type: "set-provider-readiness",
+            status: "blocked",
+            message: String(error),
+            providerId: selectedProvider?.id,
+          });
           updateOptimisticProviderStatus(
             optimisticEventsRef,
             setEvents,
@@ -3472,6 +3549,7 @@ export function App() {
               providerLabel: selectedProvider?.displayName,
               modelId: sessionModel.modelId,
               modelLabel: sessionModel.modelLabel,
+              reasoningEffort: sessionModel.reasoningEffort,
               suggestTitle: shouldSuggestTitle,
               workspacePath: activeSession?.workspacePath ?? workspacePath,
             },
@@ -3480,6 +3558,12 @@ export function App() {
         applyProviderChatResponse(activeSessionId, providerResponse);
         optimisticEventsRef.current.delete(activeSessionId);
       } catch (error) {
+        dispatchWorkbench({
+          type: "set-provider-readiness",
+          status: "blocked",
+          message: String(error),
+          providerId: selectedProvider?.id,
+        });
         updateOptimisticProviderStatus(
           optimisticEventsRef,
           setEvents,
@@ -5005,7 +5089,13 @@ export function App() {
       setConfig((current) => {
         const providers = providersForConfig(current).map((provider) =>
           provider.id === activeSession.providerId
-            ? { ...provider, selectedModelId: activeSession.modelId }
+            ? {
+                ...provider,
+                selectedModelId: activeSession.modelId,
+                selectedReasoningEffort:
+                  activeSession.reasoningEffort ??
+                  provider.selectedReasoningEffort,
+              }
             : provider,
         );
         return normalizedConfig({
@@ -5785,6 +5875,62 @@ export function App() {
     />
   );
 
+  const updateRestartBlockers = useMemo(() => {
+    const blockers: string[] = [];
+    if (isStartingFirstTurn || sendingSessionIds.length > 0) {
+      blockers.push("An agent response is still running");
+    }
+    if (
+      workbench.activeTurn &&
+      ["queued", "running", "waiting"].includes(workbench.activeTurn.status)
+    ) {
+      blockers.push("The active agent turn has not finished");
+    }
+    if ((workbench.activeTurn?.approvalsPending ?? 0) > 0) {
+      blockers.push("An approval is waiting for your decision");
+    }
+    if (workbench.terminalPanes.some((pane) => pane.status === "running")) {
+      blockers.push("A terminal process is still running");
+    }
+    if (
+      Object.values(workbench.ide.buffers).some((buffer) =>
+        ["dirty", "saving", "conflict"].includes(buffer.status),
+      )
+    ) {
+      blockers.push("The editor has unsaved or conflicted changes");
+    }
+    return [...new Set(blockers)];
+  }, [
+    isStartingFirstTurn,
+    sendingSessionIds.length,
+    workbench.activeTurn,
+    workbench.ide.buffers,
+    workbench.terminalPanes,
+  ]);
+  const updater = useGyroUpdater({
+    automaticChecks: config.automaticUpdateChecks !== false,
+    restartBlockers: updateRestartBlockers,
+  });
+  const runUpdateAction = useCallback(
+    (state: UpdateState = updater.state) => {
+      if (state.status === "available") {
+        void updater.downloadUpdate();
+      } else if (
+        state.status === "ready" ||
+        state.status === "restart-blocked"
+      ) {
+        void updater.restartAndInstallUpdate();
+      } else if (
+        state.status === "failed" ||
+        state.status === "current" ||
+        state.status === "checking"
+      ) {
+        void updater.checkForUpdate(true);
+      }
+    },
+    [updater],
+  );
+
   if (!accountSession.signedIn) {
     return (
       <GyroAccountGate
@@ -5804,6 +5950,7 @@ export function App() {
       activeSessionId={activeSessionId}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
+      updateState={updater.state}
       files={files}
       ide={workbench.ide}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
@@ -5824,6 +5971,7 @@ export function App() {
       }
       onOpenSettingsSection={openSettingsSection}
       onOpenWorkspace={openWorkspace}
+      onUpdateAction={runUpdateAction}
       onOpenWorkspaceFile={openEditorLocation}
       onRefreshWorkspace={refreshWorkspaceTree}
       onCreateWorkspacePath={createWorkspacePath}
@@ -5918,6 +6066,7 @@ export function App() {
                   modelLabel: activeSession?.modelLabel,
                   providerId: activeSession?.providerId,
                   providerLabel: activeSession?.providerLabel,
+                  reasoningEffort: activeSession?.reasoningEffort,
                 }}
                 sessionPlan={activeSessionPlan}
                 sessionTitle={activeSession?.title}
@@ -6127,6 +6276,7 @@ export function App() {
           config={config}
           density={workbench.preferences.density}
           onConfigChange={handleConfigChange}
+          onCheckForUpdates={() => void updater.checkForUpdate(true)}
           onCliLaunchPresetChange={(preset: CliLaunchPreset) =>
             dispatchWorkbench({ type: "set-cli-launch-preset", preset })
           }
@@ -6158,6 +6308,7 @@ export function App() {
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           themeMode={workbench.preferences.theme}
+          updateState={updater.state}
         />
       ) : null}
       {activeDestination === "tools" ? (
@@ -6254,6 +6405,7 @@ export function App() {
             modelLabel: activeSession?.modelLabel,
             providerId: activeSession?.providerId,
             providerLabel: activeSession?.providerLabel,
+            reasoningEffort: activeSession?.reasoningEffort,
           }}
           workspaceMode={workbench.workspaceMode}
           onToggleEnvironmentRail={() =>
@@ -8317,6 +8469,9 @@ function selectedSessionModelFromConfig(config: GyroConfig) {
     providerLabel: provider?.displayName,
     modelId: model?.id ?? provider?.selectedModelId,
     modelLabel: model?.displayName ?? provider?.selectedModelId,
+    reasoningEffort: provider
+      ? selectedReasoningEffort(provider)
+      : undefined,
   };
 }
 
@@ -8403,7 +8558,14 @@ function createPreviewSession(
   layout: WorkspaceLayoutId,
   mode: WorkbenchState["workspaceMode"] = "local",
   model: Partial<
-    Pick<Session, "modelId" | "modelLabel" | "providerId" | "providerLabel">
+    Pick<
+      Session,
+      | "modelId"
+      | "modelLabel"
+      | "providerId"
+      | "providerLabel"
+      | "reasoningEffort"
+    >
   > = {},
   titleOverride?: string,
   sessionId = `preview-${Date.now()}`,
@@ -8430,6 +8592,7 @@ function createPreviewSession(
     providerLabel: model.providerLabel,
     modelId: model.modelId,
     modelLabel: model.modelLabel,
+    reasoningEffort: model.reasoningEffort,
     createdAt: now,
     updatedAt: now,
     eventsPath: "preview://events",

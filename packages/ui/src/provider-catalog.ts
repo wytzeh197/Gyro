@@ -4,7 +4,21 @@ import type {
   ProviderId,
   ProviderModel,
   ProviderStatus,
+  ReasoningEffort,
 } from "./types";
+
+export const LEGACY_OPENAI_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
+
+export const GPT_56_REASONING_EFFORTS: ReasoningEffort[] = [
+  ...LEGACY_OPENAI_REASONING_EFFORTS,
+  "max",
+  "ultra",
+];
 
 type ProviderCatalogEntry = ModelProviderConfig & {
   defaultModelId: string;
@@ -21,23 +35,51 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     authMode: "cli",
     authStatus: "not-connected",
     baseUrl: null,
-    defaultModelId: "gpt-5.5",
-    selectedModelId: "gpt-5.5",
+    defaultModelId: "gpt-5.6-sol",
+    selectedModelId: "gpt-5.6-sol",
+    selectedReasoningEffort: "medium",
     models: [
+      {
+        id: "gpt-5.6-sol",
+        displayName: "GPT-5.6 Sol",
+        description: "Frontier model for complex professional work.",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+      },
+      {
+        id: "gpt-5.6-terra",
+        displayName: "GPT-5.6 Terra",
+        description: "Balances intelligence and cost for everyday work.",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+      },
+      {
+        id: "gpt-5.6-luna",
+        displayName: "GPT-5.6 Luna",
+        description: "Fast, cost-sensitive model for lighter workloads.",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+      },
       {
         id: "gpt-5.5",
         displayName: "GPT-5.5",
         description: "Flagship model for complex reasoning and coding.",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
       },
       {
         id: "gpt-5.4",
         displayName: "GPT-5.4",
         description: "Balanced coding model with lower cost.",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
       },
       {
         id: "gpt-5.4-mini",
         displayName: "GPT-5.4 mini",
         description: "Lower-latency model for lighter agent work.",
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
       },
     ],
     effort: "extra-high",
@@ -152,6 +194,18 @@ export function selectedModelLabel(provider: ModelProviderConfig) {
   );
 }
 
+export function selectedReasoningEffort(provider: ModelProviderConfig) {
+  const model = getProviderModel(provider);
+  const supported = model?.supportedReasoningEfforts ?? [];
+  if (
+    provider.selectedReasoningEffort &&
+    supported.includes(provider.selectedReasoningEffort)
+  ) {
+    return provider.selectedReasoningEffort;
+  }
+  return model?.defaultReasoningEffort ?? supported[0];
+}
+
 export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
   const savedProviders = new Map(
     config.modelProviders.map((provider) => [provider.id, provider]),
@@ -159,10 +213,23 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
 
   return providerCatalog.map((catalogProvider) => {
     const savedProvider = savedProviders.get(catalogProvider.id);
-    const models =
-      savedProvider?.models && savedProvider.models.length > 0
-        ? savedProvider.models
-        : catalogProvider.models;
+    const savedModels = new Map(
+      (savedProvider?.models ?? []).map((model) => [model.id, model]),
+    );
+    const catalogModelIds = new Set(
+      catalogProvider.models.map((model) => model.id),
+    );
+    const models = [
+      ...catalogProvider.models.map((model) => ({
+        ...model,
+        ...savedModels.get(model.id),
+        defaultReasoningEffort: model.defaultReasoningEffort,
+        supportedReasoningEfforts: model.supportedReasoningEfforts,
+      })),
+      ...(savedProvider?.models ?? []).filter(
+        (model) => !catalogModelIds.has(model.id),
+      ),
+    ];
     const selectedModelId =
       savedProvider?.selectedModelId &&
       models.some((model) => model.id === savedProvider.selectedModelId)
@@ -187,6 +254,15 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       enabled: authStatus === "connected",
       models,
       selectedModelId,
+      selectedReasoningEffort: (() => {
+        const model = models.find((item) => item.id === selectedModelId);
+        const requested =
+          savedProvider?.selectedReasoningEffort ??
+          catalogProvider.selectedReasoningEffort;
+        return requested && model?.supportedReasoningEfforts?.includes(requested)
+          ? requested
+          : model?.defaultReasoningEffort;
+      })(),
     };
   });
 }

@@ -38,7 +38,7 @@ pub fn run_doctor(paths: &GyroPaths, config: &GyroConfig) -> DoctorReport {
     checks.push(command_check("git", "Git", &["--version"]));
     checks.push(shell_check());
     checks.push(app_install_check());
-    checks.push(update_channel_check(config));
+    checks.push(update_source_check());
     checks.push(provider_key_check(config));
     checks.push(storage_check(paths));
 
@@ -115,12 +115,12 @@ fn first_installed_app(candidates: impl IntoIterator<Item = PathBuf>) -> Option<
     candidates.into_iter().find(|path| path.exists())
 }
 
-fn update_channel_check(config: &GyroConfig) -> DoctorCheck {
+fn update_source_check() -> DoctorCheck {
     DoctorCheck {
-        id: "update-channel".into(),
-        label: "Update channel".into(),
+        id: "update-source".into(),
+        label: "Update source".into(),
         status: DoctorStatus::Pass,
-        message: format!("{:?}", config.update_channel),
+        message: "Stable via GitHub Releases".into(),
     }
 }
 

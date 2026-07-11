@@ -244,7 +244,17 @@ export type ProviderModel = {
   id: string;
   displayName: string;
   description?: string;
+  defaultReasoningEffort?: ReasoningEffort;
+  supportedReasoningEfforts?: ReasoningEffort[];
 };
+
+export type ReasoningEffort =
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra";
 
 export type ProviderReadinessStatus = "idle" | "checking" | "ready" | "blocked";
 
@@ -735,6 +745,7 @@ export type Session = {
   providerLabel?: string;
   modelId?: string;
   modelLabel?: string;
+  reasoningEffort?: ReasoningEffort;
   createdAt: string;
   updatedAt: string;
   eventsPath: string;
@@ -780,6 +791,7 @@ export type ModelProviderConfig = {
   authStatus: ProviderAuthStatus;
   models: ProviderModel[];
   selectedModelId?: string;
+  selectedReasoningEffort?: ReasoningEffort;
 };
 
 export type GyroAccountStatus =
@@ -803,7 +815,7 @@ export type GyroAccountOidcConfig = {
 };
 
 export type GyroConfig = {
-  updateChannel: "stable" | "beta" | "nightly";
+  automaticUpdateChecks?: boolean;
   telemetryEnabled: boolean;
   requireCommandApproval: boolean;
   requireFileEditApproval: boolean;
@@ -812,6 +824,33 @@ export type GyroConfig = {
   selectedProviderId?: ProviderId;
   modelProviders: ModelProviderConfig[];
   commandProfiles: CommandProfile[];
+};
+
+export type UpdateStatus =
+  | "checking"
+  | "current"
+  | "available"
+  | "downloading"
+  | "ready"
+  | "restart-blocked"
+  | "installing"
+  | "failed"
+  | "development";
+
+export type UpdateState = {
+  status: UpdateStatus;
+  currentVersion: string;
+  nextVersion?: string;
+  releaseNotes?: string;
+  releaseDate?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  progressPercent?: number;
+  lastCheckedAt?: string;
+  blockers?: string[];
+  error?: string;
+  retryable?: boolean;
+  silentFailure?: boolean;
 };
 
 export type WorkspaceFile = {

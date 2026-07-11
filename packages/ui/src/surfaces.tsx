@@ -59,6 +59,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  Fragment,
   memo,
   useCallback,
   useDeferredValue,
@@ -103,6 +104,7 @@ import type {
   ProviderHandoff,
   ProviderSession,
   ProviderStatus,
+  ReasoningEffort,
   SettingsSectionId,
   Session,
   SessionEvent,
@@ -117,6 +119,7 @@ import type {
   TerminalPaneLayout,
   TerminalTemplate,
   ThemeMode,
+  UpdateState,
   WorkbenchDensity,
   WorkbenchMode,
   WorkbenchPaneTab,
@@ -135,7 +138,13 @@ import {
   getProviderModel,
   providersForConfig,
   selectedModelLabel,
+  selectedReasoningEffort,
 } from "./provider-catalog";
+import {
+  shouldShowSidebarUpdate,
+  updatePrimaryActionLabel,
+  updateSidebarLabel,
+} from "./update-state";
 
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
@@ -200,6 +209,7 @@ type AppChromeProps = {
   ide?: IdeState;
   activePaneTab?: WorkbenchPaneTab;
   activeSettingsSection?: SettingsSectionId;
+  updateState?: UpdateState;
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onSelectDestination: (destination: AppDestination) => void;
@@ -244,6 +254,7 @@ type AppChromeProps = {
   onToggleChatsCollapsed?: () => void;
   onSettingsSectionChange?: (section: SettingsSectionId) => void;
   onSettingsBack?: () => void;
+  onUpdateAction?: (state: UpdateState) => void;
   children: ReactNode;
 };
 
@@ -311,6 +322,7 @@ export function AppChrome({
   ide,
   activePaneTab = "diff",
   activeSettingsSection = "general",
+  updateState,
   onSelectSession,
   onSelectWorkspaceLayout,
   onSelectDestination,
@@ -348,9 +360,15 @@ export function AppChrome({
   onToggleChatsCollapsed,
   onSettingsSectionChange,
   onSettingsBack,
+  onUpdateAction,
   children,
 }: AppChromeProps) {
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
+  const [isUpdatePopoverOpen, setIsUpdatePopoverOpen] = useState(false);
+  const updatePopoverRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isUpdatePopoverOpen,
+    () => setIsUpdatePopoverOpen(false),
+  );
   const [ideSidebarMinimumWidth, setIdeSidebarMinimumWidth] =
     useState(restingSidebarWidth);
   const [ideSidebarWidth, setIdeSidebarWidth] = useState(restingSidebarWidth);
@@ -373,6 +391,15 @@ export function AppChrome({
   const isIdeSurface =
     activeDestination === "workspace" && activeWorkspaceLayout === "code";
   const ideSidebarMaximumWidth = ideSidebarMinimumWidth * 2;
+  const showSidebarUpdate = updateState
+    ? shouldShowSidebarUpdate(updateState)
+    : false;
+
+  useEffect(() => {
+    if (!showSidebarUpdate) {
+      setIsUpdatePopoverOpen(false);
+    }
+  }, [showSidebarUpdate]);
 
   useEffect(() => {
     if (!isIdeSurface) {
@@ -579,6 +606,36 @@ export function AppChrome({
 
           {activeDestination !== "settings" ? (
             <div className="gyro-sidebar-footer">
+              {showSidebarUpdate && updateState ? (
+                <div className="gyro-sidebar-update" ref={updatePopoverRef}>
+                  <button
+                    aria-expanded={isUpdatePopoverOpen}
+                    aria-haspopup="dialog"
+                    className="gyro-sidebar-update-button"
+                    onClick={() => setIsUpdatePopoverOpen((open) => !open)}
+                    type="button"
+                  >
+                    <RefreshCw
+                      className={
+                        updateState.status === "downloading" ||
+                        updateState.status === "installing"
+                          ? "is-spinning"
+                          : ""
+                      }
+                      size={16}
+                    />
+                    <span>{updateSidebarLabel(updateState)}</span>
+                    <span className="gyro-sidebar-update-dot" />
+                  </button>
+                  {isUpdatePopoverOpen ? (
+                    <UpdatePopover
+                      onAction={() => onUpdateAction?.(updateState)}
+                      onClose={() => setIsUpdatePopoverOpen(false)}
+                      state={updateState}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 className="gyro-account-button"
                 onClick={() => {
@@ -631,6 +688,70 @@ export function AppChrome({
         {children}
       </main>
     </div>
+  );
+}
+
+function UpdatePopover({
+  onAction,
+  onClose,
+  state,
+}: {
+  onAction: () => void;
+  onClose: () => void;
+  state: UpdateState;
+}) {
+  const actionDisabled =
+    state.status === "downloading" || state.status === "installing";
+  return (
+    <section
+      aria-label="Gyro update"
+      aria-modal="false"
+      className="gyro-update-popover"
+      role="dialog"
+    >
+      <header>
+        <div>
+          <strong>{updateSidebarLabel(state)}</strong>
+          <span>
+            {state.nextVersion
+              ? `${state.currentVersion} → ${state.nextVersion}`
+              : `Gyro ${state.currentVersion}`}
+          </span>
+        </div>
+        <button aria-label="Close update details" onClick={onClose} type="button">
+          <X size={14} />
+        </button>
+      </header>
+      {state.releaseNotes ? <p>{state.releaseNotes}</p> : null}
+      {state.status === "downloading" ? (
+        <div
+          aria-label="Update download progress"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={state.progressPercent}
+          className="gyro-update-progress"
+          role="progressbar"
+        >
+          <span style={{ width: `${state.progressPercent ?? 0}%` }} />
+        </div>
+      ) : null}
+      {state.blockers?.length ? (
+        <ul>
+          {state.blockers.map((blocker) => (
+            <li key={blocker}>{blocker}</li>
+          ))}
+        </ul>
+      ) : null}
+      {state.error ? <small>{state.error}</small> : null}
+      <button
+        className="gyro-update-primary"
+        disabled={actionDisabled}
+        onClick={onAction}
+        type="button"
+      >
+        {updatePrimaryActionLabel(state)}
+      </button>
+    </section>
   );
 }
 
@@ -2338,6 +2459,7 @@ type ChatSurfaceProps = {
     modelLabel?: string;
     providerId?: ProviderId;
     providerLabel?: string;
+    reasoningEffort?: ReasoningEffort;
   };
   workspacePath?: string;
   config: GyroConfig;
@@ -2438,7 +2560,7 @@ export function ChatSurface({
   const startProjectLabel =
     workspacePath && !isGeneratedGyroWorkspace(workspacePath)
       ? workspaceName(workspacePath)
-      : "Gyro";
+      : undefined;
   const browserStatus = browserPreview?.status ?? "idle";
   const deferredEvents = useDeferredValue(events);
   const transcriptState = useMemo(
@@ -2515,10 +2637,16 @@ export function ChatSurface({
             />
           </span>
           <h1>
-            <span>What should we do in </span>
-            <span className="gyro-chat-start-brand-word">
-              {startProjectLabel}?
-            </span>
+            {startProjectLabel ? (
+              <>
+                <span>What should we do in </span>
+                <span className="gyro-chat-start-brand-word">
+                  {startProjectLabel}?
+                </span>
+              </>
+            ) : (
+              <span>What should we work on?</span>
+            )}
           </h1>
           <Composer
             config={config}
@@ -4136,7 +4264,6 @@ export function ChatThread({
         requireCommandApproval: true,
         requireFileEditApproval: true,
         telemetryEnabled: false,
-        updateChannel: "stable",
       }}
       draft={draft}
       events={events}
@@ -7402,11 +7529,13 @@ type SettingsSurfaceProps = {
   onDensityChange?: (density: WorkbenchDensity) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
+  onCheckForUpdates?: () => void;
   onCliLaunchPresetChange?: (preset: CliLaunchPreset) => void;
   onResetUiState?: () => void;
   onExportDiagnostics?: () => void;
   onToggleProvider?: (providerId: string) => void;
   onTestProvider?: (providerId: string) => void;
+  updateState?: UpdateState;
 };
 
 function CliLaunchPresetEditor({
@@ -7556,11 +7685,13 @@ export function SettingsSurface({
   onDensityChange,
   onSectionChange,
   onConfigChange,
+  onCheckForUpdates,
   onCliLaunchPresetChange,
   onResetUiState,
   onExportDiagnostics,
   onToggleProvider,
   onTestProvider,
+  updateState,
 }: SettingsSurfaceProps) {
   const providerConfigs = providersForConfig(config);
   const enabledProviders = providerConfigs.filter(
@@ -7811,39 +7942,46 @@ export function SettingsSurface({
           <SettingsSection
             icon={RefreshCw}
             title="Updates"
-            description="Release channel and signed updater status."
+            description="Stable updates delivered through signed GitHub Releases."
           >
             <SettingsRow
-              label="Channel"
-              value={config.updateChannel}
-              detail="Stable is the default for direct macOS installs."
+              label="Update source"
+              value="Stable via GitHub Releases"
+              detail="Published non-prerelease builds from github.com/wytzeh197/Gyro."
+            />
+            <SettingsRow
+              label="Gyro version"
+              value={updateState?.currentVersion ?? "Unknown"}
+              detail={
+                updateState?.nextVersion
+                  ? `${updateState.nextVersion} is available.`
+                  : "The installed desktop application version."
+              }
+            />
+            <SettingsRow
+              label="Automatic checks"
+              value={config.automaticUpdateChecks === false ? "Off" : "On"}
+              detail="Checks after launch and occasionally when Gyro regains focus. Downloads still require a click."
               onClick={() =>
                 onConfigChange?.({
                   ...config,
-                  updateChannel:
-                    config.updateChannel === "stable"
-                      ? "beta"
-                      : config.updateChannel === "beta"
-                        ? "nightly"
-                        : "stable",
+                  automaticUpdateChecks: config.automaticUpdateChecks === false,
                 })
               }
             />
             <SettingsRow
-              label="Install method"
-              value="Direct or Homebrew"
-              detail="Homebrew users update through brew; direct installs use signed artifacts."
-            />
-            <SettingsRow
-              label="Signature verification"
-              value="Valid"
-              detail="Release artifacts are expected to be signed before install."
-            />
-            <SettingsRow
               label="Last checked"
-              value="Today"
-              detail="Stable, Beta, and Nightly channels share the same updater panel."
+              value={formatUpdateCheckedAt(updateState?.lastCheckedAt)}
+              detail={updateSettingsDetail(updateState)}
+              onClick={onCheckForUpdates}
             />
+            {updateState?.releaseNotes ? (
+              <SettingsRow
+                label="What’s new"
+                value={updateState.nextVersion ?? "Available"}
+                detail={updateState.releaseNotes}
+              />
+            ) : null}
           </SettingsSection>
         ) : null}
 
@@ -7938,6 +8076,44 @@ export function SettingsSurface({
   );
 }
 
+function formatUpdateCheckedAt(value?: string) {
+  if (!value) {
+    return "Not checked yet";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function updateSettingsDetail(state?: UpdateState) {
+  if (!state) {
+    return "Updater status is unavailable.";
+  }
+  if (state.status === "development") {
+    return "Updater disabled in development. Production endpoints are not contacted.";
+  }
+  if (state.status === "checking") {
+    return "Checking the signed update channel…";
+  }
+  if (state.status === "current") {
+    return "Gyro is up to date.";
+  }
+  if (state.status === "failed") {
+    return state.error ?? "The update check failed. Select this row to retry.";
+  }
+  if (state.status === "ready" || state.status === "restart-blocked") {
+    return "The downloaded update passed signature verification.";
+  }
+  return state.nextVersion
+    ? `Signed update ${state.nextVersion} is ${state.status}.`
+    : `Updater status: ${state.status}.`;
+}
+
 export function SettingsPanel({ config }: SettingsPanelProps) {
   return (
     <section className="gyro-panel gyro-settings" aria-label="Settings">
@@ -7949,7 +8125,7 @@ export function SettingsPanel({ config }: SettingsPanelProps) {
         <div>
           <CircleDashed size={15} />
           <span>Updates</span>
-          <strong>{config.updateChannel}</strong>
+          <strong>GitHub</strong>
         </div>
         <div>
           <ShieldCheck size={15} />
@@ -8045,7 +8221,14 @@ type ComposerPopoverItem = {
   action?: string;
   removeAction?: string;
   icon: IconComponent;
-  kind?: "model" | "permission-direct" | "project" | "provider" | "warning";
+  kind?:
+    | "effort"
+    | "model"
+    | "permission-direct"
+    | "project"
+    | "provider"
+    | "warning";
+  sectionLabel?: string;
   providerId?: ProviderId;
   active?: boolean;
   disabled?: boolean;
@@ -8120,60 +8303,73 @@ function ComposerPopover({
         );
         if (item.removeAction) {
           return (
-            <div className={itemClassName} key={`${item.label}-${index}`}>
-              <button
-                className="gyro-composer-menu-primary"
-                disabled={item.disabled}
-                onClick={() => onAction(item.action, item)}
-                onFocus={() => {
-                  if (!item.disabled) {
-                    onItemPreview?.(item);
-                  }
-                }}
-                onPointerEnter={() => {
-                  if (!item.disabled) {
-                    onItemPreview?.(item);
-                  }
-                }}
-                role="menuitem"
-                type="button"
-              >
-                {itemContent}
-              </button>
-              <button
-                aria-label={`Remove ${item.label}`}
-                className="gyro-composer-menu-remove"
-                disabled={item.disabled}
-                onClick={() => onAction(item.removeAction, item)}
-                title="Remove"
-                type="button"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
+            <Fragment key={`${item.label}-${index}`}>
+              {item.sectionLabel ? (
+                <div className="gyro-composer-popover-section-title">
+                  {item.sectionLabel}
+                </div>
+              ) : null}
+              <div className={itemClassName}>
+                <button
+                  className="gyro-composer-menu-primary"
+                  disabled={item.disabled}
+                  onClick={() => onAction(item.action, item)}
+                  onFocus={() => {
+                    if (!item.disabled) {
+                      onItemPreview?.(item);
+                    }
+                  }}
+                  onPointerEnter={() => {
+                    if (!item.disabled) {
+                      onItemPreview?.(item);
+                    }
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  {itemContent}
+                </button>
+                <button
+                  aria-label={`Remove ${item.label}`}
+                  className="gyro-composer-menu-remove"
+                  disabled={item.disabled}
+                  onClick={() => onAction(item.removeAction, item)}
+                  title="Remove"
+                  type="button"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </Fragment>
           );
         }
         return (
-          <button
-            className={itemClassName}
-            disabled={item.disabled}
-            key={`${item.label}-${index}`}
-            onClick={() => onAction(item.action, item)}
-            onFocus={() => {
-              if (!item.disabled) {
-                onItemPreview?.(item);
-              }
-            }}
-            onPointerEnter={() => {
-              if (!item.disabled) {
-                onItemPreview?.(item);
-              }
-            }}
-            role="menuitem"
-            type="button"
-          >
-            {itemContent}
-          </button>
+          <Fragment key={`${item.label}-${index}`}>
+            {item.sectionLabel ? (
+              <div className="gyro-composer-popover-section-title">
+                {item.sectionLabel}
+              </div>
+            ) : null}
+            <button
+              className={itemClassName}
+              disabled={item.disabled}
+              onClick={() => onAction(item.action, item)}
+              onFocus={() => {
+                if (!item.disabled) {
+                  onItemPreview?.(item);
+                }
+              }}
+              onPointerEnter={() => {
+                if (!item.disabled) {
+                  onItemPreview?.(item);
+                }
+              }}
+              role="menuitem"
+              type="button"
+            >
+              {itemContent}
+            </button>
+          </Fragment>
         );
       })}
     </div>
@@ -8188,6 +8384,13 @@ function providerAuthOwnerLabel(owner?: ProviderStatus["authOwner"]) {
     return "Provider SDK";
   }
   return "Provider CLI";
+}
+
+function reasoningEffortLabel(effort: ReasoningEffort) {
+  if (effort === "xhigh") {
+    return "XHigh";
+  }
+  return `${effort.charAt(0).toUpperCase()}${effort.slice(1)}`;
 }
 
 function providerAuthOwnershipDetail(providerId: ProviderId) {
@@ -8479,6 +8682,7 @@ function Composer({
     modelLabel?: string;
     providerId?: ProviderId;
     providerLabel?: string;
+    reasoningEffort?: ReasoningEffort;
   };
   savedProjects?: Array<{
     path: string;
@@ -8498,6 +8702,10 @@ function Composer({
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
+  const [modelFlyoutSide, setModelFlyoutSide] = useState<"left" | "right">(
+    "right",
+  );
+  const providerPickerRef = useRef<HTMLDivElement | null>(null);
   const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(activePopover),
     () => {
@@ -8532,6 +8740,12 @@ function Composer({
   const modelChipLabel = hasSelectedProvider
     ? providerModelLabel
     : "Choose model";
+  const providerReasoningEffort = selectedProvider
+    ? selectedReasoningEffort(selectedProvider)
+    : sessionModel?.reasoningEffort;
+  const modelChipDetail = providerReasoningEffort
+    ? `${providerModelLabel} · ${reasoningEffortLabel(providerReasoningEffort)}`
+    : modelChipLabel;
   const approvalMode = approvalModeForConfig(config);
   const approvalCopy = providerApprovalCopy(selectedProvider?.id, config);
   const approvalChipClassName =
@@ -8604,6 +8818,17 @@ function Composer({
               : Bot,
             kind: "model" as const,
             label: model.displayName,
+            detail: model.description,
+          })),
+          ...(getProviderModel(modelPickerProvider)
+            ?.supportedReasoningEfforts ?? []
+          ).map((effort, index) => ({
+            action: `select-provider-effort:${modelPickerProvider.id}:${effort}`,
+            active: effort === selectedReasoningEffort(modelPickerProvider),
+            icon: Gauge,
+            kind: "effort" as const,
+            label: reasoningEffortLabel(effort),
+            sectionLabel: index === 0 ? "Effort" : undefined,
           })),
         ]
       : []),
@@ -8665,6 +8890,22 @@ function Composer({
     "aria-haspopup": "menu" as const,
   });
   const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up");
+
+  useEffect(() => {
+    if (!modelPickerProvider || !providerPickerRef.current) {
+      setModelFlyoutSide("right");
+      return;
+    }
+    const rect = providerPickerRef.current.getBoundingClientRect();
+    const modelFlyoutWidth = 220;
+    const availableRight = window.innerWidth - rect.right;
+    const availableLeft = rect.left;
+    setModelFlyoutSide(
+      availableRight < modelFlyoutWidth + 8 && availableLeft > availableRight
+        ? "left"
+        : "right",
+    );
+  }, [modelPickerProvider]);
 
   return (
     <div
@@ -8791,7 +9032,7 @@ function Composer({
             {displayProvider ? (
               <ProviderLogo providerId={displayProvider.id} />
             ) : null}
-            <span className="gyro-composer-label">{modelChipLabel}</span>
+            <span className="gyro-composer-label">{modelChipDetail}</span>
             <ChevronDown size={13} />
           </button>
           {activePopover === "provider" ? (
@@ -8803,8 +9044,10 @@ function Composer({
                 .filter(Boolean)
                 .join(" ")}
               data-align="end"
+              data-flyout-side={modelFlyoutSide}
               data-placement={providerPopoverPlacement}
               id={`${popoverBaseId}-provider`}
+              ref={providerPickerRef}
             >
               <ComposerPopover
                 className="gyro-provider-picker-menu"

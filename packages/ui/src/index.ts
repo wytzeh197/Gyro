@@ -64,6 +64,7 @@ export type {
   ProviderHandoffStatus,
   ProviderId,
   ProviderModel,
+  ReasoningEffort,
   ProviderResumeCursor,
   ProviderRunDiagnostics,
   ProviderRuntimeStatus,
@@ -90,6 +91,8 @@ export type {
   TerminalTemplate,
   TestTreeItem,
   ThemeMode,
+  UpdateState,
+  UpdateStatus,
   WorkbenchDensity,
   WorkbenchMode,
   WorkbenchPaneTab,
@@ -124,8 +127,15 @@ export {
   providerCatalog,
   providersForConfig,
   selectedModelLabel,
+  selectedReasoningEffort,
 } from "./provider-catalog";
 export type { WorkbenchAction } from "./workbench-state";
+export {
+  shouldShowSidebarUpdate,
+  updatePrimaryActionLabel,
+  updateProgressPercent,
+  updateSidebarLabel,
+} from "./update-state";
 export {
   AppChrome,
   AutomationsSurface,

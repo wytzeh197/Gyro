@@ -3,20 +3,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UpdateChannel {
-    Stable,
-    Beta,
-    Nightly,
-}
-
-impl Default for UpdateChannel {
-    fn default() -> Self {
-        Self::Stable
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelProviderConfig {
     pub id: String,
@@ -98,7 +84,8 @@ pub struct AccountSessionState {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GyroConfig {
-    pub update_channel: UpdateChannel,
+    #[serde(default = "default_automatic_update_checks")]
+    pub automatic_update_checks: bool,
     pub telemetry_enabled: bool,
     pub require_command_approval: bool,
     pub require_file_edit_approval: bool,
@@ -113,7 +100,7 @@ pub struct GyroConfig {
 impl Default for GyroConfig {
     fn default() -> Self {
         Self {
-            update_channel: UpdateChannel::Stable,
+            automatic_update_checks: true,
             telemetry_enabled: false,
             require_command_approval: true,
             require_file_edit_approval: true,
@@ -171,6 +158,10 @@ impl Default for GyroConfig {
     }
 }
 
+fn default_automatic_update_checks() -> bool {
+    true
+}
+
 impl GyroConfig {
     pub fn load(paths: &GyroPaths) -> Result<Self> {
         if !paths.config_path.exists() {
@@ -221,7 +212,7 @@ mod tests {
         assert!(!config.telemetry_enabled);
         assert!(config.require_command_approval);
         assert!(config.require_file_edit_approval);
-        assert_eq!(config.update_channel, UpdateChannel::Stable);
+        assert!(config.automatic_update_checks);
         assert_eq!(
             config.account_oidc.scopes,
             vec![
@@ -250,6 +241,11 @@ mod tests {
 
         assert!(!config.account_oidc.client_id.is_empty());
         assert!(!config.account_session.signed_in);
+        assert!(config.automatic_update_checks);
+        assert!(serde_json::to_value(config)
+            .unwrap()
+            .get("updateChannel")
+            .is_none());
     }
 
     #[test]
