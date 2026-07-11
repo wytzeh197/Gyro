@@ -2169,6 +2169,7 @@ export function App() {
     setActiveSessionId(undefined);
     setEvents([]);
     resetChatDraft();
+    dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
     dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     dispatchWorkbench({ type: "close-tool-panel" });
   }, [resetChatDraft]);

@@ -2317,11 +2317,14 @@ expect(
   appSource.includes("const startNewChat") &&
     appSource.includes("suppressSessionAutoSelectRef.current = true") &&
     appSource.includes("setActiveSessionId(undefined)") &&
+    appSource.includes(
+      'dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });',
+    ) &&
     appSource.includes("onCreateSession={startNewChat}") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
     surfaceSource.includes("if (transcriptEvents.length === 0)") &&
     surfaceSource.includes('aria-label="New thread"'),
-  "New chat should clear the active session and render the start screen from transcript events.",
+  "New chat should clear the active session, reset to local mode, and render the start screen from transcript events.",
 );
 expect(
   !surfaceSource.includes("pane-shell") &&
