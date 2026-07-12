@@ -3,6 +3,10 @@ description: Suggest a product or developer-experience improvement.
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. For large changes, explain the user problem before proposing implementation details.
   - type: textarea
     id: problem
     attributes:
@@ -28,3 +32,5 @@ body:
         - Release/install
         - Documentation
         - Other
+    validations:
+      required: true

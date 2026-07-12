@@ -1,6 +1,6 @@
 # Code Of Conduct
 
-Gyro uses the Contributor Covenant Code of Conduct, version 2.1.
+Gyro uses the [Contributor Covenant Code of Conduct, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
 
 ## Our Pledge
 
@@ -26,4 +26,4 @@ Examples of unacceptable behavior:
 
 ## Enforcement
 
-Maintainers are responsible for clarifying and enforcing standards of acceptable behavior. Report conduct issues through the private security/contact channel listed in `SECURITY.md` until a dedicated community contact exists.
+Maintainers are responsible for clarifying and enforcing standards of acceptable behavior. Until a dedicated community contact is published, report conduct issues privately through the contact path in [SECURITY.md](SECURITY.md). Do not include conduct reports in public issues.

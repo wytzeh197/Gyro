@@ -3,6 +3,10 @@ description: Report a reproducible problem in Gyro.
 title: "[Bug]: "
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Gyro. Do not report vulnerabilities or include credentials or private source code here; follow SECURITY.md instead.
   - type: textarea
     id: summary
     attributes:
@@ -27,3 +31,22 @@ body:
     attributes:
       label: macOS version
       placeholder: "14.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Desktop app
+        - CLI
+        - Both app and CLI
+        - Build or installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include relevant output after removing tokens, private paths, source code, and session content.
