@@ -4273,6 +4273,9 @@ fn run_openai_codex_chat(
         request.workspace_path.as_deref(),
         request.model_label.as_deref(),
         request.suggest_title,
+        request.mode == ChatMode::Normal
+            && !request.require_command_approval
+            && !request.require_file_edit_approval,
     );
 
     let mut process = command_with_gui_path("codex");
@@ -4483,6 +4486,10 @@ fn codex_chat_args(
         args.push("--image".into());
         args.push(attachment.path.clone());
     }
+    // `codex exec --image <FILE>...` is variadic. Without an option terminator,
+    // Clap can consume the chat prompt as another image path and then fall back
+    // to an empty stdin stream.
+    args.push("--".into());
     args.push(prompt.into());
     args
 }
@@ -4544,6 +4551,7 @@ fn openai_codex_chat_prompt(
     workspace_path: Option<&str>,
     model_label: Option<&str>,
     suggest_title: bool,
+    allow_mutations: bool,
 ) -> String {
     let workspace = workspace_path
         .map(str::trim)
@@ -4558,6 +4566,11 @@ fn openai_codex_chat_prompt(
     } else {
         ""
     };
+    let mutation_instruction = if allow_mutations {
+        "You may edit files, run commands, and complete requested workspace changes directly."
+    } else {
+        "Do not edit files, start servers, commit, push, or make destructive changes in this chat run."
+    };
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -4569,7 +4582,7 @@ fn openai_codex_chat_prompt(
          If the user asks what model you are, answer with exactly that selected model label only.\n\
          {title_instruction}\
          Use the selected workspace only as optional context.\n\
-         Do not edit files, start servers, commit, push, or make destructive changes in this chat run.\n\
+         {mutation_instruction}\n\
          Selected workspace: {workspace}\n\n\
          User message:\n{message}"
     )
@@ -6455,6 +6468,7 @@ while True:
             Some("/workspace"),
             Some("GPT-5.6 Sol"),
             true,
+            false,
         );
 
         assert!(prompt.contains("polished, scannable Markdown"));
@@ -6466,6 +6480,14 @@ while True:
         assert!(prompt.contains("Do not describe the local Codex runner"));
         assert!(prompt.contains("GYRO_SESSION_TITLE:"));
         assert!(prompt.contains("Selected workspace: /workspace"));
+        assert!(prompt.contains("Do not edit files"));
+
+        let full_access_prompt =
+            openai_codex_chat_prompt("fix it", Some("/workspace"), None, false, true);
+        assert!(full_access_prompt.contains(
+            "You may edit files, run commands, and complete requested workspace changes directly."
+        ));
+        assert!(!full_access_prompt.contains("Do not edit files"));
     }
 
     #[test]
@@ -6503,6 +6525,10 @@ while True:
         assert!(fresh_codex
             .windows(2)
             .any(|args| args == ["--image", "/tmp/screen.png"]));
+        assert_eq!(
+            fresh_codex[fresh_codex.len() - 2..],
+            ["--".to_string(), "hello".to_string()]
+        );
         assert_eq!(fresh_codex.last(), Some(&"hello".to_string()));
 
         let full_access_codex =
@@ -6531,10 +6557,7 @@ while True:
             ]
         );
         assert!(resumed_codex.contains(&"--skip-git-repo-check".to_string()));
-        assert!(resumed_codex.ends_with(&[
-            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e".to_string(),
-            "again".to_string()
-        ]));
+        assert!(resumed_codex.ends_with(&["--".to_string(), "again".to_string()]));
 
         let fresh_claude = claude_chat_args(
             None,
