@@ -84,7 +84,9 @@ for (const marker of [
   "scripts/create-updater-manifest.mjs",
   'gh release create "$GITHUB_REF_NAME"',
   "cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg",
-  "cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz",
+  "release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz",
+  "updater_suffix: aarch64",
+  "updater_suffix: x64",
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
 ]) {
