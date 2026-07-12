@@ -52,6 +52,7 @@ export function mergePersistedAndOptimisticEvents(
   const userMessages = new Set<string>();
   const providerStatusTurnIds = new Set<string>();
   const assistantTurnIds = new Set<string>();
+  const providerActivityKeys = new Set<string>();
   for (const event of merged) {
     seenEventIds.add(event.id);
     if (event.kind === "user-message") {
@@ -63,6 +64,8 @@ export function mergePersistedAndOptimisticEvents(
       providerStatusTurnIds.add(event.turnId);
     } else if (event.kind === "assistant-message" && event.turnId) {
       assistantTurnIds.add(event.turnId);
+    } else if (isProviderActivityEvent(event)) {
+      providerActivityKeys.add(providerActivityKey(event));
     }
   }
   for (const event of optimisticEvents) {
@@ -77,11 +80,15 @@ export function mergePersistedAndOptimisticEvents(
     const hasSameTurnAssistant =
       event.kind === "assistant-message" &&
       Boolean(event.turnId && assistantTurnIds.has(event.turnId));
+    const hasSameProviderActivity =
+      isProviderActivityEvent(event) &&
+      providerActivityKeys.has(providerActivityKey(event));
     if (
       !hasSameId &&
       !hasSameTurnUser &&
       !hasSameTurnProviderStatus &&
-      !hasSameTurnAssistant
+      !hasSameTurnAssistant &&
+      !hasSameProviderActivity
     ) {
       merged.push(event);
       seenEventIds.add(event.id);
@@ -94,6 +101,8 @@ export function mergePersistedAndOptimisticEvents(
         providerStatusTurnIds.add(event.turnId);
       } else if (event.kind === "assistant-message" && event.turnId) {
         assistantTurnIds.add(event.turnId);
+      } else if (isProviderActivityEvent(event)) {
+        providerActivityKeys.add(providerActivityKey(event));
       }
     }
   }
@@ -104,7 +113,21 @@ export function mergeProviderResponseEvents(
   currentEvents: SessionEvent[],
   responseEvents: SessionEvent[],
 ) {
-  let merged = currentEvents;
+  const completedAssistantMessages = new Set(
+    responseEvents
+      .filter((event) => event.kind === "assistant-message")
+      .map((event) => event.message.trim()),
+  );
+  let merged = currentEvents.filter((event) => {
+    if (!isProviderActivityEvent(event)) {
+      return true;
+    }
+    const payload = recordFromUnknown(event.payload);
+    return !(
+      payload?.activityKind === "commentary" &&
+      completedAssistantMessages.has(event.message.trim())
+    );
+  });
   for (const responseEvent of responseEvents) {
     const existingIndex = merged.findIndex((event) => {
       if (event.id === responseEvent.id) {
@@ -118,6 +141,12 @@ export function mergeProviderResponseEvents(
       }
       if (responseEvent.kind === "assistant-message") {
         return event.kind === "assistant-message";
+      }
+      if (isProviderActivityEvent(responseEvent)) {
+        return (
+          isProviderActivityEvent(event) &&
+          providerActivityKey(event) === providerActivityKey(responseEvent)
+        );
       }
       return false;
     });
@@ -139,6 +168,73 @@ export function mergeProviderResponseEvents(
 export function isProviderStatusEvent(event: SessionEvent) {
   const payload = recordFromUnknown(event.payload);
   return event.kind === "system-event" && payload?.kind === "provider-status";
+}
+
+export function isProviderActivityEvent(event: SessionEvent) {
+  const payload = recordFromUnknown(event.payload);
+  return event.kind === "system-event" && payload?.kind === "provider-activity";
+}
+
+function providerActivityKey(event: SessionEvent) {
+  const payload = recordFromUnknown(event.payload);
+  return `${event.turnId ?? "turn"}:${String(payload?.activityId ?? payload?.label ?? event.id)}`;
+}
+
+export function applyProviderChatStreamActivity(
+  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
+  setEvents: SessionEventsSetter,
+  streamEvent: ProviderChatStreamEvent,
+) {
+  const turnId = streamEvent.turnId ?? undefined;
+  const label = streamEvent.activityLabel?.trim();
+  if (!streamEvent.sessionId || !turnId || !label) {
+    return;
+  }
+  const activityId = streamEvent.activityId ?? streamEvent.eventId;
+  const eventId = `${streamEvent.sessionId}-activity-${turnId}-${activityId}`;
+  const updateEvents = (items: SessionEvent[]) => {
+    const nextEvent: SessionEvent = {
+      id: eventId,
+      sessionId: streamEvent.sessionId,
+      turnId,
+      createdAt: new Date().toISOString(),
+      kind: "system-event",
+      message: label,
+      payload: {
+        kind: "provider-activity",
+        activityId,
+        activityKind: streamEvent.activityKind ?? "tool",
+        label,
+        detail: streamEvent.activityDetail,
+        status: streamEvent.activityStatus ?? "done",
+        providerId: streamEvent.providerId,
+        modelId: streamEvent.modelId,
+        turnId,
+      },
+    };
+    const existingIndex = items.findIndex((event) => event.id === eventId);
+    if (existingIndex < 0) {
+      return [...items, nextEvent];
+    }
+    const next = items.slice();
+    next[existingIndex] = {
+      ...nextEvent,
+      createdAt: items[existingIndex]?.createdAt ?? nextEvent.createdAt,
+    };
+    return next;
+  };
+  optimisticEventsRef.current.set(
+    streamEvent.sessionId,
+    limitSessionEventsForUi(
+      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+    ),
+  );
+  setEvents((current) => {
+    if (!current.some((event) => event.sessionId === streamEvent.sessionId)) {
+      return current;
+    }
+    return limitSessionEventsForUi(updateEvents(current));
+  });
 }
 
 export function applyProviderChatStreamDeltas(
