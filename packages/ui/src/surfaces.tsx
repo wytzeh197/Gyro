@@ -1058,8 +1058,11 @@ function WorkspaceSidebarContent({
             <button
               aria-expanded={isUpdatePopoverOpen}
               aria-haspopup="dialog"
+              aria-label={updateSidebarLabel(updateState)}
               className="gyro-sidebar-update-button"
+              data-status={updateState.status}
               onClick={onToggleUpdatePopover}
+              title={updateSidebarLabel(updateState)}
               type="button"
             >
               <RefreshCw
@@ -1071,7 +1074,10 @@ function WorkspaceSidebarContent({
                 }
                 size={13}
               />
-              <span>{updateSidebarLabel(updateState)}</span>
+              <span
+                aria-hidden="true"
+                className="gyro-sidebar-update-indicator"
+              />
             </button>
             {isUpdatePopoverOpen ? (
               <UpdatePopover
