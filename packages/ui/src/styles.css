@@ -124,6 +124,12 @@
   padding: 8px 10px 0;
 }
 
+.gyro-composer-attachments {
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px 2px;
+}
+
 .gyro-composer-attachment,
 .gyro-transcript-attachment {
   align-items: center;
@@ -134,6 +140,30 @@
   gap: 7px;
   max-width: 240px;
   padding: 6px 8px;
+}
+
+.gyro-composer-attachment.is-image {
+  background: #15171a;
+  border-color: rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  display: block;
+  height: 72px;
+  max-width: none;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 88px;
+}
+
+.gyro-composer-attachment.is-image::after {
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+  bottom: 0;
+  content: "";
+  height: 32px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
 }
 
 .gyro-composer-attachment > span,
@@ -148,6 +178,53 @@
   height: 32px;
   object-fit: cover;
   width: 32px;
+}
+
+.gyro-composer-attachment.is-image > img {
+  border-radius: 0;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.gyro-composer-attachment.is-image > span {
+  bottom: 5px;
+  left: 7px;
+  max-width: 64px;
+  position: absolute;
+  right: 7px;
+  z-index: 1;
+}
+
+.gyro-composer-attachment.is-image strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 10px;
+  font-weight: 550;
+}
+
+.gyro-composer-attachment.is-image small {
+  display: none;
+}
+
+.gyro-composer-attachment.is-image button {
+  align-items: center;
+  background: rgba(248, 248, 246, 0.96);
+  border-radius: 999px;
+  color: #18191c;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 18px;
+  z-index: 2;
+}
+
+.gyro-composer-attachment.is-image button:hover {
+  background: #ffffff;
+  transform: scale(1.04);
 }
 
 .gyro-composer-attachment strong,
@@ -179,6 +256,18 @@
 
 .gyro-composer-chip.is-plan {
   color: var(--gyro-warning, #e3ad54);
+}
+
+.gyro-composer-chip-remove {
+  border-left: 1px solid currentColor;
+  margin-left: 1px;
+  opacity: 0.72;
+  padding-left: 4px;
+  width: 16px;
+}
+
+.gyro-composer-chip.is-plan:hover .gyro-composer-chip-remove {
+  opacity: 1;
 }
 
 .gyro-composer-chip.is-goal {

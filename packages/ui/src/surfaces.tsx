@@ -9584,12 +9584,6 @@ function Composer({
       label: "Plan",
     },
     {
-      action:
-        chatMode === "plan" ? "set-chat-mode-normal" : "set-chat-mode-plan",
-      icon: LockKeyhole,
-      label: chatMode === "plan" ? "Leave Plan mode" : "Plan mode",
-    },
-    {
       action: "search-workspace",
       icon: Search,
       label: "Search",
@@ -9697,6 +9691,36 @@ function Composer({
         }
       }}
     >
+      {attachments.length > 0 ? (
+        <div className="gyro-composer-attachments" aria-label="Attachments">
+          {attachments.map((attachment) => (
+            <div
+              className={`gyro-composer-attachment is-${attachment.kind}`}
+              key={attachment.id}
+            >
+              {attachment.kind === "image" && attachment.previewUrl ? (
+                <img alt={attachment.name} src={attachment.previewUrl} />
+              ) : attachment.kind === "image" ? (
+                <ImagePlus size={15} />
+              ) : (
+                <FileText size={15} />
+              )}
+              <span>
+                <strong>{attachment.name}</strong>
+                <small>{formatAttachmentSize(attachment.size)}</small>
+              </span>
+              <button
+                aria-label={`Remove ${attachment.name}`}
+                onClick={() => onRemoveAttachment?.(attachment.id)}
+                title={`Remove ${attachment.name}`}
+                type="button"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <textarea
         onPaste={(event) => {
           const files = Array.from(event.clipboardData.files).filter((file) =>
@@ -9755,35 +9779,6 @@ function Composer({
         }
         value={draft}
       />
-      {attachments.length > 0 ? (
-        <div className="gyro-composer-attachments" aria-label="Attachments">
-          {attachments.map((attachment) => (
-            <div
-              className={`gyro-composer-attachment is-${attachment.kind}`}
-              key={attachment.id}
-            >
-              {attachment.kind === "image" && attachment.previewUrl ? (
-                <img alt="" src={attachment.previewUrl} />
-              ) : attachment.kind === "image" ? (
-                <ImagePlus size={15} />
-              ) : (
-                <FileText size={15} />
-              )}
-              <span>
-                <strong>{attachment.name}</strong>
-                <small>{formatAttachmentSize(attachment.size)}</small>
-              </span>
-              <button
-                aria-label={`Remove ${attachment.name}`}
-                onClick={() => onRemoveAttachment?.(attachment.id)}
-                type="button"
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
       <div className="gyro-composer-bar">
         {hasSelectedProvider || isHero ? (
           <>
@@ -9846,17 +9841,34 @@ function Composer({
           </>
         ) : null}
         {surfaceControls}
-        {chatMode === "plan" ? (
-          <button
-            className="gyro-composer-chip is-plan"
-            onClick={() => onComposerAction?.("set-chat-mode-normal")}
-            title="Plan mode is read-only"
-            type="button"
-          >
-            <LockKeyhole size={13} />
-            <span className="gyro-composer-label">Plan</span>
-          </button>
-        ) : null}
+        <button
+          aria-label={
+            chatMode === "plan" ? "Remove Plan mode" : "Select Plan mode"
+          }
+          aria-pressed={chatMode === "plan"}
+          className={`gyro-composer-chip${chatMode === "plan" ? " is-plan" : ""}`}
+          onClick={() =>
+            onComposerAction?.(
+              chatMode === "plan"
+                ? "set-chat-mode-normal"
+                : "set-chat-mode-plan",
+            )
+          }
+          title={chatMode === "plan" ? "Leave Plan mode" : "Enter Plan mode"}
+          type="button"
+        >
+          <LockKeyhole size={13} />
+          {chatMode === "plan" ? (
+            <>
+              <span className="gyro-composer-label">Plan</span>
+              <X
+                aria-hidden="true"
+                className="gyro-composer-chip-remove"
+                size={12}
+              />
+            </>
+          ) : null}
+        </button>
         {sessionGoal?.text ? (
           <button
             className="gyro-composer-chip is-goal"

@@ -3503,15 +3503,6 @@ export function App() {
         case "set-chat-mode-normal":
           {
             const mode: ChatMode = action.endsWith("plan") ? "plan" : "normal";
-            if (
-              mode === "normal" &&
-              activeChatMode === "plan" &&
-              !window.confirm(
-                "Leave Plan mode? Normal Chat remains read-only until atomic mutation approval ships.",
-              )
-            ) {
-              break;
-            }
             if (!activeSessionId) {
               setPendingNewChatMode(mode);
               break;
