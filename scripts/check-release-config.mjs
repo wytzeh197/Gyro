@@ -77,14 +77,25 @@ if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
 }
 
 for (const marker of [
-  "includeUpdaterJson: true",
-  "releaseDraft: true",
-  "prerelease: false",
+  "needs: macos",
+  "actions/upload-artifact@v4",
+  "actions/download-artifact@v4",
+  "merge-multiple: true",
+  "scripts/create-updater-manifest.mjs",
+  'gh release create "$GITHUB_REF_NAME"',
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
 ]) {
   if (!releaseWorkflow.includes(marker)) {
     failures.push(`Release workflow is missing ${marker}.`);
+  }
+}
+
+for (const unsafeMarker of ["tauri-apps/tauri-action", "includeUpdaterJson"]) {
+  if (releaseWorkflow.includes(unsafeMarker)) {
+    failures.push(
+      `Release workflow must not use ${unsafeMarker}; parallel publishers can split a multi-architecture release.`,
+    );
   }
 }
 
