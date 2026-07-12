@@ -83,6 +83,8 @@ for (const marker of [
   "merge-multiple: true",
   "scripts/create-updater-manifest.mjs",
   'gh release create "$GITHUB_REF_NAME"',
+  "cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg",
+  "cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz",
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
 ]) {

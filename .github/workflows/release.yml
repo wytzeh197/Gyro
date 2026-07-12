@@ -50,9 +50,9 @@ jobs:
       - name: Collect signed release assets
         run: |
           mkdir -p release-assets
-          cp apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
-          cp apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz release-assets/
-          cp apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig release-assets/
+          cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
+          cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz release-assets/
+          cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig release-assets/
       - name: Upload signed architecture bundle
         uses: actions/upload-artifact@v4
         with:
