@@ -77,8 +77,7 @@ if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
 }
 
 for (const marker of [
-  "uploadUpdaterJson: true",
-  "uploadUpdaterSignatures: true",
+  "includeUpdaterJson: true",
   "releaseDraft: true",
   "prerelease: false",
   "aarch64-apple-darwin",
