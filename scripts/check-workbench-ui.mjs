@@ -2300,7 +2300,7 @@ expect(
     appSource.includes("deriveChatMode") &&
     surfaceSource.includes('action: "select-image"') &&
     surfaceSource.includes('action: "add-goal"') &&
-    surfaceSource.includes('action: "add-plan"') &&
+    appSource.includes('case "add-plan"') &&
     surfaceSource.includes('"set-chat-mode-plan"') &&
     surfaceSource.includes("gyro-composer-attachments") &&
     surfaceSource.includes("gyro-session-goal") &&
