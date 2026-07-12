@@ -107,6 +107,7 @@ import {
   limitSessionEventsForUi,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
+  resetStreamingAssistantForRetry,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
 import { useGyroUpdater } from "./update-controller";
@@ -187,6 +188,7 @@ type ChatTurnContextSnapshot = {
   goal?: SessionGoal;
   plan?: SessionPlan;
   attachments?: ChatAttachment[];
+  retryTurnId?: string;
 };
 
 type WorkspaceFileWriteRequest = {
@@ -3685,15 +3687,19 @@ export function App() {
         void openWorkspace();
         return;
       }
-      const turnId = createTurnId();
+      const retryTurnId = overrideContext?.retryTurnId;
+      const turnId = retryTurnId ?? createTurnId();
+      const isRetry = Boolean(activeSessionId && retryTurnId);
       const selectedProvider = providersForConfig(config).find(
         (provider) => provider.id === config.selectedProviderId,
       );
       const sessionModel = selectedSessionModelFromConfig(config);
-      const shouldSuggestTitle = shouldSuggestSessionTitle(
-        activeSession,
-        activeSessionHasTranscriptEvents,
-      );
+      const shouldSuggestTitle =
+        !isRetry &&
+        shouldSuggestSessionTitle(
+          activeSession,
+          activeSessionHasTranscriptEvents,
+        );
       const provisionalTitle = shouldSuggestTitle
         ? sessionTitleFromMessage(message)
         : undefined;
@@ -3907,33 +3913,54 @@ export function App() {
         return;
       }
 
-      const optimisticEvents = createOptimisticTurnEvents(
-        activeSessionId,
-        message,
-        turnId,
-        selectedProvider,
-        turnAttachments,
-      );
+      const optimisticEvents = isRetry
+        ? []
+        : createOptimisticTurnEvents(
+            activeSessionId,
+            message,
+            turnId,
+            selectedProvider,
+            turnAttachments,
+          );
       if (provisionalTitle) {
         void updateSessionTitle(activeSessionId, provisionalTitle, {
           notifyFailure: false,
         });
       }
       void saveSessionModel(activeSessionId, sessionModel);
-      optimisticEventsRef.current.set(
-        activeSessionId,
-        mergePersistedAndOptimisticEvents(
-          optimisticEventsRef.current.get(activeSessionId) ?? [],
-          optimisticEvents,
-        ),
-      );
+      if (isRetry) {
+        const resetEvents = (items: SessionEvent[]) =>
+          resetStreamingAssistantForRetry(items, turnId);
+        optimisticEventsRef.current.set(
+          activeSessionId,
+          resetEvents(optimisticEventsRef.current.get(activeSessionId) ?? []),
+        );
+        setEvents((current) => resetEvents(current));
+        updateOptimisticProviderStatus(
+          optimisticEventsRef,
+          setEvents,
+          activeSessionId,
+          turnId,
+          "running",
+        );
+      } else {
+        optimisticEventsRef.current.set(
+          activeSessionId,
+          mergePersistedAndOptimisticEvents(
+            optimisticEventsRef.current.get(activeSessionId) ?? [],
+            optimisticEvents,
+          ),
+        );
+      }
       setSessionSending(activeSessionId, true);
       dispatchWorkbench({ type: "set-chat-panel" });
-      setEvents((current) =>
-        limitSessionEventsForUi(
-          mergePersistedAndOptimisticEvents(current, optimisticEvents),
-        ),
-      );
+      if (!isRetry) {
+        setEvents((current) =>
+          limitSessionEventsForUi(
+            mergePersistedAndOptimisticEvents(current, optimisticEvents),
+          ),
+        );
+      }
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
           optimisticEventsRef,
@@ -3948,13 +3975,15 @@ export function App() {
       }
       try {
         await waitForNextPaint();
-        await invoke<SessionEvent>("append_user_message", {
-          attachments: turnAttachments,
-          sessionId: activeSessionId,
-          message,
-          turnId,
-        });
-        resetChatDraft();
+        if (!isRetry) {
+          await invoke<SessionEvent>("append_user_message", {
+            attachments: turnAttachments,
+            sessionId: activeSessionId,
+            message,
+            turnId,
+          });
+          resetChatDraft();
+        }
         const providerResponse = await invoke<ProviderChatResponse>(
           "run_provider_chat",
           {
@@ -4077,6 +4106,7 @@ export function App() {
         const goalRecord = recordFromUnknown(payload?.goal);
         const planRecord = recordFromUnknown(payload?.plan);
         void sendDraft(userMessage, {
+          retryTurnId: turnId,
           mode:
             stringFromRecord(payload, "chatMode") === "plan"
               ? "plan"

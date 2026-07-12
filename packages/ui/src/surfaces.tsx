@@ -10414,11 +10414,12 @@ function ChatTurn({
   const providerStatus = turn.statusEvent
     ? providerStatusFromEvent(turn.statusEvent)
     : undefined;
-  const isRunning =
-    isActive ||
-    providerStatus?.status === "queued" ||
-    providerStatus?.status === "running" ||
-    providerStatus?.status === "waiting";
+  const wasInterrupted = Boolean(
+    !isActive &&
+    providerStatus &&
+    ["queued", "running", "waiting"].includes(providerStatus.status),
+  );
+  const isRunning = isActive;
   const completedAt =
     !isRunning && turn.statusEvent ? turn.statusEvent.createdAt : undefined;
   const hasResponse = turn.assistantEvents.some(
@@ -10467,17 +10468,27 @@ function ChatTurn({
           </article>
         ))}
         {providerStatus &&
-        ["failed", "blocked", "cancelled"].includes(providerStatus.status) &&
+        (["failed", "blocked", "cancelled"].includes(providerStatus.status) ||
+          wasInterrupted) &&
         turn.statusEvent ? (
           <div className="gyro-chat-run-error">
             <div>
-              <strong>{turn.statusEvent.message}</strong>
-              {providerStatus.error ? (
+              <strong>
+                {wasInterrupted
+                  ? "Previous send was interrupted"
+                  : turn.statusEvent.message}
+              </strong>
+              {wasInterrupted ? (
+                <span>
+                  Gyro restarted or lost the provider process before this turn
+                  finished. Retry continues the same message.
+                </span>
+              ) : providerStatus.error ? (
                 <span>{providerStatus.error}</span>
               ) : null}
             </div>
             <div>
-              {providerStatus.status === "failed" ? (
+              {providerStatus.status === "failed" || wasInterrupted ? (
                 <button
                   onClick={() =>
                     onProviderStatusAction?.("retry-send", turn.statusEvent!)
