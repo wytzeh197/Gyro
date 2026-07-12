@@ -2213,6 +2213,10 @@ expect(
     surfaceSource.includes("updatePrimaryActionLabel(state)") &&
     styleSource.includes(".gyro-sidebar-update-button") &&
     styleSource.includes(".gyro-sidebar-update.is-windowbar") &&
+    styleSource.includes("height: 24px") &&
+    styleSource.includes("width: 24px") &&
+    !styleSource.includes(".gyro-sidebar-update-indicator") &&
+    !surfaceSource.includes("gyro-sidebar-update-indicator") &&
     styleSource.includes(".gyro-update-popover") &&
     updateControllerSource.includes("import.meta.env.DEV") &&
     updateControllerSource.includes("allowDowngrades: false") &&
