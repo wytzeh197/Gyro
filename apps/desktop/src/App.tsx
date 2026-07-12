@@ -6546,6 +6546,24 @@ export function App() {
     automaticChecks: config.automaticUpdateChecks !== false,
     restartBlockers: updateRestartBlockers,
   });
+  const checkForUpdatesWithFeedback = useCallback(async () => {
+    const result = await updater.checkForUpdate(true);
+    if (result.status === "current") {
+      notify(
+        "tests-passed",
+        "Gyro is up to date",
+        `Version ${result.currentVersion} is the latest signed release`,
+      );
+    } else if (result.status === "available") {
+      notify(
+        "terminal",
+        `Gyro ${result.nextVersion} is available`,
+        "Use the update control in the titlebar to download it",
+      );
+    } else if (result.status === "failed") {
+      notify("command-failed", "Update check failed", result.error);
+    }
+  }, [notify, updater]);
   const runUpdateAction = useCallback(
     (state: UpdateState = updater.state) => {
       if (state.status === "available") {
@@ -6923,7 +6941,7 @@ export function App() {
           config={config}
           density={workbench.preferences.density}
           onConfigChange={handleConfigChange}
-          onCheckForUpdates={() => void updater.checkForUpdate(true)}
+          onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onCliLaunchPresetChange={(preset: CliLaunchPreset) =>
             dispatchWorkbench({ type: "set-cli-launch-preset", preset })
           }

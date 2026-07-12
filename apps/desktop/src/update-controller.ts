@@ -14,10 +14,16 @@ const LAST_UPDATE_CHECK_STORAGE_KEY = "gyro.update.last-checked-at.v1";
 
 export type GyroUpdateController = {
   state: UpdateState;
-  checkForUpdate: (userInitiated?: boolean) => Promise<void>;
+  checkForUpdate: (userInitiated?: boolean) => Promise<UpdateCheckResult>;
   downloadUpdate: () => Promise<void>;
   restartAndInstallUpdate: () => Promise<void>;
 };
+
+export type UpdateCheckResult =
+  | { status: "available"; currentVersion: string; nextVersion: string }
+  | { status: "current"; currentVersion: string }
+  | { status: "failed"; currentVersion: string; error: string }
+  | { status: "skipped" };
 
 function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;
@@ -43,7 +49,7 @@ export function useGyroUpdater({
   const checkForUpdate = useCallback(
     async (userInitiated = true) => {
       if (import.meta.env.DEV || !isTauriRuntime() || checkingRef.current) {
-        return;
+        return { status: "skipped" };
       }
       checkingRef.current = true;
       setState((current) => ({
@@ -72,7 +78,7 @@ export function useGyroUpdater({
             currentVersion,
             lastCheckedAt: checkedAt,
           });
-          return;
+          return { status: "current", currentVersion };
         }
         await updateRef.current?.close().catch(() => undefined);
         updateRef.current = update;
@@ -84,6 +90,11 @@ export function useGyroUpdater({
           releaseDate: update.date,
           lastCheckedAt: checkedAt,
         });
+        return {
+          status: "available",
+          currentVersion,
+          nextVersion: update.version,
+        };
       } catch (error) {
         const checkedAt = new Date().toISOString();
         localStorage.setItem(LAST_UPDATE_CHECK_STORAGE_KEY, checkedAt);
@@ -100,14 +111,20 @@ export function useGyroUpdater({
             retryDelay,
           );
         }
+        const errorMessage = String(error);
         setState({
           status: "failed",
           currentVersion: currentVersionRef.current,
-          error: String(error),
+          error: errorMessage,
           retryable: true,
           silentFailure: !userInitiated,
           lastCheckedAt: checkedAt,
         });
+        return {
+          status: "failed",
+          currentVersion: currentVersionRef.current,
+          error: errorMessage,
+        };
       } finally {
         checkingRef.current = false;
       }
