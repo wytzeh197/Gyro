@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -36,6 +36,8 @@ import {
   workbenchReducer,
   type AppDestination,
   type Automation,
+  type ChatAttachment,
+  type ChatMode,
   type ChatSidePanelId,
   type CliLaunchPreset,
   type CommandProfile,
@@ -62,6 +64,7 @@ import {
   type ProblemDiagnostic,
   type Session,
   type SessionEvent,
+  type SessionGoal,
   type SessionPlan,
   type SessionPlanItem,
   type SessionPlanItemStatus,
@@ -179,6 +182,13 @@ type ProviderStreamBatch = {
   textDelta: string;
 };
 
+type ChatTurnContextSnapshot = {
+  mode?: ChatMode;
+  goal?: SessionGoal;
+  plan?: SessionPlan;
+  attachments?: ChatAttachment[];
+};
+
 type WorkspaceFileWriteRequest = {
   workspacePath: string;
   path: string;
@@ -261,12 +271,15 @@ const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
 const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
+const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
+const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
 const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const PROVIDER_AUTH_POLL_INTERVAL_MS = 3_000;
 const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
+const NEW_CHAT_DRAFT_KEY = "new";
 const PROVIDER_STREAM_FLUSH_MS = 80;
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
@@ -452,6 +465,19 @@ export function App() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [draftResetToken, setDraftResetToken] = useState(0);
+  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
+    loadChatDrafts(),
+  );
+  const [chatAttachments, setChatAttachments] = useState<
+    Record<string, ChatAttachment[]>
+  >(() => loadChatAttachments());
+  const [pendingNewChatGoal, setPendingNewChatGoal] = useState<SessionGoal>();
+  const [pendingNewChatMode, setPendingNewChatMode] =
+    useState<ChatMode>("normal");
+  const [pendingNewChatPlan, setPendingNewChatPlan] = useState<SessionPlan>({
+    title: "Plan",
+    items: [],
+  });
   const [terminalOutput, setTerminalOutput] = useState("");
   const [terminalSourceControlByPane, setTerminalSourceControlByPane] =
     useState<Record<string, SourceControlState>>({});
@@ -499,7 +525,7 @@ export function App() {
     DEFAULT_TOOL_PANEL_HEIGHT,
   );
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
-  const suppressSessionAutoSelectRef = useRef(false);
+  const suppressSessionAutoSelectRef = useRef(true);
   const ingestedSessionEventIds = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
@@ -551,10 +577,30 @@ export function App() {
   terminalPanesRef.current = workbench.terminalPanes;
   const deferredEventsForPlan = useDeferredValue(events);
   const deferredEventsForTurn = deferredEventsForPlan;
-  const activeSessionPlan = useMemo(
+  const persistedActiveSessionPlan = useMemo(
     () => deriveSessionPlan(deferredEventsForPlan, activeSessionId),
     [activeSessionId, deferredEventsForPlan],
   );
+  const activeSessionPlan = activeSessionId
+    ? persistedActiveSessionPlan
+    : pendingNewChatPlan;
+  const persistedActiveSessionGoal = useMemo(
+    () => deriveSessionGoal(deferredEventsForPlan, activeSessionId),
+    [activeSessionId, deferredEventsForPlan],
+  );
+  const persistedActiveChatMode = useMemo(
+    () => deriveChatMode(deferredEventsForPlan),
+    [deferredEventsForPlan],
+  );
+  const activeSessionGoal = activeSessionId
+    ? persistedActiveSessionGoal
+    : pendingNewChatGoal;
+  const activeChatMode = activeSessionId
+    ? persistedActiveChatMode
+    : pendingNewChatMode;
+  const activeDraftKey = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
+  const activeChatDraft = chatDrafts[activeDraftKey] ?? "";
+  const activeChatAttachments = chatAttachments[activeDraftKey] ?? [];
   const derivedActiveTurn = useMemo(
     () => deriveActiveTurn(deferredEventsForTurn, activeSession?.title),
     [activeSession?.title, deferredEventsForTurn],
@@ -685,9 +731,22 @@ export function App() {
   const selectedTerminalSourceControl = selectedTerminalPane
     ? terminalSourceControlByPane[selectedTerminalPane.id]
     : undefined;
+  useEffect(() => {
+    safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(chatDrafts));
+  }, [chatDrafts]);
+  useEffect(() => {
+    safeSetLocalStorage(
+      CHAT_ATTACHMENTS_STORAGE_KEY,
+      JSON.stringify(chatAttachments),
+    );
+  }, [chatAttachments]);
+
   const resetChatDraft = useCallback(() => {
+    const key = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
+    setChatDrafts((current) => ({ ...current, [key]: "" }));
+    setChatAttachments((current) => ({ ...current, [key]: [] }));
     setDraftResetToken((token) => token + 1);
-  }, []);
+  }, [activeSessionId]);
 
   const checkProviderReadiness = useCallback(
     (intent: "chat" | "task" | "handoff", providerId?: string) => {
@@ -1803,6 +1862,9 @@ export function App() {
     },
     [
       activeSession?.workspacePath,
+      activeSessionGoal,
+      activeSessionId,
+      activeChatMode,
       notify,
       refreshWorkspaceTree,
       workbench.ide.buffers,
@@ -2841,6 +2903,7 @@ export function App() {
       config,
       notify,
       persistConfig,
+      refreshEvents,
       recordProviderHealthOutput,
       setProviderAuthStatus,
       workbench.workspaceMode,
@@ -3063,6 +3126,152 @@ export function App() {
     [addTerminalPane, startNewChat],
   );
 
+  const updateActiveChatDraft = useCallback(
+    (value: string) => {
+      setChatDrafts((current) => ({ ...current, [activeDraftKey]: value }));
+    },
+    [activeDraftKey],
+  );
+
+  const removeChatAttachment = useCallback(
+    (attachmentId: string) => {
+      setChatAttachments((current) => ({
+        ...current,
+        [activeDraftKey]: (current[activeDraftKey] ?? []).filter(
+          (attachment) => attachment.id !== attachmentId,
+        ),
+      }));
+    },
+    [activeDraftKey],
+  );
+
+  const selectChatAttachment = useCallback(
+    async (kind: "image" | "workspace-file") => {
+      if (!isTauriRuntime()) {
+        notify(
+          "command-failed",
+          "Attachments require the app",
+          "Open Gyro desktop to select local files",
+        );
+        return;
+      }
+      if (kind === "workspace-file" && !workspacePath) {
+        notify(
+          "command-failed",
+          "Select a project first",
+          "Workspace references must stay inside the active project",
+        );
+        return;
+      }
+      try {
+        const selected = await open({
+          directory: false,
+          multiple: kind === "image",
+          title: kind === "image" ? "Attach images" : "Attach workspace file",
+          filters:
+            kind === "image"
+              ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
+              : undefined,
+        });
+        const paths =
+          typeof selected === "string" ? [selected] : (selected ?? []);
+        const existing = chatAttachments[activeDraftKey] ?? [];
+        const availableSlots =
+          kind === "image"
+            ? Math.max(
+                0,
+                4 - existing.filter((item) => item.kind === "image").length,
+              )
+            : paths.length;
+        if (kind === "image" && paths.length > availableSlots) {
+          notify(
+            "command-failed",
+            "Four-image limit",
+            `Only ${availableSlots} more image${availableSlots === 1 ? "" : "s"} can be attached`,
+          );
+        }
+        const prepared: ChatAttachment[] = [];
+        for (const path of paths.slice(0, availableSlots)) {
+          const attachment = await invoke<ChatAttachment>(
+            "prepare_chat_attachment",
+            {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path,
+                workspacePath,
+                kind,
+              },
+            },
+          );
+          prepared.push({
+            ...attachment,
+            previewUrl:
+              attachment.kind === "image"
+                ? convertFileSrc(attachment.path)
+                : undefined,
+          });
+        }
+        if (prepared.length) {
+          setChatAttachments((current) => ({
+            ...current,
+            [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
+          }));
+        }
+      } catch (error) {
+        notify("command-failed", "Attachment rejected", String(error));
+      }
+    },
+    [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
+  );
+
+  const attachDroppedImages = useCallback(
+    async (files: File[]) => {
+      const existing = chatAttachments[activeDraftKey] ?? [];
+      const slots = Math.max(
+        0,
+        4 - existing.filter((item) => item.kind === "image").length,
+      );
+      try {
+        const prepared: ChatAttachment[] = [];
+        for (const file of files.slice(0, slots)) {
+          const attachment = await invoke<ChatAttachment>(
+            "prepare_chat_attachment",
+            {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path: "",
+                workspacePath,
+                kind: "image",
+                name: file.name || `pasted-image-${Date.now()}.png`,
+                bytes: Array.from(new Uint8Array(await file.arrayBuffer())),
+              },
+            },
+          );
+          prepared.push({
+            ...attachment,
+            previewUrl: convertFileSrc(attachment.path),
+          });
+        }
+        if (prepared.length) {
+          setChatAttachments((current) => ({
+            ...current,
+            [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
+          }));
+        }
+        if (files.length > slots) {
+          notify(
+            "command-failed",
+            "Four-image limit",
+            "Extra pasted or dropped images were not attached",
+          );
+        }
+      } catch (error) {
+        notify("command-failed", "Image rejected", String(error));
+      }
+    },
+    [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
+  );
+
   const handleComposerAction = useCallback(
     (action: string) => {
       const currentWorkspacePath =
@@ -3119,14 +3328,9 @@ export function App() {
         if (
           isProviderId(providerId) &&
           effort &&
-          ["low", "medium", "high", "xhigh", "max", "ultra"].includes(
-            effort,
-          )
+          ["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)
         ) {
-          selectProviderReasoningEffort(
-            providerId,
-            effort as ReasoningEffort,
-          );
+          selectProviderReasoningEffort(providerId, effort as ReasoningEffort);
         }
         return;
       }
@@ -3226,7 +3430,10 @@ export function App() {
       switch (action) {
         case "add-context":
         case "select-file":
-          void selectContextFile();
+          void selectChatAttachment("workspace-file");
+          break;
+        case "select-image":
+          void selectChatAttachment("image");
           break;
         case "select-project":
         case "select-workspace":
@@ -3234,8 +3441,87 @@ export function App() {
           void openWorkspace();
           break;
         case "add-goal":
+          dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
+          {
+            const text = window
+              .prompt("Session goal", activeSessionGoal?.text ?? "")
+              ?.trim();
+            if (text !== undefined && text.length > 0) {
+              if (!activeSessionId) {
+                setPendingNewChatGoal({ text, status: "active" });
+                break;
+              }
+              void invoke<SessionEvent>("append_chat_context_event", {
+                sessionId: activeSessionId,
+                eventKind: "goal-updated",
+                message: `Goal set: ${text}`,
+                payload: {
+                  action: "set",
+                  text,
+                  status: "active",
+                  sourceTurnId: workbench.activeTurn?.id,
+                },
+              }).then(() => refreshEvents(activeSessionId));
+            }
+          }
+          break;
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
+          {
+            const title = window.prompt("Add plan item")?.trim();
+            if (title) {
+              if (!activeSessionId) {
+                setPendingNewChatPlan((current) => ({
+                  ...current,
+                  items: [
+                    ...current.items,
+                    {
+                      id: crypto.randomUUID(),
+                      title,
+                      status: "todo",
+                      createdAt: new Date().toISOString(),
+                      updatedAt: new Date().toISOString(),
+                    },
+                  ],
+                }));
+                break;
+              }
+              void invoke<SessionEvent>("append_plan_event", {
+                sessionId: activeSessionId,
+                message: `Plan item added: ${title}`,
+                payload: {
+                  action: "add-item",
+                  item: { id: crypto.randomUUID(), title, status: "todo" },
+                },
+              }).then(() => refreshEvents(activeSessionId));
+            }
+          }
+          break;
+        case "set-chat-mode-plan":
+        case "set-chat-mode-normal":
+          {
+            const mode: ChatMode = action.endsWith("plan") ? "plan" : "normal";
+            if (
+              mode === "normal" &&
+              activeChatMode === "plan" &&
+              !window.confirm(
+                "Leave Plan mode? Normal Chat remains read-only until atomic mutation approval ships.",
+              )
+            ) {
+              break;
+            }
+            if (!activeSessionId) {
+              setPendingNewChatMode(mode);
+              break;
+            }
+            void invoke<SessionEvent>("append_chat_context_event", {
+              sessionId: activeSessionId,
+              eventKind: "chat-mode-changed",
+              message:
+                mode === "plan" ? "Plan mode enabled" : "Normal mode enabled",
+              payload: { mode },
+            }).then(() => refreshEvents(activeSessionId));
+          }
           break;
         case "show-project-context":
           void openWorkspace();
@@ -3311,7 +3597,7 @@ export function App() {
       selectProvider,
       selectProviderModel,
       selectProviderReasoningEffort,
-      selectContextFile,
+      selectChatAttachment,
       sessions,
       workbench.workspaceMode,
       workspacePath,
@@ -3349,8 +3635,16 @@ export function App() {
   );
 
   const sendDraft = useCallback(
-    async (overrideMessage?: string) => {
-      const message = normalizeChatMessage(overrideMessage ?? "");
+    async (
+      overrideMessage?: string,
+      overrideContext?: ChatTurnContextSnapshot,
+    ) => {
+      const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
+      const turnAttachments =
+        overrideContext?.attachments ?? activeChatAttachments;
+      const turnMode = overrideContext?.mode ?? activeChatMode;
+      const turnGoal = overrideContext?.goal ?? activeSessionGoal;
+      const turnPlan = overrideContext?.plan ?? activeSessionPlan;
       if (message === "") {
         return;
       }
@@ -3423,6 +3717,7 @@ export function App() {
           message,
           turnId,
           selectedProvider,
+          turnAttachments,
         );
         let sendingSessionId = session.id;
         optimisticEventsRef.current.set(session.id, optimisticEvents);
@@ -3433,7 +3728,6 @@ export function App() {
         setSessions((current) => [session, ...current]);
         setActiveSessionId(session.id);
         setEvents(limitSessionEventsForUi(optimisticEvents));
-        resetChatDraft();
         notify("terminal", "Message sending", "Starting chat");
 
         if (!isTauriRuntime()) {
@@ -3475,11 +3769,81 @@ export function App() {
           setActiveSessionId(persistedSession.id);
           setEvents(limitSessionEventsForUi(migratedEvents));
 
+          const persistedTurnAttachments = await Promise.all(
+            turnAttachments.map(async (attachment) => {
+              const prepared = await invoke<ChatAttachment>(
+                "prepare_chat_attachment",
+                {
+                  request: {
+                    sessionId: persistedSession.id,
+                    path: attachment.path,
+                    workspacePath: persistedSession.workspacePath,
+                    kind: attachment.kind,
+                    name: attachment.name,
+                  },
+                },
+              );
+              return {
+                ...prepared,
+                previewUrl:
+                  prepared.kind === "image"
+                    ? convertFileSrc(prepared.path)
+                    : undefined,
+              };
+            }),
+          );
+
+          const contextEvents: SessionEvent[] = [];
+          if (turnGoal?.text) {
+            contextEvents.push(
+              await invoke<SessionEvent>("append_chat_context_event", {
+                sessionId: persistedSession.id,
+                eventKind: "goal-updated",
+                message: `Goal set: ${turnGoal.text}`,
+                payload: {
+                  action: "set",
+                  text: turnGoal.text,
+                  status: turnGoal.status,
+                },
+              }),
+            );
+          }
+          if (turnMode === "plan") {
+            contextEvents.push(
+              await invoke<SessionEvent>("append_chat_context_event", {
+                sessionId: persistedSession.id,
+                eventKind: "chat-mode-changed",
+                message: "Plan mode enabled",
+                payload: { mode: "plan" },
+              }),
+            );
+          }
+          if (turnPlan.items.length) {
+            contextEvents.push(
+              await invoke<SessionEvent>("append_plan_event", {
+                sessionId: persistedSession.id,
+                message: "Plan created",
+                payload: {
+                  action: "replace",
+                  title: turnPlan.title,
+                  items: turnPlan.items,
+                },
+              }),
+            );
+          }
+          if (contextEvents.length) {
+            setEvents((current) =>
+              limitSessionEventsForUi([...current, ...contextEvents]),
+            );
+          }
+
           await invoke<SessionEvent>("append_user_message", {
+            attachments: persistedTurnAttachments,
             sessionId: persistedSession.id,
             message,
             turnId,
           });
+          resetChatDraft();
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
             {
@@ -3492,32 +3856,48 @@ export function App() {
                 modelId: sessionModel.modelId,
                 modelLabel: sessionModel.modelLabel,
                 reasoningEffort: sessionModel.reasoningEffort,
+                mode: turnMode,
+                goal: turnGoal?.text ? turnGoal : undefined,
+                plan: turnPlan.items.length ? turnPlan : undefined,
+                attachments: persistedTurnAttachments,
                 suggestTitle: shouldSuggestTitle,
                 workspacePath: persistedSession.workspacePath,
               },
             },
           );
           applyProviderChatResponse(persistedSession.id, providerResponse);
+          setPendingNewChatGoal(undefined);
+          setPendingNewChatMode("normal");
+          setPendingNewChatPlan({ title: "Plan", items: [] });
           optimisticEventsRef.current.delete(persistedSession.id);
         } catch (error) {
-          dispatchWorkbench({
-            type: "set-provider-readiness",
-            status: "blocked",
-            message: String(error),
-            providerId: selectedProvider?.id,
-          });
+          const errorMessage = String(error);
+          const wasCancelled = errorMessage.includes("chat cancelled by user");
+          if (!wasCancelled)
+            dispatchWorkbench({
+              type: "set-provider-readiness",
+              status: "blocked",
+              message: errorMessage,
+              providerId: selectedProvider?.id,
+            });
           updateOptimisticProviderStatus(
             optimisticEventsRef,
             setEvents,
             optimisticSessionId,
             turnId,
-            "failed",
-            String(error),
+            wasCancelled ? "cancelled" : "failed",
+            errorMessage,
           );
           if (optimisticSessionId !== session.id) {
             await refreshEvents(optimisticSessionId);
           }
-          notify("command-failed", "Message fallback", "Chat stayed local");
+          notify(
+            wasCancelled ? "terminal" : "command-failed",
+            wasCancelled ? "Turn stopped" : "Message fallback",
+            wasCancelled
+              ? "The provider process was cancelled"
+              : "Chat stayed local",
+          );
         } finally {
           setSessionSending(sendingSessionId, false);
           setIsStartingFirstTurn(false);
@@ -3530,6 +3910,7 @@ export function App() {
         message,
         turnId,
         selectedProvider,
+        turnAttachments,
       );
       if (provisionalTitle) {
         void updateSessionTitle(activeSessionId, provisionalTitle, {
@@ -3551,8 +3932,6 @@ export function App() {
           mergePersistedAndOptimisticEvents(current, optimisticEvents),
         ),
       );
-      resetChatDraft();
-
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
           optimisticEventsRef,
@@ -3568,10 +3947,12 @@ export function App() {
       try {
         await waitForNextPaint();
         await invoke<SessionEvent>("append_user_message", {
+          attachments: turnAttachments,
           sessionId: activeSessionId,
           message,
           turnId,
         });
+        resetChatDraft();
         const providerResponse = await invoke<ProviderChatResponse>(
           "run_provider_chat",
           {
@@ -3584,6 +3965,10 @@ export function App() {
               modelId: sessionModel.modelId,
               modelLabel: sessionModel.modelLabel,
               reasoningEffort: sessionModel.reasoningEffort,
+              mode: turnMode,
+              goal: turnGoal?.text ? turnGoal : undefined,
+              plan: turnPlan.items.length ? turnPlan : undefined,
+              attachments: turnAttachments,
               suggestTitle: shouldSuggestTitle,
               workspacePath: activeSession?.workspacePath ?? workspacePath,
             },
@@ -3592,22 +3977,31 @@ export function App() {
         applyProviderChatResponse(activeSessionId, providerResponse);
         optimisticEventsRef.current.delete(activeSessionId);
       } catch (error) {
-        dispatchWorkbench({
-          type: "set-provider-readiness",
-          status: "blocked",
-          message: String(error),
-          providerId: selectedProvider?.id,
-        });
+        const errorMessage = String(error);
+        const wasCancelled = errorMessage.includes("chat cancelled by user");
+        if (!wasCancelled)
+          dispatchWorkbench({
+            type: "set-provider-readiness",
+            status: "blocked",
+            message: errorMessage,
+            providerId: selectedProvider?.id,
+          });
         updateOptimisticProviderStatus(
           optimisticEventsRef,
           setEvents,
           activeSessionId,
           turnId,
-          "failed",
-          String(error),
+          wasCancelled ? "cancelled" : "failed",
+          errorMessage,
         );
         await refreshEvents(activeSessionId);
-        notify("command-failed", "Message fallback", "Chat stayed local");
+        notify(
+          wasCancelled ? "terminal" : "command-failed",
+          wasCancelled ? "Turn stopped" : "Message fallback",
+          wasCancelled
+            ? "The provider process was cancelled"
+            : "Chat stayed local",
+        );
       } finally {
         setSessionSending(activeSessionId, false);
       }
@@ -3617,6 +4011,11 @@ export function App() {
       activeSession,
       activeSession?.workspacePath,
       activeSessionHasTranscriptEvents,
+      activeChatAttachments,
+      activeChatDraft,
+      activeChatMode,
+      activeSessionGoal,
+      activeSessionPlan,
       applyProviderChatResponse,
       checkProviderReadiness,
       config,
@@ -3639,14 +4038,15 @@ export function App() {
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
       const turnId = turnIdFromSessionEvent(event);
+      const userEvent = turnId
+        ? eventsRef.current.find(
+            (item) =>
+              item.kind === "user-message" &&
+              (turnIdFromSessionEvent(item) ?? item.id) === turnId,
+          )
+        : undefined;
       const userMessage =
-        (turnId
-          ? eventsRef.current.find(
-              (item) =>
-                item.kind === "user-message" &&
-                (turnIdFromSessionEvent(item) ?? item.id) === turnId,
-            )?.message
-          : undefined) ??
+        userEvent?.message ??
         stringFromRecord(payload, "userMessage") ??
         stringFromRecord(payload, "messagePreview");
 
@@ -3664,11 +4064,56 @@ export function App() {
       }
 
       if (action === "retry-send" && userMessage) {
-        void sendDraft(userMessage);
+        const userPayload = recordFromUnknown(userEvent?.payload);
+        const attachments = Array.isArray(userPayload?.attachments)
+          ? (userPayload.attachments as ChatAttachment[])
+          : Array.isArray(payload?.attachments)
+            ? (payload.attachments as ChatAttachment[])
+            : [];
+        const goalRecord = recordFromUnknown(payload?.goal);
+        const planRecord = recordFromUnknown(payload?.plan);
+        void sendDraft(userMessage, {
+          mode:
+            stringFromRecord(payload, "chatMode") === "plan"
+              ? "plan"
+              : "normal",
+          attachments,
+          goal:
+            goalRecord && stringFromRecord(goalRecord, "text")
+              ? {
+                  text: stringFromRecord(goalRecord, "text")!,
+                  status:
+                    stringFromRecord(goalRecord, "status") === "complete"
+                      ? "complete"
+                      : "active",
+                }
+              : undefined,
+          plan:
+            planRecord && Array.isArray(planRecord.items)
+              ? (planRecord as unknown as SessionPlan)
+              : undefined,
+        });
       }
     },
     [connectProvider, sendDraft],
   );
+
+  const stopActiveChat = useCallback(() => {
+    if (
+      !activeSessionId ||
+      !sendingSessionIdsRef.current.has(activeSessionId)
+    ) {
+      notify(
+        "terminal",
+        "No active turn",
+        "There is no provider process to stop",
+      );
+      return;
+    }
+    void invoke("stop_provider_chat", { sessionId: activeSessionId }).catch(
+      (error) => notify("command-failed", "Stop failed", String(error)),
+    );
+  }, [activeSessionId, notify]);
 
   const appendPlanEvent = useCallback(
     async (payload: Record<string, unknown>, message = "Plan updated") => {
@@ -3969,6 +4414,151 @@ export function App() {
       );
     },
     [activeSessionPlan.items, appendPlanEvent, workbench.activeTurn?.id],
+  );
+
+  const changePlan = useCallback(
+    (
+      action: "add" | "edit" | "remove" | "move-up" | "move-down",
+      itemId?: string,
+    ) => {
+      const item = activeSessionPlan.items.find((entry) => entry.id === itemId);
+      if (action === "add") {
+        const title = window.prompt("Add plan item")?.trim();
+        if (title && !activeSessionId) {
+          const now = new Date().toISOString();
+          setPendingNewChatPlan((current) => ({
+            ...current,
+            items: [
+              ...current.items,
+              {
+                id: crypto.randomUUID(),
+                title,
+                status: "todo",
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+          }));
+        } else if (title)
+          void appendPlanEvent(
+            {
+              action: "add-item",
+              item: { id: crypto.randomUUID(), title, status: "todo" },
+            },
+            `Plan item added: ${title}`,
+          );
+        return;
+      }
+      if (!item) return;
+      if (!activeSessionId) {
+        setPendingNewChatPlan((current) => {
+          if (action === "edit") {
+            const title = window.prompt("Edit plan item", item.title)?.trim();
+            return title
+              ? {
+                  ...current,
+                  items: current.items.map((entry) =>
+                    entry.id === item.id
+                      ? { ...entry, title, updatedAt: new Date().toISOString() }
+                      : entry,
+                  ),
+                }
+              : current;
+          }
+          if (action === "remove")
+            return {
+              ...current,
+              items: current.items.filter((entry) => entry.id !== item.id),
+            };
+          const index = current.items.findIndex(
+            (entry) => entry.id === item.id,
+          );
+          const target = action === "move-up" ? index - 1 : index + 1;
+          if (target < 0 || target >= current.items.length) return current;
+          const items = [...current.items];
+          const [moved] = items.splice(index, 1);
+          if (!moved) return current;
+          items.splice(target, 0, moved);
+          return { ...current, items };
+        });
+        return;
+      }
+      if (action === "edit") {
+        const title = window.prompt("Edit plan item", item.title)?.trim();
+        if (title)
+          void appendPlanEvent(
+            { action: "update-item", item: { ...item, title } },
+            `Plan item edited: ${title}`,
+          );
+        return;
+      }
+      if (action === "remove") {
+        void appendPlanEvent(
+          { action: "remove-item", item: { id: item.id } },
+          `Plan item removed: ${item.title}`,
+        );
+        return;
+      }
+      const index = activeSessionPlan.items.findIndex(
+        (entry) => entry.id === item.id,
+      );
+      const target = action === "move-up" ? index - 1 : index + 1;
+      if (target < 0 || target >= activeSessionPlan.items.length) return;
+      const items = [...activeSessionPlan.items];
+      const [moved] = items.splice(index, 1);
+      if (!moved) return;
+      items.splice(target, 0, moved);
+      void appendPlanEvent(
+        { action: "replace", items },
+        `Plan item reordered: ${item.title}`,
+      );
+    },
+    [activeSessionId, activeSessionPlan.items, appendPlanEvent],
+  );
+
+  const changeGoal = useCallback(
+    (action: "edit" | "complete" | "clear") => {
+      if (!activeSessionGoal) return;
+      const text =
+        action === "edit"
+          ? window.prompt("Session goal", activeSessionGoal.text)?.trim()
+          : activeSessionGoal.text;
+      if (action === "edit" && !text) return;
+      if (!activeSessionId) {
+        setPendingNewChatGoal(
+          action === "clear"
+            ? undefined
+            : {
+                ...activeSessionGoal,
+                text: text!,
+                status:
+                  action === "complete" ? "complete" : activeSessionGoal.status,
+              },
+        );
+        return;
+      }
+      const payload =
+        action === "clear"
+          ? { action: "clear" }
+          : {
+              action: "set",
+              text,
+              status:
+                action === "complete" ? "complete" : activeSessionGoal.status,
+            };
+      void invoke<SessionEvent>("append_chat_context_event", {
+        sessionId: activeSessionId,
+        eventKind: "goal-updated",
+        message:
+          action === "clear"
+            ? "Goal cleared"
+            : action === "complete"
+              ? `Goal completed: ${text}`
+              : `Goal updated: ${text}`,
+        payload,
+      }).then(() => refreshEvents(activeSessionId));
+    },
+    [activeSessionGoal, activeSessionId, refreshEvents],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -6072,8 +6662,11 @@ export function App() {
                 activeChatPanel={activeChatPanel}
                 browserPreview={workbench.browserPreview}
                 config={config}
+                attachments={activeChatAttachments}
+                chatMode={activeChatMode}
                 diffReview={workbench.diffReview}
                 draftResetToken={draftResetToken}
+                draft={activeChatDraft}
                 events={events}
                 branchName={activeSession?.branch}
                 isEnvironmentRailOpen={activeChatPanel === "environment"}
@@ -6087,9 +6680,17 @@ export function App() {
                 onCompleteOnboardingStep={(step) =>
                   dispatchWorkbench({ type: "complete-onboarding-step", step })
                 }
+                onAttachImageFiles={attachDroppedImages}
                 onComposerAction={handleComposerAction}
+                onDraftChange={updateActiveChatDraft}
+                onRemoveAttachment={removeChatAttachment}
+                onReusePrompt={updateActiveChatDraft}
+                onStopChat={stopActiveChat}
+                onContinueChat={() => void sendDraft("Continue")}
                 onOpenToolPanel={openToolPanel}
                 onPlanItemStatusChange={changePlanItemStatus}
+                onPlanAction={changePlan}
+                onGoalAction={changeGoal}
                 onProviderStatusAction={handleProviderStatusAction}
                 onSend={sendDraft}
                 onSetOnboardingStep={(step) =>
@@ -6110,6 +6711,7 @@ export function App() {
                   reasoningEffort: activeSession?.reasoningEffort,
                 }}
                 sessionPlan={activeSessionPlan}
+                sessionGoal={activeSessionGoal}
                 sessionTitle={activeSession?.title}
                 terminalPanes={workbench.terminalPanes}
                 worktreeName={activeSession?.worktreeName}
@@ -6348,6 +6950,33 @@ export function App() {
           }
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
+          selectedUsageProviderId={workbench.preferences.usageProviderId}
+          usageVisualization={workbench.preferences.usageVisualization}
+          onUsageProviderChange={(providerId) =>
+            dispatchWorkbench({ type: "set-usage-provider", providerId })
+          }
+          onUsageVisualizationChange={(visualization) =>
+            dispatchWorkbench({
+              type: "set-usage-visualization",
+              visualization,
+            })
+          }
+          onRefreshProviderUsage={() =>
+            notify(
+              "terminal",
+              "Provider usage unavailable",
+              "This provider does not expose a supported quota source.",
+            )
+          }
+          providerUsage={
+            workbench.preferences.usageProviderId
+              ? {
+                  providerId: workbench.preferences.usageProviderId,
+                  status: "unavailable",
+                  windows: [],
+                }
+              : undefined
+          }
           themeMode={workbench.preferences.theme}
           updateState={updater.state}
         />
@@ -6424,7 +7053,10 @@ export function App() {
         <ChatSurface
           activeChatPanel={activeChatPanel}
           config={config}
+          attachments={activeChatAttachments}
+          chatMode={activeChatMode}
           draftResetToken={draftResetToken}
+          draft={activeChatDraft}
           events={[]}
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isComposerSending={isActiveSessionSending}
@@ -6434,9 +7066,17 @@ export function App() {
           onCompleteOnboardingStep={(step) =>
             dispatchWorkbench({ type: "complete-onboarding-step", step })
           }
+          onAttachImageFiles={attachDroppedImages}
           onComposerAction={handleComposerAction}
+          onDraftChange={updateActiveChatDraft}
+          onRemoveAttachment={removeChatAttachment}
+          onReusePrompt={updateActiveChatDraft}
+          onStopChat={stopActiveChat}
+          onContinueChat={() => void sendDraft("Continue")}
           onOpenToolPanel={openToolPanel}
           onPlanItemStatusChange={changePlanItemStatus}
+          onPlanAction={changePlan}
+          onGoalAction={changeGoal}
           onProviderStatusAction={handleProviderStatusAction}
           onSend={sendDraft}
           onSetOnboardingStep={(step) =>
@@ -6458,6 +7098,7 @@ export function App() {
           providerReadiness={workbench.providerReadiness}
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
+          sessionGoal={activeSessionGoal}
           showOnboardingSteps
           workspacePath={workspacePath}
         />
@@ -7184,6 +7825,54 @@ function loadPinnedSessionIds(): string[] {
   }
 }
 
+function loadChatDrafts(): Record<string, string> {
+  const stored = readBoundedLocalStorage(CHAT_DRAFTS_STORAGE_KEY, 256_000);
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[0] === "string" &&
+          typeof entry[1] === "string" &&
+          entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function loadChatAttachments(): Record<string, ChatAttachment[]> {
+  const stored = readBoundedLocalStorage(CHAT_ATTACHMENTS_STORAGE_KEY, 512_000);
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, value]) => [
+        key,
+        Array.isArray(value)
+          ? value
+              .filter(
+                (item): item is ChatAttachment =>
+                  Boolean(item) &&
+                  typeof item === "object" &&
+                  typeof (item as ChatAttachment).id === "string" &&
+                  typeof (item as ChatAttachment).path === "string",
+              )
+              .slice(0, 12)
+          : [],
+      ]),
+    );
+  } catch {
+    return {};
+  }
+}
+
 function loadRemovedProjectPaths(): string[] {
   const stored = readBoundedLocalStorage(
     REMOVED_PROJECTS_STORAGE_KEY,
@@ -7217,12 +7906,14 @@ function loadRecentProjectPaths(): string[] {
   try {
     const parsed = JSON.parse(stored);
     return Array.isArray(parsed)
-      ? [...new Set(
-          parsed
-            .filter((path): path is string => typeof path === "string")
-            .map(normalizeProjectPath)
-            .filter(Boolean),
-        )].slice(0, MAX_RECENT_PROJECTS)
+      ? [
+          ...new Set(
+            parsed
+              .filter((path): path is string => typeof path === "string")
+              .map(normalizeProjectPath)
+              .filter(Boolean),
+          ),
+        ].slice(0, MAX_RECENT_PROJECTS)
       : [];
   } catch {
     return [];
@@ -7928,6 +8619,53 @@ function deriveSessionPlan(
   return plan;
 }
 
+function deriveSessionGoal(
+  events: SessionEvent[],
+  sessionId?: string,
+): SessionGoal | undefined {
+  let goal: SessionGoal | undefined;
+  for (const event of events) {
+    if (event.kind !== "goal-updated") {
+      continue;
+    }
+    const payload = recordFromUnknown(event.payload);
+    const action = stringFromRecord(payload, "action") ?? "set";
+    if (action === "clear") {
+      goal = undefined;
+      continue;
+    }
+    const text = stringFromRecord(payload, "text") ?? goal?.text;
+    if (!text) {
+      continue;
+    }
+    goal = {
+      sessionId,
+      text,
+      status:
+        stringFromRecord(payload, "status") === "complete"
+          ? "complete"
+          : "active",
+      sourceTurnId:
+        stringFromRecord(payload, "sourceTurnId") ?? goal?.sourceTurnId,
+      createdAt: goal?.createdAt ?? event.createdAt,
+      updatedAt: event.createdAt,
+    };
+  }
+  return goal;
+}
+
+function deriveChatMode(events: SessionEvent[]): ChatMode {
+  let mode: ChatMode = "normal";
+  for (const event of events) {
+    if (event.kind !== "chat-mode-changed") {
+      continue;
+    }
+    const value = stringFromRecord(recordFromUnknown(event.payload), "mode");
+    mode = value === "plan" ? "plan" : "normal";
+  }
+  return mode;
+}
+
 function normalizePlanItem(
   value: unknown,
   event: SessionEvent,
@@ -8543,9 +9281,7 @@ function selectedSessionModelFromConfig(config: GyroConfig) {
     providerLabel: provider?.displayName,
     modelId: model?.id ?? provider?.selectedModelId,
     modelLabel: model?.displayName ?? provider?.selectedModelId,
-    reasoningEffort: provider
-      ? selectedReasoningEffort(provider)
-      : undefined,
+    reasoningEffort: provider ? selectedReasoningEffort(provider) : undefined,
   };
 }
 
@@ -8779,6 +9515,7 @@ function createOptimisticTurnEvents(
   message: string,
   turnId: string,
   provider?: ModelProviderConfig,
+  attachments: ChatAttachment[] = [],
 ): SessionEvent[] {
   const now = new Date().toISOString();
   return [
@@ -8789,7 +9526,7 @@ function createOptimisticTurnEvents(
       createdAt: now,
       kind: "user-message",
       message,
-      payload: { optimistic: true, turnId },
+      payload: { optimistic: true, turnId, attachments },
     },
     {
       id: `${sessionId}-provider-${Date.now()}`,
