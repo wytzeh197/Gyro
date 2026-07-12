@@ -15,9 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - aarch64-apple-darwin
-          - x86_64-apple-darwin
+        include:
+          - target: aarch64-apple-darwin
+            updater_suffix: aarch64
+          - target: x86_64-apple-darwin
+            updater_suffix: x64
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -51,8 +53,8 @@ jobs:
         run: |
           mkdir -p release-assets
           cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
-          cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz release-assets/
-          cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig release-assets/
+          cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz
+          cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz.sig release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz.sig
       - name: Upload signed architecture bundle
         uses: actions/upload-artifact@v4
         with:
