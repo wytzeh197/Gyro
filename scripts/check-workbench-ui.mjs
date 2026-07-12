@@ -2230,8 +2230,11 @@ expect(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
     ) &&
     !tauriConfigSource.includes("GYRO_DEV_UPDATER_PUBKEY") &&
-    releaseWorkflowSource.includes("includeUpdaterJson: true") &&
-    !releaseWorkflowSource.includes("uploadUpdaterJson") &&
+    releaseWorkflowSource.includes("needs: macos") &&
+    releaseWorkflowSource.includes("merge-multiple: true") &&
+    releaseWorkflowSource.includes("scripts/create-updater-manifest.mjs") &&
+    releaseWorkflowSource.includes('gh release create "$GITHUB_REF_NAME"') &&
+    !releaseWorkflowSource.includes("tauri-apps/tauri-action") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
     surfaceSource.includes("Private preview") &&

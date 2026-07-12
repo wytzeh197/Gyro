@@ -42,17 +42,51 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - run: pnpm check
       - run: cargo test --workspace
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+      - name: Build and sign Tauri app
+        run: pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Collect signed release assets
+        run: |
+          mkdir -p release-assets
+          cp apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
+          cp apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz release-assets/
+          cp apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig release-assets/
+      - name: Upload signed architecture bundle
+        uses: actions/upload-artifact@v4
         with:
-          projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: "Gyro ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
-          args: --target ${{ matrix.target }}
+          name: gyro-${{ matrix.target }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  finalize:
+    name: Assemble deterministic update release
+    needs: macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download both architecture bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gyro-*
+          path: release-assets
+          merge-multiple: true
+      - name: Build and validate updater manifest
+        run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
+      - name: Create one complete draft release
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --draft \
+              --title "Gyro $GITHUB_REF_NAME" \
+              --notes "Signed macOS private preview for Apple Silicon and Intel."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
