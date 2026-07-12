@@ -1141,10 +1141,30 @@ async fn run_provider_chat(
 ) -> Result<ProviderChatResponse, String> {
     request.message = validate_chat_message(&request.message)?;
     validate_chat_context(&request)?;
-
-    tauri::async_runtime::spawn_blocking(move || run_provider_chat_blocking(app, request))
-        .await
-        .map_err(|error| format!("provider chat worker failed: {error}"))?
+    let session_id = request.session_id.clone();
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&session_id) {
+            return Err("a provider turn is already running for this session".into());
+        }
+        flags.insert(session_id.clone(), Arc::new(AtomicBool::new(false)));
+    }
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_provider_chat_blocking(worker_app, request)
+    })
+    .await
+    .map_err(|error| format!("provider chat worker failed: {error}"));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&session_id));
+    result?
 }
 
 #[tauri::command]
@@ -5194,15 +5214,14 @@ fn run_streaming_command(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<StreamingCommandOutput> {
-    let cancellation = Arc::new(AtomicBool::new(false));
-    {
-        let manager = app.state::<ProviderCancellationManager>();
-        manager
-            .flags
-            .lock()
-            .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
-            .insert(request.session_id.clone(), cancellation.clone());
-    }
+    let cancellation = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
+        .get(&request.session_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("provider turn reservation was lost"))?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -5248,11 +5267,6 @@ fn run_streaming_command(
         if cancellation.load(Ordering::SeqCst) {
             let _ = child.kill();
             let _ = child.wait();
-            app.state::<ProviderCancellationManager>()
-                .flags
-                .lock()
-                .ok()
-                .map(|mut flags| flags.remove(&request.session_id));
             anyhow::bail!("chat cancelled by user");
         }
         if let Some(status) = child.try_wait()? {
@@ -5261,11 +5275,6 @@ fn run_streaming_command(
         if started_at.elapsed() >= timeout {
             let _ = child.kill();
             let _ = child.wait();
-            app.state::<ProviderCancellationManager>()
-                .flags
-                .lock()
-                .ok()
-                .map(|mut flags| flags.remove(&request.session_id));
             anyhow::bail!("command timed out after {} seconds", timeout.as_secs());
         }
         std::thread::sleep(Duration::from_millis(40));
@@ -5276,11 +5285,6 @@ fn run_streaming_command(
     }
     stream_state.flush_pending_delta(app, request, true);
     let stderr_text = stderr_handle.join().unwrap_or_default();
-    app.state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .ok()
-        .map(|mut flags| flags.remove(&request.session_id));
     Ok(StreamingCommandOutput {
         activities: stream_state.activities,
         status_success: status.success(),

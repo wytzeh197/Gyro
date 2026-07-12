@@ -59,7 +59,9 @@ export function mergePersistedAndOptimisticEvents(
       if (event.turnId) {
         userTurnIds.add(event.turnId);
       }
-      userMessages.add(event.message);
+      if (!event.turnId) {
+        userMessages.add(event.message);
+      }
     } else if (isProviderStatusEvent(event) && event.turnId) {
       providerStatusTurnIds.add(event.turnId);
     } else if (event.kind === "assistant-message" && event.turnId) {
@@ -72,8 +74,9 @@ export function mergePersistedAndOptimisticEvents(
     const hasSameId = seenEventIds.has(event.id);
     const hasSameTurnUser =
       event.kind === "user-message" &&
-      ((event.turnId ? userTurnIds.has(event.turnId) : false) ||
-        userMessages.has(event.message));
+      (event.turnId
+        ? userTurnIds.has(event.turnId)
+        : userMessages.has(event.message));
     const hasSameTurnProviderStatus =
       isProviderStatusEvent(event) &&
       Boolean(event.turnId && providerStatusTurnIds.has(event.turnId));
@@ -96,7 +99,9 @@ export function mergePersistedAndOptimisticEvents(
         if (event.turnId) {
           userTurnIds.add(event.turnId);
         }
-        userMessages.add(event.message);
+        if (!event.turnId) {
+          userMessages.add(event.message);
+        }
       } else if (isProviderStatusEvent(event) && event.turnId) {
         providerStatusTurnIds.add(event.turnId);
       } else if (event.kind === "assistant-message" && event.turnId) {
@@ -107,6 +112,18 @@ export function mergePersistedAndOptimisticEvents(
     }
   }
   return limitSessionEventsForUi(merged);
+}
+
+export function resetStreamingAssistantForRetry(
+  events: SessionEvent[],
+  turnId: string,
+) {
+  return events.filter((event) => {
+    if (event.kind !== "assistant-message" || event.turnId !== turnId) {
+      return true;
+    }
+    return recordFromUnknown(event.payload)?.streaming !== true;
+  });
 }
 
 export function mergeProviderResponseEvents(
@@ -226,7 +243,9 @@ export function applyProviderChatStreamActivity(
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
     limitSessionEventsForUi(
-      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+      updateEvents(
+        optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
+      ),
     ),
   );
   setEvents((current) => {

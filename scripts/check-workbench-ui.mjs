@@ -24,6 +24,8 @@ import {
   MAX_CHAT_EVENT_RENDER_COUNT,
   MAX_CHAT_RESPONSE_CHARS,
   applyProviderChatStreamDeltas,
+  mergePersistedAndOptimisticEvents,
+  resetStreamingAssistantForRetry,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import {
   shouldShowSidebarUpdate,
@@ -82,6 +84,61 @@ const availableUpdate = {
   currentVersion: "0.1.0",
   nextVersion: "0.2.0",
 };
+const repeatedMessageBase = {
+  id: "user-turn-1",
+  sessionId: "session-1",
+  turnId: "turn-1",
+  createdAt: "2026-07-12T12:00:00.000Z",
+  kind: "user-message",
+  message: "Test",
+  payload: { turnId: "turn-1" },
+};
+const repeatedMessageNext = {
+  ...repeatedMessageBase,
+  id: "user-turn-2",
+  turnId: "turn-2",
+  payload: { turnId: "turn-2", optimistic: true },
+};
+const repeatedMessages = mergePersistedAndOptimisticEvents(
+  [repeatedMessageBase],
+  [repeatedMessageNext],
+);
+const retriedStreamingEvents = resetStreamingAssistantForRetry(
+  [
+    repeatedMessageBase,
+    {
+      id: "streaming-answer",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      createdAt: "2026-07-12T12:00:01.000Z",
+      kind: "assistant-message",
+      message: "partial",
+      payload: { streaming: true },
+    },
+  ],
+  "turn-1",
+);
+expect(
+  repeatedMessages.filter((event) => event.kind === "user-message").length ===
+    2 &&
+    mergePersistedAndOptimisticEvents(
+      [repeatedMessageBase],
+      [{ ...repeatedMessageNext, turnId: "turn-1" }],
+    ).filter((event) => event.kind === "user-message").length === 1 &&
+    retriedStreamingEvents.length === 1 &&
+    retriedStreamingEvents[0]?.id === "user-turn-1",
+  "Repeated messages should remain distinct by turn while retry clears only partial streamed output.",
+);
+expect(
+  appSource.includes("retryTurnId") &&
+    appSource.includes("if (!isRetry)") &&
+    appSource.includes("resetStreamingAssistantForRetry") &&
+    surfaceSource.includes("Previous send was interrupted") &&
+    surfaceSource.includes("Retry continues the same message") &&
+    tauriSource.includes("flags.contains_key(&session_id)") &&
+    tauriSource.includes("a provider turn is already running for this session"),
+  "Chat recovery should retry the same turn, recover interrupted runs, and reject concurrent provider sends.",
+);
 expect(
   shouldShowSidebarUpdate(availableUpdate) &&
     !shouldShowSidebarUpdate({ status: "current", currentVersion: "0.2.0" }) &&
@@ -1190,8 +1247,8 @@ expect(
     appSource.includes("setSessionSending") &&
     appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
     appSource.includes("[activeSessionId, events.length]") &&
-    appSource.includes(
-      "shouldSuggestSessionTitle(\n        activeSession,\n        activeSessionHasTranscriptEvents",
+    /shouldSuggestSessionTitle\(\s*activeSession,\s*activeSessionHasTranscriptEvents/.test(
+      appSource,
     ) &&
     !appSource.includes(
       "shouldSuggestSessionTitle(\n        activeSession,\n        events",
@@ -1373,7 +1430,7 @@ expect(
     tauriSource.includes("upsert_provider_session_binding") &&
     tauriSource.includes("validate_chat_message") &&
     tauriSource.includes("async fn run_provider_chat") &&
-    /spawn_blocking\(move \|\| run_provider_chat_blocking\(app,\s*request\)\)/.test(
+    /spawn_blocking\(move \|\|\s*\{?\s*run_provider_chat_blocking\((?:app|worker_app),\s*request\)/.test(
       tauriSource,
     ) &&
     tauriSource.includes("async fn save_config") &&
@@ -2118,6 +2175,7 @@ expect(
     surfaceSource.includes("gyro-response-body") &&
     surfaceSource.includes('aria-label="Copy response"') &&
     styleSource.includes(".gyro-chat-transcript .gyro-message.is-user") &&
+    styleSource.includes("justify-items: end") &&
     styleSource.includes("width: min(100%, var(--gyro-chat-content-width))") &&
     styleSource.includes("max-width: 100%") &&
     styleSource.includes("pointer-events: none") &&
