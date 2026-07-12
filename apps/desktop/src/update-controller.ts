@@ -47,7 +47,7 @@ export function useGyroUpdater({
   const checkingRef = useRef(false);
 
   const checkForUpdate = useCallback(
-    async (userInitiated = true) => {
+    async (userInitiated = true): Promise<UpdateCheckResult> => {
       if (import.meta.env.DEV || !isTauriRuntime() || checkingRef.current) {
         return { status: "skipped" };
       }
