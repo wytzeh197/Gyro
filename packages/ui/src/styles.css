@@ -13371,23 +13371,45 @@ body,
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-sidebar-update-button {
-  background: #3478f6;
-  border: 1px solid #4a89fa;
-  border-radius: 6px;
-  color: #fff;
-  display: inline-flex;
-  font-size: 11px;
-  gap: 5px;
-  min-height: 24px;
-  padding: 3px 8px;
-  white-space: nowrap;
-  width: auto;
+  background: color-mix(in srgb, #5f8fff 14%, transparent);
+  border: 1px solid color-mix(in srgb, #7ba4ff 30%, transparent);
+  border-radius: 8px;
+  color: #9fbdff;
+  display: inline-grid;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  place-items: center;
+  position: relative;
+  width: 28px;
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-sidebar-update-button:hover,
 .gyro-sidebar-update.is-windowbar
   .gyro-sidebar-update-button[aria-expanded="true"] {
-  background: #4384f7;
+  background: color-mix(in srgb, #5f8fff 24%, transparent);
+  border-color: color-mix(in srgb, #8eb0ff 48%, transparent);
+  color: #c5d6ff;
+  transform: translateY(-1px);
+}
+
+.gyro-sidebar-update.is-windowbar .gyro-sidebar-update-indicator {
+  background: #72a1ff;
+  border: 2px solid var(--gyro-sidebar);
+  border-radius: 999px;
+  box-shadow: 0 0 7px rgb(91 143 255 / 55%);
+  height: 7px;
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 7px;
+}
+
+.gyro-sidebar-update.is-windowbar
+  .gyro-sidebar-update-button[data-status="failed"]
+  .gyro-sidebar-update-indicator {
+  background: var(--gyro-danger);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--gyro-danger) 55%, transparent);
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-update-popover {
