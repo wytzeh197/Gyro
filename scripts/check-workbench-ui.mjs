@@ -1219,6 +1219,8 @@ expect(
     appSource.includes('streamEvent.phase === "started"') &&
     appSource.includes('streamEvent.phase === "completed"') &&
     appSource.includes("applyProviderChatStreamDeltas") &&
+    appSource.includes("applyProviderChatStreamActivity") &&
+    appSource.includes('streamEvent.phase === "activity"') &&
     appSource.includes("batches.map((batch) => ({") &&
     providerStreamSource.includes(
       "const coalescedDeltaEvents = new Map<string, PendingStreamDeltaEvent>()",
@@ -1287,10 +1289,16 @@ expect(
     appSource.includes("eventsRef.current.find(") &&
     !appSource.includes("[connectProvider, events, sendDraft]") &&
     providerStreamSource.includes('kind: "provider-stream"') &&
+    providerStreamSource.includes('kind: "provider-activity"') &&
+    providerStreamSource.includes("applyProviderChatStreamActivity") &&
     providerStreamSource.includes("hasSameTurnAssistant") &&
     appSource.includes("suggestTitle: shouldSuggestTitle") &&
     appSource.includes('kind: "provider-status"') &&
-    surfaceSource.includes("ChatThinkingIndicator") &&
+    surfaceSource.includes("function ChatTurn") &&
+    surfaceSource.includes("function ChatRunHeader") &&
+    surfaceSource.includes("function ProviderActivityRow") &&
+    surfaceSource.includes('activity.kind === "commentary"') &&
+    surfaceSource.includes("gyro-chat-run-commentary") &&
     surfaceSource.includes("deriveTranscriptState") &&
     surfaceSource.includes("useDeferredValue") &&
     surfaceSource.includes("const deferredEvents = useDeferredValue(events)") &&
@@ -1301,20 +1309,26 @@ expect(
     surfaceSource.includes("onSend(localDraft)") &&
     surfaceSource.includes("const ChatEvent = memo") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
-    surfaceSource.includes("const transcriptEvents: SessionEvent[] = []") &&
-    surfaceSource.includes("hasAssistantForLatestTurn = false") &&
+    surfaceSource.includes("const turns: ChatTranscriptTurn[] = []") &&
+    surfaceSource.includes("const turnsById = new Map") &&
     surfaceSource.includes("isStreamingAssistantEvent") &&
     surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
+    surfaceSource.includes('{ kind: "ordered-list"; items: string[] }') &&
+    surfaceSource.includes("renderAssistantInlineContent(activity.label)") &&
+    surfaceSource.includes("stripHiddenSessionTitleMarker") &&
+    surfaceSource.includes("isHiddenSessionTitleActivity") &&
     surfaceSource.includes("const shouldUsePlainText") &&
     surfaceSource.includes(
-      "event.message.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS",
+      "visibleMessage.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS",
     ) &&
     surfaceSource.includes("gyro-response-streaming-text") &&
     styleSource.includes(".gyro-response-streaming-text") &&
-    surfaceSource.includes("gyro-chat-thinking-indicator") &&
-    styleSource.includes("@keyframes gyro-chat-thinking-dot") &&
-    styleSource.includes(".gyro-chat-transcript .gyro-message.is-thinking") &&
-    surfaceSource.includes("isInternalTranscriptEvent") &&
+    surfaceSource.includes("gyro-chat-run-thinking") &&
+    styleSource.includes(".gyro-chat-run-header") &&
+    styleSource.includes(".gyro-chat-run-activity") &&
+    styleSource.includes("@keyframes gyro-chat-composer-dock-enter") &&
+    styleSource.includes("@keyframes gyro-chat-final-response-enter") &&
+    surfaceSource.includes("isHiddenTranscriptEvent") &&
     surfaceSource.includes('"provider-diagnostics"') &&
     styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
@@ -1324,6 +1338,13 @@ expect(
     tauriSource.includes("SessionEventKind::AssistantMessage") &&
     tauriSource.includes("ProviderResumeCursor") &&
     tauriSource.includes("ProviderChatStreamEvent") &&
+    tauriSource.includes("extract_provider_activity") &&
+    tauriSource.includes("extract_provider_commentary_activity") &&
+    tauriSource.includes("provider_activities_for_response") &&
+    tauriSource.includes('text.contains("GYRO_SESSION_TITLE:")') &&
+    tauriSource.includes("polished, scannable Markdown") &&
+    tauriSource.includes("append_provider_activity_event") &&
+    tauriSource.includes('phase: "activity".into()') &&
     tauriSource.includes("run_provider_chat_with_retry") &&
     tauriSource.includes("run_provider_chat_once") &&
     tauriSource.includes("TEXT_TRUNCATION_SUFFIX") &&
@@ -1799,6 +1820,7 @@ expect(
     surfaceSource.includes("collapsedProjectIds") &&
     surfaceSource.includes("expandedProjectIds") &&
     surfaceSource.includes("sidebarProjectGroups") &&
+    !surfaceSource.includes("if (groups.size === 0)") &&
     surfaceSource.includes("toggleProjectMore") &&
     surfaceSource.includes("aria-expanded={isCollapsed") &&
     styleSource.includes(".gyro-sidebar-collapse-icon") &&
@@ -2042,17 +2064,26 @@ expect(
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
     appSource.includes("savedProjectsFromSessions") &&
+    appSource.includes('"gyro.recent-project-paths"') &&
+    appSource.includes("loadRecentProjectPaths") &&
+    appSource.includes("setRecentProjectPaths((current)") &&
+    appSource.includes('"Recent project"') &&
     appSource.includes("select-saved-project:") &&
     surfaceSource.includes("savedProjectItems") &&
     surfaceSource.includes(
       "select-saved-project:${encodeURIComponent(project.path)}",
     ) &&
-    surfaceSource.includes("if (isInternalTranscriptEvent(event))") &&
+    surfaceSource.includes("if (isHiddenTranscriptEvent(event))") &&
     surfaceSource.includes("gyro-provider-status-row") &&
+    surfaceSource.includes("gyro-chat-turn") &&
+    surfaceSource.includes("gyro-chat-run") &&
     styleSource.includes(".gyro-thread-topbar-actions") &&
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
     surfaceSource.includes('popoverPlacement="up"') &&
     surfaceSource.includes('variant="hero"') &&
+    surfaceSource.includes('showContextRow={false}') &&
+    surfaceSource.includes("const shouldShowContextRow = showContextRow ?? isHero") &&
+    surfaceSource.includes("{shouldShowContextRow ? (") &&
     styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell:focus-within",
@@ -2257,6 +2288,8 @@ expect(
     surfaceSource.includes('modelPickerProvider ? "has-flyout" : ""') &&
     surfaceSource.includes("onItemPreview") &&
     surfaceSource.includes("const providerModelItems: ComposerPopoverItem[]") &&
+    !surfaceSource.includes('sectionLabel: index === 0 ? "Effort"') &&
+    !surfaceSource.includes('sectionLabel: index === 0 ? "Model"') &&
     !surfaceSource.includes(
       "refresh-provider-models:${modelPickerProvider.id}",
     ) &&
@@ -2287,9 +2320,23 @@ expect(
     styleSource.includes('.gyro-provider-picker[data-flyout-side="right"]') &&
     styleSource.includes('left: calc(100% + 4px)') &&
     styleSource.includes('.gyro-provider-picker[data-flyout-side="left"]') &&
+    styleSource.includes("top: 0 !important") &&
+    styleSource.includes("bottom: auto !important") &&
+    styleSource.includes(
+      '.gyro-provider-picker[data-flyout-vertical="up"]',
+    ) &&
+    styleSource.includes("bottom: 0 !important") &&
+    styleSource.includes(".gyro-composer-menu-item.is-effort") &&
+    styleSource.includes(".gyro-composer-menu-item.has-no-icon") &&
+    styleSource.includes("max-height: none !important") &&
+    styleSource.includes("overflow: visible !important") &&
     surfaceSource.includes("getBoundingClientRect") &&
-    surfaceSource.includes("availableRight < modelFlyoutWidth + 8"),
-  "Provider picker should stay anchored and open its model flyout right unless the viewport requires a left fallback.",
+    surfaceSource.includes('?.scrollHeight ?? 420') &&
+    surfaceSource.includes("availableRight < modelFlyoutWidth + 8") &&
+    surfaceSource.includes("rect.top + modelFlyoutHeight") &&
+    surfaceSource.includes('data-flyout-vertical={modelFlyoutVertical}') &&
+    !surfaceSource.includes('title="Model & effort"'),
+  "Provider picker should stay anchored and flip its model flyout horizontally or vertically when the viewport requires it.",
 );
 expect(
   surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
@@ -2297,7 +2344,9 @@ expect(
       surfaceSource,
     ) &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
-    surfaceSource.includes("{modelChipDetail}") &&
+    surfaceSource.includes("{modelChipLabel}") &&
+    surfaceSource.includes('togglePopover("effort")') &&
+    surfaceSource.includes('className="gyro-effort-picker"') &&
     surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
     surfaceSource.includes('title="Provider"') &&
     !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
@@ -2308,7 +2357,7 @@ expect(
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer model chip should show the provider logo, model name, and selected effort.",
+  "Composer should expose separate compact model and effort selectors.",
 );
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&
@@ -2409,7 +2458,7 @@ expect(
     ) &&
     appSource.includes("onCreateSession={startNewChat}") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
-    surfaceSource.includes("if (transcriptEvents.length === 0)") &&
+    surfaceSource.includes("if (turns.length === 0 && looseEvents.length === 0)") &&
     surfaceSource.includes('aria-label="New thread"'),
   "New chat should clear the active session, reset to local mode, and render the start screen from transcript events.",
 );

@@ -399,6 +399,7 @@ struct ProviderChatRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderChatResponse {
+    activity_events: Vec<SessionEvent>,
     assistant_event: SessionEvent,
     session: Option<Session>,
     session_title: Option<String>,
@@ -424,16 +425,31 @@ struct ProviderChatStreamEvent {
     phase: String,
     status: Option<String>,
     text_delta: Option<String>,
+    activity_id: Option<String>,
+    activity_kind: Option<String>,
+    activity_label: Option<String>,
+    activity_detail: Option<String>,
+    activity_status: Option<String>,
     message: Option<String>,
     error: Option<String>,
 }
 
 struct ProviderRunnerOutput {
+    activities: Vec<ProviderActivity>,
     response: String,
     resume_cursor: Option<ProviderResumeCursor>,
     retry_count: u32,
     resumed: bool,
     output_summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProviderActivity {
+    id: String,
+    kind: String,
+    label: String,
+    detail: Option<String>,
+    status: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1148,6 +1164,14 @@ fn run_provider_chat_blocking(
             )
             .map_err(to_string)?;
     }
+    let activity_events = runner_output
+        .activities
+        .iter()
+        .map(|activity| {
+            append_provider_activity_event(&store, session_id, &request, run_id, activity)
+        })
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(to_string)?;
     let status_event = append_provider_status_event(
         &store,
         session_id,
@@ -1248,6 +1272,7 @@ fn run_provider_chat_blocking(
     );
 
     Ok(ProviderChatResponse {
+        activity_events,
         assistant_event,
         session_title: title_extraction.title,
         session,
@@ -3884,6 +3909,7 @@ fn run_openai_codex_chat(
     let prompt = openai_codex_chat_prompt(
         &request.message,
         request.workspace_path.as_deref(),
+        request.model_label.as_deref(),
         request.suggest_title,
     );
 
@@ -3914,6 +3940,7 @@ fn run_openai_codex_chat(
             let response_chars = response.chars().count();
             let provider_session_id = output.provider_session_id.clone();
             return Ok(ProviderRunnerOutput {
+                activities: provider_activities_for_response(output.activities, &response),
                 response,
                 resume_cursor: provider_session_id
                     .clone()
@@ -3936,6 +3963,7 @@ fn run_openai_codex_chat(
             let response_chars = stdout.chars().count();
             let provider_session_id = output.provider_session_id.clone();
             return Ok(ProviderRunnerOutput {
+                activities: provider_activities_for_response(output.activities, &stdout),
                 response: stdout,
                 resume_cursor: provider_session_id
                     .clone()
@@ -4012,6 +4040,7 @@ fn run_anthropic_claude_chat(
         let response_chars = response.chars().count();
         let provider_session_id = session_id.clone();
         return Ok(ProviderRunnerOutput {
+            activities: provider_activities_for_response(output.activities, &response),
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -4123,12 +4152,17 @@ fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
 fn openai_codex_chat_prompt(
     message: &str,
     workspace_path: Option<&str>,
+    model_label: Option<&str>,
     suggest_title: bool,
 ) -> String {
     let workspace = workspace_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .unwrap_or("no selected workspace");
+    let model_label = model_label
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or("OpenAI model");
     let title_instruction = if suggest_title {
         "For this first turn, you may suggest a concise session title. If useful, put this exact hidden marker on the first line before the answer: GYRO_SESSION_TITLE: <2-6 word title>. The app hides this marker. Omit it if no good title is clear.\n"
     } else {
@@ -4136,9 +4170,13 @@ fn openai_codex_chat_prompt(
     };
     format!(
         "Answer as Gyro's chat model.\n\
-         Keep replies concise by default: 1-3 short sentences unless the user asks for detail.\n\
+         Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
+         Start with the direct answer. Use short paragraphs, and use bullets or numbered lists when there are three or more distinct items, steps, or comparisons.\n\
+         When the user asks for multiple named things, put each thing on its own bullet even if there are only two.\n\
+         Use bold text sparingly for the terms that help scanning. Do not repeat the same conclusion in multiple forms.\n\
          Do not describe the local Codex runner, authentication, system prompts, or implementation details unless asked.\n\
-         If the user asks what model you are, answer with the model label only.\n\
+         Your selected model label is: {model_label}.\n\
+         If the user asks what model you are, answer with exactly that selected model label only.\n\
          {title_instruction}\
          Use the selected workspace only as optional context.\n\
          Do not edit files, start servers, commit, push, or make destructive changes in this chat run.\n\
@@ -4159,7 +4197,10 @@ fn claude_chat_prompt(message: &str, workspace_path: Option<&str>, suggest_title
     };
     format!(
         "Answer as Gyro's chat model.\n\
-         Keep replies concise by default: 1-3 short sentences unless the user asks for detail.\n\
+         Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
+         Start with the direct answer. Use short paragraphs, and use bullets or numbered lists when there are three or more distinct items, steps, or comparisons.\n\
+         When the user asks for multiple named things, put each thing on its own bullet even if there are only two.\n\
+         Use bold text sparingly for the terms that help scanning. Do not repeat the same conclusion in multiple forms.\n\
          Do not describe the local Claude Code runner, authentication, system prompts, or implementation details unless asked.\n\
          If the user asks what model you are, answer with the model label only.\n\
          {title_instruction}\
@@ -4356,6 +4397,33 @@ fn append_provider_status_event(
     )
 }
 
+fn append_provider_activity_event(
+    store: &SessionStore,
+    session_id: Uuid,
+    request: &ProviderChatRequest,
+    turn_id: Uuid,
+    activity: &ProviderActivity,
+) -> anyhow::Result<SessionEvent> {
+    let payload = serde_json::json!({
+        "kind": "provider-activity",
+        "activityId": activity.id,
+        "activityKind": activity.kind,
+        "label": activity.label,
+        "detail": activity.detail,
+        "status": activity.status,
+        "providerId": request.provider_id,
+        "modelId": request.model_id,
+        "turnId": turn_id,
+    });
+    store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::SystemEvent,
+        activity.label.clone(),
+        payload,
+        Some(turn_id),
+    )
+}
+
 fn append_provider_diagnostics_event(
     store: &SessionStore,
     session_id: Uuid,
@@ -4506,6 +4574,7 @@ fn push_bounded(
 }
 
 struct StreamingCommandOutput {
+    activities: Vec<ProviderActivity>,
     status_success: bool,
     status_label: String,
     stdout: String,
@@ -4515,6 +4584,7 @@ struct StreamingCommandOutput {
 }
 
 struct StreamingCommandState {
+    activities: Vec<ProviderActivity>,
     stdout_text: String,
     stdout_text_chars: usize,
     stdout_text_truncated: bool,
@@ -4530,6 +4600,7 @@ struct StreamingCommandState {
 impl StreamingCommandState {
     fn new() -> Self {
         Self {
+            activities: Vec::new(),
             stdout_text: String::new(),
             stdout_text_chars: 0,
             stdout_text_truncated: false,
@@ -4541,6 +4612,22 @@ impl StreamingCommandState {
             provider_session_id: None,
             last_emit_at: Instant::now(),
         }
+    }
+
+    fn push_activity(&mut self, activity: ProviderActivity) -> bool {
+        if let Some(existing) = self
+            .activities
+            .iter_mut()
+            .find(|existing| existing.id == activity.id)
+        {
+            if *existing == activity {
+                return false;
+            }
+            *existing = activity;
+            return true;
+        }
+        self.activities.push(activity);
+        true
     }
 
     fn push_stdout(&mut self, line: &str) {
@@ -4709,6 +4796,7 @@ fn run_streaming_command(
     stream_state.flush_pending_delta(app, request, true);
     let stderr_text = stderr_handle.join().unwrap_or_default();
     Ok(StreamingCommandOutput {
+        activities: stream_state.activities,
         status_success: status.success(),
         status_label: status.to_string(),
         stdout: stream_state.stdout_text,
@@ -4731,6 +4819,17 @@ fn handle_provider_stdout_line(
     };
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
+    }
+    if let Some(commentary) = extract_provider_commentary_activity(&value) {
+        if stream_state.push_activity(commentary.clone()) {
+            emit_provider_activity_event(app, request, &commentary);
+        }
+        return;
+    }
+    if let Some(activity) = extract_provider_activity(&value) {
+        if stream_state.push_activity(activity.clone()) {
+            emit_provider_activity_event(app, request, &activity);
+        }
     }
     if let Some(chunk) = extract_provider_text_chunk(&value) {
         match chunk {
@@ -4760,6 +4859,190 @@ fn handle_provider_stdout_line(
     }
 }
 
+fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
+    let text = extract_codex_agent_message_text(value)?;
+    if text.contains("GYRO_SESSION_TITLE:") {
+        return None;
+    }
+    let item = value.get("item")?;
+    let id = item
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("commentary-{}", Uuid::new_v4()));
+    Some(ProviderActivity {
+        id,
+        kind: "commentary".into(),
+        label: sanitize_provider_text_delta(&text),
+        detail: None,
+        status: "done".into(),
+    })
+}
+
+fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
+    let event_type = value
+        .get("type")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
+    let nested_event = value.get("event").unwrap_or(value);
+    let nested_type = nested_event
+        .get("type")
+        .and_then(|item| item.as_str())
+        .unwrap_or(event_type);
+    let item = value
+        .get("item")
+        .or_else(|| nested_event.get("item"))
+        .or_else(|| nested_event.get("content_block"))?;
+    let item_type = item.get("type").and_then(|value| value.as_str())?;
+    let id = item
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            nested_event
+                .get("index")
+                .and_then(|value| value.as_u64())
+                .map(|index| format!("{item_type}-{index}"))
+        })
+        .unwrap_or_else(|| format!("{item_type}-{}", Uuid::new_v4()));
+    let status = if event_type.contains("started")
+        || nested_type.contains("start")
+        || item.get("status").and_then(|value| value.as_str()) == Some("in_progress")
+    {
+        "running"
+    } else if event_type.contains("failed")
+        || nested_type.contains("error")
+        || item.get("status").and_then(|value| value.as_str()) == Some("failed")
+    {
+        "failed"
+    } else {
+        "done"
+    };
+
+    let (kind, label, detail) = match item_type {
+        "command_execution" | "command" => {
+            let command = json_string_or_joined(item.get("command"))?;
+            (
+                "command".to_string(),
+                command_activity_label(&command),
+                Some(command),
+            )
+        }
+        "file_change" | "file_edit" => {
+            let path = provider_activity_path(item).unwrap_or_else(|| "workspace files".into());
+            ("file".to_string(), format!("Updated {path}"), Some(path))
+        }
+        "mcp_tool_call" | "tool_use" | "tool_call" => {
+            let name = item
+                .get("name")
+                .or_else(|| item.get("tool"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool");
+            (
+                "tool".to_string(),
+                format!("Used {}", humanize_activity_name(name)),
+                Some(name.to_string()),
+            )
+        }
+        "web_search" | "web_search_call" => {
+            ("search".to_string(), "Searched the web".to_string(), None)
+        }
+        _ => return None,
+    };
+
+    Some(ProviderActivity {
+        id,
+        kind,
+        label,
+        detail,
+        status: status.into(),
+    })
+}
+
+fn json_string_or_joined(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Array(values) => {
+            let joined = values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        _ => None,
+    }
+}
+
+fn command_activity_label(command: &str) -> String {
+    let normalized = command.to_ascii_lowercase();
+    if normalized.contains("rg --files")
+        || normalized.contains("find ")
+        || normalized.contains(" ls ")
+        || normalized.starts_with("ls ")
+    {
+        return "Listed files".into();
+    }
+    if normalized.contains(" rg ") || normalized.contains("rg -") || normalized.starts_with("rg ") {
+        return "Searched project".into();
+    }
+    if normalized.contains("cat ")
+        || normalized.contains("sed -n")
+        || normalized.contains("head ")
+        || normalized.contains("tail ")
+    {
+        if let Some(path) = command
+            .split_whitespace()
+            .rev()
+            .map(|part| part.trim_matches(|ch: char| "'\";,()".contains(ch)))
+            .find(|part| {
+                part.contains('.') && !part.starts_with('-') && !part.chars().all(char::is_numeric)
+            })
+        {
+            let file_name = Path::new(path)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(path);
+            return format!("Read {file_name}");
+        }
+        return "Read project files".into();
+    }
+    "Ran command".into()
+}
+
+fn provider_activity_path(item: &serde_json::Value) -> Option<String> {
+    item.get("path")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            item.get("changes")
+                .and_then(|value| value.as_array())
+                .and_then(|changes| changes.first())
+                .and_then(|change| change.get("path"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+}
+
+fn humanize_activity_name(value: &str) -> String {
+    value
+        .split(['_', '-'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn provider_activities_for_response(
+    activities: Vec<ProviderActivity>,
+    response: &str,
+) -> Vec<ProviderActivity> {
+    let response = response.trim();
+    activities
+        .into_iter()
+        .filter(|activity| activity.kind != "commentary" || activity.label.trim() != response)
+        .collect()
+}
+
 fn emit_provider_chat_event(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -4778,8 +5061,38 @@ fn emit_provider_chat_event(
         phase: phase.into(),
         status: status.map(|status| status.as_str().to_string()),
         text_delta,
+        activity_id: None,
+        activity_kind: None,
+        activity_label: None,
+        activity_detail: None,
+        activity_status: None,
         message,
         error,
+    };
+    let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
+}
+
+fn emit_provider_activity_event(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    activity: &ProviderActivity,
+) {
+    let payload = ProviderChatStreamEvent {
+        session_id: request.session_id.clone(),
+        turn_id: request.turn_id.clone(),
+        provider_id: request.provider_id.clone(),
+        model_id: request.model_id.clone(),
+        event_id: Uuid::new_v4().to_string(),
+        phase: "activity".into(),
+        status: Some(HarnessRunStatus::Running.as_str().to_string()),
+        text_delta: None,
+        activity_id: Some(activity.id.clone()),
+        activity_kind: Some(activity.kind.clone()),
+        activity_label: Some(activity.label.clone()),
+        activity_detail: activity.detail.clone(),
+        activity_status: Some(activity.status.clone()),
+        message: None,
+        error: None,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -5607,10 +5920,19 @@ while True:
 
     #[test]
     fn codex_chat_prompt_prefers_concise_answers() {
-        let prompt = openai_codex_chat_prompt("WHAT MODEL are you?", Some("/workspace"), true);
+        let prompt = openai_codex_chat_prompt(
+            "WHAT MODEL are you?",
+            Some("/workspace"),
+            Some("GPT-5.6 Sol"),
+            true,
+        );
 
-        assert!(prompt.contains("Keep replies concise by default"));
-        assert!(prompt.contains("answer with the model label only"));
+        assert!(prompt.contains("polished, scannable Markdown"));
+        assert!(prompt.contains("bullets or numbered lists"));
+        assert!(prompt.contains("each thing on its own bullet"));
+        assert!(prompt.contains("Do not repeat the same conclusion"));
+        assert!(prompt.contains("selected model label is: GPT-5.6 Sol"));
+        assert!(prompt.contains("exactly that selected model label only"));
         assert!(prompt.contains("Do not describe the local Codex runner"));
         assert!(prompt.contains("GYRO_SESSION_TITLE:"));
         assert!(prompt.contains("Selected workspace: /workspace"));
@@ -5790,6 +6112,42 @@ while True:
             })),
             None
         );
+    }
+
+    #[test]
+    fn provider_stream_parsers_extract_live_activity_and_commentary() {
+        let command = extract_provider_activity(&serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "item_1",
+                "type": "command_execution",
+                "command": "/bin/zsh -lc \"rg --files packages/ui\""
+            }
+        }))
+        .expect("command activity");
+        assert_eq!(command.id, "item_1");
+        assert_eq!(command.kind, "command");
+        assert_eq!(command.label, "Listed files");
+        assert_eq!(command.status, "done");
+
+        let commentary = extract_provider_commentary_activity(&serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "message_1",
+                "type": "agent_message",
+                "text": "I’ll inspect the workspace first."
+            }
+        }))
+        .expect("commentary activity");
+        assert_eq!(commentary.id, "message_1");
+        assert_eq!(commentary.kind, "commentary");
+        assert_eq!(commentary.label, "I’ll inspect the workspace first.");
+
+        let retained = provider_activities_for_response(
+            vec![commentary.clone(), command.clone()],
+            "I’ll inspect the workspace first.",
+        );
+        assert_eq!(retained, vec![command]);
     }
 
     #[test]

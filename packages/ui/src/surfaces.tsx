@@ -2046,15 +2046,6 @@ function sidebarProjectGroups(
     });
   }
 
-  if (groups.size === 0) {
-    groups.set(currentProjectKey, {
-      hasWorkspace: Boolean(workspacePath),
-      key: currentProjectKey,
-      label: projectSidebarName(workspacePath),
-      sessions: [],
-    });
-  }
-
   return [...groups.values()].sort((first, second) => {
     if (first.key === currentProjectKey) {
       return -1;
@@ -2567,12 +2558,7 @@ export function ChatSurface({
     () => deriveTranscriptState(deferredEvents),
     [deferredEvents],
   );
-  const { hasAssistantForLatestTurn, latestUserTurnId, transcriptEvents } =
-    transcriptState;
-  const shouldShowThinking =
-    Boolean(isComposerSending) &&
-    Boolean(latestUserTurnId) &&
-    !hasAssistantForLatestTurn;
+  const { looseEvents, turns } = transcriptState;
   const hasSelectedProvider = providersForConfig(config).some(
     (provider) =>
       provider.id === config.selectedProviderId &&
@@ -2581,15 +2567,22 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
-        {transcriptEvents.map((event) => (
+        {looseEvents.map((event) => (
           <ChatEvent
             event={event}
             key={event.id}
             onProviderStatusAction={onProviderStatusAction}
           />
         ))}
-        {shouldShowThinking ? <ChatThinkingIndicator /> : null}
-        {transcriptEvents.length === 0 ? (
+        {turns.map((turn, index) => (
+          <ChatTurn
+            isActive={Boolean(isComposerSending) && index === turns.length - 1}
+            key={turn.id}
+            onProviderStatusAction={onProviderStatusAction}
+            turn={turn}
+          />
+        ))}
+        {turns.length === 0 && looseEvents.length === 0 ? (
           <div className="gyro-thread-empty">Start with a request.</div>
         ) : null}
         {pendingDiffs > 0 ? (
@@ -2606,11 +2599,12 @@ export function ChatSurface({
       onOpenToolPanel,
       onProviderStatusAction,
       pendingDiffs,
-      shouldShowThinking,
-      transcriptEvents,
+      isComposerSending,
+      looseEvents,
+      turns,
     ],
   );
-  if (transcriptEvents.length === 0) {
+  if (turns.length === 0 && looseEvents.length === 0) {
     return (
       <div className="gyro-chat-surface is-empty">
         <div
@@ -2777,6 +2771,7 @@ export function ChatSurface({
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
+            showContextRow={false}
             popoverPlacement="up"
             variant="hero"
           />
@@ -8056,7 +8051,7 @@ export function SettingsSurface({
           >
             <SettingsRow
               label="Version"
-              value="0.1.0"
+              value="0.1.1"
               detail="Open-source local-first coding agent workspace."
             />
             <SettingsRow
@@ -8213,7 +8208,13 @@ function SettingsRow({
 }
 
 type ComposerPopoverId =
-  "approval" | "branch" | "context" | "project" | "provider" | "workspace-mode";
+  | "approval"
+  | "branch"
+  | "context"
+  | "effort"
+  | "project"
+  | "provider"
+  | "workspace-mode";
 
 type ComposerPopoverItem = {
   label: string;
@@ -8234,6 +8235,7 @@ type ComposerPopoverItem = {
   disabled?: boolean;
   showChevron?: boolean;
   trailingLabel?: string;
+  hideIcon?: boolean;
 };
 
 function ComposerPopover({
@@ -8275,13 +8277,14 @@ function ComposerPopover({
           "gyro-composer-menu-item",
           item.active ? "is-active" : "",
           item.removeAction ? "has-remove" : "",
+          item.hideIcon ? "has-no-icon" : "",
           item.kind ? `is-${item.kind}` : "",
         ]
           .filter(Boolean)
           .join(" ");
         const itemContent = (
           <>
-            {item.providerId ? (
+            {item.hideIcon ? null : item.providerId ? (
               <ProviderLogo providerId={item.providerId} />
             ) : (
               <Icon size={14} />
@@ -8666,6 +8669,7 @@ function Composer({
   isSending = false,
   maxDraftLength,
   popoverPlacement,
+  showContextRow,
   variant = "thread",
 }: {
   draft: string;
@@ -8694,6 +8698,7 @@ function Composer({
   isSending?: boolean;
   maxDraftLength?: number;
   popoverPlacement?: "down" | "up";
+  showContextRow?: boolean;
   variant?: "thread" | "hero";
 }) {
   const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
@@ -8705,6 +8710,9 @@ function Composer({
   const [modelFlyoutSide, setModelFlyoutSide] = useState<"left" | "right">(
     "right",
   );
+  const [modelFlyoutVertical, setModelFlyoutVertical] = useState<
+    "down" | "up"
+  >("down");
   const providerPickerRef = useRef<HTMLDivElement | null>(null);
   const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(activePopover),
@@ -8743,9 +8751,6 @@ function Composer({
   const providerReasoningEffort = selectedProvider
     ? selectedReasoningEffort(selectedProvider)
     : sessionModel?.reasoningEffort;
-  const modelChipDetail = providerReasoningEffort
-    ? `${providerModelLabel} · ${reasoningEffortLabel(providerReasoningEffort)}`
-    : modelChipLabel;
   const approvalMode = approvalModeForConfig(config);
   const approvalCopy = providerApprovalCopy(selectedProvider?.id, config);
   const approvalChipClassName =
@@ -8774,6 +8779,7 @@ function Composer({
     branchName ??
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
   const isHero = variant === "hero";
+  const shouldShowContextRow = showContextRow ?? isHero;
   const providerErrorMessage =
     providerReadiness?.status === "blocked"
       ? providerReadiness.message
@@ -8813,26 +8819,26 @@ function Composer({
             active:
               modelPickerProvider.id === config.selectedProviderId &&
               model.id === modelPickerProvider.selectedModelId,
-            icon: getProviderModel(modelPickerProvider, model.id)
-              ? Sparkles
-              : Bot,
+            icon: Sparkles,
+            hideIcon: true,
             kind: "model" as const,
             label: model.displayName,
-            detail: model.description,
-          })),
-          ...(getProviderModel(modelPickerProvider)
-            ?.supportedReasoningEfforts ?? []
-          ).map((effort, index) => ({
-            action: `select-provider-effort:${modelPickerProvider.id}:${effort}`,
-            active: effort === selectedReasoningEffort(modelPickerProvider),
-            icon: Gauge,
-            kind: "effort" as const,
-            label: reasoningEffortLabel(effort),
-            sectionLabel: index === 0 ? "Effort" : undefined,
           })),
         ]
       : []),
   ];
+  const effortItems: ComposerPopoverItem[] = selectedProvider
+    ? (getProviderModel(selectedProvider)?.supportedReasoningEfforts ?? []).map(
+        (effort) => ({
+          action: `select-provider-effort:${selectedProvider.id}:${effort}`,
+          active: effort === selectedReasoningEffort(selectedProvider),
+          hideIcon: true,
+          icon: Gauge,
+          kind: "effort" as const,
+          label: reasoningEffortLabel(effort),
+        }),
+      )
+    : [];
   const contextItems: ComposerPopoverItem[] = [
     {
       action: "select-file",
@@ -8894,16 +8900,24 @@ function Composer({
   useEffect(() => {
     if (!modelPickerProvider || !providerPickerRef.current) {
       setModelFlyoutSide("right");
+      setModelFlyoutVertical("down");
       return;
     }
     const rect = providerPickerRef.current.getBoundingClientRect();
-    const modelFlyoutWidth = 220;
+    const modelFlyoutWidth = 208;
+    const modelFlyoutHeight =
+      providerPickerRef.current.querySelector<HTMLElement>(
+        ".gyro-provider-model-flyout",
+      )?.scrollHeight ?? 420;
     const availableRight = window.innerWidth - rect.right;
     const availableLeft = rect.left;
     setModelFlyoutSide(
       availableRight < modelFlyoutWidth + 8 && availableLeft > availableRight
         ? "left"
         : "right",
+    );
+    setModelFlyoutVertical(
+      rect.top + modelFlyoutHeight > window.innerHeight - 16 ? "up" : "down",
     );
   }, [modelPickerProvider]);
 
@@ -9032,7 +9046,7 @@ function Composer({
             {displayProvider ? (
               <ProviderLogo providerId={displayProvider.id} />
             ) : null}
-            <span className="gyro-composer-label">{modelChipDetail}</span>
+            <span className="gyro-composer-label">{modelChipLabel}</span>
             <ChevronDown size={13} />
           </button>
           {activePopover === "provider" ? (
@@ -9045,6 +9059,7 @@ function Composer({
                 .join(" ")}
               data-align="end"
               data-flyout-side={modelFlyoutSide}
+              data-flyout-vertical={modelFlyoutVertical}
               data-placement={providerPopoverPlacement}
               id={`${popoverBaseId}-provider`}
               ref={providerPickerRef}
@@ -9069,12 +9084,36 @@ function Composer({
                   items={providerModelItems}
                   onAction={runPopoverAction}
                   placement={providerPopoverPlacement}
-                  title="Model"
                 />
               ) : null}
             </div>
           ) : null}
         </div>
+        {providerReasoningEffort && effortItems.length > 0 ? (
+          <div className="gyro-composer-control gyro-composer-control-effort">
+            <button
+              className="gyro-composer-chip gyro-effort-chip"
+              onClick={() => togglePopover("effort")}
+              type="button"
+              {...menuProps("effort")}
+            >
+              <span className="gyro-composer-label">
+                {reasoningEffortLabel(providerReasoningEffort)}
+              </span>
+              <ChevronDown size={13} />
+            </button>
+            {activePopover === "effort" ? (
+              <ComposerPopover
+                align="end"
+                className="gyro-effort-picker"
+                id={`${popoverBaseId}-effort`}
+                items={effortItems}
+                onAction={runPopoverAction}
+                placement={providerPopoverPlacement}
+              />
+            ) : null}
+          </div>
+        ) : null}
         <button
           aria-label="Send message"
           aria-busy={isSending}
@@ -9090,7 +9129,7 @@ function Composer({
           <ArrowUp size={17} />
         </button>
       </div>
-      {isHero ? (
+      {shouldShowContextRow ? (
         <div className="gyro-composer-context-row gyro-composer-reveal">
           <div className="gyro-composer-control">
             <button
@@ -9394,60 +9433,224 @@ const ChatEvent = memo(function ChatEvent({
   );
 });
 
-function ChatThinkingIndicator() {
-  return (
-    <article
-      aria-label="Assistant is responding"
-      aria-live="polite"
-      className="gyro-message is-assistant is-thinking"
-      role="status"
-    >
-      <div className="gyro-message-avatar">
-        <Bot size={17} />
-      </div>
-      <div>
-        <div className="gyro-chat-thinking-indicator" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </article>
-  );
-}
+type ChatTranscriptTurn = {
+  id: string;
+  user?: SessionEvent;
+  assistantEvents: SessionEvent[];
+  activityEvents: SessionEvent[];
+  statusEvent?: SessionEvent;
+  startedAt: string;
+};
 
 function deriveTranscriptState(events: SessionEvent[]) {
-  const transcriptEvents: SessionEvent[] = [];
-  let latestUserTurnId: string | undefined;
-  let hasAssistantForLatestTurn = false;
+  const looseEvents: SessionEvent[] = [];
+  const turns: ChatTranscriptTurn[] = [];
+  const turnsById = new Map<string, ChatTranscriptTurn>();
   for (const event of events) {
-    if (isInternalTranscriptEvent(event)) {
+    if (isHiddenTranscriptEvent(event)) {
       continue;
     }
-    transcriptEvents.push(event);
+    const turnId = turnKeyFromEvent(event);
     if (event.kind === "user-message") {
-      latestUserTurnId = turnKeyFromEvent(event);
-      hasAssistantForLatestTurn = false;
+      const turn = turnsById.get(turnId) ?? {
+        id: turnId,
+        assistantEvents: [],
+        activityEvents: [],
+        startedAt: event.createdAt,
+      };
+      turn.user = event;
+      turn.startedAt = event.createdAt;
+      if (!turnsById.has(turnId)) {
+        turns.push(turn);
+        turnsById.set(turnId, turn);
+      }
       continue;
     }
-    if (
-      latestUserTurnId &&
-      event.kind === "assistant-message" &&
-      turnKeyFromEvent(event) === latestUserTurnId &&
-      event.message.trim().length > 0
-    ) {
-      hasAssistantForLatestTurn = true;
+    const belongsToTurn = event.turnId || providerStatusFromEvent(event);
+    if (!belongsToTurn) {
+      looseEvents.push(event);
+      continue;
+    }
+    let turn = turnsById.get(turnId);
+    if (!turn) {
+      turn = {
+        id: turnId,
+        assistantEvents: [],
+        activityEvents: [],
+        startedAt: event.createdAt,
+      };
+      turns.push(turn);
+      turnsById.set(turnId, turn);
+    }
+    if (event.kind === "assistant-message") {
+      turn.assistantEvents.push(event);
+    } else if (providerActivityFromEvent(event)) {
+      turn.activityEvents.push(event);
+    } else if (providerStatusFromEvent(event)) {
+      turn.statusEvent = event;
+    } else {
+      looseEvents.push(event);
     }
   }
-  return {
-    hasAssistantForLatestTurn,
-    latestUserTurnId,
-    transcriptEvents,
-  };
+  return { looseEvents, turns };
 }
 
 function turnKeyFromEvent(event: SessionEvent) {
-  return event.turnId ?? event.id;
+  return (
+    event.turnId ??
+    stringFromEventPayload(eventPayloadRecord(event), "turnId") ??
+    event.id
+  );
+}
+
+function ChatTurn({
+  isActive,
+  onProviderStatusAction,
+  turn,
+}: {
+  isActive: boolean;
+  onProviderStatusAction?: (action: string, event: SessionEvent) => void;
+  turn: ChatTranscriptTurn;
+}) {
+  const providerStatus = turn.statusEvent
+    ? providerStatusFromEvent(turn.statusEvent)
+    : undefined;
+  const isRunning =
+    isActive ||
+    providerStatus?.status === "queued" ||
+    providerStatus?.status === "running" ||
+    providerStatus?.status === "waiting";
+  const completedAt =
+    !isRunning && turn.statusEvent ? turn.statusEvent.createdAt : undefined;
+  const hasResponse = turn.assistantEvents.some(
+    (event) => event.message.trim().length > 0,
+  );
+
+  return (
+    <section className="gyro-chat-turn" data-turn-id={turn.id}>
+      {turn.user ? <ChatEvent event={turn.user} /> : null}
+      <div className="gyro-chat-run">
+        <ChatRunHeader
+          completedAt={completedAt}
+          isRunning={isRunning}
+          startedAt={turn.startedAt}
+        />
+        {turn.activityEvents.length > 0 ? (
+          <div className="gyro-chat-run-activities" aria-label="Agent activity">
+            {turn.activityEvents.map((event) => (
+              <ProviderActivityRow event={event} key={event.id} />
+            ))}
+          </div>
+        ) : null}
+        {isRunning && !hasResponse ? (
+          <div className="gyro-chat-run-thinking" role="status">
+            Thinking
+          </div>
+        ) : null}
+        {turn.assistantEvents.map((event) => (
+          <article
+            className="gyro-message is-assistant"
+            key={event.id}
+          >
+            <div>
+              <AssistantResponse event={event} />
+            </div>
+          </article>
+        ))}
+        {providerStatus &&
+        ["failed", "blocked", "cancelled"].includes(providerStatus.status) &&
+        turn.statusEvent ? (
+          <div className="gyro-chat-run-error">
+            <div>
+              <strong>{turn.statusEvent.message}</strong>
+              {providerStatus.error ? <span>{providerStatus.error}</span> : null}
+            </div>
+            <div>
+              {providerStatus.status === "failed" ? (
+                <button
+                  onClick={() =>
+                    onProviderStatusAction?.("retry-send", turn.statusEvent!)
+                  }
+                  type="button"
+                >
+                  Retry
+                </button>
+              ) : null}
+              <button
+                onClick={() =>
+                  onProviderStatusAction?.(
+                    "reconnect-provider",
+                    turn.statusEvent!,
+                  )
+                }
+                type="button"
+              >
+                Reconnect
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ChatRunHeader({
+  completedAt,
+  isRunning,
+  startedAt,
+}: {
+  completedAt?: string;
+  isRunning: boolean;
+  startedAt: string;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isRunning) {
+      return;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [isRunning]);
+  const start = Date.parse(startedAt);
+  const end = completedAt ? Date.parse(completedAt) : now;
+  const elapsedSeconds = Number.isFinite(start)
+    ? Math.max(0, Math.round((end - start) / 1_000))
+    : 0;
+  return (
+    <div className="gyro-chat-run-header">
+      <span>{isRunning ? "Working" : "Worked"} for {elapsedSeconds}s</span>
+      {!isRunning ? <ChevronDown size={13} /> : null}
+    </div>
+  );
+}
+
+function ProviderActivityRow({ event }: { event: SessionEvent }) {
+  const activity = providerActivityFromEvent(event);
+  if (!activity) {
+    return null;
+  }
+  if (activity.kind === "commentary") {
+    return (
+      <p className="gyro-chat-run-commentary">
+        {renderAssistantInlineContent(activity.label)}
+      </p>
+    );
+  }
+  return (
+    <div
+      className={`gyro-chat-run-activity is-${activity.status}`}
+      title={activity.detail ?? activity.label}
+    >
+      {activity.kind === "file" ? <FileText size={13} /> : <Search size={13} />}
+      <span>{activity.label}</span>
+      {activity.status === "running" ? (
+        <CircleDashed className="is-spinning" size={12} />
+      ) : (
+        <ChevronRight size={12} />
+      )}
+    </div>
+  );
 }
 
 type AssistantResponseBlock =
@@ -9455,21 +9658,23 @@ type AssistantResponseBlock =
   | { kind: "commands"; items: string[] }
   | { kind: "heading"; content: string }
   | { kind: "list"; items: string[] }
+  | { kind: "ordered-list"; items: string[] }
   | { kind: "paragraph"; content: string };
 
 const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
 
 function AssistantResponse({ event }: { event: SessionEvent }) {
+  const visibleMessage = stripHiddenSessionTitleMarker(event.message);
   const isStreaming = isStreamingAssistantEvent(event);
   const shouldUsePlainText =
     isStreaming ||
-    event.message.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS;
+    visibleMessage.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS;
   const blocks = useMemo(
-    () => (shouldUsePlainText ? [] : assistantResponseBlocks(event.message)),
-    [event.message, shouldUsePlainText],
+    () => (shouldUsePlainText ? [] : assistantResponseBlocks(visibleMessage)),
+    [shouldUsePlainText, visibleMessage],
   );
   const body = shouldUsePlainText ? (
-    <p className="gyro-response-streaming-text">{event.message}</p>
+    <p className="gyro-response-streaming-text">{visibleMessage}</p>
   ) : (
     blocks.map((block, index) => (
       <AssistantResponseBlockView
@@ -9484,7 +9689,7 @@ function AssistantResponse({ event }: { event: SessionEvent }) {
       <footer className="gyro-response-actions">
         <button
           aria-label="Copy response"
-          onClick={() => copyAssistantResponse(event.message)}
+          onClick={() => copyAssistantResponse(visibleMessage)}
           title="Copy response"
           type="button"
         >
@@ -9512,6 +9717,15 @@ function AssistantResponseBlockView({
       </ul>
     );
   }
+  if (block.kind === "ordered-list") {
+    return (
+      <ol>
+        {block.items.map((item, index) => (
+          <li key={`${item}-${index}`}>{renderAssistantInlineContent(item)}</li>
+        ))}
+      </ol>
+    );
+  }
   if (block.kind === "commands") {
     return (
       <div className="gyro-response-command-list">
@@ -9535,6 +9749,7 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
   const blocks: AssistantResponseBlock[] = [];
   const paragraphLines: string[] = [];
   const listItems: string[] = [];
+  const orderedListItems: string[] = [];
   const commandItems: string[] = [];
   const codeLines: string[] = [];
   let isInCodeBlock = false;
@@ -9556,6 +9771,13 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     blocks.push({ kind: "list", items: [...listItems] });
     listItems.length = 0;
   };
+  const flushOrderedList = () => {
+    if (orderedListItems.length === 0) {
+      return;
+    }
+    blocks.push({ kind: "ordered-list", items: [...orderedListItems] });
+    orderedListItems.length = 0;
+  };
   const flushCommands = () => {
     if (commandItems.length === 0) {
       return;
@@ -9573,6 +9795,7 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
   const flushOpenBlocks = () => {
     flushParagraph();
     flushList();
+    flushOrderedList();
     flushCommands();
   };
 
@@ -9607,8 +9830,18 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     const bullet = trimmed.match(/^[-*]\s+(.+)$/);
     if (bullet) {
       flushParagraph();
+      flushOrderedList();
       flushCommands();
       listItems.push(bullet[1] ?? "");
+      continue;
+    }
+
+    const orderedItem = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (orderedItem) {
+      flushParagraph();
+      flushList();
+      flushCommands();
+      orderedListItems.push(orderedItem[1] ?? "");
       continue;
     }
 
@@ -9616,11 +9849,13 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     if (codeOnly) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       commandItems.push(codeOnly[1] ?? "");
       continue;
     }
 
     flushList();
+    flushOrderedList();
     flushCommands();
     paragraphLines.push(trimmed);
   }
@@ -9635,7 +9870,7 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
 
 function renderAssistantInlineContent(value: string): ReactNode[] {
   return value
-    .split(/(`[^`]+`|\[[^\]]+\]\([^)]+\))/g)
+    .split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g)
     .filter(Boolean)
     .map((part, index) => {
       if (part.startsWith("`") && part.endsWith("`")) {
@@ -9644,6 +9879,9 @@ function renderAssistantInlineContent(value: string): ReactNode[] {
             {part.slice(1, -1)}
           </code>
         );
+      }
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>;
       }
       const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (link) {
@@ -9663,6 +9901,19 @@ function renderAssistantInlineContent(value: string): ReactNode[] {
 
 function copyAssistantResponse(message: string) {
   void navigator.clipboard?.writeText(message).catch(() => undefined);
+}
+
+function stripHiddenSessionTitleMarker(message: string) {
+  const lines = message.replace(/\r\n/g, "\n").split("\n");
+  const markerIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (
+    markerIndex < 0 ||
+    !lines[markerIndex]?.trim().startsWith("GYRO_SESSION_TITLE:")
+  ) {
+    return message;
+  }
+  lines.splice(markerIndex, 1);
+  return lines.join("\n").trim();
 }
 
 function isStreamingAssistantEvent(event: SessionEvent) {
@@ -9693,7 +9944,35 @@ function providerStatusFromEvent(event: SessionEvent) {
   };
 }
 
-function isInternalTranscriptEvent(event: SessionEvent) {
+function providerActivityFromEvent(event: SessionEvent) {
+  const payload = eventPayloadRecord(event);
+  if (event.kind !== "system-event" || payload?.kind !== "provider-activity") {
+    return undefined;
+  }
+  return {
+    detail: stringFromEventPayload(payload, "detail"),
+    kind: stringFromEventPayload(payload, "activityKind") ?? "tool",
+    label: stringFromEventPayload(payload, "label") ?? event.message,
+    status: stringFromEventPayload(payload, "status") ?? "done",
+  };
+}
+
+function isHiddenSessionTitleActivity(event: SessionEvent) {
+  const payload = eventPayloadRecord(event);
+  return (
+    event.kind === "system-event" &&
+    payload?.kind === "provider-activity" &&
+    stringFromEventPayload(payload, "activityKind") === "commentary" &&
+    (stringFromEventPayload(payload, "label") ?? event.message).includes(
+      "GYRO_SESSION_TITLE:",
+    )
+  );
+}
+
+function isHiddenTranscriptEvent(event: SessionEvent) {
+  if (isHiddenSessionTitleActivity(event)) {
+    return true;
+  }
   if (event.kind === "user-message" || event.kind === "assistant-message") {
     return false;
   }
@@ -9701,7 +9980,10 @@ function isInternalTranscriptEvent(event: SessionEvent) {
     return true;
   }
   if (providerStatusFromEvent(event)) {
-    return true;
+    return false;
+  }
+  if (providerActivityFromEvent(event)) {
+    return false;
   }
   const payload = eventPayloadRecord(event);
   const payloadKind = stringFromEventPayload(payload, "kind");

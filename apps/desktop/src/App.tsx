@@ -99,6 +99,7 @@ import {
 } from "react";
 import {
   applyProviderChatStreamDeltas,
+  applyProviderChatStreamActivity,
   isProviderStatusEvent,
   limitSessionEventsForUi,
   mergePersistedAndOptimisticEvents,
@@ -161,6 +162,7 @@ type ProviderHealthCheck = {
 };
 
 type ProviderChatResponse = {
+  activityEvents?: SessionEvent[];
   assistantEvent: SessionEvent;
   resumeCursor?: ProviderResumeCursor | null;
   session?: Session | null;
@@ -255,6 +257,7 @@ const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
 const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
 const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
+const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
 const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
@@ -276,6 +279,7 @@ const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
 const MAX_STORED_MODEL_USAGE_CHARS = 100_000;
 const MAX_PINNED_SESSIONS = 200;
 const MAX_REMOVED_PROJECTS = 200;
+const MAX_RECENT_PROJECTS = 12;
 const AUTOMATION_SCHEDULER_COMMANDS = {
   claimDue: "claim_due_automation",
   completeLease: "complete_automation_lease",
@@ -478,6 +482,9 @@ export function App() {
   const [removedProjectPaths, setRemovedProjectPaths] = useState<string[]>(
     loadRemovedProjectPaths,
   );
+  const [recentProjectPaths, setRecentProjectPaths] = useState<string[]>(
+    loadRecentProjectPaths,
+  );
   const [projectRemoveCandidate, setProjectRemoveCandidate] =
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
@@ -575,8 +582,13 @@ export function App() {
   }, [pinnedSessionIds, removedProjectPaths, sessions]);
   const savedProjects = useMemo(
     () =>
-      savedProjectsFromSessions(sessions, workspacePath, removedProjectPaths),
-    [removedProjectPaths, sessions, workspacePath],
+      savedProjectsFromSessions(
+        sessions,
+        workspacePath,
+        removedProjectPaths,
+        recentProjectPaths,
+      ),
+    [recentProjectPaths, removedProjectPaths, sessions, workspacePath],
   );
 
   useEffect(() => {
@@ -949,6 +961,15 @@ export function App() {
         );
         return;
       }
+      if (streamEvent.phase === "activity") {
+        flushProviderStreamBatches();
+        applyProviderChatStreamActivity(
+          optimisticEventsRef,
+          setEvents,
+          streamEvent,
+        );
+        return;
+      }
       const turnId = streamEvent.turnId ?? undefined;
       const textDelta = streamEvent.textDelta ?? "";
       if (
@@ -1006,6 +1027,7 @@ export function App() {
     (sessionId: string, response?: ProviderChatResponse) => {
       const updatedSession = response?.session;
       const responseEvents = [
+        ...(response?.activityEvents ?? []),
         response?.statusEvent,
         response?.assistantEvent,
       ].filter((event): event is SessionEvent => Boolean(event));
@@ -1959,8 +1981,17 @@ export function App() {
 
   const activateWorkspacePath = useCallback(
     async (selected: string, notificationTitle = "Workspace opened") => {
+      const normalizedSelected = normalizeProjectPath(selected);
       setRemovedProjectPaths((current) =>
-        current.filter((path) => path !== normalizeProjectPath(selected)),
+        current.filter((path) => path !== normalizedSelected),
+      );
+      setRecentProjectPaths((current) =>
+        [
+          normalizedSelected,
+          ...current.filter((path) => path !== normalizedSelected),
+        ]
+          .filter(Boolean)
+          .slice(0, MAX_RECENT_PROJECTS),
       );
       if (!isTauriRuntime()) {
         setWorkspacePath(selected);
@@ -2295,6 +2326,9 @@ export function App() {
     );
 
     setRemovedProjectPaths(nextRemovedProjectPaths);
+    setRecentProjectPaths((current) =>
+      current.filter((path) => normalizeProjectPath(path) !== projectPath),
+    );
     setPinnedSessionIds((current) =>
       current.filter((sessionId) => !projectSessionIds.has(sessionId)),
     );
@@ -4975,6 +5009,13 @@ export function App() {
   }, [removedProjectPaths]);
 
   useEffect(() => {
+    safeSetLocalStorage(
+      RECENT_PROJECTS_STORAGE_KEY,
+      JSON.stringify(recentProjectPaths),
+    );
+  }, [recentProjectPaths]);
+
+  useEffect(() => {
     const selectedPane = workbench.terminalPanes.find(
       (pane) => pane.id === workbench.selectedTerminalPaneId,
     );
@@ -7165,6 +7206,29 @@ function loadRemovedProjectPaths(): string[] {
   }
 }
 
+function loadRecentProjectPaths(): string[] {
+  const stored = readBoundedLocalStorage(
+    RECENT_PROJECTS_STORAGE_KEY,
+    MAX_STORED_PREVIEW_CONFIG_CHARS,
+  );
+  if (!stored) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed)
+      ? [...new Set(
+          parsed
+            .filter((path): path is string => typeof path === "string")
+            .map(normalizeProjectPath)
+            .filter(Boolean),
+        )].slice(0, MAX_RECENT_PROJECTS)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeProjectPath(path?: string) {
   return path?.trim().replace(/\/+$/, "") ?? "";
 }
@@ -8007,6 +8071,7 @@ function savedProjectsFromSessions(
   sessions: Session[],
   currentWorkspacePath?: string,
   removedProjectPaths: string[] = [],
+  recentProjectPaths: string[] = [],
 ): SavedProject[] {
   const projects = new Map<
     string,
@@ -8017,7 +8082,7 @@ function savedProjectsFromSessions(
   const upsertProject = (
     path: string | undefined,
     updatedAt?: string,
-    options: { includeRemoved?: boolean } = {},
+    options: { includeRemoved?: boolean; countSession?: boolean } = {},
   ) => {
     if (!path) {
       return;
@@ -8037,11 +8102,18 @@ function savedProjectsFromSessions(
       path: normalizedPath,
       label: workspaceName(normalizedPath),
       lastUsedAt: Math.max(existing?.lastUsedAt ?? 0, lastUsedAt),
-      sessionCount: (existing?.sessionCount ?? 0) + (updatedAt ? 1 : 0),
+      sessionCount:
+        (existing?.sessionCount ?? 0) +
+        (updatedAt && options.countSession !== false ? 1 : 0),
     });
   };
 
   upsertProject(currentWorkspacePath, undefined, { includeRemoved: true });
+  recentProjectPaths.forEach((path, index) =>
+    upsertProject(path, new Date(Date.now() - index).toISOString(), {
+      countSession: false,
+    }),
+  );
   sessions.forEach((session) =>
     upsertProject(session.workspacePath, session.updatedAt),
   );
@@ -8064,9 +8136,11 @@ function savedProjectsFromSessions(
       detail:
         project.path === currentPath
           ? "Current project"
-          : `${project.sessionCount || 1} chat${
-              project.sessionCount === 1 ? "" : "s"
-            }`,
+          : project.sessionCount > 0
+            ? `${project.sessionCount} chat${
+                project.sessionCount === 1 ? "" : "s"
+              }`
+            : "Recent project",
       sessionCount: project.sessionCount,
     }));
 }
