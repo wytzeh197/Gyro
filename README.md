@@ -8,8 +8,8 @@ Gyro's design center is trust and control. Device access, sessions, and history 
 
 ## Status
 
-Gyro is pre-alpha and has not launched v0.1.0 yet. The current repository state
-is pre-launch foundation work for the first private/developer preview:
+Gyro is in public alpha. The current `v0.1.0-alpha` releases are early developer
+previews and are not yet recommended for production use:
 
 - Rust core crate for sessions, local storage, config, approval policy, redaction, Keychain access, and app IPC.
 - `gyro` CLI crate with interactive sessions, one-shot task recording, app open/attach commands, doctor checks, and config management.
