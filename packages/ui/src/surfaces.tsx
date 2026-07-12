@@ -1072,11 +1072,7 @@ function WorkspaceSidebarContent({
                     ? "is-spinning"
                     : ""
                 }
-                size={13}
-              />
-              <span
-                aria-hidden="true"
-                className="gyro-sidebar-update-indicator"
+                size={12}
               />
             </button>
             {isUpdatePopoverOpen ? (
