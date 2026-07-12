@@ -1,6 +1,10 @@
 # Homebrew Packaging
 
-Gyro uses a dedicated tap for macOS distribution:
+> [!NOTE]
+> The Homebrew tap is planned and is not yet a supported installation route.
+> Publish these commands only after the first verified public release.
+
+Gyro will use a dedicated tap for macOS distribution:
 
 ```bash
 brew tap gyro-dev/tap

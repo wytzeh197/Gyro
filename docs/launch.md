@@ -18,7 +18,7 @@ history so clones remain lightweight.
 Use the dev launcher only while developing:
 
 ```bash
-pnpm --filter @gyro-dev/desktop tauri dev
+pnpm desktop:dev
 ```
 
 For app-like testing, build the macOS bundle and open the bundle:
@@ -57,6 +57,9 @@ Acceptance goals:
 - Command and file-edit approvals are clear.
 
 ## Public Developer Preview
+
+Public install instructions should only be published after signed artifacts and
+a clean-machine installation have been verified.
 
 Launch order:
 
