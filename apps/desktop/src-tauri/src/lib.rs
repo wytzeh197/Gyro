@@ -10,7 +10,7 @@ use gyro_core::{
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -5785,19 +5785,63 @@ fn command_with_gui_path(command: &str) -> Command {
 }
 
 fn augmented_gui_path() -> String {
-    let mut paths: Vec<String> = std::env::var("PATH")
-        .unwrap_or_default()
-        .split(':')
-        .filter(|path| !path.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-    if let Ok(home) = std::env::var("HOME") {
-        paths.push(format!("{home}/.local/bin"));
-        paths.push(format!("{home}/bin"));
-    }
+    let mut paths = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| user_cli_paths(&home))
+        .unwrap_or_default();
+    paths.extend(
+        std::env::var("PATH")
+            .unwrap_or_default()
+            .split(':')
+            .filter(|path| !path.is_empty())
+            .map(ToOwned::to_owned),
+    );
     paths.extend(GUI_CLI_PATHS.iter().map(|path| (*path).to_string()));
-    paths.dedup();
+    let mut seen = HashSet::new();
+    paths.retain(|path| seen.insert(path.clone()));
     paths.join(":")
+}
+
+fn user_cli_paths(home: &Path) -> Vec<String> {
+    let mut paths = vec![
+        home.join(".local/bin"),
+        home.join("bin"),
+        home.join(".volta/bin"),
+        home.join(".asdf/shims"),
+        home.join(".local/share/mise/shims"),
+        home.join(".bun/bin"),
+        home.join(".cargo/bin"),
+    ];
+    let nvm_versions = home.join(".nvm/versions/node");
+    let mut nvm_bins = fs::read_dir(nvm_versions)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    nvm_bins.sort_by_key(|path| std::cmp::Reverse(node_version_key(path)));
+    paths.extend(nvm_bins.into_iter().map(|path| path.join("bin")));
+    paths
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn node_version_key(path: &Path) -> (u64, u64, u64) {
+    let version = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .trim_start_matches('v');
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u64>().unwrap_or_default());
+    (
+        parts.next().unwrap_or_default(),
+        parts.next().unwrap_or_default(),
+        parts.next().unwrap_or_default(),
+    )
 }
 
 fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<Vec<u8>>>)
@@ -6452,6 +6496,28 @@ while True:
             Some("https://api.openai.com/v1"),
             Some("provider-cli:codex"),
         ));
+    }
+
+    #[test]
+    fn gui_cli_paths_include_latest_nvm_node_bin() {
+        let home = tempfile::tempdir().unwrap();
+        let node_versions = home.path().join(".nvm/versions/node");
+        std::fs::create_dir_all(node_versions.join("v22.23.1/bin")).unwrap();
+        std::fs::create_dir_all(node_versions.join("v24.11.0/bin")).unwrap();
+        std::fs::create_dir_all(node_versions.join("v9.9.9/bin")).unwrap();
+
+        let paths = user_cli_paths(home.path());
+        let nvm_paths = paths
+            .iter()
+            .filter(|path| path.contains(".nvm/versions/node"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(nvm_paths.len(), 3);
+        assert!(nvm_paths[0].ends_with("v24.11.0/bin"));
+        assert!(nvm_paths[1].ends_with("v22.23.1/bin"));
+        assert!(nvm_paths[2].ends_with("v9.9.9/bin"));
+        assert!(paths.iter().any(|path| path.ends_with(".volta/bin")));
+        assert!(paths.iter().any(|path| path.ends_with(".asdf/shims")));
     }
 
     #[test]
