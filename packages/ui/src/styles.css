@@ -16582,6 +16582,73 @@ button.gyro-settings-row em::after {
   color: var(--gyro-warn);
 }
 
+/* Permission picker: opaque, roomy, and intentionally orange. */
+.gyro-approval-picker,
+.gyro-chat-start .gyro-approval-picker,
+.gyro-chat-composer-dock .gyro-approval-picker {
+  background: #1b1f25;
+  min-width: 240px;
+  overflow: hidden;
+}
+
+:root[data-theme="light"] .gyro-approval-picker {
+  background: #f3f5f7;
+}
+
+.gyro-approval-picker .gyro-composer-menu-item {
+  grid-template-columns: 18px minmax(0, 1fr) 16px;
+  min-height: 38px;
+  padding: 7px 9px;
+}
+
+.gyro-approval-picker .gyro-composer-menu-item strong {
+  font-size: 13px;
+}
+
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct strong,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct svg,
+.gyro-composer-chip.is-warning,
+.gyro-chat-start .gyro-composer-chip.is-warning,
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning {
+  color: #ff8a3d;
+}
+
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct:hover,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct.is-active {
+  background: color-mix(in srgb, #ff8a3d 17%, #1b1f25 83%);
+  color: #ff8a3d;
+}
+
+:root[data-theme="light"]
+  .gyro-approval-picker
+  .gyro-composer-menu-item.is-permission-direct:hover,
+:root[data-theme="light"]
+  .gyro-approval-picker
+  .gyro-composer-menu-item.is-permission-direct.is-active {
+  background: color-mix(in srgb, #c45f12 14%, #f3f5f7 86%);
+  color: #a94808;
+}
+
+/* Keep the run action attached to its status line. */
+.gyro-chat-run-header .gyro-chat-run-controls {
+  margin-left: auto;
+  min-height: 24px;
+}
+
+.gyro-chat-run-header .gyro-chat-run-controls button {
+  border-radius: 5px;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  min-height: 24px;
+  padding: 0 6px;
+}
+
+.gyro-chat-run-header .gyro-chat-run-controls button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
+}
+
 .gyro-session-menu button,
 .gyro-account-menu-row,
 .gyro-terminal-toolbar .gyro-agent-launcher-menu button,

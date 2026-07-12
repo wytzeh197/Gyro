@@ -9820,6 +9820,7 @@ function Composer({
               </button>
               {activePopover === "approval" ? (
                 <ComposerPopover
+                  className="gyro-approval-picker"
                   id={`${popoverBaseId}-approval`}
                   items={[
                     {
@@ -9831,7 +9832,7 @@ function Composer({
                     {
                       action: "set-approval-direct",
                       active: approvalMode === "direct",
-                      icon: Check,
+                      icon: ShieldCheck,
                       kind: "permission-direct",
                       label: approvalCopy.directLabel,
                     },
@@ -10428,19 +10429,18 @@ function ChatTurn({
           completedAt={completedAt}
           isRunning={isRunning}
           startedAt={turn.startedAt}
-        />
-        <div className="gyro-chat-run-controls">
-          {isRunning ? (
+        >
+          {isRunning && onStopChat ? (
             <button onClick={onStopChat} type="button">
-              <Square size={12} />
+              <Square fill="currentColor" size={10} strokeWidth={0} />
               Stop
             </button>
-          ) : hasResponse ? (
+          ) : hasResponse && onContinueChat ? (
             <button onClick={onContinueChat} type="button">
               Continue
             </button>
           ) : null}
-        </div>
+        </ChatRunHeader>
         {turn.activityEvents.length > 0 ? (
           <div className="gyro-chat-run-activities" aria-label="Agent activity">
             {turn.activityEvents.map((event) => (
@@ -10501,10 +10501,12 @@ function ChatTurn({
 }
 
 function ChatRunHeader({
+  children,
   completedAt,
   isRunning,
   startedAt,
 }: {
+  children?: ReactNode;
   completedAt?: string;
   isRunning: boolean;
   startedAt: string;
@@ -10528,6 +10530,9 @@ function ChatRunHeader({
         {isRunning ? "Working" : "Worked"} for {elapsedSeconds}s
       </span>
       {!isRunning ? <ChevronDown size={13} /> : null}
+      {children ? (
+        <div className="gyro-chat-run-controls">{children}</div>
+      ) : null}
     </div>
   );
 }
