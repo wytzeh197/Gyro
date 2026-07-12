@@ -24,6 +24,36 @@ export type WorkbenchMode = "local" | "worktree";
 
 export type ChatSidePanelId = "environment" | "plan";
 
+export type ChatMode = "normal" | "plan";
+
+export type SessionGoalStatus = "active" | "complete";
+
+export type SessionGoal = {
+  sessionId?: string;
+  text: string;
+  status: SessionGoalStatus;
+  sourceTurnId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type ChatAttachmentKind = "image" | "workspace-file";
+
+export type ChatAttachment = {
+  id: string;
+  kind: ChatAttachmentKind;
+  name: string;
+  path: string;
+  relativePath?: string;
+  mimeType?: string;
+  size: number;
+  contentHash?: string;
+  modifiedAt?: string;
+  available?: boolean;
+  stale?: boolean;
+  previewUrl?: string;
+};
+
 export type SettingsSectionId =
   | "general"
   | "providers"
@@ -249,12 +279,7 @@ export type ProviderModel = {
 };
 
 export type ReasoningEffort =
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "ultra";
+  "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type ProviderReadinessStatus = "idle" | "checking" | "ready" | "blocked";
 
@@ -416,6 +441,24 @@ export type WorkbenchPreferences = {
   chatEnvironmentRailOpen: boolean;
   activeChatPanel?: ChatSidePanelId;
   cliLaunchPreset: CliLaunchPreset;
+  usageProviderId?: ProviderId;
+  usageVisualization: "bars" | "wheels";
+};
+
+export type ProviderUsageWindow = {
+  id: "five-hour" | "weekly";
+  label: string;
+  usedPercent: number;
+  resetsAt?: string;
+};
+
+export type ProviderUsageState = {
+  providerId: ProviderId;
+  status: "idle" | "loading" | "available" | "unavailable" | "error";
+  windows: ProviderUsageWindow[];
+  fetchedAt?: string;
+  stale?: boolean;
+  error?: string;
 };
 
 export type CliLaunchPresetFocus = "first" | "last";
@@ -770,6 +813,8 @@ export type SessionEvent = {
     | "file-edit-proposed"
     | "approval-requested"
     | "plan-updated"
+    | "goal-updated"
+    | "chat-mode-changed"
     | "system-event";
   message: string;
   payload: unknown;

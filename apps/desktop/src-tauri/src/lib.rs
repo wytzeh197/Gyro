@@ -15,9 +15,12 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc, Mutex,
+};
 use std::time::{Duration, Instant};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -26,6 +29,8 @@ const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
+const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_CHAT_IMAGES: usize = 4;
 const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_CHAT_TIMEOUT_SECS: u64 = 180;
@@ -40,6 +45,11 @@ const GUI_CLI_PATHS: &[&str] = &[
     "/usr/sbin",
     "/sbin",
 ];
+
+#[derive(Default)]
+struct ProviderCancellationManager {
+    flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -394,6 +404,69 @@ struct ProviderChatRequest {
     #[serde(default)]
     suggest_title: bool,
     workspace_path: Option<String>,
+    #[serde(default)]
+    mode: ChatMode,
+    goal: Option<SessionGoalContext>,
+    plan: Option<serde_json::Value>,
+    #[serde(default)]
+    attachments: Vec<ChatAttachmentRequest>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum ChatMode {
+    #[default]
+    Normal,
+    Plan,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionGoalContext {
+    text: String,
+    status: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatAttachmentRequest {
+    id: String,
+    kind: String,
+    name: String,
+    path: String,
+    relative_path: Option<String>,
+    mime_type: Option<String>,
+    size: u64,
+    content_hash: Option<String>,
+    modified_at: Option<String>,
+    preview_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareChatAttachmentRequest {
+    session_id: String,
+    path: String,
+    workspace_path: Option<String>,
+    kind: String,
+    bytes: Option<Vec<u8>>,
+    name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparedChatAttachment {
+    id: String,
+    kind: String,
+    name: String,
+    path: String,
+    relative_path: Option<String>,
+    mime_type: Option<String>,
+    size: u64,
+    content_hash: String,
+    modified_at: Option<String>,
+    available: bool,
+    stale: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1011,10 +1084,16 @@ async fn append_user_message(
     session_id: String,
     message: String,
     turn_id: Option<String>,
+    #[allow(unused_variables)] attachments: Option<Vec<ChatAttachmentRequest>>,
 ) -> Result<SessionEvent, String> {
     let message = validate_chat_message(&message)?;
     tauri::async_runtime::spawn_blocking(move || {
-        append_user_message_blocking(session_id, message, turn_id)
+        append_user_message_blocking(
+            session_id,
+            message,
+            turn_id,
+            attachments.unwrap_or_default(),
+        )
     })
     .await
     .map_err(|error| format!("user message worker failed: {error}"))?
@@ -1024,6 +1103,7 @@ fn append_user_message_blocking(
     session_id: String,
     message: String,
     turn_id: Option<String>,
+    attachments: Vec<ChatAttachmentRequest>,
 ) -> Result<SessionEvent, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
@@ -1032,7 +1112,7 @@ fn append_user_message_blocking(
             .append_user_turn_message_with_turn_id(
                 session_id,
                 message,
-                serde_json::json!({ "surface": "desktop" }),
+                serde_json::json!({ "surface": "desktop", "attachments": attachments }),
                 parse_uuid(turn_id)?,
             )
             .map_err(to_string);
@@ -1041,7 +1121,7 @@ fn append_user_message_blocking(
         .append_user_turn_message(
             session_id,
             message,
-            serde_json::json!({ "surface": "desktop" }),
+            serde_json::json!({ "surface": "desktop", "attachments": attachments }),
         )
         .map_err(to_string)
 }
@@ -1052,10 +1132,27 @@ async fn run_provider_chat(
     mut request: ProviderChatRequest,
 ) -> Result<ProviderChatResponse, String> {
     request.message = validate_chat_message(&request.message)?;
+    validate_chat_context(&request)?;
 
     tauri::async_runtime::spawn_blocking(move || run_provider_chat_blocking(app, request))
         .await
         .map_err(|error| format!("provider chat worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn stop_provider_chat(
+    session_id: String,
+    manager: tauri::State<'_, ProviderCancellationManager>,
+) -> Result<(), String> {
+    let flags = manager
+        .flags
+        .lock()
+        .map_err(|_| "provider cancellation state is unavailable")?;
+    let flag = flags
+        .get(&session_id)
+        .ok_or_else(|| "no provider turn is running for this session".to_string())?;
+    flag.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
 fn run_provider_chat_blocking(
@@ -1098,7 +1195,9 @@ fn run_provider_chat_blocking(
         Ok(response) => response,
         Err(error) => {
             let error = gyro_core::security::redact_secrets(&error.to_string());
-            let status = if adapter.kind == ProviderAdapterKind::ReadinessOnly {
+            let status = if error.contains("chat cancelled by user") {
+                HarnessRunStatus::Cancelled
+            } else if adapter.kind == ProviderAdapterKind::ReadinessOnly {
                 HarnessRunStatus::Blocked
             } else {
                 HarnessRunStatus::Failed
@@ -1128,7 +1227,11 @@ fn run_provider_chat_blocking(
             emit_provider_chat_event(
                 &app,
                 &request,
-                "failed",
+                if status == HarnessRunStatus::Cancelled {
+                    "cancelled"
+                } else {
+                    "failed"
+                },
                 Some(status),
                 None,
                 None,
@@ -1139,6 +1242,18 @@ fn run_provider_chat_blocking(
     };
     let title_extraction =
         extract_session_title_marker(&runner_output.response, request.suggest_title);
+    let plan_extraction = extract_plan_update_marker(&title_extraction.message);
+    let plan_event = plan_extraction.payload.clone().and_then(|payload| {
+        store
+            .append_event_with_turn_id(
+                session_id,
+                SessionEventKind::PlanUpdated,
+                "Provider updated the plan",
+                payload,
+                Some(run_id),
+            )
+            .ok()
+    });
     let session = if let Some(title) = title_extraction.title.as_deref() {
         store.rename_session(session_id, title).map_err(to_string)?
     } else {
@@ -1164,7 +1279,7 @@ fn run_provider_chat_blocking(
             )
             .map_err(to_string)?;
     }
-    let activity_events = runner_output
+    let mut activity_events = runner_output
         .activities
         .iter()
         .map(|activity| {
@@ -1172,6 +1287,9 @@ fn run_provider_chat_blocking(
         })
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(to_string)?;
+    if let Some(plan_event) = plan_event {
+        activity_events.push(plan_event);
+    }
     let status_event = append_provider_status_event(
         &store,
         session_id,
@@ -1253,7 +1371,7 @@ fn run_provider_chat_blocking(
         .append_event_with_turn_id(
             session_id,
             SessionEventKind::AssistantMessage,
-            title_extraction.message,
+            plan_extraction.message,
             assistant_payload,
             Some(run_id),
         )
@@ -1279,6 +1397,97 @@ fn run_provider_chat_blocking(
         status_event,
         resume_cursor: runner_output.resume_cursor,
     })
+}
+
+fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
+    let images = request
+        .attachments
+        .iter()
+        .filter(|attachment| attachment.kind == "image")
+        .count();
+    if images > MAX_CHAT_IMAGES {
+        return Err(format!("attach at most {MAX_CHAT_IMAGES} images per turn"));
+    }
+    for attachment in &request.attachments {
+        let path = PathBuf::from(&attachment.path);
+        let metadata = path
+            .metadata()
+            .map_err(|_| format!("{} is no longer available", attachment.name))?;
+        if !metadata.is_file() {
+            return Err(format!("{} is not a file", attachment.name));
+        }
+        if attachment.kind == "image" && metadata.len() > MAX_CHAT_IMAGE_BYTES {
+            return Err(format!("{} exceeds the 10 MB image limit", attachment.name));
+        }
+        if attachment.kind == "workspace-file" {
+            let workspace = request
+                .workspace_path
+                .as_deref()
+                .ok_or_else(|| "workspace attachment has no selected workspace".to_string())?;
+            let canonical = path.canonicalize().map_err(to_string)?;
+            let workspace = PathBuf::from(workspace).canonicalize().map_err(to_string)?;
+            if !canonical.starts_with(workspace) {
+                return Err(format!(
+                    "{} escapes the selected workspace",
+                    attachment.name
+                ));
+            }
+            if let Some(expected) = attachment.content_hash.as_deref() {
+                let current = format!(
+                    "{:x}",
+                    Sha256::digest(fs::read(&canonical).map_err(to_string)?)
+                );
+                if current != expected {
+                    return Err(format!(
+                        "{} changed after it was attached; remove it and attach the current file",
+                        attachment.name
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn provider_context_message(request: &ProviderChatRequest) -> String {
+    let mut context = Vec::new();
+    context.push(format!(
+        "Gyro chat mode: {}.",
+        if request.mode == ChatMode::Plan {
+            "plan"
+        } else {
+            "normal"
+        }
+    ));
+    if request.mode == ChatMode::Plan {
+        context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
+        context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
+    }
+    if let Some(goal) = request.goal.as_ref().filter(|goal| goal.status == "active") {
+        context.push(format!("Active Gyro session goal: {}", goal.text.trim()));
+    }
+    if let Some(plan) = request.plan.as_ref() {
+        context.push(format!("Current Gyro plan snapshot: {plan}"));
+    }
+    let references = request
+        .attachments
+        .iter()
+        .filter(|attachment| {
+            attachment.kind == "workspace-file" || request.provider_id == "anthropic"
+        })
+        .map(|attachment| format!("- {} ({})", attachment.name, attachment.path))
+        .collect::<Vec<_>>();
+    if !references.is_empty() {
+        context.push(format!(
+            "Explicit user attachments:\n{}",
+            references.join("\n")
+        ));
+    }
+    format!(
+        "{}\n\nUser message:\n{}",
+        context.join("\n"),
+        request.message
+    )
 }
 
 #[tauri::command]
@@ -1323,6 +1532,150 @@ fn append_plan_event_blocking(
             turn_id,
         )
         .map_err(to_string)
+}
+
+#[tauri::command]
+async fn append_chat_context_event(
+    session_id: String,
+    event_kind: String,
+    message: String,
+    payload: serde_json::Value,
+) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_id = parse_uuid(&session_id)?;
+        let kind = match event_kind.as_str() {
+            "goal-updated" => SessionEventKind::GoalUpdated,
+            "chat-mode-changed" => SessionEventKind::ChatModeChanged,
+            _ => return Err("unsupported chat context event kind".into()),
+        };
+        store
+            .append_event(session_id, kind, message, payload)
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("chat context event worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn prepare_chat_attachment(
+    request: PrepareChatAttachmentRequest,
+) -> Result<PreparedChatAttachment, String> {
+    tauri::async_runtime::spawn_blocking(move || prepare_chat_attachment_blocking(request))
+        .await
+        .map_err(|error| format!("attachment worker failed: {error}"))?
+}
+
+fn prepare_chat_attachment_blocking(
+    request: PrepareChatAttachmentRequest,
+) -> Result<PreparedChatAttachment, String> {
+    let source = (!request.path.trim().is_empty())
+        .then(|| PathBuf::from(request.path.trim()).canonicalize())
+        .transpose()
+        .map_err(|_| "attachment file is missing or unavailable".to_string())?;
+    let metadata = source
+        .as_ref()
+        .map(|path| path.metadata())
+        .transpose()
+        .map_err(to_string)?;
+    if metadata.as_ref().is_some_and(|value| !value.is_file()) {
+        return Err("directories cannot be attached".into());
+    }
+    let name = request
+        .name
+        .clone()
+        .or_else(|| source.as_ref()?.file_name()?.to_str().map(str::to_string))
+        .ok_or_else(|| "attachment name is invalid".to_string())?;
+    let bytes = request.bytes.clone().unwrap_or_else(|| {
+        fs::read(source.as_ref().expect("validated source")).unwrap_or_default()
+    });
+    if bytes.is_empty() {
+        return Err("attachment file is empty or unreadable".into());
+    }
+    let content_hash = format!("{:x}", Sha256::digest(&bytes));
+    let modified_at = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.modified().ok())
+        .map(chrono::DateTime::<chrono::Utc>::from)
+        .map(|value| value.to_rfc3339());
+
+    let (path, relative_path, mime_type) = if request.kind == "image" {
+        if bytes.len() as u64 > MAX_CHAT_IMAGE_BYTES {
+            return Err("images must be 10 MB or smaller".into());
+        }
+        let extension = Path::new(&name)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let mime = match extension.as_str() {
+            "png" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "image/png",
+            "jpg" | "jpeg" if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "image/jpeg",
+            "webp" if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => {
+                "image/webp"
+            }
+            "png" | "jpg" | "jpeg" | "webp" => {
+                return Err("image contents do not match the selected file type".into())
+            }
+            _ => return Err("only PNG, JPEG, and WebP images are supported".into()),
+        };
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        paths.ensure().map_err(to_string)?;
+        let safe_session = request
+            .session_id
+            .chars()
+            .filter(|value| value.is_ascii_alphanumeric() || *value == '-')
+            .collect::<String>();
+        let attachment_dir =
+            paths
+                .sessions_dir
+                .join("attachments")
+                .join(if safe_session.is_empty() {
+                    "new"
+                } else {
+                    &safe_session
+                });
+        fs::create_dir_all(&attachment_dir).map_err(to_string)?;
+        let destination = attachment_dir.join(format!("{}-{name}", &content_hash[..12]));
+        fs::write(&destination, &bytes).map_err(to_string)?;
+        (
+            destination.display().to_string(),
+            None,
+            Some(mime.to_string()),
+        )
+    } else if request.kind == "workspace-file" {
+        let workspace = request
+            .workspace_path
+            .as_deref()
+            .ok_or_else(|| "select a workspace before attaching a file".to_string())?;
+        let source = source.ok_or_else(|| "workspace files require a local path".to_string())?;
+        let workspace = PathBuf::from(workspace).canonicalize().map_err(to_string)?;
+        if !source.starts_with(&workspace) {
+            return Err("workspace file must remain inside the selected workspace".into());
+        }
+        let relative = source
+            .strip_prefix(&workspace)
+            .map_err(to_string)?
+            .display()
+            .to_string();
+        (source.display().to_string(), Some(relative), None)
+    } else {
+        return Err("unsupported attachment kind".into());
+    };
+
+    Ok(PreparedChatAttachment {
+        id: Uuid::new_v4().to_string(),
+        kind: request.kind,
+        name,
+        path,
+        relative_path,
+        mime_type,
+        size: bytes.len() as u64,
+        content_hash,
+        modified_at,
+        available: true,
+        stale: false,
+    })
 }
 
 #[tauri::command]
@@ -3906,8 +4259,9 @@ fn run_openai_codex_chat(
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let contextual_message = provider_context_message(request);
     let prompt = openai_codex_chat_prompt(
-        &request.message,
+        &contextual_message,
         request.workspace_path.as_deref(),
         request.model_label.as_deref(),
         request.suggest_title,
@@ -3922,6 +4276,7 @@ fn run_openai_codex_chat(
         &output_path,
         request.model_id.as_deref(),
         request.reasoning_effort.as_deref(),
+        &request.attachments,
         &prompt,
     ));
 
@@ -4000,8 +4355,9 @@ fn run_anthropic_claude_chat(
     resume_cursor: Option<&ProviderResumeCursor>,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let contextual_message = provider_context_message(request);
     let prompt = claude_chat_prompt(
-        &request.message,
+        &contextual_message,
         request.workspace_path.as_deref(),
         request.suggest_title,
     );
@@ -4016,6 +4372,7 @@ fn run_anthropic_claude_chat(
             .map(|_| session_id.as_str()),
         &session_id,
         request.model_id.as_deref(),
+        &request.mode,
         &prompt,
     ));
 
@@ -4073,6 +4430,7 @@ fn codex_chat_args(
     output_path: &Path,
     model_id: Option<&str>,
     reasoning_effort: Option<&str>,
+    attachments: &[ChatAttachmentRequest],
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec!["exec".into()];
@@ -4102,6 +4460,10 @@ fn codex_chat_args(
     if let Some(session_id) = resume_session_id {
         args.push(session_id.into());
     }
+    for attachment in attachments.iter().filter(|item| item.kind == "image") {
+        args.push("--image".into());
+        args.push(attachment.path.clone());
+    }
     args.push(prompt.into());
     args
 }
@@ -4110,6 +4472,7 @@ fn claude_chat_args(
     resume_session_id: Option<&str>,
     session_id: &str,
     model_id: Option<&str>,
+    mode: &ChatMode,
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec![
@@ -4128,6 +4491,10 @@ fn claude_chat_args(
     if let Some(model) = model_id.map(str::trim).filter(|model| !model.is_empty()) {
         args.push("--model".into());
         args.push(model.into());
+    }
+    if *mode == ChatMode::Plan {
+        args.push("--permission-mode".into());
+        args.push("plan".into());
     }
     args.push(prompt.into());
     args
@@ -4214,6 +4581,31 @@ fn claude_chat_prompt(message: &str, workspace_path: Option<&str>, suggest_title
 struct SessionTitleExtraction {
     title: Option<String>,
     message: String,
+}
+
+struct PlanUpdateExtraction {
+    payload: Option<serde_json::Value>,
+    message: String,
+}
+
+fn extract_plan_update_marker(response: &str) -> PlanUpdateExtraction {
+    let mut payload = None;
+    let mut lines = Vec::new();
+    for line in response.lines() {
+        if let Some(encoded) = line.trim().strip_prefix("GYRO_PLAN_UPDATE:") {
+            if payload.is_none() {
+                payload = serde_json::from_str::<serde_json::Value>(encoded.trim())
+                    .ok()
+                    .filter(|value| value.is_object());
+            }
+            continue;
+        }
+        lines.push(line);
+    }
+    PlanUpdateExtraction {
+        payload,
+        message: lines.join("\n").trim().to_string(),
+    }
 }
 
 fn extract_session_title_marker(response: &str, allow_title: bool) -> SessionTitleExtraction {
@@ -4386,6 +4778,35 @@ fn append_provider_status_event(
             turn_id
                 .map(|id| serde_json::Value::String(id.to_string()))
                 .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "chatMode".into(),
+            serde_json::Value::String(
+                if request.mode == ChatMode::Plan {
+                    "plan"
+                } else {
+                    "normal"
+                }
+                .into(),
+            ),
+        );
+        object.insert(
+            "goal".into(),
+            serde_json::to_value(
+                &request
+                    .goal
+                    .as_ref()
+                    .map(|goal| serde_json::json!({"text": goal.text, "status": goal.status})),
+            )
+            .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "plan".into(),
+            request.plan.clone().unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "attachments".into(),
+            serde_json::to_value(&request.attachments).unwrap_or_else(|_| serde_json::json!([])),
         );
     }
     store.append_event_with_turn_id(
@@ -4737,6 +5158,15 @@ fn run_streaming_command(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<StreamingCommandOutput> {
+    let cancellation = Arc::new(AtomicBool::new(false));
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        manager
+            .flags
+            .lock()
+            .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
+            .insert(request.session_id.clone(), cancellation.clone());
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -4779,12 +5209,27 @@ fn run_streaming_command(
             handle_provider_stdout_line(&line, app, request, &mut stream_state);
         }
         stream_state.flush_pending_delta(app, request, false);
+        if cancellation.load(Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            app.state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .ok()
+                .map(|mut flags| flags.remove(&request.session_id));
+            anyhow::bail!("chat cancelled by user");
+        }
         if let Some(status) = child.try_wait()? {
             break status;
         }
         if started_at.elapsed() >= timeout {
             let _ = child.kill();
             let _ = child.wait();
+            app.state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .ok()
+                .map(|mut flags| flags.remove(&request.session_id));
             anyhow::bail!("command timed out after {} seconds", timeout.as_secs());
         }
         std::thread::sleep(Duration::from_millis(40));
@@ -4795,6 +5240,11 @@ fn run_streaming_command(
     }
     stream_state.flush_pending_delta(app, request, true);
     let stderr_text = stderr_handle.join().unwrap_or_default();
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&request.session_id));
     Ok(StreamingCommandOutput {
         activities: stream_state.activities,
         status_success: status.success(),
@@ -5394,11 +5844,13 @@ pub fn run() {
         .manage(TerminalProcessManager::default())
         .manage(LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
+        .manage(ProviderCancellationManager::default())
         .setup(|app| {
             start_cli_ipc_listener(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            append_chat_context_event,
             append_editor_event,
             append_plan_event,
             append_user_message,
@@ -5438,6 +5890,7 @@ pub fn run() {
             read_workspace_file_full,
             read_terminal_output,
             read_session_events,
+            prepare_chat_attachment,
             restart_app,
             recover_automation_leases,
             rename_session,
@@ -5455,6 +5908,7 @@ pub fn run() {
             stat_workspace_file,
             start_account_login,
             stop_terminal_pane,
+            stop_provider_chat,
             task_discover,
             task_run,
             test_discover,
@@ -5900,6 +6354,57 @@ while True:
     }
 
     #[test]
+    fn prepares_and_revalidates_workspace_chat_attachments() {
+        let workspace = tempfile::tempdir().unwrap();
+        let file = workspace.path().join("context.txt");
+        std::fs::write(&file, "context\n").unwrap();
+        let prepared = prepare_chat_attachment_blocking(PrepareChatAttachmentRequest {
+            session_id: "new".into(),
+            path: file.display().to_string(),
+            workspace_path: Some(workspace.path().display().to_string()),
+            kind: "workspace-file".into(),
+            bytes: None,
+            name: None,
+        })
+        .unwrap();
+        assert_eq!(prepared.relative_path.as_deref(), Some("context.txt"));
+        assert!(!prepared.content_hash.is_empty());
+
+        let request = ProviderChatRequest {
+            session_id: Uuid::new_v4().to_string(),
+            message: "inspect it".into(),
+            turn_id: None,
+            provider_id: "openai".into(),
+            provider_label: None,
+            model_id: None,
+            model_label: None,
+            reasoning_effort: None,
+            suggest_title: false,
+            workspace_path: Some(workspace.path().display().to_string()),
+            mode: ChatMode::Plan,
+            goal: None,
+            plan: None,
+            attachments: vec![ChatAttachmentRequest {
+                id: prepared.id,
+                kind: prepared.kind,
+                name: prepared.name,
+                path: prepared.path,
+                relative_path: prepared.relative_path,
+                mime_type: None,
+                size: prepared.size,
+                content_hash: Some(prepared.content_hash),
+                modified_at: prepared.modified_at,
+                preview_url: None,
+            }],
+        };
+        validate_chat_context(&request).unwrap();
+        std::fs::write(&file, "changed\n").unwrap();
+        assert!(validate_chat_context(&request)
+            .unwrap_err()
+            .contains("changed after"));
+    }
+
+    #[test]
     fn provider_health_skips_codex_login_for_external_env_auth() {
         assert!(should_skip_codex_login_for_external_env(
             Some("https://gateway.example.test/v1"),
@@ -5941,11 +6446,24 @@ while True:
     #[test]
     fn provider_chat_command_args_use_resume_contracts() {
         let output_path = PathBuf::from("/tmp/gyro-last-message.txt");
+        let image = ChatAttachmentRequest {
+            id: "image-1".into(),
+            kind: "image".into(),
+            name: "screen.png".into(),
+            path: "/tmp/screen.png".into(),
+            relative_path: None,
+            mime_type: Some("image/png".into()),
+            size: 128,
+            content_hash: None,
+            modified_at: None,
+            preview_url: None,
+        };
         let fresh_codex = codex_chat_args(
             None,
             &output_path,
             Some("gpt-5.6-sol"),
             Some("max"),
+            std::slice::from_ref(&image),
             "hello",
         );
         assert_eq!(fresh_codex[0], "exec");
@@ -5955,6 +6473,9 @@ while True:
         assert!(fresh_codex.contains(&"--output-last-message".to_string()));
         assert!(fresh_codex.contains(&"gpt-5.6-sol".to_string()));
         assert!(fresh_codex.contains(&"model_reasoning_effort=\"max\"".to_string()));
+        assert!(fresh_codex
+            .windows(2)
+            .any(|args| args == ["--image", "/tmp/screen.png"]));
         assert_eq!(fresh_codex.last(), Some(&"hello".to_string()));
 
         let resumed_codex = codex_chat_args(
@@ -5962,6 +6483,7 @@ while True:
             &output_path,
             None,
             None,
+            &[],
             "again",
         );
         assert_eq!(
@@ -5982,6 +6504,7 @@ while True:
             None,
             "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
             Some("sonnet"),
+            &ChatMode::Normal,
             "hello",
         );
         assert!(fresh_claude.contains(&"--print".to_string()));
@@ -5994,13 +6517,12 @@ while True:
             Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
             "unused",
             None,
+            &ChatMode::Plan,
             "again",
         );
         assert!(resumed_claude.contains(&"--resume".to_string()));
-        assert!(resumed_claude.ends_with(&[
-            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e".to_string(),
-            "again".to_string()
-        ]));
+        assert!(resumed_claude.contains(&"plan".to_string()));
+        assert_eq!(resumed_claude.last(), Some(&"again".to_string()));
     }
 
     #[test]
@@ -6227,6 +6749,15 @@ while True:
     }
 
     #[test]
+    fn extracts_structured_plan_update_marker() {
+        let extracted = extract_plan_update_marker(
+            "GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"items\":[{\"id\":\"one\",\"title\":\"Inspect\",\"status\":\"todo\"}]}\n\nHere is the plan.",
+        );
+        assert_eq!(extracted.payload.as_ref().unwrap()["action"], "replace");
+        assert_eq!(extracted.message, "Here is the plan.");
+    }
+
+    #[test]
     fn provider_text_delta_sanitization_preserves_stream_spacing() {
         assert_eq!(sanitize_provider_text_delta(" hello "), " hello ");
         assert_eq!(sanitize_provider_chat_response(" hello "), "hello");
@@ -6251,6 +6782,10 @@ while True:
             reasoning_effort: Some("high".into()),
             suggest_title: false,
             workspace_path: Some(temp.path().display().to_string()),
+            mode: ChatMode::Normal,
+            goal: None,
+            plan: None,
+            attachments: Vec::new(),
         };
 
         let event = append_provider_status_event(

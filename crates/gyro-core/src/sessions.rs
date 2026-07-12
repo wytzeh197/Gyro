@@ -72,6 +72,8 @@ pub enum SessionEventKind {
     FileEditProposed,
     ApprovalRequested,
     PlanUpdated,
+    GoalUpdated,
+    ChatModeChanged,
     SystemEvent,
 }
 

@@ -100,16 +100,22 @@ expect(
     updateProgressPercent(10, undefined) === undefined,
   "Update state should drive sidebar visibility, labels, and bounded progress.",
 );
-const openAiCatalog = providerCatalog.find((provider) => provider.id === "openai");
+const openAiCatalog = providerCatalog.find(
+  (provider) => provider.id === "openai",
+);
 expect(
-  openAiCatalog?.models.slice(0, 3).map((model) => model.id).join(",") ===
-    "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
+  openAiCatalog?.models
+    .slice(0, 3)
+    .map((model) => model.id)
+    .join(",") === "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
     openAiCatalog.selectedModelId === "gpt-5.6-sol" &&
-    openAiCatalog.models.slice(0, 3).every(
-      (model) =>
-        model.supportedReasoningEfforts?.join(",") ===
-        "low,medium,high,xhigh,max,ultra",
-    ),
+    openAiCatalog.models
+      .slice(0, 3)
+      .every(
+        (model) =>
+          model.supportedReasoningEfforts?.join(",") ===
+          "low,medium,high,xhigh,max,ultra",
+      ),
   "OpenAI should expose all GPT-5.6 variants with their supported effort levels.",
 );
 const restoredEnabledConfig = normalizedConfig({
@@ -2081,8 +2087,10 @@ expect(
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
     surfaceSource.includes('popoverPlacement="up"') &&
     surfaceSource.includes('variant="hero"') &&
-    surfaceSource.includes('showContextRow={false}') &&
-    surfaceSource.includes("const shouldShowContextRow = showContextRow ?? isHero") &&
+    surfaceSource.includes("showContextRow={false}") &&
+    surfaceSource.includes(
+      "const shouldShowContextRow = showContextRow ?? isHero",
+    ) &&
     surfaceSource.includes("{shouldShowContextRow ? (") &&
     styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
     styleSource.includes(
@@ -2138,28 +2146,31 @@ expect(
   "Local app launch docs and scripts should steer users to Gyro.app instead of the raw debug executable.",
 );
 expect(
-  surfaceSource.indexOf('className="gyro-sidebar-update"') > -1 &&
-    surfaceSource.indexOf('className="gyro-sidebar-update"') <
-      surfaceSource.indexOf('className="gyro-account-button"') &&
+  surfaceSource.includes('className="gyro-sidebar-update is-windowbar"') &&
+    surfaceSource.indexOf('className="gyro-sidebar-update is-windowbar"') >
+      surfaceSource.indexOf('aria-label="Forward"') &&
     surfaceSource.includes('aria-haspopup="dialog"') &&
     surfaceSource.includes('role="progressbar"') &&
     surfaceSource.includes("updatePrimaryActionLabel(state)") &&
     styleSource.includes(".gyro-sidebar-update-button") &&
+    styleSource.includes(".gyro-sidebar-update.is-windowbar") &&
     styleSource.includes(".gyro-update-popover") &&
-    updateControllerSource.includes('import.meta.env.DEV') &&
-    updateControllerSource.includes('allowDowngrades: false') &&
+    updateControllerSource.includes("import.meta.env.DEV") &&
+    updateControllerSource.includes("allowDowngrades: false") &&
     !updateControllerSource.includes("X-Gyro-Channel") &&
-    updateControllerSource.includes('await update.download') &&
-    updateControllerSource.includes('await update.install()') &&
+    updateControllerSource.includes("await update.download") &&
+    updateControllerSource.includes("await update.install()") &&
     updateControllerSource.includes('invoke("restart_app")') &&
     appSource.includes("const updateRestartBlockers") &&
-    appSource.includes('buffer.status') &&
+    appSource.includes("buffer.status") &&
     tauriSource.includes("fn restart_app") &&
     tauriConfigSource.includes(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
     ) &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
-    surfaceSource.includes('value="Stable via GitHub Releases"') &&
+    surfaceSource.includes('title="Updates"') &&
+    surfaceSource.includes('"Check for updates"') &&
+    surfaceSource.includes("formatUpdateCheckedAt") &&
     !surfaceSource.includes('label="Release channel"') &&
     !surfaceSource.includes('value="Valid"') &&
     !surfaceSource.includes('value="Today"'),
@@ -2176,7 +2187,7 @@ expect(
     appSource.includes("relativeFilePath") &&
     appSource.includes('"Worktree chats need a repo or folder') &&
     appSource.includes("void openWorkspace();") &&
-    appSource.includes("void selectContextFile();") &&
+    appSource.includes('void selectChatAttachment("workspace-file");') &&
     appSource.includes('case "select-workspace-mode"') &&
     appSource.includes('type: "set-workbench-mode"') &&
     appSource.includes('type: "close-tool-panel"') &&
@@ -2206,6 +2217,27 @@ expect(
     surfaceSource.includes("Select folder") &&
     surfaceSource.includes("Change folder"),
   "Composer controls should route to real workspace, provider, permission, branch, and workspace-mode actions.",
+);
+expect(
+  appSource.includes("CHAT_DRAFTS_STORAGE_KEY") &&
+    appSource.includes('"prepare_chat_attachment"') &&
+    appSource.includes('"append_chat_context_event"') &&
+    appSource.includes('"stop_provider_chat"') &&
+    appSource.includes("deriveSessionGoal") &&
+    appSource.includes("deriveChatMode") &&
+    surfaceSource.includes('action: "select-image"') &&
+    surfaceSource.includes('action: "add-goal"') &&
+    surfaceSource.includes('action: "add-plan"') &&
+    surfaceSource.includes('"set-chat-mode-plan"') &&
+    surfaceSource.includes("gyro-composer-attachments") &&
+    surfaceSource.includes("gyro-session-goal") &&
+    tauriSource.includes("MAX_CHAT_IMAGE_BYTES") &&
+    tauriSource.includes('args.push("--image".into())') &&
+    tauriSource.includes('args.push("plan".into())') &&
+    tauriSource.includes("ProviderCancellationManager") &&
+    coreSessionsSource.includes("GoalUpdated") &&
+    coreSessionsSource.includes("ChatModeChanged"),
+  "Chat should persist goals, plans, modes, drafts, attachments, and real provider cancellation.",
 );
 expect(
   styleSource.includes(".gyro-composer-context-row") &&
@@ -2318,23 +2350,21 @@ expect(
     styleSource.includes(".gyro-composer-menu-item.is-provider:disabled") &&
     styleSource.includes(".gyro-provider-picker.has-flyout") &&
     styleSource.includes('.gyro-provider-picker[data-flyout-side="right"]') &&
-    styleSource.includes('left: calc(100% + 4px)') &&
+    styleSource.includes("left: calc(100% + 4px)") &&
     styleSource.includes('.gyro-provider-picker[data-flyout-side="left"]') &&
     styleSource.includes("top: 0 !important") &&
     styleSource.includes("bottom: auto !important") &&
-    styleSource.includes(
-      '.gyro-provider-picker[data-flyout-vertical="up"]',
-    ) &&
+    styleSource.includes('.gyro-provider-picker[data-flyout-vertical="up"]') &&
     styleSource.includes("bottom: 0 !important") &&
     styleSource.includes(".gyro-composer-menu-item.is-effort") &&
     styleSource.includes(".gyro-composer-menu-item.has-no-icon") &&
     styleSource.includes("max-height: none !important") &&
     styleSource.includes("overflow: visible !important") &&
     surfaceSource.includes("getBoundingClientRect") &&
-    surfaceSource.includes('?.scrollHeight ?? 420') &&
+    surfaceSource.includes("?.scrollHeight ?? 420") &&
     surfaceSource.includes("availableRight < modelFlyoutWidth + 8") &&
     surfaceSource.includes("rect.top + modelFlyoutHeight") &&
-    surfaceSource.includes('data-flyout-vertical={modelFlyoutVertical}') &&
+    surfaceSource.includes("data-flyout-vertical={modelFlyoutVertical}") &&
     !surfaceSource.includes('title="Model & effort"'),
   "Provider picker should stay anchored and flip its model flyout horizontally or vertically when the viewport requires it.",
 );
@@ -2451,6 +2481,7 @@ expect(
 );
 expect(
   appSource.includes("const startNewChat") &&
+    appSource.includes("const suppressSessionAutoSelectRef = useRef(true)") &&
     appSource.includes("suppressSessionAutoSelectRef.current = true") &&
     appSource.includes("setActiveSessionId(undefined)") &&
     appSource.includes(
@@ -2458,9 +2489,11 @@ expect(
     ) &&
     appSource.includes("onCreateSession={startNewChat}") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
-    surfaceSource.includes("if (turns.length === 0 && looseEvents.length === 0)") &&
+    surfaceSource.includes(
+      "if (turns.length === 0 && looseEvents.length === 0)",
+    ) &&
     surfaceSource.includes('aria-label="New thread"'),
-  "New chat should clear the active session, reset to local mode, and render the start screen from transcript events.",
+  "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
 );
 expect(
   !surfaceSource.includes("pane-shell") &&
@@ -2828,6 +2861,38 @@ expect(
 );
 
 const requiredViewports = ["1280x720", "1440x900", "2048x1180"];
+
+expect(
+  surfaceSource.includes("gyro-usage-provider-select") &&
+    surfaceSource.includes('label="Usage visualization"') &&
+    surfaceSource.includes("Usage unavailable from this provider") &&
+    surfaceSource.includes(
+      "Gyro does not estimate allowance from local activity",
+    ),
+  "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
+);
+
+expect(
+  surfaceSource.includes('role="switch"') &&
+    surfaceSource.includes("Require command approval") &&
+    surfaceSource.includes("Automatic update checks") &&
+    surfaceSource.includes("gyro-settings-confirm-overlay"),
+  "Settings should use semantic switches for persisted booleans and confirm destructive resets.",
+);
+
+for (const settingsSelector of [
+  ".gyro-settings-group",
+  ".gyro-settings-control-column",
+  ".gyro-provider-table",
+  ".gyro-usage-cards",
+  ".gyro-update-summary",
+]) {
+  expect(
+    styleSource.includes(settingsSelector),
+    `The line-based settings workspace should include ${settingsSelector}.`,
+  );
+}
+
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);
 
 if (failures.length > 0) {

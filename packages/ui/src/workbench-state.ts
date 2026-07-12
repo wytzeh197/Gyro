@@ -37,6 +37,7 @@ import type {
   ProviderConnectionStatus,
   ProviderHealthDetails,
   ProviderHandoff,
+  ProviderId,
   ProviderSession,
   ProviderSessionStatus,
   ProviderStatus,
@@ -336,6 +337,8 @@ export type WorkbenchAction =
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "set-density"; density: WorkbenchDensity }
   | { type: "set-settings-section"; section: SettingsSectionId }
+  | { type: "set-usage-provider"; providerId?: ProviderId }
+  | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
   | { type: "set-cli-launch-preset"; preset: CliLaunchPreset }
   | { type: "toggle-sidebar-chats" }
   | { type: "toggle-chat-environment-rail" }
@@ -689,6 +692,22 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           lastSettingsSection: action.section,
+        },
+      };
+    case "set-usage-provider":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          usageProviderId: action.providerId,
+        },
+      };
+    case "set-usage-visualization":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          usageVisualization: action.visualization,
         },
       };
     case "set-cli-launch-preset":
@@ -2114,6 +2133,9 @@ function normalizeWorkbenchPreferences(
     lastSettingsSection: preferences?.lastSettingsSection ?? "general",
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
     theme: preferences?.theme === "dark" ? "dark" : "light",
+    usageProviderId: preferences?.usageProviderId,
+    usageVisualization:
+      preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
   };
 }
 
