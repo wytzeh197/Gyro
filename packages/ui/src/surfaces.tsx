@@ -9579,8 +9579,8 @@ function Composer({
       label: "Goal",
     },
     {
-      action: "add-plan",
-      icon: ListChecks,
+      action: "set-chat-mode-plan",
+      icon: LockKeyhole,
       label: "Plan",
     },
     {
@@ -9841,34 +9841,24 @@ function Composer({
           </>
         ) : null}
         {surfaceControls}
-        <button
-          aria-label={
-            chatMode === "plan" ? "Remove Plan mode" : "Select Plan mode"
-          }
-          aria-pressed={chatMode === "plan"}
-          className={`gyro-composer-chip${chatMode === "plan" ? " is-plan" : ""}`}
-          onClick={() =>
-            onComposerAction?.(
-              chatMode === "plan"
-                ? "set-chat-mode-normal"
-                : "set-chat-mode-plan",
-            )
-          }
-          title={chatMode === "plan" ? "Leave Plan mode" : "Enter Plan mode"}
-          type="button"
-        >
-          <LockKeyhole size={13} />
-          {chatMode === "plan" ? (
-            <>
-              <span className="gyro-composer-label">Plan</span>
-              <X
-                aria-hidden="true"
-                className="gyro-composer-chip-remove"
-                size={12}
-              />
-            </>
-          ) : null}
-        </button>
+        {chatMode === "plan" ? (
+          <button
+            aria-label="Remove Plan mode"
+            aria-pressed="true"
+            className="gyro-composer-chip is-plan"
+            onClick={() => onComposerAction?.("set-chat-mode-normal")}
+            title="Remove Plan mode"
+            type="button"
+          >
+            <LockKeyhole size={13} />
+            <span className="gyro-composer-label">Plan</span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : null}
         {sessionGoal?.text ? (
           <button
             className="gyro-composer-chip is-goal"
