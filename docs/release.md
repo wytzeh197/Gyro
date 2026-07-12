@@ -1,6 +1,9 @@
 # Release Process
 
-Gyro v1 targets macOS first through direct downloads and Homebrew.
+Gyro v1 targets macOS first through direct downloads and Homebrew. Until Apple
+Developer signing is available, GitHub Releases provide an explicitly unsigned
+private-preview bootstrap whose updater artifacts are still protected by Gyro's
+Tauri signing key.
 
 ## Update Source
 
@@ -27,6 +30,17 @@ Each release should publish:
 
 ## Required Secrets
 
+Private-preview GitHub builds need:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+
+Add `TAURI_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. The
+release workflow injects it before preflight; the matching private key remains
+only in GitHub Actions secrets.
+
+Public signed and notarized builds additionally need:
+
 GitHub Actions release builds need:
 
 - `APPLE_CERTIFICATE`
@@ -35,17 +49,11 @@ GitHub Actions release builds need:
 - `APPLE_ID`
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
-- `TAURI_SIGNING_PRIVATE_KEY`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+  Generate the Tauri updater keypair before the first public release.
 
-Add `TAURI_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. The
-release workflow injects it before preflight; the matching private key remains
-only in GitHub Actions secrets.
-
-Generate the Tauri updater keypair before the first public release.
-
-The committed updater key remains a development placeholder so `tauri dev` can
-start before release signing exists. Generate the keypair with:
+The committed updater public key is safe to distribute. Its matching private
+key is stored in GitHub Actions secrets and backed up locally outside the repo.
+Generate a replacement keypair only if no released build trusts the current key:
 
 ```bash
 pnpm --filter @gyro-dev/desktop tauri signer generate

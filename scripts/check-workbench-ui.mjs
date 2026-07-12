@@ -2157,6 +2157,9 @@ expect(
     styleSource.includes(".gyro-update-popover") &&
     updateControllerSource.includes("import.meta.env.DEV") &&
     updateControllerSource.includes("allowDowngrades: false") &&
+    updateControllerSource.includes(
+      "localStorage.setItem(LAST_UPDATE_CHECK_STORAGE_KEY, checkedAt)",
+    ) &&
     !updateControllerSource.includes("X-Gyro-Channel") &&
     updateControllerSource.includes("await update.download") &&
     updateControllerSource.includes("await update.install()") &&
@@ -2167,8 +2170,10 @@ expect(
     tauriConfigSource.includes(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
     ) &&
+    !tauriConfigSource.includes("GYRO_DEV_UPDATER_PUBKEY") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
+    surfaceSource.includes("Private preview") &&
     surfaceSource.includes('"Check for updates"') &&
     surfaceSource.includes("formatUpdateCheckedAt") &&
     !surfaceSource.includes('label="Release channel"') &&

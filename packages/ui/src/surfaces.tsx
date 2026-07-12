@@ -8324,7 +8324,7 @@ export function SettingsSurface({
           <SettingsSection
             icon={RefreshCw}
             title="Updates"
-            description="Stable updates delivered through signed GitHub Releases."
+            description="Private preview updates verified with Gyro's updater signature."
           >
             <div className="gyro-update-summary">
               <div>
@@ -8333,7 +8333,7 @@ export function SettingsSurface({
               </div>
               <div>
                 <span>Channel</span>
-                <strong>Stable</strong>
+                <strong>Private preview</strong>
               </div>
               <div>
                 <span>Status</span>
@@ -8344,7 +8344,7 @@ export function SettingsSurface({
               <SettingsRow
                 label="Update source"
                 value="GitHub Releases"
-                detail="Published, signed, non-prerelease builds."
+                detail="Published private-preview builds signed by Gyro's updater key."
               />
               <SettingsRow
                 label="Automatic checks"
