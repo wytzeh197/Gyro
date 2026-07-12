@@ -401,6 +401,10 @@ struct ProviderChatRequest {
     model_id: Option<String>,
     model_label: Option<String>,
     reasoning_effort: Option<String>,
+    #[serde(default = "default_true")]
+    require_command_approval: bool,
+    #[serde(default = "default_true")]
+    require_file_edit_approval: bool,
     #[serde(default)]
     suggest_title: bool,
     workspace_path: Option<String>,
@@ -418,6 +422,10 @@ enum ChatMode {
     #[default]
     Normal,
     Plan,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4276,6 +4284,8 @@ fn run_openai_codex_chat(
         &output_path,
         request.model_id.as_deref(),
         request.reasoning_effort.as_deref(),
+        request.require_command_approval,
+        request.require_file_edit_approval,
         &request.attachments,
         &prompt,
     ));
@@ -4373,6 +4383,8 @@ fn run_anthropic_claude_chat(
         &session_id,
         request.model_id.as_deref(),
         &request.mode,
+        request.require_command_approval,
+        request.require_file_edit_approval,
         &prompt,
     ));
 
@@ -4430,24 +4442,31 @@ fn codex_chat_args(
     output_path: &Path,
     model_id: Option<&str>,
     reasoning_effort: Option<&str>,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
     attachments: &[ChatAttachmentRequest],
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec!["exec".into()];
+    let full_access = !require_command_approval && !require_file_edit_approval;
     if resume_session_id.is_some() {
         args.push("resume".into());
     } else {
-        args.extend([
-            "--skip-git-repo-check".into(),
-            "--sandbox".into(),
-            "read-only".into(),
-        ]);
+        args.push("--skip-git-repo-check".into());
+        if full_access {
+            args.push("--dangerously-bypass-approvals-and-sandbox".into());
+        } else {
+            args.extend(["--sandbox".into(), "workspace-write".into()]);
+        }
     }
     args.push("--json".into());
     args.push("--output-last-message".into());
     args.push(output_path.display().to_string());
     if resume_session_id.is_some() {
         args.push("--skip-git-repo-check".into());
+        if full_access {
+            args.push("--dangerously-bypass-approvals-and-sandbox".into());
+        }
     }
     if let Some(model) = codex_model_arg(model_id) {
         args.push("--model".into());
@@ -4473,6 +4492,8 @@ fn claude_chat_args(
     session_id: &str,
     model_id: Option<&str>,
     mode: &ChatMode,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec![
@@ -4495,6 +4516,8 @@ fn claude_chat_args(
     if *mode == ChatMode::Plan {
         args.push("--permission-mode".into());
         args.push("plan".into());
+    } else if !require_command_approval && !require_file_edit_approval {
+        args.push("--dangerously-skip-permissions".into());
     }
     args.push(prompt.into());
     args
@@ -6379,6 +6402,8 @@ while True:
             model_id: None,
             model_label: None,
             reasoning_effort: None,
+            require_command_approval: true,
+            require_file_edit_approval: true,
             suggest_title: false,
             workspace_path: Some(workspace.path().display().to_string()),
             mode: ChatMode::Plan,
@@ -6463,12 +6488,14 @@ while True:
             &output_path,
             Some("gpt-5.6-sol"),
             Some("max"),
+            true,
+            true,
             std::slice::from_ref(&image),
             "hello",
         );
         assert_eq!(fresh_codex[0], "exec");
         assert!(fresh_codex.contains(&"--sandbox".to_string()));
-        assert!(fresh_codex.contains(&"read-only".to_string()));
+        assert!(fresh_codex.contains(&"workspace-write".to_string()));
         assert!(fresh_codex.contains(&"--json".to_string()));
         assert!(fresh_codex.contains(&"--output-last-message".to_string()));
         assert!(fresh_codex.contains(&"gpt-5.6-sol".to_string()));
@@ -6478,11 +6505,20 @@ while True:
             .any(|args| args == ["--image", "/tmp/screen.png"]));
         assert_eq!(fresh_codex.last(), Some(&"hello".to_string()));
 
+        let full_access_codex =
+            codex_chat_args(None, &output_path, None, None, false, false, &[], "edit it");
+        assert!(
+            full_access_codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string())
+        );
+        assert!(!full_access_codex.contains(&"read-only".to_string()));
+
         let resumed_codex = codex_chat_args(
             Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
             &output_path,
             None,
             None,
+            true,
+            true,
             &[],
             "again",
         );
@@ -6505,6 +6541,8 @@ while True:
             "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
             Some("sonnet"),
             &ChatMode::Normal,
+            true,
+            true,
             "hello",
         );
         assert!(fresh_claude.contains(&"--print".to_string()));
@@ -6513,11 +6551,24 @@ while True:
         assert!(fresh_claude.contains(&"--session-id".to_string()));
         assert!(fresh_claude.ends_with(&["sonnet".to_string(), "hello".to_string()]));
 
+        let full_access_claude = claude_chat_args(
+            None,
+            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
+            None,
+            &ChatMode::Normal,
+            false,
+            false,
+            "edit it",
+        );
+        assert!(full_access_claude.contains(&"--dangerously-skip-permissions".to_string()));
+
         let resumed_claude = claude_chat_args(
             Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
             "unused",
             None,
             &ChatMode::Plan,
+            false,
+            false,
             "again",
         );
         assert!(resumed_claude.contains(&"--resume".to_string()));
@@ -6780,6 +6831,8 @@ while True:
             model_id: Some("gpt-5.5".into()),
             model_label: Some("GPT-5.5".into()),
             reasoning_effort: Some("high".into()),
+            require_command_approval: true,
+            require_file_edit_approval: true,
             suggest_title: false,
             workspace_path: Some(temp.path().display().to_string()),
             mode: ChatMode::Normal,
