@@ -69,6 +69,7 @@ const updateControllerSource = readRepoFile(
 const tauriConfigSource = readRepoFile(
   "apps/desktop/src-tauri/tauri.conf.json",
 );
+const releaseWorkflowSource = readRepoFile(".github/workflows/release.yml");
 
 const profiles = defaultCommandProfiles();
 expect(
@@ -2171,6 +2172,8 @@ expect(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
     ) &&
     !tauriConfigSource.includes("GYRO_DEV_UPDATER_PUBKEY") &&
+    releaseWorkflowSource.includes("includeUpdaterJson: true") &&
+    !releaseWorkflowSource.includes("uploadUpdaterJson") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
     surfaceSource.includes("Private preview") &&

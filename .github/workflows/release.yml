@@ -54,6 +54,5 @@ jobs:
           releaseName: "Gyro ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
-          uploadUpdaterSignatures: true
+          includeUpdaterJson: true
           args: --target ${{ matrix.target }}
