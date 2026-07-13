@@ -16,9 +16,6 @@ export function updateSidebarLabel(state: UpdateState) {
   if (state.status === "ready") {
     return "Restart to update";
   }
-  if (state.status === "restart-blocked") {
-    return "Finish active work first";
-  }
   if (state.status === "installing") {
     return "Installing update";
   }
@@ -40,7 +37,6 @@ export function shouldShowSidebarUpdate(state: UpdateState) {
     state.status === "available" ||
     state.status === "downloading" ||
     state.status === "ready" ||
-    state.status === "restart-blocked" ||
     state.status === "installing" ||
     (state.status === "failed" && !state.silentFailure)
   );

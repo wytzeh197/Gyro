@@ -6647,41 +6647,8 @@ export function App() {
     />
   );
 
-  const updateRestartBlockers = useMemo(() => {
-    const blockers: string[] = [];
-    if (isStartingFirstTurn || sendingSessionIds.length > 0) {
-      blockers.push("An agent response is still running");
-    }
-    if (
-      workbench.activeTurn &&
-      ["queued", "running", "waiting"].includes(workbench.activeTurn.status)
-    ) {
-      blockers.push("The active agent turn has not finished");
-    }
-    if ((workbench.activeTurn?.approvalsPending ?? 0) > 0) {
-      blockers.push("An approval is waiting for your decision");
-    }
-    if (workbench.terminalPanes.some((pane) => pane.status === "running")) {
-      blockers.push("A terminal process is still running");
-    }
-    if (
-      Object.values(workbench.ide.buffers).some((buffer) =>
-        ["dirty", "saving", "conflict"].includes(buffer.status),
-      )
-    ) {
-      blockers.push("The editor has unsaved or conflicted changes");
-    }
-    return [...new Set(blockers)];
-  }, [
-    isStartingFirstTurn,
-    sendingSessionIds.length,
-    workbench.activeTurn,
-    workbench.ide.buffers,
-    workbench.terminalPanes,
-  ]);
   const updater = useGyroUpdater({
     automaticChecks: config.automaticUpdateChecks !== false,
-    restartBlockers: updateRestartBlockers,
   });
   const checkForUpdatesWithFeedback = useCallback(async () => {
     const result = await updater.checkForUpdate(true);
@@ -6705,10 +6672,7 @@ export function App() {
     (state: UpdateState = updater.state) => {
       if (state.status === "available") {
         void updater.downloadUpdate();
-      } else if (
-        state.status === "ready" ||
-        state.status === "restart-blocked"
-      ) {
+      } else if (state.status === "ready") {
         void updater.restartAndInstallUpdate();
       } else if (
         state.status === "failed" ||

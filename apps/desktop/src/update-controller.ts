@@ -31,10 +31,8 @@ function isTauriRuntime() {
 
 export function useGyroUpdater({
   automaticChecks,
-  restartBlockers,
 }: {
   automaticChecks: boolean;
-  restartBlockers: string[];
 }): GyroUpdateController {
   const [state, setState] = useState<UpdateState>({
     status: import.meta.env.DEV ? "development" : "checking",
@@ -185,15 +183,7 @@ export function useGyroUpdater({
       await checkForUpdate(true);
       return;
     }
-    if (restartBlockers.length > 0) {
-      setState((current) => ({
-        ...current,
-        status: "restart-blocked",
-        blockers: restartBlockers,
-      }));
-      return;
-    }
-    setState((current) => ({ ...current, status: "installing", blockers: [] }));
+    setState((current) => ({ ...current, status: "installing" }));
     try {
       await update.install();
       await invoke("restart_app");
@@ -206,7 +196,7 @@ export function useGyroUpdater({
         silentFailure: false,
       }));
     }
-  }, [checkForUpdate, restartBlockers]);
+  }, [checkForUpdate]);
 
   useEffect(() => {
     if (import.meta.env.DEV || !automaticChecks || !isTauriRuntime()) {

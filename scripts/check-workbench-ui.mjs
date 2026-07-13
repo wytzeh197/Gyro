@@ -2295,8 +2295,11 @@ expect(
     updateControllerSource.includes("await update.download") &&
     updateControllerSource.includes("await update.install()") &&
     updateControllerSource.includes('invoke("restart_app")') &&
-    appSource.includes("const updateRestartBlockers") &&
-    appSource.includes("buffer.status") &&
+    !appSource.includes("updateRestartBlockers") &&
+    !updateControllerSource.includes("restartBlockers") &&
+    !updateControllerSource.includes('status: "restart-blocked"') &&
+    !updatePopoverSource.includes("state.blockers") &&
+    !surfaceSource.includes("Finish active work first") &&
     tauriSource.includes("fn restart_app") &&
     tauriConfigSource.includes(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
@@ -2315,7 +2318,7 @@ expect(
     !surfaceSource.includes('label="Release channel"') &&
     !surfaceSource.includes('value="Valid"') &&
     !surfaceSource.includes('value="Today"'),
-  "Signed updates should use one contextual action above Settings with progress, blockers, and development safety.",
+  "Signed updates should use one direct contextual action above Settings with progress and development safety.",
 );
 expect(
   appSource.includes("const handleComposerAction") &&
