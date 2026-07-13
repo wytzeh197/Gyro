@@ -1425,6 +1425,22 @@ expect(
     !surfaceSource.includes("isRunning && onStopChat") &&
     surfaceSource.includes('activity.kind === "commentary"') &&
     surfaceSource.includes("gyro-chat-run-commentary") &&
+    surfaceSource.includes("providerActivityFilePath") &&
+    surfaceSource.includes("sourceControlFileForActivityPath") &&
+    surfaceSource.includes("chatTurnChangeSummary") &&
+    surfaceSource.includes("sourceControlFileDelta") &&
+    surfaceSource.includes("sourceControlStatsForActivityPath") &&
+    surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
+    surfaceSource.includes("gyro-chat-run-change-summary") &&
+    surfaceSource.includes('activity.kind === "file"') &&
+    surfaceSource.includes('activity.status === "running"') &&
+    surfaceSource.includes('"Updating totals…"') &&
+    appSource.includes("refreshedFileActivityKeysRef") &&
+    appSource.includes("setTurnSourceControlBaselines") &&
+    appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
+    appSource.includes('payload.activityKind !== "file"') &&
+    appSource.includes("refreshIdeSourceControl(root)") &&
+    appSource.includes("refreshedFileActivityKeysRef.current.clear()") &&
     surfaceSource.includes("deriveTranscriptState") &&
     surfaceSource.includes("useDeferredValue") &&
     surfaceSource.includes("const deferredEvents = useDeferredValue(events)") &&
@@ -1450,8 +1466,11 @@ expect(
     surfaceSource.includes("gyro-response-streaming-text") &&
     styleSource.includes(".gyro-response-streaming-text") &&
     surfaceSource.includes("gyro-chat-run-thinking") &&
+    surfaceSource.includes("isRunning && turn.timelineEvents.length === 0") &&
     styleSource.includes(".gyro-chat-run-header") &&
     styleSource.includes(".gyro-chat-run-activity") &&
+    styleSource.includes(".gyro-chat-run-activity.is-file") &&
+    styleSource.includes(".gyro-chat-run-change-summary") &&
     styleSource.includes(".gyro-chat-run-timeline") &&
     styleSource.includes("@keyframes gyro-chat-composer-dock-enter") &&
     styleSource.includes("@keyframes gyro-chat-final-response-enter") &&
@@ -1958,7 +1977,11 @@ expect(
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
     surfaceSource.includes('title="Explorer"') &&
-    surfaceSource.includes('title="Code tools"') &&
+    surfaceSource.includes('aria-label="Code tools"') &&
+    surfaceSource.includes('className="gyro-ide-panel-shortcuts"') &&
+    surfaceSource.includes("headerActions={") &&
+    styleSource.includes(".gyro-sidebar-section-heading") &&
+    styleSource.includes(".gyro-ide-panel-shortcuts") &&
     !surfaceSource.includes("Run terminal") &&
     !surfaceSource.includes("Split pane") &&
     !surfaceSource.includes("Command search") &&
@@ -2186,6 +2209,10 @@ expect(
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
     surfaceSource.includes("diffAdditions") &&
     surfaceSource.includes("diffDeletions") &&
+    surfaceSource.includes("sourceControl?.additions") &&
+    surfaceSource.includes("sourceControl?.deletions") &&
+    surfaceSource.includes("sourceControl?.files.length") &&
+    surfaceSource.includes("gyro-change-totals") &&
     surfaceSource.includes("gyro-thread-diff-pill") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&

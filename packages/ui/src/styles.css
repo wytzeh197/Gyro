@@ -2117,6 +2117,21 @@ button.gyro-account-menu-row:hover {
   justify-content: space-between;
 }
 
+.gyro-environment-rail header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-environment-rail header strong,
+.gyro-environment-rail header span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gyro-rail-section {
   border-top: 1px solid var(--gyro-border);
   display: grid;
@@ -7309,6 +7324,129 @@ textarea:focus-visible {
 .gyro-sidebar-explorer-row[aria-selected="true"] {
   background: color-mix(in srgb, var(--gyro-accent) 11%, transparent);
   color: var(--gyro-text);
+}
+
+/* Minimal IDE sidebar: compact headers and panel shortcuts, below fixed chrome. */
+.gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-ide-sidebar-activity {
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-soft);
+  gap: 2px;
+  min-height: 32px;
+  padding: 0 4px 5px;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-ide-sidebar-activity
+  button {
+  border: 0;
+  border-radius: 4px;
+  height: 27px;
+  min-height: 27px;
+  transform: none;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-ide-sidebar-activity
+  button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  box-shadow: none;
+  transform: none;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-ide-sidebar-activity
+  button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 8%, transparent);
+  box-shadow: inset 0 -1px 0 var(--gyro-accent);
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-section {
+  margin-top: 5px;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-section-heading {
+  align-items: center;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 27px;
+  padding: 0 4px 0 7px;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-section-heading
+  .gyro-nav-label {
+  font-size: 12px;
+  margin: 0;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-explorer-toolbar {
+  border: 0;
+  gap: 0;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-explorer-toolbar
+  button {
+  border-radius: 3px;
+  height: 22px;
+  width: 22px;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-explorer-toolbar
+  button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-project-row {
+  min-height: 25px;
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-explorer-tree {
+  padding-block: 2px;
+}
+
+.gyro-ide-panel-shortcuts {
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft);
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 5px 4px 4px;
+}
+
+.gyro-ide-panel-shortcuts button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 27px;
+  justify-content: center;
+  min-height: 27px;
+  padding: 0;
+}
+
+.gyro-ide-panel-shortcuts button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-ide-panel-shortcuts button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 8%, transparent);
+  box-shadow: inset 0 -1px 0 var(--gyro-accent);
+  color: var(--gyro-text);
+}
+
+.gyro-ide-panel-shortcuts button:focus-visible {
+  outline: 1px solid var(--gyro-accent);
+  outline-offset: -1px;
 }
 
 .gyro-explorer-decoration {
@@ -16570,6 +16708,89 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-run-activity.is-running svg:last-child {
   animation: gyro-chat-activity-spin 1s linear infinite;
+}
+
+.gyro-chat-run-activity.is-file {
+  cursor: pointer;
+  grid-template-columns: 14px minmax(0, 1fr) auto 14px;
+  max-width: min(100%, 680px);
+  width: 100%;
+}
+
+.gyro-chat-run-activity.is-file > span {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gyro-chat-run-activity.is-file strong {
+  color: var(--gyro-muted);
+  font-weight: 520;
+  white-space: nowrap;
+}
+
+.gyro-chat-run-activity.is-file code {
+  color: var(--gyro-faint);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-run-activity.is-file > small,
+.gyro-chat-run-change-summary small,
+.gyro-change-totals {
+  align-items: center;
+  display: inline-flex;
+  font-size: 11px;
+  font-style: normal;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.gyro-chat-run-activity.is-file em,
+.gyro-chat-run-change-summary em,
+.gyro-change-totals em {
+  font-style: normal;
+}
+
+.gyro-chat-run-activity.is-file .is-added,
+.gyro-chat-run-change-summary .is-added,
+.gyro-change-totals .is-added {
+  color: var(--gyro-success);
+}
+
+.gyro-chat-run-activity.is-file .is-removed,
+.gyro-chat-run-change-summary .is-removed,
+.gyro-change-totals .is-removed {
+  color: var(--gyro-danger);
+}
+
+.gyro-chat-run-change-summary {
+  align-items: center;
+  align-self: center;
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 7px;
+  justify-self: center;
+  margin: 10px auto 2px;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.gyro-chat-run-change-summary:hover {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-chat-run-change-summary > small {
+  color: var(--gyro-faint);
 }
 
 @keyframes gyro-chat-activity-spin {

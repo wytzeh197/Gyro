@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/workspace",
-  "version": "0.1.0-alpha.14",
+  "version": "0.1.0-alpha.15",
   "private": true,
   "description": "Open-source local-first coding agent workspace.",
   "license": "Apache-2.0",
