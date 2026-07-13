@@ -883,7 +883,6 @@ export type UpdateStatus =
   | "available"
   | "downloading"
   | "ready"
-  | "restart-blocked"
   | "installing"
   | "failed"
   | "development";
@@ -898,7 +897,6 @@ export type UpdateState = {
   totalBytes?: number;
   progressPercent?: number;
   lastCheckedAt?: string;
-  blockers?: string[];
   error?: string;
   retryable?: boolean;
   silentFailure?: boolean;

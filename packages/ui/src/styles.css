@@ -13767,16 +13767,14 @@ body,
 
 .gyro-update-popover header span,
 .gyro-update-popover p,
-.gyro-update-popover small,
-.gyro-update-popover li {
+.gyro-update-popover small {
   color: var(--gyro-premium-muted);
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.gyro-update-popover p,
-.gyro-update-popover ul {
+.gyro-update-popover p {
   margin: 0;
 }
 

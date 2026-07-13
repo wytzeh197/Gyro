@@ -723,13 +723,6 @@ function UpdatePopover({
           <span style={{ width: `${state.progressPercent ?? 0}%` }} />
         </div>
       ) : null}
-      {state.blockers?.length ? (
-        <ul>
-          {state.blockers.map((blocker) => (
-            <li key={blocker}>{blocker}</li>
-          ))}
-        </ul>
-      ) : null}
       {state.error ? <small>{state.error}</small> : null}
       <button
         className="gyro-update-primary"
@@ -8799,7 +8792,7 @@ function updateSettingsDetail(state?: UpdateState) {
   if (state.status === "failed") {
     return state.error ?? "The update check failed. Select this row to retry.";
   }
-  if (state.status === "ready" || state.status === "restart-blocked") {
+  if (state.status === "ready") {
     return "The downloaded update passed signature verification.";
   }
   return state.nextVersion
