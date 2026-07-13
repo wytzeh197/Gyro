@@ -9069,39 +9069,45 @@ function UsageCard({
 }) {
   if (!window) return null;
   const used = Math.max(0, Math.min(100, window.usedPercent));
-  const severity = used >= 90 ? "critical" : used >= 75 ? "warning" : "normal";
+  const remaining = 100 - used;
+  const severity =
+    remaining <= 10 ? "critical" : remaining <= 25 ? "warning" : "normal";
   return (
     <article className={`gyro-usage-card is-${severity}`}>
       <header>
         <strong>{window.label}</strong>
         <span>
-          {used >= 90 ? "Critical" : used >= 75 ? "Warning" : "Within limit"}
+          {remaining <= 10
+            ? "Critical"
+            : remaining <= 25
+              ? "Low"
+              : "Within limit"}
         </span>
       </header>
       {visualization === "wheels" ? (
         <div
           className="gyro-usage-wheel"
-          style={{ "--usage": `${used * 3.6}deg` } as CSSProperties}
+          style={{ "--usage": `${remaining * 3.6}deg` } as CSSProperties}
         >
           <span>
-            <strong>{used}%</strong>
-            <small>used</small>
+            <strong>{remaining}%</strong>
+            <small>remaining</small>
           </span>
         </div>
       ) : (
         <div
           className="gyro-usage-bar"
-          aria-label={`${used}% used`}
+          aria-label={`${remaining}% remaining`}
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={used}
+          aria-valuenow={remaining}
         >
-          <span style={{ width: `${used}%` }} />
+          <span style={{ width: `${remaining}%` }} />
         </div>
       )}
       <div className="gyro-usage-card-meta">
-        <strong>{100 - used}% remaining</strong>
+        <strong>{remaining}% available</strong>
         <span>{formatUsageReset(window.resetsAt)}</span>
       </div>
     </article>
