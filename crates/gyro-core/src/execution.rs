@@ -390,16 +390,22 @@ fn terminate_process_group(child: &mut std::process::Child) {
         libc::kill(process_group, libc::SIGTERM);
     }
     let started_at = Instant::now();
+    let mut child_reaped = false;
     while started_at.elapsed() < EXECUTION_TERMINATION_GRACE {
-        if child.try_wait().ok().flatten().is_some() {
-            return;
+        if !child_reaped && child.try_wait().ok().flatten().is_some() {
+            child_reaped = true;
         }
         thread::sleep(EXECUTION_POLL_INTERVAL);
     }
+    // The direct child can exit after SIGTERM while a descendant keeps the
+    // process group's output pipes open. Always follow with SIGKILL after the
+    // grace period so cancellation cannot wait on an orphaned provider child.
     unsafe {
         libc::kill(process_group, libc::SIGKILL);
     }
-    let _ = child.wait();
+    if !child_reaped {
+        let _ = child.wait();
+    }
 }
 
 #[cfg(not(unix))]
@@ -470,7 +476,10 @@ mod tests {
     #[test]
     fn cancellation_stops_the_process_group_and_preserves_partial_output() {
         let mut request = ExecutionRequest::new("/bin/sh");
-        request.args = vec!["-c".into(), "printf 'started\\n'; sleep 30".into()];
+        request.args = vec![
+            "-c".into(),
+            "trap 'exit 0' TERM; (trap '' TERM; exec sleep 30) & printf 'started\\n'; wait".into(),
+        ];
         request.timeout = Duration::from_secs(5);
         let cancellation = CancellationToken::default();
         let cancellation_from_stream = cancellation.clone();
