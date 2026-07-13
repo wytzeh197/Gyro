@@ -16520,7 +16520,7 @@ button.gyro-settings-row em::after {
   opacity: 0.72;
 }
 
-.gyro-chat-run-activities {
+.gyro-chat-run-timeline {
   display: grid;
   gap: 1px;
   padding: 8px 0 4px;
@@ -16585,7 +16585,7 @@ button.gyro-settings-row em::after {
   padding: 10px 0 3px;
 }
 
-.gyro-chat-run > .gyro-message.is-assistant {
+.gyro-chat-run-timeline > .gyro-message.is-assistant {
   animation: gyro-chat-final-response-enter 260ms cubic-bezier(0.22, 1, 0.36, 1)
     both;
   margin: 13px 0 0;
@@ -16593,7 +16593,7 @@ button.gyro-settings-row em::after {
   width: 100%;
 }
 
-.gyro-chat-run > .gyro-message.is-assistant > div {
+.gyro-chat-run-timeline > .gyro-message.is-assistant > div {
   padding: 0;
   width: 100%;
 }

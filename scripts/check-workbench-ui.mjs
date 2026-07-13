@@ -1412,6 +1412,17 @@ expect(
     surfaceSource.includes("function ChatTurn") &&
     surfaceSource.includes("function ChatRunHeader") &&
     surfaceSource.includes("function ProviderActivityRow") &&
+    surfaceSource.includes("timelineEvents: SessionEvent[]") &&
+    surfaceSource.includes("turn.timelineEvents.push(event)") &&
+    surfaceSource.includes('className="gyro-chat-run-timeline"') &&
+    !surfaceSource.includes("assistantEvents: SessionEvent[]") &&
+    !surfaceSource.includes("activityEvents: SessionEvent[]") &&
+    surfaceSource.includes('aria-label={isSending ? "Stop response"') &&
+    surfaceSource.includes("onStop?.();") &&
+    surfaceSource.includes(
+      'className={`gyro-send-button${isSending ? " is-stop" : ""}`}',
+    ) &&
+    !surfaceSource.includes("isRunning && onStopChat") &&
     surfaceSource.includes('activity.kind === "commentary"') &&
     surfaceSource.includes("gyro-chat-run-commentary") &&
     surfaceSource.includes("deriveTranscriptState") &&
@@ -1441,6 +1452,7 @@ expect(
     surfaceSource.includes("gyro-chat-run-thinking") &&
     styleSource.includes(".gyro-chat-run-header") &&
     styleSource.includes(".gyro-chat-run-activity") &&
+    styleSource.includes(".gyro-chat-run-timeline") &&
     styleSource.includes("@keyframes gyro-chat-composer-dock-enter") &&
     styleSource.includes("@keyframes gyro-chat-final-response-enter") &&
     surfaceSource.includes("isHiddenTranscriptEvent") &&
