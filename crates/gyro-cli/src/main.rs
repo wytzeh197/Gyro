@@ -1204,7 +1204,7 @@ fn execute_cli_provider(
     );
     let status = match outcome.termination {
         ExecutionTermination::Cancelled => HarnessRunStatus::Cancelled,
-        ExecutionTermination::TimedOut => HarnessRunStatus::Failed,
+        ExecutionTermination::TimedOut | ExecutionTermination::Inactive => HarnessRunStatus::Failed,
         ExecutionTermination::Exited { code: Some(0) } if !response.is_empty() => {
             HarnessRunStatus::Done
         }
@@ -1216,6 +1216,7 @@ fn execute_cli_provider(
             ExecutionTermination::TimedOut => {
                 format!("execution timed out after {timeout_seconds} seconds")
             }
+            ExecutionTermination::Inactive => "execution stopped after prolonged inactivity".into(),
             ExecutionTermination::Exited { code } => {
                 let stderr = gyro_core::sanitize_harness_text(outcome.stderr.trim());
                 if stderr.is_empty() {

@@ -37,6 +37,7 @@ pub struct ExecutionRequest {
     pub current_dir: Option<PathBuf>,
     pub env: Vec<(OsString, Option<OsString>)>,
     pub timeout: Duration,
+    pub inactivity_timeout: Option<Duration>,
     pub max_stdout_chars: usize,
     pub max_stderr_chars: usize,
 }
@@ -49,6 +50,7 @@ impl ExecutionRequest {
             current_dir: None,
             env: Vec::new(),
             timeout: Duration::from_secs(180),
+            inactivity_timeout: None,
             max_stdout_chars: 256_000,
             max_stderr_chars: 64_000,
         }
@@ -74,6 +76,7 @@ pub enum ExecutionTermination {
     Exited { code: Option<i32> },
     Cancelled,
     TimedOut,
+    Inactive,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -95,7 +98,9 @@ impl ExecutionOutcome {
     pub fn exit_code(&self) -> Option<i32> {
         match self.termination {
             ExecutionTermination::Exited { code } => code,
-            ExecutionTermination::Cancelled | ExecutionTermination::TimedOut => None,
+            ExecutionTermination::Cancelled
+            | ExecutionTermination::TimedOut
+            | ExecutionTermination::Inactive => None,
         }
     }
 }
@@ -143,6 +148,7 @@ where
     drop(sender);
 
     let started_at = Instant::now();
+    let mut last_activity_at = Instant::now();
     let mut stdout_text = String::new();
     let mut stderr_text = String::new();
     let mut stdout_chars = 0usize;
@@ -150,7 +156,7 @@ where
     let mut stdout_truncated = false;
     let mut stderr_truncated = false;
     let termination = loop {
-        drain_chunks(
+        if drain_chunks(
             &receiver,
             &mut on_chunk,
             &mut stdout_text,
@@ -161,7 +167,9 @@ where
             request.max_stderr_chars,
             &mut stdout_truncated,
             &mut stderr_truncated,
-        );
+        ) {
+            last_activity_at = Instant::now();
+        }
         if cancellation.is_cancelled() {
             terminate_process_group(&mut child);
             break ExecutionTermination::Cancelled;
@@ -170,12 +178,20 @@ where
             terminate_process_group(&mut child);
             break ExecutionTermination::TimedOut;
         }
+        if request
+            .inactivity_timeout
+            .is_some_and(|timeout| last_activity_at.elapsed() >= timeout)
+        {
+            terminate_process_group(&mut child);
+            break ExecutionTermination::Inactive;
+        }
         if let Some(status) = child.try_wait()? {
             break ExecutionTermination::Exited {
                 code: status.code(),
             };
         }
         if let Ok(chunk) = receiver.recv_timeout(EXECUTION_POLL_INTERVAL) {
+            last_activity_at = Instant::now();
             handle_chunk(
                 chunk,
                 &mut on_chunk,
@@ -308,10 +324,13 @@ fn drain_chunks<F>(
     max_stderr_chars: usize,
     stdout_truncated: &mut bool,
     stderr_truncated: &mut bool,
-) where
+) -> bool
+where
     F: FnMut(&ExecutionChunk),
 {
+    let mut received = false;
     while let Ok(chunk) = receiver.try_recv() {
+        received = true;
         handle_chunk(
             chunk,
             on_chunk,
@@ -325,6 +344,7 @@ fn drain_chunks<F>(
             stderr_truncated,
         );
     }
+    received
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -506,5 +526,35 @@ mod tests {
 
         assert_eq!(outcome.termination, ExecutionTermination::TimedOut);
         assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[test]
+    fn inactivity_timeout_stops_silent_processes() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec!["-c".into(), "sleep 30".into()];
+        request.timeout = Duration::from_secs(5);
+        request.inactivity_timeout = Some(Duration::from_millis(80));
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert_eq!(outcome.termination, ExecutionTermination::Inactive);
+        assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[test]
+    fn output_keeps_an_active_process_alive_past_the_inactivity_window() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "for value in 1 2 3 4 5; do printf '%s\\n' \"$value\"; sleep 0.04; done".into(),
+        ];
+        request.timeout = Duration::from_secs(2);
+        request.inactivity_timeout = Some(Duration::from_millis(120));
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert!(outcome.succeeded());
+        assert_eq!(outcome.stdout, "1\n2\n3\n4\n5\n");
+        assert!(outcome.duration_ms >= 120);
     }
 }

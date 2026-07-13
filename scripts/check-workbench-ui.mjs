@@ -1539,7 +1539,12 @@ expect(
     tauriSource.includes("sanitize_provider_text_delta") &&
     tauriSource.includes("extract_codex_agent_message_text") &&
     tauriSource.includes('"item.completed"') &&
-    tauriSource.includes("CODEX_CHAT_TIMEOUT_SECS") &&
+    tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
+    tauriSource.includes("PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS") &&
+    tauriSource.includes(
+      "execution.inactivity_timeout = Some(inactivity_timeout)",
+    ) &&
+    tauriSource.includes("ExecutionTermination::Inactive") &&
     tauriSource.includes("ProviderRunPayload::new") &&
     tauriSource.includes("Some(chat_message_preview(&request.message))") &&
     tauriSource.includes("async fn list_sessions") &&

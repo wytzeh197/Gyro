@@ -41,7 +41,6 @@ const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 4;
 const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
-const CODEX_CHAT_TIMEOUT_SECS: u64 = 180;
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const TEXT_TRUNCATION_SUFFIX: &str = "...";
@@ -4094,8 +4093,14 @@ fn run_openai_codex_chat(
     ));
 
     let output =
-        run_streaming_command(process, Duration::from_secs(CODEX_CHAT_TIMEOUT_SECS), app, request)
-            .map_err(|error| {
+        run_streaming_command(
+            process,
+            Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+            Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+            app,
+            request,
+        )
+        .map_err(|error| {
             anyhow::anyhow!(
                 "Could not complete OpenAI through Codex CLI. Run `codex login` in Terminal if needed, then try again. {error}"
             )
@@ -4192,8 +4197,14 @@ fn run_anthropic_claude_chat(
     ));
 
     let output =
-        run_streaming_command(process, Duration::from_secs(CODEX_CHAT_TIMEOUT_SECS), app, request)
-            .map_err(|error| {
+        run_streaming_command(
+            process,
+            Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+            Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+            app,
+            request,
+        )
+        .map_err(|error| {
                 anyhow::anyhow!(
                     "Could not complete Anthropic through Claude Code. Run `claude auth login` in Terminal if needed, then try again. {error}"
                 )
@@ -5007,9 +5018,13 @@ impl StreamingCommandState {
     }
 }
 
+const PROVIDER_CHAT_MAX_RUNTIME_SECS: u64 = 24 * 60 * 60;
+const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
+
 fn run_streaming_command(
     command: Command,
-    timeout: Duration,
+    max_runtime: Duration,
+    inactivity_timeout: Duration,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<StreamingCommandOutput> {
@@ -5028,7 +5043,8 @@ fn run_streaming_command(
         .get_envs()
         .map(|(key, value)| (key.to_os_string(), value.map(|value| value.to_os_string())))
         .collect();
-    execution.timeout = timeout;
+    execution.timeout = max_runtime;
+    execution.inactivity_timeout = Some(inactivity_timeout);
     execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;
     execution.max_stderr_chars = MAX_CHAT_RESPONSE_CHARS;
     let mut stream_state = StreamingCommandState::new();
@@ -5047,7 +5063,16 @@ fn run_streaming_command(
     match outcome.termination {
         ExecutionTermination::Cancelled => anyhow::bail!("chat cancelled by user"),
         ExecutionTermination::TimedOut => {
-            anyhow::bail!("command timed out after {} seconds", timeout.as_secs())
+            anyhow::bail!(
+                "provider reached the maximum runtime of {} seconds",
+                max_runtime.as_secs()
+            )
+        }
+        ExecutionTermination::Inactive => {
+            anyhow::bail!(
+                "no provider activity was received for {} seconds",
+                inactivity_timeout.as_secs()
+            )
         }
         ExecutionTermination::Exited { .. } => {}
     }
@@ -5397,13 +5422,13 @@ fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
             kind: ProviderAdapterKind::OpenAiCodex,
             runner: "codex-cli",
             auth_owner: "chatgpt-local-codex-login",
-            timeout_seconds: CODEX_CHAT_TIMEOUT_SECS,
+            timeout_seconds: PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
         },
         "anthropic" => ProviderAdapterDescriptor {
             kind: ProviderAdapterKind::AnthropicClaude,
             runner: "claude-code",
             auth_owner: "anthropic-local-claude-login",
-            timeout_seconds: CODEX_CHAT_TIMEOUT_SECS,
+            timeout_seconds: PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
         },
         "xai" | "gemini" => ProviderAdapterDescriptor {
             kind: ProviderAdapterKind::ReadinessOnly,
