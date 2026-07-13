@@ -2939,10 +2939,13 @@ expect(
 expect(
   (styleSource.match(/^:root\s*\{/gm) ?? []).length === 1 &&
     styleSource.includes(
-      "--gyro-premium-hairline: rgba(225, 233, 244, 0.075)",
+      "--gyro-premium-hairline: rgba(225, 233, 244, 0.065)",
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 7px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
+    styleSource.includes("--gyro-app: #07080a") &&
+    styleSource.includes("--gyro-pane: #030405") &&
+    styleSource.includes("--gyro-hero-composer: #111318") &&
     styleSource.includes("--gyro-accent: #7aa7ff") &&
     styleSource.includes(':root[data-theme="light"]') &&
     styleSource.includes("--gyro-premium-hairline: rgba(23, 27, 34, 0.1)") &&
@@ -2972,10 +2975,17 @@ expect(
     appSource.includes("function terminalThemeFor") &&
     appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
     appSource.includes('background: "#ffffff"') &&
-    appSource.includes('background: "#101722"') &&
+    appSource.includes('background: "#020304"') &&
     appSource.includes('brightMagenta: "#f08cff"') &&
     appSource.includes('brightYellow: "#ffd166"'),
   "Live terminals should update their xterm palette in place for dark and light themes.",
+);
+
+expect(
+  monacoEditorSource.includes('monaco.editor.defineTheme("gyro-dark"') &&
+    monacoEditorSource.includes('"editor.background": "#030405"') &&
+    appSource.includes('theme={theme === "light" ? "vs" : "gyro-dark"}'),
+  "The IDE editor should use the same near-black graphite palette as the rest of dark mode.",
 );
 
 expect(

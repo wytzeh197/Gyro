@@ -4,6 +4,19 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import "./theme.css";
 
+const initialTheme = (() => {
+  try {
+    return localStorage.getItem("gyro.theme") === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+})();
+
+document.documentElement.dataset.theme = initialTheme;
+document
+  .querySelector('meta[name="theme-color"]')
+  ?.setAttribute("content", initialTheme === "light" ? "#f6f7f8" : "#07080a");
+
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null }
