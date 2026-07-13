@@ -3113,6 +3113,9 @@ expect(
   surfaceSource.includes("gyro-usage-provider-select") &&
     surfaceSource.includes('aria-label="Refresh provider usage"') &&
     surfaceSource.includes('label="Usage visualization"') &&
+    surfaceSource.includes("aria-label={`${remaining}% remaining`}") &&
+    surfaceSource.includes("<small>remaining</small>") &&
+    surfaceSource.includes('"--usage": `${remaining * 3.6}deg`') &&
     surfaceSource.includes("Usage unavailable from this provider") &&
     surfaceSource.includes(
       "Gyro does not estimate allowance from local activity",
