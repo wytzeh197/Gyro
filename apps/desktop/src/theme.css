@@ -17,14 +17,20 @@ button {
 button:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid #2457a7;
+  outline: 2px solid #6f9df4;
   outline-offset: 2px;
+}
+
+:root[data-theme="light"] button:focus-visible,
+:root[data-theme="light"] select:focus-visible,
+:root[data-theme="light"] textarea:focus-visible {
+  outline-color: #2457a7;
 }
 
 .gyro-root-error {
   align-items: flex-start;
-  background: #f7f2ea;
-  color: #1d2329;
+  background: #07080a;
+  color: #e9edf2;
   display: flex;
   flex-direction: column;
   font-family:
@@ -45,6 +51,15 @@ textarea:focus-visible {
 }
 
 .gyro-root-error span {
-  color: #5c6670;
+  color: #9aa4b1;
   max-width: 720px;
+}
+
+:root[data-theme="light"] .gyro-root-error {
+  background: #f7f2ea;
+  color: #1d2329;
+}
+
+:root[data-theme="light"] .gyro-root-error span {
+  color: #5c6670;
 }

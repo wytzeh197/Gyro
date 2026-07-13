@@ -5699,6 +5699,12 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = workbench.preferences.theme;
     document.documentElement.dataset.density = workbench.preferences.density;
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute(
+        "content",
+        workbench.preferences.theme === "light" ? "#f6f7f8" : "#07080a",
+      );
     safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
   }, [workbench.preferences.density, workbench.preferences.theme]);
 
@@ -7966,8 +7972,8 @@ function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
   }
 
   return {
-    background: "#101722",
-    black: "#111923",
+    background: "#020304",
+    black: "#05070a",
     blue: "#6ea8ff",
     brightBlack: "#7b8491",
     brightBlue: "#99c2ff",
@@ -7978,13 +7984,13 @@ function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
     brightWhite: "#f5f7fa",
     brightYellow: "#ffd166",
     cursor: "#e7edf6",
-    cursorAccent: "#101722",
+    cursorAccent: "#020304",
     cyan: "#51d7d0",
     foreground: "#e2e8f0",
     green: "#52d985",
     magenta: "#d86cff",
     red: "#ff6f6f",
-    selectionBackground: "#374151",
+    selectionBackground: "#1d3048",
     white: "#d9e0ea",
     yellow: "#f2c94c",
   };
@@ -9350,7 +9356,7 @@ function MonacoEditorPane({
           wordWrap: "off",
         }}
         path={path}
-        theme={theme === "light" ? "vs" : "vs-dark"}
+        theme={theme === "light" ? "vs" : "gyro-dark"}
         value={buffer?.content ?? fileContent?.content ?? ""}
       />
     </Suspense>
