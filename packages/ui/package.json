@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/ui",
-  "version": "0.1.0-alpha.16",
+  "version": "0.1.0-alpha.17",
   "private": true,
   "description": "Shared React UI components for Gyro.",
   "license": "Apache-2.0",

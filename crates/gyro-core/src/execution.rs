@@ -174,16 +174,14 @@ where
             terminate_process_group(&mut child);
             break ExecutionTermination::Cancelled;
         }
-        if started_at.elapsed() >= request.timeout {
+        if let Some(termination) = execution_timeout_termination(
+            started_at.elapsed(),
+            last_activity_at.elapsed(),
+            request.timeout,
+            request.inactivity_timeout,
+        ) {
             terminate_process_group(&mut child);
-            break ExecutionTermination::TimedOut;
-        }
-        if request
-            .inactivity_timeout
-            .is_some_and(|timeout| last_activity_at.elapsed() >= timeout)
-        {
-            terminate_process_group(&mut child);
-            break ExecutionTermination::Inactive;
+            break termination;
         }
         if let Some(status) = child.try_wait()? {
             break ExecutionTermination::Exited {
@@ -232,6 +230,20 @@ where
         stderr_truncated,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
     })
+}
+
+fn execution_timeout_termination(
+    elapsed: Duration,
+    inactive_for: Duration,
+    max_runtime: Duration,
+    inactivity_timeout: Option<Duration>,
+) -> Option<ExecutionTermination> {
+    if elapsed >= max_runtime {
+        return Some(ExecutionTermination::TimedOut);
+    }
+    inactivity_timeout
+        .filter(|timeout| inactive_for >= *timeout)
+        .map(|_| ExecutionTermination::Inactive)
 }
 
 fn spawn_reader<R>(
@@ -542,19 +554,24 @@ mod tests {
     }
 
     #[test]
-    fn output_keeps_an_active_process_alive_past_the_inactivity_window() {
-        let mut request = ExecutionRequest::new("/bin/sh");
-        request.args = vec![
-            "-c".into(),
-            "for value in 1 2 3 4 5; do printf '%s\\n' \"$value\"; sleep 0.04; done".into(),
-        ];
-        request.timeout = Duration::from_secs(2);
-        request.inactivity_timeout = Some(Duration::from_millis(120));
-
-        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
-
-        assert!(outcome.succeeded());
-        assert_eq!(outcome.stdout, "1\n2\n3\n4\n5\n");
-        assert!(outcome.duration_ms >= 120);
+    fn recent_output_keeps_a_long_active_process_alive() {
+        assert_eq!(
+            execution_timeout_termination(
+                Duration::from_secs(60 * 60),
+                Duration::from_secs(2),
+                Duration::from_secs(24 * 60 * 60),
+                Some(Duration::from_secs(30 * 60)),
+            ),
+            None
+        );
+        assert_eq!(
+            execution_timeout_termination(
+                Duration::from_secs(60 * 60),
+                Duration::from_secs(30 * 60),
+                Duration::from_secs(24 * 60 * 60),
+                Some(Duration::from_secs(30 * 60)),
+            ),
+            Some(ExecutionTermination::Inactive)
+        );
     }
 }
