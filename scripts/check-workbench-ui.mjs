@@ -3111,12 +3111,26 @@ expect(
 
 expect(
   surfaceSource.includes("gyro-usage-provider-select") &&
+    surfaceSource.includes('aria-label="Refresh provider usage"') &&
     surfaceSource.includes('label="Usage visualization"') &&
     surfaceSource.includes("Usage unavailable from this provider") &&
     surfaceSource.includes(
       "Gyro does not estimate allowance from local activity",
     ),
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
+);
+
+expect(
+  appSource.includes(
+    'invoke<ProviderUsageSnapshot>(\n          "get_provider_usage"',
+  ) &&
+    appSource.includes("refreshProviderUsage(selectedUsageProviderId)") &&
+    appSource.includes('status: "loading"') &&
+    tauriSource.includes('"account/rateLimits/read"') &&
+    tauriSource.includes("CODEX_USAGE_TIMEOUT") &&
+    tauriSource.includes("provider_usage_windows_from_codex") &&
+    tauriSource.includes("get_provider_usage,"),
+  "Usage settings should fetch bounded live Codex account limits, load automatically, and expose refresh state.",
 );
 
 expect(

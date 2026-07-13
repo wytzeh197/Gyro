@@ -8223,15 +8223,34 @@ export function SettingsSurface({
                         : "Provider-reported usage only"}
                     </span>
                   </div>
-                  <SettingsSegmented
-                    label="Usage visualization"
-                    value={usageVisualization}
-                    options={[
-                      { label: "Bars", value: "bars" },
-                      { label: "Wheels", value: "wheels" },
-                    ]}
-                    onChange={(value) => onUsageVisualizationChange?.(value)}
-                  />
+                  <div className="gyro-usage-toolbar-actions">
+                    <SettingsSegmented
+                      label="Usage visualization"
+                      value={usageVisualization}
+                      options={[
+                        { label: "Bars", value: "bars" },
+                        { label: "Wheels", value: "wheels" },
+                      ]}
+                      onChange={(value) => onUsageVisualizationChange?.(value)}
+                    />
+                    <button
+                      aria-label="Refresh provider usage"
+                      className="gyro-icon-button is-subtle"
+                      disabled={providerUsage?.status === "loading"}
+                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
+                      title="Refresh provider usage"
+                      type="button"
+                    >
+                      <RefreshCw
+                        className={
+                          providerUsage?.status === "loading"
+                            ? "is-spinning"
+                            : ""
+                        }
+                        size={14}
+                      />
+                    </button>
+                  </div>
                 </div>
                 {providerUsage?.status === "available" ? (
                   <div className="gyro-usage-cards">

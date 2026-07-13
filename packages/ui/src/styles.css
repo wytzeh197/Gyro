@@ -15952,6 +15952,14 @@ button.gyro-settings-row em::after {
   color: var(--gyro-muted);
   font-size: 11px;
 }
+.gyro-usage-toolbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.gyro-usage-toolbar-actions .gyro-icon-button {
+  flex: 0 0 auto;
+}
 .gyro-usage-cards {
   display: grid;
   gap: 14px;
