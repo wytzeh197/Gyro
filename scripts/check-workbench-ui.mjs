@@ -25,6 +25,7 @@ import {
   MAX_CHAT_RESPONSE_CHARS,
   applyProviderChatStreamDeltas,
   mergePersistedAndOptimisticEvents,
+  orderProviderChatStreamEvent,
   resetStreamingAssistantForRetry,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import {
@@ -48,6 +49,7 @@ function readRepoFile(path) {
 }
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
 const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
 );
@@ -56,6 +58,7 @@ const indexSource = readRepoFile("packages/ui/src/index.ts");
 const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
 const launchDocsSource = readRepoFile("docs/launch.md");
+const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
 const roadmapSource = readRepoFile("ROADMAP.md");
 const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
@@ -63,6 +66,13 @@ const styleSource = readRepoFile("packages/ui/src/styles.css");
 const typeSource = readRepoFile("packages/ui/src/types.ts");
 const reducerSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const coreHarnessSource = readRepoFile("crates/gyro-core/src/harness.rs");
+const coreExecutionSource = readRepoFile("crates/gyro-core/src/execution.rs");
+const coreProviderHealthSource = readRepoFile(
+  "crates/gyro-core/src/provider_health.rs",
+);
+const coreProviderStreamSource = readRepoFile(
+  "crates/gyro-core/src/provider_stream.rs",
+);
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 const updateControllerSource = readRepoFile(
@@ -78,6 +88,36 @@ expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
     "openai,anthropic,xai,gemini",
   "Composer provider picker should show OpenAI, Anthropic, xAI, and Gemini only.",
+);
+const orderedStreamState = new Map();
+const orderedStreamBase = {
+  sessionId: "ordered-session",
+  turnId: "ordered-turn",
+  providerId: "openai",
+  eventId: "ordered-0",
+  sequence: 0,
+  phase: "started",
+};
+expect(
+  orderProviderChatStreamEvent(orderedStreamState, orderedStreamBase).length ===
+    1 &&
+    orderProviderChatStreamEvent(orderedStreamState, {
+      ...orderedStreamBase,
+      eventId: "ordered-2",
+      sequence: 2,
+      phase: "delta",
+      textDelta: "second",
+    }).length === 0 &&
+    orderProviderChatStreamEvent(orderedStreamState, {
+      ...orderedStreamBase,
+      eventId: "ordered-1",
+      sequence: 1,
+      phase: "delta",
+      textDelta: "first",
+    })
+      .map((event) => event.sequence)
+      .join(",") === "1,2",
+  "Provider stream IPC should reorder delayed events and reject duplicate sequences.",
 );
 const availableUpdate = {
   status: "available",
@@ -135,6 +175,9 @@ expect(
     appSource.includes("resetStreamingAssistantForRetry") &&
     surfaceSource.includes("Previous send was interrupted") &&
     surfaceSource.includes("Retry continues the same message") &&
+    surfaceSource.includes(
+      'providerStatus.status === "cancelled" ||\n              wasInterrupted',
+    ) &&
     tauriSource.includes("flags.contains_key(&session_id)") &&
     tauriSource.includes("a provider turn is already running for this session"),
   "Chat recovery should retry the same turn, recover interrupted runs, and reject concurrent provider sends.",
@@ -806,6 +849,13 @@ state = workbenchReducer(state, {
   type: "browser-navigate",
   url: "http://localhost:1421",
 });
+expect(
+  state.browserPreview.status === "loading" &&
+    state.browserPreview.verificationMessage === "Checking local preview" &&
+    appSource.includes('invoke<BrowserPreviewCheck>("check_browser_preview"') &&
+    tauriSource.includes("check_browser_preview_blocking"),
+  "Browser preview navigation should verify reachability before claiming success.",
+);
 state = workbenchReducer(state, { type: "browser-device", device: "mobile" });
 state = workbenchReducer(state, { type: "browser-screenshot" });
 expect(
@@ -1239,8 +1289,9 @@ expect(
     ) &&
     appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
     appSource.includes(
-      "limitSessionEventsForUi(optimisticEvents.map(updateEvent))",
+      "limitSessionEventsForUi(updateEvents(optimisticEvents))",
     ) &&
+    appSource.includes("items.findLastIndex(") &&
     appSource.includes("updateOptimisticProviderStatus") &&
     appSource.includes("setIsStartingFirstTurn") &&
     appSource.includes("sendingSessionIdsRef") &&
@@ -1419,11 +1470,11 @@ expect(
     tauriSource.includes("codex_chat_args") &&
     tauriSource.includes("claude_chat_args") &&
     tauriSource.includes("extract_provider_session_id") &&
-    tauriSource.includes("enum ProviderTextChunk") &&
+    coreProviderStreamSource.includes("pub enum ProviderTextChunk") &&
     tauriSource.includes("ProviderTextChunk::Snapshot") &&
     tauriSource.includes("push_assistant_snapshot") &&
-    tauriSource.includes("extract_provider_text_value") &&
-    tauriSource.includes('Some("reasoning" | "reasoning_text")') &&
+    coreProviderStreamSource.includes("extract_provider_text_value") &&
+    coreProviderStreamSource.includes('Some("reasoning" | "reasoning_text")') &&
     tauriSource.includes("extract_provider_text_delta") &&
     tauriSource.includes("PROVIDER_CHAT_EVENT") &&
     tauriSource.includes("clear_provider_session_binding") &&
@@ -1453,7 +1504,7 @@ expect(
     tauriSource.includes("run_streaming_command") &&
     tauriSource.includes("PROVIDER_STREAM_FLUSH_INTERVAL") &&
     tauriSource.includes("StreamingCommandState") &&
-    tauriSource.includes("stdin(Stdio::null())") &&
+    coreExecutionSource.includes("stdin(Stdio::null())") &&
     tauriSource.includes("sanitize_provider_text_delta") &&
     tauriSource.includes("extract_codex_agent_message_text") &&
     tauriSource.includes('"item.completed"') &&
@@ -1541,7 +1592,7 @@ expect(
     coreSessionsSource.includes("MAX_SESSION_EVENT_MESSAGE_CHARS") &&
     coreSessionsSource.includes("MAX_SESSION_EVENTS_READ") &&
     coreSessionsSource.includes("read_recent_events") &&
-    coreSessionsSource.includes("VecDeque") &&
+    coreSessionsSource.includes("read_recent_event_lines") &&
     tauriSource.includes("MAX_DESKTOP_SESSION_EVENTS_READ") &&
     tauriSource.includes("async fn read_session_events") &&
     tauriSource.includes("read_session_events_blocking") &&
@@ -2198,6 +2249,10 @@ expect(
 expect(
   packageSource.includes('"desktop:bundle"') &&
     packageSource.includes('"desktop:install-local"') &&
+    installLocalSource.includes("isInstalledAppRunning") &&
+    installLocalSource.includes("waitForInstalledAppState(false)") &&
+    installLocalSource.includes("waitForInstalledAppState(true)") &&
+    installLocalSource.includes('application id "dev.gyro.desktop"') &&
     readmeSource.includes("target/debug/gyro-desktop") &&
     launchDocsSource.includes("open target/release/bundle/macos/Gyro.app") &&
     launchDocsSource.includes("~/Applications/Gyro.app") &&
@@ -2332,19 +2387,24 @@ expect(
     appSource.includes("configSaveQueueRef.current") &&
     appSource.includes("PROVIDER_AUTH_POLL_ATTEMPTS") &&
     appSource.includes("Gyro will connect automatically.") &&
-    appSource.includes(
-      'provider.authStatus === "connected" || provider.enabled',
-    ) &&
+    appSource.includes("EXECUTABLE_PROVIDER_IDS.has(provider.id)") &&
+    appSource.includes('health?.connectionStatus === "connected"') &&
     appSource.includes('provider?.authStatus === "connected"') &&
     appSource.includes('layout: "terminal-grid"') &&
     appSource.includes('tab: "terminal"') &&
-    tauriSource.includes("struct ProviderHealthService") &&
-    tauriSource.includes('"codex",\n            &["login", "status"]') &&
-    tauriSource.includes('"claude",\n                &["auth", "status"]') &&
-    tauriSource.includes('"xai"') &&
-    tauriSource.includes('"XAI_API_KEY"') &&
-    tauriSource.includes("should_skip_codex_login_for_external_env") &&
-    tauriSource.includes("gyro_core::security::redact_secrets") &&
+    coreProviderHealthSource.includes("pub struct ProviderHealthService") &&
+    coreProviderHealthSource.includes(
+      '"codex",\n            &["login", "status"]',
+    ) &&
+    coreProviderHealthSource.includes(
+      '"claude",\n                &["auth", "status"]',
+    ) &&
+    coreProviderHealthSource.includes('"xai"') &&
+    coreProviderHealthSource.includes('"XAI_API_KEY"') &&
+    coreProviderHealthSource.includes(
+      "should_skip_codex_login_for_external_env",
+    ) &&
+    coreProviderHealthSource.includes("crate::security::redact_secrets") &&
     tauriSource.includes("fn augmented_gui_path") &&
     tauriSource.includes("command_with_gui_path(") &&
     surfaceSource.includes("Gyro local access stays separate") &&
@@ -2582,6 +2642,11 @@ expect(
     ) &&
     tauriSource.includes("write_workspace_file") &&
     appSource.includes("<MonacoEditorPane") &&
+    appSource.includes('lazy(() => import("./monaco-editor"))') &&
+    monacoEditorSource.includes("loader.config({ monaco })") &&
+    monacoEditorSource.includes("MonacoEnvironment") &&
+    monacoEditorSource.includes("new EditorWorker()") &&
+    monacoEditorSource.includes("new TypeScriptWorker()") &&
     surfaceSource.includes("renderEditor") &&
     surfaceSource.includes("gyro-editor-ai-bar") &&
     surfaceSource.includes("gyro-editor-contextbar") &&
@@ -2612,7 +2677,15 @@ expect(
     tauriSource.includes("impl LanguageServerManager") &&
     tauriSource.includes("spawn_lsp_message_reader") &&
     styleSource.includes(".gyro-editor-groups.is-split-right") &&
-    styleSource.includes(".gyro-ide-assistant-composer"),
+    styleSource.includes(".gyro-ide-assistant-composer") &&
+    surfaceSource.includes('role="tree"') &&
+    surfaceSource.includes('role="treeitem"') &&
+    surfaceSource.includes('event.key === "ArrowRight"') &&
+    surfaceSource.includes('event.key === "ArrowLeft"') &&
+    surfaceSource.includes('event.key === "Enter"') &&
+    surfaceSource.includes('event.key === " "') &&
+    surfaceSource.includes("explorerRowRefs") &&
+    styleSource.includes(".gyro-sidebar-explorer-tree"),
   "Core IDE controls should operate real editor groups, workspace files, Git review, AI context, and language-server lifecycles.",
 );
 expect(
@@ -2933,7 +3006,38 @@ expect(
   "Full Access should retain its warning color in the menu and selected composer chip.",
 );
 
-const requiredViewports = ["1280x720", "1440x900", "2048x1180"];
+const requiredViewports = [
+  "860x620 compact",
+  "1280x720",
+  "1440x900",
+  "1728x1117",
+];
+
+for (const token of [
+  "--gyro-space-compact",
+  "--gyro-space-standard",
+  "--gyro-space-comfortable",
+  "--gyro-space-section",
+  "--gyro-status-running",
+  "--gyro-status-waiting",
+  "--gyro-status-success",
+  "--gyro-status-failed",
+  "--gyro-status-cancelled",
+]) {
+  expect(
+    styleSource.includes(token),
+    `Shared v0.2 design token missing: ${token}`,
+  );
+}
+
+expect(
+  tauriSource.includes("next_provider_event_sequence") &&
+    typeSource.includes("sequence: number") &&
+    appSource.includes("providerStreamOrderRef") &&
+    coreSessionsSource.includes("read_recent_event_lines") &&
+    coreSessionsSource.includes("file.sync_data()"),
+  "Reliability contract should cover ordered IPC, durable writes, and tail-based recovery.",
+);
 
 expect(
   surfaceSource.includes("gyro-usage-provider-select") &&

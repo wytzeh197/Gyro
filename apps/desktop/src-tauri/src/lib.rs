@@ -2,10 +2,12 @@ use gyro_core::{
     create_worktree, ipc::AppNotification, logout_account as account_logout,
     refresh_account_session as account_refresh_session, start_account_login as account_start_login,
     stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
-    Automation, AutomationStatus, AutomationStore, AutomationTriageState, CreateAutomationRequest,
-    CreateSessionContext, GyroConfig, GyroPaths, HarnessRunStatus, ProviderDiagnosticsPayload,
-    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
-    SessionOrigin, SessionStore, SessionWorkspaceMode,
+    Automation, AutomationStatus, AutomationStore, AutomationTriageState, CancellationToken,
+    CreateAutomationRequest, CreateSessionContext, ExecutionRequest, ExecutionStream,
+    ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus, ProviderDiagnosticsPayload,
+    ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService, ProviderRunPayload,
+    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode,
 };
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -16,13 +18,19 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicU64, Ordering},
     mpsc, Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 use walkdir::WalkDir;
+
+#[cfg(test)]
+use gyro_core::{
+    provider_account_label, provider_runtime_status_from_output, provider_subscription_label,
+    should_skip_codex_login_for_external_env,
+};
 
 const MAX_WORKSPACE_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
@@ -48,7 +56,13 @@ const GUI_CLI_PATHS: &[&str] = &[
 
 #[derive(Default)]
 struct ProviderCancellationManager {
-    flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    flags: Mutex<HashMap<String, Arc<ProviderRunControl>>>,
+}
+
+#[derive(Default)]
+struct ProviderRunControl {
+    cancellation: CancellationToken,
+    next_event_sequence: AtomicU64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -367,31 +381,6 @@ struct TerminalPaneSnapshot {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ProviderHealthRequest {
-    provider_id: String,
-    base_url: Option<String>,
-    api_key_ref: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProviderHealthCheck {
-    provider_id: String,
-    output: String,
-    runtime_status: String,
-    auth_owner: String,
-    auth_command: Option<String>,
-    login_command: Option<String>,
-    account_label: Option<String>,
-    subscription_label: Option<String>,
-    provider_mode: Option<String>,
-    secret_storage: String,
-    privacy_note: String,
-    diagnostics_opt_in: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ProviderChatRequest {
     session_id: String,
     message: String,
@@ -488,6 +477,20 @@ struct ProviderChatResponse {
     resume_cursor: Option<ProviderResumeCursor>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPreviewCheckRequest {
+    url: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPreviewCheck {
+    reachable: bool,
+    status_code: Option<u16>,
+    message: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderResumeCursor {
@@ -503,6 +506,7 @@ struct ProviderChatStreamEvent {
     provider_id: String,
     model_id: Option<String>,
     event_id: String,
+    sequence: u64,
     phase: String,
     status: Option<String>,
     text_delta: Option<String>,
@@ -1151,7 +1155,7 @@ async fn run_provider_chat(
         if flags.contains_key(&session_id) {
             return Err("a provider turn is already running for this session".into());
         }
-        flags.insert(session_id.clone(), Arc::new(AtomicBool::new(false)));
+        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
     }
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -1179,7 +1183,7 @@ async fn stop_provider_chat(
     let flag = flags
         .get(&session_id)
         .ok_or_else(|| "no provider turn is running for this session".to_string())?;
-    flag.store(true, Ordering::SeqCst);
+    flag.cancellation.cancel();
     Ok(())
 }
 
@@ -3674,6 +3678,49 @@ async fn check_provider_health(
         .map_err(|error| format!("provider health worker failed: {error}"))?
 }
 
+#[tauri::command]
+async fn check_browser_preview(
+    request: BrowserPreviewCheckRequest,
+) -> Result<BrowserPreviewCheck, String> {
+    tauri::async_runtime::spawn_blocking(move || check_browser_preview_blocking(request))
+        .await
+        .map_err(|error| format!("browser preview worker failed: {error}"))?
+}
+
+fn check_browser_preview_blocking(
+    request: BrowserPreviewCheckRequest,
+) -> Result<BrowserPreviewCheck, String> {
+    let url = url::Url::parse(request.url.trim()).map_err(|_| "invalid preview URL".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("preview URLs must use http or https".into());
+    }
+    if url.host_str().is_none() {
+        return Err("preview URL must include a host".into());
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(2))
+        .timeout_read(Duration::from_secs(2))
+        .timeout_write(Duration::from_secs(2))
+        .build();
+    match agent.get(url.as_str()).call() {
+        Ok(response) => Ok(BrowserPreviewCheck {
+            reachable: true,
+            status_code: Some(response.status()),
+            message: format!("Local preview reachable (HTTP {})", response.status()),
+        }),
+        Err(ureq::Error::Status(status, _)) => Ok(BrowserPreviewCheck {
+            reachable: true,
+            status_code: Some(status),
+            message: format!("Preview server reachable (HTTP {status})"),
+        }),
+        Err(ureq::Error::Transport(_)) => Ok(BrowserPreviewCheck {
+            reachable: false,
+            status_code: None,
+            message: "Preview unavailable: connection refused, timed out, or offline".into(),
+        }),
+    }
+}
+
 fn check_provider_health_blocking(
     request: ProviderHealthRequest,
 ) -> Result<ProviderHealthCheck, String> {
@@ -3813,113 +3860,6 @@ fn session_workspace_mode_label(mode: &SessionWorkspaceMode) -> &'static str {
     }
 }
 
-#[derive(Default)]
-struct ProviderHealthService;
-
-impl ProviderHealthService {
-    fn check(&self, request: ProviderHealthRequest) -> anyhow::Result<ProviderHealthCheck> {
-        match request.provider_id.as_str() {
-            "openai" => self.check_openai(request),
-            "anthropic" => self.cli_check(
-                "anthropic",
-                "provider-cli",
-                "claude",
-                &["auth", "status"],
-                Some("claude auth login"),
-                "Provider CLI, OS Keychain, or provider-owned files",
-            ),
-            "cursor" => self.cli_check(
-                "cursor",
-                "provider-cli",
-                "cursor-agent",
-                &["login", "status"],
-                Some("cursor-agent login"),
-                "Provider CLI, OS Keychain, or provider-owned files",
-            ),
-            "xai" => Ok(env_provider_health(
-                "xai",
-                request.api_key_ref.as_deref(),
-                &["XAI_API_KEY"],
-            )),
-            "gemini" => Ok(env_provider_health(
-                "gemini",
-                request.api_key_ref.as_deref(),
-                &[
-                    "GEMINI_API_KEY",
-                    "GOOGLE_API_KEY",
-                    "GOOGLE_APPLICATION_CREDENTIALS",
-                ],
-            )),
-            "opencode" => self.cli_check(
-                "opencode",
-                "provider-cli",
-                "opencode",
-                &["auth", "status"],
-                Some("opencode auth login"),
-                "Provider CLI, OS Keychain, or provider-owned files",
-            ),
-            _ => anyhow::bail!("unknown provider `{}`", request.provider_id),
-        }
-    }
-
-    fn check_openai(&self, request: ProviderHealthRequest) -> anyhow::Result<ProviderHealthCheck> {
-        if should_skip_codex_login_for_external_env(
-            request.base_url.as_deref(),
-            request.api_key_ref.as_deref(),
-        ) {
-            return Ok(env_provider_health(
-                "openai",
-                request.api_key_ref.as_deref(),
-                &["OPENAI_API_KEY"],
-            ));
-        }
-
-        self.cli_check(
-            "openai",
-            "provider-cli",
-            "codex",
-            &["login", "status"],
-            Some("codex login --device-auth"),
-            "Provider CLI, OS Keychain, or provider-owned files",
-        )
-    }
-
-    fn cli_check(
-        &self,
-        provider_id: &str,
-        auth_owner: &str,
-        command: &str,
-        args: &[&str],
-        login_command: Option<&str>,
-        secret_storage: &str,
-    ) -> anyhow::Result<ProviderHealthCheck> {
-        let auth_command = std::iter::once(command)
-            .chain(args.iter().copied())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let output = match command_output(command, args) {
-            Ok(output) => output,
-            Err(error) => format!("{command} not installed or unavailable: {error}"),
-        };
-        let output = gyro_core::security::redact_secrets(&output);
-        Ok(ProviderHealthCheck {
-            provider_id: provider_id.into(),
-            runtime_status: provider_runtime_status_from_output(&output).into(),
-            auth_owner: auth_owner.into(),
-            auth_command: Some(auth_command),
-            login_command: login_command.map(str::to_string),
-            account_label: provider_account_label(&output),
-            subscription_label: provider_subscription_label(&output),
-            provider_mode: provider_mode_label(&output),
-            secret_storage: secret_storage.into(),
-            privacy_note:
-                "Gyro stores readiness summaries only; provider tokens stay outside Gyro.".into(),
-            diagnostics_opt_in: false,
-            output,
-        })
-    }
-}
-
 fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<TerminalProcess> {
     if request.command.trim().is_empty() {
         anyhow::bail!("terminal command cannot be empty");
@@ -4041,166 +3981,6 @@ fn terminal_command_path(command: &str) -> String {
         return "/bin/zsh".into();
     }
     command.into()
-}
-
-fn should_skip_codex_login_for_external_env(
-    base_url: Option<&str>,
-    api_key_ref: Option<&str>,
-) -> bool {
-    let base_url = base_url.unwrap_or_default().trim().to_ascii_lowercase();
-    let api_key_ref = api_key_ref.unwrap_or_default().trim().to_ascii_lowercase();
-    let external_base_url = !base_url.is_empty()
-        && !base_url.contains("api.openai.com")
-        && !base_url.contains("chatgpt.com");
-    let env_owned_key = api_key_ref.starts_with("provider-env:")
-        || api_key_ref.starts_with("env:")
-        || api_key_ref.ends_with("_api_key")
-        || api_key_ref.contains("api_key");
-
-    external_base_url && env_owned_key
-}
-
-fn env_provider_health(
-    provider_id: &str,
-    api_key_ref: Option<&str>,
-    fallback_env_names: &[&str],
-) -> ProviderHealthCheck {
-    let mut env_names = Vec::new();
-    if let Some(env_name) = env_name_from_ref(api_key_ref) {
-        env_names.push(env_name);
-    }
-    for env_name in fallback_env_names {
-        if !env_names.iter().any(|candidate| candidate == env_name) {
-            env_names.push((*env_name).to_string());
-        }
-    }
-
-    let present_env = env_names
-        .iter()
-        .find(|env_name| std::env::var_os(env_name.as_str()).is_some())
-        .cloned();
-    let output = if let Some(env_name) = present_env.as_deref() {
-        format!(
-            "{provider_id} provider-env auth available; {env_name} is set; value not read by Gyro."
-        )
-    } else {
-        format!(
-            "{provider_id} provider-env auth missing; configure one of {} outside Gyro.",
-            env_names.join(", ")
-        )
-    };
-
-    ProviderHealthCheck {
-        provider_id: provider_id.into(),
-        runtime_status: if present_env.is_some() {
-            "ready".into()
-        } else {
-            "not-logged-in".into()
-        },
-        auth_owner: "provider-env".into(),
-        auth_command: None,
-        login_command: None,
-        account_label: None,
-        subscription_label: None,
-        provider_mode: Some("environment-owned auth".into()),
-        secret_storage: "Environment variable or provider SDK store".into(),
-        privacy_note: "Gyro stores readiness summaries only; provider tokens stay outside Gyro."
-            .into(),
-        diagnostics_opt_in: false,
-        output,
-    }
-}
-
-fn env_name_from_ref(api_key_ref: Option<&str>) -> Option<String> {
-    let reference = api_key_ref?.trim();
-    let candidate = reference
-        .strip_prefix("provider-env:")
-        .or_else(|| reference.strip_prefix("env:"))
-        .unwrap_or(reference)
-        .trim();
-    if candidate.is_empty() || candidate.contains(':') || candidate.contains('/') {
-        None
-    } else {
-        Some(candidate.to_string())
-    }
-}
-
-fn provider_runtime_status_from_output(output: &str) -> &'static str {
-    let normalized = output.to_ascii_lowercase();
-    if normalized.contains("not installed")
-        || normalized.contains("command not found")
-        || normalized.contains("no such file")
-    {
-        "not-installed"
-    } else if normalized.contains("not authenticated")
-        || normalized.contains("not logged in")
-        || normalized.contains("logged out")
-        || normalized.contains("\"loggedin\": false")
-        || normalized.contains("auth required")
-    {
-        "not-logged-in"
-    } else if normalized.contains("authenticated")
-        || normalized.contains("logged in")
-        || normalized.contains("\"loggedin\": true")
-        || normalized.contains("ready")
-        || normalized.contains("ok")
-    {
-        "ready"
-    } else if normalized.contains("error")
-        || normalized.contains("failed")
-        || normalized.contains("invalid")
-        || normalized.contains("denied")
-    {
-        "warning"
-    } else {
-        "unknown"
-    }
-}
-
-fn provider_subscription_label(output: &str) -> Option<String> {
-    quoted_field(output, "subscriptionType")
-        .or_else(|| quoted_field(output, "subscriptionTier"))
-        .or_else(|| quoted_field(output, "subscription"))
-}
-
-fn provider_account_label(output: &str) -> Option<String> {
-    quoted_field(output, "email")
-        .or_else(|| quoted_field(output, "account"))
-        .or_else(|| quoted_field(output, "user"))
-}
-
-fn provider_mode_label(output: &str) -> Option<String> {
-    quoted_field(output, "mode").or_else(|| quoted_field(output, "authMode"))
-}
-
-fn quoted_field(output: &str, field: &str) -> Option<String> {
-    let marker = format!("\"{field}\"");
-    let start = output.find(&marker)?;
-    let after_marker = &output[start + marker.len()..];
-    let colon = after_marker.find(':')?;
-    let after_colon = after_marker[colon + 1..].trim_start();
-    let after_quote = after_colon.strip_prefix('"')?;
-    let end = after_quote.find('"')?;
-    Some(after_quote[..end].to_string())
-}
-
-fn command_output(command: &str, args: &[&str]) -> Result<String, String> {
-    let output = command_with_gui_path(command)
-        .args(args)
-        .output()
-        .map_err(to_string)?;
-    let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
-    let combined = combined.trim().to_string();
-
-    if output.status.success() {
-        Ok(combined)
-    } else if combined.is_empty() {
-        Err(format!("{command} exited with {}", output.status))
-    } else {
-        Ok(combined)
-    }
 }
 
 fn run_provider_chat_with_retry(
@@ -5071,6 +4851,7 @@ struct StreamingCommandState {
     pending_delta_chunks: Vec<String>,
     pending_delta_chars: usize,
     provider_session_id: Option<String>,
+    stdout_line_buffer: String,
     last_emit_at: Instant,
 }
 
@@ -5087,6 +4868,7 @@ impl StreamingCommandState {
             pending_delta_chunks: Vec::new(),
             pending_delta_chars: 0,
             provider_session_id: None,
+            stdout_line_buffer: String::new(),
             last_emit_at: Instant::now(),
         }
     }
@@ -5118,6 +4900,23 @@ impl StreamingCommandState {
             MAX_CHAT_RESPONSE_CHARS * 4,
         )
         .truncated;
+    }
+
+    fn take_stdout_lines(&mut self, chunk: &str) -> Vec<String> {
+        self.push_stdout(chunk);
+        self.stdout_line_buffer.push_str(chunk);
+        let mut lines = Vec::new();
+        while let Some(newline) = self.stdout_line_buffer.find('\n') {
+            lines.push(self.stdout_line_buffer.drain(..=newline).collect());
+        }
+        if self.stdout_line_buffer.chars().count() > MAX_CHAT_RESPONSE_CHARS * 4 {
+            self.stdout_line_buffer.clear();
+        }
+        lines
+    }
+
+    fn take_final_stdout_line(&mut self) -> Option<String> {
+        (!self.stdout_line_buffer.is_empty()).then(|| std::mem::take(&mut self.stdout_line_buffer))
     }
 
     fn push_assistant_delta(&mut self, delta: &str) {
@@ -5209,12 +5008,12 @@ impl StreamingCommandState {
 }
 
 fn run_streaming_command(
-    mut command: Command,
+    command: Command,
     timeout: Duration,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<StreamingCommandOutput> {
-    let cancellation = app
+    let run_control = app
         .state::<ProviderCancellationManager>()
         .flags
         .lock()
@@ -5222,75 +5021,46 @@ fn run_streaming_command(
         .get(&request.session_id)
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("provider turn reservation was lost"))?;
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn()?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("provider stdout was unavailable"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("provider stderr was unavailable"))?;
-    let (stdout_tx, stdout_rx) = mpsc::channel::<String>();
-    let stdout_handle = std::thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let _ = stdout_tx.send(line.clone());
-                }
-                Err(_) => break,
-            }
-        }
-    });
-    let stderr_handle = std::thread::spawn(move || {
-        let mut buffer = String::new();
-        let mut reader = BufReader::new(stderr);
-        let _ = reader.read_to_string(&mut buffer);
-        buffer
-    });
-
-    let started_at = Instant::now();
+    let mut execution = ExecutionRequest::new(command.get_program().to_os_string());
+    execution.args = command.get_args().map(|arg| arg.to_os_string()).collect();
+    execution.current_dir = command.get_current_dir().map(Path::to_path_buf);
+    execution.env = command
+        .get_envs()
+        .map(|(key, value)| (key.to_os_string(), value.map(|value| value.to_os_string())))
+        .collect();
+    execution.timeout = timeout;
+    execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;
+    execution.max_stderr_chars = MAX_CHAT_RESPONSE_CHARS;
     let mut stream_state = StreamingCommandState::new();
-    let status = loop {
-        while let Ok(line) = stdout_rx.try_recv() {
-            handle_provider_stdout_line(&line, app, request, &mut stream_state);
+    let outcome = gyro_core::run_command(execution, run_control.cancellation.clone(), |chunk| {
+        if chunk.stream == ExecutionStream::Stdout {
+            for line in stream_state.take_stdout_lines(&chunk.text) {
+                handle_provider_stdout_line(&line, app, request, &mut stream_state);
+            }
+            stream_state.flush_pending_delta(app, request, false);
         }
-        stream_state.flush_pending_delta(app, request, false);
-        if cancellation.load(Ordering::SeqCst) {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("chat cancelled by user");
-        }
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if started_at.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("command timed out after {} seconds", timeout.as_secs());
-        }
-        std::thread::sleep(Duration::from_millis(40));
-    };
-    let _ = stdout_handle.join();
-    while let Ok(line) = stdout_rx.try_recv() {
+    })?;
+    if let Some(line) = stream_state.take_final_stdout_line() {
         handle_provider_stdout_line(&line, app, request, &mut stream_state);
     }
     stream_state.flush_pending_delta(app, request, true);
-    let stderr_text = stderr_handle.join().unwrap_or_default();
+    match outcome.termination {
+        ExecutionTermination::Cancelled => anyhow::bail!("chat cancelled by user"),
+        ExecutionTermination::TimedOut => {
+            anyhow::bail!("command timed out after {} seconds", timeout.as_secs())
+        }
+        ExecutionTermination::Exited { .. } => {}
+    }
+    let status_label = outcome
+        .exit_code()
+        .map(|code| format!("exit status: {code}"))
+        .unwrap_or_else(|| "terminated by signal".into());
     Ok(StreamingCommandOutput {
         activities: stream_state.activities,
-        status_success: status.success(),
-        status_label: status.to_string(),
+        status_success: outcome.succeeded(),
+        status_label,
         stdout: stream_state.stdout_text,
-        stderr: stderr_text,
+        stderr: outcome.stderr,
         assistant_text: (!stream_state.assistant_text.trim().is_empty())
             .then_some(stream_state.assistant_text),
         provider_session_id: stream_state.provider_session_id,
@@ -5303,7 +5073,6 @@ fn handle_provider_stdout_line(
     request: &ProviderChatRequest,
     stream_state: &mut StreamingCommandState,
 ) {
-    stream_state.push_stdout(line);
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
         return;
     };
@@ -5548,6 +5317,7 @@ fn emit_provider_chat_event(
         provider_id: request.provider_id.clone(),
         model_id: request.model_id.clone(),
         event_id: Uuid::new_v4().to_string(),
+        sequence: next_provider_event_sequence(app, &request.session_id),
         phase: phase.into(),
         status: status.map(|status| status.as_str().to_string()),
         text_delta,
@@ -5573,6 +5343,7 @@ fn emit_provider_activity_event(
         provider_id: request.provider_id.clone(),
         model_id: request.model_id.clone(),
         event_id: Uuid::new_v4().to_string(),
+        sequence: next_provider_event_sequence(app, &request.session_id),
         phase: "activity".into(),
         status: Some(HarnessRunStatus::Running.as_str().to_string()),
         text_delta: None,
@@ -5587,43 +5358,21 @@ fn emit_provider_activity_event(
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
 
+fn next_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> u64 {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session_id).cloned())
+        .map(|control| control.next_event_sequence.fetch_add(1, Ordering::SeqCst))
+        .unwrap_or_default()
+}
+
 fn extract_provider_session_id(value: &serde_json::Value) -> Option<String> {
-    for key in [
-        "session_id",
-        "sessionId",
-        "conversation_id",
-        "conversationId",
-        "thread_id",
-        "threadId",
-    ] {
-        if let Some(id) = value.get(key).and_then(|item| item.as_str()) {
-            if looks_like_session_id(id) {
-                return Some(id.to_string());
-            }
-        }
-    }
-    match value {
-        serde_json::Value::Array(items) => items.iter().find_map(extract_provider_session_id),
-        serde_json::Value::Object(map) => map.values().find_map(extract_provider_session_id),
-        _ => None,
-    }
+    gyro_core::extract_provider_session_id(value)
 }
 
-fn looks_like_session_id(value: &str) -> bool {
-    let value = value.trim();
-    Uuid::parse_str(value).is_ok()
-        || (value.len() >= 12
-            && value.len() <= 128
-            && value
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')))
-}
-
-enum ProviderTextChunk {
-    Delta(String),
-    Snapshot(String),
-    Final(String),
-}
+type ProviderTextChunk = gyro_core::ProviderTextChunk;
 
 #[cfg(test)]
 fn extract_provider_text_delta(value: &serde_json::Value) -> Option<String> {
@@ -5635,94 +5384,11 @@ fn extract_provider_text_delta(value: &serde_json::Value) -> Option<String> {
 }
 
 fn extract_provider_text_chunk(value: &serde_json::Value) -> Option<ProviderTextChunk> {
-    if let Some(delta) = value.pointer("/delta/text").and_then(|item| item.as_str()) {
-        return Some(ProviderTextChunk::Delta(delta.to_string()));
-    }
-    if let Some(delta) = value
-        .pointer("/message/delta/text")
-        .and_then(|item| item.as_str())
-    {
-        return Some(ProviderTextChunk::Delta(delta.to_string()));
-    }
-    if let Some(delta) = value.get("text_delta").and_then(|item| item.as_str()) {
-        return Some(ProviderTextChunk::Delta(delta.to_string()));
-    }
-    if let Some(delta) = value.get("textDelta").and_then(|item| item.as_str()) {
-        return Some(ProviderTextChunk::Delta(delta.to_string()));
-    }
-    let event_type = value
-        .get("type")
-        .or_else(|| value.get("event"))
-        .and_then(|item| item.as_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if event_type.contains("delta") {
-        if let Some(delta) = value.get("delta").and_then(extract_provider_text_value) {
-            return Some(ProviderTextChunk::Delta(delta.to_string()));
-        }
-        for key in ["text", "content", "message"] {
-            if let Some(delta) = value.get(key).and_then(extract_provider_text_value) {
-                return Some(ProviderTextChunk::Delta(delta));
-            }
-        }
-    }
-    if event_type.contains("partial") {
-        for key in ["text", "content", "message"] {
-            if let Some(snapshot) = value.get(key).and_then(extract_provider_text_value) {
-                return Some(ProviderTextChunk::Snapshot(snapshot));
-            }
-        }
-    }
-    if let Some(text) = extract_codex_agent_message_text(value) {
-        return Some(ProviderTextChunk::Final(text));
-    }
-    None
-}
-
-fn extract_provider_text_value(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) => Some(text.clone()),
-        serde_json::Value::Array(items) => {
-            let text = items
-                .iter()
-                .filter_map(extract_provider_text_value)
-                .collect::<String>();
-            (!text.is_empty()).then_some(text)
-        }
-        serde_json::Value::Object(map) => {
-            let item_type = map.get("type").and_then(|item| item.as_str());
-            if matches!(item_type, Some("reasoning" | "reasoning_text")) {
-                return None;
-            }
-            map.get("text")
-                .or_else(|| map.get("content"))
-                .and_then(extract_provider_text_value)
-        }
-        _ => None,
-    }
+    gyro_core::extract_provider_text_chunk(value)
 }
 
 fn extract_codex_agent_message_text(value: &serde_json::Value) -> Option<String> {
-    let event_type = value
-        .get("type")
-        .or_else(|| value.get("event"))
-        .and_then(|item| item.as_str())
-        .unwrap_or_default();
-    if event_type != "item.completed" {
-        return None;
-    }
-    let item = value.get("item")?;
-    let item_type = item.get("type").and_then(|item| item.as_str())?;
-    let role = item.get("role").and_then(|item| item.as_str());
-    if item_type != "agent_message"
-        && item_type != "assistant_message"
-        && !(item_type == "message" && role == Some("assistant"))
-    {
-        return None;
-    }
-    item.get("text")
-        .or_else(|| item.get("content"))
-        .and_then(extract_provider_text_value)
+    gyro_core::extract_codex_agent_message_text(value)
 }
 
 fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
@@ -5940,6 +5606,7 @@ pub fn run() {
             append_user_message,
             claim_due_automation,
             check_provider_auth,
+            check_browser_preview,
             check_provider_health,
             complete_automation_lease,
             create_automation,
@@ -6071,6 +5738,8 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
                     AppNotificationKind::OpenSession | AppNotificationKind::AttachSession
                 ) {
                     let _ = app.emit("gyro://app-notification", notification);
+                    let _ = reader.get_mut().write_all(b"ok\n");
+                    let _ = reader.get_mut().flush();
                 }
             }
         }
@@ -6080,6 +5749,35 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_preview_check_reports_reachable_http_and_rejects_other_schemes() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        });
+
+        let reachable = check_browser_preview_blocking(BrowserPreviewCheckRequest {
+            url: format!("http://{address}/health"),
+        })
+        .unwrap();
+        server.join().unwrap();
+        assert!(reachable.reachable);
+        assert_eq!(reachable.status_code, Some(204));
+        assert!(reachable.message.contains("HTTP 204"));
+
+        let rejected = check_browser_preview_blocking(BrowserPreviewCheckRequest {
+            url: "file:///tmp/private".into(),
+        })
+        .unwrap_err();
+        assert!(rejected.contains("http or https"));
+    }
 
     #[test]
     fn lsp_json_rpc_framing_round_trips() {

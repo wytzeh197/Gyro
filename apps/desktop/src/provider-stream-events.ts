@@ -3,6 +3,75 @@ import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 export const MAX_CHAT_RESPONSE_CHARS = 64_000;
 export const CHAT_RESPONSE_TRUNCATION_SUFFIX = "...";
 export const MAX_CHAT_EVENT_RENDER_COUNT = 400;
+const MAX_PENDING_STREAM_EVENTS_PER_TURN = 64;
+const MAX_STREAM_TURN_ORDER_STATES = 256;
+
+type ProviderStreamSequence = {
+  nextSequence: number;
+  pending: Map<number, ProviderChatStreamEvent>;
+  terminal: boolean;
+};
+
+export type ProviderStreamOrderState = Map<string, ProviderStreamSequence>;
+
+export function orderProviderChatStreamEvent(
+  state: ProviderStreamOrderState,
+  event: ProviderChatStreamEvent,
+) {
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < 0) {
+    return [event];
+  }
+  const key = `${event.sessionId}:${event.turnId ?? "turn"}`;
+  let sequence = state.get(key);
+  if (!sequence) {
+    if (state.size >= MAX_STREAM_TURN_ORDER_STATES) {
+      const oldestKey = state.keys().next().value;
+      if (oldestKey) {
+        state.delete(oldestKey);
+      }
+    }
+    sequence = {
+      nextSequence: event.phase === "started" ? 0 : event.sequence,
+      pending: new Map(),
+      terminal: false,
+    };
+    state.set(key, sequence);
+  }
+  if (sequence.terminal) {
+    return [];
+  }
+  if (event.sequence < sequence.nextSequence) {
+    return [];
+  }
+  if (!sequence.pending.has(event.sequence)) {
+    sequence.pending.set(event.sequence, event);
+  }
+  if (sequence.pending.size > MAX_PENDING_STREAM_EVENTS_PER_TURN) {
+    sequence.nextSequence = Math.min(...sequence.pending.keys());
+  }
+
+  const ordered: ProviderChatStreamEvent[] = [];
+  while (sequence.pending.has(sequence.nextSequence)) {
+    const next = sequence.pending.get(sequence.nextSequence);
+    sequence.pending.delete(sequence.nextSequence);
+    sequence.nextSequence += 1;
+    if (next) {
+      ordered.push(next);
+    }
+  }
+  if (
+    ordered.some(
+      (item) =>
+        item.phase === "completed" ||
+        item.phase === "failed" ||
+        item.phase === "cancelled",
+    )
+  ) {
+    sequence.pending.clear();
+    sequence.terminal = true;
+  }
+  return ordered;
+}
 
 type SessionEventsSetter = (
   value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
@@ -146,7 +215,7 @@ export function mergeProviderResponseEvents(
     );
   });
   for (const responseEvent of responseEvents) {
-    const existingIndex = merged.findIndex((event) => {
+    const findMatchingEvent = (event: SessionEvent) => {
       if (event.id === responseEvent.id) {
         return true;
       }
@@ -166,20 +235,65 @@ export function mergeProviderResponseEvents(
         );
       }
       return false;
-    });
+    };
+    const existingIndex = isProviderStatusEvent(responseEvent)
+      ? merged.findLastIndex(findMatchingEvent)
+      : merged.findIndex(findMatchingEvent);
     if (existingIndex >= 0) {
       const existing = merged[existingIndex];
       if (existing === responseEvent) {
         continue;
       }
       const next = merged.slice();
-      next[existingIndex] = responseEvent;
+      next[existingIndex] =
+        existing &&
+        isProviderStatusEvent(existing) &&
+        isProviderStatusEvent(responseEvent)
+          ? mergeProviderStatusAttemptTiming(existing, responseEvent)
+          : responseEvent;
       merged = next;
       continue;
     }
     merged = [...merged, responseEvent];
   }
   return merged;
+}
+
+function mergeProviderStatusAttemptTiming(
+  current: SessionEvent,
+  response: SessionEvent,
+) {
+  const currentPayload = recordFromUnknown(current.payload) ?? {};
+  const responsePayload = recordFromUnknown(response.payload) ?? {};
+  const startedAt =
+    typeof responsePayload.startedAt === "string"
+      ? responsePayload.startedAt
+      : typeof currentPayload.startedAt === "string"
+        ? currentPayload.startedAt
+        : current.createdAt;
+  const completedAt =
+    typeof responsePayload.completedAt === "string"
+      ? responsePayload.completedAt
+      : response.createdAt;
+  const startedAtMs = Date.parse(startedAt);
+  const completedAtMs = Date.parse(completedAt);
+  const durationMs =
+    typeof responsePayload.durationMs === "number"
+      ? responsePayload.durationMs
+      : typeof currentPayload.durationMs === "number"
+        ? currentPayload.durationMs
+        : Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+          ? Math.max(0, completedAtMs - startedAtMs)
+          : undefined;
+  return {
+    ...response,
+    payload: {
+      ...responsePayload,
+      completedAt,
+      durationMs,
+      startedAt,
+    },
+  };
 }
 
 export function isProviderStatusEvent(event: SessionEvent) {

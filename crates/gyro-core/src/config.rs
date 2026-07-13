@@ -171,7 +171,7 @@ impl GyroConfig {
             .with_context(|| format!("read {}", paths.config_path.display()))?;
         let mut config: Self = serde_json::from_str(&raw)
             .with_context(|| format!("parse {}", paths.config_path.display()))?;
-        config.normalize_legacy_account_state();
+        config.normalize_legacy_state();
         Ok(config)
     }
 
@@ -182,7 +182,7 @@ impl GyroConfig {
             .with_context(|| format!("write {}", paths.config_path.display()))
     }
 
-    fn normalize_legacy_account_state(&mut self) {
+    fn normalize_legacy_state(&mut self) {
         let legacy_hosted_placeholder = self.account_oidc.issuer_url.trim_end_matches('/')
             == "https://auth.gyro.dev"
             && self.account_oidc.client_id == "gyro-desktop";
@@ -198,6 +198,16 @@ impl GyroConfig {
             self.account_session.email = None;
             self.account_session.name = Some("This Mac".into());
             self.account_session.issuer = Some("local-device://gyro".into());
+        }
+
+        for profile in &mut self.command_profiles {
+            if profile.provider_id.is_none() {
+                profile.provider_id = match profile.id.as_str() {
+                    "codex" => Some("openai".into()),
+                    "claude" | "claude-code" => Some("anthropic".into()),
+                    _ => None,
+                };
+            }
         }
     }
 }
@@ -264,5 +274,37 @@ mod tests {
         assert_eq!(profile.provider_id, None);
         assert_eq!(profile.default_model, None);
         assert_eq!(profile.readiness, CommandProfileReadiness::Waiting);
+    }
+
+    #[test]
+    fn loading_legacy_profiles_restores_known_provider_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+        std::fs::write(
+            &paths.config_path,
+            r#"{
+              "telemetryEnabled": false,
+              "requireCommandApproval": true,
+              "requireFileEditApproval": true,
+              "modelProviders": [],
+              "commandProfiles": [
+                {"id":"codex","displayName":"Codex CLI","command":"codex","args":[],"workingDirectory":null},
+                {"id":"claude-code","displayName":"Claude Code","command":"claude","args":[],"workingDirectory":null}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let config = GyroConfig::load(&paths).unwrap();
+
+        assert_eq!(
+            config.command_profiles[0].provider_id.as_deref(),
+            Some("openai")
+        );
+        assert_eq!(
+            config.command_profiles[1].provider_id.as_deref(),
+            Some("anthropic")
+        );
     }
 }

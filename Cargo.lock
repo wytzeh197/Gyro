@@ -525,6 +525,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -744,6 +750,17 @@ name = "ctor-proc-macro"
 version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
+
+[[package]]
+name = "ctrlc"
+version = "3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
+dependencies = [
+ "dispatch2",
+ "nix 0.31.3",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "darling"
@@ -1595,11 +1612,13 @@ dependencies = [
 
 [[package]]
 name = "gyro-cli"
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 dependencies = [
  "anyhow",
  "clap",
+ "ctrlc",
  "gyro-core",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -1608,13 +1627,14 @@ dependencies = [
 
 [[package]]
 name = "gyro-core"
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
  "keyring",
+ "libc",
  "rand",
  "regex",
  "rusqlite",
@@ -1630,7 +1650,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-desktop"
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1645,6 +1665,8 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-updater",
  "tempfile",
+ "ureq",
+ "url",
  "uuid",
  "walkdir",
 ]
@@ -2420,6 +2442,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2931,7 +2965,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
- "nix",
+ "nix 0.25.1",
  "serial",
  "shared_library",
  "shell-words",

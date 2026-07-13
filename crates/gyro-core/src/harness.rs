@@ -276,6 +276,11 @@ impl TerminalRequestPayload {
             approval_required: true,
         }
     }
+
+    pub fn with_approval_required(mut self, approval_required: bool) -> Self {
+        self.approval_required = approval_required;
+        self
+    }
 }
 
 impl FileEditProposalPayload {

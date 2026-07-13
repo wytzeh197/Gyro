@@ -104,6 +104,32 @@
   --gyro-ide-gap-xs: 4px;
   --gyro-ide-gap-sm: 8px;
   --gyro-ide-gap-md: 12px;
+  --gyro-space-compact: 4px;
+  --gyro-space-standard: 8px;
+  --gyro-space-comfortable: 12px;
+  --gyro-space-section: 24px;
+  --gyro-control-compact: 24px;
+  --gyro-control-standard: 28px;
+  --gyro-control-comfortable: 32px;
+  --gyro-icon-compact: 13px;
+  --gyro-icon-standard: 15px;
+  --gyro-status-active: var(--gyro-accent);
+  --gyro-status-running: #74a8ff;
+  --gyro-status-waiting: #d9a852;
+  --gyro-status-success: #68c892;
+  --gyro-status-warning: #dc9c48;
+  --gyro-status-failed: #de7474;
+  --gyro-status-cancelled: #8b95a3;
+  --gyro-status-disabled: #646d79;
+  --gyro-status-experimental: #aa86d8;
+  --gyro-file-javascript: #d9c34a;
+  --gyro-file-typescript: #5b9fd4;
+  --gyro-file-json: #cdbf58;
+  --gyro-file-style: #a982cf;
+  --gyro-file-document: #6ca5cc;
+  --gyro-file-rust: #cd8d64;
+  --gyro-file-shell: #73ad70;
+  --gyro-file-image: #b783ca;
   color: var(--gyro-text);
   font-family:
     Inter,
@@ -7161,6 +7187,167 @@ textarea:focus-visible {
   }
 }
 
+/* v0.2 shared visual system: Settings-derived hierarchy across every surface. */
+.gyro-chat-start .gyro-composer-shell.is-hero.has-provider,
+.gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider {
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-premium-radius-xl);
+  box-shadow: 0 12px 32px var(--gyro-premium-shadow-soft);
+}
+
+.gyro-chat-start
+  .gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-context-row,
+.gyro-chat-composer-dock
+  .gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-context-row {
+  border-radius: 0 0 var(--gyro-premium-radius-lg) var(--gyro-premium-radius-lg);
+}
+
+.gyro-kanban-column,
+.gyro-task-card,
+.gyro-automation-list,
+.gyro-automation-detail,
+.gyro-automation-empty,
+.gyro-provider-card,
+.gyro-provider-boundary,
+.gyro-provider-handoff-panel,
+.gyro-provider-policy,
+.gyro-diff-file-list,
+.gyro-diff-main,
+.gyro-browser-preview,
+.gyro-settings-confirm-overlay > section,
+.gyro-terminal-terminate-card {
+  border-color: var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-premium-radius-lg);
+  box-shadow: none;
+}
+
+.gyro-cli-status-card,
+.gyro-terminal-pane,
+.gyro-code-surface,
+.gyro-ide-assistant,
+.gyro-settings-section-body {
+  border-color: var(--gyro-premium-hairline);
+  border-radius: var(--gyro-premium-radius-md);
+  box-shadow: none;
+}
+
+.gyro-board-surface,
+.gyro-automations-surface,
+.gyro-providers-surface,
+.gyro-diff-review,
+.gyro-browser-preview,
+.gyro-settings-surface {
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+}
+
+:where(
+  button,
+  input,
+  textarea,
+  select,
+  summary,
+  [role="treeitem"],
+  [tabindex]
+):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+
+.gyro-sidebar-explorer-tree {
+  min-height: 0;
+  overflow: auto;
+  padding-block: var(--gyro-space-compact);
+  scrollbar-gutter: stable;
+}
+
+.gyro-sidebar-explorer-row {
+  min-height: var(--gyro-control-compact);
+  padding-block: 0;
+}
+
+.gyro-sidebar-explorer-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-explorer-row[data-open="true"] > span {
+  color: var(--gyro-text);
+  font-weight: 540;
+}
+
+.gyro-sidebar-explorer-row[data-buffer-state="dirty"] > span,
+.gyro-sidebar-explorer-row[data-buffer-state="conflict"] > span {
+  font-style: italic;
+}
+
+.gyro-sidebar-explorer-row[data-buffer-state="conflict"],
+.gyro-sidebar-explorer-row[data-buffer-state="error"],
+.gyro-sidebar-explorer-row[data-file-state="error"] {
+  color: var(--gyro-status-failed);
+}
+
+.gyro-sidebar-explorer-row[data-file-state="warning"] {
+  color: var(--gyro-status-warning);
+}
+
+.gyro-sidebar-explorer-row[data-file-state="added"] .gyro-explorer-decoration {
+  color: var(--gyro-status-success);
+}
+
+.gyro-sidebar-explorer-row[data-file-state="deleted"] {
+  opacity: 0.66;
+  text-decoration-color: var(--gyro-status-failed);
+  text-decoration-line: line-through;
+}
+
+.gyro-sidebar-explorer-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--gyro-accent) 11%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-explorer-decoration {
+  color: var(--gyro-status-warning);
+}
+
+[data-status="running"],
+.is-running {
+  --gyro-current-status: var(--gyro-status-running);
+}
+
+[data-status="waiting"],
+.is-waiting,
+.is-approval-needed {
+  --gyro-current-status: var(--gyro-status-waiting);
+}
+
+[data-status="done"],
+[data-status="complete"],
+.is-success {
+  --gyro-current-status: var(--gyro-status-success);
+}
+
+[data-status="failed"],
+.is-failed {
+  --gyro-current-status: var(--gyro-status-failed);
+}
+
+[data-status="cancelled"],
+.is-cancelled {
+  --gyro-current-status: var(--gyro-status-cancelled);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
 /* IDE density system: two rows of editor chrome, one shared spacing rhythm. */
 .gyro-app-shell:has(.gyro-workspace-route.is-code) {
   grid-template-columns: var(--gyro-ide-sidebar-width) minmax(0, 1fr);
@@ -7547,36 +7734,36 @@ textarea:focus-visible {
 
 .gyro-sidebar-explorer-row[data-file-tone="javascript"]
   .gyro-explorer-file-icon {
-  color: #d9c34a;
+  color: var(--gyro-file-javascript);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="typescript"]
   .gyro-explorer-file-icon {
-  color: #4d9ddc;
+  color: var(--gyro-file-typescript);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="json"] .gyro-explorer-file-icon {
-  color: #d6c64f;
+  color: var(--gyro-file-json);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="style"] .gyro-explorer-file-icon {
-  color: #b47ee5;
+  color: var(--gyro-file-style);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="document"] .gyro-explorer-file-icon {
-  color: #65a9d9;
+  color: var(--gyro-file-document);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="rust"] .gyro-explorer-file-icon {
-  color: #d99566;
+  color: var(--gyro-file-rust);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="shell"] .gyro-explorer-file-icon {
-  color: #76b76f;
+  color: var(--gyro-file-shell);
 }
 
 .gyro-sidebar-explorer-row[data-file-tone="image"] .gyro-explorer-file-icon {
-  color: #c38adf;
+  color: var(--gyro-file-image);
 }
 
 .gyro-explorer-decoration {
@@ -16851,4 +17038,52 @@ button.gyro-account-menu-row:hover,
   .gyro-ide-assistant {
     display: none;
   }
+}
+
+/* Final shared-system guard: later compatibility rules cannot restore old chrome. */
+.gyro-chat-start .gyro-composer-shell.is-hero.has-provider,
+.gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider {
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-premium-radius-xl);
+  box-shadow: 0 12px 32px var(--gyro-premium-shadow-soft);
+}
+
+.gyro-kanban-column,
+.gyro-task-card,
+.gyro-automation-list,
+.gyro-automation-detail,
+.gyro-provider-card,
+.gyro-provider-boundary,
+.gyro-provider-handoff-panel,
+.gyro-provider-policy,
+.gyro-diff-file-list,
+.gyro-diff-main,
+.gyro-browser-preview,
+.gyro-settings-confirm-overlay > section,
+.gyro-terminal-terminate-card {
+  border-color: var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-premium-radius-lg);
+  box-shadow: none;
+}
+
+.gyro-cli-status-card,
+.gyro-terminal-pane,
+.gyro-code-surface,
+.gyro-ide-assistant,
+.gyro-settings-section-body {
+  border-color: var(--gyro-premium-hairline);
+  border-radius: var(--gyro-premium-radius-md);
+  box-shadow: none;
+}
+
+.gyro-sidebar-explorer-tree {
+  min-height: 0;
+  overflow: auto;
+  padding-block: var(--gyro-space-compact);
+  scrollbar-gutter: stable;
+}
+
+.gyro-sidebar-explorer-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--gyro-accent) 11%, transparent);
+  color: var(--gyro-text);
 }
