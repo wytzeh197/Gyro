@@ -2800,7 +2800,6 @@ export function ChatSurface({
             key={turn.id}
             onProviderStatusAction={onProviderStatusAction}
             onReusePrompt={onReusePrompt}
-            onStopChat={onStopChat}
             onContinueChat={onContinueChat}
             turn={turn}
           />
@@ -2876,6 +2875,7 @@ export function ChatSurface({
             onRemoveAttachment={onRemoveAttachment}
             onAttachImageFiles={onAttachImageFiles}
             onSend={handleSend}
+            onStop={onStopChat}
             isSending={isComposerSending}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
@@ -2998,6 +2998,7 @@ export function ChatSurface({
             onRemoveAttachment={onRemoveAttachment}
             onAttachImageFiles={onAttachImageFiles}
             onSend={handleSend}
+            onStop={onStopChat}
             isSending={isComposerSending}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
@@ -9504,6 +9505,7 @@ function Composer({
   onRemoveAttachment,
   onAttachImageFiles,
   onSend,
+  onStop,
   worktreeName,
   workspacePath,
   workspaceMode = "local",
@@ -9529,6 +9531,7 @@ function Composer({
   onRemoveAttachment?: (attachmentId: string) => void;
   onAttachImageFiles?: (files: File[]) => void;
   onSend: () => void;
+  onStop?: () => void;
   worktreeName?: string;
   workspacePath?: string;
   workspaceMode?: WorkbenchMode;
@@ -10088,18 +10091,26 @@ function Composer({
           </div>
         ) : null}
         <button
-          aria-label="Send message"
+          aria-label={isSending ? "Stop response" : "Send message"}
           aria-busy={isSending}
-          className="gyro-send-button"
-          disabled={!hasSelectedProvider || isSending}
+          className={`gyro-send-button${isSending ? " is-stop" : ""}`}
+          disabled={isSending ? !onStop : !hasSelectedProvider}
           onClick={() => {
             setActivePopover(null);
-            onSend();
+            if (isSending) {
+              onStop?.();
+            } else {
+              onSend();
+            }
           }}
-          title="Send"
+          title={isSending ? "Stop response" : "Send"}
           type="button"
         >
-          <ArrowUp size={17} />
+          {isSending ? (
+            <Square fill="currentColor" size={10} strokeWidth={0} />
+          ) : (
+            <ArrowUp size={17} />
+          )}
         </button>
       </div>
       {shouldShowContextRow ? (
@@ -10428,8 +10439,7 @@ const ChatEvent = memo(function ChatEvent({
 type ChatTranscriptTurn = {
   id: string;
   user?: SessionEvent;
-  assistantEvents: SessionEvent[];
-  activityEvents: SessionEvent[];
+  timelineEvents: SessionEvent[];
   statusEvent?: SessionEvent;
   startedAt: string;
   runStartedAt?: string;
@@ -10488,8 +10498,7 @@ function deriveTranscriptState(events: SessionEvent[]) {
     if (!turn) {
       turn = {
         id: turnId,
-        assistantEvents: [],
-        activityEvents: [],
+        timelineEvents: [],
         startedAt,
       };
       turns.push(turn);
@@ -10553,9 +10562,9 @@ function deriveTranscriptState(events: SessionEvent[]) {
     }
     const turn = ensureTurn(turnId, event.createdAt);
     if (event.kind === "assistant-message") {
-      turn.assistantEvents.push(event);
+      turn.timelineEvents.push(event);
     } else if (providerActivityFromEvent(event)) {
-      turn.activityEvents.push(event);
+      turn.timelineEvents.push(event);
     } else if (providerStatusFromEvent(event)) {
       turn.statusEvent = event;
       const providerStatus = providerStatusFromEvent(event);
@@ -10633,14 +10642,12 @@ function ChatTurn({
   isActive,
   onProviderStatusAction,
   onReusePrompt,
-  onStopChat,
   onContinueChat,
   turn,
 }: {
   isActive: boolean;
   onProviderStatusAction?: (action: string, event: SessionEvent) => void;
   onReusePrompt?: (message: string) => void;
-  onStopChat?: () => void;
   onContinueChat?: () => void;
   turn: ChatTranscriptTurn;
 }) {
@@ -10656,8 +10663,9 @@ function ChatTurn({
   const completedAt = !isRunning
     ? (turn.completedAt ?? turn.statusEvent?.createdAt)
     : undefined;
-  const hasResponse = turn.assistantEvents.some(
-    (event) => event.message.trim().length > 0,
+  const hasResponse = turn.timelineEvents.some(
+    (event) =>
+      event.kind === "assistant-message" && event.message.trim().length > 0,
   );
 
   return (
@@ -10672,36 +10680,32 @@ function ChatTurn({
           isRunning={isRunning}
           startedAt={turn.runStartedAt ?? turn.startedAt}
         >
-          {isRunning && onStopChat ? (
-            <button onClick={onStopChat} type="button">
-              <Square fill="currentColor" size={10} strokeWidth={0} />
-              Stop
-            </button>
-          ) : hasResponse && onContinueChat ? (
+          {!isRunning && hasResponse && onContinueChat ? (
             <button onClick={onContinueChat} type="button">
               Continue
             </button>
           ) : null}
         </ChatRunHeader>
-        {turn.activityEvents.length > 0 ? (
-          <div className="gyro-chat-run-activities" aria-label="Agent activity">
-            {turn.activityEvents.map((event) => (
-              <ProviderActivityRow event={event} key={event.id} />
-            ))}
-          </div>
-        ) : null}
         {isRunning && !hasResponse ? (
           <div className="gyro-chat-run-thinking" role="status">
             Thinking
           </div>
         ) : null}
-        {turn.assistantEvents.map((event) => (
-          <article className="gyro-message is-assistant" key={event.id}>
-            <div>
-              <AssistantResponse event={event} />
-            </div>
-          </article>
-        ))}
+        {turn.timelineEvents.length > 0 ? (
+          <div className="gyro-chat-run-timeline" aria-label="Agent timeline">
+            {turn.timelineEvents.map((event) =>
+              event.kind === "assistant-message" ? (
+                <article className="gyro-message is-assistant" key={event.id}>
+                  <div>
+                    <AssistantResponse event={event} />
+                  </div>
+                </article>
+              ) : (
+                <ProviderActivityRow event={event} key={event.id} />
+              ),
+            )}
+          </div>
+        ) : null}
         {providerStatus &&
         (["failed", "blocked", "cancelled"].includes(providerStatus.status) ||
           wasInterrupted) &&
