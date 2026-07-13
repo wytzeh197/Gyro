@@ -259,7 +259,8 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
         const requested =
           savedProvider?.selectedReasoningEffort ??
           catalogProvider.selectedReasoningEffort;
-        return requested && model?.supportedReasoningEfforts?.includes(requested)
+        return requested &&
+          model?.supportedReasoningEfforts?.includes(requested)
           ? requested
           : model?.defaultReasoningEffort;
       })(),

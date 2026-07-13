@@ -339,7 +339,7 @@ export type ProviderResumeCursor = {
 };
 
 export type ProviderChatStreamPhase =
-  "started" | "activity" | "delta" | "completed" | "failed";
+  "started" | "activity" | "delta" | "completed" | "failed" | "cancelled";
 
 export type ProviderChatStreamEvent = {
   sessionId: string;
@@ -347,6 +347,7 @@ export type ProviderChatStreamEvent = {
   providerId: string;
   modelId?: string | null;
   eventId: string;
+  sequence: number;
   phase: ProviderChatStreamPhase;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;

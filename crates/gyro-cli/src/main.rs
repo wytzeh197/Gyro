@@ -3,16 +3,22 @@ use clap::{Args, Parser, Subcommand};
 use gyro_core::{
     config::CommandProfile, create_worktree, doctor::run_doctor, ipc::notify_running_app, keychain,
     slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
-    CreateSessionContext, DoctorStatus, GyroConfig, GyroPaths, HarnessRunStatus,
-    ProviderRunPayload, Session, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode, TerminalRequestPayload,
+    CancellationToken, CreateSessionContext, DoctorStatus, ExecutionRequest, ExecutionStream,
+    ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus, ProviderHealthRequest,
+    ProviderHealthService, ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind,
+    SessionOrigin, SessionStore, SessionWorkspaceMode, TerminalRequestPayload,
 };
 use serde::Serialize;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+const CLI_JSON_SCHEMA_V1: &str = "gyro.cli.v1";
+const EXIT_PROVIDER_UNAVAILABLE: i32 = 3;
 
 const DEFAULT_SESSION_LIMIT: usize = 20;
 
@@ -26,6 +32,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Start an interactive provider-backed chat in the current repository.
+    Chat(ChatArgs),
     /// Run a one-shot coding task in the current repository.
     Run(RunArgs),
     /// Resume the latest or selected Gyro session.
@@ -40,6 +48,41 @@ enum Commands {
     Doctor(DoctorArgs),
     /// Manage local Gyro configuration.
     Config(ConfigArgs),
+}
+
+#[derive(Debug, Args)]
+struct ChatArgs {
+    /// Workspace path. Defaults to the current directory.
+    #[arg(long)]
+    workspace: Option<PathBuf>,
+
+    /// CLI profile to use, such as codex or claude-code.
+    #[arg(long)]
+    profile: Option<String>,
+
+    /// Model hint to use for this chat.
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Approve provider runs when the active policy requires terminal confirmation.
+    #[arg(long)]
+    approve: bool,
+
+    /// Stop a provider turn when this timeout is reached.
+    #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    timeout_seconds: u64,
+}
+
+impl Default for ChatArgs {
+    fn default() -> Self {
+        Self {
+            workspace: None,
+            profile: None,
+            model: None,
+            approve: false,
+            timeout_seconds: 180,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -71,6 +114,14 @@ struct RunArgs {
     #[arg(long)]
     json: bool,
 
+    /// Approve this provider run when the active policy requires terminal confirmation.
+    #[arg(long)]
+    approve: bool,
+
+    /// Stop the provider when this timeout is reached.
+    #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    timeout_seconds: u64,
+
     #[command(flatten)]
     worktree: WorktreeArgs,
 }
@@ -99,6 +150,18 @@ struct ResumeArgs {
     /// Emit JSON instead of text.
     #[arg(long)]
     json: bool,
+
+    /// Message sent while resuming. Defaults to continuing the interrupted work.
+    #[arg(long)]
+    message: Option<String>,
+
+    /// Approve this provider run when the active policy requires terminal confirmation.
+    #[arg(long)]
+    approve: bool,
+
+    /// Stop the provider when this timeout is reached.
+    #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    timeout_seconds: u64,
 }
 
 #[derive(Debug, Args)]
@@ -237,10 +300,25 @@ struct SessionCommandOutput {
     profile_id: Option<String>,
     profile_label: Option<String>,
     model: Option<String>,
+    approval_required: bool,
     app_handoff: AppHandoffOutput,
     resume_command: String,
     next_command: Option<String>,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run: Option<CliRunOutput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CliRunOutput {
+    run_id: Uuid,
+    attempt_id: Uuid,
+    provider_id: String,
+    duration_ms: u64,
+    exit_code: Option<i32>,
+    resumed: bool,
+    response: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -297,9 +375,100 @@ enum OpenBehavior {
     Skip,
 }
 
-fn main() -> Result<()> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum CliErrorCategory {
+    InvalidInput,
+    ProviderUnavailable,
+    ApprovalRejected,
+    ExecutionFailed,
+    Cancelled,
+    Internal,
+}
+
+impl CliErrorCategory {
+    fn exit_code(self) -> i32 {
+        match self {
+            Self::InvalidInput => 2,
+            Self::ProviderUnavailable => EXIT_PROVIDER_UNAVAILABLE,
+            Self::ApprovalRejected => 4,
+            Self::ExecutionFailed => 5,
+            Self::Cancelled => 130,
+            Self::Internal => 70,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CliErrorBody<'a> {
+    category: CliErrorCategory,
+    code: i32,
+    message: &'a str,
+}
+
+#[derive(Serialize)]
+struct CliErrorOutput<'a> {
+    schema: &'static str,
+    status: &'static str,
+    error: CliErrorBody<'a>,
+}
+
+#[derive(Serialize)]
+struct CliJsonEnvelope<'a, T> {
+    schema: &'static str,
+    #[serde(flatten)]
+    value: &'a T,
+}
+
+impl Cli {
+    fn wants_json(&self) -> bool {
+        match self.command.as_ref() {
+            Some(Commands::Chat(_)) => false,
+            Some(Commands::Run(args)) => args.json,
+            Some(Commands::Resume(args)) => args.json,
+            Some(Commands::Sessions(args)) => args.json,
+            Some(Commands::Setup(args)) => args.json,
+            Some(Commands::Doctor(args)) => args.json,
+            Some(Commands::Config(ConfigArgs {
+                command: ConfigCommand::Show { json },
+            })) => *json,
+            _ => false,
+        }
+    }
+}
+
+fn main() {
     let cli = Cli::parse();
+    let json = cli.wants_json();
+    if let Err(error) = run_cli(cli) {
+        let message = gyro_core::security::redact_secrets(&error.to_string());
+        let category = classify_cli_error(&message);
+        if json {
+            let output = CliErrorOutput {
+                schema: CLI_JSON_SCHEMA_V1,
+                status: "failed",
+                error: CliErrorBody {
+                    category,
+                    code: category.exit_code(),
+                    message: &message,
+                },
+            };
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&output)
+                    .unwrap_or_else(|_| format!("Gyro CLI failed: {message}"))
+            );
+        } else {
+            eprintln!("Gyro CLI failed: {message}");
+        }
+        std::process::exit(category.exit_code());
+    }
+}
+
+fn run_cli(cli: Cli) -> Result<()> {
     match cli.command {
+        Some(Commands::Chat(args)) => interactive_chat(args),
         Some(Commands::Run(args)) => run_task(args),
         Some(Commands::Resume(args)) => resume_session(args),
         Some(Commands::Sessions(args)) => sessions_command(args),
@@ -307,7 +476,43 @@ fn main() -> Result<()> {
         Some(Commands::App(args)) => app_command(args),
         Some(Commands::Doctor(args)) => doctor(args),
         Some(Commands::Config(args)) => config_command(args),
-        None => interactive_chat(),
+        None => interactive_chat(ChatArgs::default()),
+    }
+}
+
+fn classify_cli_error(message: &str) -> CliErrorCategory {
+    let message = message.to_ascii_lowercase();
+    if message.contains("cancelled") || message.contains("interrupted") {
+        CliErrorCategory::Cancelled
+    } else if message.contains("approval") && message.contains("reject") {
+        CliErrorCategory::ApprovalRejected
+    } else if message.contains("session saved: no")
+        || message.contains("unknown provider")
+        || message.contains("unknown profile")
+        || message.contains("require --")
+        || message.contains("pass exactly one")
+        || message.contains("resolve workspace path")
+    {
+        CliErrorCategory::InvalidInput
+    } else if message.contains("not installed")
+        || message.contains("unavailable")
+        || message.contains("not authenticated")
+        || message.contains("not logged in")
+        || message.contains("auth required")
+        || message.contains("not configured")
+        || message.contains("has no provider")
+        || message.contains("status: blocked")
+    {
+        CliErrorCategory::ProviderUnavailable
+    } else if message.contains("not found") || message.contains("does not exist") {
+        CliErrorCategory::InvalidInput
+    } else if message.contains("timed out")
+        || message.contains("execution failed")
+        || message.contains("exited with")
+    {
+        CliErrorCategory::ExecutionFailed
+    } else {
+        CliErrorCategory::Internal
     }
 }
 
@@ -349,6 +554,31 @@ fn select_command_profile<'a>(
         .ok_or_else(|| {
             anyhow!(
                 "status: blocked\nprofile `{profile_id}` is not configured\nnext: run `gyro config show` to inspect available CLI profiles\nsession saved: no"
+            )
+        })
+}
+
+fn select_execution_profile<'a>(
+    config: &'a GyroConfig,
+    profile_id: Option<&str>,
+) -> Result<&'a CommandProfile> {
+    if let Some(profile) = select_command_profile(config, profile_id)? {
+        return Ok(profile);
+    }
+    config
+        .command_profiles
+        .iter()
+        .find(|profile| {
+            profile.provider_id.as_ref().is_some_and(|provider_id| {
+                config
+                    .model_providers
+                    .iter()
+                    .any(|provider| provider.id == *provider_id && provider.enabled)
+            }) && command_in_path(&profile.command).is_some()
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "provider unavailable: choose an enabled executable profile with --profile <id>"
             )
         })
 }
@@ -470,6 +700,7 @@ fn cli_terminal_request_payload(
     profile: Option<&CommandProfile>,
     model: Option<String>,
     session: &Session,
+    approval_required: bool,
 ) -> Result<serde_json::Value> {
     let payload = TerminalRequestPayload::new(
         run_id,
@@ -482,14 +713,22 @@ fn cli_terminal_request_payload(
             .unwrap_or_default(),
         Some(session.workspace_path.display().to_string()),
         status,
-    );
-    gyro_core::validate_mutation_approval_policy("terminal-request", payload.approval_required)?;
+    )
+    .with_approval_required(approval_required);
+    if payload.approval_required {
+        gyro_core::validate_mutation_approval_policy("terminal-request", true)?;
+    }
     let mut value = gyro_core::harness_payload_value(&payload)?;
     insert_cli_metadata(&mut value, mode, profile, model, session);
     Ok(value)
 }
 
-fn cli_approval_payload(run_id: Uuid, mode: &str) -> Result<serde_json::Value> {
+fn cli_approval_payload(
+    run_id: Uuid,
+    mode: &str,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
+) -> Result<serde_json::Value> {
     let payload = ApprovalRequestPayload::new(
         run_id,
         "command-and-file-edits",
@@ -501,11 +740,11 @@ fn cli_approval_payload(run_id: Uuid, mode: &str) -> Result<serde_json::Value> {
         object.insert("mode".into(), serde_json::Value::String(mode.into()));
         object.insert(
             "requireCommandApproval".into(),
-            serde_json::Value::Bool(true),
+            serde_json::Value::Bool(require_command_approval),
         );
         object.insert(
             "requireFileEditApproval".into(),
-            serde_json::Value::Bool(true),
+            serde_json::Value::Bool(require_file_edit_approval),
         );
     }
     Ok(value)
@@ -543,6 +782,524 @@ fn cli_profile_readiness_payload(
         object.insert("sessionSaved".into(), serde_json::Value::Bool(true));
     }
     Ok(value)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CliProviderKind {
+    Codex,
+    Claude,
+}
+
+struct CliProviderInvocation {
+    request: ExecutionRequest,
+    output_path: Option<PathBuf>,
+    provider_kind: CliProviderKind,
+    proposed_session_id: Option<String>,
+}
+
+#[derive(Default)]
+struct CliStreamDecoder {
+    line_buffer: String,
+    response: String,
+    provider_session_id: Option<String>,
+}
+
+impl CliStreamDecoder {
+    fn push_stdout(&mut self, chunk: &str) -> Vec<String> {
+        self.line_buffer.push_str(chunk);
+        let mut deltas = Vec::new();
+        while let Some(newline) = self.line_buffer.find('\n') {
+            let line = self.line_buffer.drain(..=newline).collect::<String>();
+            self.push_line(&line, &mut deltas);
+        }
+        if self.line_buffer.chars().count() > 256_000 {
+            self.line_buffer.clear();
+        }
+        deltas
+    }
+
+    fn finish(&mut self) -> Vec<String> {
+        if self.line_buffer.is_empty() {
+            return Vec::new();
+        }
+        let line = std::mem::take(&mut self.line_buffer);
+        let mut deltas = Vec::new();
+        self.push_line(&line, &mut deltas);
+        deltas
+    }
+
+    fn push_line(&mut self, line: &str, deltas: &mut Vec<String>) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            return;
+        };
+        if self.provider_session_id.is_none() {
+            self.provider_session_id = gyro_core::extract_provider_session_id(&value);
+        }
+        let Some(chunk) = gyro_core::extract_provider_text_chunk(&value) else {
+            return;
+        };
+        let delta = match chunk {
+            ProviderTextChunk::Delta(delta) => delta,
+            ProviderTextChunk::Snapshot(snapshot) => {
+                if self.response.is_empty() {
+                    snapshot
+                } else {
+                    snapshot
+                        .strip_prefix(&self.response)
+                        .unwrap_or_default()
+                        .to_string()
+                }
+            }
+            ProviderTextChunk::Final(final_text) => {
+                if self.response.is_empty() {
+                    final_text
+                } else {
+                    final_text
+                        .strip_prefix(&self.response)
+                        .unwrap_or_default()
+                        .to_string()
+                }
+            }
+        };
+        if !delta.is_empty() {
+            self.response.push_str(&delta);
+            deltas.push(delta);
+        }
+    }
+}
+
+static CLI_SIGNAL_TOKEN: OnceLock<Mutex<Option<CancellationToken>>> = OnceLock::new();
+static CLI_SIGNAL_HANDLER: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+
+struct CliCancellationGuard;
+
+impl Drop for CliCancellationGuard {
+    fn drop(&mut self) {
+        if let Some(slot) = CLI_SIGNAL_TOKEN.get() {
+            if let Ok(mut active) = slot.lock() {
+                *active = None;
+            }
+        }
+    }
+}
+
+fn activate_cli_cancellation(token: CancellationToken) -> Result<CliCancellationGuard> {
+    let slot = CLI_SIGNAL_TOKEN.get_or_init(|| Mutex::new(None));
+    let handler = CLI_SIGNAL_HANDLER.get_or_init(|| {
+        ctrlc::set_handler(|| {
+            if let Some(slot) = CLI_SIGNAL_TOKEN.get() {
+                if let Ok(active) = slot.lock() {
+                    if let Some(token) = active.as_ref() {
+                        token.cancel();
+                    }
+                }
+            }
+        })
+        .map_err(|error| error.to_string())
+    });
+    if let Err(error) = handler {
+        return Err(anyhow!("install Ctrl-C handler: {error}"));
+    }
+    *slot
+        .lock()
+        .map_err(|_| anyhow!("CLI cancellation state is unavailable"))? = Some(token);
+    Ok(CliCancellationGuard)
+}
+
+fn confirm_cli_execution(config: &GyroConfig, approved: bool, json: bool) -> Result<bool> {
+    let approval_required = config.require_command_approval || config.require_file_edit_approval;
+    if !approval_required || approved {
+        return Ok(true);
+    }
+    if json || !io::stdin().is_terminal() {
+        return Err(anyhow!(
+            "approval rejected: the active policy requires confirmation; rerun with --approve"
+        ));
+    }
+    print!(
+        "The provider may run commands or edit workspace files under the active policy. Approve this run? [y/N] "
+    );
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(true)
+    } else {
+        Err(anyhow!("approval rejected by user"))
+    }
+}
+
+fn cli_provider_kind(profile: &CommandProfile) -> Result<CliProviderKind> {
+    match profile.provider_id.as_deref() {
+        Some("openai") => Ok(CliProviderKind::Codex),
+        Some("anthropic") => Ok(CliProviderKind::Claude),
+        Some(provider_id) => Err(anyhow!(
+            "provider `{provider_id}` is unavailable for CLI execution"
+        )),
+        None => Err(anyhow!(
+            "profile `{}` is not configured with an executable provider",
+            profile.id
+        )),
+    }
+}
+
+fn build_cli_provider_invocation(
+    profile: &CommandProfile,
+    workspace: &Path,
+    prompt: &str,
+    model: Option<&str>,
+    resume_cursor: Option<(&str, &str)>,
+    approved: bool,
+    timeout_seconds: u64,
+) -> Result<CliProviderInvocation> {
+    let provider_kind = cli_provider_kind(profile)?;
+    let mut args = profile.args.clone();
+    let mut output_path = None;
+    let mut proposed_session_id = None;
+    match provider_kind {
+        CliProviderKind::Codex => {
+            let response_path =
+                std::env::temp_dir().join(format!("gyro-cli-response-{}.txt", Uuid::new_v4()));
+            args.push("exec".into());
+            if let Some(("codex-session", session_id)) = resume_cursor {
+                args.push("resume".into());
+                args.push("--skip-git-repo-check".into());
+                if approved {
+                    args.push("--dangerously-bypass-approvals-and-sandbox".into());
+                }
+                args.push("--json".into());
+                args.push("--output-last-message".into());
+                args.push(response_path.display().to_string());
+                if let Some(model) = cli_codex_model_arg(model) {
+                    args.extend(["--model".into(), model]);
+                }
+                args.push(session_id.into());
+            } else {
+                args.push("--skip-git-repo-check".into());
+                if approved {
+                    args.push("--dangerously-bypass-approvals-and-sandbox".into());
+                } else {
+                    args.extend(["--sandbox".into(), "workspace-write".into()]);
+                }
+                args.push("--json".into());
+                args.push("--output-last-message".into());
+                args.push(response_path.display().to_string());
+                if let Some(model) = cli_codex_model_arg(model) {
+                    args.extend(["--model".into(), model]);
+                }
+            }
+            args.extend(["--".into(), prompt.into()]);
+            output_path = Some(response_path);
+        }
+        CliProviderKind::Claude => {
+            args.extend([
+                "--print".into(),
+                "--output-format".into(),
+                "stream-json".into(),
+                "--include-partial-messages".into(),
+            ]);
+            if let Some(("claude-session", session_id)) = resume_cursor {
+                args.extend(["--resume".into(), session_id.into()]);
+                proposed_session_id = Some(session_id.into());
+            } else {
+                let session_id = Uuid::new_v4().to_string();
+                args.extend(["--session-id".into(), session_id.clone()]);
+                proposed_session_id = Some(session_id);
+            }
+            if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
+                args.extend(["--model".into(), model.into()]);
+            }
+            if approved {
+                args.push("--dangerously-skip-permissions".into());
+            }
+            args.push(prompt.into());
+        }
+    }
+    let mut request = ExecutionRequest::new(profile.command.clone());
+    request.args = args.into_iter().map(Into::into).collect();
+    request.current_dir = Some(workspace.to_path_buf());
+    request.timeout = Duration::from_secs(timeout_seconds);
+    request.max_stdout_chars = 256_000;
+    request.max_stderr_chars = 64_000;
+    Ok(CliProviderInvocation {
+        request,
+        output_path,
+        provider_kind,
+        proposed_session_id,
+    })
+}
+
+fn cli_codex_model_arg(model: Option<&str>) -> Option<String> {
+    let model = model?.trim();
+    if model.is_empty()
+        || matches!(
+            model.to_ascii_lowercase().as_str(),
+            "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5"
+        )
+    {
+        return None;
+    }
+    Some(model.into())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_cli_run_status(
+    store: &SessionStore,
+    session: &Session,
+    turn_id: Uuid,
+    attempt_id: Uuid,
+    mode: &str,
+    status: HarnessRunStatus,
+    profile: &CommandProfile,
+    model: Option<String>,
+    message: &str,
+    error: Option<&str>,
+    duration_ms: Option<u64>,
+) -> Result<()> {
+    let mut payload = cli_provider_run_payload(
+        turn_id,
+        attempt_id,
+        mode,
+        status,
+        Some(profile),
+        model,
+        session,
+    )?;
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "error".into(),
+            error
+                .map(gyro_core::sanitize_harness_text)
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "durationMs".into(),
+            duration_ms
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
+    store.append_event_with_turn_id(
+        session.id,
+        SessionEventKind::SystemEvent,
+        message,
+        payload,
+        Some(turn_id),
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_cli_provider(
+    store: &SessionStore,
+    session: &Session,
+    profile: &CommandProfile,
+    model: Option<String>,
+    prompt: &str,
+    mode: &str,
+    config: &GyroConfig,
+    approved: bool,
+    json: bool,
+    timeout_seconds: u64,
+    turn_id: Uuid,
+    attempt_id: Uuid,
+) -> Result<CliRunOutput> {
+    let approved = confirm_cli_execution(config, approved, json)?;
+    let provider_id = profile
+        .provider_id
+        .clone()
+        .ok_or_else(|| anyhow!("profile `{}` has no provider", profile.id))?;
+    let binding = store.get_provider_session_binding(session.id, &provider_id)?;
+    let resume_cursor = binding.as_ref().and_then(|binding| {
+        let kind = binding.resume_cursor_json.get("kind")?.as_str()?;
+        let session_id = binding.resume_cursor_json.get("sessionId")?.as_str()?;
+        Some((kind, session_id))
+    });
+    let invocation = build_cli_provider_invocation(
+        profile,
+        &session.workspace_path,
+        prompt,
+        model.as_deref(),
+        resume_cursor,
+        approved,
+        timeout_seconds,
+    )?;
+    append_cli_run_status(
+        store,
+        session,
+        turn_id,
+        attempt_id,
+        mode,
+        HarnessRunStatus::Running,
+        profile,
+        model.clone(),
+        "CLI provider run started.",
+        None,
+        None,
+    )?;
+    if !json {
+        eprintln!(
+            "Running {} in {}...",
+            profile.display_name,
+            session.workspace_path.display()
+        );
+    }
+    let cancellation = CancellationToken::default();
+    let _cancellation_guard = activate_cli_cancellation(cancellation.clone())?;
+    let mut decoder = CliStreamDecoder::default();
+    let outcome = gyro_core::run_command(invocation.request, cancellation, |chunk| {
+        if chunk.stream != ExecutionStream::Stdout {
+            return;
+        }
+        for delta in decoder.push_stdout(&chunk.text) {
+            if !json {
+                print!("{delta}");
+                let _ = io::stdout().flush();
+            }
+        }
+    });
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let error = gyro_core::sanitize_harness_text(&error.to_string());
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                HarnessRunStatus::Failed,
+                profile,
+                model,
+                "CLI provider run failed to start.",
+                Some(&error),
+                None,
+            )?;
+            return Err(anyhow!("execution failed: {error}"));
+        }
+    };
+    for delta in decoder.finish() {
+        if !json {
+            print!("{delta}");
+        }
+    }
+    if !json && !decoder.response.is_empty() {
+        println!();
+    }
+    let output_file_response = invocation
+        .output_path
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default();
+    if let Some(path) = invocation.output_path.as_ref() {
+        let _ = std::fs::remove_file(path);
+    }
+    let response = gyro_core::sanitize_harness_text(
+        output_file_response
+            .trim()
+            .is_empty()
+            .then_some(decoder.response.trim())
+            .unwrap_or(output_file_response.trim()),
+    );
+    let status = match outcome.termination {
+        ExecutionTermination::Cancelled => HarnessRunStatus::Cancelled,
+        ExecutionTermination::TimedOut => HarnessRunStatus::Failed,
+        ExecutionTermination::Exited { code: Some(0) } if !response.is_empty() => {
+            HarnessRunStatus::Done
+        }
+        ExecutionTermination::Exited { .. } => HarnessRunStatus::Failed,
+    };
+    if status != HarnessRunStatus::Done {
+        let detail = match outcome.termination {
+            ExecutionTermination::Cancelled => "run cancelled by user".to_string(),
+            ExecutionTermination::TimedOut => {
+                format!("execution timed out after {timeout_seconds} seconds")
+            }
+            ExecutionTermination::Exited { code } => {
+                let stderr = gyro_core::sanitize_harness_text(outcome.stderr.trim());
+                if stderr.is_empty() {
+                    format!("provider exited with {}", code.unwrap_or(-1))
+                } else {
+                    format!("provider exited with {}: {stderr}", code.unwrap_or(-1))
+                }
+            }
+        };
+        append_cli_run_status(
+            store,
+            session,
+            turn_id,
+            attempt_id,
+            mode,
+            status.clone(),
+            profile,
+            model,
+            if status == HarnessRunStatus::Cancelled {
+                "CLI provider run cancelled."
+            } else {
+                "CLI provider run failed."
+            },
+            Some(&detail),
+            Some(outcome.duration_ms),
+        )?;
+        return Err(anyhow!(detail));
+    }
+    let provider_session_id = decoder
+        .provider_session_id
+        .or(invocation.proposed_session_id);
+    if let Some(provider_session_id) = provider_session_id.as_deref() {
+        let kind = match invocation.provider_kind {
+            CliProviderKind::Codex => "codex-session",
+            CliProviderKind::Claude => "claude-session",
+        };
+        store.upsert_provider_session_binding(
+            session.id,
+            provider_id.clone(),
+            model.clone(),
+            model.clone(),
+            None,
+            serde_json::json!({"kind": kind, "sessionId": provider_session_id}),
+            "ready",
+            None,
+        )?;
+    }
+    store.append_event_with_turn_id(
+        session.id,
+        SessionEventKind::AssistantMessage,
+        response.clone(),
+        cli_provider_run_payload(
+            turn_id,
+            attempt_id,
+            mode,
+            HarnessRunStatus::Done,
+            Some(profile),
+            model.clone(),
+            session,
+        )?,
+        Some(turn_id),
+    )?;
+    append_cli_run_status(
+        store,
+        session,
+        turn_id,
+        attempt_id,
+        mode,
+        HarnessRunStatus::Done,
+        profile,
+        model,
+        "CLI provider run completed.",
+        None,
+        Some(outcome.duration_ms),
+    )?;
+    Ok(CliRunOutput {
+        run_id: turn_id,
+        attempt_id,
+        provider_id,
+        duration_ms: outcome.duration_ms,
+        exit_code: outcome.exit_code(),
+        resumed: resume_cursor.is_some(),
+        response,
+    })
 }
 
 fn insert_cli_metadata(
@@ -610,7 +1367,13 @@ fn session_summary(session: &Session) -> SessionSummaryOutput {
 }
 
 fn print_json<T: Serialize>(value: &T) -> Result<()> {
-    println!("{}", serde_json::to_string_pretty(value)?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&CliJsonEnvelope {
+            schema: CLI_JSON_SCHEMA_V1,
+            value,
+        })?
+    );
     Ok(())
 }
 
@@ -669,13 +1432,17 @@ fn default_worktree_branch(title: &str) -> String {
     format!("gyro/{}-{timestamp}", slugify_worktree_name(title))
 }
 
-fn interactive_chat() -> Result<()> {
+fn interactive_chat(args: ChatArgs) -> Result<()> {
     let (paths, store) = open_store()?;
-    let workspace = workspace_path(None)?;
+    let config = GyroConfig::load(&paths)?;
+    let profile = select_execution_profile(&config, args.profile.as_deref())?;
+    let model = model_for(Some(profile), args.model);
+    let workspace = workspace_path(args.workspace)?;
     let session = store.create_session(&workspace, SessionOrigin::Cli, "CLI chat")?;
 
     println!("Gyro CLI session {}", session.id);
     println!("Workspace: {}", workspace.display());
+    println!("Provider: {}", profile.display_name);
     println!("Type a message, or /open to open this session in Gyro.app, or /exit.");
 
     let stdin = io::stdin();
@@ -711,28 +1478,55 @@ fn interactive_chat() -> Result<()> {
                 attempt_id,
                 "chat",
                 HarnessRunStatus::Queued,
-                None,
-                None,
+                Some(profile),
+                model.clone(),
                 &session,
             )?,
             Some(turn_id),
         )?;
         store.append_event_with_turn_id(
             session.id,
-            SessionEventKind::SystemEvent,
-            "Message saved. Model execution is configured through providers.",
-            cli_provider_run_payload(
+            SessionEventKind::CommandRequested,
+            "CLI chat provider execution requested.",
+            cli_terminal_request_payload(
                 turn_id,
-                attempt_id,
                 "chat",
-                HarnessRunStatus::Waiting,
-                None,
-                None,
+                HarnessRunStatus::Queued,
+                Some(profile),
+                model.clone(),
                 &session,
+                config.require_command_approval || config.require_file_edit_approval,
             )?,
             Some(turn_id),
         )?;
-        println!("saved to session {}", session.id);
+        if config.require_command_approval || config.require_file_edit_approval {
+            store.append_event_with_turn_id(
+                session.id,
+                SessionEventKind::ApprovalRequested,
+                "CLI chat turn requires approval under the active policy.",
+                cli_approval_payload(
+                    turn_id,
+                    "chat",
+                    config.require_command_approval,
+                    config.require_file_edit_approval,
+                )?,
+                Some(turn_id),
+            )?;
+        }
+        execute_cli_provider(
+            &store,
+            &session,
+            profile,
+            model.clone(),
+            input,
+            "chat",
+            &config,
+            args.approve,
+            false,
+            args.timeout_seconds,
+            turn_id,
+            attempt_id,
+        )?;
     }
 
     Ok(())
@@ -741,7 +1535,7 @@ fn interactive_chat() -> Result<()> {
 fn run_task(args: RunArgs) -> Result<()> {
     let (paths, store) = open_store()?;
     let config = GyroConfig::load(&paths)?;
-    let profile = select_command_profile(&config, args.profile.as_deref())?;
+    let profile = Some(select_execution_profile(&config, args.profile.as_deref())?);
     let model = model_for(profile, args.model);
     let workspace = workspace_path(args.workspace)?;
     let title = summarize_title(&args.task);
@@ -775,16 +1569,24 @@ fn run_task(args: RunArgs) -> Result<()> {
             profile,
             model.clone(),
             &session,
+            config.require_command_approval || config.require_file_edit_approval,
         )?,
         Some(turn_id),
     )?;
-    store.append_event_with_turn_id(
-        session.id,
-        SessionEventKind::ApprovalRequested,
-        "Agent task recorded; command and file edits require approval by default.",
-        cli_approval_payload(turn_id, "run")?,
-        Some(turn_id),
-    )?;
+    if config.require_command_approval || config.require_file_edit_approval {
+        store.append_event_with_turn_id(
+            session.id,
+            SessionEventKind::ApprovalRequested,
+            "CLI provider execution requires approval under the active policy.",
+            cli_approval_payload(
+                turn_id,
+                "run",
+                config.require_command_approval,
+                config.require_file_edit_approval,
+            )?,
+            Some(turn_id),
+        )?;
+    }
 
     if status == CliStatus::Blocked {
         store.append_event_with_turn_id(
@@ -804,21 +1606,42 @@ fn run_task(args: RunArgs) -> Result<()> {
             )?,
             Some(turn_id),
         )?;
+        return Err(anyhow!(
+            "provider unavailable: {}; session saved: {}",
+            profile_message.unwrap_or_else(|| "selected CLI profile is blocked".into()),
+            session.id
+        ));
     }
 
+    let run = Some(execute_cli_provider(
+        &store,
+        &session,
+        profile.ok_or_else(|| anyhow!("an executable provider profile is required"))?,
+        model.clone(),
+        &args.task,
+        "run",
+        &config,
+        args.approve,
+        args.json,
+        args.timeout_seconds,
+        turn_id,
+        attempt_id,
+    )?);
     let handoff = perform_app_handoff(
         &paths,
         &session,
         AppNotificationKind::OpenSession,
         open_behavior(args.open, args.no_open),
     )?;
-    let message = match status {
-        CliStatus::Blocked => profile_message
-            .unwrap_or_else(|| "session saved, but the selected CLI profile needs setup".into()),
-        _ => "local session saved; approval required before commands or file edits".into(),
+    let final_status = CliStatus::Done;
+    let message = match final_status {
+        CliStatus::Done => {
+            "trusted provider run completed and was saved to the shared session".into()
+        }
+        _ => "local session saved".into(),
     };
     let output = SessionCommandOutput {
-        status,
+        status: final_status,
         session_id: session.id,
         title: session.title.clone(),
         workspace: session.workspace_path.clone(),
@@ -828,16 +1651,18 @@ fn run_task(args: RunArgs) -> Result<()> {
         profile_id: profile_id(profile),
         profile_label: profile_label(profile),
         model,
+        approval_required: config.require_command_approval || config.require_file_edit_approval,
         app_handoff: handoff,
         resume_command: format!("gyro resume {}", session.id),
-        next_command,
+        next_command: None,
         message,
+        run,
     };
 
     if args.json {
         print_json(&output)?;
     } else {
-        print_session_command_output("Run recorded", &output);
+        print_session_command_output("Run completed", &output);
     }
     Ok(())
 }
@@ -857,11 +1682,15 @@ fn resume_session(args: ResumeArgs) -> Result<()> {
     let recorded_profile = latest_payload_string(&events, "profileId");
     let recorded_model = latest_payload_string(&events, "model");
     let selected_profile_id = args.profile.as_deref().or(recorded_profile.as_deref());
-    let profile = select_command_profile(&config, selected_profile_id)?;
+    let profile = Some(select_execution_profile(&config, selected_profile_id)?);
     let model = model_for(profile, args.model.or(recorded_model));
     let (status, profile_message, next_command) = profile_status(profile);
     let turn_id = Uuid::new_v4();
     let attempt_id = Uuid::new_v4();
+    let resume_message = args.message.clone().unwrap_or_else(|| {
+        "Continue the previous trusted run from its durable state. Resume the last incomplete step and report the result."
+            .into()
+    });
 
     store.append_event_with_turn_id(
         session.id,
@@ -880,6 +1709,21 @@ fn resume_session(args: ResumeArgs) -> Result<()> {
     )?;
     store.append_event_with_turn_id(
         session.id,
+        SessionEventKind::UserMessage,
+        resume_message.clone(),
+        cli_provider_run_payload(
+            turn_id,
+            attempt_id,
+            "resume",
+            HarnessRunStatus::Queued,
+            profile,
+            model.clone(),
+            &session,
+        )?,
+        Some(turn_id),
+    )?;
+    store.append_event_with_turn_id(
+        session.id,
         SessionEventKind::CommandRequested,
         "CLI agent resume recorded.",
         cli_terminal_request_payload(
@@ -889,16 +1733,24 @@ fn resume_session(args: ResumeArgs) -> Result<()> {
             profile,
             model.clone(),
             &session,
+            config.require_command_approval || config.require_file_edit_approval,
         )?,
         Some(turn_id),
     )?;
-    store.append_event_with_turn_id(
-        session.id,
-        SessionEventKind::ApprovalRequested,
-        "Agent resume recorded; command and file edits require approval by default.",
-        cli_approval_payload(turn_id, "resume")?,
-        Some(turn_id),
-    )?;
+    if config.require_command_approval || config.require_file_edit_approval {
+        store.append_event_with_turn_id(
+            session.id,
+            SessionEventKind::ApprovalRequested,
+            "CLI provider resume requires approval under the active policy.",
+            cli_approval_payload(
+                turn_id,
+                "resume",
+                config.require_command_approval,
+                config.require_file_edit_approval,
+            )?,
+            Some(turn_id),
+        )?;
+    }
 
     if status == CliStatus::Blocked {
         store.append_event_with_turn_id(
@@ -918,21 +1770,40 @@ fn resume_session(args: ResumeArgs) -> Result<()> {
             )?,
             Some(turn_id),
         )?;
+        return Err(anyhow!(
+            "provider unavailable: {}; session saved: {}",
+            profile_message.unwrap_or_else(|| "selected CLI profile is blocked".into()),
+            session.id
+        ));
     }
 
+    let run = Some(execute_cli_provider(
+        &store,
+        &session,
+        profile.ok_or_else(|| anyhow!("an executable provider profile is required"))?,
+        model.clone(),
+        &resume_message,
+        "resume",
+        &config,
+        args.approve,
+        args.json,
+        args.timeout_seconds,
+        turn_id,
+        attempt_id,
+    )?);
     let handoff = perform_app_handoff(
         &paths,
         &session,
         AppNotificationKind::OpenSession,
         open_behavior(args.open, args.no_open),
     )?;
-    let message = match status {
-        CliStatus::Blocked => profile_message
-            .unwrap_or_else(|| "resume saved, but the selected CLI profile needs setup".into()),
-        _ => "resume recorded; local session remains approval gated".into(),
+    let final_status = CliStatus::Done;
+    let message = match final_status {
+        CliStatus::Done => "trusted provider run resumed and saved to the shared session".into(),
+        _ => "resume recorded".into(),
     };
     let output = SessionCommandOutput {
-        status,
+        status: final_status,
         session_id: session.id,
         title: session.title.clone(),
         workspace: session.workspace_path.clone(),
@@ -942,16 +1813,18 @@ fn resume_session(args: ResumeArgs) -> Result<()> {
         profile_id: profile_id(profile),
         profile_label: profile_label(profile),
         model,
+        approval_required: config.require_command_approval || config.require_file_edit_approval,
         app_handoff: handoff,
         resume_command: format!("gyro resume {}", session.id),
-        next_command,
+        next_command: None,
         message,
+        run,
     };
 
     if args.json {
         print_json(&output)?;
     } else {
-        print_session_command_output("Resume recorded", &output);
+        print_session_command_output("Resume completed", &output);
     }
     Ok(())
 }
@@ -1100,36 +1973,46 @@ fn setup_command(args: SetupArgs) -> Result<()> {
             ),
         });
     } else {
+        let health_service = ProviderHealthService;
         for provider in enabled_providers {
-            let key_status = keychain::get_api_key(&provider.api_key_ref);
-            let has_key = key_status
-                .as_ref()
-                .ok()
-                .and_then(|value| value.as_ref())
-                .is_some();
+            let health = health_service.check(ProviderHealthRequest {
+                provider_id: provider.id.clone(),
+                base_url: provider.base_url.clone(),
+                api_key_ref: Some(provider.api_key_ref.clone()),
+            });
+            let (status, message, next) = match health {
+                Ok(health) if health.runtime_status == "ready" => {
+                    (CliStatus::Ready, health.output, None)
+                }
+                Ok(health) => {
+                    let executable_provider =
+                        matches!(provider.id.as_str(), "openai" | "anthropic");
+                    let status = if executable_provider
+                        && matches!(
+                            health.runtime_status.as_str(),
+                            "not-installed" | "not-logged-in"
+                        ) {
+                        CliStatus::Blocked
+                    } else {
+                        CliStatus::Waiting
+                    };
+                    let next = health
+                        .login_command
+                        .map(|command| format!("run `{command}`"));
+                    (status, health.output, next)
+                }
+                Err(error) => (
+                    CliStatus::Waiting,
+                    format!("provider readiness check failed: {error}"),
+                    Some("retry `gyro setup` or inspect the provider in Gyro.app".into()),
+                ),
+            };
             checks.push(SetupCheckOutput {
                 id: format!("provider:{}", provider.id),
                 label: format!("Provider: {}", provider.display_name),
-                status: if has_key {
-                    CliStatus::Ready
-                } else {
-                    CliStatus::Waiting
-                },
-                message: if has_key {
-                    format!("{} key is stored in Keychain", provider.display_name)
-                } else if let Err(error) = key_status {
-                    format!("could not inspect Keychain entry: {error}")
-                } else {
-                    format!("{} is enabled; no Keychain key found", provider.display_name)
-                },
-                next: if has_key {
-                    None
-                } else {
-                    Some(format!(
-                        "run `gyro config set-provider-key {} --env <ENV_VAR>` or use external CLI auth",
-                        provider.id
-                    ))
-                },
+                status,
+                message,
+                next,
             });
         }
     }
@@ -1186,7 +2069,20 @@ fn print_session_command_output(title: &str, output: &SessionCommandOutput) {
             .unwrap_or_default();
         println!("profile: {profile_label}{model}");
     }
-    println!("approval: required");
+    println!(
+        "approval: {}",
+        if output.approval_required {
+            "required"
+        } else {
+            "not required"
+        }
+    );
+    if let Some(run) = &output.run {
+        println!("provider: {}", run.provider_id);
+        println!("duration: {} ms", run.duration_ms);
+        println!("exit: {}", run.exit_code.unwrap_or(-1));
+        println!("resumed: {}", run.resumed);
+    }
     println!("app: {}", output.app_handoff.message);
     println!("resume: {}", output.resume_command);
     if let Some(next) = &output.next_command {
@@ -1394,7 +2290,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
     let report = run_doctor(&paths, &config);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        print_json(&report)?;
     } else {
         for check in &report.checks {
             println!(
@@ -1407,7 +2303,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
     }
 
     if report.has_failures() {
-        std::process::exit(1);
+        std::process::exit(EXIT_PROVIDER_UNAVAILABLE);
     }
     Ok(())
 }
@@ -1419,7 +2315,7 @@ fn config_command(args: ConfigArgs) -> Result<()> {
     match args.command {
         ConfigCommand::Show { json } => {
             if json {
-                println!("{}", serde_json::to_string_pretty(&config)?);
+                print_json(&config)?;
             } else {
                 println!("update source: Stable via GitHub Releases");
                 println!(
@@ -1567,7 +2463,54 @@ mod tests {
         assert_eq!(args.model.as_deref(), Some("gpt-test"));
         assert!(args.no_open);
         assert!(args.json);
+        assert!(!args.approve);
+        assert_eq!(args.timeout_seconds, 180);
         assert_eq!(args.task, "inspect this repo");
+    }
+
+    #[test]
+    fn parses_chat_and_resume_execution_controls() {
+        let chat = Cli::try_parse_from([
+            "gyro",
+            "chat",
+            "--profile",
+            "claude-code",
+            "--model",
+            "sonnet",
+            "--approve",
+            "--timeout-seconds",
+            "45",
+        ])
+        .unwrap();
+        let Some(Commands::Chat(chat)) = chat.command else {
+            panic!("expected chat command");
+        };
+        assert_eq!(chat.profile.as_deref(), Some("claude-code"));
+        assert_eq!(chat.model.as_deref(), Some("sonnet"));
+        assert!(chat.approve);
+        assert_eq!(chat.timeout_seconds, 45);
+
+        let session_id = Uuid::new_v4();
+        let resume = Cli::try_parse_from([
+            "gyro",
+            "resume",
+            &session_id.to_string(),
+            "--message",
+            "continue safely",
+            "--json",
+            "--no-open",
+            "--timeout-seconds",
+            "90",
+        ])
+        .unwrap();
+        let Some(Commands::Resume(resume)) = resume.command else {
+            panic!("expected resume command");
+        };
+        assert_eq!(resume.session_id, Some(session_id));
+        assert_eq!(resume.message.as_deref(), Some("continue safely"));
+        assert!(resume.json);
+        assert!(resume.no_open);
+        assert_eq!(resume.timeout_seconds, 90);
     }
 
     #[test]
@@ -1592,6 +2535,7 @@ mod tests {
             profile_id: Some("codex".into()),
             profile_label: Some("Codex CLI".into()),
             model: Some("gpt-test".into()),
+            approval_required: false,
             app_handoff: AppHandoffOutput {
                 requested: true,
                 opened: false,
@@ -1600,13 +2544,91 @@ mod tests {
             resume_command: "gyro resume 00000000-0000-0000-0000-000000000000".into(),
             next_command: Some("gyro setup".into()),
             message: "local session saved".into(),
+            run: None,
         };
         let value = serde_json::to_value(output).unwrap();
         assert_eq!(value["status"], "waiting");
         assert_eq!(value["sessionId"], "00000000-0000-0000-0000-000000000000");
         assert_eq!(value["workspaceMode"], "local");
         assert_eq!(value["profileId"], "codex");
+        assert_eq!(value["approvalRequired"], false);
         assert_eq!(value["appHandoff"]["requested"], true);
+    }
+
+    #[test]
+    fn completed_run_json_includes_stable_execution_evidence() {
+        let run_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
+        let output = CliRunOutput {
+            run_id,
+            attempt_id,
+            provider_id: "openai".into(),
+            duration_ms: 42,
+            exit_code: Some(0),
+            resumed: true,
+            response: "done".into(),
+        };
+        let value = serde_json::to_value(output).unwrap();
+
+        assert_eq!(value["runId"], run_id.to_string());
+        assert_eq!(value["attemptId"], attempt_id.to_string());
+        assert_eq!(value["providerId"], "openai");
+        assert_eq!(value["durationMs"], 42);
+        assert_eq!(value["exitCode"], 0);
+        assert_eq!(value["resumed"], true);
+        assert_eq!(value["response"], "done");
+    }
+
+    #[test]
+    fn json_envelopes_are_versioned_without_hiding_command_fields() {
+        let output = SessionListOutput {
+            status: CliStatus::Ready,
+            count: 0,
+            sessions: Vec::new(),
+        };
+        let value = serde_json::to_value(CliJsonEnvelope {
+            schema: CLI_JSON_SCHEMA_V1,
+            value: &output,
+        })
+        .unwrap();
+
+        assert_eq!(value["schema"], "gyro.cli.v1");
+        assert_eq!(value["status"], "ready");
+        assert_eq!(value["count"], 0);
+    }
+
+    #[test]
+    fn runtime_failures_map_to_stable_exit_categories() {
+        assert_eq!(
+            classify_cli_error("profile is not installed"),
+            CliErrorCategory::ProviderUnavailable
+        );
+        assert_eq!(
+            classify_cli_error("profile `legacy` has no provider"),
+            CliErrorCategory::ProviderUnavailable
+        );
+        assert_eq!(
+            classify_cli_error("provider exited with 1: not logged in"),
+            CliErrorCategory::ProviderUnavailable
+        );
+        assert_eq!(
+            classify_cli_error("session was not found"),
+            CliErrorCategory::InvalidInput
+        );
+        assert_eq!(
+            classify_cli_error("profile `missing` is not configured; session saved: no"),
+            CliErrorCategory::InvalidInput
+        );
+        assert_eq!(
+            classify_cli_error("approval was rejected"),
+            CliErrorCategory::ApprovalRejected
+        );
+        assert_eq!(
+            classify_cli_error("provider execution failed"),
+            CliErrorCategory::ExecutionFailed
+        );
+        assert_eq!(classify_cli_error("run cancelled by user").exit_code(), 130);
+        assert_eq!(CliErrorCategory::Internal.exit_code(), 70);
     }
 
     #[test]
@@ -1646,9 +2668,10 @@ mod tests {
             Some(&profile),
             Some("gpt-test".into()),
             &session,
+            true,
         )
         .unwrap();
-        let approval_payload = cli_approval_payload(run_id, "run").unwrap();
+        let approval_payload = cli_approval_payload(run_id, "run", true, true).unwrap();
 
         assert_eq!(run_payload["schema"], gyro_core::HARNESS_SCHEMA_V1);
         assert_eq!(run_payload["runId"], run_id.to_string());
@@ -1657,6 +2680,17 @@ mod tests {
         assert_eq!(run_payload["model"], "gpt-test");
         assert_eq!(command_payload["kind"], "terminal-request");
         assert_eq!(command_payload["approvalRequired"], true);
+        let trusted_command_payload = cli_terminal_request_payload(
+            run_id,
+            "run",
+            HarnessRunStatus::Waiting,
+            Some(&profile),
+            Some("gpt-test".into()),
+            &session,
+            false,
+        )
+        .unwrap();
+        assert_eq!(trusted_command_payload["approvalRequired"], false);
         assert_eq!(approval_payload["kind"], "approval-request");
         assert_eq!(approval_payload["requireFileEditApproval"], true);
     }
@@ -1710,5 +2744,95 @@ mod tests {
             latest_payload_string(&events, "model").as_deref(),
             Some("new")
         );
+    }
+
+    #[test]
+    fn shared_stream_decoder_deduplicates_snapshots_and_final_text() {
+        let mut decoder = CliStreamDecoder::default();
+        assert_eq!(
+            decoder.push_stdout(
+                "{\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hello \"}}\n"
+            ),
+            vec!["hello "]
+        );
+        assert_eq!(
+            decoder
+                .push_stdout("{\"type\":\"content_block_partial\",\"content\":\"hello world\"}\n"),
+            vec!["world"]
+        );
+        assert!(decoder
+            .push_stdout("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"hello world\"}}\n")
+            .is_empty());
+        assert_eq!(decoder.response, "hello world");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_cli_run_persists_shared_state_and_ctrl_c_reaches_active_token() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-codex");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"item.completed\",\"session_id\":\"019f5a51-d9dc-7423-89fa-8f92cfe4d727\",\"item\":{\"type\":\"agent_message\",\"text\":\"validated\"}}'\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).unwrap();
+
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Cli, "trusted run")
+            .unwrap();
+        let profile = CommandProfile {
+            id: "codex".into(),
+            display_name: "Codex CLI".into(),
+            command: script.display().to_string(),
+            args: Vec::new(),
+            working_directory: None,
+            provider_id: Some("openai".into()),
+            default_model: None,
+            readiness: gyro_core::CommandProfileReadiness::Ready,
+        };
+        let mut config = GyroConfig::default();
+        config.require_command_approval = false;
+        config.require_file_edit_approval = false;
+        let run_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
+
+        let output = execute_cli_provider(
+            &store, &session, &profile, None, "validate", "run", &config, false, true, 5, run_id,
+            attempt_id,
+        )
+        .unwrap();
+
+        assert_eq!(output.response, "validated");
+        assert_eq!(output.exit_code, Some(0));
+        assert!(store
+            .read_events(session.id)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == SessionEventKind::AssistantMessage
+                && event.message == "validated"));
+        assert!(store
+            .get_provider_session_binding(session.id, "openai")
+            .unwrap()
+            .is_some());
+
+        let token = CancellationToken::default();
+        let guard = activate_cli_cancellation(token.clone()).unwrap();
+        unsafe {
+            libc::raise(libc::SIGINT);
+        }
+        for _ in 0..20 {
+            if token.is_cancelled() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(token.is_cancelled());
+        drop(guard);
     }
 }

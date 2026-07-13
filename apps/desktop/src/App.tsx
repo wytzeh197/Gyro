@@ -107,12 +107,14 @@ import {
   limitSessionEventsForUi,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
+  orderProviderChatStreamEvent,
   resetStreamingAssistantForRetry,
+  type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
 import { useGyroUpdater } from "./update-controller";
 
-const MonacoEditor = lazy(() => import("@monaco-editor/react"));
+const MonacoEditor = lazy(() => import("./monaco-editor"));
 
 type AppNotification = {
   kind: "open-session" | "attach-session";
@@ -283,9 +285,16 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const NEW_CHAT_DRAFT_KEY = "new";
 const PROVIDER_STREAM_FLUSH_MS = 80;
+const EXECUTABLE_PROVIDER_IDS = new Set<ProviderId>(["openai", "anthropic"]);
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
+
+type BrowserPreviewCheck = {
+  reachable: boolean;
+  statusCode?: number;
+  message: string;
+};
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
 const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
 const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
@@ -490,6 +499,7 @@ export function App() {
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
+  const providerStreamOrderRef = useRef<ProviderStreamOrderState>(new Map());
   const providerStreamFlushTimerRef = useRef<number>();
   const pendingWorkbenchPersistRef = useRef<WorkbenchState>();
   const workbenchPersistTimerRef = useRef<number>();
@@ -764,9 +774,18 @@ export function App() {
       const enabledProviders = providerConfigs.filter((provider) =>
         targetProviderId ? provider.id === targetProviderId : provider.enabled,
       );
-      const readyProvider = enabledProviders.find(
-        (provider) => provider.authStatus === "connected" || provider.enabled,
-      );
+      const readyProvider = enabledProviders.find((provider) => {
+        const health = workbench.providerStatuses.find(
+          (status) => status.id === provider.id,
+        );
+        return (
+          provider.enabled &&
+          EXECUTABLE_PROVIDER_IDS.has(provider.id) &&
+          (provider.authStatus === "connected" ||
+            (health?.connectionStatus === "connected" &&
+              health.runtimeStatus === "ready"))
+        );
+      });
 
       if (readyProvider) {
         dispatchWorkbench({
@@ -785,9 +804,14 @@ export function App() {
             targetProviderId,
           )
         : enabledProviders[0]?.displayName;
-      const message = targetProvider
-        ? `${targetProvider} is not connected yet`
-        : "Enable and connect a provider before sending";
+      const message =
+        targetProviderId &&
+        (!isProviderId(targetProviderId) ||
+          !EXECUTABLE_PROVIDER_IDS.has(targetProviderId))
+          ? `${targetProvider ?? targetProviderId} is visible for readiness only and cannot execute ${intent} runs`
+          : targetProvider
+            ? `${targetProvider} is not connected yet`
+            : "Enable and connect a provider before sending";
 
       dispatchWorkbench({
         type: "set-provider-readiness",
@@ -1007,7 +1031,7 @@ export function App() {
     );
   }, [flushProviderStreamBatches]);
 
-  const queueProviderChatStreamEvent = useCallback(
+  const processProviderChatStreamEvent = useCallback(
     (streamEvent: ProviderChatStreamEvent) => {
       if (
         streamEvent.phase === "started" ||
@@ -1052,6 +1076,19 @@ export function App() {
     [flushProviderStreamBatches, scheduleProviderStreamFlush],
   );
 
+  const queueProviderChatStreamEvent = useCallback(
+    (streamEvent: ProviderChatStreamEvent) => {
+      const orderedEvents = orderProviderChatStreamEvent(
+        providerStreamOrderRef.current,
+        streamEvent,
+      );
+      for (const orderedEvent of orderedEvents) {
+        processProviderChatStreamEvent(orderedEvent);
+      }
+    },
+    [processProviderChatStreamEvent],
+  );
+
   useEffect(() => {
     if (!isTauriRuntime()) {
       return;
@@ -1080,6 +1117,7 @@ export function App() {
         providerStreamFlushTimerRef.current = undefined;
       }
       providerStreamBatchRef.current.clear();
+      providerStreamOrderRef.current.clear();
       unlistenProviderChat?.();
     };
   }, [flushProviderStreamBatches, queueProviderChatStreamEvent]);
@@ -4960,6 +4998,60 @@ export function App() {
     }
   }, [notify, workbench.browserPreview.url]);
 
+  useEffect(() => {
+    if (workbench.browserPreview.status !== "loading") return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4_000);
+    let disposed = false;
+    const url = normalizedPreviewUrl(workbench.browserPreview.url);
+
+    const verification = isTauriRuntime()
+      ? invoke<BrowserPreviewCheck>("check_browser_preview", {
+          request: { url },
+        })
+      : fetch(url, {
+          cache: "no-store",
+          method: "GET",
+          mode: "no-cors",
+          signal: controller.signal,
+        }).then(
+          () =>
+            ({
+              reachable: true,
+              message: "Local preview reachable",
+            }) satisfies BrowserPreviewCheck,
+        );
+
+    void verification
+      .then((result) => {
+        if (disposed) return;
+        dispatchWorkbench({
+          type: "browser-status",
+          status: result.reachable ? "ready" : "verification-failed",
+          message: result.message,
+        });
+      })
+      .catch((error) => {
+        if (disposed) return;
+        const reason =
+          error instanceof DOMException && error.name === "AbortError"
+            ? "connection timed out"
+            : "connection refused or offline";
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "verification-failed",
+          message: `Preview unavailable: ${reason}`,
+        });
+      })
+      .finally(() => window.clearTimeout(timeout));
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [workbench.browserPreview.status, workbench.browserPreview.url]);
+
   const createTask = useCallback(() => {
     const metadata = workspaceRunMetadata(
       workbench.workspaceMode,
@@ -5503,6 +5595,30 @@ export function App() {
     void refreshAccount();
     void refreshConfig();
   }, [refreshAccount, refreshConfig]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const providers = providersForConfig(config).filter(
+      (provider) =>
+        provider.enabled && EXECUTABLE_PROVIDER_IDS.has(provider.id),
+    );
+    if (providers.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      providers.map(async (provider) => {
+        const check = await invoke<ProviderHealthCheck>(
+          "check_provider_health",
+          { request: providerHealthRequest(provider, provider.id) },
+        );
+        if (!cancelled) {
+          recordProviderHealthOutput(provider.id, check.output, check);
+        }
+      }),
+    ).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [config.modelProviders, recordProviderHealthOutput]);
 
   useEffect(() => {
     if (!accountSession.signedIn) {
@@ -9385,13 +9501,28 @@ function createProviderHealthOutput(
 }
 
 const previewFiles: WorkspaceFile[] = [
-  { path: "packages/ui/src/surfaces.tsx", kind: "file" },
-  { path: "packages/ui/src/styles.css", kind: "file" },
-  { path: "apps/desktop/src/App.tsx", kind: "file" },
-  { path: "apps/desktop/src-tauri/src/lib.rs", kind: "file" },
-  { path: "crates/gyro-core/src/sessions.rs", kind: "file" },
-  { path: "docs/architecture.md", kind: "file" },
-  { path: "packages/ui/src", kind: "directory" },
+  { path: "apps", kind: "directory", depth: 1 },
+  { path: "apps/desktop", kind: "directory", depth: 2 },
+  { path: "apps/desktop/src", kind: "directory", depth: 3 },
+  { path: "apps/desktop/src/App.tsx", kind: "file", depth: 4 },
+  { path: "apps/desktop/src-tauri", kind: "directory", depth: 3 },
+  { path: "apps/desktop/src-tauri/src", kind: "directory", depth: 4 },
+  {
+    path: "apps/desktop/src-tauri/src/lib.rs",
+    kind: "file",
+    depth: 5,
+  },
+  { path: "crates", kind: "directory", depth: 1 },
+  { path: "crates/gyro-core", kind: "directory", depth: 2 },
+  { path: "crates/gyro-core/src", kind: "directory", depth: 3 },
+  { path: "crates/gyro-core/src/sessions.rs", kind: "file", depth: 4 },
+  { path: "docs", kind: "directory", depth: 1 },
+  { path: "docs/architecture.md", kind: "file", depth: 2 },
+  { path: "packages", kind: "directory", depth: 1 },
+  { path: "packages/ui", kind: "directory", depth: 2 },
+  { path: "packages/ui/src", kind: "directory", depth: 3 },
+  { path: "packages/ui/src/styles.css", kind: "file", depth: 4 },
+  { path: "packages/ui/src/surfaces.tsx", kind: "file", depth: 4 },
 ];
 
 function createPreviewWorkspaceFileContent(path: string): WorkspaceFileContent {
@@ -9712,6 +9843,20 @@ function updateOptimisticProviderStatus(
   status: OptimisticProviderStatus,
   error?: string,
 ) {
+  const updateEvents = (items: SessionEvent[]) => {
+    const targetIndex = items.findLastIndex(
+      (event) => isProviderStatusEvent(event) && event.turnId === turnId,
+    );
+    if (targetIndex < 0) {
+      return items;
+    }
+    const next = items.slice();
+    const target = items[targetIndex];
+    if (target) {
+      next[targetIndex] = updateEvent(target);
+    }
+    return next;
+  };
   const updateEvent = (event: SessionEvent): SessionEvent => {
     if (!isProviderStatusEvent(event) || event.turnId !== turnId) {
       return event;
@@ -9719,6 +9864,20 @@ function updateOptimisticProviderStatus(
     const payload = recordFromUnknown(event.payload);
     const providerLabel =
       stringFromRecord(payload, "providerLabel") ?? "Provider";
+    const now = new Date().toISOString();
+    const previousStatus = stringFromRecord(payload, "status");
+    const previousStartedAt = stringFromRecord(payload, "startedAt");
+    const isActiveStatus = ["queued", "running", "waiting"].includes(status);
+    const wasActiveStatus =
+      previousStatus !== undefined &&
+      ["queued", "running", "waiting"].includes(previousStatus);
+    const startedAt = isActiveStatus
+      ? wasActiveStatus
+        ? (previousStartedAt ?? event.createdAt)
+        : now
+      : (previousStartedAt ?? event.createdAt);
+    const startedAtMs = Date.parse(startedAt);
+    const completedAtMs = Date.parse(now);
     return {
       ...event,
       message: providerStatusMessage(status, {
@@ -9727,7 +9886,15 @@ function updateOptimisticProviderStatus(
       } as ModelProviderConfig),
       payload: {
         ...payload,
+        completedAt: isActiveStatus ? undefined : now,
+        durationMs:
+          !isActiveStatus &&
+          Number.isFinite(startedAtMs) &&
+          Number.isFinite(completedAtMs)
+            ? Math.max(0, completedAtMs - startedAtMs)
+            : undefined,
         error,
+        startedAt,
         status,
       },
     };
@@ -9736,8 +9903,8 @@ function updateOptimisticProviderStatus(
   if (optimisticEvents) {
     optimisticEventsRef.current.set(
       sessionId,
-      limitSessionEventsForUi(optimisticEvents.map(updateEvent)),
+      limitSessionEventsForUi(updateEvents(optimisticEvents)),
     );
   }
-  setEvents((current) => limitSessionEventsForUi(current.map(updateEvent)));
+  setEvents((current) => limitSessionEventsForUi(updateEvents(current)));
 }

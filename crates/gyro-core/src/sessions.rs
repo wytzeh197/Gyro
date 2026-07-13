@@ -4,9 +4,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::VecDeque;
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -14,6 +13,7 @@ const MAX_SESSION_TITLE_CHARS: usize = 160;
 const MAX_SESSION_EVENT_MESSAGE_CHARS: usize = 64_000;
 const MAX_SESSION_EVENT_PAYLOAD_BYTES: usize = 128 * 1024;
 const MAX_SESSION_EVENTS_READ: usize = 1_000;
+const SESSION_EVENT_TAIL_CHUNK_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -181,6 +181,12 @@ impl SessionStore {
         paths.ensure()?;
         let conn = Connection::open(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
+        conn.busy_timeout(std::time::Duration::from_secs(2))?;
+        conn.execute_batch(
+            "pragma foreign_keys = on;
+             pragma journal_mode = wal;
+             pragma synchronous = full;",
+        )?;
         let store = Self { paths, conn };
         store.initialize()?;
         Ok(store)
@@ -523,6 +529,9 @@ impl SessionStore {
             .open(&events_path)
             .with_context(|| format!("open {}", events_path.display()))?;
         writeln!(file, "{encoded}")?;
+        file.flush()?;
+        file.sync_data()
+            .with_context(|| format!("sync {}", events_path.display()))?;
 
         self.conn.execute(
             "update sessions set updated_at = ?1 where id = ?2",
@@ -549,30 +558,24 @@ impl SessionStore {
             return Ok(Vec::new());
         }
 
-        let file = std::fs::File::open(&events_path)
+        let mut file = std::fs::File::open(&events_path)
             .with_context(|| format!("open {}", events_path.display()))?;
-        let mut first_line: Option<(usize, String)> = None;
-        let mut recent_lines: VecDeque<(usize, String)> =
-            VecDeque::with_capacity(max_recent_events.saturating_add(1));
-        for (line_number, line) in BufReader::new(file).lines().enumerate() {
-            let line = line?;
-            if first_line.is_none() {
-                first_line = Some((line_number, line.clone()));
-            }
-            if max_recent_events > 0 {
-                recent_lines.push_back((line_number, line));
-                if recent_lines.len() > max_recent_events {
-                    recent_lines.pop_front();
-                }
-            }
-        }
-
+        let mut first_line = String::new();
+        BufReader::new(file.try_clone()?).read_line(&mut first_line)?;
+        let recent_lines = read_recent_event_lines(&mut file, max_recent_events)?;
         let mut events = recent_lines
-            .into_iter()
-            .map(|(line_number, line)| parse_session_event_line(&events_path, line_number, &line))
+            .iter()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                if line.is_empty() {
+                    None
+                } else {
+                    Some(parse_session_event_line(&events_path, index, line))
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
-        if let Some((line_number, line)) = first_line {
-            let first_event = parse_session_event_line(&events_path, line_number, &line)?;
+        if !first_line.trim().is_empty() {
+            let first_event = parse_session_event_line(&events_path, 0, first_line.trim_end())?;
             if first_event.kind == SessionEventKind::SessionCreated
                 && !events.iter().any(|item| item.id == first_event.id)
             {
@@ -674,6 +677,54 @@ impl SessionStore {
             .execute_batch(&format!("alter table sessions add column {definition};"))?;
         Ok(())
     }
+}
+
+fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result<Vec<String>> {
+    if max_lines == 0 {
+        return Ok(Vec::new());
+    }
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut chunks = Vec::new();
+    let mut position = file_len;
+    let mut newline_count = 0usize;
+    while position > 0 && newline_count <= max_lines {
+        let chunk_len = usize::try_from(position.min(SESSION_EVENT_TAIL_CHUNK_BYTES as u64))?;
+        position -= chunk_len as u64;
+        file.seek(SeekFrom::Start(position))?;
+        let mut chunk = vec![0; chunk_len];
+        file.read_exact(&mut chunk)?;
+        newline_count += chunk.iter().filter(|byte| **byte == b'\n').count();
+        chunks.push(chunk);
+    }
+    chunks.reverse();
+    let mut bytes = chunks.into_iter().flatten().collect::<Vec<_>>();
+    if position > 0 {
+        if let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            bytes.drain(..=first_newline);
+        } else {
+            bytes.clear();
+        }
+    }
+
+    let has_trailing_newline = bytes.last() == Some(&b'\n');
+    let text = String::from_utf8(bytes).context("session event log is not valid UTF-8")?;
+    let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
+    if !has_trailing_newline {
+        if lines
+            .last()
+            .is_some_and(|line| serde_json::from_str::<SessionEvent>(line).is_err())
+        {
+            lines.pop();
+        }
+    }
+    if lines.len() > max_lines {
+        lines.drain(..lines.len() - max_lines);
+    }
+    Ok(lines)
 }
 
 fn row_to_provider_session_binding(
@@ -945,6 +996,103 @@ mod tests {
         assert_eq!(events[1].message, "message 9");
         assert_eq!(events[2].message, "message 10");
         assert_eq!(events[3].message, "message 11");
+    }
+
+    #[test]
+    fn recovers_events_before_an_interrupted_trailing_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "recover session")
+            .unwrap();
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::UserMessage,
+                "durable message",
+                serde_json::json!({ "source": "test" }),
+            )
+            .unwrap();
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(br#"{"id":"interrupted""#).unwrap();
+        file.flush().unwrap();
+
+        let events = store.read_events(session.id).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].message, "durable message");
+    }
+
+    #[test]
+    fn reports_corrupt_complete_event_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "corrupt session")
+            .unwrap();
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(b"not-json\n").unwrap();
+        file.flush().unwrap();
+
+        assert!(store.read_events(session.id).is_err());
+    }
+
+    #[test]
+    fn measures_long_session_tail_loading_against_full_scan() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "long benchmark")
+            .unwrap();
+        let mut writer = std::io::BufWriter::new(
+            OpenOptions::new()
+                .append(true)
+                .open(&session.events_path)
+                .unwrap(),
+        );
+        for index in 0..50_000 {
+            let event = SessionEvent::new(
+                session.id,
+                SessionEventKind::AssistantMessage,
+                format!("event {index}"),
+                serde_json::json!({ "index": index }),
+            );
+            writeln!(writer, "{}", serde_json::to_string(&event).unwrap()).unwrap();
+        }
+        writer.flush().unwrap();
+
+        let full_scan_started = std::time::Instant::now();
+        let mut old_recent = std::collections::VecDeque::with_capacity(1_001);
+        for line in BufReader::new(std::fs::File::open(&session.events_path).unwrap()).lines() {
+            old_recent.push_back(line.unwrap());
+            if old_recent.len() > 1_000 {
+                old_recent.pop_front();
+            }
+        }
+        let old_recent = old_recent
+            .iter()
+            .map(|line| serde_json::from_str::<SessionEvent>(line).unwrap())
+            .collect::<Vec<_>>();
+        let full_scan_elapsed = full_scan_started.elapsed();
+
+        let tail_started = std::time::Instant::now();
+        let tail = store.read_recent_events(session.id, 1_000).unwrap();
+        let tail_elapsed = tail_started.elapsed();
+
+        assert_eq!(old_recent.len(), 1_000);
+        assert_eq!(old_recent.last().unwrap().message, "event 49999");
+        assert_eq!(tail.len(), 1_001);
+        assert_eq!(tail.last().unwrap().message, "event 49999");
+        eprintln!(
+            "long-session-load full-scan={}us tail-read={}us events=50001 retained=1001",
+            full_scan_elapsed.as_micros(),
+            tail_elapsed.as_micros()
+        );
     }
 
     #[test]

@@ -350,15 +350,15 @@ state.
 
 ## 8. Validation Matrix
 
-| Area | Automated | Manual |
-| --- | --- | --- |
-| Website | responsive, accessibility, link and manifest checks | macOS browsers, reduced motion, keyboard path |
-| Downloads | artifact URL, hash, version, architecture checks | interrupted download and retry |
-| DMG | signature, notarization, bundle metadata | mount, drag, eject, first launch |
-| First run | state-machine and readiness tests | clean account, offline, missing CLI, expired auth |
-| Providers | adapter capability and stale-catalogue tests | switch, setup, resume incompatibility |
-| Workbench | existing typecheck, test, lint, and smoke gates | project/run/approval/recovery walkthrough |
-| Updates | signature, channel, deferral, rollback-path tests | active run, downloaded update, restart, failure |
+| Area      | Automated                                           | Manual                                            |
+| --------- | --------------------------------------------------- | ------------------------------------------------- |
+| Website   | responsive, accessibility, link and manifest checks | macOS browsers, reduced motion, keyboard path     |
+| Downloads | artifact URL, hash, version, architecture checks    | interrupted download and retry                    |
+| DMG       | signature, notarization, bundle metadata            | mount, drag, eject, first launch                  |
+| First run | state-machine and readiness tests                   | clean account, offline, missing CLI, expired auth |
+| Providers | adapter capability and stale-catalogue tests        | switch, setup, resume incompatibility             |
+| Workbench | existing typecheck, test, lint, and smoke gates     | project/run/approval/recovery walkthrough         |
+| Updates   | signature, channel, deferral, rollback-path tests   | active run, downloaded update, restart, failure   |
 
 ## 9. Explicit Non-Goals
 
@@ -383,4 +383,3 @@ state.
 - Crash-free runs and recoverable interrupted runs.
 - Percentage of visible actions that are functional, truthfully unavailable, or
   intentionally omitted.
-

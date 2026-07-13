@@ -1803,9 +1803,9 @@ export function workbenchReducer(
           ...state.browserPreview,
           history: nextHistory,
           historyIndex: nextHistory.length - 1,
-          status: action.status ?? "ready",
+          status: action.status ?? "loading",
           url: action.url,
-          verificationMessage: "Loaded local preview",
+          verificationMessage: "Checking local preview",
         },
       };
     }
@@ -1825,8 +1825,8 @@ export function workbenchReducer(
         ...state,
         browserPreview: {
           ...state.browserPreview,
-          status: "verification-passed",
-          verificationMessage: "Reloaded and layout check passed",
+          status: "loading",
+          verificationMessage: "Reloading local preview",
         },
       };
     case "browser-device":
@@ -2642,9 +2642,9 @@ function browserHistoryState(
     browserPreview: {
       ...state.browserPreview,
       historyIndex,
-      status: "ready",
+      status: "loading",
       url,
-      verificationMessage: "History navigation ready",
+      verificationMessage: "Checking history target",
     },
   };
 }

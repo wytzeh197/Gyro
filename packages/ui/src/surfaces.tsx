@@ -969,11 +969,17 @@ function WorkspaceSidebarContent({
   const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
   const [sourceControlMessage, setSourceControlMessage] = useState("");
   const [debugAdapterCommand, setDebugAdapterCommand] = useState("lldb-dap");
-  const visibleFiles = files.filter((file) =>
-    workspaceAncestorPaths(file.path).every(
-      (ancestor) => !collapsedWorkspaceDirectories.has(ancestor),
-    ),
+  const visibleFiles = useMemo(
+    () =>
+      files.filter((file) =>
+        workspaceAncestorPaths(file.path).every(
+          (ancestor) => !collapsedWorkspaceDirectories.has(ancestor),
+        ),
+      ),
+    [collapsedWorkspaceDirectories, files],
   );
+  const explorerTreeRef = useRef<HTMLDivElement>(null);
+  const explorerRowRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeIdeView = ide?.activeView ?? "explorer";
   const defaultTestTask = ide?.taskDefinitions.find(
     (task) => task.group === "test",
@@ -984,6 +990,35 @@ function WorkspaceSidebarContent({
   useEffect(() => {
     setSidebarSearchDraft(ide?.searchQuery.query ?? "");
   }, [ide?.searchQuery.query]);
+  useEffect(() => {
+    setCollapsedWorkspaceDirectories(new Set());
+    setSelectedExplorerPath(
+      ide?.activePath && files.some((file) => file.path === ide.activePath)
+        ? ide.activePath
+        : undefined,
+    );
+  }, [workspacePath]);
+  useEffect(() => {
+    if (
+      !selectedExplorerPath ||
+      files.some((file) => file.path === selectedExplorerPath)
+    ) {
+      return;
+    }
+    const hadExplorerFocus = Boolean(
+      explorerTreeRef.current?.contains(document.activeElement),
+    );
+    const fallbackPath = [...workspaceAncestorPaths(selectedExplorerPath)]
+      .reverse()
+      .find((path) => files.some((file) => file.path === path));
+    const nextPath = fallbackPath ?? visibleFiles[0]?.path;
+    setSelectedExplorerPath(nextPath);
+    if (hadExplorerFocus && nextPath) {
+      window.requestAnimationFrame(() =>
+        explorerRowRefs.current.get(nextPath)?.focus(),
+      );
+    }
+  }, [files, selectedExplorerPath, visibleFiles]);
   const isCliSidebar =
     activeDestination === "workspace" &&
     activeWorkspaceLayout === "terminal-grid";
@@ -1002,6 +1037,76 @@ function WorkspaceSidebarContent({
         ? current.filter((id) => id !== projectKey)
         : [...current, projectKey],
     );
+  };
+  const toggleWorkspaceDirectory = (path: string, collapsed?: boolean) => {
+    setCollapsedWorkspaceDirectories((current) => {
+      const next = new Set(current);
+      if (collapsed ?? !next.has(path)) {
+        next.add(path);
+      } else {
+        next.delete(path);
+      }
+      return next;
+    });
+  };
+  const focusExplorerPath = (path?: string) => {
+    if (!path) return;
+    setSelectedExplorerPath(path);
+    explorerRowRefs.current.get(path)?.focus();
+  };
+  const handleExplorerKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const activePath = (document.activeElement as HTMLElement | null)?.dataset
+      .explorerPath;
+    const index = visibleFiles.findIndex((file) => file.path === activePath);
+    if (index < 0) return;
+    const file = visibleFiles[index];
+    if (!file) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusExplorerPath(
+        visibleFiles[Math.min(index + 1, visibleFiles.length - 1)]?.path,
+      );
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusExplorerPath(visibleFiles[Math.max(index - 1, 0)]?.path);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      focusExplorerPath(visibleFiles[0]?.path);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      focusExplorerPath(visibleFiles.at(-1)?.path);
+    } else if (event.key === "ArrowRight" && file.kind === "directory") {
+      event.preventDefault();
+      if (collapsedWorkspaceDirectories.has(file.path)) {
+        toggleWorkspaceDirectory(file.path, false);
+      } else {
+        const child = visibleFiles.find(
+          (candidate) =>
+            workspaceAncestorPaths(candidate.path).at(-1) === file.path,
+        );
+        focusExplorerPath(child?.path);
+      }
+    } else if (event.key === "ArrowLeft") {
+      const parentPath = workspaceAncestorPaths(file.path).at(-1);
+      if (
+        file.kind === "directory" &&
+        !collapsedWorkspaceDirectories.has(file.path)
+      ) {
+        event.preventDefault();
+        toggleWorkspaceDirectory(file.path, true);
+      } else if (parentPath) {
+        event.preventDefault();
+        focusExplorerPath(parentPath);
+      }
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setSelectedExplorerPath(file.path);
+      if (file.kind === "directory") {
+        toggleWorkspaceDirectory(file.path);
+      } else {
+        onOpenWorkspaceFile?.(file.path);
+      }
+    }
   };
   const renderSessionRow = (session: Session) => (
     <SessionSidebarRow
@@ -1264,41 +1369,62 @@ function WorkspaceSidebarContent({
                     </button>
                   </div>
                   {visibleFiles.length > 0 ? (
-                    visibleFiles.map((file) => (
-                      <WorkspaceExplorerRow
-                        collapsed={collapsedWorkspaceDirectories.has(file.path)}
-                        depth={file.depth ?? file.path.split(/[\\/]/).length}
-                        isActive={
-                          selectedExplorerPath === file.path ||
-                          (!selectedExplorerPath &&
-                            ide?.activePath === file.path)
-                        }
-                        key={file.path}
-                        kind={file.kind}
-                        label={workspaceName(file.path)}
-                        decoration={
-                          ide?.fileDecorations.find(
-                            (decoration) => decoration.path === file.path,
-                          )?.badge
-                        }
-                        onClick={() => {
-                          setSelectedExplorerPath(file.path);
-                          if (file.kind === "file") {
-                            onOpenWorkspaceFile?.(file.path);
-                            return;
-                          }
-                          setCollapsedWorkspaceDirectories((current) => {
-                            const next = new Set(current);
-                            if (next.has(file.path)) {
-                              next.delete(file.path);
-                            } else {
-                              next.add(file.path);
+                    <div
+                      aria-label="Workspace files"
+                      className="gyro-sidebar-explorer-tree"
+                      onKeyDown={handleExplorerKeyDown}
+                      ref={explorerTreeRef}
+                      role="tree"
+                    >
+                      {visibleFiles.map((file, index) => {
+                        const decoration = ide?.fileDecorations.find(
+                          (item) => item.path === file.path,
+                        );
+                        return (
+                          <WorkspaceExplorerRow
+                            collapsed={collapsedWorkspaceDirectories.has(
+                              file.path,
+                            )}
+                            decoration={decoration}
+                            depth={
+                              file.depth ?? file.path.split(/[\\/]/).length
                             }
-                            return next;
-                          });
-                        }}
-                      />
-                    ))
+                            bufferStatus={ide?.buffers[file.path]?.status}
+                            isActive={
+                              selectedExplorerPath === file.path ||
+                              (!selectedExplorerPath &&
+                                ide?.activePath === file.path)
+                            }
+                            isOpen={Boolean(
+                              ide?.tabs.some((tab) => tab.path === file.path),
+                            )}
+                            key={file.path}
+                            kind={file.kind}
+                            label={workspaceName(file.path)}
+                            path={file.path}
+                            rowRef={(element) => {
+                              if (element)
+                                explorerRowRefs.current.set(file.path, element);
+                              else explorerRowRefs.current.delete(file.path);
+                            }}
+                            tabIndex={
+                              selectedExplorerPath === file.path ||
+                              (!selectedExplorerPath && index === 0)
+                                ? 0
+                                : -1
+                            }
+                            onClick={() => {
+                              setSelectedExplorerPath(file.path);
+                              if (file.kind === "file") {
+                                onOpenWorkspaceFile?.(file.path);
+                                return;
+                              }
+                              toggleWorkspaceDirectory(file.path);
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
                   ) : (
                     <div className="gyro-sidebar-mini-copy">
                       This workspace has no files yet.
@@ -2186,18 +2312,28 @@ function SidebarDestinationRow({
 function WorkspaceExplorerRow({
   label,
   decoration,
+  bufferStatus,
   kind,
   depth,
   collapsed,
   isActive,
+  isOpen,
+  path,
+  rowRef,
+  tabIndex,
   onClick,
 }: {
   label: string;
-  decoration?: string;
+  decoration?: IdeState["fileDecorations"][number];
+  bufferStatus?: EditorBuffer["status"];
   kind: WorkspaceFile["kind"];
   depth: number;
   collapsed: boolean;
   isActive: boolean;
+  isOpen: boolean;
+  path: string;
+  rowRef: (element: HTMLButtonElement | null) => void;
+  tabIndex: number;
   onClick: () => void;
 }) {
   const extension =
@@ -2207,15 +2343,25 @@ function WorkspaceExplorerRow({
   return (
     <button
       aria-expanded={kind === "directory" ? !collapsed : undefined}
+      aria-label={`${kind === "directory" ? "Folder" : "File"} ${path}${decoration?.tooltip ? `, ${decoration.tooltip}` : ""}${bufferStatus === "dirty" ? ", unsaved changes" : ""}`}
+      aria-level={Math.max(1, depth)}
+      aria-selected={isActive}
       className={
         isActive
           ? "gyro-sidebar-row gyro-sidebar-explorer-row is-active"
           : "gyro-sidebar-row gyro-sidebar-explorer-row"
       }
+      data-buffer-state={bufferStatus}
+      data-explorer-path={path}
+      data-file-state={decoration?.color}
       data-file-tone={fileTone}
+      data-open={isOpen || undefined}
       onClick={onClick}
+      ref={rowRef}
+      role="treeitem"
       style={{ paddingLeft: `${Math.max(8, Math.min(depth, 8) * 11)}px` }}
-      title={label}
+      tabIndex={tabIndex}
+      title={`${path}${decoration?.tooltip ? ` · ${decoration.tooltip}` : ""}`}
       type="button"
     >
       {kind === "directory" ? (
@@ -2224,8 +2370,8 @@ function WorkspaceExplorerRow({
         <FileCode2 className="gyro-explorer-file-icon" size={13} />
       )}
       <span>{label}</span>
-      {decoration ? (
-        <small className="gyro-explorer-decoration">{decoration}</small>
+      {decoration?.badge ? (
+        <small className="gyro-explorer-decoration">{decoration.badge}</small>
       ) : null}
     </button>
   );
@@ -2642,6 +2788,9 @@ export function ChatSurface({
     [deferredEvents],
   );
   const { looseEvents, turns } = transcriptState;
+  const activeTurnId = isComposerSending
+    ? activeTranscriptTurnId(turns)
+    : undefined;
   const hasSelectedProvider = providersForConfig(config).some(
     (provider) =>
       provider.id === config.selectedProviderId &&
@@ -2657,9 +2806,9 @@ export function ChatSurface({
             onProviderStatusAction={onProviderStatusAction}
           />
         ))}
-        {turns.map((turn, index) => (
+        {turns.map((turn) => (
           <ChatTurn
-            isActive={Boolean(isComposerSending) && index === turns.length - 1}
+            isActive={turn.id === activeTurnId}
             key={turn.id}
             onProviderStatusAction={onProviderStatusAction}
             onReusePrompt={onReusePrompt}
@@ -2685,6 +2834,7 @@ export function ChatSurface({
       onOpenToolPanel,
       onProviderStatusAction,
       pendingDiffs,
+      activeTurnId,
       isComposerSending,
       looseEvents,
       turns,
@@ -10155,7 +10305,8 @@ const ChatEvent = memo(function ChatEvent({
           {providerStatus.error ? <small>{providerStatus.error}</small> : null}
         </div>
         <div className="gyro-provider-status-actions">
-          {providerStatus.status === "failed" ? (
+          {providerStatus.status === "failed" ||
+          providerStatus.status === "cancelled" ? (
             <>
               <button
                 onClick={() => onProviderStatusAction?.("retry-send", event)}
@@ -10163,14 +10314,16 @@ const ChatEvent = memo(function ChatEvent({
               >
                 Retry
               </button>
-              <button
-                onClick={() =>
-                  onProviderStatusAction?.("reconnect-provider", event)
-                }
-                type="button"
-              >
-                Reconnect
-              </button>
+              {providerStatus.status === "failed" ? (
+                <button
+                  onClick={() =>
+                    onProviderStatusAction?.("reconnect-provider", event)
+                  }
+                  type="button"
+                >
+                  Reconnect
+                </button>
+              ) : null}
             </>
           ) : providerStatus.status === "blocked" ? (
             <button
@@ -10291,6 +10444,11 @@ type ChatTranscriptTurn = {
   activityEvents: SessionEvent[];
   statusEvent?: SessionEvent;
   startedAt: string;
+  runStartedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  runStatus?: string;
+  runUpdatedAtMs?: number;
 };
 
 function TranscriptAttachments({ event }: { event: SessionEvent }) {
@@ -10337,24 +10495,67 @@ function deriveTranscriptState(events: SessionEvent[]) {
   const looseEvents: SessionEvent[] = [];
   const turns: ChatTranscriptTurn[] = [];
   const turnsById = new Map<string, ChatTranscriptTurn>();
-  for (const event of events) {
-    if (isHiddenTranscriptEvent(event)) {
-      continue;
-    }
-    const turnId = turnKeyFromEvent(event);
-    if (event.kind === "user-message") {
-      const turn = turnsById.get(turnId) ?? {
+  const ensureTurn = (turnId: string, startedAt: string) => {
+    let turn = turnsById.get(turnId);
+    if (!turn) {
+      turn = {
         id: turnId,
         assistantEvents: [],
         activityEvents: [],
-        startedAt: event.createdAt,
+        startedAt,
       };
+      turns.push(turn);
+      turnsById.set(turnId, turn);
+    }
+    return turn;
+  };
+  for (const event of events) {
+    const turnId = turnKeyFromEvent(event);
+    const payload = eventPayloadRecord(event);
+    const payloadKind = stringFromEventPayload(payload, "kind");
+    if (
+      event.turnId &&
+      (payloadKind === "provider-diagnostics" || payloadKind === "provider-run")
+    ) {
+      const turn = ensureTurn(turnId, event.createdAt);
+      const status = stringFromEventPayload(payload, "status");
+      const payloadStartedAt = stringFromEventPayload(payload, "startedAt");
+      const payloadCompletedAt = stringFromEventPayload(payload, "completedAt");
+      const durationMs = numberFromEventPayload(payload, "durationMs");
+      const runUpdatedAtMs = timestampMs(
+        payloadCompletedAt ?? payloadStartedAt ?? event.createdAt,
+      );
+      if (
+        runUpdatedAtMs === undefined ||
+        turn.runUpdatedAtMs === undefined ||
+        runUpdatedAtMs >= turn.runUpdatedAtMs
+      ) {
+        turn.runUpdatedAtMs = runUpdatedAtMs ?? turn.runUpdatedAtMs;
+        if (status) {
+          turn.runStatus = status;
+        }
+        if (payloadStartedAt) {
+          turn.runStartedAt = payloadStartedAt;
+        } else if (status === "running") {
+          turn.runStartedAt = event.createdAt;
+        }
+        if (payloadCompletedAt) {
+          turn.completedAt = payloadCompletedAt;
+        } else if (status && isTerminalRunStatus(status)) {
+          turn.completedAt = event.createdAt;
+        }
+        if (durationMs !== undefined) {
+          turn.durationMs = durationMs;
+        }
+      }
+    }
+    if (isHiddenTranscriptEvent(event)) {
+      continue;
+    }
+    if (event.kind === "user-message") {
+      const turn = ensureTurn(turnId, event.createdAt);
       turn.user = event;
       turn.startedAt = event.createdAt;
-      if (!turnsById.has(turnId)) {
-        turns.push(turn);
-        turnsById.set(turnId, turn);
-      }
       continue;
     }
     const belongsToTurn = event.turnId || providerStatusFromEvent(event);
@@ -10362,28 +10563,74 @@ function deriveTranscriptState(events: SessionEvent[]) {
       looseEvents.push(event);
       continue;
     }
-    let turn = turnsById.get(turnId);
-    if (!turn) {
-      turn = {
-        id: turnId,
-        assistantEvents: [],
-        activityEvents: [],
-        startedAt: event.createdAt,
-      };
-      turns.push(turn);
-      turnsById.set(turnId, turn);
-    }
+    const turn = ensureTurn(turnId, event.createdAt);
     if (event.kind === "assistant-message") {
       turn.assistantEvents.push(event);
     } else if (providerActivityFromEvent(event)) {
       turn.activityEvents.push(event);
     } else if (providerStatusFromEvent(event)) {
       turn.statusEvent = event;
+      const providerStatus = providerStatusFromEvent(event);
+      if (providerStatus) {
+        const statusStartedAt = stringFromEventPayload(payload, "startedAt");
+        const statusCompletedAt = stringFromEventPayload(
+          payload,
+          "completedAt",
+        );
+        const durationMs = numberFromEventPayload(payload, "durationMs");
+        const runUpdatedAtMs = timestampMs(
+          statusCompletedAt ?? statusStartedAt ?? event.createdAt,
+        );
+        if (
+          runUpdatedAtMs === undefined ||
+          turn.runUpdatedAtMs === undefined ||
+          runUpdatedAtMs >= turn.runUpdatedAtMs
+        ) {
+          turn.runUpdatedAtMs = runUpdatedAtMs ?? turn.runUpdatedAtMs;
+          turn.runStatus = providerStatus.status;
+          if (isActiveRunStatus(providerStatus.status)) {
+            turn.runStartedAt = statusStartedAt ?? event.createdAt;
+            turn.completedAt = undefined;
+            turn.durationMs = undefined;
+          } else if (isTerminalRunStatus(providerStatus.status)) {
+            turn.completedAt = statusCompletedAt ?? event.createdAt;
+            if (statusStartedAt) {
+              turn.runStartedAt = statusStartedAt;
+            }
+            if (durationMs !== undefined) {
+              turn.durationMs = durationMs;
+            }
+          }
+        }
+      }
     } else {
       looseEvents.push(event);
     }
   }
   return { looseEvents, turns };
+}
+
+function isActiveRunStatus(status: string) {
+  return ["queued", "running", "waiting"].includes(status);
+}
+
+function isTerminalRunStatus(status: string) {
+  return ["blocked", "done", "failed", "cancelled"].includes(status);
+}
+
+function timestampMs(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function activeTranscriptTurnId(turns: ChatTranscriptTurn[]) {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn && turn.runStatus && isActiveRunStatus(turn.runStatus)) {
+      return turn.id;
+    }
+  }
+  return undefined;
 }
 
 function turnKeyFromEvent(event: SessionEvent) {
@@ -10418,8 +10665,9 @@ function ChatTurn({
     ["queued", "running", "waiting"].includes(providerStatus.status),
   );
   const isRunning = isActive;
-  const completedAt =
-    !isRunning && turn.statusEvent ? turn.statusEvent.createdAt : undefined;
+  const completedAt = !isRunning
+    ? (turn.completedAt ?? turn.statusEvent?.createdAt)
+    : undefined;
   const hasResponse = turn.assistantEvents.some(
     (event) => event.message.trim().length > 0,
   );
@@ -10432,8 +10680,9 @@ function ChatTurn({
       <div className="gyro-chat-run">
         <ChatRunHeader
           completedAt={completedAt}
+          durationMs={turn.durationMs}
           isRunning={isRunning}
-          startedAt={turn.startedAt}
+          startedAt={turn.runStartedAt ?? turn.startedAt}
         >
           {isRunning && onStopChat ? (
             <button onClick={onStopChat} type="button">
@@ -10486,7 +10735,9 @@ function ChatTurn({
               ) : null}
             </div>
             <div>
-              {providerStatus.status === "failed" || wasInterrupted ? (
+              {providerStatus.status === "failed" ||
+              providerStatus.status === "cancelled" ||
+              wasInterrupted ? (
                 <button
                   onClick={() =>
                     onProviderStatusAction?.("retry-send", turn.statusEvent!)
@@ -10496,17 +10747,19 @@ function ChatTurn({
                   Retry
                 </button>
               ) : null}
-              <button
-                onClick={() =>
-                  onProviderStatusAction?.(
-                    "reconnect-provider",
-                    turn.statusEvent!,
-                  )
-                }
-                type="button"
-              >
-                Reconnect
-              </button>
+              {providerStatus.status !== "cancelled" ? (
+                <button
+                  onClick={() =>
+                    onProviderStatusAction?.(
+                      "reconnect-provider",
+                      turn.statusEvent!,
+                    )
+                  }
+                  type="button"
+                >
+                  Reconnect
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -10518,11 +10771,13 @@ function ChatTurn({
 function ChatRunHeader({
   children,
   completedAt,
+  durationMs,
   isRunning,
   startedAt,
 }: {
   children?: ReactNode;
   completedAt?: string;
+  durationMs?: number;
   isRunning: boolean;
   startedAt: string;
 }) {
@@ -10536,9 +10791,12 @@ function ChatRunHeader({
   }, [isRunning]);
   const start = Date.parse(startedAt);
   const end = completedAt ? Date.parse(completedAt) : now;
-  const elapsedSeconds = Number.isFinite(start)
-    ? Math.max(0, Math.round((end - start) / 1_000))
-    : 0;
+  const elapsedSeconds =
+    !isRunning && durationMs !== undefined
+      ? Math.max(0, Math.round(durationMs / 1_000))
+      : Number.isFinite(start)
+        ? Math.max(0, Math.round((end - start) / 1_000))
+        : 0;
   return (
     <div className="gyro-chat-run-header">
       <span>
@@ -10939,6 +11197,16 @@ function stringFromEventPayload(
 ) {
   const value = payload?.[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function numberFromEventPayload(
+  payload: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const value = payload?.[key];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function isInspectableEvent(event: SessionEvent) {
