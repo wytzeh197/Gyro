@@ -185,6 +185,16 @@ type ProviderStreamBatch = {
   textDelta: string;
 };
 
+type SourceControlLineStats = {
+  additions: number;
+  deletions: number;
+};
+
+type TurnSourceControlBaselines = Record<
+  string,
+  Record<string, SourceControlLineStats>
+>;
+
 type ChatTurnContextSnapshot = {
   mode?: ChatMode;
   goal?: SessionGoal;
@@ -492,6 +502,8 @@ export function App() {
   const [terminalOutput, setTerminalOutput] = useState("");
   const [terminalSourceControlByPane, setTerminalSourceControlByPane] =
     useState<Record<string, SourceControlState>>({});
+  const [turnSourceControlBaselines, setTurnSourceControlBaselines] =
+    useState<TurnSourceControlBaselines>({});
   const [
     terminalSourceControlLoadingPaneId,
     setTerminalSourceControlLoadingPaneId,
@@ -539,6 +551,7 @@ export function App() {
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
   const suppressSessionAutoSelectRef = useRef(true);
   const ingestedSessionEventIds = useRef(new Set<string>());
+  const refreshedFileActivityKeysRef = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
   const languageServerIdsRef = useRef<Record<string, string>>({});
@@ -1291,7 +1304,7 @@ export function App() {
     });
   }, []);
 
-  const refreshIdeServices = useCallback((root?: string) => {
+  const refreshIdeSourceControl = useCallback((root?: string) => {
     if (!root) {
       return;
     }
@@ -1309,31 +1322,6 @@ export function App() {
           statsPartial: false,
           files: [],
         },
-      });
-      dispatchWorkbench({
-        type: "ide-set-tasks",
-        tasks: [
-          {
-            id: "preview:typecheck",
-            label: "pnpm typecheck",
-            command: "pnpm",
-            args: ["typecheck"],
-            group: "build",
-            status: "idle",
-            outputChannelId: "task-preview-typecheck",
-          },
-        ],
-      });
-      dispatchWorkbench({
-        type: "ide-set-test-tree",
-        tests: [
-          {
-            id: "preview-tests",
-            label: "Workspace tests",
-            status: "unknown",
-            children: [],
-          },
-        ],
       });
       return;
     }
@@ -1361,15 +1349,57 @@ export function App() {
           },
         }),
       );
-
-    void invoke<TaskDefinition[]>("task_discover", { workspacePath: root })
-      .then((tasks) => dispatchWorkbench({ type: "ide-set-tasks", tasks }))
-      .catch(() => dispatchWorkbench({ type: "ide-set-tasks", tasks: [] }));
-
-    void invoke<TestTreeItem[]>("test_discover", { workspacePath: root })
-      .then((tests) => dispatchWorkbench({ type: "ide-set-test-tree", tests }))
-      .catch(() => dispatchWorkbench({ type: "ide-set-test-tree", tests: [] }));
   }, []);
+
+  const refreshIdeServices = useCallback(
+    (root?: string) => {
+      if (!root) {
+        return;
+      }
+      refreshIdeSourceControl(root);
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: [
+            {
+              id: "preview:typecheck",
+              label: "pnpm typecheck",
+              command: "pnpm",
+              args: ["typecheck"],
+              group: "build",
+              status: "idle",
+              outputChannelId: "task-preview-typecheck",
+            },
+          ],
+        });
+        dispatchWorkbench({
+          type: "ide-set-test-tree",
+          tests: [
+            {
+              id: "preview-tests",
+              label: "Workspace tests",
+              status: "unknown",
+              children: [],
+            },
+          ],
+        });
+        return;
+      }
+
+      void invoke<TaskDefinition[]>("task_discover", { workspacePath: root })
+        .then((tasks) => dispatchWorkbench({ type: "ide-set-tasks", tasks }))
+        .catch(() => dispatchWorkbench({ type: "ide-set-tasks", tasks: [] }));
+
+      void invoke<TestTreeItem[]>("test_discover", { workspacePath: root })
+        .then((tests) =>
+          dispatchWorkbench({ type: "ide-set-test-tree", tests }),
+        )
+        .catch(() =>
+          dispatchWorkbench({ type: "ide-set-test-tree", tests: [] }),
+        );
+    },
+    [refreshIdeSourceControl],
+  );
 
   const runWorkspaceSearch = useCallback(
     async (query: WorkspaceSearchQuery) => {
@@ -3718,6 +3748,15 @@ export function App() {
       }
       const retryTurnId = overrideContext?.retryTurnId;
       const turnId = retryTurnId ?? createTurnId();
+      setTurnSourceControlBaselines((current) => {
+        if (current[turnId]) {
+          return current;
+        }
+        return Object.fromEntries([
+          ...Object.entries(current).slice(-49),
+          [turnId, sourceControlLineStats(workbench.ide.sourceControl)],
+        ]);
+      });
       const isRetry = Boolean(activeSessionId && retryTurnId);
       const selectedProvider = providersForConfig(config).find(
         (provider) => provider.id === config.selectedProviderId,
@@ -4090,6 +4129,7 @@ export function App() {
       saveSessionModel,
       setSessionSending,
       updateSessionTitle,
+      workbench.ide.sourceControl,
       workbench.workspaceMode,
       workspacePath,
     ],
@@ -6006,6 +6046,10 @@ export function App() {
   ]);
 
   useEffect(() => {
+    refreshedFileActivityKeysRef.current.clear();
+  }, [activeSessionId]);
+
+  useEffect(() => {
     const root = activeSession?.workspacePath ?? workspacePath;
     const buffer = selectedFile
       ? workbench.ide.buffers[selectedFile]
@@ -6409,6 +6453,42 @@ export function App() {
     workbench.activeTurn?.id,
     workbench.activeTurn?.status,
     workbench.activeTurn?.updatedAt,
+  ]);
+
+  useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root) {
+      return;
+    }
+    const freshKeys = deferredEventsForTurn
+      .map((event) => {
+        const payload = recordFromUnknown(event.payload);
+        if (
+          event.kind !== "system-event" ||
+          payload?.kind !== "provider-activity" ||
+          payload.activityKind !== "file"
+        ) {
+          return undefined;
+        }
+        const status = stringFromRecord(payload, "status") ?? "done";
+        return `${event.id}:${status}`;
+      })
+      .filter(
+        (key): key is string =>
+          typeof key === "string" &&
+          !refreshedFileActivityKeysRef.current.has(key),
+      );
+    if (freshKeys.length === 0) {
+      return;
+    }
+    freshKeys.forEach((key) => refreshedFileActivityKeysRef.current.add(key));
+    const timeout = window.setTimeout(() => refreshIdeSourceControl(root), 100);
+    return () => window.clearTimeout(timeout);
+  }, [
+    activeSession?.workspacePath,
+    deferredEventsForTurn,
+    refreshIdeSourceControl,
+    workspacePath,
   ]);
 
   useEffect(() => {
@@ -6836,7 +6916,9 @@ export function App() {
                 sessionPlan={activeSessionPlan}
                 sessionGoal={activeSessionGoal}
                 sessionTitle={activeSession?.title}
+                sourceControl={workbench.ide.sourceControl}
                 terminalPanes={workbench.terminalPanes}
+                turnSourceControlBaselines={turnSourceControlBaselines}
                 worktreeName={activeSession?.worktreeName}
                 workspaceMode={workbench.workspaceMode}
                 workspacePath={activeSession?.workspacePath ?? workspacePath}
@@ -7223,6 +7305,8 @@ export function App() {
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
           showOnboardingSteps
+          sourceControl={workbench.ide.sourceControl}
+          turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
         />
       ) : null}
@@ -8922,6 +9006,15 @@ function workspaceContentToEditorBuffer(
     status: "ready",
     updatedAt: new Date().toISOString(),
   };
+}
+
+function sourceControlLineStats(sourceControl: SourceControlState) {
+  return Object.fromEntries(
+    sourceControl.files.map((file) => [
+      file.path.replaceAll("\\", "/"),
+      { additions: file.additions, deletions: file.deletions },
+    ]),
+  );
 }
 
 function workspaceName(path?: string) {

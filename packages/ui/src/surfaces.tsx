@@ -1293,15 +1293,10 @@ function WorkspaceSidebarContent({
           </nav>
 
           {activeIdeView === "explorer" ? (
-            <SidebarSection grow meta={String(files.length)} title="Explorer">
-              {workspacePath ? (
-                <>
-                  <SidebarProjectRow
-                    icon={Folder}
-                    label={workspaceName(workspacePath)}
-                    meta="workspace"
-                    onClick={onOpenWorkspace}
-                  />
+            <SidebarSection
+              grow
+              headerActions={
+                workspacePath ? (
                   <div className="gyro-sidebar-explorer-toolbar">
                     <button
                       aria-label="New file"
@@ -1309,8 +1304,8 @@ function WorkspaceSidebarContent({
                       title="New file"
                       type="button"
                     >
-                      <FileText size={14} />
-                      <Plus size={10} />
+                      <FileText size={13} />
+                      <Plus size={9} />
                     </button>
                     <button
                       aria-label="New folder"
@@ -1318,8 +1313,8 @@ function WorkspaceSidebarContent({
                       title="New folder"
                       type="button"
                     >
-                      <Folder size={14} />
-                      <Plus size={10} />
+                      <Folder size={13} />
+                      <Plus size={9} />
                     </button>
                     <button
                       aria-label="Rename selected path"
@@ -1332,7 +1327,7 @@ function WorkspaceSidebarContent({
                       title="Rename selected path"
                       type="button"
                     >
-                      <Edit3 size={14} />
+                      <Edit3 size={13} />
                     </button>
                     <button
                       aria-label="Delete selected path"
@@ -1345,7 +1340,7 @@ function WorkspaceSidebarContent({
                       title="Delete selected path"
                       type="button"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                     <button
                       aria-label="Refresh workspace files"
@@ -1353,9 +1348,21 @@ function WorkspaceSidebarContent({
                       title="Refresh workspace files"
                       type="button"
                     >
-                      <RefreshCw size={14} />
+                      <RefreshCw size={13} />
                     </button>
                   </div>
+                ) : null
+              }
+              title="Explorer"
+            >
+              {workspacePath ? (
+                <>
+                  <SidebarProjectRow
+                    icon={Folder}
+                    label={workspaceName(workspacePath)}
+                    meta="workspace"
+                    onClick={onOpenWorkspace}
+                  />
                   {visibleFiles.length > 0 ? (
                     <div
                       aria-label="Workspace files"
@@ -1812,14 +1819,13 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          <SidebarSection title="Code tools">
-            {paneTabs.map(({ id, label, icon }) => (
-              <SidebarDestinationRow
-                icon={icon}
-                isActive={activePaneTab === id}
+          <nav className="gyro-ide-panel-shortcuts" aria-label="Code tools">
+            {paneTabs.map(({ id, label, icon: Icon }) => (
+              <button
+                aria-label={label}
+                aria-pressed={activePaneTab === id}
+                className={activePaneTab === id ? "is-active" : ""}
                 key={id}
-                label={label}
-                meta={undefined}
                 onClick={() => onOpenToolPanel(id)}
                 title={
                   id === "diff"
@@ -1828,9 +1834,12 @@ function WorkspaceSidebarContent({
                       ? "Browser preview"
                       : label
                 }
-              />
+                type="button"
+              >
+                <Icon size={14} />
+              </button>
             ))}
-          </SidebarSection>
+          </nav>
         </>
       ) : null}
 
@@ -1928,6 +1937,7 @@ function SidebarSection({
   collapsible,
   isCollapsed,
   meta,
+  headerActions,
   onToggle,
   children,
 }: {
@@ -1936,6 +1946,7 @@ function SidebarSection({
   collapsible?: boolean;
   isCollapsed?: boolean;
   meta?: string;
+  headerActions?: ReactNode;
   onToggle?: () => void;
   children: ReactNode;
 }) {
@@ -1964,6 +1975,11 @@ function SidebarSection({
           <span>{title}</span>
           {meta ? <small>{meta}</small> : null}
         </button>
+      ) : headerActions ? (
+        <div className="gyro-sidebar-section-heading">
+          <div className="gyro-nav-label">{title}</div>
+          {headerActions}
+        </div>
       ) : (
         <div className="gyro-nav-label">{title}</div>
       )}
@@ -2649,6 +2665,11 @@ type ChatSurfaceProps = {
   providerReadiness?: ProviderReadiness;
   terminalPanes?: TerminalPane[];
   diffReview?: DiffReview;
+  sourceControl?: SourceControlState;
+  turnSourceControlBaselines?: Record<
+    string,
+    Record<string, { additions: number; deletions: number }>
+  >;
   browserPreview?: BrowserPreview;
   onboarding?: OnboardingState;
   sessionPlan?: SessionPlan;
@@ -2708,6 +2729,8 @@ export function ChatSurface({
   providerReadiness,
   terminalPanes,
   diffReview,
+  sourceControl,
+  turnSourceControlBaselines,
   browserPreview,
   onboarding,
   sessionPlan,
@@ -2798,9 +2821,12 @@ export function ChatSurface({
           <ChatTurn
             isActive={turn.id === activeTurnId}
             key={turn.id}
+            onOpenChanges={() => onOpenToolPanel?.("diff")}
             onProviderStatusAction={onProviderStatusAction}
             onReusePrompt={onReusePrompt}
             onContinueChat={onContinueChat}
+            sourceControl={sourceControl}
+            sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
             turn={turn}
           />
         ))}
@@ -2820,6 +2846,8 @@ export function ChatSurface({
       onAgentAction,
       onOpenToolPanel,
       onProviderStatusAction,
+      sourceControl,
+      turnSourceControlBaselines,
       pendingDiffs,
       activeTurnId,
       isComposerSending,
@@ -3024,6 +3052,7 @@ export function ChatSurface({
           branchName={branchName}
           browserPreview={browserPreview}
           diffReview={diffReview}
+          sourceControl={sourceControl}
           onPlanItemStatusChange={onPlanItemStatusChange}
           onPlanAction={onPlanAction}
           onGoalAction={onGoalAction}
@@ -3109,6 +3138,7 @@ function ChatSidePanel({
   activePanel,
   browserPreview,
   diffReview,
+  sourceControl,
   onPlanItemStatusChange,
   onPlanAction,
   onGoalAction,
@@ -3124,6 +3154,7 @@ function ChatSidePanel({
   branchName?: string;
   browserPreview?: BrowserPreview;
   diffReview?: DiffReview;
+  sourceControl?: SourceControlState;
   onPlanItemStatusChange?: (
     itemId: string,
     status: SessionPlanItemStatus,
@@ -3271,14 +3302,18 @@ function ChatSidePanel({
 
   const pendingDiffs =
     diffReview?.files.filter((file) => file.state === "pending").length ?? 0;
-  const acceptedDiffs =
-    diffReview?.files.filter((file) => file.state === "accepted").length ?? 0;
   const rejectedDiffs =
     diffReview?.files.filter((file) => file.state === "rejected").length ?? 0;
   const additions =
-    diffReview?.files.reduce((total, file) => total + file.additions, 0) ?? 0;
+    sourceControl?.additions ??
+    diffReview?.files.reduce((total, file) => total + file.additions, 0) ??
+    0;
   const deletions =
-    diffReview?.files.reduce((total, file) => total + file.deletions, 0) ?? 0;
+    sourceControl?.deletions ??
+    diffReview?.files.reduce((total, file) => total + file.deletions, 0) ??
+    0;
+  const changedFiles =
+    sourceControl?.files.length ?? diffReview?.files.length ?? 0;
   const runningPanes = terminalPanes.filter(
     (pane) => pane.status === "running" || pane.status === "waiting",
   ).length;
@@ -3310,15 +3345,18 @@ function ChatSidePanel({
       <div className="gyro-rail-section">
         <div className="gyro-rail-heading">Changes</div>
         <div className="gyro-rail-row">
-          <GitPullRequest size={15} />
-          <span>{pendingDiffs} pending</span>
-          <small>{acceptedDiffs} accepted</small>
-        </div>
-        <div className="gyro-rail-row">
           <FileCode2 size={15} />
           <span>
-            +{additions} -{deletions}
+            {changedFiles} changed {changedFiles === 1 ? "file" : "files"}
           </span>
+          <small className="gyro-change-totals">
+            <em className="is-added">+{additions}</em>
+            <em className="is-removed">-{deletions}</em>
+          </small>
+        </div>
+        <div className="gyro-rail-row">
+          <GitPullRequest size={15} />
+          <span>{pendingDiffs} pending review</span>
           <small>{rejectedDiffs} rejected</small>
         </div>
       </div>
@@ -10640,15 +10678,24 @@ function turnKeyFromEvent(event: SessionEvent) {
 
 function ChatTurn({
   isActive,
+  onOpenChanges,
   onProviderStatusAction,
   onReusePrompt,
   onContinueChat,
+  sourceControl,
+  sourceControlBaseline,
   turn,
 }: {
   isActive: boolean;
+  onOpenChanges?: () => void;
   onProviderStatusAction?: (action: string, event: SessionEvent) => void;
   onReusePrompt?: (message: string) => void;
   onContinueChat?: () => void;
+  sourceControl?: SourceControlState;
+  sourceControlBaseline?: Record<
+    string,
+    { additions: number; deletions: number }
+  >;
   turn: ChatTranscriptTurn;
 }) {
   const providerStatus = turn.statusEvent
@@ -10666,6 +10713,11 @@ function ChatTurn({
   const hasResponse = turn.timelineEvents.some(
     (event) =>
       event.kind === "assistant-message" && event.message.trim().length > 0,
+  );
+  const changeSummary = chatTurnChangeSummary(
+    turn.timelineEvents,
+    sourceControl,
+    sourceControlBaseline,
   );
 
   return (
@@ -10686,7 +10738,7 @@ function ChatTurn({
             </button>
           ) : null}
         </ChatRunHeader>
-        {isRunning && !hasResponse ? (
+        {isRunning && turn.timelineEvents.length === 0 ? (
           <div className="gyro-chat-run-thinking" role="status">
             Thinking
           </div>
@@ -10701,10 +10753,42 @@ function ChatTurn({
                   </div>
                 </article>
               ) : (
-                <ProviderActivityRow event={event} key={event.id} />
+                <ProviderActivityRow
+                  event={event}
+                  key={event.id}
+                  onOpenChanges={onOpenChanges}
+                  sourceControl={sourceControl}
+                  sourceControlBaseline={sourceControlBaseline}
+                />
               ),
             )}
           </div>
+        ) : null}
+        {changeSummary.paths.length > 0 ? (
+          <button
+            aria-label={`Open ${changeSummary.paths.length} changed ${changeSummary.paths.length === 1 ? "file" : "files"}`}
+            className="gyro-chat-run-change-summary"
+            onClick={onOpenChanges}
+            title="Open changes"
+            type="button"
+          >
+            <FileCode2 size={13} />
+            <span>
+              {changeSummary.paths.length}{" "}
+              {changeSummary.paths.length === 1 ? "file" : "files"} changed
+            </span>
+            {changeSummary.hasStats ? (
+              <small>
+                <em className="is-added">+{changeSummary.additions}</em>
+                <em className="is-removed">-{changeSummary.deletions}</em>
+              </small>
+            ) : (
+              <small>
+                {isRunning ? "Updating totals…" : "Stats unavailable"}
+              </small>
+            )}
+            <ChevronRight size={12} />
+          </button>
         ) : null}
         {providerStatus &&
         (["failed", "blocked", "cancelled"].includes(providerStatus.status) ||
@@ -10802,7 +10886,20 @@ function ChatRunHeader({
   );
 }
 
-function ProviderActivityRow({ event }: { event: SessionEvent }) {
+function ProviderActivityRow({
+  event,
+  onOpenChanges,
+  sourceControl,
+  sourceControlBaseline,
+}: {
+  event: SessionEvent;
+  onOpenChanges?: () => void;
+  sourceControl?: SourceControlState;
+  sourceControlBaseline?: Record<
+    string,
+    { additions: number; deletions: number }
+  >;
+}) {
   const activity = providerActivityFromEvent(event);
   if (!activity) {
     return null;
@@ -10812,6 +10909,52 @@ function ProviderActivityRow({ event }: { event: SessionEvent }) {
       <p className="gyro-chat-run-commentary">
         {renderAssistantInlineContent(activity.label)}
       </p>
+    );
+  }
+  if (activity.kind === "file") {
+    const path = providerActivityFilePath(event);
+    const file = path
+      ? sourceControlFileForActivityPath(path, sourceControl)
+      : undefined;
+    const fileDelta = file
+      ? sourceControlFileDelta(
+          file,
+          sourceControlStatsForActivityPath(
+            path ?? file.path,
+            sourceControlBaseline,
+          ),
+        )
+      : undefined;
+    const statusLabel =
+      activity.status === "running"
+        ? "Editing"
+        : activity.status === "failed"
+          ? "Edit failed"
+          : "Edited";
+    return (
+      <button
+        className={`gyro-chat-run-activity is-file is-${activity.status}`}
+        onClick={onOpenChanges}
+        title={path ?? activity.label}
+        type="button"
+      >
+        <FileCode2 size={13} />
+        <span>
+          <strong>{statusLabel}</strong>
+          <code>{path ?? activity.label.replace(/^Updated\s+/, "")}</code>
+        </span>
+        {fileDelta ? (
+          <small>
+            <em className="is-added">+{fileDelta.additions}</em>
+            <em className="is-removed">-{fileDelta.deletions}</em>
+          </small>
+        ) : null}
+        {activity.status === "running" ? (
+          <CircleDashed className="is-spinning" size={12} />
+        ) : (
+          <ChevronRight size={12} />
+        )}
+      </button>
     );
   }
   return (
@@ -10828,6 +10971,99 @@ function ProviderActivityRow({ event }: { event: SessionEvent }) {
       )}
     </div>
   );
+}
+
+function providerActivityFilePath(event: SessionEvent) {
+  const activity = providerActivityFromEvent(event);
+  if (!activity || activity.kind !== "file") {
+    return undefined;
+  }
+  const detail = activity.detail?.trim();
+  if (detail && detail !== "workspace files") {
+    return detail;
+  }
+  const labelPath = activity.label
+    .replace(/^(?:Editing|Edited|Updated)\s+/, "")
+    .trim();
+  return labelPath && labelPath !== "workspace files" ? labelPath : undefined;
+}
+
+function sourceControlFileForActivityPath(
+  activityPath: string,
+  sourceControl?: SourceControlState,
+) {
+  const normalizedActivityPath = activityPath.replaceAll("\\", "/");
+  return sourceControl?.files.find((file) => {
+    const normalizedFilePath = file.path.replaceAll("\\", "/");
+    return (
+      normalizedFilePath === normalizedActivityPath ||
+      normalizedActivityPath.endsWith(`/${normalizedFilePath}`)
+    );
+  });
+}
+
+function chatTurnChangeSummary(
+  events: SessionEvent[],
+  sourceControl?: SourceControlState,
+  sourceControlBaseline?: Record<
+    string,
+    { additions: number; deletions: number }
+  >,
+) {
+  const paths = Array.from(
+    new Set(
+      events
+        .map(providerActivityFilePath)
+        .filter((path): path is string => Boolean(path)),
+    ),
+  );
+  const files = paths
+    .map((path) => sourceControlFileForActivityPath(path, sourceControl))
+    .filter((file): file is SourceControlFile => Boolean(file));
+  const deltas = files.map((file) =>
+    sourceControlFileDelta(
+      file,
+      sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
+    ),
+  );
+  return {
+    additions: deltas.reduce((total, file) => total + file.additions, 0),
+    deletions: deltas.reduce((total, file) => total + file.deletions, 0),
+    hasStats: paths.length > 0 && files.length === paths.length,
+    paths,
+  };
+}
+
+function sourceControlStatsForActivityPath(
+  activityPath: string,
+  stats?: Record<string, { additions: number; deletions: number }>,
+) {
+  const normalizedActivityPath = activityPath.replaceAll("\\", "/");
+  return Object.entries(stats ?? {}).find(([path]) => {
+    const normalizedPath = path.replaceAll("\\", "/");
+    return (
+      normalizedPath === normalizedActivityPath ||
+      normalizedActivityPath.endsWith(`/${normalizedPath}`)
+    );
+  })?.[1];
+}
+
+function sourceControlFileDelta(
+  current: Pick<SourceControlFile, "additions" | "deletions">,
+  baseline?: { additions: number; deletions: number },
+) {
+  if (!baseline) {
+    return {
+      additions: current.additions,
+      deletions: current.deletions,
+    };
+  }
+  const additionsDelta = current.additions - baseline.additions;
+  const deletionsDelta = current.deletions - baseline.deletions;
+  return {
+    additions: Math.max(0, additionsDelta) + Math.max(0, -deletionsDelta),
+    deletions: Math.max(0, deletionsDelta) + Math.max(0, -additionsDelta),
+  };
 }
 
 type AssistantResponseBlock =
