@@ -40,7 +40,9 @@ const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 4;
 const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
+const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const TEXT_TRUNCATION_SUFFIX: &str = "...";
@@ -549,6 +551,44 @@ struct ProviderAdapterDescriptor {
     runner: &'static str,
     auth_owner: &'static str,
     timeout_seconds: u64,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ProviderUsageWindow {
+    id: String,
+    label: String,
+    used_percent: i32,
+    resets_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ProviderUsageSnapshot {
+    provider_id: String,
+    windows: Vec<ProviderUsageWindow>,
+    fetched_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexRateLimitWindow {
+    used_percent: i32,
+    window_duration_mins: Option<i64>,
+    resets_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexRateLimitSnapshot {
+    primary: Option<CodexRateLimitWindow>,
+    secondary: Option<CodexRateLimitWindow>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexRateLimitsResponse {
+    rate_limits: CodexRateLimitSnapshot,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -3742,6 +3782,209 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
 }
 
 #[tauri::command]
+async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || get_provider_usage_blocking(&provider_id))
+        .await
+        .map_err(|error| format!("provider usage worker failed: {error}"))?
+}
+
+fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
+    if provider_id != "openai" {
+        return Err("this provider does not expose a supported quota source".into());
+    }
+
+    let mut process = command_with_gui_path("codex");
+    process
+        .args(["app-server", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = process
+        .spawn()
+        .map_err(|error| format!("could not start the Codex usage service: {error}"))?;
+    let result = (|| {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Codex usage service input is unavailable".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Codex usage service output is unavailable".to_string())?;
+        let messages = spawn_codex_app_server_reader(stdout);
+        let deadline = Instant::now() + CODEX_USAGE_TIMEOUT;
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "gyro",
+                        "title": "Gyro",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "capabilities": { "experimentalApi": true },
+                },
+            }),
+        )?;
+        let initialize = receive_codex_app_server_response(&messages, 1, deadline)?;
+        codex_app_server_result(&initialize)?;
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({ "method": "initialized" }),
+        )?;
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 2,
+                "method": "account/rateLimits/read",
+            }),
+        )?;
+        let response = receive_codex_app_server_response(&messages, 2, deadline)?;
+        let payload = codex_app_server_result(&response)?;
+        let response: CodexRateLimitsResponse = serde_json::from_value(payload)
+            .map_err(|error| format!("Codex returned an unsupported usage response: {error}"))?;
+        Ok(ProviderUsageSnapshot {
+            provider_id: provider_id.into(),
+            windows: provider_usage_windows_from_codex(&response.rate_limits),
+            fetched_at: chrono::Utc::now().to_rfc3339(),
+        })
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+fn spawn_codex_app_server_reader(
+    stdout: ChildStdout,
+) -> mpsc::Receiver<Result<serde_json::Value, String>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    let _ = sender.send(Err("Codex usage service closed unexpectedly".into()));
+                    break;
+                }
+                Ok(_) if line.len() > MAX_CODEX_APP_SERVER_MESSAGE_BYTES => {
+                    let _ = sender.send(Err("Codex usage response exceeded the size limit".into()));
+                    break;
+                }
+                Ok(_) => match serde_json::from_str(line.trim()) {
+                    Ok(message) => {
+                        if sender.send(Ok(message)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(format!(
+                            "Codex usage service returned invalid JSON: {error}"
+                        )));
+                        break;
+                    }
+                },
+                Err(error) => {
+                    let _ = sender.send(Err(format!(
+                        "could not read the Codex usage response: {error}"
+                    )));
+                    break;
+                }
+            }
+        }
+    });
+    receiver
+}
+
+fn write_codex_app_server_message(
+    stdin: &mut ChildStdin,
+    message: &serde_json::Value,
+) -> Result<(), String> {
+    let mut bytes = serde_json::to_vec(message).map_err(to_string)?;
+    bytes.push(b'\n');
+    stdin
+        .write_all(&bytes)
+        .and_then(|_| stdin.flush())
+        .map_err(|error| format!("could not write to the Codex usage service: {error}"))
+}
+
+fn receive_codex_app_server_response(
+    messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
+    request_id: u64,
+    deadline: Instant,
+) -> Result<serde_json::Value, String> {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Codex usage request timed out".into());
+        }
+        let message = messages
+            .recv_timeout(remaining)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => "Codex usage request timed out".to_string(),
+                mpsc::RecvTimeoutError::Disconnected => {
+                    "Codex usage service disconnected".to_string()
+                }
+            })??;
+        if message.get("id").and_then(serde_json::Value::as_u64) == Some(request_id) {
+            return Ok(message);
+        }
+    }
+}
+
+fn codex_app_server_result(response: &serde_json::Value) -> Result<serde_json::Value, String> {
+    if let Some(error) = response.get("error") {
+        return Err(error
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Codex could not load account usage")
+            .to_string());
+    }
+    response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "Codex usage response did not include a result".into())
+}
+
+fn provider_usage_windows_from_codex(
+    snapshot: &CodexRateLimitSnapshot,
+) -> Vec<ProviderUsageWindow> {
+    let mut windows = Vec::new();
+    let mut seen = HashSet::new();
+    for (window, fallback_id, fallback_label) in [
+        (snapshot.primary.as_ref(), "five-hour", "5-hour window"),
+        (snapshot.secondary.as_ref(), "weekly", "Weekly window"),
+    ] {
+        let Some(window) = window else {
+            continue;
+        };
+        let (id, label) = match window.window_duration_mins {
+            Some(300) => ("five-hour", "5-hour window"),
+            Some(10_080) => ("weekly", "Weekly window"),
+            _ => (fallback_id, fallback_label),
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        windows.push(ProviderUsageWindow {
+            id: id.into(),
+            label: label.into(),
+            used_percent: window.used_percent.clamp(0, 100),
+            resets_at: window
+                .resets_at
+                .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+                .map(|timestamp| timestamp.to_rfc3339()),
+        });
+    }
+    windows.sort_by_key(|window| if window.id == "five-hour" { 0 } else { 1 });
+    windows
+}
+
+#[tauri::command]
 async fn export_diagnostics() -> Result<DiagnosticsExportResult, String> {
     tauri::async_runtime::spawn_blocking(export_diagnostics_blocking)
         .await
@@ -5646,6 +5889,7 @@ pub fn run() {
             delete_workspace_path,
             export_diagnostics,
             get_account_session,
+            get_provider_usage,
             git_commit,
             git_diff,
             git_discard,
@@ -5774,6 +6018,77 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_usage_windows_follow_reported_duration_instead_of_slot() {
+        let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
+            primary: Some(CodexRateLimitWindow {
+                used_percent: 29,
+                window_duration_mins: Some(10_080),
+                resets_at: Some(1_784_489_840),
+            }),
+            secondary: None,
+        });
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].id, "weekly");
+        assert_eq!(windows[0].label, "Weekly window");
+        assert_eq!(windows[0].used_percent, 29);
+        assert!(windows[0]
+            .resets_at
+            .as_deref()
+            .is_some_and(|value| { chrono::DateTime::parse_from_rfc3339(value).is_ok() }));
+    }
+
+    #[test]
+    fn codex_usage_windows_are_clamped_ordered_and_deduplicated() {
+        let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
+            primary: Some(CodexRateLimitWindow {
+                used_percent: 140,
+                window_duration_mins: Some(300),
+                resets_at: None,
+            }),
+            secondary: Some(CodexRateLimitWindow {
+                used_percent: -5,
+                window_duration_mins: Some(10_080),
+                resets_at: None,
+            }),
+        });
+
+        assert_eq!(
+            windows
+                .iter()
+                .map(|window| window.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["five-hour", "weekly"]
+        );
+        assert_eq!(windows[0].used_percent, 100);
+        assert_eq!(windows[1].used_percent, 0);
+    }
+
+    #[test]
+    fn codex_app_server_errors_are_exposed_without_protocol_details() {
+        let error = codex_app_server_result(&serde_json::json!({
+            "id": 2,
+            "error": { "code": -32603, "message": "Login required" },
+        }))
+        .unwrap_err();
+
+        assert_eq!(error, "Login required");
+    }
+
+    #[test]
+    #[ignore = "requires a locally authenticated Codex CLI"]
+    fn live_codex_provider_usage_reads_the_current_account() {
+        let snapshot = get_provider_usage_blocking("openai").unwrap();
+
+        assert_eq!(snapshot.provider_id, "openai");
+        assert!(!snapshot.windows.is_empty());
+        assert!(snapshot
+            .windows
+            .iter()
+            .all(|window| (0..=100).contains(&window.used_percent)));
+    }
 
     #[test]
     fn browser_preview_check_reports_reachable_http_and_rejects_other_schemes() {

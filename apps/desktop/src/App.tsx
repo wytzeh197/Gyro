@@ -56,6 +56,7 @@ import {
   type ModelProviderConfig,
   type ProviderHealthDetails,
   type ProviderId,
+  type ProviderUsageState,
   type ProviderHandoff,
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
@@ -305,6 +306,12 @@ type BrowserPreviewCheck = {
   statusCode?: number;
   message: string;
 };
+
+type ProviderUsageSnapshot = {
+  providerId: ProviderId;
+  windows: ProviderUsageState["windows"];
+  fetchedAt: string;
+};
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
 const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
 const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
@@ -509,7 +516,11 @@ export function App() {
     setTerminalSourceControlLoadingPaneId,
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const [providerUsageByProvider, setProviderUsageByProvider] = useState<
+    Partial<Record<ProviderId, ProviderUsageState>>
+  >({});
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const providerUsageRequestRef = useRef(0);
   const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
   const providerStreamOrderRef = useRef<ProviderStreamOrderState>(new Map());
   const providerStreamFlushTimerRef = useRef<number>();
@@ -559,6 +570,14 @@ export function App() {
 
   const activeDestination = workbench.activeDestination;
   const activeWorkspaceLayout = workbench.activeWorkspaceLayout;
+  const selectedUsageProviderId = useMemo(() => {
+    const providers = providersForConfig(config);
+    return (
+      workbench.preferences.usageProviderId ??
+      providers.find((provider) => provider.authStatus === "connected")?.id ??
+      providers[0]?.id
+    );
+  }, [config, workbench.preferences.usageProviderId]);
   const activeChatPanel: ChatSidePanelId | undefined =
     workbench.preferences.activeChatPanel ??
     (workbench.preferences.chatEnvironmentRailOpen ? "environment" : undefined);
@@ -702,6 +721,108 @@ export function App() {
     },
     [],
   );
+  const refreshProviderUsage = useCallback(
+    async (providerId: ProviderId, showFailureNotification = false) => {
+      const request = ++providerUsageRequestRef.current;
+      setProviderUsageByProvider((current) => ({
+        ...current,
+        [providerId]: {
+          providerId,
+          status: "loading",
+          windows: current[providerId]?.windows ?? [],
+          fetchedAt: current[providerId]?.fetchedAt,
+        },
+      }));
+
+      if (providerId !== "openai") {
+        setProviderUsageByProvider((current) => ({
+          ...current,
+          [providerId]: {
+            providerId,
+            status: "unavailable",
+            windows: [],
+            error: "This provider does not expose a supported quota source.",
+          },
+        }));
+        return;
+      }
+
+      if (!isTauriRuntime()) {
+        setProviderUsageByProvider((current) => ({
+          ...current,
+          [providerId]: {
+            providerId,
+            status: "unavailable",
+            windows: [],
+            error: "Live account usage is available in the Gyro desktop app.",
+          },
+        }));
+        return;
+      }
+
+      try {
+        const snapshot = await invoke<ProviderUsageSnapshot>(
+          "get_provider_usage",
+          { providerId },
+        );
+        if (request !== providerUsageRequestRef.current) return;
+        setProviderUsageByProvider((current) => ({
+          ...current,
+          [providerId]: {
+            providerId,
+            status: snapshot.windows.length > 0 ? "available" : "unavailable",
+            windows: snapshot.windows,
+            fetchedAt: snapshot.fetchedAt,
+            error:
+              snapshot.windows.length > 0
+                ? undefined
+                : "Codex did not report an active rolling usage window.",
+          },
+        }));
+      } catch (error) {
+        if (request !== providerUsageRequestRef.current) return;
+        const detail = String(error);
+        setProviderUsageByProvider((current) => {
+          const previous = current[providerId];
+          return {
+            ...current,
+            [providerId]: {
+              providerId,
+              status: "error",
+              windows: previous?.windows ?? [],
+              fetchedAt: previous?.fetchedAt,
+              stale: Boolean(previous?.windows.length),
+              error: detail,
+            },
+          };
+        });
+        if (showFailureNotification) {
+          notify(
+            "command-failed",
+            "Provider usage could not be loaded",
+            detail,
+          );
+        }
+      }
+    },
+    [notify],
+  );
+
+  useEffect(() => {
+    if (
+      activeDestination !== "settings" ||
+      workbench.preferences.lastSettingsSection !== "usage-limits" ||
+      !selectedUsageProviderId
+    ) {
+      return;
+    }
+    void refreshProviderUsage(selectedUsageProviderId);
+  }, [
+    activeDestination,
+    refreshProviderUsage,
+    selectedUsageProviderId,
+    workbench.preferences.lastSettingsSection,
+  ]);
   const setSessionSending = useCallback(
     (sessionId: string, isSending: boolean) => {
       if (isSending) {
@@ -7161,31 +7282,23 @@ export function App() {
           }
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
-          selectedUsageProviderId={workbench.preferences.usageProviderId}
+          selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
-          onUsageProviderChange={(providerId) =>
-            dispatchWorkbench({ type: "set-usage-provider", providerId })
-          }
+          onUsageProviderChange={(providerId) => {
+            dispatchWorkbench({ type: "set-usage-provider", providerId });
+          }}
           onUsageVisualizationChange={(visualization) =>
             dispatchWorkbench({
               type: "set-usage-visualization",
               visualization,
             })
           }
-          onRefreshProviderUsage={() =>
-            notify(
-              "terminal",
-              "Provider usage unavailable",
-              "This provider does not expose a supported quota source.",
-            )
+          onRefreshProviderUsage={(providerId) =>
+            void refreshProviderUsage(providerId, true)
           }
           providerUsage={
-            workbench.preferences.usageProviderId
-              ? {
-                  providerId: workbench.preferences.usageProviderId,
-                  status: "unavailable",
-                  windows: [],
-                }
+            selectedUsageProviderId
+              ? providerUsageByProvider[selectedUsageProviderId]
               : undefined
           }
           themeMode={workbench.preferences.theme}
