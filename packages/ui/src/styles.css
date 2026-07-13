@@ -15,6 +15,8 @@
   --gyro-faint: #737e8c;
   --gyro-accent: #7aa7ff;
   --gyro-accent-strong: #a8c4ff;
+  --gyro-update-blue: #356fd6;
+  --gyro-update-blue-hover: #2f63be;
   --gyro-warn: #e8b45f;
   --gyro-danger: #ef7d7d;
   --gyro-success: #70d39f;
@@ -13647,46 +13649,58 @@ body,
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-sidebar-update-button {
-  background: transparent;
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-premium-text) 14%, transparent);
+  align-items: center;
+  background: var(--gyro-update-blue);
+  border: 1px solid transparent;
   border-radius: 6px;
   box-shadow: none;
-  color: var(--gyro-muted);
-  display: inline-grid;
+  color: #ffffff;
+  display: inline-flex;
+  gap: 0;
+  grid-template-columns: none;
   height: 24px;
+  justify-content: center;
   line-height: 0;
   min-height: 24px;
   padding: 0;
-  place-items: center;
+  transform: none;
   width: 24px;
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-sidebar-update-button svg {
   display: block;
+  flex: 0 0 auto;
+  height: 13px;
+  width: 13px;
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-sidebar-update-button:hover,
 .gyro-sidebar-update.is-windowbar
   .gyro-sidebar-update-button[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--gyro-premium-text) 6%, transparent);
-  border-color: color-mix(in srgb, var(--gyro-premium-text) 24%, transparent);
+  background: var(--gyro-update-blue-hover);
+  border-color: transparent;
   box-shadow: none;
-  color: var(--gyro-premium-text);
+  color: #ffffff;
   transform: none;
 }
 
 .gyro-sidebar-update.is-windowbar
   .gyro-sidebar-update-button[data-status="failed"] {
-  border-color: color-mix(in srgb, var(--gyro-danger) 32%, transparent);
-  color: var(--gyro-danger);
+  background: var(--gyro-danger);
+  border-color: transparent;
+  color: #ffffff;
 }
 
 .gyro-sidebar-update.is-windowbar .gyro-update-popover {
   bottom: auto;
-  left: auto;
-  right: 0;
-  top: calc(100% + 7px);
+  left: 12px;
+  max-height: min(420px, calc(100vh - 64px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: fixed;
+  right: auto;
+  top: 52px;
+  width: min(286px, calc(100vw - 24px));
 }
 
 .gyro-sidebar-update-button {
@@ -13748,6 +13762,7 @@ body,
 .gyro-update-popover header > div {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .gyro-update-popover header span,
@@ -13757,6 +13772,7 @@ body,
   color: var(--gyro-premium-muted);
   font-size: 11px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .gyro-update-popover p,

@@ -2259,6 +2259,10 @@ expect(
     launchDocsSource.includes("generic `exec` Dock icon"),
   "Local app launch docs and scripts should steer users to Gyro.app instead of the raw debug executable.",
 );
+const updatePopoverSource = surfaceSource.slice(
+  surfaceSource.indexOf("function UpdatePopover"),
+  surfaceSource.indexOf("function SettingsSidebarContent"),
+);
 expect(
   surfaceSource.includes('className="gyro-sidebar-update is-windowbar"') &&
     surfaceSource.indexOf('className="gyro-sidebar-update is-windowbar"') >
@@ -2268,8 +2272,17 @@ expect(
     surfaceSource.includes("updatePrimaryActionLabel(state)") &&
     styleSource.includes(".gyro-sidebar-update-button") &&
     styleSource.includes(".gyro-sidebar-update.is-windowbar") &&
+    styleSource.includes("--gyro-update-blue: #356fd6") &&
+    styleSource.includes("background: var(--gyro-update-blue)") &&
+    styleSource.includes("display: inline-flex") &&
+    styleSource.includes("justify-content: center") &&
+    styleSource.includes("grid-template-columns: none") &&
     styleSource.includes("height: 24px") &&
     styleSource.includes("width: 24px") &&
+    !updatePopoverSource.includes("gyro-cli-launch-column-head") &&
+    styleSource.includes("max-height: min(420px, calc(100vh - 64px))") &&
+    styleSource.includes("width: min(286px, calc(100vw - 24px))") &&
+    styleSource.includes("overflow-wrap: anywhere") &&
     !styleSource.includes(".gyro-sidebar-update-indicator") &&
     !surfaceSource.includes("gyro-sidebar-update-indicator") &&
     styleSource.includes(".gyro-update-popover") &&

@@ -710,11 +710,6 @@ function UpdatePopover({
           <X size={14} />
         </button>
       </header>
-      <div className="gyro-cli-launch-column-head">
-        <span>Profile</span>
-        <span>Pane count</span>
-        <span>Remove</span>
-      </div>
       {state.releaseNotes ? <p>{state.releaseNotes}</p> : null}
       {state.status === "downloading" ? (
         <div
