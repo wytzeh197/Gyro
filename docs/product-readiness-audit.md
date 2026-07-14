@@ -84,18 +84,13 @@ Polish direction applied:
 5. The updater trust path is configured with a real committed public key and
    signed GitHub manifest, but the currently published alpha DMGs are only
    ad-hoc/linker-signed: they fail strict code-signing and Gatekeeper checks and
-   have no stapled notarization ticket. Future tagged builds now require Apple
-   Developer ID and notarization credentials before the draft can be assembled;
-   GitHub currently has only the two Tauri updater-signing secrets, so the next
-   tag will stop at preflight until all six Apple secrets are configured. Once
-   configured, strict Developer ID, hardened-runtime, Gatekeeper, and stapled
-   ticket checks run against the app and DMG before upload; the workflow
-   explicitly notarizes and staples each DMG after Tauri finishes its app-level
-   notarization. Per-tag workflow concurrency and a draft-only mutation guard
-   prevent reruns from overwriting an already published release. The release job
-   pins and verifies the audited Tauri CLI version whose temporary-keychain path
-   imports the CI certificate and rejects identity mismatches. Both architectures
-   still need clean-machine acceptance before distribution can be called ready.
+   have no stapled notarization ticket. The current tagged workflow intentionally
+   builds these unsigned public-alpha artifacts on GitHub while requiring Tauri
+   updater signatures. Per-tag workflow concurrency and a draft-only mutation
+   guard prevent reruns from overwriting an already published release. Apple
+   Developer ID signing and notarization remain future stable-release work, and
+   both architectures still need clean-machine acceptance before distribution
+   can be called ready.
 
 ## CLI Roadmap Audit
 

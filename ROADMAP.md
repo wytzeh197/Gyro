@@ -919,13 +919,11 @@ The product is not launch-ready because:
 - Provider onboarding lacks clean-machine acceptance proof.
 - The updater public key, signed `latest.json`, and stable GitHub endpoint are
   real, but the currently published alpha DMGs are ad-hoc/linker-signed and lack
-  a notarization ticket. The tagged workflow now fails closed unless Apple
-  Developer ID signing and notarization credentials are present; those six
-  Apple repository secrets are not configured yet. Artifact upload is also
-  gated on strict signature, hardened-runtime, Gatekeeper, and stapled-ticket
-  verification for the generated app and DMG.
-- A newly tagged draft still needs Apple-signing verification, generated
-  Homebrew checksums, and clean-machine installation proof on both architectures.
+  a notarization ticket. The current tagged workflow intentionally publishes
+  GitHub-built unsigned alpha artifacts while requiring updater signatures.
+- A newly tagged draft still needs generated Homebrew checksums and clean-machine
+  installation proof on both architectures. Apple signing and notarization
+  remain future stable-release work.
 - The first-run and download journey exists as a plan rather than a tested
   end-to-end funnel.
 

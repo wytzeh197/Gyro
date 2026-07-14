@@ -35,10 +35,6 @@ const cliFinalizer = readFileSync(
   resolve(repoRoot, "scripts/finalize-cli-release.mjs"),
   "utf8",
 );
-const macosReleaseVerifier = readFileSync(
-  resolve(repoRoot, "scripts/verify-macos-release.mjs"),
-  "utf8",
-);
 const homebrewFormula = readFileSync(
   resolve(repoRoot, "packaging/homebrew/Formula/gyro.rb"),
   "utf8",
@@ -97,7 +93,7 @@ if (
   expectedTauriCliVersion
 ) {
   failures.push(
-    `Desktop @tauri-apps/cli must be pinned to ${expectedTauriCliVersion} for the audited macOS certificate-import path.`,
+    `Desktop @tauri-apps/cli must be pinned to ${expectedTauriCliVersion} for reproducible GitHub release builds.`,
   );
 }
 
@@ -129,21 +125,8 @@ for (const marker of [
   "scripts/package-cli-release.mjs",
   "gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz",
   "scripts/finalize-cli-release.mjs",
-  "APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}",
-  "APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}",
-  "APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}",
-  "APPLE_ID: ${{ secrets.APPLE_ID }}",
-  "APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}",
-  "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}",
-  "Developer ID signed, notarized, and updater-signed",
-  "Notarize and staple signed DMGs",
-  'xcrun notarytool submit "$dmg"',
-  'test "$(jq -r \'.status\' "$RESULT")" = "Accepted"',
-  'xcrun stapler staple -v "$dmg"',
-  "Verify Apple signature, Gatekeeper, and notarization tickets",
-  "scripts/verify-macos-release.mjs",
-  'VERIFY_ARGS=(--app "$APP")',
-  'VERIFY_ARGS+=(--dmg "$dmg")',
+  "Build GitHub-hosted alpha and sign updater archive",
+  "Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
   "Refusing to overwrite published release",
@@ -165,37 +148,6 @@ if (
   failures.push(
     "Release workflow must verify an existing release is still a draft before uploading assets.",
   );
-}
-
-for (const marker of [
-  'run("codesign", ["--verify", "--deep", "--strict"',
-  'details.includes("Authority=Developer ID Application:")',
-  'details.includes("Signature=adhoc")',
-  "TeamIdentifier=",
-  "hardened runtime",
-  'run("spctl", ["--assess", "--type", "execute"',
-  'run("xcrun", ["stapler", "validate", app])',
-  'run("xcrun", ["stapler", "validate", dmg])',
-]) {
-  if (!macosReleaseVerifier.includes(marker)) {
-    failures.push(`macOS release verifier is missing ${marker}.`);
-  }
-}
-
-for (const marker of [
-  "APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}",
-  "APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}",
-  "APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}",
-  "APPLE_ID: ${{ secrets.APPLE_ID }}",
-  "APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}",
-  "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}",
-]) {
-  const occurrences = releaseWorkflow.split(marker).length - 1;
-  if (occurrences < 2) {
-    failures.push(
-      `Release workflow must pass ${marker.split(":", 1)[0]} to both preflight and the Tauri build.`,
-    );
-  }
 }
 
 for (const marker of [
@@ -253,16 +205,26 @@ for (const unsafeMarker of ["tauri-apps/tauri-action", "includeUpdaterJson"]) {
   }
 }
 
+for (const appleReleaseMarker of [
+  "APPLE_CERTIFICATE",
+  "APPLE_SIGNING_IDENTITY",
+  "APPLE_ID",
+  "APPLE_PASSWORD",
+  "APPLE_TEAM_ID",
+  "notarytool",
+  "verify-macos-release",
+]) {
+  if (releaseWorkflow.includes(appleReleaseMarker)) {
+    failures.push(
+      `GitHub-hosted alpha workflow must not require Apple release marker ${appleReleaseMarker}.`,
+    );
+  }
+}
+
 if (process.env.CI) {
   for (const variable of [
     "TAURI_SIGNING_PRIVATE_KEY",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
-    "APPLE_CERTIFICATE",
-    "APPLE_CERTIFICATE_PASSWORD",
-    "APPLE_SIGNING_IDENTITY",
-    "APPLE_ID",
-    "APPLE_PASSWORD",
-    "APPLE_TEAM_ID",
   ]) {
     if (!process.env[variable]?.trim()) {
       failures.push(`${variable} is missing from the release environment.`);
@@ -276,7 +238,7 @@ if (failures.length > 0) {
     console.error(`- ${failure}`);
   }
   console.error(
-    "\nConfigure both the Tauri updater key and Apple Developer ID/notarization credentials in GitHub Actions before tagging a release.",
+    "\nConfigure the Tauri updater signing key in GitHub Actions before tagging a release.",
   );
   process.exit(1);
 }
