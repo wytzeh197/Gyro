@@ -1,6 +1,16 @@
-use crate::{config::GyroConfig, paths::GyroPaths};
+use crate::{
+    config::GyroConfig,
+    execution::{
+        run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
+    },
+    paths::GyroPaths,
+};
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, process::Command};
+use std::{ffi::OsString, path::PathBuf, time::Duration};
+
+const DOCTOR_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+const DOCTOR_MAX_STDOUT_CHARS: usize = 8 * 1024;
+const DOCTOR_MAX_STDERR_CHARS: usize = 8 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -37,24 +47,52 @@ impl DoctorReport {
 }
 
 pub fn run_doctor(paths: &GyroPaths, config: &GyroConfig) -> DoctorReport {
-    let mut checks = Vec::new();
-    checks.push(command_check("git", "Git", &["--version"]));
-    checks.push(shell_check());
-    checks.push(app_install_check());
-    checks.push(update_source_check());
-    checks.push(provider_key_check(config));
-    checks.push(storage_check(paths));
+    let checks = vec![
+        command_check("git", "Git", &["--version"]),
+        shell_check(),
+        app_install_check(),
+        update_source_check(),
+        provider_key_check(config),
+        storage_check(paths),
+    ];
 
     DoctorReport { checks }
 }
 
 fn command_check(command: &str, label: &str, args: &[&str]) -> DoctorCheck {
-    match Command::new(command).args(args).output() {
-        Ok(output) if output.status.success() => DoctorCheck {
+    command_check_with_limits(
+        command,
+        label,
+        args,
+        DOCTOR_COMMAND_TIMEOUT,
+        DOCTOR_MAX_STDOUT_CHARS,
+        DOCTOR_MAX_STDERR_CHARS,
+    )
+}
+
+fn command_check_with_limits(
+    command: &str,
+    label: &str,
+    args: &[&str],
+    timeout: Duration,
+    max_stdout_chars: usize,
+    max_stderr_chars: usize,
+) -> DoctorCheck {
+    let mut request = ExecutionRequest::new(command);
+    request.args = args.iter().copied().map(OsString::from).collect();
+    request.timeout = timeout;
+    request.max_stdout_chars = max_stdout_chars;
+    request.max_stderr_chars = max_stderr_chars;
+    match run_command(request, CancellationToken::default(), |_| {}) {
+        Ok(output) if output.succeeded() => DoctorCheck {
             id: command.into(),
             label: label.into(),
             status: DoctorStatus::Pass,
-            message: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            message: retained_command_output(
+                &output.stdout,
+                output.stdout_truncated,
+                "stdout truncated",
+            ),
             required: true,
             next: None,
         },
@@ -62,7 +100,7 @@ fn command_check(command: &str, label: &str, args: &[&str]) -> DoctorCheck {
             id: command.into(),
             label: label.into(),
             status: DoctorStatus::Fail,
-            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            message: doctor_command_error(command, args, &output, timeout),
             required: true,
             next: Some(format!(
                 "install {label} and confirm `{command} {}` succeeds",
@@ -81,6 +119,46 @@ fn command_check(command: &str, label: &str, args: &[&str]) -> DoctorCheck {
             )),
         },
     }
+}
+
+fn doctor_command_error(
+    command: &str,
+    args: &[&str],
+    output: &ExecutionOutcome,
+    timeout: Duration,
+) -> String {
+    let command_label = std::iter::once(command)
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match &output.termination {
+        ExecutionTermination::Exited { .. } => {
+            retained_command_output(&output.stderr, output.stderr_truncated, "stderr truncated")
+        }
+        ExecutionTermination::TimedOut => {
+            format!("`{command_label}` timed out after {timeout:?}")
+        }
+        ExecutionTermination::Cancelled => format!("`{command_label}` was cancelled"),
+        ExecutionTermination::Inactive => {
+            format!("`{command_label}` stopped after becoming inactive")
+        }
+        ExecutionTermination::OutputLimit => {
+            format!("`{command_label}` exceeded its output limit")
+        }
+    }
+}
+
+fn retained_command_output(output: &str, truncated: bool, marker: &str) -> String {
+    let mut output = output.trim().to_string();
+    if truncated {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push('[');
+        output.push_str(marker);
+        output.push(']');
+    }
+    output
 }
 
 fn shell_check() -> DoctorCheck {
@@ -213,9 +291,10 @@ fn storage_check(paths: &GyroPaths) -> DoctorCheck {
 
 #[cfg(test)]
 mod tests {
-    use super::{first_installed_app, provider_key_check, DoctorStatus};
+    use super::{command_check_with_limits, first_installed_app, provider_key_check, DoctorStatus};
     use crate::GyroConfig;
     use std::fs;
+    use std::time::Duration;
 
     #[test]
     fn finds_user_application_when_system_application_is_missing() {
@@ -240,5 +319,22 @@ mod tests {
             check.next.as_deref(),
             Some("run `gyro config enable-provider openai` or connect a provider in Gyro.app")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_check_reports_timeout_as_failure() {
+        let check = command_check_with_limits(
+            "/bin/sh",
+            "Slow command",
+            &["-c", "sleep 5"],
+            Duration::from_millis(50),
+            128,
+            128,
+        );
+
+        assert_eq!(check.status, DoctorStatus::Fail);
+        assert_eq!(check.message, "`/bin/sh -c sleep 5` timed out after 50ms");
+        assert!(check.required);
     }
 }

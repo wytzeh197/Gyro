@@ -11,6 +11,7 @@ coverage/
 
 # Local generated production artifacts and mezzanine media.
 /artifacts/
+/release-assets/
 
 target/
 

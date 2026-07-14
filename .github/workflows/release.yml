@@ -106,7 +106,12 @@ jobs:
       - name: Create one complete draft release
         run: |
           set -euo pipefail
-          RELEASE_NOTES="GitHub-built macOS alpha for Apple Silicon and Intel. Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized."
+          NOTES_PATH="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$NOTES_PATH" ]; then
+            echo "Missing versioned release notes at $NOTES_PATH." >&2
+            exit 1
+          fi
+          RELEASE_NOTES="$(cat "$NOTES_PATH")"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             IS_DRAFT="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
             if [ "$IS_DRAFT" != "true" ]; then

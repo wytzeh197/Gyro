@@ -40,6 +40,8 @@ pub struct ExecutionRequest {
     pub inactivity_timeout: Option<Duration>,
     pub max_stdout_chars: usize,
     pub max_stderr_chars: usize,
+    pub max_total_output_bytes: usize,
+    pub max_output_chunks: usize,
 }
 
 impl ExecutionRequest {
@@ -53,6 +55,8 @@ impl ExecutionRequest {
             inactivity_timeout: None,
             max_stdout_chars: 256_000,
             max_stderr_chars: 64_000,
+            max_total_output_bytes: 64 * 1024 * 1024,
+            max_output_chunks: 100_000,
         }
     }
 }
@@ -77,6 +81,7 @@ pub enum ExecutionTermination {
     Cancelled,
     TimedOut,
     Inactive,
+    OutputLimit,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -100,7 +105,8 @@ impl ExecutionOutcome {
             ExecutionTermination::Exited { code } => code,
             ExecutionTermination::Cancelled
             | ExecutionTermination::TimedOut
-            | ExecutionTermination::Inactive => None,
+            | ExecutionTermination::Inactive
+            | ExecutionTermination::OutputLimit => None,
         }
     }
 }
@@ -144,14 +150,14 @@ where
     let mut child = command
         .spawn()
         .with_context(|| format!("start {}", request.program.to_string_lossy()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("execution stdout was unavailable")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("execution stderr was unavailable")?;
+    let Some(stdout) = child.stdout.take() else {
+        terminate_process_group(&mut child);
+        anyhow::bail!("execution stdout was unavailable");
+    };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_process_group(&mut child);
+        anyhow::bail!("execution stderr was unavailable");
+    };
     let (sender, receiver) = mpsc::sync_channel(EXECUTION_CHANNEL_CAPACITY);
     let stdout_thread = spawn_reader(stdout, ExecutionStream::Stdout, sender.clone());
     let stderr_thread = spawn_reader(stderr, ExecutionStream::Stderr, sender.clone());
@@ -165,6 +171,13 @@ where
     let mut stderr_chars = 0usize;
     let mut stdout_truncated = false;
     let mut stderr_truncated = false;
+    let mut output_budget = OutputBudget {
+        total_bytes: 0,
+        chunks: 0,
+        max_total_bytes: request.max_total_output_bytes,
+        max_chunks: request.max_output_chunks,
+        exceeded: false,
+    };
     let termination = loop {
         if drain_chunks(
             &receiver,
@@ -177,8 +190,13 @@ where
             request.max_stderr_chars,
             &mut stdout_truncated,
             &mut stderr_truncated,
+            &mut output_budget,
         ) {
             last_activity_at = Instant::now();
+        }
+        if output_budget.exceeded {
+            terminate_process_group(&mut child);
+            break ExecutionTermination::OutputLimit;
         }
         if cancellation.is_cancelled() {
             terminate_process_group(&mut child);
@@ -193,10 +211,22 @@ where
             terminate_process_group(&mut child);
             break termination;
         }
-        if let Some(status) = child.try_wait()? {
-            break ExecutionTermination::Exited {
-                code: status.code(),
-            };
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // A background descendant can retain the inherited output pipes after
+                // the direct child exits. Tear down any remaining process-group members
+                // before waiting for the reader threads so a completed command cannot
+                // hang forever.
+                terminate_descendants_after_exit(child.id());
+                break ExecutionTermination::Exited {
+                    code: status.code(),
+                };
+            }
+            Ok(None) => {}
+            Err(error) => {
+                terminate_process_group(&mut child);
+                return Err(error).context("poll execution process");
+            }
         }
         if let Ok(chunk) = receiver.recv_timeout(EXECUTION_POLL_INTERVAL) {
             last_activity_at = Instant::now();
@@ -211,23 +241,31 @@ where
                 request.max_stderr_chars,
                 &mut stdout_truncated,
                 &mut stderr_truncated,
+                &mut output_budget,
             );
+            if output_budget.exceeded {
+                terminate_process_group(&mut child);
+                break ExecutionTermination::OutputLimit;
+            }
         }
     };
 
     while let Ok(chunk) = receiver.recv_timeout(EXECUTION_POLL_INTERVAL) {
-        handle_chunk(
-            chunk,
-            &mut on_chunk,
-            &mut stdout_text,
-            &mut stderr_text,
-            &mut stdout_chars,
-            &mut stderr_chars,
-            request.max_stdout_chars,
-            request.max_stderr_chars,
-            &mut stdout_truncated,
-            &mut stderr_truncated,
-        );
+        if termination != ExecutionTermination::OutputLimit {
+            handle_chunk(
+                chunk,
+                &mut on_chunk,
+                &mut stdout_text,
+                &mut stderr_text,
+                &mut stdout_chars,
+                &mut stderr_chars,
+                request.max_stdout_chars,
+                request.max_stderr_chars,
+                &mut stdout_truncated,
+                &mut stderr_truncated,
+                &mut output_budget,
+            );
+        }
     }
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
@@ -346,6 +384,7 @@ fn drain_chunks<F>(
     max_stderr_chars: usize,
     stdout_truncated: &mut bool,
     stderr_truncated: &mut bool,
+    output_budget: &mut OutputBudget,
 ) -> bool
 where
     F: FnMut(&ExecutionChunk),
@@ -364,7 +403,11 @@ where
             max_stderr_chars,
             stdout_truncated,
             stderr_truncated,
+            output_budget,
         );
+        if output_budget.exceeded {
+            break;
+        }
     }
     received
 }
@@ -381,9 +424,14 @@ fn handle_chunk<F>(
     max_stderr_chars: usize,
     stdout_truncated: &mut bool,
     stderr_truncated: &mut bool,
+    output_budget: &mut OutputBudget,
 ) where
     F: FnMut(&ExecutionChunk),
 {
+    output_budget.record(&chunk);
+    if output_budget.exceeded {
+        return;
+    }
     on_chunk(&chunk);
     match chunk.stream {
         ExecutionStream::Stdout => {
@@ -392,6 +440,22 @@ fn handle_chunk<F>(
         ExecutionStream::Stderr => {
             *stderr_truncated |= push_bounded(stderr, stderr_chars, &chunk.text, max_stderr_chars)
         }
+    }
+}
+
+struct OutputBudget {
+    total_bytes: usize,
+    chunks: usize,
+    max_total_bytes: usize,
+    max_chunks: usize,
+    exceeded: bool,
+}
+
+impl OutputBudget {
+    fn record(&mut self, chunk: &ExecutionChunk) {
+        self.total_bytes = self.total_bytes.saturating_add(chunk.text.len());
+        self.chunks = self.chunks.saturating_add(1);
+        self.exceeded = self.total_bytes > self.max_total_bytes || self.chunks > self.max_chunks;
     }
 }
 
@@ -424,6 +488,22 @@ fn configure_process_group(command: &mut Command) {
 
 #[cfg(not(unix))]
 fn configure_process_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn terminate_descendants_after_exit(process_group_id: u32) {
+    let process_group = -(process_group_id as i32);
+    // ESRCH is the common, zero-cost path when the command left no descendants.
+    let had_descendants = unsafe { libc::kill(process_group, libc::SIGTERM) } == 0;
+    if had_descendants {
+        thread::sleep(EXECUTION_POLL_INTERVAL);
+        unsafe {
+            libc::kill(process_group, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_descendants_after_exit(_process_group_id: u32) {}
 
 #[cfg(unix)]
 fn terminate_process_group(child: &mut std::process::Child) {
@@ -516,6 +596,30 @@ mod tests {
     }
 
     #[test]
+    fn output_budget_terminates_an_unbounded_output_process() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "while :; do printf '0123456789abcdef'; done".into(),
+        ];
+        request.timeout = Duration::from_secs(5);
+        request.max_stdout_chars = 16 * 1024;
+        request.max_total_output_bytes = 1024;
+        request.max_output_chunks = 1_000;
+        let mut streamed_bytes = 0usize;
+
+        let outcome = run_command(request, CancellationToken::default(), |chunk| {
+            streamed_bytes = streamed_bytes.saturating_add(chunk.text.len());
+        })
+        .unwrap();
+
+        assert_eq!(outcome.termination, ExecutionTermination::OutputLimit);
+        assert!(outcome.stdout.len() <= 1024);
+        assert!(streamed_bytes <= 1024);
+        assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[test]
     fn cancellation_stops_the_process_group_and_preserves_partial_output() {
         let mut request = ExecutionRequest::new("/bin/sh");
         request.args = vec![
@@ -572,6 +676,23 @@ mod tests {
         let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
 
         assert_eq!(outcome.termination, ExecutionTermination::Inactive);
+        assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completed_child_does_not_hang_on_descendant_held_pipes() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "(trap '' TERM; exec sleep 30) & printf 'done'; exit 0".into(),
+        ];
+        request.timeout = Duration::from_secs(5);
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert!(outcome.succeeded());
+        assert_eq!(outcome.stdout, "done");
         assert!(outcome.duration_ms < 2_000);
     }
 

@@ -1,6 +1,12 @@
 use crate::paths::GyroPaths;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
+use uuid::Uuid;
+
+const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,18 +18,13 @@ pub struct ModelProviderConfig {
     pub enabled: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CommandProfileReadiness {
     Ready,
+    #[default]
     Waiting,
     Blocked,
-}
-
-impl Default for CommandProfileReadiness {
-    fn default() -> Self {
-        Self::Waiting
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -164,11 +165,26 @@ fn default_automatic_update_checks() -> bool {
 
 impl GyroConfig {
     pub fn load(paths: &GyroPaths) -> Result<Self> {
-        if !paths.config_path.exists() {
+        Self::load_unlocked(paths)
+    }
+
+    fn load_unlocked(paths: &GyroPaths) -> Result<Self> {
+        let Some(file) = open_config_for_read(&paths.config_path)? else {
             return Ok(Self::default());
-        }
-        let raw = std::fs::read_to_string(&paths.config_path)
+        };
+        let mut bytes = Vec::new();
+        file.take((MAX_CONFIG_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
             .with_context(|| format!("read {}", paths.config_path.display()))?;
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(anyhow!(
+                "config file {} exceeds the {} byte size limit",
+                paths.config_path.display(),
+                MAX_CONFIG_BYTES
+            ));
+        }
+        let raw = String::from_utf8(bytes)
+            .with_context(|| format!("read {} as UTF-8", paths.config_path.display()))?;
         let mut config: Self = serde_json::from_str(&raw)
             .with_context(|| format!("parse {}", paths.config_path.display()))?;
         config.normalize_legacy_state();
@@ -176,10 +192,30 @@ impl GyroConfig {
     }
 
     pub fn save(&self, paths: &GyroPaths) -> Result<()> {
+        let _lock = acquire_config_lock(paths)?;
+        self.save_unlocked(paths)
+    }
+
+    pub fn update<T>(paths: &GyroPaths, update: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let _lock = acquire_config_lock(paths)?;
+        let mut config = Self::load_unlocked(paths)?;
+        let result = update(&mut config)?;
+        config.save_unlocked(paths)?;
+        Ok(result)
+    }
+
+    fn save_unlocked(&self, paths: &GyroPaths) -> Result<()> {
         paths.ensure()?;
-        let raw = serde_json::to_string_pretty(self)?;
-        std::fs::write(&paths.config_path, format!("{raw}\n"))
-            .with_context(|| format!("write {}", paths.config_path.display()))
+        reject_unsafe_config_target(&paths.config_path)?;
+        let mut bytes = serde_json::to_vec_pretty(self)?;
+        bytes.push(b'\n');
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(anyhow!(
+                "serialized config exceeds the {} byte size limit",
+                MAX_CONFIG_BYTES
+            ));
+        }
+        atomic_write_private_config(&paths.config_path, &bytes)
     }
 
     fn normalize_legacy_state(&mut self) {
@@ -210,6 +246,167 @@ impl GyroConfig {
             }
         }
     }
+}
+
+struct ConfigFileLock {
+    file: File,
+}
+
+fn acquire_config_lock(paths: &GyroPaths) -> Result<ConfigFileLock> {
+    paths.ensure()?;
+    let lock_path = paths.base_dir.join("config.lock");
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(false).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options
+        .open(&lock_path)
+        .with_context(|| format!("open {}", lock_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("secure {}", lock_path.display()))?;
+        use std::os::fd::AsRawFd;
+        loop {
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+                break;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error).with_context(|| format!("lock {}", lock_path.display()));
+            }
+        }
+    }
+    Ok(ConfigFileLock { file })
+}
+
+impl Drop for ConfigFileLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            unsafe {
+                libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
+    }
+}
+
+fn open_config_for_read(path: &Path) -> Result<Option<File>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(anyhow!(
+                "config file cannot be a symlink: {}",
+                path.display()
+            ))
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(anyhow!(
+                "config path is not a regular file: {}",
+                path.display()
+            ))
+        }
+        Ok(metadata) if metadata.len() > MAX_CONFIG_BYTES as u64 => {
+            return Err(anyhow!(
+                "config file {} exceeds the {} byte size limit",
+                path.display(),
+                MAX_CONFIG_BYTES
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("inspect {}", path.display())),
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .with_context(|| format!("open {}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("inspect opened config {}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        return Err(anyhow!(
+            "config path is not a regular file: {}",
+            path.display()
+        ));
+    }
+    if metadata.len() > MAX_CONFIG_BYTES as u64 {
+        return Err(anyhow!(
+            "config file {} exceeds the {} byte size limit",
+            path.display(),
+            MAX_CONFIG_BYTES
+        ));
+    }
+    Ok(Some(file))
+}
+
+fn reject_unsafe_config_target(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
+            "config file cannot be a symlink: {}",
+            path.display()
+        )),
+        Ok(metadata) if !metadata.file_type().is_file() => Err(anyhow!(
+            "config path is not a regular file: {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("inspect {}", path.display())),
+    }
+}
+
+fn atomic_write_private_config(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("config path has no parent directory"))?;
+    let temporary = parent.join(format!(".config-{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            let mut file = options
+                .open(&temporary)
+                .with_context(|| format!("create {}", temporary.display()))?;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            file.write_all(bytes)?;
+            file.flush()?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        {
+            let mut file = options
+                .open(&temporary)
+                .with_context(|| format!("create {}", temporary.display()))?;
+            file.write_all(bytes)?;
+            file.flush()?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&temporary, path).with_context(|| format!("replace {}", path.display()))?;
+        File::open(parent)
+            .with_context(|| format!("open config directory {}", parent.display()))?
+            .sync_all()
+            .with_context(|| format!("sync config directory {}", parent.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.with_context(|| format!("write {}", path.display()))
 }
 
 #[cfg(test)]
@@ -306,5 +503,151 @@ mod tests {
             config.command_profiles[1].provider_id.as_deref(),
             Some("anthropic")
         );
+    }
+
+    #[test]
+    fn saves_private_config_atomically_and_round_trips() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let config = GyroConfig {
+            telemetry_enabled: true,
+            ..GyroConfig::default()
+        };
+
+        config.save(&paths).unwrap();
+
+        assert_eq!(GyroConfig::load(&paths).unwrap(), config);
+        assert!(std::fs::read_dir(paths.config_path.parent().unwrap())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .all(|entry| !entry.file_name().to_string_lossy().starts_with(".config-")));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&paths.config_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_config_replacements_always_leave_valid_json() {
+        const WRITERS: usize = 6;
+        const SAVES_PER_WRITER: usize = 8;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        GyroConfig::default().save(&paths).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+        let threads = (0..WRITERS)
+            .map(|writer| {
+                let paths = paths.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for sequence in 0..SAVES_PER_WRITER {
+                        let mut config = GyroConfig::default();
+                        config.command_profiles[0].display_name =
+                            format!("writer-{writer}-save-{sequence}");
+                        config.save(&paths).unwrap();
+                        GyroConfig::load(&paths).unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        GyroConfig::load(&paths).unwrap();
+    }
+
+    #[test]
+    fn concurrent_config_updates_preserve_every_change() {
+        const WRITERS: usize = 8;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        GyroConfig::default().save(&paths).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+        let threads = (0..WRITERS)
+            .map(|writer| {
+                let paths = paths.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    GyroConfig::update(&paths, |config| {
+                        config.command_profiles.push(CommandProfile {
+                            id: format!("concurrent-{writer}"),
+                            display_name: format!("Concurrent writer {writer}"),
+                            command: "true".into(),
+                            args: Vec::new(),
+                            working_directory: None,
+                            provider_id: None,
+                            default_model: None,
+                            readiness: CommandProfileReadiness::Ready,
+                        });
+                        Ok(())
+                    })
+                    .unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        let config = GyroConfig::load(&paths).unwrap();
+        for writer in 0..WRITERS {
+            assert!(config
+                .command_profiles
+                .iter()
+                .any(|profile| profile.id == format!("concurrent-{writer}")));
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_config_without_replacing_existing_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let config = GyroConfig::default();
+        config.save(&paths).unwrap();
+        let original = std::fs::read(&paths.config_path).unwrap();
+
+        std::fs::write(&paths.config_path, vec![b'x'; MAX_CONFIG_BYTES + 1]).unwrap();
+        let error = GyroConfig::load(&paths).unwrap_err().to_string();
+        assert!(error.contains("size limit"), "unexpected error: {error}");
+
+        std::fs::write(&paths.config_path, &original).unwrap();
+        let mut oversized = config;
+        oversized.command_profiles[0].args = vec!["x".repeat(MAX_CONFIG_BYTES)];
+        let error = oversized.save(&paths).unwrap_err().to_string();
+        assert!(error.contains("size limit"), "unexpected error: {error}");
+        assert_eq!(std::fs::read(&paths.config_path).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_config_symlinks_for_load_and_save() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+        let target = temp.path().join("outside-config.json");
+        let original = serde_json::to_vec_pretty(&GyroConfig::default()).unwrap();
+        std::fs::write(&target, &original).unwrap();
+        symlink(&target, &paths.config_path).unwrap();
+
+        let load_error = GyroConfig::load(&paths).unwrap_err().to_string();
+        assert!(load_error.contains("cannot be a symlink"));
+        let save_error = GyroConfig::default().save(&paths).unwrap_err().to_string();
+        assert!(save_error.contains("cannot be a symlink"));
+        assert_eq!(std::fs::read(&target).unwrap(), original);
     }
 }

@@ -22,16 +22,16 @@ use gyro_core::{
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc, Arc, Condvar, Mutex,
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    mpsc, Arc, Condvar, Mutex, OnceLock, Weak,
 };
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
@@ -46,10 +46,20 @@ use gyro_core::{
 const MAX_WORKSPACE_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_WORKSPACE_FILE_EDIT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 512 * 1024;
+const MAX_TERMINAL_PROCESSES: usize = 32;
+const MAX_LANGUAGE_SERVER_PROCESSES: usize = 16;
+const MAX_DEBUG_ADAPTER_PROCESSES: usize = 8;
+const MAX_CONCURRENT_IDE_COMMANDS: usize = 4;
+const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
 const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
+const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 4;
+const MAX_CHAT_ATTACHMENTS: usize = 16;
+const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 16;
 const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS: usize = 400;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS: usize = 8_000;
@@ -57,14 +67,39 @@ const BROWSER_PREVIEW_DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(4);
 const BROWSER_PREVIEW_CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BROWSER_PREVIEW_CAPTURE_BYTES: usize = 25 * 1024 * 1024;
 const MAX_BROWSER_PREVIEW_CAPTURES: usize = 20;
-const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CONCURRENT_BROWSER_PREVIEWS: usize = 2;
+const MAX_LSP_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_LSP_HEADER_BYTES: usize = 16 * 1024;
+const IDE_PROTOCOL_CHANNEL_CAPACITY: usize = 8;
+const MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE: usize = 32;
+const MAX_IDE_PROTOCOL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 1024 * 1024;
+const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 64;
+const MAX_CODEX_APP_SERVER_ACTIVITIES: usize = 256;
+const MAX_CODEX_APP_SERVER_PATCHES: usize = 64;
+const MAX_CODEX_APP_SERVER_PATCH_BYTES: usize = 256 * 1024;
+const MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES: usize = 50_000;
+const MAX_CODEX_APP_SERVER_PROTOCOL_BYTES: usize = 128 * 1024 * 1024;
+const MAX_DESKTOP_IPC_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PERMISSION_MCP_MESSAGE_BYTES: usize = 1024 * 1024;
+const DESKTOP_IPC_WORKER_COUNT: usize = 16;
+const DESKTOP_IPC_QUEUE_CAPACITY: usize = 64;
+const DESKTOP_IPC_IO_TIMEOUT: Duration = Duration::from_secs(5);
+const WORKSPACE_TREE_MAX_CACHE_AGE: Duration = Duration::from_secs(30);
+const MAX_WORKSPACE_WATCH_CACHES: usize = 8;
+const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
+const MAX_WORKSPACE_SEARCH_FALLBACK_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_GIT_UNTRACKED_STAT_FILES: usize = 256;
+const MAX_GIT_UNTRACKED_STAT_BYTES: usize = 16 * 1024 * 1024;
+const GIT_UNTRACKED_STAT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
 const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
+const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const AUTOMATION_LEASE_SECONDS: i64 = 45 * 60;
 const AUTOMATION_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
@@ -88,6 +123,84 @@ struct ProviderCancellationManager {
 #[derive(Default)]
 struct ProviderApprovalManager {
     pending: Mutex<HashMap<String, PendingProviderApproval>>,
+}
+
+static ATTACHMENT_SESSION_LOCKS: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
+    OnceLock::new();
+static ACTIVE_IDE_COMMANDS: AtomicUsize = AtomicUsize::new(0);
+static ACTIVE_BROWSER_PREVIEWS: AtomicUsize = AtomicUsize::new(0);
+
+struct IdeCommandAdmission;
+
+impl IdeCommandAdmission {
+    fn acquire() -> Result<Self, String> {
+        ACTIVE_IDE_COMMANDS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < MAX_CONCURRENT_IDE_COMMANDS).then_some(active + 1)
+            })
+            .map_err(|_| "too many task or test commands are already running".to_string())?;
+        Ok(Self)
+    }
+}
+
+impl Drop for IdeCommandAdmission {
+    fn drop(&mut self) {
+        ACTIVE_IDE_COMMANDS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct BrowserPreviewAdmission;
+
+impl BrowserPreviewAdmission {
+    fn acquire() -> Result<Self, String> {
+        ACTIVE_BROWSER_PREVIEWS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < MAX_CONCURRENT_BROWSER_PREVIEWS).then_some(active + 1)
+            })
+            .map_err(|_| "too many browser previews are already being captured".to_string())?;
+        Ok(Self)
+    }
+}
+
+impl Drop for BrowserPreviewAdmission {
+    fn drop(&mut self) {
+        ACTIVE_BROWSER_PREVIEWS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct HiddenWebviewGuard(tauri::WebviewWindow);
+
+impl std::ops::Deref for HiddenWebviewGuard {
+    type Target = tauri::WebviewWindow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for HiddenWebviewGuard {
+    fn drop(&mut self) {
+        let _ = self.0.close();
+    }
+}
+
+#[derive(Clone, Default)]
+struct WorkspaceWatchManager {
+    snapshots: Arc<Mutex<HashMap<PathBuf, WorkspaceTreeSnapshot>>>,
+}
+
+#[derive(Clone)]
+struct WorkspaceTreeSnapshot {
+    files: Vec<WorkspaceFile>,
+    directories: Vec<WorkspaceDirectoryStamp>,
+    scanned_at: Instant,
+}
+
+#[derive(Clone)]
+struct WorkspaceDirectoryStamp {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    len: u64,
 }
 
 struct PendingProviderApproval {
@@ -125,10 +238,20 @@ enum ProviderApprovalDecision {
     AppliedByGyro,
 }
 
-#[derive(Default)]
 struct ProviderRunControl {
     cancellation: CancellationToken,
     next_event_sequence: AtomicU64,
+    approval_nonce: String,
+}
+
+impl Default for ProviderRunControl {
+    fn default() -> Self {
+        Self {
+            cancellation: CancellationToken::default(),
+            next_event_sequence: AtomicU64::new(0),
+            approval_nonce: Uuid::new_v4().to_string(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -587,7 +710,7 @@ struct TerminalProcessManager {
 
 #[derive(Clone, Default)]
 struct LanguageServerManager {
-    processes: Arc<Mutex<HashMap<String, LanguageServerProcess>>>,
+    processes: Arc<Mutex<HashMap<String, Arc<Mutex<LanguageServerProcess>>>>>,
 }
 
 struct LanguageServerProcess {
@@ -601,7 +724,7 @@ struct LanguageServerProcess {
 
 #[derive(Clone, Default)]
 struct DebugAdapterManager {
-    processes: Arc<Mutex<HashMap<String, DebugAdapterProcess>>>,
+    processes: Arc<Mutex<HashMap<String, Arc<Mutex<DebugAdapterProcess>>>>>,
 }
 
 struct DebugAdapterProcess {
@@ -724,8 +847,70 @@ struct PrepareChatAttachmentRequest {
     path: String,
     workspace_path: Option<String>,
     kind: String,
+    #[serde(default, deserialize_with = "deserialize_optional_attachment_bytes")]
     bytes: Option<Vec<u8>>,
     name: Option<String>,
+}
+
+fn deserialize_optional_attachment_bytes<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<u8>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OptionalBytesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for OptionalBytesVisitor {
+        type Value = Option<Vec<u8>>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("an optional bounded byte array")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D2>(self, deserializer: D2) -> Result<Self::Value, D2::Error>
+        where
+            D2: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_seq(BoundedBytesVisitor).map(Some)
+        }
+    }
+
+    struct BoundedBytesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for BoundedBytesVisitor {
+        type Value = Vec<u8>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "at most {MAX_CHAT_IMAGE_BYTES} image bytes")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let limit = MAX_CHAT_IMAGE_BYTES as usize;
+            let mut bytes = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(limit));
+            while let Some(byte) = sequence.next_element::<u8>()? {
+                if bytes.len() >= limit {
+                    return Err(serde::de::Error::custom(
+                        "image attachment exceeds the 10 MB limit",
+                    ));
+                }
+                bytes.push(byte);
+            }
+            Ok(bytes)
+        }
+    }
+
+    deserializer.deserialize_option(OptionalBytesVisitor)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -834,6 +1019,7 @@ struct ProviderChatStreamEvent {
     error: Option<String>,
 }
 
+#[derive(Debug)]
 struct ProviderRunnerOutput {
     activities: Vec<ProviderActivity>,
     response: String,
@@ -954,11 +1140,18 @@ struct TerminalProcess {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send>,
-    output: Arc<Mutex<Vec<u8>>>,
+    output: Arc<Mutex<VecDeque<u8>>>,
     status: String,
     exit_code: Option<i32>,
     cols: u16,
     rows: u16,
+    terminated: bool,
+}
+
+impl Drop for TerminalProcess {
+    fn drop(&mut self) {
+        terminate_terminal_process(self);
+    }
 }
 
 impl TerminalProcessManager {
@@ -968,7 +1161,10 @@ impl TerminalProcessManager {
             .lock()
             .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
         if let Some(mut existing) = processes.remove(&request.pane_id) {
-            let _ = existing.child.kill();
+            terminate_terminal_process(&mut existing);
+        }
+        if processes.len() >= MAX_TERMINAL_PROCESSES {
+            anyhow::bail!("terminal process limit reached; close a terminal pane first");
         }
         let mut process = spawn_terminal_process(request)?;
         let snapshot = snapshot_terminal_process(&mut process);
@@ -1039,10 +1235,10 @@ impl TerminalProcessManager {
         {
             let shell_pid = process.child.process_id().map(|pid| pid as i32);
             let foreground_pid = process.master.process_group_leader();
-            return Ok(match (shell_pid, foreground_pid) {
+            Ok(match (shell_pid, foreground_pid) {
                 (Some(shell_pid), Some(foreground_pid)) => foreground_pid != shell_pid,
                 _ => true,
-            });
+            })
         }
 
         #[cfg(not(unix))]
@@ -1057,9 +1253,24 @@ impl TerminalProcessManager {
         let process = processes
             .get_mut(pane_id)
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        let _ = process.child.kill();
+        terminate_terminal_process(process);
         process.status = "failed".into();
         Ok(snapshot_terminal_process(process))
+    }
+
+    fn close(&self, pane_id: &str) -> anyhow::Result<()> {
+        let mut process = {
+            let mut processes = self
+                .processes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
+            processes
+                .remove(pane_id)
+                .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?
+        };
+        terminate_terminal_process(&mut process);
+        drop(process);
+        Ok(())
     }
 
     fn restart(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
@@ -1071,7 +1282,7 @@ impl TerminalProcessManager {
             let mut process = processes
                 .remove(pane_id)
                 .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-            let _ = process.child.kill();
+            terminate_terminal_process(&mut process);
             process.request.clone()
         };
         self.create(request)
@@ -1168,6 +1379,7 @@ fn create_desktop_session_blocking(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn create_worktree_session(
     workspace_path: String,
     title: String,
@@ -1196,6 +1408,7 @@ async fn create_worktree_session(
     .map_err(|error| format!("worktree session worker failed: {error}"))?
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_worktree_session_blocking(
     workspace_path: String,
     title: String,
@@ -1291,16 +1504,137 @@ async fn rename_session(session_id: String, title: String) -> Result<Session, St
 }
 
 #[tauri::command]
-async fn delete_session(session_id: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || delete_session_blocking(session_id))
-        .await
-        .map_err(|error| format!("session delete worker failed: {error}"))?
+async fn delete_session(app: tauri::AppHandle, session_id: String) -> Result<bool, String> {
+    let reservation = Arc::new(ProviderRunControl::default());
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&session_id) {
+            return Err("stop the active provider turn before deleting this session".into());
+        }
+        flags.insert(session_id.clone(), reservation.clone());
+    }
+    let worker_session_id = session_id.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || delete_session_blocking(worker_session_id))
+            .await
+            .map_err(|error| format!("session delete worker failed: {error}"));
+    if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        if flags
+            .get(&session_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &reservation))
+        {
+            flags.remove(&session_id);
+        }
+    }
+    result?
 }
 
 fn delete_session_blocking(session_id: String) -> Result<bool, String> {
-    let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
-    store.delete_session(session_id).map_err(to_string)
+    let attachment_lock = attachment_session_lock(&session_id.to_string())?;
+    let _attachment_guard = attachment_lock
+        .lock()
+        .map_err(|_| "session attachment lock is unavailable".to_string())?;
+    let store = open_store()?;
+    let attachments_root = store.paths().sessions_dir.join("attachments");
+    cleanup_staged_session_attachments(&attachments_root);
+    let staged = stage_session_attachments(&attachments_root, session_id)?;
+    match store.delete_session(session_id) {
+        Ok(deleted) => {
+            drop(store);
+            if let Some((_, tombstone)) = staged {
+                if let Err(error) = remove_attachment_storage_entry(&tombstone) {
+                    eprintln!(
+                        "could not finish private attachment cleanup for {session_id}: {error}"
+                    );
+                }
+            }
+            Ok(deleted)
+        }
+        Err(error) => {
+            if let Some((original, tombstone)) = staged {
+                let _ = fs::rename(tombstone, original);
+            }
+            Err(to_string(error))
+        }
+    }
+}
+
+fn attachment_session_lock(session_id: &str) -> Result<Arc<Mutex<()>>, String> {
+    let locks = ATTACHMENT_SESSION_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut locks = locks
+        .lock()
+        .map_err(|_| "attachment lock registry is unavailable".to_string())?;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(session_id).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(session_id.to_string(), Arc::downgrade(&lock));
+    Ok(lock)
+}
+
+fn stage_session_attachments(
+    attachments_root: &Path,
+    session_id: Uuid,
+) -> Result<Option<(PathBuf, PathBuf)>, String> {
+    let root_metadata = match fs::symlink_metadata(attachments_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(to_string(error)),
+    };
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err("attachment storage is not a safe directory".into());
+    }
+    let session_dir = attachments_root.join(session_id.to_string());
+    let metadata = match fs::symlink_metadata(&session_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(to_string(error)),
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("session attachment storage is not a safe directory".into());
+    }
+    let tombstone = attachments_root.join(format!(
+        ".deleting-{session_id}-{}",
+        Uuid::new_v4().simple()
+    ));
+    fs::rename(&session_dir, &tombstone).map_err(to_string)?;
+    Ok(Some((session_dir, tombstone)))
+}
+
+fn remove_attachment_storage_entry(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(to_string(error)),
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(path).map_err(to_string)
+    } else if metadata.is_dir() {
+        fs::remove_dir_all(path).map_err(to_string)
+    } else {
+        Err("attachment cleanup target has an unsupported file type".into())
+    }
+}
+
+fn cleanup_staged_session_attachments(attachments_root: &Path) {
+    let Ok(entries) = fs::read_dir(attachments_root) else {
+        return;
+    };
+    for entry in entries.flatten().take(64) {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".deleting-")
+        {
+            let _ = remove_attachment_storage_entry(&entry.path());
+        }
+    }
 }
 
 #[tauri::command]
@@ -1745,7 +2079,11 @@ where
         AUTOMATION_LEASE_SECONDS,
         heartbeat_interval,
     );
-    let execution_result = execute(&claimed);
+    let execution_result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute(&claimed)))
+            .unwrap_or_else(|_| {
+                Err("automation execution panicked and was safely contained".into())
+            });
     drop(heartbeat);
 
     let (status, summary, pause_for_configuration, stop_condition_met) = match execution_result {
@@ -2115,7 +2453,6 @@ async fn run_provider_chat(
     mut request: ProviderChatRequest,
 ) -> Result<ProviderChatResponse, String> {
     request.message = validate_chat_message(&request.message)?;
-    validate_chat_context(&request)?;
     let session_id = request.session_id.clone();
     {
         let manager = app.state::<ProviderCancellationManager>();
@@ -2125,6 +2462,11 @@ async fn run_provider_chat(
             .map_err(|_| "provider cancellation state is unavailable".to_string())?;
         if flags.contains_key(&session_id) {
             return Err("a provider turn is already running for this session".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err(format!(
+                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+            ));
         }
         flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
     }
@@ -2160,12 +2502,27 @@ async fn stop_provider_chat(
 
 fn run_provider_chat_blocking(
     app: tauri::AppHandle,
-    request: ProviderChatRequest,
+    mut request: ProviderChatRequest,
 ) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&request.session_id)?;
+    let session = store
+        .get_session(session_id)
+        .map_err(to_string)?
+        .ok_or_else(|| "provider chat session no longer exists".to_string())?;
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    let config = GyroConfig::load(&paths).map_err(to_string)?;
+    bind_provider_chat_request(&mut request, &session, &config)?;
+    request.message = validate_chat_message(&request.message)?;
+    validate_chat_context(&request)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
     let run_id = turn_id.unwrap_or_else(Uuid::new_v4);
+    if provider_turn_has_unfinished_attempt(&store, session_id, run_id).map_err(to_string)? {
+        return Err(
+            "this turn has an unfinished provider attempt; start a new turn to avoid replaying tools"
+                .into(),
+        );
+    }
     let attempt_id = Uuid::new_v4();
     let started_at = chrono::Utc::now();
     let adapter = provider_adapter_for(&request.provider_id);
@@ -2246,85 +2603,12 @@ fn run_provider_chat_blocking(
     let title_extraction =
         extract_session_title_marker(&runner_output.response, request.suggest_title);
     let plan_extraction = extract_plan_update_marker(&title_extraction.message);
-    let plan_event = plan_extraction.payload.clone().and_then(|payload| {
-        store
-            .append_event_with_turn_id(
-                session_id,
-                SessionEventKind::PlanUpdated,
-                "Provider updated the plan",
-                payload,
-                Some(run_id),
-            )
-            .ok()
-    });
-    let renamed_session = if let Some(title) = title_extraction.title.as_deref() {
-        store.rename_session(session_id, title).map_err(to_string)?
-    } else {
-        None
-    };
-    let session_summary = derive_session_summary(&plan_extraction.message);
-    let session = if let Some(summary) = session_summary.as_deref() {
-        store
-            .update_session_summary(session_id, summary)
-            .map_err(to_string)?
-    } else {
-        renamed_session
-    };
     let resume_cursor_value = runner_output
         .resume_cursor
         .as_ref()
         .map(serde_json::to_value)
         .transpose()
         .map_err(to_string)?;
-    if let Some(resume_cursor_value) = resume_cursor_value {
-        store
-            .upsert_provider_session_binding(
-                session_id,
-                request.provider_id.clone(),
-                request.model_id.clone(),
-                request.model_label.clone(),
-                request.reasoning_effort.clone(),
-                resume_cursor_value,
-                "ready",
-                None,
-            )
-            .map_err(to_string)?;
-    }
-    let mut activity_events = runner_output
-        .activities
-        .iter()
-        .map(|activity| {
-            append_provider_activity_event(&store, session_id, &request, run_id, activity)
-        })
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map_err(to_string)?;
-    if let Some(plan_event) = plan_event {
-        activity_events.push(plan_event);
-    }
-    let status_event = append_provider_status_event(
-        &store,
-        session_id,
-        &request,
-        Some(run_id),
-        attempt_id,
-        HarnessRunStatus::Done,
-        None,
-    )
-    .map_err(to_string)?;
-    append_provider_diagnostics_event(
-        &store,
-        session_id,
-        &request,
-        Some(run_id),
-        attempt_id,
-        HarnessRunStatus::Done,
-        started_at,
-        runner_output.retry_count,
-        runner_output.resumed,
-        None,
-        runner_output.output_summary.as_deref(),
-    )
-    .map_err(to_string)?;
     let mut assistant_payload = gyro_core::harness_payload_value(&ProviderRunPayload::new(
         run_id,
         attempt_id,
@@ -2341,7 +2625,16 @@ fn run_provider_chat_blocking(
         runner_output.retry_count,
         Some(adapter.timeout_seconds),
     ))
-    .map_err(to_string)?;
+    .unwrap_or_else(|error| {
+        serde_json::json!({
+            "schema": gyro_core::HARNESS_SCHEMA_V1,
+            "kind": "provider-response",
+            "runId": run_id,
+            "attemptId": attempt_id,
+            "status": "done",
+            "metadataError": gyro_core::sanitize_harness_text(&error.to_string()),
+        })
+    });
     if let Some(object) = assistant_payload.as_object_mut() {
         object.insert(
             "reasoningEffort".into(),
@@ -2387,6 +2680,119 @@ fn run_provider_chat_blocking(
             Some(run_id),
         )
         .map_err(to_string)?;
+    // Persist the response before advancing the provider cursor. The response is
+    // the durable source of truth even if cursor metadata cannot be updated.
+    if let Some(resume_cursor_value) = resume_cursor_value {
+        if let Err(error) = store.upsert_provider_session_binding(
+            session_id,
+            request.provider_id.clone(),
+            request.model_id.clone(),
+            request.model_label.clone(),
+            request.reasoning_effort.clone(),
+            resume_cursor_value,
+            "ready",
+            None,
+        ) {
+            eprintln!(
+                "provider response was saved but its resume cursor was not: {}",
+                gyro_core::security::redact_secrets(&error.to_string())
+            );
+        }
+    }
+
+    // Timeline enrichment is intentionally best-effort after the assistant
+    // response is durable. A title, activity, or diagnostics failure must not
+    // turn a completed provider request into a duplicate retry.
+    let plan_event = plan_extraction.payload.clone().and_then(|payload| {
+        store
+            .append_event_with_turn_id(
+                session_id,
+                SessionEventKind::PlanUpdated,
+                "Provider updated the plan",
+                payload,
+                Some(run_id),
+            )
+            .ok()
+    });
+    let renamed_session = title_extraction
+        .title
+        .as_deref()
+        .and_then(|title| store.rename_session(session_id, title).ok().flatten());
+    let session_summary = derive_session_summary(&assistant_event.message);
+    let session = session_summary
+        .as_deref()
+        .and_then(|summary| {
+            store
+                .update_session_summary(session_id, summary)
+                .ok()
+                .flatten()
+        })
+        .or(renamed_session);
+    let activity_entries = runner_output
+        .activities
+        .iter()
+        .map(|activity| provider_activity_event_entry(&request, run_id, activity))
+        .collect();
+    let mut activity_events =
+        match store.append_system_events_with_turn_id(session_id, activity_entries) {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!(
+                    "provider response was saved without its activity batch: {}",
+                    gyro_core::security::redact_secrets(&error.to_string())
+                );
+                Vec::new()
+            }
+        };
+    if let Some(plan_event) = plan_event {
+        activity_events.push(plan_event);
+    }
+    let status_event = append_provider_status_event(
+        &store,
+        session_id,
+        &request,
+        Some(run_id),
+        attempt_id,
+        HarnessRunStatus::Done,
+        None,
+    )
+    .unwrap_or_else(|error| {
+        eprintln!(
+            "provider response was saved without its completion status: {}",
+            gyro_core::security::redact_secrets(&error.to_string())
+        );
+        let mut event = SessionEvent::new(
+            session_id,
+            SessionEventKind::SystemEvent,
+            provider_chat_status_message(
+                &HarnessRunStatus::Done,
+                request.provider_label.as_deref().unwrap_or("Provider"),
+            ),
+            serde_json::json!({
+                "schema": gyro_core::HARNESS_SCHEMA_V1,
+                "kind": "provider-status",
+                "status": "done",
+                "runId": run_id,
+                "attemptId": attempt_id,
+                "persistence": "response-only",
+            }),
+        );
+        event.turn_id = Some(run_id);
+        event
+    });
+    let _ = append_provider_diagnostics_event(
+        &store,
+        session_id,
+        &request,
+        Some(run_id),
+        attempt_id,
+        HarnessRunStatus::Done,
+        started_at,
+        runner_output.retry_count,
+        runner_output.resumed,
+        None,
+        runner_output.output_summary.as_deref(),
+    );
     emit_provider_chat_event(
         &app,
         &request,
@@ -2410,7 +2816,78 @@ fn run_provider_chat_blocking(
     })
 }
 
+fn bind_provider_chat_request(
+    request: &mut ProviderChatRequest,
+    session: &Session,
+    config: &GyroConfig,
+) -> Result<(), String> {
+    if request.session_id != session.id.to_string() {
+        return Err("provider chat session identity did not match stored state".into());
+    }
+    let provider_id = session
+        .provider_id
+        .as_deref()
+        .ok_or_else(|| "select a provider before starting chat".to_string())?;
+    if request.provider_id != provider_id {
+        return Err("provider selection changed; refresh the chat and try again".into());
+    }
+    let provider = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .ok_or_else(|| "the selected provider is not configured".to_string())?;
+    if !provider.enabled {
+        return Err("the selected provider is disabled in Gyro settings".into());
+    }
+    if request.model_id != session.model_id || request.reasoning_effort != session.reasoning_effort
+    {
+        return Err("model selection changed; refresh the chat and try again".into());
+    }
+
+    let workspace = session
+        .workspace_path
+        .canonicalize()
+        .map_err(|_| "the chat workspace is no longer available".to_string())?;
+    if !workspace.is_dir() {
+        return Err("the chat workspace is not a directory".into());
+    }
+    if let Some(requested_workspace) = request
+        .workspace_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let requested_workspace = PathBuf::from(requested_workspace)
+            .canonicalize()
+            .map_err(|_| "the requested workspace is no longer available".to_string())?;
+        if requested_workspace != workspace {
+            return Err("workspace selection changed; refresh the chat and try again".into());
+        }
+    }
+
+    // The renderer selects UX state, but native execution authority always comes
+    // from persisted backend state. This prevents a stale or compromised renderer
+    // from weakening approvals or swapping provider/workspace/model identity.
+    request.provider_id = provider_id.to_string();
+    request.provider_label = session
+        .provider_label
+        .clone()
+        .or_else(|| Some(provider.display_name.clone()));
+    request.model_id = session.model_id.clone();
+    request.model_label = session.model_label.clone();
+    request.reasoning_effort = session.reasoning_effort.clone();
+    request.workspace_path = Some(workspace.display().to_string());
+    request.require_command_approval = config.require_command_approval;
+    request.require_file_edit_approval = config.require_file_edit_approval;
+    Ok(())
+}
+
 fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
+    if request.attachments.len() > MAX_CHAT_ATTACHMENTS {
+        return Err(format!(
+            "attach at most {MAX_CHAT_ATTACHMENTS} files per turn"
+        ));
+    }
     let images = request
         .attachments
         .iter()
@@ -2419,18 +2896,67 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
     if images > MAX_CHAT_IMAGES {
         return Err(format!("attach at most {MAX_CHAT_IMAGES} images per turn"));
     }
+    let mut total_bytes = 0_u64;
     for attachment in &request.attachments {
+        validate_attachment_name(&attachment.name)?;
         let path = PathBuf::from(&attachment.path);
+        let link_metadata = fs::symlink_metadata(&path)
+            .map_err(|_| format!("{} is no longer available", attachment.name))?;
+        if link_metadata.file_type().is_symlink() || !link_metadata.is_file() {
+            return Err(format!("{} is not a file", attachment.name));
+        }
         let metadata = path
             .metadata()
             .map_err(|_| format!("{} is no longer available", attachment.name))?;
-        if !metadata.is_file() {
-            return Err(format!("{} is not a file", attachment.name));
+        if metadata.len() != attachment.size {
+            return Err(format!(
+                "{} changed after it was attached; remove it and attach the current file",
+                attachment.name
+            ));
+        }
+        total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .ok_or_else(|| "attachment size overflow".to_string())?;
+        if total_bytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES {
+            return Err("attachments exceed the 64 MB per-turn limit".into());
         }
         if attachment.kind == "image" && metadata.len() > MAX_CHAT_IMAGE_BYTES {
             return Err(format!("{} exceeds the 10 MB image limit", attachment.name));
         }
-        if attachment.kind == "workspace-file" {
+        if attachment.kind == "image" {
+            let expected_hash = attachment
+                .content_hash
+                .as_deref()
+                .ok_or_else(|| format!("{} is missing its integrity hash", attachment.name))?;
+            let canonical = path.canonicalize().map_err(to_string)?;
+            let paths = GyroPaths::for_current_user().map_err(to_string)?;
+            let attachment_dir = paths
+                .sessions_dir
+                .join("attachments")
+                .join(&request.session_id)
+                .canonicalize()
+                .map_err(|_| "session attachment storage is unavailable".to_string())?;
+            if !canonical.starts_with(&attachment_dir) {
+                return Err(format!(
+                    "{} is outside this session's private attachment storage",
+                    attachment.name
+                ));
+            }
+            let (current, current_size) =
+                hash_file_streaming(&canonical, Some(MAX_CHAT_IMAGE_BYTES))?;
+            if current_size != attachment.size || current != expected_hash {
+                return Err(format!(
+                    "{} changed after it was attached; remove it and attach the current file",
+                    attachment.name
+                ));
+            }
+        } else if attachment.kind == "workspace-file" {
+            if metadata.len() > MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES {
+                return Err(format!(
+                    "{} exceeds the 32 MB workspace attachment limit",
+                    attachment.name
+                ));
+            }
             let workspace = request
                 .workspace_path
                 .as_deref()
@@ -2443,18 +2969,23 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
                     attachment.name
                 ));
             }
-            if let Some(expected) = attachment.content_hash.as_deref() {
-                let current = format!(
-                    "{:x}",
-                    Sha256::digest(fs::read(&canonical).map_err(to_string)?)
-                );
-                if current != expected {
-                    return Err(format!(
-                        "{} changed after it was attached; remove it and attach the current file",
-                        attachment.name
-                    ));
-                }
+            let expected = attachment
+                .content_hash
+                .as_deref()
+                .ok_or_else(|| format!("{} is missing its integrity hash", attachment.name))?;
+            let (current, current_size) =
+                hash_file_streaming(&canonical, Some(MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES))?;
+            if current_size != attachment.size || current != expected {
+                return Err(format!(
+                    "{} changed after it was attached; remove it and attach the current file",
+                    attachment.name
+                ));
             }
+        } else {
+            return Err(format!(
+                "{} has an unsupported attachment kind",
+                attachment.name
+            ));
         }
     }
     Ok(())
@@ -2580,6 +3111,22 @@ async fn prepare_chat_attachment(
 fn prepare_chat_attachment_blocking(
     request: PrepareChatAttachmentRequest,
 ) -> Result<PreparedChatAttachment, String> {
+    let safe_session = if request.session_id == "new" {
+        "new".to_string()
+    } else {
+        parse_uuid(&request.session_id)?.to_string()
+    };
+    let attachment_lock = attachment_session_lock(&safe_session)?;
+    let _attachment_guard = attachment_lock
+        .lock()
+        .map_err(|_| "session attachment lock is unavailable".to_string())?;
+    if safe_session != "new" {
+        let store = open_store()?;
+        let session_id = parse_uuid(&safe_session)?;
+        if store.get_session(session_id).map_err(to_string)?.is_none() {
+            return Err("the attachment session no longer exists".into());
+        }
+    }
     let source = (!request.path.trim().is_empty())
         .then(|| PathBuf::from(request.path.trim()).canonicalize())
         .transpose()
@@ -2597,20 +3144,35 @@ fn prepare_chat_attachment_blocking(
         .clone()
         .or_else(|| source.as_ref()?.file_name()?.to_str().map(str::to_string))
         .ok_or_else(|| "attachment name is invalid".to_string())?;
-    let bytes = request.bytes.clone().unwrap_or_else(|| {
-        fs::read(source.as_ref().expect("validated source")).unwrap_or_default()
-    });
-    if bytes.is_empty() {
-        return Err("attachment file is empty or unreadable".into());
-    }
-    let content_hash = format!("{:x}", Sha256::digest(&bytes));
+    validate_attachment_name(&name)?;
     let modified_at = metadata
         .as_ref()
         .and_then(|metadata| metadata.modified().ok())
         .map(chrono::DateTime::<chrono::Utc>::from)
         .map(|value| value.to_rfc3339());
 
-    let (path, relative_path, mime_type) = if request.kind == "image" {
+    let (path, relative_path, mime_type, size, content_hash) = if request.kind == "image" {
+        if metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.len() > MAX_CHAT_IMAGE_BYTES)
+        {
+            return Err("images must be 10 MB or smaller".into());
+        }
+        let bytes = match request.bytes {
+            Some(bytes) => bytes,
+            None => read_bounded_regular_file(
+                source
+                    .as_ref()
+                    .ok_or_else(|| "image attachment has no source data".to_string())?,
+                MAX_CHAT_IMAGE_BYTES as usize,
+                "image attachment",
+            )
+            .map(|(bytes, _)| bytes)
+            .map_err(|_| "attachment file is empty or unreadable".to_string())?,
+        };
+        if bytes.is_empty() {
+            return Err("attachment file is empty or unreadable".into());
+        }
         if bytes.len() as u64 > MAX_CHAT_IMAGE_BYTES {
             return Err("images must be 10 MB or smaller".into());
         }
@@ -2630,29 +3192,39 @@ fn prepare_chat_attachment_blocking(
             }
             _ => return Err("only PNG, JPEG, and WebP images are supported".into()),
         };
+        let safe_extension = match mime {
+            "image/png" => "png",
+            "image/jpeg" => "jpg",
+            "image/webp" => "webp",
+            _ => unreachable!("validated image MIME"),
+        };
+        let content_hash = format!("{:x}", Sha256::digest(&bytes));
         let paths = GyroPaths::for_current_user().map_err(to_string)?;
         paths.ensure().map_err(to_string)?;
-        let safe_session = request
-            .session_id
-            .chars()
-            .filter(|value| value.is_ascii_alphanumeric() || *value == '-')
-            .collect::<String>();
-        let attachment_dir =
-            paths
-                .sessions_dir
-                .join("attachments")
-                .join(if safe_session.is_empty() {
-                    "new"
-                } else {
-                    &safe_session
-                });
-        fs::create_dir_all(&attachment_dir).map_err(to_string)?;
-        let destination = attachment_dir.join(format!("{}-{name}", &content_hash[..12]));
-        fs::write(&destination, &bytes).map_err(to_string)?;
+        let attachments_root = paths.sessions_dir.join("attachments");
+        ensure_private_attachment_directory(&attachments_root)?;
+        let attachment_dir = attachments_root.join(&safe_session);
+        ensure_private_attachment_directory(&attachment_dir)?;
+        // Never incorporate the renderer-provided display name into a filesystem
+        // path. Content-addressed native filenames eliminate traversal and make
+        // deduplication safe.
+        let destination = attachment_dir.join(format!("{content_hash}.{safe_extension}"));
+        ensure_attachment_storage_quota(&attachment_dir, &destination, bytes.len() as u64)?;
+        write_private_attachment(&destination, &bytes, &content_hash)?;
+        if safe_session != "new" {
+            if let Some(source) = source.as_ref() {
+                let draft_dir = attachments_root.join("new");
+                if source.starts_with(&draft_dir) && source != &destination {
+                    let _ = fs::remove_file(source);
+                }
+            }
+        }
         (
             destination.display().to_string(),
             None,
             Some(mime.to_string()),
+            bytes.len() as u64,
+            content_hash,
         )
     } else if request.kind == "workspace-file" {
         let workspace = request
@@ -2669,7 +3241,18 @@ fn prepare_chat_attachment_blocking(
             .map_err(to_string)?
             .display()
             .to_string();
-        (source.display().to_string(), Some(relative), None)
+        let (content_hash, size) =
+            hash_file_streaming(&source, Some(MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES))?;
+        if size == 0 {
+            return Err("attachment file is empty or unreadable".into());
+        }
+        (
+            source.display().to_string(),
+            Some(relative),
+            None,
+            size,
+            content_hash,
+        )
     } else {
         return Err("unsupported attachment kind".into());
     };
@@ -2681,12 +3264,150 @@ fn prepare_chat_attachment_blocking(
         path,
         relative_path,
         mime_type,
-        size: bytes.len() as u64,
+        size,
         content_hash,
         modified_at,
         available: true,
         stale: false,
     })
+}
+
+fn validate_attachment_name(name: &str) -> Result<(), String> {
+    let mut components = Path::new(name).components();
+    let is_single_component = matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none();
+    if !is_single_component || name.chars().count() > 255 || name.chars().any(char::is_control) {
+        return Err("attachment name must be a single safe file name".into());
+    }
+    Ok(())
+}
+
+fn ensure_private_attachment_directory(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err("attachment storage path is not a private directory".into());
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(to_string)?;
+        }
+        Err(error) => return Err(to_string(error)),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(to_string)?;
+    }
+    Ok(())
+}
+
+fn ensure_attachment_storage_quota(
+    directory: &Path,
+    destination: &Path,
+    incoming_bytes: u64,
+) -> Result<(), String> {
+    if fs::symlink_metadata(destination).is_ok() {
+        return Ok(());
+    }
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    for entry in fs::read_dir(directory).map_err(to_string)? {
+        let entry = entry.map_err(to_string)?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with(".upload-") {
+            let _ = remove_attachment_storage_entry(&entry.path());
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path()).map_err(to_string)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("session attachment storage contains an unsafe entry".into());
+        }
+        files = files.saturating_add(1);
+        bytes = bytes
+            .checked_add(metadata.len())
+            .ok_or_else(|| "attachment storage size overflow".to_string())?;
+    }
+    if files >= MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION
+        || bytes
+            .checked_add(incoming_bytes)
+            .map_or(true, |total| total > MAX_CHAT_ATTACHMENT_TOTAL_BYTES)
+    {
+        return Err("session attachment storage limit reached".into());
+    }
+    Ok(())
+}
+
+fn write_private_attachment(path: &Path, bytes: &[u8], expected_hash: &str) -> Result<(), String> {
+    if fs::symlink_metadata(path).is_ok() {
+        return validate_private_attachment(path, expected_hash);
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "attachment destination has no parent directory".to_string())?;
+    let temporary = parent.join(format!(".upload-{}", Uuid::new_v4().simple()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary).map_err(to_string)?;
+    let write_result = file.write_all(bytes).and_then(|_| file.sync_all());
+    drop(file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(to_string(error));
+    }
+    let link_result = fs::hard_link(&temporary, path);
+    let _ = fs::remove_file(&temporary);
+    match link_result {
+        Ok(()) => {
+            #[cfg(unix)]
+            if let Ok(parent) = fs::File::open(parent) {
+                let _ = parent.sync_all();
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            validate_private_attachment(path, expected_hash)
+        }
+        Err(error) => Err(to_string(error)),
+    }
+}
+
+fn validate_private_attachment(path: &Path, expected_hash: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(to_string)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("attachment destination is not a regular file".into());
+    }
+    let (actual_hash, _) = hash_file_streaming(path, Some(MAX_CHAT_IMAGE_BYTES))?;
+    if actual_hash != expected_hash {
+        return Err("attachment destination already contains different data".into());
+    }
+    Ok(())
+}
+
+fn hash_file_streaming(path: &Path, max_bytes: Option<u64>) -> Result<(String, u64), String> {
+    let mut file = fs::File::open(path).map_err(to_string)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut total = 0_u64;
+    loop {
+        let count = file.read(&mut buffer).map_err(to_string)?;
+        if count == 0 {
+            break;
+        }
+        total = total
+            .checked_add(count as u64)
+            .ok_or_else(|| "attachment size overflow".to_string())?;
+        if max_bytes.is_some_and(|limit| total > limit) {
+            return Err("attachment exceeds the allowed size".into());
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok((format!("{:x}", hasher.finalize()), total))
 }
 
 #[tauri::command]
@@ -2793,10 +3514,22 @@ fn logout_account_blocking() -> Result<AccountSessionState, String> {
 async fn save_config(config: GyroConfig) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let paths = GyroPaths::for_current_user().map_err(to_string)?;
-        config.save(&paths).map_err(to_string)
+        GyroConfig::update(&paths, |persisted| {
+            *persisted = merge_renderer_config(config, persisted);
+            Ok(())
+        })
+        .map_err(to_string)
     })
     .await
     .map_err(|error| format!("config save worker failed: {error}"))?
+}
+
+fn merge_renderer_config(mut incoming: GyroConfig, persisted: &GyroConfig) -> GyroConfig {
+    // Account issuer/session state is owned by the native login flow. A renderer
+    // settings write must not redirect refresh tokens or forge a signed-in user.
+    incoming.account_oidc = persisted.account_oidc.clone();
+    incoming.account_session = persisted.account_session.clone();
+    incoming
 }
 
 #[tauri::command]
@@ -2828,9 +3561,22 @@ fn list_workspace_tree_blocking(
         .canonicalize()
         .map_err(to_string)?;
     let max_depth = depth.unwrap_or(4).clamp(1, 8);
-    let mut entries = Vec::new();
+    scan_workspace_tree(&root, max_depth).map(|snapshot| snapshot.files)
+}
 
-    for entry in WalkDir::new(&root)
+fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSnapshot, String> {
+    let mut entries = Vec::new();
+    let root_metadata = fs::symlink_metadata(root).map_err(to_string)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err("workspace root is not a regular directory".into());
+    }
+    let mut directories = vec![WorkspaceDirectoryStamp {
+        path: root.to_path_buf(),
+        modified: root_metadata.modified().ok(),
+        len: root_metadata.len(),
+    }];
+
+    for entry in WalkDir::new(root)
         .min_depth(1)
         .max_depth(max_depth)
         .into_iter()
@@ -2844,8 +3590,14 @@ fn list_workspace_tree_blocking(
         .take(1200)
     {
         let entry = entry.map_err(to_string)?;
-        let path = entry.path().strip_prefix(&root).map_err(to_string)?;
+        let path = entry.path().strip_prefix(root).map_err(to_string)?;
         let kind = if entry.file_type().is_dir() {
+            let metadata = entry.metadata().map_err(to_string)?;
+            directories.push(WorkspaceDirectoryStamp {
+                path: entry.path().to_path_buf(),
+                modified: metadata.modified().ok(),
+                len: metadata.len(),
+            });
             "directory".into()
         } else {
             "file".into()
@@ -2865,7 +3617,65 @@ fn list_workspace_tree_blocking(
             .then_with(|| a.kind.cmp(&b.kind))
             .then_with(|| a.path.cmp(&b.path))
     });
-    Ok(entries)
+    Ok(WorkspaceTreeSnapshot {
+        files: entries,
+        directories,
+        scanned_at: Instant::now(),
+    })
+}
+
+impl WorkspaceDirectoryStamp {
+    fn is_current(&self) -> bool {
+        let Ok(metadata) = fs::symlink_metadata(&self.path) else {
+            return false;
+        };
+        !metadata.file_type().is_symlink()
+            && metadata.is_dir()
+            && metadata.len() == self.len
+            && metadata.modified().ok() == self.modified
+    }
+}
+
+impl WorkspaceWatchManager {
+    fn snapshot(&self, workspace_path: &str) -> Result<Vec<WorkspaceFile>, String> {
+        let root = PathBuf::from(workspace_path)
+            .canonicalize()
+            .map_err(to_string)?;
+        let cached = self
+            .snapshots
+            .lock()
+            .map_err(|_| "workspace watch cache is unavailable".to_string())?
+            .get(&root)
+            .cloned();
+        if let Some(cached) = cached {
+            if cached.scanned_at.elapsed() < WORKSPACE_TREE_MAX_CACHE_AGE
+                && cached
+                    .directories
+                    .iter()
+                    .all(WorkspaceDirectoryStamp::is_current)
+            {
+                return Ok(cached.files);
+            }
+        }
+
+        let snapshot = scan_workspace_tree(&root, 5)?;
+        let files = snapshot.files.clone();
+        let mut snapshots = self
+            .snapshots
+            .lock()
+            .map_err(|_| "workspace watch cache is unavailable".to_string())?;
+        if !snapshots.contains_key(&root) && snapshots.len() >= MAX_WORKSPACE_WATCH_CACHES {
+            if let Some(oldest) = snapshots
+                .iter()
+                .min_by_key(|(_, cached)| cached.scanned_at)
+                .map(|(path, _)| path.clone())
+            {
+                snapshots.remove(&oldest);
+            }
+        }
+        snapshots.insert(root, snapshot);
+        Ok(files)
+    }
 }
 
 #[tauri::command]
@@ -3043,14 +3853,16 @@ async fn resolve_provider_approval(
 }
 
 #[tauri::command]
-async fn watch_workspace(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
-    // The renderer polls this normalized snapshot while a workspace is active.
-    // Hash-based stat checks handle open-file conflicts independently.
-    tauri::async_runtime::spawn_blocking(move || {
-        list_workspace_tree_blocking(workspace_path, Some(5))
-    })
-    .await
-    .map_err(|error| format!("workspace watch worker failed: {error}"))?
+async fn watch_workspace(
+    workspace_path: String,
+    manager: tauri::State<'_, WorkspaceWatchManager>,
+) -> Result<Vec<WorkspaceFile>, String> {
+    // Polling now stats only known directories in the common case. A full walk
+    // runs when directory metadata changes or at a bounded reconciliation age.
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.snapshot(&workspace_path))
+        .await
+        .map_err(|error| format!("workspace watch worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -3138,14 +3950,21 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
         "--format=%(refname:short)",
         "refs/heads/",
     ]);
-    let output = command.output()?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "could not list local branches: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(10),
+        None,
+        2 * 1024 * 1024,
+        64 * 1024,
+    )?;
+    if !output.succeeded() {
+        return Err(bounded_command_error(
+            "could not list local branches",
+            &output,
         ));
     }
-    let mut branches = String::from_utf8_lossy(&output.stdout)
+    let mut branches = output
+        .stdout
         .lines()
         .map(str::trim)
         .filter(|branch| !branch.is_empty())
@@ -3158,12 +3977,16 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
         .arg("-C")
         .arg(&repo_root)
         .args(["branch", "--show-current"]);
-    let current_output = current_command.output()?;
-    let current = current_output.status.success().then(|| {
-        String::from_utf8_lossy(&current_output.stdout)
-            .trim()
-            .to_string()
-    });
+    let current_output = run_bounded_command(
+        &current_command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )?;
+    let current = current_output
+        .succeeded()
+        .then(|| current_output.stdout.trim().to_string());
     let current = current.filter(|branch| !branch.is_empty());
     Ok(GitBranchCatalog {
         available: true,
@@ -3196,13 +4019,19 @@ fn git_checkout_branch_impl(
         .arg("-C")
         .arg(&repo_root)
         .args(["status", "--porcelain"]);
-    let status = status_command.output()?;
-    if !status.status.success() {
+    let status = run_bounded_command(
+        &status_command,
+        Duration::from_secs(10),
+        None,
+        2 * 1024 * 1024,
+        64 * 1024,
+    )?;
+    if !status.succeeded() {
         return Err(anyhow::anyhow!(
             "could not inspect the workspace before switching branches"
         ));
     }
-    if !status.stdout.is_empty() {
+    if !status.stdout.is_empty() || status.stdout_truncated {
         return Err(anyhow::anyhow!(
             "commit or stash workspace changes before switching branches"
         ));
@@ -3214,12 +4043,15 @@ fn git_checkout_branch_impl(
         .arg("switch")
         .arg("--")
         .arg(&request.branch);
-    let switched = switch_command.output()?;
-    if !switched.status.success() {
-        return Err(anyhow::anyhow!(
-            "could not switch branch: {}",
-            String::from_utf8_lossy(&switched.stderr).trim()
-        ));
+    let switched = run_bounded_command(
+        &switch_command,
+        Duration::from_secs(60),
+        Some(Duration::from_secs(30)),
+        64 * 1024,
+        64 * 1024,
+    )?;
+    if !switched.succeeded() {
+        return Err(bounded_command_error("could not switch branch", &switched));
     }
     git_branch_catalog_impl(&request.workspace_path)
 }
@@ -3383,7 +4215,10 @@ async fn lsp_start(
     request: LspStartRequest,
     manager: tauri::State<'_, LanguageServerManager>,
 ) -> Result<LspSessionResult, String> {
-    manager.start(request).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.start(request).map_err(to_string))
+        .await
+        .map_err(|error| format!("language server start worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -3391,7 +4226,10 @@ async fn lsp_request(
     request: LspRequestPayload,
     manager: tauri::State<'_, LanguageServerManager>,
 ) -> Result<serde_json::Value, String> {
-    manager.request(request).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.request(request).map_err(to_string))
+        .await
+        .map_err(|error| format!("language server request worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -3399,13 +4237,19 @@ async fn lsp_stop(
     server_id: String,
     manager: tauri::State<'_, LanguageServerManager>,
 ) -> Result<serde_json::Value, String> {
-    manager.stop(&server_id).map_err(to_string)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.stop(&server_id).map_err(to_string))
+        .await
+        .map_err(|error| format!("language server stop worker failed: {error}"))?
 }
 
 impl LanguageServerManager {
     fn start(&self, request: LspStartRequest) -> anyhow::Result<LspSessionResult> {
         let root = workspace_root(&request.workspace_path)?;
         let command_text = request.command.trim().to_string();
+        if !language_server_command_is_allowed(&request.language_id, &command_text) {
+            anyhow::bail!("language server command is not allowed for this language");
+        }
         let mut parts = command_text.split_whitespace();
         let command_name = parts
             .next()
@@ -3416,22 +4260,48 @@ impl LanguageServerManager {
             args.push("--stdio".into());
         }
 
-        let mut processes = self
-            .processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
-        if let Some((server_id, process)) = processes.iter_mut().find(|(_, process)| {
-            process.language_id == request.language_id && process.command == command_text
-        }) {
-            if process.child.try_wait()?.is_none() {
+        let existing_processes = {
+            let processes = self
+                .processes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
+            processes
+                .iter()
+                .map(|(server_id, process)| (server_id.clone(), process.clone()))
+                .collect::<Vec<_>>()
+        };
+        let mut stale_processes = Vec::new();
+        let mut live_processes = 0usize;
+        for (server_id, process) in existing_processes {
+            let mut process = process
+                .lock()
+                .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
+            if process.child.try_wait()?.is_some() {
+                stale_processes.push(server_id);
+                continue;
+            }
+            live_processes += 1;
+            if process.language_id == request.language_id && process.command == command_text {
                 return Ok(LspSessionResult {
-                    server_id: server_id.clone(),
+                    server_id,
                     language_id: request.language_id,
                     command: command_text,
                     status: "ready".into(),
                     message: "Language server is already running".into(),
                 });
             }
+        }
+        if !stale_processes.is_empty() {
+            let mut processes = self
+                .processes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
+            for server_id in stale_processes {
+                processes.remove(&server_id);
+            }
+        }
+        if live_processes >= MAX_LANGUAGE_SERVER_PROCESSES {
+            anyhow::bail!("language server process limit reached; stop a server first");
         }
 
         let mut command = command_with_gui_path(command_name);
@@ -3503,7 +4373,16 @@ impl LanguageServerManager {
             .map(|value| value.len())
             .unwrap_or(0);
         let server_id = format!("{}:{}", request.language_id, Uuid::new_v4());
-        processes.insert(server_id.clone(), process);
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
+        if processes.len() >= MAX_LANGUAGE_SERVER_PROCESSES {
+            let _ = process.child.kill();
+            let _ = process.child.wait();
+            anyhow::bail!("language server process limit reached; stop a server first");
+        }
+        processes.insert(server_id.clone(), Arc::new(Mutex::new(process)));
         Ok(LspSessionResult {
             server_id,
             language_id: request.language_id,
@@ -3517,19 +4396,22 @@ impl LanguageServerManager {
     }
 
     fn request(&self, request: LspRequestPayload) -> anyhow::Result<serde_json::Value> {
-        let mut processes = self
+        let process = self
             .processes
             .lock()
-            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
-        let process = processes
-            .get_mut(&request.server_id)
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?
+            .get(&request.server_id)
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!("language server is not running"))?;
+        let mut process = process
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
         if let Some(status) = process.child.try_wait()? {
             anyhow::bail!("language server exited with {status}");
         }
 
         if request.method == "$/gyro/poll" {
-            let messages = drain_lsp_messages(process)?;
+            let messages = drain_lsp_messages(&mut process)?;
             return Ok(serde_json::json!({
                 "serverId": request.server_id,
                 "status": "ok",
@@ -3546,7 +4428,7 @@ impl LanguageServerManager {
                     "params": request.params,
                 }),
             )?;
-            let messages = drain_lsp_messages(process)?;
+            let messages = drain_lsp_messages(&mut process)?;
             return Ok(serde_json::json!({
                 "serverId": request.server_id,
                 "status": "sent",
@@ -3566,7 +4448,7 @@ impl LanguageServerManager {
             }),
         )?;
         let (response, messages) =
-            receive_lsp_response(process, request_id, Duration::from_secs(15))?;
+            receive_lsp_response(&mut process, request_id, Duration::from_secs(15))?;
         Ok(serde_json::json!({
             "serverId": request.server_id,
             "status": if response.get("error").is_some() { "error" } else { "ok" },
@@ -3577,16 +4459,20 @@ impl LanguageServerManager {
     }
 
     fn stop(&self, server_id: &str) -> anyhow::Result<serde_json::Value> {
-        let mut processes = self
+        let process = self
             .processes
             .lock()
-            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
-        let Some(mut process) = processes.remove(server_id) else {
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?
+            .remove(server_id);
+        let Some(process) = process else {
             return Ok(serde_json::json!({
                 "serverId": server_id,
                 "status": "stopped",
             }));
         };
+        let mut process = process
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
         let request_id = process.next_request_id;
         process.next_request_id += 1;
         let _ = write_lsp_message(
@@ -3609,6 +4495,20 @@ impl LanguageServerManager {
             "serverId": server_id,
             "status": "stopped",
         }))
+    }
+}
+
+fn language_server_command_is_allowed(language_id: &str, command: &str) -> bool {
+    let normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    match language_id {
+        "typescript" | "typescriptreact" | "javascript" | "javascriptreact" => {
+            normalized == "typescript-language-server --stdio"
+        }
+        "rust" => normalized == "rust-analyzer",
+        "json" => normalized == "vscode-json-language-server --stdio",
+        "css" | "scss" | "less" => normalized == "vscode-css-language-server --stdio",
+        "html" => normalized == "vscode-html-language-server --stdio",
+        _ => false,
     }
 }
 
@@ -3638,7 +4538,7 @@ fn lsp_method_is_notification(method: &str) -> bool {
 fn spawn_lsp_message_reader(
     stdout: ChildStdout,
 ) -> mpsc::Receiver<Result<serde_json::Value, String>> {
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(IDE_PROTOCOL_CHANNEL_CAPACITY);
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
@@ -3671,10 +4571,22 @@ fn write_lsp_message(writer: &mut impl Write, value: &serde_json::Value) -> anyh
 
 fn read_lsp_message(reader: &mut impl BufRead) -> anyhow::Result<serde_json::Value> {
     let mut content_length = None;
+    let mut header_bytes = 0usize;
     loop {
         let mut header = String::new();
-        if reader.read_line(&mut header)? == 0 {
+        let remaining = MAX_LSP_HEADER_BYTES.saturating_sub(header_bytes);
+        if remaining == 0 {
+            anyhow::bail!("language server headers exceed size limit");
+        }
+        let read = Read::by_ref(reader)
+            .take((remaining + 1) as u64)
+            .read_line(&mut header)?;
+        if read == 0 {
             anyhow::bail!("language server output closed");
+        }
+        header_bytes = header_bytes.saturating_add(read);
+        if header_bytes > MAX_LSP_HEADER_BYTES {
+            anyhow::bail!("language server headers exceed size limit");
         }
         if header == "\r\n" || header == "\n" {
             break;
@@ -3702,6 +4614,7 @@ fn receive_lsp_response(
 ) -> anyhow::Result<(serde_json::Value, Vec<serde_json::Value>)> {
     let deadline = Instant::now() + timeout;
     let mut messages = Vec::new();
+    let mut message_bytes = 0usize;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -3716,6 +4629,10 @@ fn receive_lsp_response(
             return Ok((message, messages));
         }
         handle_lsp_server_message(process, &message)?;
+        if messages.len() >= MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
+            anyhow::bail!("language server produced too many messages before its response");
+        }
+        add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
         messages.push(message);
     }
 }
@@ -3724,7 +4641,8 @@ fn drain_lsp_messages(
     process: &mut LanguageServerProcess,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let mut messages = Vec::new();
-    for _ in 0..128 {
+    let mut message_bytes = 0usize;
+    for _ in 0..MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
         let message = match process.messages.try_recv() {
             Ok(message) => message.map_err(anyhow::Error::msg)?,
             Err(mpsc::TryRecvError::Empty) => break,
@@ -3733,6 +4651,7 @@ fn drain_lsp_messages(
             }
         };
         handle_lsp_server_message(process, &message)?;
+        add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
         messages.push(message);
     }
     Ok(messages)
@@ -3794,12 +4713,21 @@ async fn task_run(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
 }
 
 fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
+    let _admission = IdeCommandAdmission::acquire()?;
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let mut command = command_with_gui_path(&request.command);
-    command.current_dir(root).args(request.args);
+    let task = task_discover_impl(&request.workspace_path)
+        .map_err(to_string)?
+        .into_iter()
+        .find(|task| task.id == request.task_id)
+        .ok_or_else(|| "task is no longer present in the workspace".to_string())?;
+    if request.command != task.command || request.args != task.args {
+        return Err("task definition changed; refresh tasks before running it".into());
+    }
+    let mut command = command_with_gui_path(&task.command);
+    command.current_dir(root).args(&task.args);
     let mut output = run_command_output(command).map_err(to_string)?;
     if output.status == "done" {
-        output.stdout = format!("task {} completed\n{}", request.task_id, output.stdout);
+        output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
     }
     Ok(output)
 }
@@ -3821,15 +4749,33 @@ async fn test_run(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
 }
 
 fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String> {
+    let _admission = IdeCommandAdmission::acquire()?;
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let command_name = request.command.unwrap_or_else(|| "cargo".into());
-    let args = request.args.unwrap_or_else(|| vec!["test".into()]);
-    let mut command = command_with_gui_path(&command_name);
-    command.current_dir(root).args(args);
-    let mut output = run_command_output(command).map_err(to_string)?;
-    if let Some(test_ids) = request.test_ids {
-        output.stdout = format!("tests {:?}\n{}", test_ids, output.stdout);
+    let discovered = task_discover_impl(&request.workspace_path).map_err(to_string)?;
+    let requested_ids = request.test_ids.as_deref().unwrap_or_default();
+    if requested_ids.len() > 1 {
+        return Err("run one native-discovered test task at a time".into());
     }
+    let task = if let Some(test_id) = requested_ids.first() {
+        discovered
+            .into_iter()
+            .find(|task| task.group == "test" && task.id == *test_id)
+    } else {
+        discovered.into_iter().find(|task| task.group == "test")
+    }
+    .ok_or_else(|| "no native-discovered test task is available".to_string())?;
+    if request
+        .command
+        .as_ref()
+        .is_some_and(|command| command != &task.command)
+        || request.args.as_ref().is_some_and(|args| args != &task.args)
+    {
+        return Err("test definition changed; refresh tests before running it".into());
+    }
+    let mut command = command_with_gui_path(&task.command);
+    command.current_dir(root).args(&task.args);
+    let mut output = run_command_output(command).map_err(to_string)?;
+    output.stdout = format!("tests {:?}\n{}", vec![task.id], output.stdout);
     Ok(output)
 }
 
@@ -3868,6 +4814,40 @@ async fn debug_stop(
 
 impl DebugAdapterManager {
     fn start(&self, request: DebugStartRequest) -> anyhow::Result<DebugSessionResult> {
+        let existing_processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?
+            .iter()
+            .map(|(session_id, process)| (session_id.clone(), process.clone()))
+            .collect::<Vec<_>>();
+        let mut stale_processes = Vec::new();
+        let mut live_processes = 0usize;
+        for (session_id, process) in existing_processes {
+            if process
+                .lock()
+                .map_err(|_| anyhow::anyhow!("debug adapter process lock poisoned"))?
+                .child
+                .try_wait()?
+                .is_some()
+            {
+                stale_processes.push(session_id);
+            } else {
+                live_processes += 1;
+            }
+        }
+        if !stale_processes.is_empty() {
+            let mut processes = self
+                .processes
+                .lock()
+                .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?;
+            for session_id in stale_processes {
+                processes.remove(&session_id);
+            }
+        }
+        if live_processes >= MAX_DEBUG_ADAPTER_PROCESSES {
+            anyhow::bail!("debug adapter process limit reached; stop a debug session first");
+        }
         let root = request
             .workspace_path
             .as_deref()
@@ -3884,6 +4864,9 @@ impl DebugAdapterManager {
             .ok_or_else(|| anyhow::anyhow!("debug adapter command is required"))?;
         let mut args = command_parts.map(ToOwned::to_owned).collect::<Vec<_>>();
         args.extend(request.args.clone().unwrap_or_default());
+        if !debug_adapter_command_is_allowed(&request.adapter, command_name, &args) {
+            anyhow::bail!("debug adapter command requires a native allowlist entry");
+        }
         let mut command = command_with_gui_path(command_name);
         command
             .args(args)
@@ -3970,21 +4953,30 @@ impl DebugAdapterManager {
             message,
             capabilities,
         };
-        self.processes
-            .lock()
-            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?
-            .insert(session_id, process);
-        Ok(result)
-    }
-
-    fn send(&self, request: DebugSendRequest) -> anyhow::Result<serde_json::Value> {
         let mut processes = self
             .processes
             .lock()
             .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?;
-        let process = processes
-            .get_mut(&request.session_id)
+        if processes.len() >= MAX_DEBUG_ADAPTER_PROCESSES {
+            let _ = process.child.kill();
+            let _ = process.child.wait();
+            anyhow::bail!("debug adapter process limit reached; stop a debug session first");
+        }
+        processes.insert(session_id, Arc::new(Mutex::new(process)));
+        Ok(result)
+    }
+
+    fn send(&self, request: DebugSendRequest) -> anyhow::Result<serde_json::Value> {
+        let process = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?
+            .get(&request.session_id)
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!("debug session is not running"))?;
+        let mut process = process
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter process lock poisoned"))?;
         if let Some(status) = process.child.try_wait()? {
             anyhow::bail!("debug adapter exited with {status}");
         }
@@ -3994,7 +4986,7 @@ impl DebugAdapterManager {
             .and_then(|value| value.as_str())
             .ok_or_else(|| anyhow::anyhow!("debug request command is required"))?;
         if command == "$/gyro/poll" {
-            let events = drain_dap_messages(process)?;
+            let events = drain_dap_messages(&mut process)?;
             return Ok(redact_json_strings(serde_json::json!({
                 "sessionId": request.session_id,
                 "name": process.name,
@@ -4014,7 +5006,8 @@ impl DebugAdapterManager {
                 "arguments": request.request.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({})),
             }),
         )?;
-        let (response, events) = receive_dap_response(process, sequence, Duration::from_secs(20))?;
+        let (response, events) =
+            receive_dap_response(&mut process, sequence, Duration::from_secs(20))?;
         Ok(redact_json_strings(serde_json::json!({
             "sessionId": request.session_id,
             "status": if response.get("success").and_then(|value| value.as_bool()) == Some(false) { "error" } else { "ok" },
@@ -4024,13 +5017,17 @@ impl DebugAdapterManager {
     }
 
     fn stop(&self, session_id: &str) -> anyhow::Result<serde_json::Value> {
-        let mut processes = self
+        let process = self
             .processes
             .lock()
-            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?;
-        let Some(mut process) = processes.remove(session_id) else {
+            .map_err(|_| anyhow::anyhow!("debug adapter manager lock poisoned"))?
+            .remove(session_id);
+        let Some(process) = process else {
             return Ok(serde_json::json!({ "sessionId": session_id, "status": "stopped" }));
         };
+        let mut process = process
+            .lock()
+            .map_err(|_| anyhow::anyhow!("debug adapter process lock poisoned"))?;
         let sequence = process.next_sequence;
         let _ = write_lsp_message(
             &mut process.stdin,
@@ -4048,6 +5045,34 @@ impl DebugAdapterManager {
     }
 }
 
+fn debug_adapter_command_is_allowed(adapter: &str, command: &str, args: &[String]) -> bool {
+    if command.is_empty()
+        || command.contains('/')
+        || command.contains('\\')
+        || args.len() > 32
+        || args
+            .iter()
+            .any(|arg| arg.len() > 4_096 || arg.as_bytes().contains(&0))
+    {
+        return false;
+    }
+    #[cfg(test)]
+    if adapter == "fake" && command == "python3" {
+        return true;
+    }
+    let allowed = [
+        "lldb-dap",
+        "codelldb",
+        "debugpy-adapter",
+        "dlv",
+        "js-debug-adapter",
+        "vscode-js-debug",
+        "netcoredbg",
+        "OpenDebugAD7",
+    ];
+    adapter == command && allowed.contains(&command)
+}
+
 fn receive_dap_response(
     process: &mut DebugAdapterProcess,
     request_sequence: u64,
@@ -4055,6 +5080,7 @@ fn receive_dap_response(
 ) -> anyhow::Result<(serde_json::Value, Vec<serde_json::Value>)> {
     let deadline = Instant::now() + timeout;
     let mut events = Vec::new();
+    let mut event_bytes = 0usize;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -4071,13 +5097,18 @@ fn receive_dap_response(
             return Ok((message, events));
         }
         handle_dap_adapter_request(process, &message)?;
+        if events.len() >= MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
+            anyhow::bail!("debug adapter produced too many events before its response");
+        }
+        add_ide_protocol_message_bytes(&mut event_bytes, &message)?;
         events.push(message);
     }
 }
 
 fn drain_dap_messages(process: &mut DebugAdapterProcess) -> anyhow::Result<Vec<serde_json::Value>> {
     let mut messages = Vec::new();
-    for _ in 0..128 {
+    let mut message_bytes = 0usize;
+    for _ in 0..MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
         let message = match process.messages.try_recv() {
             Ok(message) => message.map_err(anyhow::Error::msg)?,
             Err(mpsc::TryRecvError::Empty) => break,
@@ -4086,9 +5117,21 @@ fn drain_dap_messages(process: &mut DebugAdapterProcess) -> anyhow::Result<Vec<s
             }
         };
         handle_dap_adapter_request(process, &message)?;
+        add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
         messages.push(message);
     }
     Ok(messages)
+}
+
+fn add_ide_protocol_message_bytes(
+    total: &mut usize,
+    message: &serde_json::Value,
+) -> anyhow::Result<()> {
+    *total = total.saturating_add(serde_json::to_vec(message)?.len());
+    if *total > MAX_IDE_PROTOCOL_RESPONSE_BYTES {
+        anyhow::bail!("IDE protocol response exceeded its aggregate size limit");
+    }
+    Ok(())
 }
 
 fn handle_dap_adapter_request(
@@ -4149,17 +5192,8 @@ fn read_workspace_file_with_limit(
 ) -> anyhow::Result<WorkspaceFileContent> {
     let root = PathBuf::from(workspace_path).canonicalize()?;
     let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
-    let metadata = std::fs::metadata(&candidate)?;
-
-    if metadata.is_dir() {
-        anyhow::bail!("workspace preview path is a directory");
-    }
-
-    let mut file = std::fs::File::open(&candidate)?;
-    let mut bytes = Vec::with_capacity(max_bytes.min(metadata.len() as usize));
-    Read::by_ref(&mut file)
-        .take((max_bytes + 1) as u64)
-        .read_to_end(&mut bytes)?;
+    let (mut bytes, size_bytes) =
+        read_bounded_regular_file(&candidate, max_bytes, "workspace file")?;
     let truncated = bytes.len() > max_bytes;
     if truncated {
         bytes.truncate(max_bytes);
@@ -4174,9 +5208,36 @@ fn read_workspace_file_with_limit(
         path: path.to_string(),
         content,
         truncated,
-        size_bytes: metadata.len(),
+        size_bytes,
         content_hash,
     })
+}
+
+fn read_bounded_regular_file(
+    path: &Path,
+    max_bytes: usize,
+    label: &str,
+) -> anyhow::Result<(Vec<u8>, u64)> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("open {label} {}", path.display()))?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        anyhow::bail!("{label} is not a regular file");
+    }
+    let mut bytes = Vec::with_capacity(max_bytes.min(metadata.len() as usize));
+    Read::by_ref(&mut file)
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read {label} {}", path.display()))?;
+    Ok((bytes, metadata.len()))
 }
 
 fn stat_workspace_file_impl(workspace_path: &str, path: &str) -> anyhow::Result<WorkspaceFileStat> {
@@ -4189,17 +5250,19 @@ fn stat_workspace_file_impl(workspace_path: &str, path: &str) -> anyhow::Result<
         "file"
     }
     .to_string();
-    let content_hash =
-        if metadata.is_file() && metadata.len() <= MAX_WORKSPACE_FILE_EDIT_BYTES as u64 {
-            let bytes = std::fs::read(&candidate)?;
-            if bytes.contains(&0) {
-                None
-            } else {
-                Some(content_hash(&bytes))
-            }
-        } else {
+    let content_hash = if metadata.is_file()
+        && metadata.len() <= MAX_WORKSPACE_FILE_EDIT_BYTES as u64
+    {
+        let (bytes, _) =
+            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
+        if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES || bytes.contains(&0) {
             None
-        };
+        } else {
+            Some(content_hash(&bytes))
+        }
+    } else {
+        None
+    };
 
     Ok(WorkspaceFileStat {
         path: path.to_string(),
@@ -4225,7 +5288,11 @@ fn write_workspace_file_impl(
         anyhow::bail!("binary workspace files cannot be edited");
     }
     if let Some(expected_hash) = request.expected_hash.as_deref() {
-        let current = std::fs::read(&candidate)?;
+        let (current, _) =
+            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
+        if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
+            anyhow::bail!("workspace file is too large to edit in Gyro");
+        }
         if current.contains(&0) {
             anyhow::bail!("binary workspace files cannot be edited");
         }
@@ -4270,7 +5337,11 @@ fn create_file_mutation_proposal_impl(
     }
     let base_exists = candidate.exists();
     let expected_hash = if base_exists {
-        let current = fs::read(&candidate)?;
+        let (current, _) =
+            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
+        if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
+            anyhow::bail!("workspace file is too large to edit in Gyro");
+        }
         if current.contains(&0) {
             anyhow::bail!("binary workspace files cannot be edited");
         }
@@ -4460,7 +5531,14 @@ fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::R
     let metadata = std::fs::metadata(&candidate)?;
     if metadata.is_file() {
         if let Some(expected_hash) = request.expected_hash.as_deref() {
-            let bytes = std::fs::read(&candidate)?;
+            let (bytes, _) = read_bounded_regular_file(
+                &candidate,
+                MAX_WORKSPACE_FILE_EDIT_BYTES,
+                "workspace file",
+            )?;
+            if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
+                anyhow::bail!("workspace file is too large for hash-approved deletion");
+            }
             if bytes.contains(&0) {
                 anyhow::bail!("binary workspace files cannot be deleted through hash approval");
             }
@@ -4501,12 +5579,18 @@ fn search_workspace_impl(
     }
     command.arg(query).arg(".");
 
-    match command.output() {
-        Ok(output) if output.status.success() || output.status.code() == Some(1) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            Ok(parse_rg_output(&stdout, query, max_results))
+    match run_bounded_command(
+        &command,
+        Duration::from_secs(30),
+        Some(Duration::from_secs(10)),
+        8 * 1024 * 1024,
+        64 * 1024,
+    ) {
+        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
+            Ok(parse_rg_output(&output.stdout, query, max_results))
         }
-        Ok(_) | Err(_) => fallback_search_workspace(&root, query, max_results),
+        Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
+        Err(_) => fallback_search_workspace(&root, query, max_results),
     }
 }
 
@@ -4540,6 +5624,9 @@ fn fallback_search_workspace(
     max_results: usize,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     let mut results = Vec::new();
+    let started_at = Instant::now();
+    let mut scanned_files = 0usize;
+    let mut scanned_bytes = 0u64;
     for entry in WalkDir::new(root)
         .min_depth(1)
         .max_depth(8)
@@ -4552,6 +5639,12 @@ fn fallback_search_workspace(
             )
         })
     {
+        if started_at.elapsed() >= WORKSPACE_SEARCH_FALLBACK_TIMEOUT
+            || scanned_files >= MAX_WORKSPACE_SEARCH_FALLBACK_FILES
+            || scanned_bytes >= MAX_WORKSPACE_SEARCH_FALLBACK_BYTES
+        {
+            break;
+        }
         let entry = entry?;
         if !entry.file_type().is_file() {
             continue;
@@ -4560,7 +5653,19 @@ fn fallback_search_workspace(
         if metadata.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES as u64 {
             continue;
         }
-        let bytes = std::fs::read(entry.path())?;
+        if scanned_bytes.saturating_add(metadata.len()) > MAX_WORKSPACE_SEARCH_FALLBACK_BYTES {
+            break;
+        }
+        scanned_files += 1;
+        scanned_bytes = scanned_bytes.saturating_add(metadata.len());
+        let (bytes, _) = read_bounded_regular_file(
+            entry.path(),
+            MAX_WORKSPACE_FILE_PREVIEW_BYTES,
+            "workspace search file",
+        )?;
+        if bytes.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES {
+            continue;
+        }
         if bytes.contains(&0) {
             continue;
         }
@@ -4600,7 +5705,13 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
         .arg("--porcelain=v2")
         .arg("--branch")
         .arg("--untracked-files=all");
-    let output = match command.output() {
+    let output = match run_bounded_command(
+        &command,
+        Duration::from_secs(15),
+        Some(Duration::from_secs(10)),
+        4 * 1024 * 1024,
+        64 * 1024,
+    ) {
         Ok(output) => output,
         Err(error) => {
             return Ok(SourceControlStatus {
@@ -4620,7 +5731,7 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             });
         }
     };
-    if !output.status.success() {
+    if !output.succeeded() || output.stdout_truncated {
         return Ok(SourceControlStatus {
             provider: "git".into(),
             available: false,
@@ -4634,10 +5745,10 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             stats_partial: false,
             files: Vec::new(),
             last_checked_at: None,
-            error: Some(String::from_utf8_lossy(&output.stderr).to_string()),
+            error: Some(bounded_command_error("could not inspect Git status", &output).to_string()),
         });
     }
-    let mut status = parse_git_status_v2(&String::from_utf8_lossy(&output.stdout));
+    let mut status = parse_git_status_v2(&output.stdout);
     let repo_root = git_repo_root(&root).unwrap_or(root);
     apply_git_diff_stats(&repo_root, &mut status);
     status.repo_root = Some(repo_root.display().to_string());
@@ -4702,7 +5813,7 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
             let _record = parts.next();
             let xy = parts.next().unwrap_or("..");
             let _sub = parts.next();
-            let _modes_and_hashes = (0..5).for_each(|_| {
+            (0..5).for_each(|_| {
                 let _ = parts.next();
             });
             let _score = parts.next();
@@ -4743,11 +5854,18 @@ fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
         .arg("-C")
         .arg(workspace)
         .args(["rev-parse", "--show-toplevel"]);
-    let output = command.output().ok()?;
-    if !output.status.success() {
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )
+    .ok()?;
+    if !output.succeeded() || output.stdout_truncated {
         return None;
     }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let path = output.stdout.trim().to_string();
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
@@ -4760,6 +5878,9 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
         status.deletions = status.deletions.saturating_add(*deletions);
     }
 
+    let untracked_started_at = Instant::now();
+    let mut untracked_files = 0usize;
+    let mut untracked_bytes = 0usize;
     for file in &mut status.files {
         if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
             file.original_path
@@ -4770,7 +5891,20 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
             file.deletions = *deletions;
         }
         if file.state == "untracked" {
-            let (additions, partial) = untracked_text_additions(repo_root, &file.path);
+            if untracked_files >= MAX_GIT_UNTRACKED_STAT_FILES
+                || untracked_bytes >= MAX_GIT_UNTRACKED_STAT_BYTES
+                || untracked_started_at.elapsed() >= GIT_UNTRACKED_STAT_TIMEOUT
+            {
+                status.stats_partial = true;
+                continue;
+            }
+            let (additions, partial, bytes_read) = untracked_text_additions(
+                repo_root,
+                &file.path,
+                MAX_GIT_UNTRACKED_STAT_BYTES - untracked_bytes,
+            );
+            untracked_files += 1;
+            untracked_bytes = untracked_bytes.saturating_add(bytes_read);
             file.additions = additions;
             status.additions = status.additions.saturating_add(additions);
             status.stats_partial |= partial;
@@ -4784,11 +5918,18 @@ fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
         .arg("-C")
         .arg(repo_root)
         .args(["diff", "--numstat", "--no-renames", "HEAD", "--"]);
-    let output = match command.output() {
-        Ok(output) if output.status.success() => output,
+    let output = match run_bounded_command(
+        &command,
+        Duration::from_secs(15),
+        Some(Duration::from_secs(10)),
+        4 * 1024 * 1024,
+        64 * 1024,
+    ) {
+        Ok(output) if output.succeeded() => output,
         _ => return git_numstat_without_head(repo_root),
     };
-    parse_git_numstat(&String::from_utf8_lossy(&output.stdout))
+    let (stats, partial) = parse_git_numstat(&output.stdout);
+    (stats, partial || output.stdout_truncated)
 }
 
 fn git_numstat_without_head(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
@@ -4800,16 +5941,22 @@ fn git_numstat_without_head(repo_root: &Path) -> (HashMap<String, (usize, usize)
     ] {
         let mut command = command_with_gui_path("git");
         command.arg("-C").arg(repo_root).args(args);
-        let Ok(output) = command.output() else {
+        let Ok(output) = run_bounded_command(
+            &command,
+            Duration::from_secs(15),
+            Some(Duration::from_secs(10)),
+            4 * 1024 * 1024,
+            64 * 1024,
+        ) else {
             partial = true;
             continue;
         };
-        if !output.status.success() {
+        if !output.succeeded() {
             partial = true;
             continue;
         }
-        let (stats, output_partial) = parse_git_numstat(&String::from_utf8_lossy(&output.stdout));
-        partial |= output_partial;
+        let (stats, output_partial) = parse_git_numstat(&output.stdout);
+        partial |= output_partial || output.stdout_truncated;
         for (path, (additions, deletions)) in stats {
             let entry = totals.entry(path).or_insert((0usize, 0usize));
             entry.0 = entry.0.saturating_add(additions);
@@ -4839,23 +5986,32 @@ fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
     (totals, partial)
 }
 
-fn untracked_text_additions(repo_root: &Path, relative_path: &str) -> (usize, bool) {
+fn untracked_text_additions(
+    repo_root: &Path,
+    relative_path: &str,
+    remaining_bytes: usize,
+) -> (usize, bool, usize) {
     let path = repo_root.join(relative_path);
     let Ok(metadata) = fs::metadata(&path) else {
-        return (0, true);
+        return (0, true, 0);
     };
-    if !metadata.is_file() || metadata.len() > MAX_WORKSPACE_FILE_EDIT_BYTES as u64 {
-        return (0, metadata.is_file());
+    let max_bytes = MAX_WORKSPACE_FILE_EDIT_BYTES.min(remaining_bytes);
+    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
+        return (0, metadata.is_file(), 0);
     }
-    let Ok(bytes) = fs::read(path) else {
-        return (0, true);
+    let Ok((bytes, _)) = read_bounded_regular_file(&path, max_bytes, "untracked workspace file")
+    else {
+        return (0, true, 0);
     };
+    if bytes.len() > max_bytes {
+        return (0, true, 0);
+    }
     if bytes.contains(&0) {
-        return (0, false);
+        return (0, false, bytes.len());
     }
     let lines = bytes.iter().filter(|byte| **byte == b'\n').count()
         + usize::from(!bytes.is_empty() && bytes.last() != Some(&b'\n'));
-    (lines, false)
+    (lines, false, bytes.len())
 }
 
 fn git_state_from_xy(xy: &str) -> String {
@@ -4878,7 +6034,12 @@ fn task_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TaskDefinition
     let mut tasks = Vec::new();
     let package_json = root.join("package.json");
     if package_json.exists() {
-        let package = std::fs::read_to_string(&package_json)?;
+        let (package, _) =
+            read_bounded_regular_file(&package_json, 1024 * 1024, "package manifest")?;
+        if package.len() > 1024 * 1024 {
+            anyhow::bail!("package manifest exceeds the 1 MiB size limit");
+        }
+        let package = String::from_utf8(package).context("package manifest is not UTF-8")?;
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&package) {
             if let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) {
                 let runner = if root.join("pnpm-lock.yaml").exists() {
@@ -4957,19 +6118,75 @@ fn test_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TestTreeItemRe
     }])
 }
 
-fn run_command_output(mut command: Command) -> anyhow::Result<IdeCommandOutput> {
-    let output = command.output()?;
-    let stdout = gyro_core::security::redact_secrets(&String::from_utf8_lossy(&output.stdout));
-    let stderr = gyro_core::security::redact_secrets(&String::from_utf8_lossy(&output.stderr));
+fn run_command_output(command: Command) -> anyhow::Result<IdeCommandOutput> {
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(30 * 60),
+        Some(Duration::from_secs(5 * 60)),
+        2 * 1024 * 1024,
+        1024 * 1024,
+    )?;
+    let mut stdout = gyro_core::security::redact_secrets(&output.stdout);
+    let mut stderr = gyro_core::security::redact_secrets(&output.stderr);
+    if output.stdout_truncated {
+        stdout.push_str("\n[stdout truncated by Gyro]");
+    }
+    if output.stderr_truncated {
+        stderr.push_str("\n[stderr truncated by Gyro]");
+    }
     Ok(IdeCommandOutput {
-        status: if output.status.success() {
-            "done".into()
-        } else {
-            "failed".into()
-        },
+        status: match output.termination {
+            ExecutionTermination::Exited { code: Some(0) } => "done",
+            ExecutionTermination::Cancelled => "cancelled",
+            ExecutionTermination::TimedOut => "timed-out",
+            ExecutionTermination::Inactive => "inactive",
+            ExecutionTermination::OutputLimit => "output-limit",
+            ExecutionTermination::Exited { .. } => "failed",
+        }
+        .into(),
         stdout,
         stderr,
     })
+}
+
+fn run_bounded_command(
+    command: &Command,
+    timeout: Duration,
+    inactivity_timeout: Option<Duration>,
+    max_stdout_chars: usize,
+    max_stderr_chars: usize,
+) -> anyhow::Result<gyro_core::ExecutionOutcome> {
+    let mut request = ExecutionRequest::new(command.get_program().to_os_string());
+    request.args = command
+        .get_args()
+        .map(std::ffi::OsStr::to_os_string)
+        .collect();
+    request.current_dir = command.get_current_dir().map(Path::to_path_buf);
+    request.env = command
+        .get_envs()
+        .map(|(key, value)| (key.to_os_string(), value.map(std::ffi::OsStr::to_os_string)))
+        .collect();
+    request.timeout = timeout;
+    request.inactivity_timeout = inactivity_timeout;
+    request.max_stdout_chars = max_stdout_chars;
+    request.max_stderr_chars = max_stderr_chars;
+    gyro_core::run_command(request, CancellationToken::default(), |_| {})
+}
+
+fn bounded_command_error(label: &str, output: &gyro_core::ExecutionOutcome) -> anyhow::Error {
+    let reason = match &output.termination {
+        ExecutionTermination::Exited { code } => format!("exited with {code:?}"),
+        ExecutionTermination::Cancelled => "was cancelled".into(),
+        ExecutionTermination::TimedOut => "timed out".into(),
+        ExecutionTermination::Inactive => "stopped after no output".into(),
+        ExecutionTermination::OutputLimit => "exceeded its output limit".into(),
+    };
+    let detail = output.stderr.trim();
+    if detail.is_empty() {
+        anyhow::anyhow!("{label} {reason}")
+    } else {
+        anyhow::anyhow!("{label} {reason}: {}", truncate_error_detail(detail))
+    }
 }
 
 fn content_hash(bytes: &[u8]) -> String {
@@ -5051,6 +6268,17 @@ async fn stop_terminal_pane(
 }
 
 #[tauri::command]
+async fn close_terminal_pane(
+    manager: tauri::State<'_, TerminalProcessManager>,
+    pane_id: String,
+) -> Result<(), String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.close(&pane_id).map_err(to_string))
+        .await
+        .map_err(|error| format!("terminal close worker failed: {error}"))?
+}
+
+#[tauri::command]
 async fn restart_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
@@ -5118,11 +6346,18 @@ fn check_browser_preview_blocking(
     if url.host_str().is_none() {
         return Err("preview URL must include a host".into());
     }
-    let diagnostics_supported = browser_preview_diagnostics_supported(&url);
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("preview URLs cannot include credentials".into());
+    }
+    if !browser_preview_diagnostics_supported(&url) {
+        return Err("preview URLs must use localhost or a loopback IP address".into());
+    }
+    let diagnostics_supported = true;
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(2))
         .timeout_read(Duration::from_secs(2))
         .timeout_write(Duration::from_secs(2))
+        .redirects(0)
         .build();
     match agent.get(url.as_str()).call() {
         Ok(response) => Ok(BrowserPreviewCheck {
@@ -5153,6 +6388,12 @@ fn check_browser_preview_blocking(
 }
 
 fn browser_preview_diagnostics_supported(url: &url::Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return false;
+    }
     match url.host() {
         Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
         Some(url::Host::Ipv4(address)) => address.is_loopback(),
@@ -5268,6 +6509,7 @@ async fn capture_browser_preview_diagnostics(
     app: &tauri::AppHandle,
     raw_url: &str,
 ) -> Result<Vec<BrowserPreviewDiagnostic>, String> {
+    let _admission = BrowserPreviewAdmission::acquire()?;
     let url = url::Url::parse(raw_url.trim()).map_err(|_| "invalid preview URL".to_string())?;
     if !browser_preview_diagnostics_supported(&url) {
         return Err("diagnostics are limited to loopback previews".into());
@@ -5285,6 +6527,7 @@ async fn capture_browser_preview_diagnostics(
         .skip_taskbar(true)
         .incognito(true)
         .devtools(false)
+        .on_navigation(browser_preview_diagnostics_supported)
         .initialization_script(script)
         .on_document_title_changed(move |_window, title| {
             if title.starts_with(&callback_prefix) {
@@ -5293,6 +6536,7 @@ async fn capture_browser_preview_diagnostics(
         })
         .build()
         .map_err(|error| format!("could not create diagnostic webview: {error}"))?;
+    let window = HiddenWebviewGuard(window);
     let received = tauri::async_runtime::spawn_blocking(move || {
         receiver.recv_timeout(BROWSER_PREVIEW_DIAGNOSTIC_TIMEOUT)
     })
@@ -5309,6 +6553,7 @@ async fn capture_browser_preview(
     app: tauri::AppHandle,
     request: BrowserPreviewCaptureRequest,
 ) -> Result<BrowserPreviewCapture, String> {
+    let _admission = BrowserPreviewAdmission::acquire()?;
     let url = url::Url::parse(request.url.trim()).map_err(|_| "invalid preview URL".to_string())?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err("preview URL must use http or https and include a host".into());
@@ -5332,6 +6577,7 @@ async fn capture_browser_preview(
                 .skip_taskbar(true)
                 .incognito(true)
                 .devtools(false)
+                .on_navigation(browser_preview_diagnostics_supported)
                 .on_page_load(move |_window, payload| {
                     if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                         let _ = load_sender.send(());
@@ -5339,6 +6585,7 @@ async fn capture_browser_preview(
                 })
                 .build()
                 .map_err(|error| format!("could not create browser capture webview: {error}"))?;
+        let window = HiddenWebviewGuard(window);
 
         let loaded = tauri::async_runtime::spawn_blocking(move || {
             load_receiver.recv_timeout(BROWSER_PREVIEW_CAPTURE_TIMEOUT)
@@ -5358,7 +6605,7 @@ async fn capture_browser_preview(
         let snapshot = snapshot?;
         let paths = GyroPaths::for_current_user().map_err(to_string)?;
         let created_at = chrono::Utc::now();
-        return tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             persist_browser_preview_capture(
                 &paths,
                 &snapshot.png,
@@ -5368,7 +6615,7 @@ async fn capture_browser_preview(
             )
         })
         .await
-        .map_err(|error| format!("browser capture writer failed: {error}"))?;
+        .map_err(|error| format!("browser capture writer failed: {error}"))?
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -5537,9 +6784,7 @@ fn prune_browser_preview_captures(directory: &Path) -> Result<(), String> {
 fn check_provider_health_blocking(
     request: ProviderHealthRequest,
 ) -> Result<ProviderHealthCheck, String> {
-    ProviderHealthService::default()
-        .check(request)
-        .map_err(to_string)
+    ProviderHealthService.check(request).map_err(to_string)
 }
 
 #[tauri::command]
@@ -5635,21 +6880,16 @@ fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapsho
 fn spawn_codex_app_server_reader(
     stdout: ChildStdout,
 ) -> mpsc::Receiver<Result<serde_json::Value, String>> {
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(CODEX_APP_SERVER_CHANNEL_CAPACITY);
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
+            match read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES) {
+                Ok(None) => {
                     let _ = sender.send(Err("Codex usage service closed unexpectedly".into()));
                     break;
                 }
-                Ok(_) if line.len() > MAX_CODEX_APP_SERVER_MESSAGE_BYTES => {
-                    let _ = sender.send(Err("Codex usage response exceeded the size limit".into()));
-                    break;
-                }
-                Ok(_) => match serde_json::from_str(line.trim()) {
+                Ok(Some(line)) => match serde_json::from_slice(&line) {
                     Ok(message) => {
                         if sender.send(Ok(message)).is_err() {
                             break;
@@ -5672,6 +6912,41 @@ fn spawn_codex_app_server_reader(
         }
     });
     receiver
+}
+
+fn read_bounded_protocol_line<R: BufRead>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>, String> {
+    let mut line = Vec::with_capacity(max_bytes.min(8 * 1024));
+    loop {
+        let available = reader
+            .fill_buf()
+            .map_err(|error| format!("could not read protocol data: {error}"))?;
+        if available.is_empty() {
+            return if line.is_empty() {
+                Ok(None)
+            } else {
+                Err("protocol response ended before its newline terminator".into())
+            };
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let payload_len = newline.unwrap_or(consumed);
+        if line.len().saturating_add(payload_len) > max_bytes {
+            return Err(format!(
+                "protocol response exceeded the {max_bytes} byte size limit"
+            ));
+        }
+        line.extend_from_slice(&available[..payload_len]);
+        reader.consume(consumed);
+        if newline.is_some() {
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            return Ok(Some(line));
+        }
+    }
 }
 
 fn write_codex_app_server_message(
@@ -5846,7 +7121,7 @@ fn export_diagnostics_blocking() -> Result<DiagnosticsExportResult, String> {
 }
 
 fn collect_provider_health_for_diagnostics(config: &GyroConfig) -> Vec<ProviderHealthCheck> {
-    let service = ProviderHealthService::default();
+    let service = ProviderHealthService;
     config
         .model_providers
         .iter()
@@ -5903,7 +7178,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     }
 
     let child = pair.slave.spawn_command(command)?;
-    let output = Arc::new(Mutex::new(Vec::new()));
+    let output = Arc::new(Mutex::new(VecDeque::new()));
     let reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
     spawn_terminal_reader(reader, Arc::clone(&output));
@@ -5920,7 +7195,51 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
         exit_code: None,
         cols,
         rows,
+        terminated: false,
     })
+}
+
+fn terminate_terminal_process(process: &mut TerminalProcess) {
+    if process.terminated {
+        return;
+    }
+    #[cfg(unix)]
+    let process_groups = {
+        let shell_group = process.child.process_id().map(|pid| pid as i32);
+        let foreground_group = process.master.process_group_leader();
+        let mut groups = [foreground_group, shell_group]
+            .into_iter()
+            .flatten()
+            .filter(|group| *group > 1)
+            .collect::<Vec<_>>();
+        groups.sort_unstable();
+        groups.dedup();
+        for group in &groups {
+            // PTY jobs can outlive their shell. Signal both the current
+            // foreground job and the shell process group before reaping.
+            unsafe {
+                libc::kill(-*group, libc::SIGHUP);
+                libc::kill(-*group, libc::SIGTERM);
+            }
+        }
+        groups
+    };
+    let _ = process.child.kill();
+    #[cfg(unix)]
+    {
+        std::thread::sleep(Duration::from_millis(25));
+        for group in process_groups {
+            unsafe {
+                if libc::kill(-group, 0) == 0 {
+                    libc::kill(-group, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    if let Ok(status) = process.child.wait() {
+        process.exit_code = Some(status.exit_code() as i32);
+        process.terminated = true;
+    }
 }
 
 fn configure_terminal_environment(command: &mut CommandBuilder) {
@@ -5935,6 +7254,9 @@ fn configure_terminal_environment(command: &mut CommandBuilder) {
 }
 
 fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<PathBuf>> {
+    if request.working_directory.as_deref() == Some("Home") {
+        return Ok(Some(user_home_directory()?));
+    }
     let workspace = request
         .workspace_path
         .as_deref()
@@ -5943,7 +7265,7 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
         .map(|path| path.canonicalize())
         .transpose()?;
     let Some(mut workspace) = workspace else {
-        return Ok(None);
+        return Ok(Some(user_home_directory()?));
     };
     if request.workspace_mode.as_deref() != Some("worktree") {
         workspace = terminal_local_workspace(&workspace).unwrap_or(workspace);
@@ -5960,27 +7282,49 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
     gyro_core::security::assert_path_inside_workspace(&workspace, candidate).map(Some)
 }
 
-fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
-    let top_level_output = command_with_gui_path("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()?;
-    if !top_level_output.status.success() {
-        return Ok(workspace.to_path_buf());
-    }
-    let git_top_level =
-        PathBuf::from(String::from_utf8_lossy(&top_level_output.stdout).trim()).canonicalize()?;
+fn user_home_directory() -> anyhow::Result<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("user home directory is unavailable"))?;
+    Ok(home.canonicalize().unwrap_or(home))
+}
 
-    let common_dir_output = command_with_gui_path("git")
+fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
+    let mut top_level_command = command_with_gui_path("git");
+    top_level_command
         .arg("-C")
         .arg(workspace)
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .output()?;
-    if !common_dir_output.status.success() {
+        .args(["rev-parse", "--show-toplevel"]);
+    let top_level_output = run_bounded_command(
+        &top_level_command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )?;
+    if !top_level_output.succeeded() || top_level_output.stdout_truncated {
         return Ok(workspace.to_path_buf());
     }
-    let git_common_dir = PathBuf::from(String::from_utf8_lossy(&common_dir_output.stdout).trim());
+    let git_top_level = PathBuf::from(top_level_output.stdout.trim()).canonicalize()?;
+
+    let mut common_dir_command = command_with_gui_path("git");
+    common_dir_command.arg("-C").arg(workspace).args([
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ]);
+    let common_dir_output = run_bounded_command(
+        &common_dir_command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )?;
+    if !common_dir_output.succeeded() || common_dir_output.stdout_truncated {
+        return Ok(workspace.to_path_buf());
+    }
+    let git_common_dir = PathBuf::from(common_dir_output.stdout.trim());
     let Some(repo_root) = git_common_dir.parent() else {
         return Ok(workspace.to_path_buf());
     };
@@ -6021,7 +7365,7 @@ where
 {
     let binding_cursor = binding
         .as_ref()
-        .and_then(|binding| provider_resume_cursor_from_binding(binding));
+        .and_then(provider_resume_cursor_from_binding);
     match run_once(binding_cursor.as_ref()) {
         Ok(mut output) => {
             output.resumed = binding_cursor.is_some();
@@ -6031,11 +7375,9 @@ where
             let session_id =
                 parse_uuid(&request.session_id).map_err(|error| anyhow::anyhow!(error))?;
             let _ = store.clear_provider_session_binding(session_id, &request.provider_id);
-            let mut output = run_once(None)?;
-            output.retry_count = 1;
-            output.resumed = false;
-            output.output_summary = Some("stale resume cursor cleared and request retried".into());
-            Ok(output)
+            Err(error.context(
+                "the stale provider cursor was cleared; retry explicitly to avoid replaying tools",
+            ))
         }
         Err(error) => {
             if let Some(binding) = binding {
@@ -6120,6 +7462,7 @@ fn run_openai_codex_chat(
         &output_path,
         request.model_id.as_deref(),
         request.reasoning_effort.as_deref(),
+        &request.mode,
         request.require_command_approval,
         request.require_file_edit_approval,
         &request.attachments,
@@ -6139,8 +7482,10 @@ fn run_openai_codex_chat(
                 "Could not complete OpenAI through Codex CLI. Run `codex login` in Terminal if needed, then try again. {error}"
             )
         })?;
-    let last_message = fs::read_to_string(&output_path).unwrap_or_default();
+    let last_message_result =
+        read_bounded_optional_text_file(&output_path, MAX_CHAT_RESPONSE_BYTES);
     let _ = fs::remove_file(&output_path);
+    let last_message = last_message_result?;
     if output.status_success {
         let response = sanitize_provider_chat_response(last_message.trim());
         if !response.is_empty() {
@@ -6201,6 +7546,23 @@ fn run_openai_codex_chat(
     anyhow::bail!("{}", truncate_error_detail(&combined));
 }
 
+fn read_bounded_optional_text_file(path: &Path, max_bytes: usize) -> anyhow::Result<String> {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(error).with_context(|| format!("open {}", path.display())),
+    };
+    let mut bytes = Vec::with_capacity(max_bytes.min(8 * 1024));
+    Read::by_ref(&mut file)
+        .take((max_bytes + 1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read {}", path.display()))?;
+    if bytes.len() > max_bytes {
+        anyhow::bail!("provider response file exceeded the {max_bytes} byte limit");
+    }
+    String::from_utf8(bytes).context("provider response file was not UTF-8")
+}
+
 fn run_openai_codex_app_server_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -6222,9 +7584,11 @@ fn run_openai_codex_app_server_chat(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = process
+    configure_provider_process_group(&mut process);
+    let child = process
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    let mut child = ProviderProcessGuard::new(child);
     let result = (|| -> anyhow::Result<ProviderRunnerOutput> {
         let mut stdin = child
             .stdin
@@ -6264,6 +7628,7 @@ fn run_openai_codex_app_server_chat(
         });
         let model = codex_model_arg(request.model_id.as_deref());
         let (approval_policy, sandbox_mode, sandbox_policy) = codex_app_server_policy(
+            &request.mode,
             request.require_command_approval,
             request.require_file_edit_approval,
             &cwd,
@@ -6343,10 +7708,17 @@ fn run_openai_codex_app_server_chat(
         .map_err(anyhow::Error::msg)?;
 
         let mut response_text = String::new();
+        let mut response_text_chars = 0_usize;
+        let mut response_text_truncated = false;
+        let mut pending_delta = String::new();
+        let mut last_delta_emit = Instant::now();
         let mut completed_message = String::new();
         let mut activities = Vec::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
         let mut turn_started = false;
+        let mut last_protocol_activity = Instant::now();
+        let mut protocol_messages = 0usize;
+        let mut protocol_bytes = 0usize;
         loop {
             if provider_chat_cancelled(app, &request.session_id) {
                 anyhow::bail!("chat cancelled by user");
@@ -6355,16 +7727,41 @@ fn run_openai_codex_app_server_chat(
             if remaining.is_zero() {
                 anyhow::bail!("Codex app server turn timed out");
             }
-            let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
+            let inactivity_remaining = Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS)
+                .saturating_sub(last_protocol_activity.elapsed());
+            if inactivity_remaining.is_zero() {
+                anyhow::bail!("Codex app server stopped producing protocol activity");
+            }
+            let message = match messages.recv_timeout(
+                remaining
+                    .min(inactivity_remaining)
+                    .min(Duration::from_millis(250)),
+            ) {
                 Ok(message) => message.map_err(anyhow::Error::msg)?,
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    flush_codex_app_server_delta(
+                        app,
+                        request,
+                        &mut pending_delta,
+                        &mut last_delta_emit,
+                        false,
+                    );
+                    continue;
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     anyhow::bail!("Codex app server disconnected")
                 }
             };
+            last_protocol_activity = Instant::now();
+            protocol_messages = protocol_messages.saturating_add(1);
+            protocol_bytes = protocol_bytes.saturating_add(serde_json::to_vec(&message)?.len());
+            if protocol_messages > MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES
+                || protocol_bytes > MAX_CODEX_APP_SERVER_PROTOCOL_BYTES
+            {
+                anyhow::bail!("Codex app server exceeded its protocol activity budget");
+            }
             let method = message.get("method").and_then(serde_json::Value::as_str);
-            if method.is_some() && message.get("id").is_some() {
-                let method = method.expect("checked method");
+            if let Some(method) = method.filter(|_| message.get("id").is_some()) {
                 let params = message.get("params").cloned().unwrap_or_default();
                 handle_codex_app_server_request(
                     app, request, &mut stdin, &message, method, &params, &patches,
@@ -6381,27 +7778,36 @@ fn run_openai_codex_app_server_chat(
             match method {
                 "item/agentMessage/delta" => {
                     if let Some(delta) = params.get("delta").and_then(serde_json::Value::as_str) {
-                        response_text.push_str(delta);
-                        emit_provider_chat_event(
-                            app,
-                            request,
-                            "delta",
-                            Some(HarnessRunStatus::Running),
-                            Some(delta.to_string()),
-                            None,
-                            None,
-                        );
+                        if !response_text_truncated {
+                            let pushed = push_bounded(
+                                &mut response_text,
+                                &mut response_text_chars,
+                                delta,
+                                MAX_CHAT_RESPONSE_CHARS,
+                            );
+                            response_text_truncated = pushed.truncated;
+                            if pushed.accepted_chars > 0 {
+                                pending_delta.extend(delta.chars().take(pushed.accepted_chars));
+                                flush_codex_app_server_delta(
+                                    app,
+                                    request,
+                                    &mut pending_delta,
+                                    &mut last_delta_emit,
+                                    false,
+                                );
+                            }
+                        }
                     }
                 }
                 "item/fileChange/patchUpdated" => {
                     if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str)
                     {
-                        if !patches
+                        if patches
                             .get(item_id)
                             .and_then(|patch| patch.get("changes"))
-                            .is_some()
+                            .is_none()
                         {
-                            patches.insert(item_id.to_string(), params.clone());
+                            insert_codex_app_server_patch(&mut patches, item_id, params.clone())?;
                         }
                     }
                 }
@@ -6413,13 +7819,14 @@ fn run_openai_codex_app_server_chat(
                             if let Some(item_id) =
                                 item.get("id").and_then(serde_json::Value::as_str)
                             {
-                                patches.insert(
-                                    item_id.to_string(),
+                                insert_codex_app_server_patch(
+                                    &mut patches,
+                                    item_id,
                                     serde_json::json!({
                                         "itemId": item_id,
                                         "changes": item.get("changes").cloned().unwrap_or_default(),
                                     }),
-                                );
+                                )?;
                             }
                         }
                     }
@@ -6431,24 +7838,36 @@ fn run_openai_codex_app_server_chat(
                                 if let Some(text) =
                                     item.get("text").and_then(serde_json::Value::as_str)
                                 {
-                                    completed_message = text.to_string();
+                                    completed_message =
+                                        truncate_chars(text, MAX_CHAT_RESPONSE_CHARS);
                                 }
                             }
                             Some("commandExecution") => {
                                 let activity = codex_item_activity(item, "command", "Ran command");
-                                emit_provider_activity_event(app, request, &activity);
-                                activities.push(activity);
+                                if activities.len() < MAX_CODEX_APP_SERVER_ACTIVITIES {
+                                    emit_provider_activity_event(app, request, &activity);
+                                    activities.push(activity);
+                                }
                             }
                             Some("fileChange") => {
                                 let activity = codex_item_activity(item, "file", "Updated files");
-                                emit_provider_activity_event(app, request, &activity);
-                                activities.push(activity);
+                                if activities.len() < MAX_CODEX_APP_SERVER_ACTIVITIES {
+                                    emit_provider_activity_event(app, request, &activity);
+                                    activities.push(activity);
+                                }
                             }
                             _ => {}
                         }
                     }
                 }
                 "turn/completed" => {
+                    flush_codex_app_server_delta(
+                        app,
+                        request,
+                        &mut pending_delta,
+                        &mut last_delta_emit,
+                        true,
+                    );
                     let status = params
                         .pointer("/turn/status")
                         .and_then(serde_json::Value::as_str)
@@ -6494,22 +7913,22 @@ fn run_openai_codex_app_server_chat(
             )),
         })
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(child);
     result
 }
 
 fn codex_app_server_policy(
+    mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
     cwd: &Path,
 ) -> (&'static str, &'static str, serde_json::Value) {
-    let approval_policy = if require_command_approval {
+    let approval_policy = if *mode == ChatMode::Plan || require_command_approval {
         "untrusted"
     } else {
         "on-request"
     };
-    if require_file_edit_approval {
+    if *mode == ChatMode::Plan || require_file_edit_approval {
         return (
             approval_policy,
             "read-only",
@@ -6527,6 +7946,50 @@ fn codex_app_server_policy(
             "excludeSlashTmp": false
         }),
     )
+}
+
+fn flush_codex_app_server_delta(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    pending_delta: &mut String,
+    last_emit: &mut Instant,
+    force: bool,
+) {
+    if pending_delta.is_empty() || (!force && last_emit.elapsed() < PROVIDER_STREAM_FLUSH_INTERVAL)
+    {
+        return;
+    }
+    let delta = std::mem::take(pending_delta);
+    *last_emit = Instant::now();
+    emit_provider_chat_event(
+        app,
+        request,
+        "delta",
+        Some(HarnessRunStatus::Running),
+        Some(delta),
+        None,
+        None,
+    );
+}
+
+fn insert_codex_app_server_patch(
+    patches: &mut HashMap<String, serde_json::Value>,
+    item_id: &str,
+    patch: serde_json::Value,
+) -> anyhow::Result<()> {
+    if !patches.contains_key(item_id) && patches.len() >= MAX_CODEX_APP_SERVER_PATCHES {
+        anyhow::bail!(
+            "Codex returned more than {MAX_CODEX_APP_SERVER_PATCHES} file-change records"
+        );
+    }
+    let encoded_size = serde_json::to_vec(&patch)?.len();
+    if encoded_size > MAX_CODEX_APP_SERVER_PATCH_BYTES {
+        anyhow::bail!(
+            "Codex file-change record exceeded the {MAX_CODEX_APP_SERVER_PATCH_BYTES} byte limit"
+        );
+    }
+    patches.insert(item_id.to_string(), patch);
+    Ok(())
 }
 
 fn codex_item_activity(
@@ -6699,7 +8162,7 @@ fn wait_for_provider_approval_with_transaction(
         .get("reason")
         .and_then(serde_json::Value::as_str)
         .map(gyro_core::sanitize_harness_text);
-    let mut payload = serde_json::json!({
+    let payload = serde_json::json!({
         "schema": "gyro.provider-approval.v1",
         "kind": "provider-tool-approval",
         "approvalId": approval_id,
@@ -6738,32 +8201,83 @@ fn wait_for_provider_approval_with_transaction(
             },
         );
     let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    let approval_key = approval_id.to_string();
+    let started_at = Instant::now();
     loop {
         match receiver.recv_timeout(Duration::from_millis(250)) {
-            Ok(decision) => return Ok(decision),
+            Ok(decision) => {
+                remove_pending_provider_approval(app, &approval_key);
+                return Ok(decision);
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
+                remove_pending_provider_approval(app, &approval_key);
+                record_provider_approval_terminal_event(
+                    app,
+                    &store,
+                    session_id,
+                    turn_id,
+                    payload,
+                    "failed",
+                    "Provider approval channel closed",
+                )?;
                 anyhow::bail!("provider approval channel closed")
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        if provider_chat_cancelled(app, &context.session_id) {
-            app.state::<ProviderApprovalManager>()
-                .pending
-                .lock()
-                .ok()
-                .map(|mut pending| pending.remove(&approval_id.to_string()));
-            payload["status"] = serde_json::Value::String("cancelled".into());
-            let event = store.append_event_with_turn_id(
+        if started_at.elapsed() >= PROVIDER_APPROVAL_TIMEOUT {
+            remove_pending_provider_approval(app, &approval_key);
+            record_provider_approval_terminal_event(
+                app,
+                &store,
                 session_id,
-                SessionEventKind::SystemEvent,
-                "Provider approval cancelled",
-                payload,
                 turn_id,
+                payload,
+                "expired",
+                "Provider approval expired",
             )?;
-            let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+            anyhow::bail!("provider approval expired after 15 minutes");
+        }
+        if provider_chat_cancelled(app, &context.session_id) {
+            remove_pending_provider_approval(app, &approval_key);
+            record_provider_approval_terminal_event(
+                app,
+                &store,
+                session_id,
+                turn_id,
+                payload,
+                "cancelled",
+                "Provider approval cancelled",
+            )?;
             anyhow::bail!("chat cancelled by user");
         }
     }
+}
+
+fn remove_pending_provider_approval(app: &tauri::AppHandle, approval_key: &str) {
+    if let Ok(mut pending) = app.state::<ProviderApprovalManager>().pending.lock() {
+        pending.remove(approval_key);
+    }
+}
+
+fn record_provider_approval_terminal_event(
+    app: &tauri::AppHandle,
+    store: &SessionStore,
+    session_id: Uuid,
+    turn_id: Option<Uuid>,
+    mut payload: serde_json::Value,
+    status: &str,
+    message: &str,
+) -> anyhow::Result<()> {
+    payload["status"] = serde_json::Value::String(status.into());
+    let event = store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::SystemEvent,
+        message,
+        payload,
+        turn_id,
+    )?;
+    let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    Ok(())
 }
 
 fn provider_approval_label(approval_type: &str) -> &'static str {
@@ -6965,6 +8479,10 @@ fn handle_desktop_provider_approval_request(
         Ok(store) => store,
         Err(error) => return DesktopProviderApprovalResponse::deny(error),
     };
+    let config = match GyroPaths::for_current_user().and_then(|paths| GyroConfig::load(&paths)) {
+        Ok(config) => config,
+        Err(error) => return DesktopProviderApprovalResponse::deny(error.to_string()),
+    };
     let session = match store.get_session(session_id) {
         Ok(Some(session)) => session,
         Ok(None) => {
@@ -6974,10 +8492,26 @@ fn handle_desktop_provider_approval_request(
         }
         Err(error) => return DesktopProviderApprovalResponse::deny(error.to_string()),
     };
+    if session.provider_id.as_deref() != Some("anthropic") {
+        return DesktopProviderApprovalResponse::deny(
+            "Gyro rejected an approval request for a chat using another provider.",
+        );
+    }
+    let active_run_matches = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map(|flags| provider_run_approval_matches(&flags, &request.session_id, &request.run_nonce))
+        .unwrap_or(false);
+    if !active_run_matches {
+        return DesktopProviderApprovalResponse::deny(
+            "Gyro rejected an approval request that was not issued by the active provider run.",
+        );
+    }
     let approval_type = desktop_claude_approval_type(&request.tool_name);
     let required = match approval_type {
-        "command" => request.require_command_approval,
-        "file-change" => request.require_file_edit_approval,
+        "command" => config.require_command_approval,
+        "file-change" => config.require_file_edit_approval,
         _ => true,
     };
     if !required {
@@ -6991,7 +8525,7 @@ fn handle_desktop_provider_approval_request(
         session_id: request.session_id.clone(),
         turn_id: request.turn_id.clone(),
         provider_id: request.provider_id.clone(),
-        provider_label: request.provider_label.clone(),
+        provider_label: session.provider_label.clone(),
     };
     let file_transaction = if approval_type == "file-change" {
         match prepare_claude_provider_mutation_transaction(
@@ -7066,7 +8600,11 @@ fn run_anthropic_claude_chat(
     let permission_mcp_config = if request.mode != ChatMode::Plan
         && (request.require_command_approval || request.require_file_edit_approval)
     {
-        Some(desktop_claude_permission_mcp_config(request)?)
+        let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
+        Some(desktop_claude_permission_mcp_config(
+            request,
+            &approval_nonce,
+        )?)
     } else {
         None
     };
@@ -7143,18 +8681,21 @@ fn run_anthropic_claude_chat(
     anyhow::bail!("{}", truncate_error_detail(&combined));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn codex_chat_args(
     resume_session_id: Option<&str>,
     output_path: &Path,
     model_id: Option<&str>,
     reasoning_effort: Option<&str>,
+    mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
     attachments: &[ChatAttachmentRequest],
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec!["exec".into()];
-    let full_access = !require_command_approval && !require_file_edit_approval;
+    let full_access =
+        *mode == ChatMode::Normal && !require_command_approval && !require_file_edit_approval;
     if resume_session_id.is_some() {
         args.push("resume".into());
     } else {
@@ -7199,6 +8740,7 @@ fn codex_chat_args(
     args
 }
 
+#[allow(clippy::too_many_arguments)]
 fn claude_chat_args(
     resume_session_id: Option<&str>,
     session_id: &str,
@@ -7250,7 +8792,34 @@ fn claude_chat_args(
     args
 }
 
-fn desktop_claude_permission_mcp_config(request: &ProviderChatRequest) -> anyhow::Result<String> {
+fn active_provider_approval_nonce(
+    app: &tauri::AppHandle,
+    session_id: &str,
+) -> anyhow::Result<String> {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
+        .get(session_id)
+        .map(|control| control.approval_nonce.clone())
+        .ok_or_else(|| anyhow::anyhow!("provider approval has no active run"))
+}
+
+fn provider_run_approval_matches(
+    flags: &HashMap<String, Arc<ProviderRunControl>>,
+    session_id: &str,
+    approval_nonce: &str,
+) -> bool {
+    !approval_nonce.is_empty()
+        && flags
+            .get(session_id)
+            .is_some_and(|control| control.approval_nonce == approval_nonce)
+}
+
+fn desktop_claude_permission_mcp_config(
+    request: &ProviderChatRequest,
+    approval_nonce: &str,
+) -> anyhow::Result<String> {
     let executable = std::env::current_exe().context("resolve Gyro desktop permission bridge")?;
     serde_json::to_string(&serde_json::json!({
         "mcpServers": {
@@ -7261,6 +8830,7 @@ fn desktop_claude_permission_mcp_config(request: &ProviderChatRequest) -> anyhow
                 "env": {
                     "GYRO_DESKTOP_PERMISSION_SESSION_ID": request.session_id,
                     "GYRO_DESKTOP_PERMISSION_TURN_ID": request.turn_id.as_deref().unwrap_or(""),
+                    "GYRO_DESKTOP_PERMISSION_RUN_NONCE": approval_nonce,
                     "GYRO_DESKTOP_PERMISSION_PROVIDER_ID": request.provider_id,
                     "GYRO_DESKTOP_PERMISSION_PROVIDER_LABEL": request.provider_label.as_deref().unwrap_or("Anthropic"),
                     "GYRO_DESKTOP_PERMISSION_REQUIRE_COMMAND": request.require_command_approval.to_string(),
@@ -7623,7 +9193,7 @@ fn append_provider_status_event(
         object.insert(
             "goal".into(),
             serde_json::to_value(
-                &request
+                request
                     .goal
                     .as_ref()
                     .map(|goal| serde_json::json!({"text": goal.text, "status": goal.status})),
@@ -7646,6 +9216,33 @@ fn append_provider_status_event(
         payload,
         turn_id,
     )
+}
+
+fn provider_turn_has_unfinished_attempt(
+    store: &SessionStore,
+    session_id: Uuid,
+    turn_id: Uuid,
+) -> anyhow::Result<bool> {
+    let last_status = store
+        .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)?
+        .into_iter()
+        .filter(|event| {
+            event.turn_id == Some(turn_id)
+                && event
+                    .payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("provider-status")
+        })
+        .filter_map(|event| {
+            event
+                .payload
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .next_back();
+    Ok(last_status.as_deref() == Some("running"))
 }
 
 fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
@@ -7684,13 +9281,11 @@ fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
     )
 }
 
-fn append_provider_activity_event(
-    store: &SessionStore,
-    session_id: Uuid,
+fn provider_activity_event_entry(
     request: &ProviderChatRequest,
     turn_id: Uuid,
     activity: &ProviderActivity,
-) -> anyhow::Result<SessionEvent> {
+) -> (String, serde_json::Value, Option<Uuid>) {
     let payload = serde_json::json!({
         "kind": "provider-activity",
         "activityId": activity.id,
@@ -7702,15 +9297,10 @@ fn append_provider_activity_event(
         "modelId": request.model_id,
         "turnId": turn_id,
     });
-    store.append_event_with_turn_id(
-        session_id,
-        SessionEventKind::SystemEvent,
-        activity.label.clone(),
-        payload,
-        Some(turn_id),
-    )
+    (activity.label.clone(), payload, Some(turn_id))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_provider_diagnostics_event(
     store: &SessionStore,
     session_id: Uuid,
@@ -7915,6 +9505,9 @@ impl StreamingCommandState {
             *existing = activity;
             return true;
         }
+        if self.activities.len() >= MAX_CODEX_APP_SERVER_ACTIVITIES {
+            return false;
+        }
         self.activities.push(activity);
         true
     }
@@ -8092,6 +9685,9 @@ fn run_streaming_command(
                 "no provider activity was received for {} seconds",
                 inactivity_timeout.as_secs()
             )
+        }
+        ExecutionTermination::OutputLimit => {
+            anyhow::bail!("provider exceeded Gyro's output activity limit")
         }
         ExecutionTermination::Exited { .. } => {}
     }
@@ -8491,12 +10087,16 @@ fn provider_output_summary(
 
 fn is_stale_resume_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
-    normalized.contains("not found")
-        || normalized.contains("no such session")
-        || normalized.contains("unknown session")
-        || normalized.contains("missing thread")
-        || normalized.contains("could not resume")
-        || normalized.contains("resume")
+    let resume_identity = normalized.contains("resume")
+        || normalized.contains("session")
+        || normalized.contains("thread");
+    let missing_identity = normalized.contains("not found")
+        || normalized.contains("no such")
+        || normalized.contains("unknown")
+        || normalized.contains("missing")
+        || normalized.contains("expired")
+        || normalized.contains("could not resume");
+    resume_identity && missing_identity
 }
 
 fn command_with_gui_path(command: &str) -> Command {
@@ -8505,6 +10105,82 @@ fn command_with_gui_path(command: &str) -> Command {
         process.env("PATH", augmented_gui_path());
     }
     process
+}
+
+struct ProviderProcessGuard {
+    child: Child,
+}
+
+impl ProviderProcessGuard {
+    fn new(child: Child) -> Self {
+        Self { child }
+    }
+}
+
+impl std::ops::Deref for ProviderProcessGuard {
+    type Target = Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for ProviderProcessGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+impl Drop for ProviderProcessGuard {
+    fn drop(&mut self) {
+        terminate_provider_process_group(&mut self.child);
+    }
+}
+
+#[cfg(unix)]
+fn configure_provider_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_provider_process_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn terminate_provider_process_group(child: &mut Child) {
+    let process_group = -(child.id() as i32);
+    unsafe {
+        libc::kill(process_group, libc::SIGTERM);
+    }
+    for _ in 0..10 {
+        let _ = child.try_wait();
+        let group_exists = unsafe { libc::kill(process_group, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if !group_exists {
+            let _ = child.wait();
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+fn terminate_provider_process_group(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn augmented_gui_path() -> String {
@@ -8567,7 +10243,7 @@ fn node_version_key(path: &Path) -> (u64, u64, u64) {
     )
 }
 
-fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<Vec<u8>>>)
+fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<VecDeque<u8>>>)
 where
     R: Read + Send + 'static,
 {
@@ -8584,21 +10260,34 @@ where
     });
 }
 
-fn append_terminal_output(output: &Arc<Mutex<Vec<u8>>>, bytes: &[u8]) {
+fn append_terminal_output(output: &Arc<Mutex<VecDeque<u8>>>, bytes: &[u8]) {
     let Ok(mut output) = output.lock() else {
         return;
     };
-    output.extend_from_slice(bytes);
-    if output.len() > MAX_TERMINAL_OUTPUT_BYTES {
-        let overflow = output.len() - MAX_TERMINAL_OUTPUT_BYTES;
-        output.drain(0..overflow);
+    if bytes.len() >= MAX_TERMINAL_OUTPUT_BYTES {
+        output.clear();
+        output.extend(
+            bytes[bytes.len() - MAX_TERMINAL_OUTPUT_BYTES..]
+                .iter()
+                .copied(),
+        );
+        return;
     }
+    let overflow = output
+        .len()
+        .saturating_add(bytes.len())
+        .saturating_sub(MAX_TERMINAL_OUTPUT_BYTES);
+    if overflow > 0 {
+        output.drain(..overflow);
+    }
+    output.extend(bytes.iter().copied());
 }
 
 fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnapshot {
     match process.child.try_wait() {
         Ok(Some(status)) => {
             process.exit_code = Some(status.exit_code() as i32);
+            process.terminated = true;
             process.status = if status.success() {
                 "done".into()
             } else {
@@ -8618,7 +10307,7 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
     let output = process
         .output
         .lock()
-        .map(|value| String::from_utf8_lossy(&value).to_string())
+        .map(|value| terminal_output_text(&value))
         .unwrap_or_default();
     TerminalPaneSnapshot {
         pane_id: process.request.pane_id.clone(),
@@ -8640,9 +10329,21 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
     }
 }
 
+fn terminal_output_text(output: &VecDeque<u8>) -> String {
+    let (first, second) = output.as_slices();
+    if second.is_empty() {
+        return String::from_utf8_lossy(first).into_owned();
+    }
+    let mut bytes = Vec::with_capacity(output.len());
+    bytes.extend_from_slice(first);
+    bytes.extend_from_slice(second);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 struct DesktopProviderPermissionContext {
     session_id: String,
     turn_id: Option<String>,
+    run_nonce: String,
     provider_id: String,
     provider_label: Option<String>,
     require_command_approval: bool,
@@ -8656,6 +10357,7 @@ impl DesktopProviderPermissionContext {
             turn_id: std::env::var("GYRO_DESKTOP_PERMISSION_TURN_ID")
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
+            run_nonce: desktop_permission_env("GYRO_DESKTOP_PERMISSION_RUN_NONCE")?,
             provider_id: desktop_permission_env("GYRO_DESKTOP_PERMISSION_PROVIDER_ID")?,
             provider_label: std::env::var("GYRO_DESKTOP_PERMISSION_PROVIDER_LABEL")
                 .ok()
@@ -8707,6 +10409,7 @@ fn desktop_permission_tool_call(
         sender_version: env!("CARGO_PKG_VERSION").into(),
         session_id: context.session_id.clone(),
         turn_id: context.turn_id.clone(),
+        run_nonce: context.run_nonce.clone(),
         provider_id: context.provider_id.clone(),
         provider_label: context.provider_label.clone(),
         tool_name,
@@ -8749,10 +10452,8 @@ fn write_desktop_mcp_message(
     output: &mut impl Write,
     message: &serde_json::Value,
 ) -> anyhow::Result<()> {
-    serde_json::to_writer(&mut *output, message)?;
-    output.write_all(b"\n")?;
-    output.flush()?;
-    Ok(())
+    write_bounded_json_line(output, message, MAX_PERMISSION_MCP_MESSAGE_BYTES)
+        .map_err(anyhow::Error::msg)
 }
 
 pub fn run_provider_permission_server() -> anyhow::Result<()> {
@@ -8760,12 +10461,14 @@ pub fn run_provider_permission_server() -> anyhow::Result<()> {
     let paths = GyroPaths::for_current_user()?;
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+    let mut stdin = stdin.lock();
+    while let Some(line) = read_bounded_protocol_line(&mut stdin, MAX_PERMISSION_MCP_MESSAGE_BYTES)
+        .map_err(anyhow::Error::msg)?
+    {
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let request: serde_json::Value = match serde_json::from_str(&line) {
+        let request: serde_json::Value = match serde_json::from_slice(&line) {
             Ok(request) => request,
             Err(error) => {
                 write_desktop_mcp_message(
@@ -8861,6 +10564,7 @@ pub fn run() {
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
         .manage(ProviderApprovalManager::default())
+        .manage(WorkspaceWatchManager::default())
         .manage(AutomationSchedulerControl::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -8892,6 +10596,7 @@ pub fn run() {
             check_provider_health,
             capture_browser_preview,
             complete_automation_lease,
+            close_terminal_pane,
             create_automation,
             create_desktop_session,
             create_file_mutation_proposal,
@@ -9039,48 +10744,104 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            use std::os::unix::net::UnixListener;
-
-            if paths.socket_path.exists() {
-                let _ = std::fs::remove_file(&paths.socket_path);
-            }
             if let Err(error) = paths.ensure() {
                 eprintln!("could not create Gyro IPC directory: {error}");
                 return;
             }
-
-            let listener = match UnixListener::bind(&paths.socket_path) {
-                Ok(listener) => listener,
+            let listener = match bind_cli_ipc_listener(&paths) {
+                Ok(Some(listener)) => listener,
+                Ok(None) => {
+                    eprintln!("Gyro IPC listener is already active");
+                    return;
+                }
                 Err(error) => {
                     eprintln!("could not bind Gyro IPC socket: {error}");
                     return;
                 }
             };
-            let _ = std::fs::set_permissions(
-                &paths.socket_path,
-                std::fs::Permissions::from_mode(0o600),
-            );
+
+            let (sender, receiver) = mpsc::sync_channel(DESKTOP_IPC_QUEUE_CAPACITY);
+            let receiver = Arc::new(Mutex::new(receiver));
+            for _ in 0..DESKTOP_IPC_WORKER_COUNT {
+                let app = app.clone();
+                let receiver = Arc::clone(&receiver);
+                std::thread::spawn(move || loop {
+                    let stream = match receiver.lock() {
+                        Ok(receiver) => receiver.recv(),
+                        Err(_) => return,
+                    };
+                    match stream {
+                        Ok(stream) => handle_cli_ipc_connection(&app, stream),
+                        Err(_) => return,
+                    }
+                });
+            }
 
             for stream in listener.incoming() {
                 let Ok(stream) = stream else {
                     continue;
                 };
-                let app = app.clone();
-                std::thread::spawn(move || handle_cli_ipc_connection(&app, stream));
+                if sender.try_send(stream).is_err() {
+                    eprintln!("Gyro IPC queue is full; rejecting a connection");
+                }
             }
         }
     });
 }
 
 #[cfg(unix)]
+fn bind_cli_ipc_listener(
+    paths: &GyroPaths,
+) -> anyhow::Result<Option<std::os::unix::net::UnixListener>> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    let bind = || UnixListener::bind(&paths.socket_path);
+    let listener = match bind() {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            let before = fs::symlink_metadata(&paths.socket_path)
+                .with_context(|| format!("inspect {}", paths.socket_path.display()))?;
+            if before.file_type().is_symlink() || !before.file_type().is_socket() {
+                anyhow::bail!(
+                    "Gyro IPC path is not a safe Unix socket: {}",
+                    paths.socket_path.display()
+                );
+            }
+            if UnixStream::connect(&paths.socket_path).is_ok() {
+                return Ok(None);
+            }
+            let after = fs::symlink_metadata(&paths.socket_path)
+                .with_context(|| format!("reinspect {}", paths.socket_path.display()))?;
+            if before.dev() != after.dev()
+                || before.ino() != after.ino()
+                || after.file_type().is_symlink()
+                || !after.file_type().is_socket()
+            {
+                anyhow::bail!("Gyro IPC socket changed while checking whether it was stale");
+            }
+            fs::remove_file(&paths.socket_path)
+                .with_context(|| format!("remove stale {}", paths.socket_path.display()))?;
+            bind().with_context(|| format!("bind {}", paths.socket_path.display()))?
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("bind {}", paths.socket_path.display()))
+        }
+    };
+    fs::set_permissions(&paths.socket_path, fs::Permissions::from_mode(0o600))?;
+    Ok(Some(listener))
+}
+
+#[cfg(unix)]
 fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net::UnixStream) {
+    let _ = stream.set_read_timeout(Some(DESKTOP_IPC_IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(DESKTOP_IPC_IO_TIMEOUT));
     let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    if reader.read_line(&mut line).is_err() {
+    let Ok(Some(frame)) = read_bounded_protocol_line(&mut reader, MAX_DESKTOP_IPC_MESSAGE_BYTES)
+    else {
         return;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame) else {
         return;
     };
     if value.get("schema").and_then(serde_json::Value::as_str)
@@ -9093,9 +10854,7 @@ fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net:
                 gyro_core::sanitize_harness_text(&error.to_string())
             )),
         };
-        let _ = serde_json::to_writer(reader.get_mut(), &response);
-        let _ = reader.get_mut().write_all(b"\n");
-        let _ = reader.get_mut().flush();
+        let _ = write_bounded_json_line(reader.get_mut(), &response, MAX_DESKTOP_IPC_MESSAGE_BYTES);
         return;
     }
     let Ok(notification) = serde_json::from_value::<AppNotification>(value) else {
@@ -9109,9 +10868,29 @@ fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net:
     {
         let _ = app.emit("gyro://app-notification", notification);
     }
-    let _ = serde_json::to_writer(reader.get_mut(), &acknowledgement);
-    let _ = reader.get_mut().write_all(b"\n");
-    let _ = reader.get_mut().flush();
+    let _ = write_bounded_json_line(
+        reader.get_mut(),
+        &acknowledgement,
+        MAX_DESKTOP_IPC_MESSAGE_BYTES,
+    );
+}
+
+fn write_bounded_json_line(
+    writer: &mut impl Write,
+    value: &impl Serialize,
+    max_bytes: usize,
+) -> Result<(), String> {
+    let bytes = serde_json::to_vec(value).map_err(to_string)?;
+    if bytes.len() > max_bytes {
+        return Err(format!(
+            "IPC response exceeded the {max_bytes} byte size limit"
+        ));
+    }
+    writer
+        .write_all(&bytes)
+        .and_then(|_| writer.write_all(b"\n"))
+        .and_then(|_| writer.flush())
+        .map_err(to_string)
 }
 
 #[cfg(test)]
@@ -9166,8 +10945,10 @@ mod tests {
     #[test]
     fn desktop_claude_mcp_config_uses_the_installed_binary_and_gated_context() {
         let request = anthropic_provider_request();
-        let config: serde_json::Value =
-            serde_json::from_str(&desktop_claude_permission_mcp_config(&request).unwrap()).unwrap();
+        let config: serde_json::Value = serde_json::from_str(
+            &desktop_claude_permission_mcp_config(&request, "test-run-nonce").unwrap(),
+        )
+        .unwrap();
         let server = &config["mcpServers"]["gyro_approval"];
 
         assert!(server["command"]
@@ -9185,6 +10966,35 @@ mod tests {
             server["env"]["GYRO_DESKTOP_PERMISSION_REQUIRE_FILE"],
             "true"
         );
+        assert_eq!(
+            server["env"]["GYRO_DESKTOP_PERMISSION_RUN_NONCE"],
+            "test-run-nonce"
+        );
+    }
+
+    #[test]
+    fn provider_approval_nonce_is_bound_to_the_active_session_run() {
+        let session_id = Uuid::new_v4().to_string();
+        let control = Arc::new(ProviderRunControl::default());
+        let expected_nonce = control.approval_nonce.clone();
+        let flags = HashMap::from([(session_id.clone(), control)]);
+
+        assert!(provider_run_approval_matches(
+            &flags,
+            &session_id,
+            &expected_nonce
+        ));
+        assert!(!provider_run_approval_matches(
+            &flags,
+            &session_id,
+            "forged-nonce"
+        ));
+        assert!(!provider_run_approval_matches(&flags, &session_id, ""));
+        assert!(!provider_run_approval_matches(
+            &flags,
+            "another-session",
+            &expected_nonce
+        ));
     }
 
     #[test]
@@ -9206,6 +11016,7 @@ mod tests {
             sender_version: env!("CARGO_PKG_VERSION").into(),
             session_id: Uuid::new_v4().to_string(),
             turn_id: Some(Uuid::new_v4().to_string()),
+            run_nonce: "test-run-nonce".into(),
             provider_id: "anthropic".into(),
             provider_label: Some("Anthropic".into()),
             tool_name: "Write".into(),
@@ -9237,6 +11048,7 @@ mod tests {
         let context = DesktopProviderPermissionContext {
             session_id: Uuid::new_v4().to_string(),
             turn_id: Some(Uuid::new_v4().to_string()),
+            run_nonce: "test-run-nonce".into(),
             provider_id: "anthropic".into(),
             provider_label: Some("Anthropic".into()),
             require_command_approval: true,
@@ -9296,6 +11108,7 @@ mod tests {
         let context = DesktopProviderPermissionContext {
             session_id: Uuid::new_v4().to_string(),
             turn_id: Some(Uuid::new_v4().to_string()),
+            run_nonce: "test-run-nonce".into(),
             provider_id: "anthropic".into(),
             provider_label: Some("Anthropic".into()),
             require_command_approval: true,
@@ -9423,6 +11236,16 @@ mod tests {
         })
         .unwrap_err();
         assert!(rejected.contains("http or https"));
+        let rejected = check_browser_preview_blocking(BrowserPreviewCheckRequest {
+            url: "https://example.com".into(),
+        })
+        .unwrap_err();
+        assert!(rejected.contains("localhost or a loopback"));
+        let rejected = check_browser_preview_blocking(BrowserPreviewCheckRequest {
+            url: "http://user:secret@localhost:3000".into(),
+        })
+        .unwrap_err();
+        assert!(rejected.contains("credentials"));
         assert!(!browser_preview_diagnostics_supported(
             &url::Url::parse("https://example.com").unwrap()
         ));
@@ -9564,6 +11387,13 @@ mod tests {
         let decoded = read_lsp_message(&mut BufReader::new(framed.as_slice())).unwrap();
 
         assert_eq!(decoded["method"], "initialized");
+    }
+
+    #[test]
+    fn lsp_json_rpc_framing_rejects_oversized_headers() {
+        let framed = format!("X-Fill: {}", "x".repeat(MAX_LSP_HEADER_BYTES + 1));
+        let error = read_lsp_message(&mut BufReader::new(framed.as_bytes())).unwrap_err();
+        assert!(error.to_string().contains("headers exceed size limit"));
     }
 
     #[test]
@@ -9761,6 +11591,33 @@ while True:
         assert_eq!(content.content, "export const value = 1;\n");
         assert!(!content.truncated);
         assert_eq!(content.size_bytes, 24);
+    }
+
+    #[test]
+    fn workspace_watch_cache_reuses_stable_tree_and_invalidates_on_directory_change() {
+        let workspace = tempfile::tempdir().unwrap();
+        let nested = workspace.path().join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("first.txt"), "one\n").unwrap();
+        let manager = WorkspaceWatchManager::default();
+
+        let first = manager
+            .snapshot(workspace.path().to_str().unwrap())
+            .unwrap();
+        let cached = manager
+            .snapshot(workspace.path().to_str().unwrap())
+            .unwrap();
+        assert_eq!(
+            first.iter().map(|file| &file.path).collect::<Vec<_>>(),
+            cached.iter().map(|file| &file.path).collect::<Vec<_>>()
+        );
+
+        fs::remove_dir_all(&nested).unwrap();
+        fs::write(workspace.path().join("second.txt"), "two\n").unwrap();
+        let changed = manager
+            .snapshot(workspace.path().to_str().unwrap())
+            .unwrap();
+        assert!(changed.iter().any(|file| file.path == "second.txt"));
     }
 
     #[test]
@@ -10034,6 +11891,7 @@ while True:
             &output_path,
             Some("gpt-5.6-sol"),
             Some("max"),
+            &ChatMode::Normal,
             true,
             true,
             std::slice::from_ref(&image),
@@ -10055,8 +11913,17 @@ while True:
         );
         assert_eq!(fresh_codex.last(), Some(&"hello".to_string()));
 
-        let full_access_codex =
-            codex_chat_args(None, &output_path, None, None, false, false, &[], "edit it");
+        let full_access_codex = codex_chat_args(
+            None,
+            &output_path,
+            None,
+            None,
+            &ChatMode::Normal,
+            false,
+            false,
+            &[],
+            "edit it",
+        );
         assert!(
             full_access_codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string())
         );
@@ -10067,6 +11934,7 @@ while True:
             &output_path,
             None,
             None,
+            &ChatMode::Normal,
             true,
             true,
             &[],
@@ -10085,6 +11953,24 @@ while True:
             .windows(2)
             .any(|args| args == ["--sandbox", "read-only"]));
         assert!(resumed_codex.ends_with(&["--".to_string(), "again".to_string()]));
+
+        for resume_session_id in [None, Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e")] {
+            let plan_codex = codex_chat_args(
+                resume_session_id,
+                &output_path,
+                None,
+                None,
+                &ChatMode::Plan,
+                false,
+                false,
+                &[],
+                "inspect only",
+            );
+            assert!(plan_codex
+                .windows(2)
+                .any(|args| args == ["--sandbox", "read-only"]));
+            assert!(!plan_codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        }
 
         let fresh_claude = claude_chat_args(
             None,
@@ -10140,17 +12026,26 @@ while True:
     #[test]
     fn codex_app_server_policy_keeps_gated_edits_read_only() {
         let workspace = Path::new("/tmp/gyro-workspace");
-        let (approval, sandbox, policy) = codex_app_server_policy(true, true, workspace);
+        let (approval, sandbox, policy) =
+            codex_app_server_policy(&ChatMode::Normal, true, true, workspace);
         assert_eq!(approval, "untrusted");
         assert_eq!(sandbox, "read-only");
         assert_eq!(policy["type"], "readOnly");
         assert_eq!(policy["networkAccess"], false);
 
-        let (approval, sandbox, policy) = codex_app_server_policy(false, false, workspace);
+        let (approval, sandbox, policy) =
+            codex_app_server_policy(&ChatMode::Normal, false, false, workspace);
         assert_eq!(approval, "on-request");
         assert_eq!(sandbox, "workspace-write");
         assert_eq!(policy["type"], "workspaceWrite");
         assert_eq!(policy["writableRoots"][0], "/tmp/gyro-workspace");
+
+        let (approval, sandbox, policy) =
+            codex_app_server_policy(&ChatMode::Plan, false, false, workspace);
+        assert_eq!(approval, "untrusted");
+        assert_eq!(sandbox, "read-only");
+        assert_eq!(policy["type"], "readOnly");
+        assert_eq!(policy["networkAccess"], false);
         assert_eq!(provider_approval_label("command"), "Review command");
         assert!(provider_approval_risk("file-change").contains("workspace patch"));
     }
@@ -10330,6 +12225,21 @@ while True:
     }
 
     #[test]
+    fn streaming_state_caps_retained_provider_activities() {
+        let mut state = StreamingCommandState::new();
+        for index in 0..(MAX_CODEX_APP_SERVER_ACTIVITIES + 8) {
+            state.push_activity(ProviderActivity {
+                id: format!("activity-{index}"),
+                kind: "command".into(),
+                label: "Ran command".into(),
+                detail: None,
+                status: "done".into(),
+            });
+        }
+        assert_eq!(state.activities.len(), MAX_CODEX_APP_SERVER_ACTIVITIES);
+    }
+
+    #[test]
     fn provider_resume_cursor_decodes_from_binding() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -10382,7 +12292,7 @@ while True:
     }
 
     #[test]
-    fn stale_resume_binding_is_cleared_and_retried_without_a_cursor() {
+    fn stale_resume_binding_is_cleared_without_replaying_the_request() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
         let session = store
@@ -10422,7 +12332,7 @@ while True:
             attachments: Vec::new(),
         };
         let mut attempts = Vec::new();
-        let output =
+        let error =
             run_provider_chat_with_retry_using(&store, &request, Some(binding), |resume_cursor| {
                 attempts.push(resume_cursor.map(|cursor| cursor.session_id.clone()));
                 if resume_cursor.is_some() {
@@ -10437,15 +12347,12 @@ while True:
                     output_summary: None,
                 })
             })
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(attempts, vec![Some("stale-provider-session".into()), None]);
-        assert_eq!(output.retry_count, 1);
-        assert!(!output.resumed);
-        assert_eq!(
-            output.output_summary.as_deref(),
-            Some("stale resume cursor cleared and request retried")
-        );
+        assert_eq!(attempts, vec![Some("stale-provider-session".into())]);
+        assert!(error
+            .to_string()
+            .contains("retry explicitly to avoid replaying tools"));
         assert!(store
             .get_provider_session_binding(session.id, "openai")
             .unwrap()
@@ -10602,6 +12509,195 @@ while True:
     }
 
     #[test]
+    fn native_provider_binding_owns_execution_authority() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session_with_context(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "bound provider",
+                CreateSessionContext {
+                    provider_id: Some("openai".into()),
+                    provider_label: Some("OpenAI".into()),
+                    model_id: Some("gpt-5.6-sol".into()),
+                    model_label: Some("GPT-5.6 Sol".into()),
+                    reasoning_effort: Some("high".into()),
+                    ..CreateSessionContext::default()
+                },
+            )
+            .unwrap();
+        let mut config = GyroConfig {
+            require_command_approval: true,
+            require_file_edit_approval: true,
+            ..GyroConfig::default()
+        };
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "openai")
+            .unwrap()
+            .enabled = true;
+        let mut request = ProviderChatRequest {
+            session_id: session.id.to_string(),
+            message: "inspect it".into(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "openai".into(),
+            provider_label: Some("forged label".into()),
+            model_id: Some("gpt-5.6-sol".into()),
+            model_label: Some("forged model".into()),
+            reasoning_effort: Some("high".into()),
+            require_command_approval: false,
+            require_file_edit_approval: false,
+            suggest_title: false,
+            workspace_path: None,
+            mode: ChatMode::Normal,
+            goal: None,
+            plan: None,
+            attachments: Vec::new(),
+        };
+
+        bind_provider_chat_request(&mut request, &session, &config).unwrap();
+
+        assert!(request.require_command_approval);
+        assert!(request.require_file_edit_approval);
+        assert_eq!(request.provider_label.as_deref(), Some("OpenAI"));
+        assert_eq!(request.model_label.as_deref(), Some("GPT-5.6 Sol"));
+        assert_eq!(
+            PathBuf::from(request.workspace_path.as_deref().unwrap()),
+            temp.path().canonicalize().unwrap()
+        );
+
+        request.provider_id = "anthropic".into();
+        assert!(bind_provider_chat_request(&mut request, &session, &config)
+            .unwrap_err()
+            .contains("provider selection changed"));
+    }
+
+    #[test]
+    fn renderer_config_cannot_replace_native_account_state() {
+        let mut persisted = GyroConfig::default();
+        persisted.account_session.signed_in = true;
+        persisted.account_session.user_id = Some("native-user".into());
+        let mut incoming = persisted.clone();
+        incoming.telemetry_enabled = true;
+        incoming.account_oidc.issuer_url = "https://attacker.invalid".into();
+        incoming.account_session.user_id = Some("forged-user".into());
+
+        let merged = merge_renderer_config(incoming, &persisted);
+
+        assert!(merged.telemetry_enabled);
+        assert_eq!(merged.account_oidc, persisted.account_oidc);
+        assert_eq!(merged.account_session, persisted.account_session);
+    }
+
+    #[test]
+    fn attachment_names_cannot_become_paths_or_prompt_controls() {
+        assert!(validate_attachment_name("screen.png").is_ok());
+        for unsafe_name in [
+            "pivot/../../../../config.json",
+            "../config.json",
+            ".",
+            "line\nbreak.png",
+        ] {
+            assert!(
+                validate_attachment_name(unsafe_name).is_err(),
+                "{unsafe_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn protocol_line_reader_rejects_oversized_unterminated_frames() {
+        let mut oversized = BufReader::new(std::io::Cursor::new(vec![b'x'; 33]));
+        assert!(read_bounded_protocol_line(&mut oversized, 32)
+            .unwrap_err()
+            .contains("size limit"));
+
+        let mut framed = BufReader::new(std::io::Cursor::new(b"{\"ok\":true}\r\nnext\n"));
+        assert_eq!(
+            read_bounded_protocol_line(&mut framed, 32).unwrap(),
+            Some(br#"{"ok":true}"#.to_vec())
+        );
+        assert_eq!(
+            read_bounded_protocol_line(&mut framed, 32).unwrap(),
+            Some(b"next".to_vec())
+        );
+
+        let mut unterminated = BufReader::new(std::io::Cursor::new(b"{\"ok\":true}"));
+        assert!(read_bounded_protocol_line(&mut unterminated, 32)
+            .unwrap_err()
+            .contains("newline terminator"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ipc_bind_preserves_live_socket_and_replaces_only_stale_socket() {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        use std::os::unix::net::UnixListener;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+        let live = UnixListener::bind(&paths.socket_path).unwrap();
+        let live_inode = fs::symlink_metadata(&paths.socket_path).unwrap().ino();
+
+        assert!(bind_cli_ipc_listener(&paths).unwrap().is_none());
+        assert_eq!(
+            fs::symlink_metadata(&paths.socket_path).unwrap().ino(),
+            live_inode
+        );
+
+        drop(live);
+        let rebound = bind_cli_ipc_listener(&paths).unwrap().unwrap();
+        assert!(fs::symlink_metadata(&paths.socket_path)
+            .unwrap()
+            .file_type()
+            .is_socket());
+        drop(rebound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ipc_bind_refuses_to_remove_non_socket_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+        fs::write(&paths.socket_path, b"do not remove").unwrap();
+
+        assert!(bind_cli_ipc_listener(&paths)
+            .unwrap_err()
+            .to_string()
+            .contains("not a safe Unix socket"));
+        assert_eq!(fs::read(&paths.socket_path).unwrap(), b"do not remove");
+    }
+
+    #[test]
+    fn codex_patch_accumulator_is_bounded() {
+        let mut patches = HashMap::new();
+        for index in 0..MAX_CODEX_APP_SERVER_PATCHES {
+            insert_codex_app_server_patch(
+                &mut patches,
+                &format!("patch-{index}"),
+                serde_json::json!({ "changes": [] }),
+            )
+            .unwrap();
+        }
+        assert!(insert_codex_app_server_patch(
+            &mut patches,
+            "one-too-many",
+            serde_json::json!({ "changes": [] }),
+        )
+        .is_err());
+        assert!(insert_codex_app_server_patch(
+            &mut HashMap::new(),
+            "oversized",
+            serde_json::json!({ "changes": "x".repeat(MAX_CODEX_APP_SERVER_PATCH_BYTES) }),
+        )
+        .is_err());
+    }
+
+    #[test]
     fn provider_chat_response_is_redacted_and_bounded() {
         let response = format!(
             "token=sk-abcdefghijklmnopqrstuvwxyz123456 {}",
@@ -10661,7 +12757,31 @@ while True:
             rows: None,
         };
 
-        assert_eq!(resolve_terminal_cwd(&request).unwrap(), None);
+        assert_eq!(
+            resolve_terminal_cwd(&request).unwrap(),
+            Some(user_home_directory().unwrap())
+        );
+    }
+
+    #[test]
+    fn terminal_home_cwd_ignores_workspace_path() {
+        let request = TerminalPaneRequest {
+            pane_id: "home-workspace".into(),
+            title: "Codex".into(),
+            profile_id: Some("codex".into()),
+            command: "codex".into(),
+            args: Vec::new(),
+            workspace_path: Some("/tmp/gyro-workspace".into()),
+            workspace_mode: None,
+            working_directory: Some("Home".into()),
+            cols: None,
+            rows: None,
+        };
+
+        assert_eq!(
+            resolve_terminal_cwd(&request).unwrap(),
+            Some(user_home_directory().unwrap())
+        );
     }
 
     #[test]
@@ -11561,6 +13681,135 @@ while True:
         let snapshot = manager.stop("pane-stop").unwrap();
 
         assert_eq!(snapshot.status, "failed");
+    }
+
+    #[test]
+    fn terminal_output_retains_only_the_newest_bytes() {
+        let output = Arc::new(Mutex::new(VecDeque::new()));
+        append_terminal_output(
+            &output,
+            &vec![b'a'; MAX_TERMINAL_OUTPUT_BYTES.saturating_sub(4)],
+        );
+        append_terminal_output(&output, b"12345678");
+
+        let retained = output.lock().unwrap().iter().copied().collect::<Vec<_>>();
+        assert_eq!(retained.len(), MAX_TERMINAL_OUTPUT_BYTES);
+        assert!(retained[..retained.len() - 8]
+            .iter()
+            .all(|byte| *byte == b'a'));
+        assert_eq!(&retained[retained.len() - 8..], b"12345678");
+
+        let oversized = vec![b'z'; MAX_TERMINAL_OUTPUT_BYTES + 32];
+        append_terminal_output(&output, &oversized);
+        let retained = output.lock().unwrap().iter().copied().collect::<Vec<_>>();
+        assert_eq!(retained, oversized[32..]);
+    }
+
+    #[test]
+    fn terminal_manager_close_removes_backend_state() {
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-close".into(),
+                title: "Shell".into(),
+                profile_id: Some("shell".into()),
+                command: "sh".into(),
+                args: vec!["-c".into(), "sleep 5".into()],
+                workspace_path: None,
+                workspace_mode: None,
+                working_directory: None,
+                cols: None,
+                rows: None,
+            })
+            .unwrap();
+
+        assert!(manager.processes.lock().unwrap().contains_key("pane-close"));
+        manager.close("pane-close").unwrap();
+
+        assert!(!manager.processes.lock().unwrap().contains_key("pane-close"));
+        assert!(manager.restore().unwrap().is_empty());
+        assert!(manager.read("pane-close").is_err());
+    }
+
+    #[test]
+    fn native_process_allowlists_reject_renderer_command_substitution() {
+        assert!(language_server_command_is_allowed("rust", "rust-analyzer"));
+        assert!(!language_server_command_is_allowed("rust", "sh -c whoami"));
+        assert!(debug_adapter_command_is_allowed(
+            "lldb-dap",
+            "lldb-dap",
+            &[]
+        ));
+        assert!(!debug_adapter_command_is_allowed(
+            "sh",
+            "sh",
+            &["-c".into()]
+        ));
+
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            workspace.path().join("package.json"),
+            r#"{"scripts":{"safe":"echo safe"}}"#,
+        )
+        .unwrap();
+        let error = task_run_blocking(TaskRunRequest {
+            workspace_path: workspace.path().display().to_string(),
+            task_id: "package:safe".into(),
+            command: "sh".into(),
+            args: vec!["-c".into(), "whoami".into()],
+        })
+        .unwrap_err();
+        assert!(error.contains("task definition changed"));
+    }
+
+    #[test]
+    fn private_attachment_storage_is_quota_limited_and_staged_for_deletion() {
+        let root = tempfile::tempdir().unwrap();
+        let session_id = Uuid::new_v4();
+        let session_dir = root.path().join(session_id.to_string());
+        std::fs::create_dir(&session_dir).unwrap();
+        for index in 0..MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION {
+            std::fs::write(session_dir.join(format!("{index}.png")), b"x").unwrap();
+        }
+        let error = ensure_attachment_storage_quota(&session_dir, &session_dir.join("next.png"), 1)
+            .unwrap_err();
+        assert!(error.contains("storage limit"));
+
+        let (original, tombstone) = stage_session_attachments(root.path(), session_id)
+            .unwrap()
+            .unwrap();
+        assert!(!original.exists());
+        assert!(tombstone.exists());
+        remove_attachment_storage_entry(&tombstone).unwrap();
+        assert!(!tombstone.exists());
+    }
+
+    #[test]
+    fn browser_navigation_policy_rejects_credentials_and_non_http_schemes() {
+        assert!(browser_preview_diagnostics_supported(
+            &url::Url::parse("http://127.0.0.1:3000/").unwrap()
+        ));
+        assert!(!browser_preview_diagnostics_supported(
+            &url::Url::parse("http://user@127.0.0.1:3000/").unwrap()
+        ));
+        assert!(!browser_preview_diagnostics_supported(
+            &url::Url::parse("file://localhost/tmp/private").unwrap()
+        ));
+    }
+
+    #[test]
+    fn workspace_watch_cache_evicts_old_roots() {
+        let parent = tempfile::tempdir().unwrap();
+        let manager = WorkspaceWatchManager::default();
+        for index in 0..=MAX_WORKSPACE_WATCH_CACHES {
+            let root = parent.path().join(format!("workspace-{index}"));
+            std::fs::create_dir(&root).unwrap();
+            manager.snapshot(root.to_str().unwrap()).unwrap();
+        }
+        assert_eq!(
+            manager.snapshots.lock().unwrap().len(),
+            MAX_WORKSPACE_WATCH_CACHES
+        );
     }
 
     fn wait_for_terminal_output(

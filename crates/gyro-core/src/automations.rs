@@ -1,4 +1,7 @@
-use crate::{paths::GyroPaths, sessions::SessionWorkspaceMode};
+use crate::{
+    paths::{reject_unsafe_private_file, secure_private_file, GyroPaths},
+    sessions::SessionWorkspaceMode,
+};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -174,8 +177,10 @@ pub struct AutomationStore {
 impl AutomationStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
+        reject_unsafe_private_file(&paths.database_path)?;
         let conn = Connection::open(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
+        secure_private_file(&paths.database_path)?;
         conn.busy_timeout(std::time::Duration::from_secs(2))?;
         conn.execute_batch(
             "pragma foreign_keys = on;

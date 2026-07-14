@@ -2099,7 +2099,30 @@ expect(
     surfaceSource.includes("function ProviderActivityRow") &&
     surfaceSource.includes("timelineEvents: SessionEvent[]") &&
     surfaceSource.includes("turn.timelineEvents.push(event)") &&
-    surfaceSource.includes('className="gyro-chat-run-timeline"') &&
+    surfaceSource.includes(
+      'className="gyro-chat-run-timeline is-thought-process"',
+    ) &&
+    surfaceSource.includes(
+      'className="gyro-chat-run-timeline is-final-response"',
+    ) &&
+    surfaceSource.includes('aria-label="AI thought process"') &&
+    surfaceSource.includes('aria-label="Final response"') &&
+    surfaceSource.includes('isRunning ? "Working" : "Thought"') &&
+    surfaceSource.includes("formatThoughtDuration") &&
+    surfaceSource.includes("formatMessageTime(event.createdAt)") &&
+    surfaceSource.includes('aria-label="Copy message"') &&
+    surfaceSource.includes("`${hours}h`") &&
+    surfaceSource.includes("`${minutes % 60}m`") &&
+    surfaceSource.includes("`${seconds}s`") &&
+    surfaceSource.includes("compactThoughtTimelineEvents") &&
+    surfaceSource.includes("`Ran ${count} commands`") &&
+    styleSource.includes(".gyro-chat-run-toggle") &&
+    styleSource.includes("max-width: min(78%, 720px)") &&
+    styleSource.includes(".gyro-user-message-meta") &&
+    styleSource.includes(".gyro-user-message-bubble") &&
+    styleSource.includes(
+      ".gyro-message.is-user:hover .gyro-user-message-meta",
+    ) &&
     !surfaceSource.includes("assistantEvents: SessionEvent[]") &&
     !surfaceSource.includes("activityEvents: SessionEvent[]") &&
     surfaceSource.includes('aria-label={isSending ? "Stop response"') &&
@@ -2174,7 +2197,8 @@ expect(
     tauriSource.includes("provider_activities_for_response") &&
     tauriSource.includes('text.contains("GYRO_SESSION_TITLE:")') &&
     tauriSource.includes("polished, scannable Markdown") &&
-    tauriSource.includes("append_provider_activity_event") &&
+    tauriSource.includes("provider_activity_event_entry") &&
+    tauriSource.includes("append_system_events_with_turn_id") &&
     tauriSource.includes('phase: "activity".into()') &&
     tauriSource.includes("run_provider_chat_with_retry") &&
     tauriSource.includes("run_provider_chat_once") &&
@@ -2360,6 +2384,15 @@ expect(
     ) &&
     surfaceSource.includes("Rename"),
   "Chat sessions should get first-turn titles and expose rename from the active row three-dot menu.",
+);
+expect(
+  appSource.includes("sendingSessionIds={sendingSessionIds}") &&
+    appSource.includes("activeSessionIdRef.current === sessionId") &&
+    surfaceSource.includes("sendingSessionIds.includes(session.id)") &&
+    surfaceSource.includes('aria-label={isSending ? "Chat working"') &&
+    surfaceSource.includes("gyro-session-time is-working") &&
+    styleSource.includes(".gyro-session-time.is-working svg"),
+  "Background chats should keep session-scoped updates and show a rotating sidebar activity indicator.",
 );
 expect(
   typeSource.includes("providerId?: ProviderId") &&
@@ -2582,6 +2615,15 @@ expect(
     tauriSource.includes("terminal_command_path") &&
     !spawnTerminalSource.includes("Stdio::piped"),
   "Desktop terminal backend should use PTYs instead of piped stdio.",
+);
+expect(
+  appSource.includes(': "Home"') &&
+    tauriSource.includes(
+      'request.working_directory.as_deref() == Some("Home")',
+    ) &&
+    tauriSource.includes("fn user_home_directory()") &&
+    tauriSource.includes("return Ok(Some(user_home_directory()?));"),
+  "Interactive CLI terminals should start in the user's home directory instead of inheriting the Gyro workspace.",
 );
 expect(
   appSource.includes("Restart to reconnect") &&

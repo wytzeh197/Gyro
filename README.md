@@ -140,11 +140,12 @@ the inbox:
 
 Codex and Claude provider session IDs are recorded as soon as the provider
 accepts them. A crashed or interrupted run remains resumable; if the provider
-reports that a stored session is stale, Gyro clears that cursor and retries once
-in a fresh provider session. Explicit profiles honor the shared provider toggle,
-so enable a disabled provider with `gyro config enable-provider <id>` before
-launching it. Structured authentication failures report the provider login
-command and preserve the Gyro session for a later `gyro resume`.
+reports that a stored session is stale, Gyro clears that cursor and requires an
+explicit retry in a fresh provider session so tools cannot be replayed
+automatically. Explicit profiles honor the shared provider toggle, so enable a
+disabled provider with `gyro config enable-provider <id>` before launching it.
+Structured authentication failures report the provider login command and
+preserve the Gyro session for a later `gyro resume`.
 
 ```bash
 gyro approvals

@@ -1,6 +1,7 @@
 # Release Process
 
-Gyro v1 targets macOS first through direct downloads and Homebrew. Preview
+Gyro v1 targets macOS first through direct downloads, with CLI Homebrew support
+planned through a dedicated tap. Preview
 artifacts are currently built and hosted through GitHub Actions without Apple
 Developer signing or notarization. They must be labeled as unsigned public
 alphas rather than stable or production-ready releases. Tauri updater
@@ -72,7 +73,7 @@ Generate a replacement keypair only if no released build trusts the current key:
 pnpm --filter @gyro-dev/desktop tauri signer generate
 ```
 
-## Homebrew
+## Homebrew CLI Formula
 
 Use a dedicated tap:
 
@@ -80,10 +81,11 @@ Use a dedicated tap:
 gyro-dev/homebrew-tap
 ```
 
-Publish:
-
-- `Casks/gyro.rb` for Gyro.app.
-- `Formula/gyro.rb` for the CLI.
+The current alpha workflow generates `Formula/gyro.rb` for the CLI. The
+checked-in app Cask is a planned template only: it does not match the
+architecture-specific DMGs and must not be published as-is. Install Gyro.app
+from the matching direct-download DMG until a generated Cask is added to the
+release workflow.
 
 The checked-in Formula is a release template and intentionally contains
 checksum markers. Do not publish that template. Download `gyro.rb` from the
@@ -91,11 +93,11 @@ draft release after both architecture jobs complete, inspect it, and copy that
 generated file to the tap. It contains the real SHA256 values calculated from
 the uploaded archives.
 
-Homebrew-installed users should update with:
+After the generated Formula is published to the tap, Homebrew CLI users should
+update with:
 
 ```bash
 brew update
-brew upgrade --cask gyro
 brew upgrade gyro
 ```
 

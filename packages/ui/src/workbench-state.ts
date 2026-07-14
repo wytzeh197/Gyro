@@ -2565,13 +2565,13 @@ export function workbenchReducer(
           ...state.browserPreview,
           consoleErrors:
             action.consoleErrors ?? state.browserPreview.consoleErrors,
-          diagnostics:
-            action.diagnostics ?? state.browserPreview.diagnostics,
+          diagnostics: action.diagnostics ?? state.browserPreview.diagnostics,
           diagnosticsSupported:
             action.diagnosticsSupported ??
             state.browserPreview.diagnosticsSupported,
           diagnosticsCaptured:
-            action.diagnosticsCaptured ?? state.browserPreview.diagnosticsCaptured,
+            action.diagnosticsCaptured ??
+            state.browserPreview.diagnosticsCaptured,
           status: action.status,
           verificationMessage: action.message,
         },

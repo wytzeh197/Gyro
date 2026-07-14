@@ -1,8 +1,16 @@
+use crate::execution::{
+    run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
+
+const PROVIDER_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+const PROVIDER_HEALTH_MAX_STDOUT_CHARS: usize = 32 * 1024;
+const PROVIDER_HEALTH_MAX_STDERR_CHARS: usize = 16 * 1024;
 
 const GUI_CLI_PATHS: &[&str] = &[
     "/opt/homebrew/bin",
@@ -124,7 +132,12 @@ impl ProviderHealthService {
             .join(" ");
         let output = match command_output(command, args) {
             Ok(output) => output,
-            Err(error) => format!("{command} not installed or unavailable: {error}"),
+            Err(CommandOutputError::Unavailable(error)) => {
+                format!("{command} not installed or unavailable: {error}")
+            }
+            Err(CommandOutputError::Terminated(error)) => {
+                format!("{command} health check failed: {error}")
+            }
         };
         let output = crate::security::redact_secrets(&output);
         Ok(ProviderHealthCheck {
@@ -293,31 +306,99 @@ fn quoted_field(output: &str, field: &str) -> Option<String> {
     Some(after_quote[..end].to_string())
 }
 
-fn command_output(command: &str, args: &[&str]) -> Result<String, String> {
-    let output = command_with_gui_path(command)
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let combined = [stdout, stderr]
-        .into_iter()
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if combined.is_empty() {
-        Ok(format!("{command} exited with {}", output.status))
-    } else {
-        Ok(combined)
+#[derive(Debug, Eq, PartialEq)]
+enum CommandOutputError {
+    Unavailable(String),
+    Terminated(String),
+}
+
+fn command_output(command: &str, args: &[&str]) -> std::result::Result<String, CommandOutputError> {
+    command_output_with_limits(
+        command,
+        args,
+        PROVIDER_HEALTH_TIMEOUT,
+        PROVIDER_HEALTH_MAX_STDOUT_CHARS,
+        PROVIDER_HEALTH_MAX_STDERR_CHARS,
+    )
+}
+
+fn command_output_with_limits(
+    command: &str,
+    args: &[&str],
+    timeout: Duration,
+    max_stdout_chars: usize,
+    max_stderr_chars: usize,
+) -> std::result::Result<String, CommandOutputError> {
+    let mut request = ExecutionRequest::new(command);
+    request.args = args.iter().copied().map(OsString::from).collect();
+    request.timeout = timeout;
+    request.max_stdout_chars = max_stdout_chars;
+    request.max_stderr_chars = max_stderr_chars;
+    if !command.contains('/') {
+        request.env.push((
+            OsString::from("PATH"),
+            Some(OsString::from(augmented_gui_path())),
+        ));
+    }
+    let outcome = run_command(request, CancellationToken::default(), |_| {})
+        .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
+    match &outcome.termination {
+        ExecutionTermination::Exited { code } => {
+            let combined = combined_command_output(&outcome);
+            if combined.is_empty() {
+                let status = match code {
+                    Some(code) => format!("exit status: {code}"),
+                    None => "termination without an exit code".into(),
+                };
+                Ok(format!("{command} exited with {status}"))
+            } else {
+                Ok(combined)
+            }
+        }
+        ExecutionTermination::TimedOut => Err(CommandOutputError::Terminated(format!(
+            "timed out after {timeout:?}"
+        ))),
+        ExecutionTermination::Cancelled => {
+            Err(CommandOutputError::Terminated("was cancelled".into()))
+        }
+        ExecutionTermination::Inactive => Err(CommandOutputError::Terminated(
+            "stopped after becoming inactive".into(),
+        )),
+        ExecutionTermination::OutputLimit => Err(CommandOutputError::Terminated(
+            "exceeded its output limit".into(),
+        )),
     }
 }
 
-fn command_with_gui_path(command: &str) -> Command {
-    let mut process = Command::new(command);
-    if !command.contains('/') {
-        process.env("PATH", augmented_gui_path());
+fn combined_command_output(outcome: &ExecutionOutcome) -> String {
+    let stdout = retained_stream_output(
+        &outcome.stdout,
+        outcome.stdout_truncated,
+        "stdout truncated",
+    );
+    let stderr = retained_stream_output(
+        &outcome.stderr,
+        outcome.stderr_truncated,
+        "stderr truncated",
+    );
+    [stdout, stderr]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn retained_stream_output(output: &str, truncated: bool, marker: &str) -> String {
+    let mut output = output.trim().to_string();
+    if truncated {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push('[');
+        output.push_str(marker);
+        output.push(']');
     }
-    process
+    output
 }
 
 fn augmented_gui_path() -> String {
@@ -415,5 +496,38 @@ mod tests {
             provider_runtime_status_from_output("Failed to authenticate: unauthorized"),
             "not-logged-in"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_health_command_reports_timeout() {
+        let error = command_output_with_limits(
+            "/bin/sh",
+            &["-c", "sleep 5"],
+            Duration::from_millis(50),
+            128,
+            128,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            CommandOutputError::Terminated("timed out after 50ms".into())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_health_command_marks_truncated_output() {
+        let output = command_output_with_limits(
+            "/bin/sh",
+            &["-c", "printf 123456789"],
+            Duration::from_secs(1),
+            4,
+            4,
+        )
+        .unwrap();
+
+        assert_eq!(output, "1234\n[stdout truncated]");
     }
 }
