@@ -35,6 +35,10 @@ const cliFinalizer = readFileSync(
   resolve(repoRoot, "scripts/finalize-cli-release.mjs"),
   "utf8",
 );
+const updaterManifest = readFileSync(
+  resolve(repoRoot, "scripts/create-updater-manifest.mjs"),
+  "utf8",
+);
 const homebrewFormula = readFileSync(
   resolve(repoRoot, "packaging/homebrew/Formula/gyro.rb"),
   "utf8",
@@ -182,6 +186,16 @@ for (const marker of [
   if (!cliFinalizer.includes(marker)) {
     failures.push(`CLI release finalizer is missing ${marker}.`);
   }
+}
+
+if (
+  !updaterManifest.includes(
+    "Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
+  )
+) {
+  failures.push(
+    "Updater manifest must disclose the unsigned GitHub-hosted alpha status.",
+  );
 }
 
 for (const marker of [
