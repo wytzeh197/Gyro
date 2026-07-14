@@ -55,7 +55,8 @@ const appleSilicon = platform(/_aarch64\.app\.tar\.gz$/, "Apple Silicon");
 const intel = platform(/_x64\.app\.tar\.gz$/, "Intel");
 const manifest = {
   version: tag.slice(1),
-  notes: "Signed macOS private preview for Apple Silicon and Intel.",
+  notes:
+    "GitHub-built macOS alpha for Apple Silicon and Intel. Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
   pub_date: new Date().toISOString(),
   platforms: {
     "darwin-aarch64": appleSilicon,
