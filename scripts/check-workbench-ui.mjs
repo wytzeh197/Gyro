@@ -2115,6 +2115,9 @@ expect(
     surfaceSource.includes("`${minutes % 60}m`") &&
     surfaceSource.includes("`${seconds}s`") &&
     surfaceSource.includes("compactThoughtTimelineEvents") &&
+    surfaceSource.includes("providerActivityPathsMatch") &&
+    surfaceSource.includes("existingFileIndex") &&
+    surfaceSource.includes("compacted[existingFileIndex]") &&
     surfaceSource.includes("`Ran ${count} commands`") &&
     styleSource.includes(".gyro-chat-run-toggle") &&
     styleSource.includes("max-width: min(78%, 720px)") &&
@@ -2125,12 +2128,16 @@ expect(
     ) &&
     !surfaceSource.includes("assistantEvents: SessionEvent[]") &&
     !surfaceSource.includes("activityEvents: SessionEvent[]") &&
-    surfaceSource.includes('aria-label="Stop response"') &&
-    surfaceSource.includes("onStop();") &&
+    surfaceSource.includes("const isStopAction = Boolean(") &&
+    surfaceSource.includes("isStopAction ? (") &&
+    surfaceSource.includes('"Stop response"') &&
+    surfaceSource.includes('"Queue message"') &&
+    surfaceSource.includes("onStop?.();") &&
     surfaceSource.includes(
-      'aria-label={isSending ? "Queue message" : "Send message"}',
+      "!isStopAction && (!canSubmitChat || draft.trim().length === 0)",
     ) &&
     surfaceSource.includes('className="gyro-send-button"') &&
+    !surfaceSource.includes('className="gyro-composer-stop-button"') &&
     surfaceSource.includes("function ChatMessageQueue") &&
     appSource.includes('"Message queued"') &&
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
@@ -3327,7 +3334,7 @@ expect(
     ) &&
     surfaceSource.includes("if (canSubmitChat && draft.trim().length > 0)") &&
     surfaceSource.includes(
-      "disabled={!canSubmitChat || draft.trim().length === 0}",
+      "!isStopAction && (!canSubmitChat || draft.trim().length === 0)",
     ) &&
     surfaceSource.includes("Choose a folder before sending") &&
     surfaceSource.includes("Connect a provider before sending") &&
@@ -3625,10 +3632,9 @@ expect(
 );
 expect(
   !surfaceSource.includes("const fileActivityIndexes = new Map") &&
-    surfaceSource.includes("const previousFilePath = previous") &&
-    surfaceSource.includes('previousActivity?.status === "running"') &&
-    surfaceSource.includes("compacted[compacted.length - 1]") &&
-    surfaceSource.includes("createdAt: previous.event.createdAt") &&
+    surfaceSource.includes("const existingFileIndex = compacted.findIndex") &&
+    surfaceSource.includes("compacted[existingFileIndex]") &&
+    surfaceSource.includes("createdAt: existing.event.createdAt") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
@@ -4127,8 +4133,11 @@ expect(
     styleSource.includes(
       ':root[data-theme="light"] .gyro-chat-start .gyro-composer-chip.is-warning',
     ) &&
-    styleSource.includes("color: var(--gyro-warn)"),
-  "Full Access should retain its warning color in the menu and selected composer chip.",
+    styleSource.includes("color: var(--gyro-warn)") &&
+    styleSource.includes("background: transparent") &&
+    styleSource.includes("border-color: transparent") &&
+    styleSource.includes("color: #ff8a3d"),
+  "Full Access should keep orange text and icons on a transparent menu and composer control.",
 );
 
 const requiredViewports = [

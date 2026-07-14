@@ -13,7 +13,7 @@ homepage = "https://github.com/gyro-dev/gyro"
 license = "Apache-2.0"
 repository = "https://github.com/gyro-dev/gyro"
 rust-version = "1.78"
-version = "0.1.0-alpha.23.1"
+version = "0.1.0-alpha.23.2"
 
 [workspace.dependencies]
 anyhow = "1.0"

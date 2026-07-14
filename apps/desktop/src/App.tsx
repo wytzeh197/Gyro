@@ -222,6 +222,7 @@ type QueuedChatMessage = {
   id: string;
   message: string;
   context: ChatTurnContextSnapshot;
+  status: "waiting" | "sending";
 };
 
 type WorkspaceFileWriteRequest = {
@@ -1203,10 +1204,13 @@ export function App() {
   }, [removedProjectPaths]);
 
   const refreshEvents = useCallback(async (sessionId: string) => {
-    const optimisticEvents = optimisticEventsRef.current.get(sessionId);
     if (!isTauriRuntime()) {
       if (activeSessionIdRef.current === sessionId) {
-        setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
+        setEvents(
+          limitSessionEventsForUi(
+            optimisticEventsRef.current.get(sessionId) ?? [],
+          ),
+        );
       }
       return;
     }
@@ -1215,15 +1219,27 @@ export function App() {
         sessionId,
       });
       if (activeSessionIdRef.current === sessionId) {
+        // Streaming can continue while the persisted transcript is loading.
+        // Read the buffer after the await so late chunks are never overwritten
+        // by the older transcript snapshot.
+        const latestOptimisticEvents =
+          optimisticEventsRef.current.get(sessionId);
         setEvents(
           limitSessionEventsForUi(
-            mergePersistedAndOptimisticEvents(nextEvents, optimisticEvents),
+            mergePersistedAndOptimisticEvents(
+              nextEvents,
+              latestOptimisticEvents,
+            ),
           ),
         );
       }
     } catch {
       if (activeSessionIdRef.current === sessionId) {
-        setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
+        setEvents(
+          limitSessionEventsForUi(
+            optimisticEventsRef.current.get(sessionId) ?? [],
+          ),
+        );
       }
     }
   }, []);
@@ -2747,7 +2763,6 @@ export function App() {
 
   const startNewChat = useCallback(() => {
     suppressSessionAutoSelectRef.current = true;
-    optimisticEventsRef.current.clear();
     setIsStartingFirstTurn(false);
     setActiveSessionId(undefined);
     setEvents([]);
@@ -4386,6 +4401,7 @@ export function App() {
         const queuedMessage: QueuedChatMessage = {
           id: `queued-${createTurnId()}`,
           message,
+          status: "waiting",
           context: {
             attachments: turnAttachments.map((attachment) => ({
               ...attachment,
@@ -4887,12 +4903,26 @@ export function App() {
       activeSessionId,
       nextMessage.id,
     );
+    setChatMessageQueues((current) => ({
+      ...current,
+      [activeSessionId]: (current[activeSessionId] ?? []).map((item) =>
+        item.id === nextMessage.id ? { ...item, status: "sending" } : item,
+      ),
+    }));
     void sendDraft(nextMessage.message, {
       ...nextMessage.context,
       preserveDraft: true,
     })
       .then((accepted) => {
         if (!accepted) {
+          setChatMessageQueues((current) => ({
+            ...current,
+            [activeSessionId]: (current[activeSessionId] ?? []).map((item) =>
+              item.id === nextMessage.id
+                ? { ...item, status: "waiting" }
+                : item,
+            ),
+          }));
           return;
         }
         setChatMessageQueues((current) => {
@@ -5118,6 +5148,37 @@ export function App() {
       (error) => notify("command-failed", "Stop failed", String(error)),
     );
   }, [activeSessionId, notify]);
+
+  const steerQueuedChatMessage = useCallback(
+    (messageId: string) => {
+      if (!activeSessionId) {
+        return;
+      }
+      setChatMessageQueues((current) => {
+        const queued = current[activeSessionId] ?? [];
+        const selected = queued.find((item) => item.id === messageId);
+        if (!selected) {
+          return current;
+        }
+        return {
+          ...current,
+          [activeSessionId]: [
+            selected,
+            ...queued.filter((item) => item.id !== messageId),
+          ],
+        };
+      });
+      if (sendingSessionIdsRef.current.has(activeSessionId)) {
+        stopActiveChat();
+      }
+      notify(
+        "terminal",
+        "Steering next",
+        "Stopping the current response, then sending this message.",
+      );
+    },
+    [activeSessionId, notify, stopActiveChat],
+  );
 
   const appendPlanEvent = useCallback(
     async (payload: Record<string, unknown>, message = "Plan updated") => {
@@ -7326,6 +7387,36 @@ export function App() {
 
   useEffect(() => {
     const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root) {
+      return;
+    }
+    const hasRunningFileEdit = deferredEventsForTurn.some((event) => {
+      const payload = recordFromUnknown(event.payload);
+      return (
+        event.kind === "system-event" &&
+        payload?.kind === "provider-activity" &&
+        payload.activityKind === "file" &&
+        stringFromRecord(payload, "status") === "running"
+      );
+    });
+    if (!hasRunningFileEdit) {
+      return;
+    }
+    refreshIdeSourceControl(root);
+    const interval = window.setInterval(
+      () => refreshIdeSourceControl(root),
+      800,
+    );
+    return () => window.clearInterval(interval);
+  }, [
+    activeSession?.workspacePath,
+    deferredEventsForTurn,
+    refreshIdeSourceControl,
+    workspacePath,
+  ]);
+
+  useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
     const descriptor = selectedFile
       ? languageServerDescriptorForPath(selectedFile)
       : undefined;
@@ -8122,6 +8213,7 @@ export function App() {
                 }
                 onGoalAction={changeGoal}
                 onRemoveQueuedMessage={removeQueuedChatMessage}
+                onSteerQueuedMessage={steerQueuedChatMessage}
                 onMutationApprovalAction={handleMutationApprovalAction}
                 onProviderApprovalAction={handleProviderApprovalAction}
                 onProviderStatusAction={handleProviderStatusAction}
@@ -8139,10 +8231,7 @@ export function App() {
                 queuedMessages={activeQueuedChatMessages.map((item) => ({
                   attachmentCount: item.context.attachments?.length ?? 0,
                   id: item.id,
-                  isDispatching:
-                    queuedChatDispatchMessageIdsRef.current.get(
-                      activeSessionId ?? "",
-                    ) === item.id,
+                  isDispatching: item.status === "sending",
                   message: item.message,
                 }))}
                 savedProjects={savedProjects}
@@ -8530,6 +8619,7 @@ export function App() {
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
           onRemoveQueuedMessage={removeQueuedChatMessage}
+          onSteerQueuedMessage={steerQueuedChatMessage}
           onMutationApprovalAction={handleMutationApprovalAction}
           onProviderApprovalAction={handleProviderApprovalAction}
           onProviderStatusAction={handleProviderStatusAction}
@@ -8554,10 +8644,7 @@ export function App() {
           queuedMessages={activeQueuedChatMessages.map((item) => ({
             attachmentCount: item.context.attachments?.length ?? 0,
             id: item.id,
-            isDispatching:
-              queuedChatDispatchMessageIdsRef.current.get(
-                activeSessionId ?? "",
-              ) === item.id,
+            isDispatching: item.status === "sending",
             message: item.message,
           }))}
           savedProjects={savedProjects}
