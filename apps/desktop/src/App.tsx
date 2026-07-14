@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
@@ -209,7 +210,18 @@ type ChatTurnContextSnapshot = {
   goal?: SessionGoal;
   plan?: SessionPlan;
   attachments?: ChatAttachment[];
+  sessionModel?: SessionModelSelection;
+  requireCommandApproval?: boolean;
+  requireFileEditApproval?: boolean;
+  workspacePath?: string;
+  preserveDraft?: boolean;
   retryTurnId?: string;
+};
+
+type QueuedChatMessage = {
+  id: string;
+  message: string;
+  context: ChatTurnContextSnapshot;
 };
 
 type WorkspaceFileWriteRequest = {
@@ -303,6 +315,8 @@ const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const PROVIDER_AUTH_POLL_INTERVAL_MS = 3_000;
 const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
+const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
+const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
 const PROVIDER_STREAM_FLUSH_MS = 80;
 const EXECUTABLE_PROVIDER_IDS = new Set<ProviderId>(["openai", "anthropic"]);
@@ -515,6 +529,9 @@ export function App() {
   const [chatAttachments, setChatAttachments] = useState<
     Record<string, ChatAttachment[]>
   >(() => loadChatAttachments());
+  const [chatMessageQueues, setChatMessageQueues] = useState<
+    Record<string, QueuedChatMessage[]>
+  >({});
   const [pendingNewChatGoal, setPendingNewChatGoal] = useState<SessionGoal>();
   const [pendingNewChatMode, setPendingNewChatMode] =
     useState<ChatMode>("normal");
@@ -570,6 +587,8 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const queuedChatDispatchesRef = useRef(new Set<string>());
+  const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [planEditorRequest, setPlanEditorRequest] = useState<{
@@ -670,6 +689,9 @@ export function App() {
   const activeDraftKey = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
   const activeChatDraft = chatDrafts[activeDraftKey] ?? "";
   const activeChatAttachments = chatAttachments[activeDraftKey] ?? [];
+  const activeQueuedChatMessages = activeSessionId
+    ? (chatMessageQueues[activeSessionId] ?? [])
+    : [];
   const derivedActiveTurn = useMemo(
     () => deriveActiveTurn(deferredEventsForTurn, activeSession?.title),
     [activeSession?.title, deferredEventsForTurn],
@@ -2802,6 +2824,14 @@ export function App() {
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
       );
+      setChatMessageQueues((current) => {
+        if (!current[sessionId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
       if (activeSessionId === sessionId) {
         setActiveSessionId(nextSessions[0]?.id);
         setEvents([]);
@@ -3709,9 +3739,10 @@ export function App() {
         0,
         4 - existing.filter((item) => item.kind === "image").length,
       );
-      try {
-        const prepared: ChatAttachment[] = [];
-        for (const file of files.slice(0, slots)) {
+      const prepared: ChatAttachment[] = [];
+      let rejectedCount = 0;
+      for (const file of files.slice(0, slots)) {
+        try {
           const attachment = await invoke<ChatAttachment>(
             "prepare_chat_attachment",
             {
@@ -3729,25 +3760,204 @@ export function App() {
             ...attachment,
             previewUrl: convertFileSrc(attachment.path),
           });
+        } catch {
+          rejectedCount += 1;
         }
-        if (prepared.length) {
-          setChatAttachments((current) => ({
-            ...current,
-            [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
-          }));
-        }
-        if (files.length > slots) {
-          notify(
-            "command-failed",
-            "Four-image limit",
-            "Extra pasted or dropped images were not attached",
-          );
-        }
-      } catch (error) {
-        notify("command-failed", "Image rejected", String(error));
+      }
+      if (prepared.length) {
+        setChatAttachments((current) => ({
+          ...current,
+          [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
+        }));
+      }
+      if (files.length > slots) {
+        notify(
+          "command-failed",
+          "Four-image limit",
+          "Extra pasted or dropped images were not attached",
+        );
+      } else if (rejectedCount > 0) {
+        notify(
+          "command-failed",
+          "Image rejected",
+          `${rejectedCount} image${rejectedCount === 1 ? " was" : "s were"} not accepted`,
+        );
       }
     },
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
+  );
+
+  const attachDroppedImagePaths = useCallback(
+    async (paths: string[]) => {
+      const imagePaths = paths.filter(isSupportedChatImagePath);
+      const unsupportedCount = paths.length - imagePaths.length;
+      if (!imagePaths.length) {
+        notify(
+          "command-failed",
+          "Unsupported attachment",
+          "Drop PNG, JPEG, or WebP images onto the chat",
+        );
+        return;
+      }
+      const existing = chatAttachments[activeDraftKey] ?? [];
+      const slots = Math.max(
+        0,
+        4 - existing.filter((item) => item.kind === "image").length,
+      );
+      const prepared: ChatAttachment[] = [];
+      let rejectedCount = unsupportedCount;
+      for (const path of imagePaths.slice(0, slots)) {
+        try {
+          const attachment = await invoke<ChatAttachment>(
+            "prepare_chat_attachment",
+            {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path,
+                workspacePath,
+                kind: "image",
+              },
+            },
+          );
+          prepared.push({
+            ...attachment,
+            previewUrl: convertFileSrc(attachment.path),
+          });
+        } catch {
+          rejectedCount += 1;
+        }
+      }
+      if (prepared.length) {
+        setChatAttachments((current) => ({
+          ...current,
+          [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
+        }));
+      }
+      if (imagePaths.length > slots) {
+        notify(
+          "command-failed",
+          "Four-image limit",
+          "Extra dropped images were not attached",
+        );
+      } else if (rejectedCount > 0) {
+        notify(
+          "command-failed",
+          "Image rejected",
+          `${rejectedCount} dropped item${rejectedCount === 1 ? " was" : "s were"} not accepted`,
+        );
+      }
+    },
+    [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
+  );
+
+  useEffect(() => {
+    const isChatVisible =
+      activeDestination === "onboarding" ||
+      (activeDestination === "workspace" && activeWorkspaceLayout === "thread");
+    if (!isTauriRuntime() || !isChatVisible) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type !== "drop") {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        const target = document.elementFromPoint(
+          event.payload.position.x / scale,
+          event.payload.position.y / scale,
+        );
+        if (!target?.closest(".gyro-chat-surface")) {
+          return;
+        }
+        void attachDroppedImagePaths(event.payload.paths);
+      })
+      .then((dispose) => {
+        if (disposed) {
+          dispose();
+        } else {
+          unlisten = dispose;
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [activeDestination, activeWorkspaceLayout, attachDroppedImagePaths]);
+
+  const changeChatMode = useCallback(
+    async (mode: ChatMode) => {
+      if (!activeSessionId) {
+        setPendingNewChatMode(mode);
+        if (mode === "plan") {
+          setPendingNewChatGoal(undefined);
+        }
+        return true;
+      }
+
+      const shouldClearGoal = mode === "plan" && Boolean(activeSessionGoal);
+      const shouldChangeMode = activeChatMode !== mode;
+      if (!shouldClearGoal && !shouldChangeMode) {
+        return true;
+      }
+
+      const modeMessage =
+        mode === "plan" ? "Plan mode enabled" : "Normal mode enabled";
+      if (!isTauriRuntime()) {
+        const now = new Date().toISOString();
+        setEvents((current) => [
+          ...current,
+          ...(shouldClearGoal
+            ? [
+                createGoalSessionEvent(activeSessionId, "Goal cleared", {
+                  action: "clear",
+                }),
+              ]
+            : []),
+          ...(shouldChangeMode
+            ? [
+                {
+                  id: `chat-mode-${Date.now()}`,
+                  sessionId: activeSessionId,
+                  createdAt: now,
+                  kind: "chat-mode-changed" as const,
+                  message: modeMessage,
+                  payload: { mode },
+                },
+              ]
+            : []),
+        ]);
+        return true;
+      }
+
+      try {
+        if (shouldClearGoal) {
+          await invoke<SessionEvent>("append_chat_context_event", {
+            sessionId: activeSessionId,
+            eventKind: "goal-updated",
+            message: "Goal cleared",
+            payload: { action: "clear" },
+          });
+        }
+        if (shouldChangeMode) {
+          await invoke<SessionEvent>("append_chat_context_event", {
+            sessionId: activeSessionId,
+            eventKind: "chat-mode-changed",
+            message: modeMessage,
+            payload: { mode },
+          });
+        }
+        await refreshEvents(activeSessionId);
+        return true;
+      } catch (error) {
+        notify("command-failed", "Mode change failed", String(error));
+        return false;
+      }
+    },
+    [activeChatMode, activeSessionGoal, activeSessionId, notify, refreshEvents],
   );
 
   const handleComposerAction = useCallback(
@@ -3990,17 +4200,7 @@ export function App() {
         case "set-chat-mode-normal":
           {
             const mode: ChatMode = action.endsWith("plan") ? "plan" : "normal";
-            if (!activeSessionId) {
-              setPendingNewChatMode(mode);
-              break;
-            }
-            void invoke<SessionEvent>("append_chat_context_event", {
-              sessionId: activeSessionId,
-              eventKind: "chat-mode-changed",
-              message:
-                mode === "plan" ? "Plan mode enabled" : "Normal mode enabled",
-              payload: { mode },
-            }).then(() => refreshEvents(activeSessionId));
+            void changeChatMode(mode);
           }
           break;
         case "search-workspace":
@@ -4061,6 +4261,7 @@ export function App() {
       activeSession?.workspacePath,
       activateWorkspacePath,
       checkProviderReadiness,
+      changeChatMode,
       connectProvider,
       config,
       notify,
@@ -4121,10 +4322,28 @@ export function App() {
       const turnAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
       const turnMode = overrideContext?.mode ?? activeChatMode;
-      const turnGoal = overrideContext?.goal ?? activeSessionGoal;
+      const requestedTurnGoal = overrideContext?.goal ?? activeSessionGoal;
+      const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
+      const sessionModel = {
+        ...selectedSessionModelFromConfig(config),
+        ...overrideContext?.sessionModel,
+      };
+      const selectedProvider = providersForConfig(config).find(
+        (provider) => provider.id === sessionModel.providerId,
+      );
+      const requireCommandApproval =
+        overrideContext?.requireCommandApproval ??
+        config.requireCommandApproval;
+      const requireFileEditApproval =
+        overrideContext?.requireFileEditApproval ??
+        config.requireFileEditApproval;
+      const chatWorkspacePath =
+        overrideContext?.workspacePath ??
+        activeSession?.workspacePath ??
+        workspacePath;
       if (message === "") {
-        return;
+        return false;
       }
       if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
         notify(
@@ -4132,23 +4351,84 @@ export function App() {
           "Message too long",
           `Keep chat messages under ${MAX_CHAT_MESSAGE_CHARS.toLocaleString()} characters.`,
         );
-        return;
+        return false;
       }
       if (!activeSessionId && isStartingFirstTurn) {
-        return;
+        return false;
       }
       if (
         activeSessionId &&
         sendingSessionIdsRef.current.has(activeSessionId)
       ) {
+        if (
+          (chatMessageQueues[activeSessionId]?.length ?? 0) >=
+          MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
+        ) {
+          notify(
+            "command-failed",
+            "Queue full",
+            `Finish or remove a queued message before adding more than ${MAX_QUEUED_CHAT_MESSAGES_PER_SESSION}.`,
+          );
+          return false;
+        }
+        const queuedMessageCount = Object.values(chatMessageQueues).reduce(
+          (total, queued) => total + queued.length,
+          0,
+        );
+        if (queuedMessageCount >= MAX_QUEUED_CHAT_MESSAGES_TOTAL) {
+          notify(
+            "command-failed",
+            "Queue capacity reached",
+            "Finish or remove a queued message in another chat before adding more.",
+          );
+          return false;
+        }
+        const queuedMessage: QueuedChatMessage = {
+          id: `queued-${createTurnId()}`,
+          message,
+          context: {
+            attachments: turnAttachments.map((attachment) => ({
+              ...attachment,
+            })),
+            goal: turnGoal ? { ...turnGoal } : undefined,
+            mode: turnMode,
+            plan: {
+              ...turnPlan,
+              items: turnPlan.items.map((item) => ({ ...item })),
+            },
+            sessionModel: { ...sessionModel },
+            requireCommandApproval,
+            requireFileEditApproval,
+            workspacePath: chatWorkspacePath,
+          },
+        };
+        setChatMessageQueues((current) => {
+          const queued = current[activeSessionId] ?? [];
+          const totalQueued = Object.values(current).reduce(
+            (total, messages) => total + messages.length,
+            0,
+          );
+          if (
+            queued.length >= MAX_QUEUED_CHAT_MESSAGES_PER_SESSION ||
+            totalQueued >= MAX_QUEUED_CHAT_MESSAGES_TOTAL
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            [activeSessionId]: [...queued, queuedMessage],
+          };
+        });
+        if (!overrideContext?.preserveDraft) {
+          resetChatDraft();
+        }
         notify(
           "terminal",
-          "Message already sending",
-          "Wait for this turn to finish before sending another message.",
+          "Message queued",
+          "It will send when this chat is active and its current response finishes.",
         );
-        return;
+        return true;
       }
-      const chatWorkspacePath = activeSession?.workspacePath ?? workspacePath;
       if (!isUserSelectedWorkspacePath(chatWorkspacePath)) {
         notify(
           "command-failed",
@@ -4156,10 +4436,10 @@ export function App() {
           "Select the folder Gyro should use before starting this chat.",
         );
         void openWorkspace();
-        return;
+        return false;
       }
-      if (!checkProviderReadiness("chat")) {
-        return;
+      if (!checkProviderReadiness("chat", sessionModel.providerId)) {
+        return false;
       }
       const retryTurnId = overrideContext?.retryTurnId;
       const turnId = retryTurnId ?? createTurnId();
@@ -4173,10 +4453,6 @@ export function App() {
         ]);
       });
       const isRetry = Boolean(activeSessionId && retryTurnId);
-      const selectedProvider = providersForConfig(config).find(
-        (provider) => provider.id === config.selectedProviderId,
-      );
-      const sessionModel = selectedSessionModelFromConfig(config);
       const shouldSuggestTitle =
         !isRetry &&
         shouldSuggestSessionTitle(
@@ -4218,7 +4494,9 @@ export function App() {
         setSessions((current) => [session, ...current]);
         setActiveSessionId(session.id);
         setEvents(limitSessionEventsForUi(optimisticEvents));
-        resetChatDraft();
+        if (!overrideContext?.preserveDraft) {
+          resetChatDraft();
+        }
         notify("terminal", "Message sending", "Starting chat");
 
         if (!isTauriRuntime()) {
@@ -4231,14 +4509,15 @@ export function App() {
           );
           setSessionSending(session.id, false);
           setIsStartingFirstTurn(false);
-          return;
+          return true;
         }
 
         let optimisticSessionId = session.id;
+        let didPersistUserMessage = false;
         try {
           await waitForNextPaint();
           const persistedSession = await createTauriThreadSession(
-            workspacePath,
+            chatWorkspacePath,
             workbench.workspaceMode,
             sessionModel,
             provisionalTitle,
@@ -4251,6 +4530,19 @@ export function App() {
           optimisticEventsRef.current.delete(session.id);
           optimisticEventsRef.current.set(persistedSession.id, migratedEvents);
           replaceSendingSessionId(session.id, persistedSession.id);
+          setChatMessageQueues((current) => {
+            const queued = current[session.id];
+            if (!queued?.length) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[session.id];
+            next[persistedSession.id] = [
+              ...(next[persistedSession.id] ?? []),
+              ...queued,
+            ];
+            return next;
+          });
           sendingSessionId = persistedSession.id;
           setSessions((current) => [
             persistedSession,
@@ -4346,6 +4638,7 @@ export function App() {
             message,
             turnId,
           });
+          didPersistUserMessage = true;
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
             {
@@ -4353,13 +4646,17 @@ export function App() {
                 sessionId: persistedSession.id,
                 message,
                 turnId,
-                providerId: selectedProvider?.id ?? config.selectedProviderId,
-                providerLabel: selectedProvider?.displayName,
+                providerId:
+                  sessionModel.providerId ??
+                  selectedProvider?.id ??
+                  config.selectedProviderId,
+                providerLabel:
+                  sessionModel.providerLabel ?? selectedProvider?.displayName,
                 modelId: sessionModel.modelId,
                 modelLabel: sessionModel.modelLabel,
                 reasoningEffort: sessionModel.reasoningEffort,
-                requireCommandApproval: config.requireCommandApproval,
-                requireFileEditApproval: config.requireFileEditApproval,
+                requireCommandApproval,
+                requireFileEditApproval,
                 mode: turnMode,
                 goal: turnGoal?.text ? turnGoal : undefined,
                 plan: turnPlan.items.length ? turnPlan : undefined,
@@ -4382,7 +4679,7 @@ export function App() {
               type: "set-provider-readiness",
               status: "blocked",
               message: errorMessage,
-              providerId: selectedProvider?.id,
+              providerId: sessionModel.providerId ?? selectedProvider?.id,
             });
           updateOptimisticProviderStatus(
             optimisticEventsRef,
@@ -4406,7 +4703,7 @@ export function App() {
           setSessionSending(sendingSessionId, false);
           setIsStartingFirstTurn(false);
         }
-        return;
+        return didPersistUserMessage;
       }
 
       const optimisticEvents = isRetry
@@ -4456,7 +4753,9 @@ export function App() {
             mergePersistedAndOptimisticEvents(current, optimisticEvents),
           ),
         );
-        resetChatDraft();
+        if (!overrideContext?.preserveDraft) {
+          resetChatDraft();
+        }
       }
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
@@ -4468,8 +4767,9 @@ export function App() {
         );
         setSessionSending(activeSessionId, false);
         notify("terminal", "Message added", "Local optimistic event");
-        return;
+        return true;
       }
+      let didPersistUserMessage = isRetry;
       try {
         await waitForNextPaint();
         if (!isRetry) {
@@ -4479,6 +4779,7 @@ export function App() {
             message,
             turnId,
           });
+          didPersistUserMessage = true;
         }
         const providerResponse = await invoke<ProviderChatResponse>(
           "run_provider_chat",
@@ -4487,19 +4788,23 @@ export function App() {
               sessionId: activeSessionId,
               message,
               turnId,
-              providerId: selectedProvider?.id ?? config.selectedProviderId,
-              providerLabel: selectedProvider?.displayName,
+              providerId:
+                sessionModel.providerId ??
+                selectedProvider?.id ??
+                config.selectedProviderId,
+              providerLabel:
+                sessionModel.providerLabel ?? selectedProvider?.displayName,
               modelId: sessionModel.modelId,
               modelLabel: sessionModel.modelLabel,
               reasoningEffort: sessionModel.reasoningEffort,
-              requireCommandApproval: config.requireCommandApproval,
-              requireFileEditApproval: config.requireFileEditApproval,
+              requireCommandApproval,
+              requireFileEditApproval,
               mode: turnMode,
               goal: turnGoal?.text ? turnGoal : undefined,
               plan: turnPlan.items.length ? turnPlan : undefined,
               attachments: turnAttachments,
               suggestTitle: shouldSuggestTitle,
-              workspacePath: activeSession?.workspacePath ?? workspacePath,
+              workspacePath: chatWorkspacePath,
             },
           },
         );
@@ -4513,7 +4818,7 @@ export function App() {
             type: "set-provider-readiness",
             status: "blocked",
             message: errorMessage,
-            providerId: selectedProvider?.id,
+            providerId: sessionModel.providerId ?? selectedProvider?.id,
           });
         updateOptimisticProviderStatus(
           optimisticEventsRef,
@@ -4534,6 +4839,7 @@ export function App() {
       } finally {
         setSessionSending(activeSessionId, false);
       }
+      return didPersistUserMessage;
     },
     [
       activeSessionId,
@@ -4546,6 +4852,7 @@ export function App() {
       activeSessionGoal,
       activeSessionPlan,
       applyProviderChatResponse,
+      chatMessageQueues,
       checkProviderReadiness,
       config,
       isStartingFirstTurn,
@@ -4561,6 +4868,80 @@ export function App() {
       workbench.workspaceMode,
       workspacePath,
     ],
+  );
+
+  useEffect(() => {
+    if (
+      !activeSessionId ||
+      sendingSessionIdsRef.current.has(activeSessionId) ||
+      queuedChatDispatchesRef.current.has(activeSessionId)
+    ) {
+      return;
+    }
+    const nextMessage = chatMessageQueues[activeSessionId]?.[0];
+    if (!nextMessage) {
+      return;
+    }
+    queuedChatDispatchesRef.current.add(activeSessionId);
+    queuedChatDispatchMessageIdsRef.current.set(
+      activeSessionId,
+      nextMessage.id,
+    );
+    void sendDraft(nextMessage.message, {
+      ...nextMessage.context,
+      preserveDraft: true,
+    })
+      .then((accepted) => {
+        if (!accepted) {
+          return;
+        }
+        setChatMessageQueues((current) => {
+          const remaining = (current[activeSessionId] ?? []).filter(
+            (item) => item.id !== nextMessage.id,
+          );
+          if (remaining.length === 0) {
+            const next = { ...current };
+            delete next[activeSessionId];
+            return next;
+          }
+          return { ...current, [activeSessionId]: remaining };
+        });
+      })
+      .finally(() => {
+        queuedChatDispatchesRef.current.delete(activeSessionId);
+        queuedChatDispatchMessageIdsRef.current.delete(activeSessionId);
+      });
+  }, [activeSessionId, chatMessageQueues, sendDraft, sendingSessionIds]);
+
+  const removeQueuedChatMessage = useCallback(
+    (messageId: string) => {
+      if (!activeSessionId) {
+        return;
+      }
+      if (
+        queuedChatDispatchMessageIdsRef.current.get(activeSessionId) ===
+        messageId
+      ) {
+        notify(
+          "terminal",
+          "Message already sending",
+          "Stop the active response if you do not want this queued turn to continue.",
+        );
+        return;
+      }
+      setChatMessageQueues((current) => {
+        const remaining = (current[activeSessionId] ?? []).filter(
+          (item) => item.id !== messageId,
+        );
+        if (remaining.length === 0) {
+          const next = { ...current };
+          delete next[activeSessionId];
+          return next;
+        }
+        return { ...current, [activeSessionId]: remaining };
+      });
+    },
+    [activeSessionId, notify],
   );
 
   const handleProviderStatusAction = useCallback(
@@ -5275,6 +5656,9 @@ export function App() {
             ? "active"
             : (activeSessionGoal?.status ?? "active");
       if (!activeSessionId) {
+        if (action === "set" || action === "edit") {
+          setPendingNewChatMode("normal");
+        }
         setPendingNewChatGoal(
           action === "clear"
             ? undefined
@@ -5304,9 +5688,26 @@ export function App() {
               : action === "set"
                 ? `Goal set: ${text}`
                 : `Goal updated: ${text}`;
-      void appendGoalEvent(payload, message);
+      void (async () => {
+        if (
+          (action === "set" || action === "edit") &&
+          activeChatMode === "plan"
+        ) {
+          const modeChanged = await changeChatMode("normal");
+          if (!modeChanged) {
+            return;
+          }
+        }
+        await appendGoalEvent(payload, message);
+      })();
     },
-    [activeSessionGoal, activeSessionId, appendGoalEvent],
+    [
+      activeChatMode,
+      activeSessionGoal,
+      activeSessionId,
+      appendGoalEvent,
+      changeChatMode,
+    ],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -7720,6 +8121,7 @@ export function App() {
                   setPlanEditorRequest(undefined)
                 }
                 onGoalAction={changeGoal}
+                onRemoveQueuedMessage={removeQueuedChatMessage}
                 onMutationApprovalAction={handleMutationApprovalAction}
                 onProviderApprovalAction={handleProviderApprovalAction}
                 onProviderStatusAction={handleProviderStatusAction}
@@ -7734,6 +8136,15 @@ export function App() {
                   dispatchWorkbench({ type: "toggle-chat-plan" })
                 }
                 providerReadiness={workbench.providerReadiness}
+                queuedMessages={activeQueuedChatMessages.map((item) => ({
+                  attachmentCount: item.context.attachments?.length ?? 0,
+                  id: item.id,
+                  isDispatching:
+                    queuedChatDispatchMessageIdsRef.current.get(
+                      activeSessionId ?? "",
+                    ) === item.id,
+                  message: item.message,
+                }))}
                 savedProjects={savedProjects}
                 sessionModel={{
                   modelLabel: activeSession?.modelLabel,
@@ -8118,6 +8529,7 @@ export function App() {
           planEditorRequest={planEditorRequest}
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
+          onRemoveQueuedMessage={removeQueuedChatMessage}
           onMutationApprovalAction={handleMutationApprovalAction}
           onProviderApprovalAction={handleProviderApprovalAction}
           onProviderStatusAction={handleProviderStatusAction}
@@ -8139,6 +8551,15 @@ export function App() {
             dispatchWorkbench({ type: "toggle-chat-plan" })
           }
           providerReadiness={workbench.providerReadiness}
+          queuedMessages={activeQueuedChatMessages.map((item) => ({
+            attachmentCount: item.context.attachments?.length ?? 0,
+            id: item.id,
+            isDispatching:
+              queuedChatDispatchMessageIdsRef.current.get(
+                activeSessionId ?? "",
+              ) === item.id,
+            message: item.message,
+          }))}
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
@@ -8924,6 +9345,10 @@ function loadChatAttachments(): Record<string, ChatAttachment[]> {
   } catch {
     return {};
   }
+}
+
+function isSupportedChatImagePath(path: string) {
+  return /\.(?:png|jpe?g|webp)$/i.test(path.trim());
 }
 
 function loadRemovedProjectPaths(): string[] {

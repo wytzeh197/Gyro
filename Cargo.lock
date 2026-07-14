@@ -1636,7 +1636,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-cli"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.23.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-core"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.23.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1678,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-desktop"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.23.1"
 dependencies = [
  "anyhow",
  "block2",
@@ -1802,6 +1802,12 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
 
 [[package]]
 name = "httparse"
@@ -4172,6 +4178,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "http-range",
  "jni 0.21.1",
  "libc",
  "log",
