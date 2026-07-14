@@ -8,17 +8,23 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   macos:
-    name: macOS private preview (${{ matrix.target }})
-    runs-on: macos-14
+    name: macOS release candidate (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
+            runner: macos-15
             updater_suffix: aarch64
           - target: x86_64-apple-darwin
+            runner: macos-15-intel
             updater_suffix: x64
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +39,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: pnpm install --frozen-lockfile
+      - name: Verify pinned Tauri release toolchain
+        run: test "$(pnpm --filter @gyro-dev/desktop tauri --version)" = "tauri-cli 2.11.4"
       - name: Configure updater public key
         run: node scripts/configure-release-updater.mjs
         env:
@@ -42,13 +50,66 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - run: pnpm check
       - run: cargo test --workspace
-      - name: Build and sign Tauri app
+      - name: Build native CLI
+        run: cargo build --release -p gyro-cli --target ${{ matrix.target }}
+      - name: Package and verify native CLI
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/package-cli-release.mjs \
+            --binary "target/${{ matrix.target }}/release/gyro" \
+            --version "$VERSION" \
+            --target "${{ matrix.target }}" \
+            --output release-assets
+          node scripts/package-cli-release.mjs \
+            --verify "release-assets/gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz" \
+            --run
+      - name: Build, Apple-sign, notarize, and sign updater archive
         run: pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Notarize and staple signed DMGs
+        run: |
+          for dmg in target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            RESULT="$(mktemp)"
+            xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait \
+              --output-format json > "$RESULT"
+            cat "$RESULT"
+            test "$(jq -r '.status' "$RESULT")" = "Accepted"
+            xcrun stapler staple -v "$dmg"
+            rm -f "$RESULT"
+          done
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Verify Apple signature, Gatekeeper, and notarization tickets
+        run: |
+          APP="target/${{ matrix.target }}/release/bundle/macos/Gyro.app"
+          DMGS=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          VERIFY_ARGS=(--app "$APP")
+          for dmg in "${DMGS[@]}"; do
+            VERIFY_ARGS+=(--dmg "$dmg")
+          done
+          node scripts/verify-macos-release.mjs "${VERIFY_ARGS[@]}"
       - name: Collect signed release assets
         run: |
           mkdir -p release-assets
@@ -80,15 +141,28 @@ jobs:
           merge-multiple: true
       - name: Build and validate updater manifest
         run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
+      - name: Finalize CLI checksums and Homebrew Formula
+        run: node scripts/finalize-cli-release.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
       - name: Create one complete draft release
         run: |
+          set -euo pipefail
+          RELEASE_NOTES="Developer ID signed, notarized, and updater-signed macOS release candidate for Apple Silicon and Intel."
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            IS_DRAFT="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "Refusing to overwrite published release $GITHUB_REF_NAME." >&2
+              exit 1
+            fi
+            gh release edit "$GITHUB_REF_NAME" \
+              --draft \
+              --title "Gyro $GITHUB_REF_NAME" \
+              --notes "$RELEASE_NOTES"
             gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" release-assets/* \
               --draft \
               --title "Gyro $GITHUB_REF_NAME" \
-              --notes "Signed macOS private preview for Apple Silicon and Intel."
+              --notes "$RELEASE_NOTES"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

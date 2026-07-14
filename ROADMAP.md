@@ -58,16 +58,28 @@ Partially implemented and still gated, Gyro must clear the blockers below. The
 implemented foundations above are necessary, but none of them replaces this
 end-to-end exit gate.
 
-- Provider-proposed edits do not yet share one atomic, typed
-  propose/review/apply/reject/recover transaction.
-- Always-on automation execution lacks durable scheduling, leases, recovery,
-  and stop conditions.
+- Codex and Claude text-file proposals now share the journaled
+  propose/review/apply/reject/recover transaction; clean-machine approval and
+  interrupted-restore acceptance remain.
+- The desktop backend now schedules approval-aware automation sessions with
+  durable leases, interruption recovery, failure backoff, and pause
+  cancellation while the window is hidden. Resume events wake the scheduler
+  without losing an early signal, and forward clock jumps claim one missed run.
+  Active provider runs renew their owned lease while waiting for approval, while
+  crashed processes still expire into normal recovery.
+  Physical sleep/wake, physical installed-notification delivery, and real-provider
+  stop-verdict acceptance remain. Simulated backward clock correction now keeps
+  due work visible and cannot shorten an active lease. Notification
+  permission is inspectable and testable from Settings without a startup prompt;
+  stop verdicts fail closed and atomically complete schedules, and background
+  outcomes emit privacy-safe native notices only when access is granted.
 - Provider onboarding still needs clean-machine acceptance coverage.
 - LSP and DAP discovery exists, but lifecycle management is not production
   ready.
-- Browser preview lacks automatic console/error collection and verified capture.
-- Production Apple signing, notarization, updater keys, and clean-machine release
-  proof are incomplete.
+- Browser preview automatically captures bounded, redacted console/page errors and private retained PNG screenshots for loopback previews; installed screenshot acceptance remains.
+- The GitHub updater key, signed manifest, and stable endpoint are configured.
+  Production Apple signing/notarization and clean-machine release proof remain
+  incomplete for the currently published alpha artifacts.
 - The public download journey and first-run activation flow are not yet a single
   tested funnel.
 
@@ -207,6 +219,116 @@ Exit gate:
 - Provider setup recovery rate from Chat.
 - Percentage of failed runs with a successful documented recovery action.
 
+#### Current implementation audit (2026-07-13)
+
+Status: the provider-backed conversation foundation is implemented, but the
+v0.2 exit gate is not yet met.
+
+Implemented now:
+
+- Codex and Claude Code conversations use the shared durable session store,
+  provider bindings, ordered streaming events, cancellation, retry, and resume.
+- New Chat requires both a user-selected project and a connected provider in
+  its button, keyboard, and execution paths before a session can run.
+- The Chat shell keeps project, branch/worktree, provider, model, permission,
+  run status, attachments, and tool entry points visible without making the
+  terminal or editor the default conversation surface.
+- Optimistic first-send rendering, stream reconciliation, bounded transcript
+  state, provider failure recovery actions, attachment persistence, editable
+  session titles, and project-grouped local chat history are covered by the
+  workbench and Chat-specific Rust test suites.
+- Assistant text, provider commentary, file activity, status, completion, and
+  failure events render in chronological turn groups, with direct routes into
+  changes, terminal, browser, files, and plan surfaces.
+- File mutations now have a shared durable proposal record, bounded diff review,
+  typed Chat approval card, approve or reject decision, fresh hash validation,
+  atomic disk write, durable decision event, and restart-safe status
+  reconciliation. Stale files and symlink escapes fail closed.
+- Completed provider responses now produce a bounded durable session summary;
+  summaries remain secondary to JSONL history and are exposed to accessible
+  session navigation. The Chat transcript is a live log with labelled composer,
+  native keyboard approval controls, and visible focus treatment.
+- Default-permission OpenAI runs now use the Codex app-server protocol. Gated
+  file turns start read-only, command and file escalation callbacks become live
+  typed Chat cards, and approve or reject decisions return to the still-running
+  provider turn. Explicit Full Access keeps the direct unrestricted runner.
+- Approved Codex file callbacks in both Chat and CLI now pass through one
+  Gyro-owned transaction. It decodes the reviewed add, update, delete, and move
+  set, validates canonical workspace paths and fresh content hashes, stages all
+  writes, backs up touched files, rolls the set back on partial failure or
+  cancellation, records the changed paths, and suppresses Codex's native
+  reapply after Gyro commits.
+- Claude CLI Write, Edit, and MultiEdit permission callbacks are translated into
+  the same transaction and denied at the native tool boundary after Gyro
+  applies them. Unsupported notebook and binary edits fail closed.
+- Desktop Claude Chat now launches a strict hidden MCP permission helper. The
+  helper forwards versioned requests to Gyro.app's typed approval manager over
+  its user-only local socket; approved Write, Edit, and MultiEdit actions use
+  the same journaled transaction and suppress native reapplication.
+- Provider file transactions now write an Application Support journal before
+  the first workspace rename. CLI and desktop startup correlate each journal
+  with its durable approval event, finalize an applied transaction, or roll an
+  unrecorded transaction back. Recovery validates workspace, artifact, and
+  content hashes; stale targets remain untouched with the journal retained for
+  manual review.
+- CLI Codex and Claude runs persist provider session identity before a turn can
+  crash. Failed or interrupted bindings remain resumable, successful runs return
+  them to `ready`, and a definitively stale thread or session is cleared and
+  retried once. Real-binary protocol fixtures prove crash-then-resume and stale
+  cursor replacement for both adapters.
+- Explicit CLI profile selection now honors the same enabled-provider state as
+  Gyro.app and fails before creating or launching a new session when that
+  provider is disabled. Structured Claude authentication and network failures
+  map to `provider-unavailable`, retain the resumable session, and include an
+  actionable login or retry command without exposing structured credentials.
+- Real-binary CLI coverage now exercises human output at 60 columns with
+  Unicode and `NO_COLOR`, non-TTY newline-delimited Chat, public read-command
+  `gyro.cli.v1` shapes, completions, and compatible and incompatible app
+  handoffs. Human session, setup, and doctor rows wrap to the detected terminal
+  width instead of relying on fixed tables.
+- Doctor checks now identify required versus optional capabilities and carry a
+  redaction-safe next action in both human and `gyro.cli.v1` output. `gyro setup`
+  reuses the same remediation metadata instead of dropping it.
+
+Incomplete for v0.2:
+
+- OpenAI and Anthropic provider-native command and file callbacks are
+  intercepted, persisted in the event timeline, and resolved through Gyro in
+  supported CLI and desktop paths. Gated Codex and Claude text changes use the
+  shared transaction. Harmless sandboxed Codex commands may execute without a
+  callback, while untrusted or elevated commands require the typed approval
+  card.
+- Stop and retry are implemented, provider resume cursors are durable, and the
+  CLI protocol-level restart, stale-cursor, and provider-crash matrix is covered.
+  Authenticated clean-machine, offline, and approval-restore acceptance is not
+  yet proven end to end.
+- Keyboard, screen-reader, long-stream, image, code-block, diff, and narrow-view
+  behavior has expanded automated coverage, but the complete Chat validation
+  matrix above still needs release-candidate manual proof with VoiceOver and
+  real provider runs.
+
+Later milestone status:
+
+- v0.2.2 is partial: permission selection and unavailable-provider recovery are
+  present, while the first-launch handoff, repository-aware starter actions, and
+  completed-action first-success flow are not.
+- v0.3 has project-grouped sessions and provider-handoff scaffolding in shared
+  state, but Chat does not yet provide typed handoff previews, task or goal
+  grouping, cross-run evidence references, or simultaneous-run attention
+  controls.
+- v0.4 has plan state and file-activity links, but typed IDE references, exact
+  evidence citations with stale-context warnings, and visible skill or project
+  policy context are not implemented.
+
+Next completion slice:
+
+1. Complete authenticated clean-machine provider-crash, offline, and
+   approval-restore tests against installed Codex and Claude Code CLIs.
+2. Finish VoiceOver and keyboard acceptance for the full timeline and approval
+   recovery states.
+3. Define a reviewed policy for notebook and non-text mutations without
+   weakening the current fail-closed boundary.
+
 ### CLI Surface Roadmap
 
 #### Product role
@@ -264,6 +386,20 @@ Exit gate:
   run, and hand it to the app without session or policy divergence.
 
 #### v0.2.1 — Installable CLI
+
+Current implementation evidence:
+
+- The tagged release matrix builds architecture-specific CLI archives natively
+  on Apple Silicon and Intel runners, with a versioned archive manifest and
+  per-archive SHA256 sidecar.
+- Release finalization verifies both sidecars, writes `SHA256SUMS`, and creates
+  a Homebrew Formula with immutable tag URLs and the calculated architecture
+  checksums.
+- Each native archive is installed into an isolated temporary home before
+  upload; version output, zsh completions, and JSON doctor output must pass.
+- Local Apple Silicon packaging is byte-for-byte reproducible and rejects a
+  corrupted or renamed archive. A real tagged draft and clean Intel plus Apple
+  Silicon installation remain required acceptance evidence.
 
 Deliver:
 
@@ -777,12 +913,19 @@ The product is not launch-ready because:
 
 - A large IDE and design upgrade is still active and must be stabilized as one
   coherent release candidate.
-- Provider-proposed edits still need one complete atomic approval transaction.
+- Codex and supported Claude text edits in CLI and desktop Chat now use the
+  shared journaled approval transaction with startup reconciliation; installed
+  clean-machine and approval-restore acceptance remains incomplete.
 - Provider onboarding lacks clean-machine acceptance proof.
-- The committed updater public key is a development placeholder, so the release
-  configuration check fails intentionally.
-- Apple signing, notarization, updater deployment, release artifacts, Homebrew
-  checksums, and clean-machine installation proof are incomplete.
+- The updater public key, signed `latest.json`, and stable GitHub endpoint are
+  real, but the currently published alpha DMGs are ad-hoc/linker-signed and lack
+  a notarization ticket. The tagged workflow now fails closed unless Apple
+  Developer ID signing and notarization credentials are present; those six
+  Apple repository secrets are not configured yet. Artifact upload is also
+  gated on strict signature, hardened-runtime, Gatekeeper, and stapled-ticket
+  verification for the generated app and DMG.
+- A newly tagged draft still needs Apple-signing verification, generated
+  Homebrew checksums, and clean-machine installation proof on both architectures.
 - The first-run and download journey exists as a plan rather than a tested
   end-to-end funnel.
 
@@ -1117,7 +1260,8 @@ Deliver:
 - Explicit project, branch/worktree, provider/model, and approval context around
   the composer.
 - Functional or truthfully unavailable states for every visible control.
-- Live browser console/error collection and isolated preview capture.
+- Installed-app acceptance for isolated preview screenshot capture and its
+  private, bounded capture-file lifecycle.
 - Experimental labelling for LSP and DAP until process lifecycle and recovery
   are complete.
 - Consistent visual state vocabulary across Chat, CLI, IDE, tasks, automations,
@@ -1141,7 +1285,9 @@ Deliver:
 
 - A scheduler independent of the currently visible UI.
 - Durable leases preventing duplicate execution.
+- Owned-lease heartbeats for provider runs that wait on long approvals.
 - Missed-run, retry, backoff, timeout, pause, resume, and stop semantics.
+- Fail-closed structured stop-condition verdicts with durable completion state.
 - Workspace and worktree isolation for scheduled mutations.
 - Visible run history and concrete recovery actions.
 - Local notification behavior that respects privacy and quiet hours.

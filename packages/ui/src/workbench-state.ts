@@ -3,6 +3,7 @@ import type {
   Automation,
   AutomationStatus,
   AutomationTriageState,
+  BrowserPreview,
   BrowserPreviewDevice,
   BrowserPreviewStatus,
   ChatSidePanelId,
@@ -62,6 +63,8 @@ import type {
 import { defaultProviderStatuses as catalogDefaultProviderStatuses } from "./provider-catalog.ts";
 
 export const CLI_LAUNCH_PRESET_MAX_PANES = 8;
+const MAX_RESTORED_EDITOR_TABS = 100;
+const MAX_RESTORED_EDITOR_GROUPS = 8;
 
 function createEditorGroup(
   id: string,
@@ -96,6 +99,261 @@ function defaultIdeLayout(): WorkbenchState["ide"]["layout"] {
     restoreOnLaunch: true,
     rightAssistantOpen: true,
   };
+}
+
+export function sanitizeStoredIdeState(
+  value: unknown,
+  base: WorkbenchState["ide"],
+): WorkbenchState["ide"] {
+  const ide = storedRecord(value);
+  if (!ide) {
+    return base;
+  }
+  const storedLayout = storedRecord(ide.layout);
+  const restoreOnLaunch = storedBoolean(
+    storedLayout?.restoreOnLaunch,
+    base.layout.restoreOnLaunch,
+  );
+  const layoutPreferences = {
+    splitDirection:
+      storedLayout?.splitDirection === "down" ||
+      storedLayout?.splitDirection === "right"
+        ? storedLayout.splitDirection
+        : base.layout.splitDirection,
+    minimapEnabled: storedBoolean(
+      storedLayout?.minimapEnabled,
+      base.layout.minimapEnabled,
+    ),
+    restoreOnLaunch,
+    rightAssistantOpen: storedBoolean(
+      storedLayout?.rightAssistantOpen,
+      base.layout.rightAssistantOpen,
+    ),
+  };
+  const activeView = isIdeViewId(ide.activeView)
+    ? ide.activeView
+    : base.activeView;
+
+  if (!restoreOnLaunch) {
+    return {
+      ...base,
+      activePath: undefined,
+      activeView,
+      tabs: [],
+      layout: {
+        ...base.layout,
+        ...layoutPreferences,
+        groups: [createEditorGroup("group-main", "Main")],
+        activeGroupId: "group-main",
+      },
+    };
+  }
+
+  const tabs: EditorTab[] = [];
+  const seenPaths = new Set<string>();
+  const rawTabs = Array.isArray(ide.tabs) ? ide.tabs : [];
+  for (const rawTab of rawTabs.slice(0, MAX_RESTORED_EDITOR_TABS)) {
+    const tab = storedRecord(rawTab);
+    const path = storedRelativeEditorPath(tab?.path);
+    if (!path || seenPaths.has(path)) {
+      continue;
+    }
+    seenPaths.add(path);
+    const storedTitle =
+      typeof tab?.title === "string" ? tab.title.trim().slice(0, 256) : "";
+    tabs.push({
+      path,
+      title: storedTitle || workspaceNameFromPath(path),
+      dirty: false,
+      pinned: tab?.pinned === true,
+      preview: false,
+      groupId:
+        typeof tab?.groupId === "string" && storedEditorGroupId(tab.groupId)
+          ? tab.groupId
+          : undefined,
+    });
+  }
+  const tabByPath = new Map(tabs.map((tab) => [tab.path, tab]));
+  const seenGroupIds = new Set<string>();
+  const rawGroups = Array.isArray(storedLayout?.groups)
+    ? storedLayout.groups
+    : [];
+  let groups: EditorGroup[] = [];
+  for (const rawGroup of rawGroups.slice(0, MAX_RESTORED_EDITOR_GROUPS)) {
+    const group = storedRecord(rawGroup);
+    const id = storedEditorGroupId(group?.id);
+    if (!id || seenGroupIds.has(id)) {
+      continue;
+    }
+    seenGroupIds.add(id);
+    const groupTabs: EditorTab[] = [];
+    const groupPaths = new Set<string>();
+    const rawGroupTabs = Array.isArray(group?.tabs) ? group.tabs : [];
+    for (const rawGroupTab of rawGroupTabs) {
+      const path = storedRelativeEditorPath(storedRecord(rawGroupTab)?.path);
+      const tab = path ? tabByPath.get(path) : undefined;
+      if (!tab || groupPaths.has(tab.path)) {
+        continue;
+      }
+      groupPaths.add(tab.path);
+      groupTabs.push({ ...tab, groupId: id });
+    }
+    const requestedActivePath = storedRelativeEditorPath(group?.activePath);
+    const activePath = groupTabs.some((tab) => tab.path === requestedActivePath)
+      ? requestedActivePath
+      : groupTabs[0]?.path;
+    const storedTitle =
+      typeof group?.title === "string" ? group.title.trim().slice(0, 80) : "";
+    groups.push({
+      id,
+      title: storedTitle || `Group ${groups.length + 1}`,
+      activePath,
+      tabs: groupTabs,
+      panes: [{ id: `${id}-pane`, path: activePath }],
+    });
+  }
+
+  if (groups.length === 0) {
+    groups = [
+      {
+        ...createEditorGroup("group-main", "Main"),
+        activePath: tabs[0]?.path,
+        tabs: tabs.map((tab) => ({ ...tab, groupId: "group-main" })),
+        panes: [{ id: "group-main-pane", path: tabs[0]?.path }],
+      },
+    ];
+  } else {
+    const representedPaths = new Set(
+      groups.flatMap((group) => group.tabs.map((tab) => tab.path)),
+    );
+    const unassignedTabs = tabs.filter(
+      (tab) => !representedPaths.has(tab.path),
+    );
+    if (unassignedTabs.length > 0) {
+      const firstGroup = groups[0];
+      if (firstGroup) {
+        const firstTabs = [
+          ...firstGroup.tabs,
+          ...unassignedTabs.map((tab) => ({
+            ...tab,
+            groupId: firstGroup.id,
+          })),
+        ];
+        groups = [
+          {
+            ...firstGroup,
+            activePath: firstGroup.activePath ?? firstTabs[0]?.path,
+            tabs: firstTabs,
+            panes: [
+              {
+                id: `${firstGroup.id}-pane`,
+                path: firstGroup.activePath ?? firstTabs[0]?.path,
+              },
+            ],
+          },
+          ...groups.slice(1),
+        ];
+      }
+    }
+  }
+
+  const requestedGroupId = storedEditorGroupId(storedLayout?.activeGroupId);
+  let activeGroupId = groups.some((group) => group.id === requestedGroupId)
+    ? requestedGroupId
+    : groups[0]?.id;
+  const requestedActivePath = storedRelativeEditorPath(ide.activePath);
+  let activePath = requestedActivePath
+    ? tabByPath.get(requestedActivePath)?.path
+    : undefined;
+  if (activePath) {
+    const requestedGroup = groups.find((group) => group.id === activeGroupId);
+    const containingGroup = requestedGroup?.tabs.some(
+      (tab) => tab.path === activePath,
+    )
+      ? requestedGroup
+      : groups.find((group) =>
+          group.tabs.some((tab) => tab.path === activePath),
+        );
+    if (containingGroup) {
+      activeGroupId = containingGroup.id;
+    }
+  } else {
+    activePath =
+      groups.find((group) => group.id === activeGroupId)?.activePath ??
+      tabs[0]?.path;
+  }
+  activeGroupId = activeGroupId ?? "group-main";
+  const restoredTabs = tabs.map((tab) => {
+    const requestedGroup = groups.find(
+      (group) =>
+        group.id === tab.groupId &&
+        group.tabs.some((groupTab) => groupTab.path === tab.path),
+    );
+    const ownerGroup =
+      requestedGroup ??
+      groups.find((group) =>
+        group.tabs.some((groupTab) => groupTab.path === tab.path),
+      );
+    return { ...tab, groupId: ownerGroup?.id };
+  });
+
+  return {
+    ...base,
+    activePath,
+    activeView,
+    tabs: restoredTabs,
+    layout: {
+      ...base.layout,
+      ...layoutPreferences,
+      groups,
+      activeGroupId,
+    },
+  };
+}
+
+function storedRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function storedBoolean(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function storedRelativeEditorPath(value: unknown) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const path = value.trim().replaceAll("\\", "/");
+  if (
+    !path ||
+    path.length > 4_096 ||
+    path.startsWith("/") ||
+    /^[a-z]:\//i.test(path) ||
+    path.includes("\0") ||
+    path.split("/").some((segment) => segment === "..")
+  ) {
+    return undefined;
+  }
+  return path;
+}
+
+function storedEditorGroupId(value: unknown) {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value)
+    ? value
+    : undefined;
+}
+
+function isIdeViewId(value: unknown): value is IdeViewId {
+  return (
+    value === "explorer" ||
+    value === "search" ||
+    value === "source-control" ||
+    value === "run-test" ||
+    value === "ai" ||
+    value === "settings"
+  );
 }
 
 function defaultSourceControlState(): SourceControlState {
@@ -215,13 +473,85 @@ function upsertPathInActiveEditorGroup(
   return syncEditorGroupsForActivePath(layout, path);
 }
 
+function syncEditorTabInLayout(
+  layout: WorkbenchState["ide"]["layout"],
+  tab: EditorTab,
+): WorkbenchState["ide"]["layout"] {
+  return {
+    ...layout,
+    groups: layout.groups.map((group) => ({
+      ...group,
+      tabs: group.tabs.map((groupTab) =>
+        groupTab.path === tab.path ? { ...groupTab, ...tab } : groupTab,
+      ),
+    })),
+  };
+}
+
+function updateEditorTabInLayout(
+  layout: WorkbenchState["ide"]["layout"],
+  path: string,
+  updates: Partial<EditorTab>,
+): WorkbenchState["ide"]["layout"] {
+  return {
+    ...layout,
+    groups: layout.groups.map((group) => ({
+      ...group,
+      tabs: group.tabs.map((tab) =>
+        tab.path === path ? { ...tab, ...updates } : tab,
+      ),
+    })),
+  };
+}
+
+function removeEditorTabFromLayout(
+  layout: WorkbenchState["ide"]["layout"],
+  path: string,
+): WorkbenchState["ide"]["layout"] {
+  return {
+    ...layout,
+    groups: layout.groups.map((group) => {
+      const tabs = group.tabs.filter((tab) => tab.path !== path);
+      const activePath =
+        group.activePath === path
+          ? tabs[tabs.length - 1]?.path
+          : group.activePath;
+      return {
+        ...group,
+        activePath,
+        tabs,
+        panes: group.panes.map((pane) =>
+          pane.path === path ? { ...pane, path: activePath } : pane,
+        ),
+      };
+    }),
+  };
+}
+
+function editorPathMatches(path: string, root: string) {
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function renameEditorPath(path: string, fromPath: string, toPath: string) {
+  return editorPathMatches(path, fromPath)
+    ? `${toPath}${path.slice(fromPath.length)}`
+    : path;
+}
+
 function moveTabToEditorGroup(
   layout: WorkbenchState["ide"]["layout"],
   path: string,
   toGroupId: string,
+  fromGroupId?: string,
 ): WorkbenchState["ide"]["layout"] {
+  if (!layout.groups.some((group) => group.id === toGroupId)) {
+    return layout;
+  }
   let movedTab: EditorTab | undefined;
   const groupsWithoutTab = layout.groups.map((group) => {
+    if (fromGroupId && group.id !== fromGroupId) {
+      return group;
+    }
     const tab = group.tabs.find((item) => item.path === path);
     if (tab) {
       movedTab = { ...tab, groupId: toGroupId };
@@ -249,7 +579,9 @@ function moveTabToEditorGroup(
         ? {
             ...group,
             activePath: path,
-            tabs: [...group.tabs, tabToMove],
+            tabs: group.tabs.some((tab) => tab.path === path)
+              ? group.tabs
+              : [...group.tabs, tabToMove],
             panes:
               group.panes.length > 0
                 ? group.panes
@@ -258,6 +590,14 @@ function moveTabToEditorGroup(
         : group,
     ),
   };
+}
+
+function nextEditorGroupId(layout: WorkbenchState["ide"]["layout"]) {
+  let index = layout.groups.length + 1;
+  while (layout.groups.some((group) => group.id === `group-${index}`)) {
+    index += 1;
+  }
+  return `group-${index}`;
 }
 
 function decorationsFromSourceControl(
@@ -346,12 +686,20 @@ export type WorkbenchAction =
   | { type: "toggle-chat-plan" }
   | { type: "set-chat-panel"; panel?: ChatSidePanelId }
   | { type: "ide-open-tab"; tab: EditorTab }
-  | { type: "ide-close-tab"; path: string }
+  | { type: "ide-close-tab"; path: string; groupId?: string }
+  | { type: "ide-rename-path"; fromPath: string; toPath: string }
+  | { type: "ide-delete-path"; path: string }
+  | { type: "ide-pin-tab"; path: string }
   | { type: "ide-select-tab"; path: string }
   | { type: "ide-select-group"; groupId: string }
   | { type: "ide-split-group"; direction: "right" | "down" }
   | { type: "ide-close-group"; groupId: string }
-  | { type: "ide-move-tab"; path: string; toGroupId: string }
+  | {
+      type: "ide-move-tab";
+      path: string;
+      toGroupId: string;
+      fromGroupId?: string;
+    }
   | { type: "ide-select-view"; view: IdeViewId }
   | { type: "ide-toggle-minimap" }
   | { type: "ide-toggle-assistant" }
@@ -485,12 +833,20 @@ export type WorkbenchAction =
   | { type: "browser-forward" }
   | { type: "browser-reload" }
   | { type: "browser-device"; device: BrowserPreviewDevice }
-  | { type: "browser-screenshot" }
+  | { type: "browser-capture-start" }
+  | {
+      type: "browser-capture-success";
+      capture: NonNullable<BrowserPreview["latestCapture"]>;
+    }
+  | { type: "browser-capture-failure"; error: string }
   | {
       type: "browser-status";
       status: BrowserPreviewStatus;
       message: string;
       consoleErrors?: number;
+      diagnostics?: BrowserPreview["diagnostics"];
+      diagnosticsSupported?: boolean;
+      diagnosticsCaptured?: boolean;
     }
   | {
       type: "set-provider-status";
@@ -743,12 +1099,40 @@ export function workbenchReducer(
     case "set-chat-panel":
       return chatPanelState(state, action.panel);
     case "ide-open-tab": {
-      const tab = normalizeEditorTab(action.tab);
-      const tabs = state.ide.tabs.some((item) => item.path === tab.path)
-        ? state.ide.tabs.map((item) =>
+      const existingTab = state.ide.tabs.find(
+        (item) => item.path === action.tab.path,
+      );
+      const tab = normalizeEditorTab({
+        ...existingTab,
+        ...action.tab,
+        dirty: existingTab?.dirty ?? action.tab.dirty,
+        pinned: existingTab?.pinned || action.tab.pinned,
+        preview: existingTab?.pinned ? false : action.tab.preview,
+      });
+      const activeGroup = state.ide.layout.groups.find(
+        (group) => group.id === state.ide.layout.activeGroupId,
+      );
+      const previewPath =
+        tab.preview && !tab.pinned
+          ? activeGroup?.tabs.find(
+              (item) =>
+                item.path !== tab.path &&
+                item.preview &&
+                !item.pinned &&
+                !item.dirty,
+            )?.path
+          : undefined;
+      const baseTabs = previewPath
+        ? state.ide.tabs.filter((item) => item.path !== previewPath)
+        : state.ide.tabs;
+      const tabs = baseTabs.some((item) => item.path === tab.path)
+        ? baseTabs.map((item) =>
             item.path === tab.path ? { ...item, ...tab } : item,
           )
-        : [...state.ide.tabs, tab];
+        : [...baseTabs, tab];
+      const baseLayout = previewPath
+        ? removeEditorTabFromLayout(state.ide.layout, previewPath)
+        : state.ide.layout;
       return {
         ...state,
         activeDestination: "workspace",
@@ -757,18 +1141,202 @@ export function workbenchReducer(
           ...state.ide,
           tabs,
           activePath: tab.path,
-          layout: upsertPathInActiveEditorGroup(state.ide.layout, tab.path),
+          layout: syncEditorTabInLayout(
+            upsertPathInActiveEditorGroup(baseLayout, tab.path),
+            tab,
+          ),
+        },
+      };
+    }
+    case "ide-pin-tab": {
+      const existingTab = state.ide.tabs.find(
+        (tab) => tab.path === action.path,
+      );
+      if (!existingTab) {
+        return state;
+      }
+      const updates = { pinned: true, preview: false };
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          tabs: state.ide.tabs.map((tab) =>
+            tab.path === action.path ? { ...tab, ...updates } : tab,
+          ),
+          layout: updateEditorTabInLayout(
+            state.ide.layout,
+            action.path,
+            updates,
+          ),
+        },
+      };
+    }
+    case "ide-rename-path": {
+      if (
+        !action.fromPath ||
+        !action.toPath ||
+        action.fromPath === action.toPath
+      ) {
+        return state;
+      }
+      const remap = (path: string) =>
+        renameEditorPath(path, action.fromPath, action.toPath);
+      const tabs = state.ide.tabs.map((tab) => {
+        const path = remap(tab.path);
+        return path === tab.path
+          ? tab
+          : { ...tab, path, title: workspaceNameFromPath(path) };
+      });
+      const buffers = Object.fromEntries(
+        Object.entries(state.ide.buffers).map(([path, buffer]) => {
+          const nextPath = remap(path);
+          return [nextPath, { ...buffer, path: nextPath }];
+        }),
+      );
+      const groups = state.ide.layout.groups.map((group) => ({
+        ...group,
+        activePath: group.activePath ? remap(group.activePath) : undefined,
+        tabs: group.tabs.map((tab) => {
+          const path = remap(tab.path);
+          return path === tab.path
+            ? tab
+            : { ...tab, path, title: workspaceNameFromPath(path) };
+        }),
+        panes: group.panes.map((pane) => ({
+          ...pane,
+          path: pane.path ? remap(pane.path) : undefined,
+        })),
+      }));
+      const selection = state.ide.selection
+        ? { ...state.ide.selection, path: remap(state.ide.selection.path) }
+        : undefined;
+      const lastAssistantRequest = state.ide.lastAssistantRequest
+        ? {
+            ...state.ide.lastAssistantRequest,
+            path: state.ide.lastAssistantRequest.path
+              ? remap(state.ide.lastAssistantRequest.path)
+              : undefined,
+            selection: state.ide.lastAssistantRequest.selection
+              ? {
+                  ...state.ide.lastAssistantRequest.selection,
+                  path: remap(state.ide.lastAssistantRequest.selection.path),
+                }
+              : undefined,
+            visibleTabs: state.ide.lastAssistantRequest.visibleTabs.map(remap),
+          }
+        : undefined;
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activePath: state.ide.activePath
+            ? remap(state.ide.activePath)
+            : undefined,
+          buffers,
+          diagnostics: state.ide.diagnostics.map((diagnostic) => ({
+            ...diagnostic,
+            path: remap(diagnostic.path),
+          })),
+          fileDecorations: state.ide.fileDecorations.map((decoration) => ({
+            ...decoration,
+            path: remap(decoration.path),
+          })),
+          languageServers: state.ide.languageServers.map((server) => ({
+            ...server,
+            activePath: server.activePath
+              ? remap(server.activePath)
+              : undefined,
+          })),
+          lastAssistantRequest,
+          searchResults: state.ide.searchResults.map((result) => ({
+            ...result,
+            path: remap(result.path),
+          })),
+          selection,
+          tabs,
+          layout: { ...state.ide.layout, groups },
+        },
+      };
+    }
+    case "ide-delete-path": {
+      if (!action.path) {
+        return state;
+      }
+      const keepPath = (path: string) => !editorPathMatches(path, action.path);
+      const groups = state.ide.layout.groups.map((group) => {
+        const tabs = group.tabs.filter((tab) => keepPath(tab.path));
+        const activePath =
+          group.activePath && keepPath(group.activePath)
+            ? group.activePath
+            : tabs.at(-1)?.path;
+        return {
+          ...group,
+          activePath,
+          tabs,
+          panes: group.panes.map((pane) => ({
+            ...pane,
+            path: pane.path && keepPath(pane.path) ? pane.path : activePath,
+          })),
+        };
+      });
+      let activeGroupId = state.ide.layout.activeGroupId;
+      let activePath = groups.find(
+        (group) => group.id === activeGroupId,
+      )?.activePath;
+      if (!activePath) {
+        const populatedGroup = groups.find((group) => group.activePath);
+        if (populatedGroup) {
+          activeGroupId = populatedGroup.id;
+          activePath = populatedGroup.activePath;
+        }
+      }
+      const tabs = state.ide.tabs.filter((tab) => keepPath(tab.path));
+      const buffers = Object.fromEntries(
+        Object.entries(state.ide.buffers).filter(([path]) => keepPath(path)),
+      );
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          activePath,
+          buffers,
+          diagnostics: state.ide.diagnostics.filter((diagnostic) =>
+            keepPath(diagnostic.path),
+          ),
+          fileDecorations: state.ide.fileDecorations.filter((decoration) =>
+            keepPath(decoration.path),
+          ),
+          languageServers: state.ide.languageServers.filter(
+            (server) => !server.activePath || keepPath(server.activePath),
+          ),
+          lastAssistantRequest:
+            state.ide.lastAssistantRequest?.path &&
+            !keepPath(state.ide.lastAssistantRequest.path)
+              ? undefined
+              : state.ide.lastAssistantRequest,
+          searchResults: state.ide.searchResults.filter((result) =>
+            keepPath(result.path),
+          ),
+          selection:
+            state.ide.selection && keepPath(state.ide.selection.path)
+              ? state.ide.selection
+              : undefined,
+          tabs,
+          layout: { ...state.ide.layout, activeGroupId, groups },
         },
       };
     }
     case "ide-close-tab": {
-      const tabs = state.ide.tabs.filter((tab) => tab.path !== action.path);
-      const activePath =
-        state.ide.activePath === action.path
-          ? tabs[tabs.length - 1]?.path
-          : state.ide.activePath;
-      const { [action.path]: _closedBuffer, ...buffers } = state.ide.buffers;
+      if (
+        action.groupId &&
+        !state.ide.layout.groups.some((group) => group.id === action.groupId)
+      ) {
+        return state;
+      }
       const groups = state.ide.layout.groups.map((group) => {
+        if (action.groupId && group.id !== action.groupId) {
+          return group;
+        }
         const groupTabs = group.tabs.filter((tab) => tab.path !== action.path);
         const activePath =
           group.activePath === action.path
@@ -783,6 +1351,45 @@ export function workbenchReducer(
           ),
         };
       });
+      const pathStillOpen = groups.some((group) =>
+        group.tabs.some((tab) => tab.path === action.path),
+      );
+      const tabs = (
+        pathStillOpen
+          ? state.ide.tabs
+          : state.ide.tabs.filter((tab) => tab.path !== action.path)
+      ).map((tab) => {
+        if (tab.path !== action.path) {
+          return tab;
+        }
+        const ownerGroup = groups.find((group) =>
+          group.tabs.some((groupTab) => groupTab.path === tab.path),
+        );
+        return { ...tab, groupId: ownerGroup?.id };
+      });
+      let buffers = state.ide.buffers;
+      if (!pathStillOpen) {
+        const { [action.path]: _closedBuffer, ...remainingBuffers } =
+          state.ide.buffers;
+        buffers = remainingBuffers;
+      }
+      const closesActiveGroup =
+        !action.groupId || action.groupId === state.ide.layout.activeGroupId;
+      let activeGroupId = state.ide.layout.activeGroupId;
+      let activePath =
+        state.ide.activePath === action.path && closesActiveGroup
+          ? (groups.find((group) => group.id === state.ide.layout.activeGroupId)
+              ?.activePath ?? (!action.groupId ? tabs.at(-1)?.path : undefined))
+          : state.ide.activePath;
+      if (!activePath && pathStillOpen && closesActiveGroup) {
+        const ownerGroup = groups.find((group) =>
+          group.tabs.some((tab) => tab.path === action.path),
+        );
+        if (ownerGroup) {
+          activeGroupId = ownerGroup.id;
+          activePath = ownerGroup.activePath ?? action.path;
+        }
+      }
       return {
         ...state,
         ide: {
@@ -790,11 +1397,12 @@ export function workbenchReducer(
           activePath,
           buffers,
           selection:
-            state.ide.selection?.path === action.path
+            state.ide.selection?.path === action.path &&
+            activePath !== action.path
               ? undefined
               : state.ide.selection,
           tabs,
-          layout: { ...state.ide.layout, groups },
+          layout: { ...state.ide.layout, activeGroupId, groups },
         },
       };
     }
@@ -831,11 +1439,24 @@ export function workbenchReducer(
       };
     }
     case "ide-split-group": {
-      const group = createEditorGroup(
-        `group-${Date.now()}`,
+      let group = createEditorGroup(
+        nextEditorGroupId(state.ide.layout),
         action.direction === "right" ? "Side" : "Below",
         state.ide.activePath,
       );
+      const activeTab = state.ide.tabs.find(
+        (tab) => tab.path === state.ide.activePath,
+      );
+      if (activeTab) {
+        group = {
+          ...group,
+          tabs: group.tabs.map((tab) =>
+            tab.path === activeTab.path
+              ? { ...tab, ...activeTab, groupId: group.id }
+              : tab,
+          ),
+        };
+      }
       return {
         ...state,
         activeDestination: "workspace",
@@ -852,22 +1473,53 @@ export function workbenchReducer(
       };
     }
     case "ide-close-group": {
+      if (
+        !state.ide.layout.groups.some((group) => group.id === action.groupId)
+      ) {
+        return state;
+      }
       const remainingGroups = state.ide.layout.groups.filter(
         (group) => group.id !== action.groupId,
       );
       const groups =
         remainingGroups.length > 0
           ? remainingGroups
-          : [createEditorGroup("group-main", "Main", state.ide.activePath)];
+          : [createEditorGroup("group-main", "Main")];
       const activeGroupId = groups.some(
         (group) => group.id === state.ide.layout.activeGroupId,
       )
         ? state.ide.layout.activeGroupId
         : (groups[0]?.id ?? "group-main");
+      const openPaths = new Set(
+        groups.flatMap((group) => group.tabs.map((tab) => tab.path)),
+      );
+      const tabs = state.ide.tabs
+        .filter((tab) => openPaths.has(tab.path))
+        .map((tab) => {
+          const ownerGroup = groups.find((group) =>
+            group.tabs.some((groupTab) => groupTab.path === tab.path),
+          );
+          return { ...tab, groupId: ownerGroup?.id };
+        });
+      const buffers = Object.fromEntries(
+        Object.entries(state.ide.buffers).filter(([path]) =>
+          openPaths.has(path),
+        ),
+      );
+      const activePath = groups.find(
+        (group) => group.id === activeGroupId,
+      )?.activePath;
       return {
         ...state,
         ide: {
           ...state.ide,
+          activePath,
+          buffers,
+          selection:
+            state.ide.selection?.path === activePath
+              ? state.ide.selection
+              : undefined,
+          tabs,
           layout: {
             ...state.ide.layout,
             activeGroupId,
@@ -876,11 +1528,17 @@ export function workbenchReducer(
         },
       };
     }
-    case "ide-move-tab":
+    case "ide-move-tab": {
+      if (
+        !state.ide.layout.groups.some((group) => group.id === action.toGroupId)
+      ) {
+        return state;
+      }
       return {
         ...state,
         ide: {
           ...state.ide,
+          activePath: action.path,
           tabs: state.ide.tabs.map((tab) =>
             tab.path === action.path
               ? { ...tab, groupId: action.toGroupId }
@@ -890,9 +1548,11 @@ export function workbenchReducer(
             state.ide.layout,
             action.path,
             action.toGroupId,
+            action.fromGroupId,
           ),
         },
       };
+    }
     case "ide-select-view":
       return {
         ...state,
@@ -925,20 +1585,24 @@ export function workbenchReducer(
       };
     case "ide-upsert-buffer": {
       const buffer = action.buffer;
+      const dirty = buffer.status === "dirty";
       const tabs = state.ide.tabs.some((tab) => tab.path === buffer.path)
         ? state.ide.tabs.map((tab) =>
-            tab.path === buffer.path
-              ? { ...tab, dirty: buffer.status === "dirty" }
-              : tab,
+            tab.path === buffer.path ? { ...tab, dirty } : tab,
           )
         : [
             ...state.ide.tabs,
             {
               path: buffer.path,
               title: workspaceNameFromPath(buffer.path),
-              dirty: buffer.status === "dirty",
+              dirty,
             },
           ];
+      const layout = updateEditorTabInLayout(
+        upsertPathInActiveEditorGroup(state.ide.layout, buffer.path),
+        buffer.path,
+        { dirty },
+      );
       return {
         ...state,
         ide: {
@@ -948,7 +1612,7 @@ export function workbenchReducer(
             ...state.ide.buffers,
             [buffer.path]: buffer,
           },
-          layout: upsertPathInActiveEditorGroup(state.ide.layout, buffer.path),
+          layout,
           tabs,
         },
       };
@@ -973,8 +1637,19 @@ export function workbenchReducer(
             },
           },
           tabs: state.ide.tabs.map((tab) =>
-            tab.path === action.path ? { ...tab, dirty } : tab,
+            tab.path === action.path
+              ? {
+                  ...tab,
+                  dirty,
+                  pinned: dirty ? true : tab.pinned,
+                  preview: dirty ? false : tab.preview,
+                }
+              : tab,
           ),
+          layout: updateEditorTabInLayout(state.ide.layout, action.path, {
+            dirty,
+            ...(dirty ? { pinned: true, preview: false } : {}),
+          }),
         },
       };
     }
@@ -1003,6 +1678,9 @@ export function workbenchReducer(
           tabs: state.ide.tabs.map((tab) =>
             tab.path === action.path ? { ...tab, dirty: false } : tab,
           ),
+          layout: updateEditorTabInLayout(state.ide.layout, action.path, {
+            dirty: false,
+          }),
         },
       };
     }
@@ -1071,7 +1749,6 @@ export function workbenchReducer(
         ...state,
         ide: {
           ...state.ide,
-          activeView: "source-control",
           sourceControl: action.sourceControl,
           fileDecorations: decorationsFromSourceControl(action.sourceControl),
         },
@@ -1805,6 +2482,13 @@ export function workbenchReducer(
           historyIndex: nextHistory.length - 1,
           status: action.status ?? "loading",
           url: action.url,
+          consoleErrors: 0,
+          diagnostics: [],
+          diagnosticsSupported: false,
+          diagnosticsCaptured: false,
+          captureStatus: "idle",
+          captureError: undefined,
+          latestCapture: undefined,
           verificationMessage: "Checking local preview",
         },
       };
@@ -1826,21 +2510,52 @@ export function workbenchReducer(
         browserPreview: {
           ...state.browserPreview,
           status: "loading",
+          consoleErrors: 0,
+          diagnostics: [],
+          diagnosticsCaptured: false,
+          captureStatus: "idle",
+          captureError: undefined,
+          latestCapture: undefined,
           verificationMessage: "Reloading local preview",
         },
       };
     case "browser-device":
       return {
         ...state,
-        browserPreview: { ...state.browserPreview, device: action.device },
+        browserPreview: {
+          ...state.browserPreview,
+          device: action.device,
+          captureStatus: "idle",
+          captureError: undefined,
+          latestCapture: undefined,
+        },
       };
-    case "browser-screenshot":
+    case "browser-capture-start":
       return {
         ...state,
         browserPreview: {
           ...state.browserPreview,
-          screenshotCount: state.browserPreview.screenshotCount + 1,
-          verificationMessage: "Screenshot captured locally",
+          captureStatus: "capturing",
+          captureError: undefined,
+        },
+      };
+    case "browser-capture-success":
+      return {
+        ...state,
+        browserPreview: {
+          ...state.browserPreview,
+          captureStatus: "captured",
+          captureError: undefined,
+          latestCapture: action.capture,
+        },
+      };
+    case "browser-capture-failure":
+      return {
+        ...state,
+        browserPreview: {
+          ...state.browserPreview,
+          captureStatus: "failed",
+          captureError: action.error,
         },
       };
     case "browser-status":
@@ -1850,6 +2565,13 @@ export function workbenchReducer(
           ...state.browserPreview,
           consoleErrors:
             action.consoleErrors ?? state.browserPreview.consoleErrors,
+          diagnostics:
+            action.diagnostics ?? state.browserPreview.diagnostics,
+          diagnosticsSupported:
+            action.diagnosticsSupported ??
+            state.browserPreview.diagnosticsSupported,
+          diagnosticsCaptured:
+            action.diagnosticsCaptured ?? state.browserPreview.diagnosticsCaptured,
           status: action.status,
           verificationMessage: action.message,
         },
@@ -2572,7 +3294,12 @@ function defaultBrowserPreview() {
     historyIndex: 0,
     device: "desktop" as const,
     consoleErrors: 0,
-    screenshotCount: 0,
+    diagnostics: [],
+    diagnosticsSupported: false,
+    diagnosticsCaptured: false,
+    captureStatus: "idle" as const,
+    captureError: undefined,
+    latestCapture: undefined,
     status: "idle" as const,
     verificationMessage: "No preview loaded",
   };
@@ -2627,6 +3354,18 @@ function workspaceNameFromPath(path: string) {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
+export function isUserSelectedWorkspacePath(path?: string) {
+  if (!path?.trim()) {
+    return false;
+  }
+  const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  return !/^gyro-.+-\d{8,}$/i.test(name);
+}
+
+export function canSendChat(providerReady: boolean, workspacePath?: string) {
+  return providerReady && isUserSelectedWorkspacePath(workspacePath);
+}
+
 function browserHistoryState(
   state: WorkbenchState,
   historyIndex: number,
@@ -2644,6 +3383,13 @@ function browserHistoryState(
       historyIndex,
       status: "loading",
       url,
+      consoleErrors: 0,
+      diagnostics: [],
+      diagnosticsSupported: false,
+      diagnosticsCaptured: false,
+      captureStatus: "idle",
+      captureError: undefined,
+      latestCapture: undefined,
       verificationMessage: "Checking history target",
     },
   };

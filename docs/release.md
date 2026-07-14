@@ -29,9 +29,32 @@ Each release should publish:
 - Tauri updater artifacts.
 - Release notes with upgrade and rollback notes.
 
+The tagged workflow builds `gyro` natively on Apple Silicon and Intel runners.
+Each archive is named
+`gyro-cli-<version>-<target>.tar.gz`, contains the executable, license, README,
+and a `gyro.cli.archive.v1` manifest, and has a matching `.sha256` sidecar. The
+finalize job also publishes `SHA256SUMS` and a generated `gyro.rb` whose URLs
+and architecture checksums point at that immutable tag.
+
+Before upload, the workflow installs each archived CLI into an isolated
+temporary home and runs `gyro --version`, zsh completion generation, and
+`gyro doctor --json`. This catches a runnable-architecture or packaging failure
+before a draft release is assembled.
+
+The macOS job also verifies the finished `.app` and every DMG before upload.
+Developer ID authority, Apple Team identity, hardened runtime, strict nested
+signatures, Gatekeeper acceptance, and stapled notarization tickets must all be
+present. Tauri notarizes and staples the app bundle; the workflow separately
+submits and staples each signed DMG before running the shared verifier. The same
+gate can be run manually against downloaded artifacts:
+
+```bash
+pnpm release:verify-macos -- --app /path/to/Gyro.app --dmg /path/to/Gyro.dmg
+```
+
 ## Required Secrets
 
-Private-preview GitHub builds need:
+Every tagged GitHub release build needs the updater-signing secrets:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
@@ -40,7 +63,7 @@ Add `TAURI_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. The
 release workflow injects it before preflight; the matching private key remains
 only in GitHub Actions secrets.
 
-GitHub Actions release builds need:
+The same build also needs Apple Developer ID signing and notarization secrets:
 
 - `APPLE_CERTIFICATE`
 - `APPLE_CERTIFICATE_PASSWORD`
@@ -48,6 +71,19 @@ GitHub Actions release builds need:
 - `APPLE_ID`
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
+
+`pnpm release:check` fails closed in GitHub Actions when any of these eight
+secrets is absent. The release workflow passes the Apple credentials directly
+to Tauri's build step so the app bundle and DMGs are Developer ID signed and
+submitted for notarization; the updater private key separately signs the update
+archive. A successful updater signature is not evidence of Apple signing.
+
+The release toolchain is pinned to `tauri-cli 2.11.4`. That audited version
+imports the base64 `.p12` from `APPLE_CERTIFICATE` into its temporary keychain,
+uses `APPLE_CERTIFICATE_PASSWORD`, and rejects a configured
+`APPLE_SIGNING_IDENTITY` that does not match the imported certificate. Gyro does
+not duplicate that keychain implementation in workflow shell code; the job
+verifies the pinned CLI version before release configuration or signing begins.
 
 Generate the Tauri updater keypair before the first public release.
 
@@ -72,6 +108,12 @@ Publish:
 - `Casks/gyro.rb` for Gyro.app.
 - `Formula/gyro.rb` for the CLI.
 
+The checked-in Formula is a release template and intentionally contains
+checksum markers. Do not publish that template. Download `gyro.rb` from the
+draft release after both architecture jobs complete, inspect it, and copy that
+generated file to the tap. It contains the real SHA256 values calculated from
+the uploaded archives.
+
 Homebrew-installed users should update with:
 
 ```bash
@@ -81,8 +123,22 @@ brew upgrade gyro
 ```
 
 Direct app installs should use Tauri updater artifacts and refuse unsigned or invalid updates.
-The tagged workflow uploads `latest.json`, updater signatures, signed artifacts,
-DMGs, and release notes for Apple Silicon and Intel macOS.
+The tagged workflow uploads `latest.json`, updater signatures, CLI archives and
+checksums, the generated Homebrew Formula, Developer ID signed and notarized app
+artifacts, DMGs, and release notes for Apple Silicon and Intel macOS. It creates
+a draft; publishing remains an explicit decision after the manual checks below.
+Runs are serialized per tag. A rerun may refresh assets and notes only while the
+release is still a draft and fails before upload if that tag has already been
+published.
+
+Direct CLI users can verify an archive before installation:
+
+```bash
+shasum -a 256 -c gyro-cli-<version>-<target>.tar.gz.sha256
+tar -xzf gyro-cli-<version>-<target>.tar.gz
+./gyro --version
+./gyro doctor
+```
 
 ## Preflight
 
@@ -94,14 +150,22 @@ pnpm doctor
 pnpm release:check
 pnpm check
 cargo test --workspace
+cargo build -p gyro-cli
+pnpm release:cli:check
 cargo run -p gyro-cli -- doctor --json
+node scripts/package-cli-release.mjs --help
 pnpm --filter @gyro-dev/desktop tauri build
 ```
 
 Manual checks:
 
 - Install DMG on a clean macOS user.
+- Verify `codesign --verify --deep --strict`, `spctl --assess --type execute`,
+  and `xcrun stapler validate` against both architecture app bundles and DMGs;
+  this repeats the automated upload gate on clean hardware.
 - Run `gyro doctor`.
+- Verify both CLI checksum sidecars against `SHA256SUMS` and install the
+  generated Formula from the draft release on matching hardware.
 - Create a CLI session and open it in Gyro.app.
 - Create an app session and read it from CLI.
 - Verify updater signature failure is rejected using a deliberately invalid manifest in a staging channel.

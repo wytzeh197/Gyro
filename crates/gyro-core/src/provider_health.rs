@@ -237,6 +237,11 @@ pub fn provider_runtime_status_from_output(output: &str) -> &'static str {
     } else if normalized.contains("not authenticated")
         || normalized.contains("not logged in")
         || normalized.contains("logged out")
+        || normalized.contains("authentication_failed")
+        || normalized.contains("authentication failed")
+        || normalized.contains("failed to authenticate")
+        || normalized.contains("invalid authentication credentials")
+        || normalized.contains("unauthorized")
         || normalized.contains("\"loggedin\": false")
         || normalized.contains("\"loggedin\":false")
         || normalized.contains("auth required")
@@ -399,6 +404,16 @@ mod tests {
         assert!(
             node_version_key(Path::new("/tmp/v22.10.1"))
                 > node_version_key(Path::new("/tmp/v20.18.0"))
+        );
+        assert_eq!(
+            provider_runtime_status_from_output(
+                r#"{"error":"authentication_failed","message":"Invalid authentication credentials"}"#
+            ),
+            "not-logged-in"
+        );
+        assert_eq!(
+            provider_runtime_status_from_output("Failed to authenticate: unauthorized"),
+            "not-logged-in"
         );
     }
 }

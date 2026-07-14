@@ -113,6 +113,16 @@ pub fn run_command<F>(
 where
     F: FnMut(&ExecutionChunk),
 {
+    if cancellation.is_cancelled() {
+        return Ok(ExecutionOutcome {
+            termination: ExecutionTermination::Cancelled,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            duration_ms: 0,
+        });
+    }
     let mut command = Command::new(&request.program);
     command
         .args(&request.args)
@@ -526,6 +536,18 @@ mod tests {
         assert_eq!(outcome.termination, ExecutionTermination::Cancelled);
         assert!(outcome.stdout.contains("started"));
         assert!(outcome.duration_ms < 2_000);
+    }
+
+    #[test]
+    fn cancellation_before_start_never_spawns_the_command() {
+        let request = ExecutionRequest::new("/definitely/missing/gyro-provider");
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+
+        let outcome = run_command(request, cancellation, |_| {}).unwrap();
+
+        assert_eq!(outcome.termination, ExecutionTermination::Cancelled);
+        assert_eq!(outcome.duration_ms, 0);
     }
 
     #[test]

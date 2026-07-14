@@ -17,6 +17,9 @@ pub struct DoctorCheck {
     pub label: String,
     pub status: DoctorStatus,
     pub message: String,
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -52,18 +55,30 @@ fn command_check(command: &str, label: &str, args: &[&str]) -> DoctorCheck {
             label: label.into(),
             status: DoctorStatus::Pass,
             message: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            required: true,
+            next: None,
         },
         Ok(output) => DoctorCheck {
             id: command.into(),
             label: label.into(),
             status: DoctorStatus::Fail,
             message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            required: true,
+            next: Some(format!(
+                "install {label} and confirm `{command} {}` succeeds",
+                args.join(" ")
+            )),
         },
         Err(error) => DoctorCheck {
             id: command.into(),
             label: label.into(),
             status: DoctorStatus::Fail,
             message: error.to_string(),
+            required: true,
+            next: Some(format!(
+                "install {label} and confirm `{command} {}` succeeds",
+                args.join(" ")
+            )),
         },
     }
 }
@@ -75,12 +90,16 @@ fn shell_check() -> DoctorCheck {
             label: "Default shell".into(),
             status: DoctorStatus::Pass,
             message: shell,
+            required: false,
+            next: None,
         },
         Err(_) => DoctorCheck {
             id: "shell".into(),
             label: "Default shell".into(),
             status: DoctorStatus::Warn,
             message: "SHELL is not set".into(),
+            required: false,
+            next: Some("set `SHELL` to your preferred shell, such as `/bin/zsh`".into()),
         },
     }
 }
@@ -106,8 +125,13 @@ fn app_install_check() -> DoctorCheck {
             DoctorStatus::Warn
         },
         message: installed_path
+            .as_ref()
             .map(|path| format!("Installed at {}", path.display()))
             .unwrap_or_else(|| "Gyro.app was not found in /Applications or ~/Applications".into()),
+        required: false,
+        next: installed_path.is_none().then(|| {
+            "install Gyro.app for visual handoff, or continue using the CLI on its own".into()
+        }),
     }
 }
 
@@ -121,6 +145,8 @@ fn update_source_check() -> DoctorCheck {
         label: "Update source".into(),
         status: DoctorStatus::Pass,
         message: "Stable via GitHub Releases".into(),
+        required: true,
+        next: None,
     }
 }
 
@@ -136,6 +162,10 @@ fn provider_key_check(config: &GyroConfig) -> DoctorCheck {
             label: "Model provider".into(),
             status: DoctorStatus::Warn,
             message: "No model provider is enabled yet".into(),
+            required: false,
+            next: Some(
+                "run `gyro config enable-provider openai` or connect a provider in Gyro.app".into(),
+            ),
         };
     }
 
@@ -152,6 +182,8 @@ fn provider_key_check(config: &GyroConfig) -> DoctorCheck {
             "Enabled provider profiles use external auth: {}",
             names.join(", ")
         ),
+        required: false,
+        next: None,
     }
 }
 
@@ -162,19 +194,27 @@ fn storage_check(paths: &GyroPaths) -> DoctorCheck {
             label: "Local storage".into(),
             status: DoctorStatus::Pass,
             message: paths.base_dir.display().to_string(),
+            required: true,
+            next: None,
         },
         Err(error) => DoctorCheck {
             id: "storage".into(),
             label: "Local storage".into(),
             status: DoctorStatus::Fail,
             message: error.to_string(),
+            required: true,
+            next: Some(format!(
+                "check write permissions for {} and retry `gyro doctor`",
+                paths.base_dir.display()
+            )),
         },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::first_installed_app;
+    use super::{first_installed_app, provider_key_check, DoctorStatus};
+    use crate::GyroConfig;
     use std::fs;
 
     #[test]
@@ -188,5 +228,17 @@ mod tests {
 
         assert_eq!(installed, Some(user_app));
         fs::remove_dir_all(root).expect("remove doctor fixture");
+    }
+
+    #[test]
+    fn optional_provider_check_includes_safe_remediation() {
+        let check = provider_key_check(&GyroConfig::default());
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(!check.required);
+        assert_eq!(
+            check.next.as_deref(),
+            Some("run `gyro config enable-provider openai` or connect a provider in Gyro.app")
+        );
     }
 }

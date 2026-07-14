@@ -1,13 +1,23 @@
+use anyhow::Context;
 use gyro_core::{
-    create_worktree, ipc::AppNotification, logout_account as account_logout,
-    refresh_account_session as account_refresh_session, start_account_login as account_start_login,
-    stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
-    Automation, AutomationStatus, AutomationStore, AutomationTriageState, CancellationToken,
-    CreateAutomationRequest, CreateSessionContext, ExecutionRequest, ExecutionStream,
-    ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus, ProviderDiagnosticsPayload,
-    ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService, ProviderRunPayload,
-    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode,
+    begin_provider_mutation_transaction, create_worktree, decide_mutation_proposal,
+    ipc::{
+        acknowledgement_for, request_desktop_provider_approval, versions_compatible,
+        AppNotification, DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
+        DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+    },
+    logout_account as account_logout, mutation_approval_payload,
+    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
+    recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
+    start_account_login as account_start_login, stored_account_session as account_stored_session,
+    AccountSessionState, AppNotificationKind, Automation, AutomationRunStatus, AutomationStatus,
+    AutomationStore, AutomationTriageState, CancellationToken, CreateAutomationRequest,
+    CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
+    GyroPaths, HarnessRunStatus, MutationDecision, MutationProposal, PendingProviderMutationCommit,
+    PreparedProviderMutationTransaction, ProviderDiagnosticsPayload, ProviderFileChange,
+    ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
+    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
+    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
 };
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -18,11 +28,12 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    mpsc, Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc, Arc, Condvar, Mutex,
 };
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
+use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -39,12 +50,26 @@ const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 4;
+const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
+const MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS: usize = 400;
+const MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS: usize = 8_000;
+const BROWSER_PREVIEW_DIAGNOSTIC_TIMEOUT: Duration = Duration::from_secs(4);
+const BROWSER_PREVIEW_CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_BROWSER_PREVIEW_CAPTURE_BYTES: usize = 25 * 1024 * 1024;
+const MAX_BROWSER_PREVIEW_CAPTURES: usize = 20;
 const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 1024 * 1024;
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
+const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
+const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
+const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const AUTOMATION_LEASE_SECONDS: i64 = 45 * 60;
+const AUTOMATION_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+const AUTOMATION_RESULT_MARKER_PREFIX: &str = "<!-- gyro-automation-result:";
+const AUTOMATION_RESULT_MARKER_SUFFIX: &str = "-->";
 const TEXT_TRUNCATION_SUFFIX: &str = "...";
 const GUI_CLI_PATHS: &[&str] = &[
     "/opt/homebrew/bin",
@@ -61,9 +86,211 @@ struct ProviderCancellationManager {
 }
 
 #[derive(Default)]
+struct ProviderApprovalManager {
+    pending: Mutex<HashMap<String, PendingProviderApproval>>,
+}
+
+struct PendingProviderApproval {
+    sender: mpsc::Sender<ProviderApprovalDecision>,
+    approval_id: Uuid,
+    session_id: Uuid,
+    turn_id: Option<Uuid>,
+    payload: serde_json::Value,
+    file_transaction: Option<PreparedProviderMutationTransaction>,
+}
+
+#[derive(Clone, Debug)]
+struct ProviderApprovalContext {
+    session_id: String,
+    turn_id: Option<String>,
+    provider_id: String,
+    provider_label: Option<String>,
+}
+
+impl From<&ProviderChatRequest> for ProviderApprovalContext {
+    fn from(request: &ProviderChatRequest) -> Self {
+        Self {
+            session_id: request.session_id.clone(),
+            turn_id: request.turn_id.clone(),
+            provider_id: request.provider_id.clone(),
+            provider_label: request.provider_label.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProviderApprovalDecision {
+    Approve,
+    Reject,
+    AppliedByGyro,
+}
+
+#[derive(Default)]
 struct ProviderRunControl {
     cancellation: CancellationToken,
     next_event_sequence: AtomicU64,
+}
+
+#[derive(Default)]
+struct AutomationSchedulerControl {
+    state: Mutex<AutomationSchedulerState>,
+    wake: Condvar,
+}
+
+#[derive(Default)]
+struct AutomationSchedulerState {
+    generation: u64,
+    running_sessions: HashMap<Uuid, String>,
+}
+
+struct AutomationLeaseHeartbeat {
+    stopped: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+struct AutomationSchedulerClock {
+    last_effective: chrono::DateTime<chrono::Utc>,
+    last_sample: Instant,
+}
+
+fn automation_scheduler_effective_now(
+    previous: chrono::DateTime<chrono::Utc>,
+    monotonic_elapsed: Duration,
+    observed_wall: chrono::DateTime<chrono::Utc>,
+) -> chrono::DateTime<chrono::Utc> {
+    let elapsed = chrono::Duration::from_std(monotonic_elapsed).unwrap_or_default();
+    observed_wall.max(previous + elapsed)
+}
+
+impl AutomationSchedulerClock {
+    fn new(observed_wall: chrono::DateTime<chrono::Utc>) -> Self {
+        Self {
+            last_effective: observed_wall,
+            last_sample: Instant::now(),
+        }
+    }
+
+    fn now(&mut self) -> chrono::DateTime<chrono::Utc> {
+        let sample = Instant::now();
+        let effective = automation_scheduler_effective_now(
+            self.last_effective,
+            sample.duration_since(self.last_sample),
+            chrono::Utc::now(),
+        );
+        self.last_effective = effective;
+        self.last_sample = sample;
+        effective
+    }
+}
+
+impl AutomationLeaseHeartbeat {
+    fn start(
+        paths: GyroPaths,
+        automation_id: Uuid,
+        lease_owner: String,
+        lease_seconds: i64,
+        interval: Duration,
+    ) -> Self {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let worker_stopped = stopped.clone();
+        let worker = std::thread::spawn(move || {
+            let store = match AutomationStore::open(paths) {
+                Ok(store) => store,
+                Err(error) => {
+                    eprintln!("could not start automation lease heartbeat: {error}");
+                    return;
+                }
+            };
+            while !worker_stopped.load(Ordering::SeqCst) {
+                std::thread::park_timeout(interval);
+                if worker_stopped.load(Ordering::SeqCst) {
+                    break;
+                }
+                match store.renew_automation_lease(
+                    automation_id,
+                    lease_owner.clone(),
+                    lease_seconds,
+                ) {
+                    Ok(Some(_)) => {}
+                    Ok(None) => break,
+                    Err(error) => eprintln!(
+                        "could not renew automation lease {}: {}",
+                        automation_id,
+                        gyro_core::security::redact_secrets(&error.to_string())
+                    ),
+                }
+            }
+        });
+        Self {
+            stopped,
+            worker: Some(worker),
+        }
+    }
+
+    fn stop(&mut self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for AutomationLeaseHeartbeat {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+impl AutomationSchedulerControl {
+    fn wake(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.generation = state.generation.wrapping_add(1);
+            self.wake.notify_all();
+        }
+    }
+
+    fn generation(&self) -> u64 {
+        self.state
+            .lock()
+            .map(|state| state.generation)
+            .unwrap_or_default()
+    }
+
+    fn wait_for_change(&self, observed_generation: u64, timeout: Duration) -> u64 {
+        let Ok(state) = self.state.lock() else {
+            std::thread::sleep(timeout);
+            return observed_generation;
+        };
+        if state.generation != observed_generation {
+            return state.generation;
+        }
+        self.wake
+            .wait_timeout_while(state, timeout, |state| {
+                state.generation == observed_generation
+            })
+            .map(|(state, _)| state.generation)
+            .unwrap_or(observed_generation)
+    }
+
+    fn register(&self, automation_id: Uuid, session_id: String) {
+        if let Ok(mut state) = self.state.lock() {
+            state.running_sessions.insert(automation_id, session_id);
+        }
+    }
+
+    fn unregister(&self, automation_id: Uuid) {
+        if let Ok(mut state) = self.state.lock() {
+            state.running_sessions.remove(&automation_id);
+        }
+    }
+
+    fn session_for(&self, automation_id: Uuid) -> Option<String> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.running_sessions.get(&automation_id).cloned())
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -100,6 +327,38 @@ struct WorkspaceFileWriteRequest {
     path: String,
     content: String,
     expected_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileMutationProposalRequest {
+    session_id: String,
+    turn_id: Option<String>,
+    path: String,
+    content: String,
+    expected_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileMutationDecisionRequest {
+    proposal_id: String,
+    decision: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileMutationDecisionResult {
+    proposal: MutationProposal,
+    event: SessionEvent,
+    file: Option<WorkspaceFileContent>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderApprovalDecisionRequest {
+    approval_id: String,
+    decision: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -178,6 +437,22 @@ struct SourceControlStatus {
     files: Vec<SourceControlFile>,
     last_checked_at: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitBranchCatalog {
+    available: bool,
+    current: Option<String>,
+    branches: Vec<String>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCheckoutBranchRequest {
+    workspace_path: String,
+    branch: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -357,6 +632,7 @@ impl Drop for DebugAdapterProcess {
 struct TerminalPaneRequest {
     pane_id: String,
     title: String,
+    profile_id: Option<String>,
     command: String,
     args: Vec<String>,
     workspace_path: Option<String>,
@@ -371,6 +647,7 @@ struct TerminalPaneRequest {
 struct TerminalPaneSnapshot {
     pane_id: String,
     title: String,
+    profile_id: Option<String>,
     command: String,
     output: String,
     status: String,
@@ -484,12 +761,49 @@ struct BrowserPreviewCheckRequest {
     url: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPreviewCaptureRequest {
+    url: String,
+    device: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPreviewCapture {
+    path: String,
+    filename: String,
+    width: u32,
+    height: u32,
+    created_at: String,
+}
+
+#[cfg(target_os = "macos")]
+struct BrowserPreviewSnapshot {
+    png: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPreviewDiagnostic {
+    kind: String,
+    message: String,
+    source: Option<String>,
+    line: Option<u32>,
+    column: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserPreviewCheck {
     reachable: bool,
     status_code: Option<u16>,
     message: String,
+    diagnostics: Vec<BrowserPreviewDiagnostic>,
+    diagnostics_supported: bool,
+    diagnostics_captured: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -708,6 +1022,33 @@ impl TerminalProcessManager {
         Ok(snapshot_terminal_process(process))
     }
 
+    fn has_foreground_job(&self, pane_id: &str) -> anyhow::Result<bool> {
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
+        let process = processes
+            .get_mut(pane_id)
+            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
+        let snapshot = snapshot_terminal_process(process);
+        if snapshot.status != "running" {
+            return Ok(false);
+        }
+
+        #[cfg(unix)]
+        {
+            let shell_pid = process.child.process_id().map(|pid| pid as i32);
+            let foreground_pid = process.master.process_group_leader();
+            return Ok(match (shell_pid, foreground_pid) {
+                (Some(shell_pid), Some(foreground_pid)) => foreground_pid != shell_pid,
+                _ => true,
+            });
+        }
+
+        #[cfg(not(unix))]
+        Ok(true)
+    }
+
     fn stop(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
         let mut processes = self
             .processes
@@ -800,12 +1141,21 @@ fn create_desktop_session_blocking(
     reasoning_effort: Option<String>,
 ) -> Result<Session, String> {
     let store = open_store()?;
+    let branch = if workspace_path.trim().is_empty() {
+        "main".into()
+    } else {
+        git_branch_catalog_impl(&workspace_path)
+            .ok()
+            .and_then(|catalog| catalog.current)
+            .unwrap_or_else(|| "main".into())
+    };
     store
         .create_session_with_context(
             PathBuf::from(workspace_path),
             SessionOrigin::Desktop,
             title,
             CreateSessionContext {
+                branch,
                 provider_id,
                 provider_label,
                 model_id,
@@ -978,10 +1328,17 @@ fn list_due_automations_blocking() -> Result<Vec<Automation>, String> {
 }
 
 #[tauri::command]
-async fn create_automation(draft: CreateAutomationRequest) -> Result<Automation, String> {
-    tauri::async_runtime::spawn_blocking(move || create_automation_blocking(draft))
-        .await
-        .map_err(|error| format!("automation create worker failed: {error}"))?
+async fn create_automation(
+    app: tauri::AppHandle,
+    draft: CreateAutomationRequest,
+) -> Result<Automation, String> {
+    let automation =
+        tauri::async_runtime::spawn_blocking(move || create_automation_blocking(draft))
+            .await
+            .map_err(|error| format!("automation create worker failed: {error}"))??;
+    emit_automation_update(&app, &automation);
+    app.state::<AutomationSchedulerControl>().wake();
+    Ok(automation)
 }
 
 fn create_automation_blocking(draft: CreateAutomationRequest) -> Result<Automation, String> {
@@ -991,14 +1348,23 @@ fn create_automation_blocking(draft: CreateAutomationRequest) -> Result<Automati
 
 #[tauri::command]
 async fn set_automation_status(
+    app: tauri::AppHandle,
     automation_id: String,
     status: AutomationStatus,
 ) -> Result<Automation, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let parsed_id = parse_uuid(&automation_id)?;
+    let should_cancel = status != AutomationStatus::Current;
+    let automation = tauri::async_runtime::spawn_blocking(move || {
         set_automation_status_blocking(automation_id, status)
     })
     .await
-    .map_err(|error| format!("automation status worker failed: {error}"))?
+    .map_err(|error| format!("automation status worker failed: {error}"))??;
+    if should_cancel {
+        cancel_scheduled_automation(&app, parsed_id);
+    }
+    emit_automation_update(&app, &automation);
+    app.state::<AutomationSchedulerControl>().wake();
+    Ok(automation)
 }
 
 fn set_automation_status_blocking(
@@ -1014,17 +1380,24 @@ fn set_automation_status_blocking(
 }
 
 #[tauri::command]
-async fn run_automation(automation_id: String, summary: String) -> Result<Automation, String> {
-    tauri::async_runtime::spawn_blocking(move || run_automation_blocking(automation_id, summary))
-        .await
-        .map_err(|error| format!("automation run worker failed: {error}"))?
+async fn run_automation(
+    app: tauri::AppHandle,
+    automation_id: String,
+) -> Result<Automation, String> {
+    let automation =
+        tauri::async_runtime::spawn_blocking(move || run_automation_blocking(automation_id))
+            .await
+            .map_err(|error| format!("automation queue worker failed: {error}"))??;
+    emit_automation_update(&app, &automation);
+    app.state::<AutomationSchedulerControl>().wake();
+    Ok(automation)
 }
 
-fn run_automation_blocking(automation_id: String, summary: String) -> Result<Automation, String> {
+fn run_automation_blocking(automation_id: String) -> Result<Automation, String> {
     let store = open_automation_store()?;
     let automation_id = parse_uuid(&automation_id)?;
     store
-        .record_automation_run(automation_id, summary)
+        .queue_automation_now(automation_id)
         .map_err(to_string)?
         .ok_or_else(|| "automation not found".into())
 }
@@ -1115,6 +1488,534 @@ fn triage_automation_blocking(
         .ok_or_else(|| "automation not found".into())
 }
 
+fn emit_automation_update(app: &tauri::AppHandle, automation: &Automation) {
+    if let Err(error) = app.emit(AUTOMATION_UPDATED_EVENT, automation) {
+        eprintln!("could not emit automation update: {error}");
+    }
+}
+
+fn automation_notification_content(
+    automation: &Automation,
+) -> Option<(&'static str, &'static str)> {
+    match automation.run_history.first()?.status {
+        AutomationRunStatus::Passed => Some((
+            "Gyro automation finished",
+            "A scheduled automation completed. Open Gyro to review the result.",
+        )),
+        AutomationRunStatus::Failed => Some((
+            "Gyro automation needs attention",
+            "A scheduled automation failed. Open Gyro to review the result.",
+        )),
+        AutomationRunStatus::Queued
+        | AutomationRunStatus::Running
+        | AutomationRunStatus::Stopped => None,
+    }
+}
+
+fn should_show_automation_notification(window_visible: bool, window_focused: bool) -> bool {
+    !window_visible || !window_focused
+}
+
+fn notification_permission_allows_delivery(permission: PermissionState) -> bool {
+    permission == PermissionState::Granted
+}
+
+#[tauri::command]
+async fn get_notification_permission(app: tauri::AppHandle) -> Result<String, String> {
+    app.notification()
+        .permission_state()
+        .map(|permission| permission.to_string())
+        .map_err(to_string)
+}
+
+#[tauri::command]
+async fn test_notification(app: tauri::AppHandle) -> Result<String, String> {
+    let notifications = app.notification();
+    let mut permission = notifications.permission_state().map_err(to_string)?;
+    if matches!(
+        permission,
+        PermissionState::Prompt | PermissionState::PromptWithRationale
+    ) {
+        permission = notifications.request_permission().map_err(to_string)?;
+    }
+    if !notification_permission_allows_delivery(permission) {
+        return Ok(permission.to_string());
+    }
+    notifications
+        .builder()
+        .title("Gyro notifications are ready")
+        .body("Automation outcomes can now appear while Gyro is in the background.")
+        .show()
+        .map_err(to_string)?;
+    Ok(permission.to_string())
+}
+
+fn notify_automation_outcome(app: &tauri::AppHandle, automation: &Automation) {
+    let Some((title, body)) = automation_notification_content(automation) else {
+        return;
+    };
+    let (window_visible, window_focused) = app
+        .get_webview_window("main")
+        .map(|window| {
+            (
+                window.is_visible().unwrap_or(false),
+                window.is_focused().unwrap_or(false),
+            )
+        })
+        .unwrap_or((false, false));
+    if !should_show_automation_notification(window_visible, window_focused) {
+        return;
+    }
+    let Ok(permission) = app.notification().permission_state() else {
+        return;
+    };
+    if !notification_permission_allows_delivery(permission) {
+        return;
+    }
+    if let Err(error) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("could not show automation notification: {error}");
+    }
+}
+
+fn cancel_scheduled_automation(app: &tauri::AppHandle, automation_id: Uuid) {
+    let Some(session_id) = app
+        .state::<AutomationSchedulerControl>()
+        .session_for(automation_id)
+    else {
+        return;
+    };
+    if let Ok(flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        if let Some(control) = flags.get(&session_id) {
+            control.cancellation.cancel();
+        }
+    }
+}
+
+fn start_automation_scheduler(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let paths = match GyroPaths::for_current_user() {
+            Ok(paths) => paths,
+            Err(error) => {
+                eprintln!("could not resolve automation scheduler paths: {error}");
+                return;
+            }
+        };
+        let lease_owner = format!("desktop-{}-{}", std::process::id(), Uuid::new_v4());
+        let mut observed_generation = app.state::<AutomationSchedulerControl>().generation();
+        let mut clock = AutomationSchedulerClock::new(chrono::Utc::now());
+
+        loop {
+            let now = clock.now();
+            if let Err(error) =
+                recover_automation_scheduler_leases_with(&paths, now, |automation| {
+                    emit_automation_update(&app, automation);
+                    notify_automation_outcome(&app, automation);
+                })
+            {
+                eprintln!("could not recover automation leases: {error}");
+            }
+            match run_automation_scheduler_once_at_with(&paths, &lease_owner, now, |automation| {
+                emit_automation_update(&app, automation);
+                execute_claimed_automation(&app, &paths, automation)
+            }) {
+                Ok(Some(automation)) => {
+                    emit_automation_update(&app, &automation);
+                    notify_automation_outcome(&app, &automation);
+                    continue;
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("automation scheduler iteration failed: {error}"),
+            }
+            observed_generation = app
+                .state::<AutomationSchedulerControl>()
+                .wait_for_change(observed_generation, AUTOMATION_SCHEDULER_POLL_INTERVAL);
+        }
+    });
+}
+
+fn recover_automation_scheduler_leases_with<F>(
+    paths: &GyroPaths,
+    now: chrono::DateTime<chrono::Utc>,
+    mut on_recovered: F,
+) -> Result<usize, String>
+where
+    F: FnMut(&Automation),
+{
+    let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
+    let expired_ids = store
+        .list_automations()
+        .map_err(to_string)?
+        .into_iter()
+        .filter(|automation| {
+            automation
+                .lease_expires_at
+                .is_some_and(|expires_at| expires_at <= now)
+        })
+        .map(|automation| automation.id)
+        .collect::<Vec<_>>();
+    if expired_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let recovered = store
+        .recover_expired_automation_leases(now)
+        .map_err(to_string)?;
+    for automation_id in expired_ids {
+        let Some(automation) = store.get_automation(automation_id).map_err(to_string)? else {
+            continue;
+        };
+        if automation.lease_owner.is_none() && automation.last_run_at == Some(now) {
+            on_recovered(&automation);
+        }
+    }
+    Ok(recovered)
+}
+
+#[cfg(test)]
+fn run_automation_scheduler_once_with<F>(
+    paths: &GyroPaths,
+    lease_owner: &str,
+    execute: F,
+) -> Result<Option<Automation>, String>
+where
+    F: FnOnce(&Automation) -> Result<String, String>,
+{
+    run_automation_scheduler_once_at_with(paths, lease_owner, chrono::Utc::now(), execute)
+}
+
+fn run_automation_scheduler_once_at_with<F>(
+    paths: &GyroPaths,
+    lease_owner: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    execute: F,
+) -> Result<Option<Automation>, String>
+where
+    F: FnOnce(&Automation) -> Result<String, String>,
+{
+    run_automation_scheduler_once_at_with_heartbeat_interval(
+        paths,
+        lease_owner,
+        now,
+        AUTOMATION_LEASE_HEARTBEAT_INTERVAL,
+        execute,
+    )
+}
+
+#[cfg(test)]
+fn run_automation_scheduler_once_with_heartbeat_interval<F>(
+    paths: &GyroPaths,
+    lease_owner: &str,
+    heartbeat_interval: Duration,
+    execute: F,
+) -> Result<Option<Automation>, String>
+where
+    F: FnOnce(&Automation) -> Result<String, String>,
+{
+    run_automation_scheduler_once_at_with_heartbeat_interval(
+        paths,
+        lease_owner,
+        chrono::Utc::now(),
+        heartbeat_interval,
+        execute,
+    )
+}
+
+fn run_automation_scheduler_once_at_with_heartbeat_interval<F>(
+    paths: &GyroPaths,
+    lease_owner: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    heartbeat_interval: Duration,
+    execute: F,
+) -> Result<Option<Automation>, String>
+where
+    F: FnOnce(&Automation) -> Result<String, String>,
+{
+    let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
+    let Some(claimed) = store
+        .claim_due_automation_at(lease_owner, AUTOMATION_LEASE_SECONDS, now)
+        .map_err(to_string)?
+    else {
+        return Ok(None);
+    };
+
+    let heartbeat = AutomationLeaseHeartbeat::start(
+        paths.clone(),
+        claimed.id,
+        lease_owner.to_string(),
+        AUTOMATION_LEASE_SECONDS,
+        heartbeat_interval,
+    );
+    let execution_result = execute(&claimed);
+    drop(heartbeat);
+
+    let (status, summary, pause_for_configuration, stop_condition_met) = match execution_result {
+        Ok(summary) => match parse_automation_execution_outcome(&claimed, &summary) {
+            Ok(outcome) => (
+                AutomationRunStatus::Passed,
+                outcome.summary,
+                false,
+                outcome.stop_condition_met,
+            ),
+            Err(error) => (AutomationRunStatus::Failed, error, false, None),
+        },
+        Err(error) if error.contains("chat cancelled") => (
+            AutomationRunStatus::Stopped,
+            "Automation stopped before completion".into(),
+            false,
+            None,
+        ),
+        Err(error) => {
+            let error = gyro_core::security::redact_secrets(&error);
+            let pause = error.starts_with("configuration:");
+            (AutomationRunStatus::Failed, error, pause, None)
+        }
+    };
+    let updated = store
+        .finish_automation_lease_with_stop_condition(
+            claimed.id,
+            lease_owner,
+            status,
+            bounded_automation_summary(&summary),
+            stop_condition_met,
+        )
+        .map_err(to_string)?
+        .ok_or_else(|| "claimed automation disappeared before completion".to_string())?;
+    if pause_for_configuration {
+        return store
+            .set_automation_status(updated.id, AutomationStatus::Paused)
+            .map_err(to_string);
+    }
+    Ok(Some(updated))
+}
+
+fn execute_claimed_automation(
+    app: &tauri::AppHandle,
+    paths: &GyroPaths,
+    automation: &Automation,
+) -> Result<String, String> {
+    let workspace_path = resolve_automation_workspace(paths, automation)?;
+    let provider_id = automation
+        .execution
+        .provider_id
+        .clone()
+        .unwrap_or_else(|| provider_id_for_automation_label(&automation.provider).into());
+    if provider_adapter_for(&provider_id).kind == ProviderAdapterKind::ReadinessOnly {
+        return Err(format!(
+            "configuration: {} cannot execute automation runs",
+            automation.provider
+        ));
+    }
+    let provider_label = automation
+        .execution
+        .provider_label
+        .clone()
+        .or_else(|| Some(automation.provider.clone()));
+    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let session = store
+        .create_session_with_context(
+            &workspace_path,
+            SessionOrigin::Desktop,
+            format!("Automation: {}", automation.title),
+            CreateSessionContext {
+                workspace_mode: automation.workspace_mode.clone(),
+                branch: automation.branch.clone(),
+                worktree_name: automation.worktree_name.clone(),
+                provider_id: Some(provider_id.clone()),
+                provider_label: provider_label.clone(),
+                model_id: automation.execution.model_id.clone(),
+                model_label: automation.execution.model_label.clone(),
+                reasoning_effort: automation.execution.reasoning_effort.clone(),
+            },
+        )
+        .map_err(to_string)?;
+    emit_automation_update(app, automation);
+    let message = automation_provider_prompt(automation);
+    let user_event = store
+        .append_user_turn_message(
+            session.id,
+            message.clone(),
+            serde_json::json!({
+                "surface": "automation",
+                "automationId": automation.id,
+                "schedule": automation.schedule,
+            }),
+        )
+        .map_err(to_string)?;
+    let session_id = session.id.to_string();
+    let control = Arc::new(ProviderRunControl::default());
+    {
+        let cancellation_manager = app.state::<ProviderCancellationManager>();
+        let mut flags = cancellation_manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        flags.insert(session_id.clone(), control);
+    }
+    app.state::<AutomationSchedulerControl>()
+        .register(automation.id, session_id.clone());
+
+    let request = ProviderChatRequest {
+        session_id: session_id.clone(),
+        message,
+        turn_id: user_event.turn_id.map(|id| id.to_string()),
+        provider_id,
+        provider_label,
+        model_id: automation.execution.model_id.clone(),
+        model_label: automation.execution.model_label.clone(),
+        reasoning_effort: automation.execution.reasoning_effort.clone(),
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        suggest_title: false,
+        workspace_path: Some(workspace_path.display().to_string()),
+        mode: ChatMode::Normal,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+    };
+    let result = run_provider_chat_blocking(app.clone(), request)
+        .map(|response| response.assistant_event.message);
+    app.state::<AutomationSchedulerControl>()
+        .unregister(automation.id);
+    if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        flags.remove(&session_id);
+    }
+    result
+}
+
+fn resolve_automation_workspace(
+    paths: &GyroPaths,
+    automation: &Automation,
+) -> Result<PathBuf, String> {
+    let source = automation
+        .execution
+        .workspace_path
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "configuration: choose a workspace for this automation".to_string())?;
+    let source = PathBuf::from(source).canonicalize().map_err(|_| {
+        "configuration: the automation workspace is no longer available".to_string()
+    })?;
+    if !source.is_dir() {
+        return Err("configuration: the automation workspace is not a folder".into());
+    }
+    if automation.workspace_mode == SessionWorkspaceMode::Local {
+        return Ok(source);
+    }
+
+    let worktree_name = automation
+        .worktree_name
+        .as_deref()
+        .ok_or_else(|| "configuration: the automation has no worktree name".to_string())?;
+    let expected = paths.worktrees_dir.join(worktree_name);
+    if expected.exists() {
+        let expected = expected
+            .canonicalize()
+            .map_err(|_| "configuration: the automation worktree is unavailable".to_string())?;
+        let root = paths
+            .worktrees_dir
+            .canonicalize()
+            .map_err(|_| "configuration: the Gyro worktree root is unavailable".to_string())?;
+        if !expected.starts_with(root) || !expected.is_dir() {
+            return Err("configuration: the automation worktree is unsafe".into());
+        }
+        return Ok(expected);
+    }
+    create_worktree(
+        paths,
+        source,
+        automation.branch.clone(),
+        Some(worktree_name.to_string()),
+    )
+    .map(|plan| plan.worktree_path)
+    .map_err(|error| format!("configuration: could not create automation worktree: {error}"))
+}
+
+fn provider_id_for_automation_label(label: &str) -> &'static str {
+    let normalized = label.to_ascii_lowercase();
+    if normalized.contains("claude") || normalized.contains("anthropic") {
+        "anthropic"
+    } else {
+        "openai"
+    }
+}
+
+fn automation_provider_prompt(automation: &Automation) -> String {
+    match automation.stop_condition.as_deref() {
+        Some(condition) => format!(
+            "{}\n\nAutomation stop condition: {}\n\nEvaluate the stop condition after completing the work. End your final response with exactly one hidden machine-readable line using one of these forms:\n<!-- gyro-automation-result: {{\"stopConditionMet\":true}} -->\n<!-- gyro-automation-result: {{\"stopConditionMet\":false}} -->\nUse true only when you verified the condition is satisfied. Do not omit this line.",
+            automation.prompt, condition,
+        ),
+        None => automation.prompt.clone(),
+    }
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct AutomationStopConditionVerdict {
+    stop_condition_met: bool,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AutomationExecutionOutcome {
+    summary: String,
+    stop_condition_met: Option<bool>,
+}
+
+fn parse_automation_execution_outcome(
+    automation: &Automation,
+    response: &str,
+) -> Result<AutomationExecutionOutcome, String> {
+    if automation.stop_condition.is_none() {
+        return Ok(AutomationExecutionOutcome {
+            summary: response.trim().to_string(),
+            stop_condition_met: None,
+        });
+    }
+
+    let marker_start = response
+        .rfind(AUTOMATION_RESULT_MARKER_PREFIX)
+        .ok_or_else(|| {
+            "Automation failed closed because the provider did not report a stop-condition verdict"
+                .to_string()
+        })?;
+    let marker_payload_start = marker_start + AUTOMATION_RESULT_MARKER_PREFIX.len();
+    let marker_tail = &response[marker_payload_start..];
+    let marker_end = marker_tail
+        .find(AUTOMATION_RESULT_MARKER_SUFFIX)
+        .ok_or_else(|| {
+            "Automation failed closed because the provider returned an incomplete stop-condition verdict"
+                .to_string()
+        })?;
+    let trailing = &marker_tail[marker_end + AUTOMATION_RESULT_MARKER_SUFFIX.len()..];
+    if !trailing.trim().is_empty() {
+        return Err(
+            "Automation failed closed because its stop-condition verdict was not the final output"
+                .into(),
+        );
+    }
+
+    let verdict = serde_json::from_str::<AutomationStopConditionVerdict>(
+        marker_tail[..marker_end].trim(),
+    )
+    .map_err(|_| {
+        "Automation failed closed because the provider returned an invalid stop-condition verdict"
+            .to_string()
+    })?;
+    let summary = response[..marker_start].trim();
+    Ok(AutomationExecutionOutcome {
+        summary: if summary.is_empty() {
+            "Automation completed and evaluated its stop condition".into()
+        } else {
+            summary.to_string()
+        },
+        stop_condition_met: Some(verdict.stop_condition_met),
+    })
+}
+
+fn bounded_automation_summary(value: &str) -> String {
+    truncate_chars(value.trim(), 600)
+}
+
 #[tauri::command]
 async fn read_session_events(session_id: String) -> Result<Vec<SessionEvent>, String> {
     tauri::async_runtime::spawn_blocking(move || read_session_events_blocking(session_id))
@@ -1125,9 +2026,40 @@ async fn read_session_events(session_id: String) -> Result<Vec<SessionEvent>, St
 fn read_session_events_blocking(session_id: String) -> Result<Vec<SessionEvent>, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
-    store
-        .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)
-        .map_err(to_string)
+    read_session_events_from_store(&store, session_id).map_err(to_string)
+}
+
+fn read_session_events_from_store(
+    store: &SessionStore,
+    session_id: Uuid,
+) -> anyhow::Result<Vec<SessionEvent>> {
+    let mut events = store.read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)?;
+    let represented_proposals = events
+        .iter()
+        .filter_map(event_mutation_proposal_id)
+        .collect::<HashSet<_>>();
+    for proposal in store.list_pending_mutation_proposals(session_id)? {
+        if represented_proposals.contains(&proposal.id) {
+            continue;
+        }
+        let recovered = store.append_event_with_turn_id(
+            session_id,
+            SessionEventKind::ApprovalRequested,
+            format!("Review changes to {}", proposal.path),
+            mutation_approval_payload(&proposal, None),
+            proposal.turn_id,
+        )?;
+        events.push(recovered);
+    }
+    Ok(events)
+}
+
+fn event_mutation_proposal_id(event: &SessionEvent) -> Option<Uuid> {
+    let payload = event.payload.as_object()?;
+    if payload.get("kind")?.as_str()? != "mutation-approval" {
+        return None;
+    }
+    Uuid::parse_str(payload.get("proposalId")?.as_str()?).ok()
 }
 
 #[tauri::command]
@@ -1325,10 +2257,18 @@ fn run_provider_chat_blocking(
             )
             .ok()
     });
-    let session = if let Some(title) = title_extraction.title.as_deref() {
+    let renamed_session = if let Some(title) = title_extraction.title.as_deref() {
         store.rename_session(session_id, title).map_err(to_string)?
     } else {
         None
+    };
+    let session_summary = derive_session_summary(&plan_extraction.message);
+    let session = if let Some(summary) = session_summary.as_deref() {
+        store
+            .update_session_summary(session_id, summary)
+            .map_err(to_string)?
+    } else {
+        renamed_session
     };
     let resume_cursor_value = runner_output
         .resume_cursor
@@ -1977,6 +2917,132 @@ async fn write_workspace_file(
 }
 
 #[tauri::command]
+async fn create_file_mutation_proposal(
+    request: FileMutationProposalRequest,
+) -> Result<MutationProposal, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        create_file_mutation_proposal_impl(request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("file mutation proposal worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn resolve_file_mutation_proposal(
+    request: FileMutationDecisionRequest,
+) -> Result<FileMutationDecisionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_file_mutation_proposal_impl(request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("file mutation decision worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn resolve_provider_approval(
+    app: tauri::AppHandle,
+    request: ProviderApprovalDecisionRequest,
+) -> Result<SessionEvent, String> {
+    let decision = match request.decision.as_str() {
+        "approve" => ProviderApprovalDecision::Approve,
+        "reject" => ProviderApprovalDecision::Reject,
+        _ => return Err("provider approval decision must be approve or reject".into()),
+    };
+    let pending = app
+        .state::<ProviderApprovalManager>()
+        .pending
+        .lock()
+        .map_err(|_| "provider approval state is unavailable".to_string())?
+        .remove(&request.approval_id)
+        .ok_or_else(|| "this provider approval is no longer pending".to_string())?;
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let mut payload = pending.payload;
+    let mut provider_decision = decision;
+    let mut pending_mutation: Option<PendingProviderMutationCommit> = None;
+    if decision == ProviderApprovalDecision::Approve {
+        if let Some(transaction) = pending.file_transaction.as_ref() {
+            match begin_provider_mutation_transaction(
+                transaction,
+                &paths.mutation_journals_dir,
+                ProviderMutationJournalContext {
+                    session_id: pending.session_id,
+                    approval_id: pending.approval_id,
+                },
+            ) {
+                Ok(commit) => {
+                    payload["changedPaths"] =
+                        serde_json::to_value(commit.result().changed_paths.clone())
+                            .map_err(|error| error.to_string())?;
+                    provider_decision = ProviderApprovalDecision::AppliedByGyro;
+                    pending_mutation = Some(commit);
+                }
+                Err(error) => {
+                    payload["status"] = serde_json::Value::String("failed".into());
+                    payload["error"] = serde_json::Value::String(error.to_string());
+                    payload["decidedAt"] =
+                        serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+                    let event = store.append_event_with_turn_id(
+                        pending.session_id,
+                        SessionEventKind::SystemEvent,
+                        "Provider file changes were not applied",
+                        payload,
+                        pending.turn_id,
+                    );
+                    let _ = pending.sender.send(ProviderApprovalDecision::Reject);
+                    let event = event.map_err(to_string)?;
+                    let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+                    return Err(format!("The reviewed file set was not applied: {error}"));
+                }
+            }
+        }
+    }
+    payload["status"] = serde_json::Value::String(
+        match provider_decision {
+            ProviderApprovalDecision::Approve => "approved",
+            ProviderApprovalDecision::Reject => "rejected",
+            ProviderApprovalDecision::AppliedByGyro => "applied",
+        }
+        .into(),
+    );
+    payload["decidedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+    let event = match store.append_event_with_turn_id(
+        pending.session_id,
+        SessionEventKind::SystemEvent,
+        match provider_decision {
+            ProviderApprovalDecision::Approve => "Provider action approved",
+            ProviderApprovalDecision::Reject => "Provider action rejected",
+            ProviderApprovalDecision::AppliedByGyro => "Provider file changes applied through Gyro",
+        },
+        payload,
+        pending.turn_id,
+    ) {
+        Ok(event) => event,
+        Err(error) => {
+            let rollback_error = pending_mutation.and_then(|commit| commit.rollback().err());
+            let _ = pending.sender.send(ProviderApprovalDecision::Reject);
+            return Err(match rollback_error {
+                Some(rollback_error) => format!(
+                    "record provider approval failed ({error}); rollback also failed: {rollback_error}"
+                ),
+                None => to_string(error),
+            });
+        }
+    };
+    if let Some(commit) = pending_mutation {
+        if let Err(error) = commit.finalize() {
+            eprintln!("Gyro deferred provider mutation cleanup until restart: {error}");
+        }
+    }
+    pending
+        .sender
+        .send(provider_decision)
+        .map_err(|_| "the provider turn ended before the decision was delivered".to_string())?;
+    let _ = app.emit(PROVIDER_APPROVAL_EVENT, event.clone());
+    Ok(event)
+}
+
+#[tauri::command]
 async fn watch_workspace(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
     // The renderer polls this normalized snapshot while a workspace is active.
     // Hash-based stat checks handle open-file conflicts independently.
@@ -2034,6 +3100,142 @@ async fn git_status(workspace_path: String) -> Result<SourceControlStatus, Strin
     })
     .await
     .map_err(|error| format!("git status worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn git_branches(workspace_path: String) -> Result<GitBranchCatalog, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_branch_catalog_impl(&workspace_path).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("git branch worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn git_checkout_branch(
+    request: GitCheckoutBranchRequest,
+) -> Result<GitBranchCatalog, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_checkout_branch_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("git branch checkout worker failed: {error}"))?
+}
+
+fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCatalog> {
+    let root = workspace_root(workspace_path)?;
+    let Some(repo_root) = git_repo_root(&root) else {
+        return Ok(GitBranchCatalog {
+            available: false,
+            current: None,
+            branches: Vec::new(),
+            error: Some("The selected folder is not a Git repository.".into()),
+        });
+    };
+    let mut command = command_with_gui_path("git");
+    command.arg("-C").arg(&repo_root).args([
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads/",
+    ]);
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "could not list local branches: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let mut branches = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    branches.sort();
+    branches.dedup();
+    let mut current_command = command_with_gui_path("git");
+    current_command
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["branch", "--show-current"]);
+    let current_output = current_command.output()?;
+    let current = current_output.status.success().then(|| {
+        String::from_utf8_lossy(&current_output.stdout)
+            .trim()
+            .to_string()
+    });
+    let current = current.filter(|branch| !branch.is_empty());
+    Ok(GitBranchCatalog {
+        available: true,
+        current,
+        branches,
+        error: None,
+    })
+}
+
+fn git_checkout_branch_impl(
+    request: &GitCheckoutBranchRequest,
+) -> anyhow::Result<GitBranchCatalog> {
+    gyro_core::validate_branch_name(&request.branch)?;
+    let root = workspace_root(&request.workspace_path)?;
+    let repo_root = git_repo_root(&root)
+        .ok_or_else(|| anyhow::anyhow!("the selected folder is not a Git repository"))?;
+    let catalog = git_branch_catalog_impl(&request.workspace_path)?;
+    if !catalog
+        .branches
+        .iter()
+        .any(|branch| branch == &request.branch)
+    {
+        return Err(anyhow::anyhow!("local branch not found"));
+    }
+    if catalog.current.as_deref() == Some(request.branch.as_str()) {
+        return Ok(catalog);
+    }
+    let mut status_command = command_with_gui_path("git");
+    status_command
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["status", "--porcelain"]);
+    let status = status_command.output()?;
+    if !status.status.success() {
+        return Err(anyhow::anyhow!(
+            "could not inspect the workspace before switching branches"
+        ));
+    }
+    if !status.stdout.is_empty() {
+        return Err(anyhow::anyhow!(
+            "commit or stash workspace changes before switching branches"
+        ));
+    }
+    let mut switch_command = command_with_gui_path("git");
+    switch_command
+        .arg("-C")
+        .arg(&repo_root)
+        .arg("switch")
+        .arg("--")
+        .arg(&request.branch);
+    let switched = switch_command.output()?;
+    if !switched.status.success() {
+        return Err(anyhow::anyhow!(
+            "could not switch branch: {}",
+            String::from_utf8_lossy(&switched.stderr).trim()
+        ));
+    }
+    git_branch_catalog_impl(&request.workspace_path)
+}
+
+#[tauri::command]
+async fn set_session_branch(session_id: String, branch: String) -> Result<Session, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_id = parse_uuid(&session_id)?;
+        store
+            .update_session_branch(session_id, branch)
+            .map_err(to_string)?
+            .ok_or_else(|| "session not found".into())
+    })
+    .await
+    .map_err(|error| format!("session branch worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -3011,8 +4213,7 @@ fn write_workspace_file_impl(
     request: &WorkspaceFileWriteRequest,
 ) -> anyhow::Result<WorkspaceFileContent> {
     let root = PathBuf::from(&request.workspace_path).canonicalize()?;
-    let candidate =
-        gyro_core::security::assert_path_inside_workspace(&root, Path::new(&request.path))?;
+    let candidate = validated_workspace_file_target(&root, &request.path)?;
     if candidate.is_dir() {
         anyhow::bail!("workspace write path is a directory");
     }
@@ -3034,12 +4235,161 @@ fn write_workspace_file_impl(
         }
     }
 
-    std::fs::write(&candidate, content_bytes)?;
+    atomic_write_workspace_file(&candidate, content_bytes)?;
     read_workspace_file_with_limit(
         &request.workspace_path,
         &request.path,
         MAX_WORKSPACE_FILE_EDIT_BYTES,
     )
+}
+
+fn create_file_mutation_proposal_impl(
+    request: FileMutationProposalRequest,
+) -> anyhow::Result<MutationProposal> {
+    let store = SessionStore::open(GyroPaths::for_current_user()?)?;
+    let session_id = Uuid::parse_str(&request.session_id)?;
+    let turn_id = request
+        .turn_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()?;
+    let session = store
+        .get_session(session_id)?
+        .ok_or_else(|| anyhow::anyhow!("unknown session {session_id}"))?;
+    let root = session.workspace_path.canonicalize()?;
+    let candidate = validated_workspace_file_target(&root, &request.path)?;
+    if candidate.is_dir() {
+        anyhow::bail!("mutation proposal path is a directory");
+    }
+    let content_bytes = request.content.as_bytes();
+    if content_bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
+        anyhow::bail!("mutation proposal is too large");
+    }
+    if content_bytes.contains(&0) {
+        anyhow::bail!("binary mutation proposals are not supported");
+    }
+    let base_exists = candidate.exists();
+    let expected_hash = if base_exists {
+        let current = fs::read(&candidate)?;
+        if current.contains(&0) {
+            anyhow::bail!("binary workspace files cannot be edited");
+        }
+        let current_hash = content_hash(&current);
+        if let Some(expected) = request.expected_hash.as_deref() {
+            if current_hash != expected {
+                anyhow::bail!("file changed on disk; reload before proposing an edit");
+            }
+        }
+        Some(current_hash)
+    } else {
+        if request.expected_hash.is_some() {
+            anyhow::bail!("cannot use an expected hash for a file that does not exist");
+        }
+        None
+    };
+    let proposal = store.create_mutation_proposal(
+        session_id,
+        turn_id,
+        &request.path,
+        request.content,
+        expected_hash,
+        base_exists,
+    )?;
+    let payload = mutation_approval_payload(&proposal, None);
+    store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::FileEditProposed,
+        format!("Proposed {}", proposal.path),
+        payload.clone(),
+        turn_id,
+    )?;
+    store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::ApprovalRequested,
+        format!("Review changes to {}", proposal.path),
+        payload,
+        turn_id,
+    )?;
+    Ok(proposal)
+}
+
+fn resolve_file_mutation_proposal_impl(
+    request: FileMutationDecisionRequest,
+) -> anyhow::Result<FileMutationDecisionResult> {
+    let store = SessionStore::open(GyroPaths::for_current_user()?)?;
+    let proposal_id = Uuid::parse_str(&request.proposal_id)?;
+    let decision = match request.decision.as_str() {
+        "approve" => MutationDecision::Approve,
+        "reject" => MutationDecision::Reject,
+        _ => anyhow::bail!("mutation decision must be approve or reject"),
+    };
+    let result = decide_mutation_proposal(&store, proposal_id, decision)?;
+    let file = result
+        .changed_path
+        .as_ref()
+        .map(|_| {
+            read_workspace_file_with_limit(
+                &result.proposal.workspace_path.to_string_lossy(),
+                &result.proposal.path,
+                MAX_WORKSPACE_FILE_EDIT_BYTES,
+            )
+        })
+        .transpose()?;
+    Ok(FileMutationDecisionResult {
+        proposal: result.proposal,
+        event: result.event,
+        file,
+    })
+}
+
+fn validated_workspace_file_target(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
+    let candidate = gyro_core::security::assert_path_inside_workspace(root, Path::new(path))?;
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("workspace file path has no parent"))?;
+    let resolved_parent = parent
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("workspace file parent does not exist"))?;
+    if !resolved_parent.starts_with(root) {
+        anyhow::bail!("workspace file parent resolves outside the workspace");
+    }
+    Ok(resolved_parent.join(
+        candidate
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("workspace file path has no file name"))?,
+    ))
+}
+
+fn atomic_write_workspace_file(path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("workspace file path has no parent"))?;
+    let temporary = parent.join(format!(
+        ".gyro-{}-{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("mutation"),
+        Uuid::new_v4()
+    ));
+    let result = (|| -> anyhow::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        if let Ok(metadata) = fs::metadata(path) {
+            file.set_permissions(metadata.permissions())?;
+        }
+        file.write_all(content)?;
+        file.flush()?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn workspace_root(workspace_path: &str) -> anyhow::Result<PathBuf> {
@@ -3677,6 +5027,19 @@ async fn resize_terminal_pane(
 }
 
 #[tauri::command]
+async fn terminal_pane_has_foreground_job(
+    manager: tauri::State<'_, TerminalProcessManager>,
+    pane_id: String,
+) -> Result<bool, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        manager.has_foreground_job(&pane_id).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("terminal activity worker failed: {error}"))?
+}
+
+#[tauri::command]
 async fn stop_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
@@ -3719,11 +5082,30 @@ async fn check_provider_health(
 
 #[tauri::command]
 async fn check_browser_preview(
+    app: tauri::AppHandle,
     request: BrowserPreviewCheckRequest,
 ) -> Result<BrowserPreviewCheck, String> {
-    tauri::async_runtime::spawn_blocking(move || check_browser_preview_blocking(request))
-        .await
-        .map_err(|error| format!("browser preview worker failed: {error}"))?
+    let capture_request = request.clone();
+    let mut check =
+        tauri::async_runtime::spawn_blocking(move || check_browser_preview_blocking(request))
+            .await
+            .map_err(|error| format!("browser preview worker failed: {error}"))??;
+    if check.reachable && check.diagnostics_supported {
+        match capture_browser_preview_diagnostics(&app, &capture_request.url).await {
+            Ok(diagnostics) => {
+                check.diagnostics = diagnostics;
+                check.diagnostics_captured = true;
+            }
+            Err(error) => {
+                check.message = format!("{} · diagnostics unavailable", check.message);
+                eprintln!(
+                    "browser preview diagnostics unavailable: {}",
+                    gyro_core::security::redact_secrets(&error)
+                );
+            }
+        }
+    }
+    Ok(check)
 }
 
 fn check_browser_preview_blocking(
@@ -3736,6 +5118,7 @@ fn check_browser_preview_blocking(
     if url.host_str().is_none() {
         return Err("preview URL must include a host".into());
     }
+    let diagnostics_supported = browser_preview_diagnostics_supported(&url);
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(2))
         .timeout_read(Duration::from_secs(2))
@@ -3746,18 +5129,409 @@ fn check_browser_preview_blocking(
             reachable: true,
             status_code: Some(response.status()),
             message: format!("Local preview reachable (HTTP {})", response.status()),
+            diagnostics: Vec::new(),
+            diagnostics_supported,
+            diagnostics_captured: false,
         }),
         Err(ureq::Error::Status(status, _)) => Ok(BrowserPreviewCheck {
             reachable: true,
             status_code: Some(status),
             message: format!("Preview server reachable (HTTP {status})"),
+            diagnostics: Vec::new(),
+            diagnostics_supported,
+            diagnostics_captured: false,
         }),
         Err(ureq::Error::Transport(_)) => Ok(BrowserPreviewCheck {
             reachable: false,
             status_code: None,
             message: "Preview unavailable: connection refused, timed out, or offline".into(),
+            diagnostics: Vec::new(),
+            diagnostics_supported,
+            diagnostics_captured: false,
         }),
     }
+}
+
+fn browser_preview_diagnostics_supported(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
+fn browser_preview_capture_script(prefix: &str) -> Result<String, String> {
+    let prefix = serde_json::to_string(prefix).map_err(to_string)?;
+    Ok(format!(
+        r#"(() => {{
+  const prefix = {prefix};
+  const diagnostics = [];
+  const text = (value) => {{
+    try {{
+      if (value instanceof Error) return value.message || value.name;
+      if (typeof value === "string") return value;
+      const encoded = JSON.stringify(value);
+      return encoded === undefined ? String(value) : encoded;
+    }} catch (_) {{
+      return String(value);
+    }}
+  }};
+  const record = (kind, values, source, line, column) => {{
+    if (diagnostics.length >= {MAX_BROWSER_PREVIEW_DIAGNOSTICS}) return;
+    const message = values.map(text).join(" ").slice(0, {MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS});
+    if (!message) return;
+    diagnostics.push({{
+      kind,
+      message,
+      source: typeof source === "string" ? source : null,
+      line: Number.isFinite(line) ? line : null,
+      column: Number.isFinite(column) ? column : null,
+    }});
+  }};
+  const originalError = console.error.bind(console);
+  console.error = (...values) => {{
+    record("console-error", values, null, null, null);
+    originalError(...values);
+  }};
+  addEventListener("error", (event) => {{
+    record("page-error", [event.message || "Page error"], event.filename, event.lineno, event.colno);
+  }}, true);
+  addEventListener("unhandledrejection", (event) => {{
+    record("unhandled-rejection", [event.reason || "Unhandled promise rejection"], null, null, null);
+  }}, true);
+  let reported = false;
+  const report = () => {{
+    if (reported) return;
+    reported = true;
+    document.title = prefix + JSON.stringify(diagnostics);
+  }};
+  addEventListener("load", () => setTimeout(report, 750), {{ once: true }});
+  setTimeout(report, 3000);
+}})();"#
+    ))
+}
+
+fn sanitize_browser_preview_source(source: Option<String>) -> Option<String> {
+    let source = source?.trim().to_string();
+    if source.is_empty() {
+        return None;
+    }
+    let sanitized = match url::Url::parse(&source) {
+        Ok(url) => url.path().to_string(),
+        Err(_) => source,
+    };
+    Some(truncate_chars(
+        &gyro_core::security::redact_secrets(&sanitized),
+        MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS,
+    ))
+}
+
+fn parse_browser_preview_diagnostics(
+    prefix: &str,
+    title: &str,
+) -> Option<Vec<BrowserPreviewDiagnostic>> {
+    let payload = title.strip_prefix(prefix)?;
+    if payload.chars().count() > MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS {
+        return None;
+    }
+    let diagnostics = serde_json::from_str::<Vec<BrowserPreviewDiagnostic>>(payload).ok()?;
+    Some(
+        diagnostics
+            .into_iter()
+            .take(MAX_BROWSER_PREVIEW_DIAGNOSTICS)
+            .filter_map(|diagnostic| {
+                let message = truncate_chars(
+                    &gyro_core::security::redact_secrets(diagnostic.message.trim()),
+                    MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS,
+                );
+                if message.is_empty() {
+                    return None;
+                }
+                let kind = match diagnostic.kind.as_str() {
+                    "console-error" | "page-error" | "unhandled-rejection" => diagnostic.kind,
+                    _ => "page-error".into(),
+                };
+                Some(BrowserPreviewDiagnostic {
+                    kind,
+                    message,
+                    source: sanitize_browser_preview_source(diagnostic.source),
+                    line: diagnostic.line,
+                    column: diagnostic.column,
+                })
+            })
+            .collect(),
+    )
+}
+
+async fn capture_browser_preview_diagnostics(
+    app: &tauri::AppHandle,
+    raw_url: &str,
+) -> Result<Vec<BrowserPreviewDiagnostic>, String> {
+    let url = url::Url::parse(raw_url.trim()).map_err(|_| "invalid preview URL".to_string())?;
+    if !browser_preview_diagnostics_supported(&url) {
+        return Err("diagnostics are limited to loopback previews".into());
+    }
+    let token = Uuid::new_v4();
+    let prefix = format!("gyro-browser-diagnostics:{token}:");
+    let script = browser_preview_capture_script(&prefix)?;
+    let (sender, receiver) = mpsc::channel();
+    let callback_prefix = prefix.clone();
+    let label = format!("browser-diagnostics-{token}");
+    let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
+        .title("Gyro browser diagnostics")
+        .inner_size(1.0, 1.0)
+        .visible(false)
+        .skip_taskbar(true)
+        .incognito(true)
+        .devtools(false)
+        .initialization_script(script)
+        .on_document_title_changed(move |_window, title| {
+            if title.starts_with(&callback_prefix) {
+                let _ = sender.send(title);
+            }
+        })
+        .build()
+        .map_err(|error| format!("could not create diagnostic webview: {error}"))?;
+    let received = tauri::async_runtime::spawn_blocking(move || {
+        receiver.recv_timeout(BROWSER_PREVIEW_DIAGNOSTIC_TIMEOUT)
+    })
+    .await
+    .map_err(|error| format!("browser diagnostic worker failed: {error}"))?;
+    let _ = window.close();
+    let title = received.map_err(|_| "browser diagnostic capture timed out".to_string())?;
+    parse_browser_preview_diagnostics(&prefix, &title)
+        .ok_or_else(|| "browser diagnostic payload was invalid".to_string())
+}
+
+#[tauri::command]
+async fn capture_browser_preview(
+    app: tauri::AppHandle,
+    request: BrowserPreviewCaptureRequest,
+) -> Result<BrowserPreviewCapture, String> {
+    let url = url::Url::parse(request.url.trim()).map_err(|_| "invalid preview URL".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("preview URL must use http or https and include a host".into());
+    }
+    if !browser_preview_diagnostics_supported(&url) {
+        return Err("screenshots are limited to local loopback previews".into());
+    }
+    let (width, height) = browser_preview_capture_dimensions(&request.device)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let token = Uuid::new_v4();
+        let label = format!("browser-capture-{token}");
+        let (load_sender, load_receiver) = mpsc::channel();
+        let window =
+            tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::External(url))
+                .title("Gyro browser capture")
+                .inner_size(width as f64, height as f64)
+                .visible(false)
+                .focused(false)
+                .skip_taskbar(true)
+                .incognito(true)
+                .devtools(false)
+                .on_page_load(move |_window, payload| {
+                    if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                        let _ = load_sender.send(());
+                    }
+                })
+                .build()
+                .map_err(|error| format!("could not create browser capture webview: {error}"))?;
+
+        let loaded = tauri::async_runtime::spawn_blocking(move || {
+            load_receiver.recv_timeout(BROWSER_PREVIEW_CAPTURE_TIMEOUT)
+        })
+        .await
+        .map_err(|error| format!("browser capture load worker failed: {error}"))?;
+        if loaded.is_err() {
+            let _ = window.close();
+            return Err("browser preview did not finish loading before capture".into());
+        }
+
+        tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(300)))
+            .await
+            .map_err(|error| format!("browser capture settle worker failed: {error}"))?;
+        let snapshot = capture_macos_browser_preview_snapshot(&window).await;
+        let _ = window.close();
+        let snapshot = snapshot?;
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        let created_at = chrono::Utc::now();
+        return tauri::async_runtime::spawn_blocking(move || {
+            persist_browser_preview_capture(
+                &paths,
+                &snapshot.png,
+                snapshot.width,
+                snapshot.height,
+                created_at,
+            )
+        })
+        .await
+        .map_err(|error| format!("browser capture writer failed: {error}"))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, width, height);
+        Err("browser screenshots are currently available on macOS only".into())
+    }
+}
+
+fn browser_preview_capture_dimensions(device: &str) -> Result<(u32, u32), String> {
+    match device {
+        "desktop" => Ok((1440, 900)),
+        "tablet" => Ok((834, 1112)),
+        "mobile" => Ok((390, 844)),
+        _ => Err("unknown browser preview device".into()),
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn capture_macos_browser_preview_snapshot(
+    window: &tauri::WebviewWindow,
+) -> Result<BrowserPreviewSnapshot, String> {
+    let (sender, receiver) = mpsc::channel();
+    window
+        .with_webview(move |webview| unsafe {
+            use block2::RcBlock;
+            use objc2::runtime::AnyObject;
+            use objc2_app_kit::{
+                NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage,
+            };
+            use objc2_foundation::{NSDictionary, NSError};
+            use objc2_web_kit::WKWebView;
+
+            let view: &WKWebView = &*webview.inner().cast();
+            let completion = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
+                let snapshot = (|| {
+                    let image = image
+                        .as_ref()
+                        .ok_or_else(|| "native browser snapshot returned no image".to_string())?;
+                    let tiff = image.TIFFRepresentation().ok_or_else(|| {
+                        "native browser snapshot could not be encoded".to_string()
+                    })?;
+                    let bitmap = NSBitmapImageRep::imageRepWithData(&tiff).ok_or_else(|| {
+                        "native browser snapshot could not create a bitmap".to_string()
+                    })?;
+                    let properties = NSDictionary::<NSBitmapImageRepPropertyKey, AnyObject>::new();
+                    let png = bitmap
+                        .representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)
+                        .ok_or_else(|| {
+                            "native browser snapshot could not create PNG data".to_string()
+                        })?;
+                    if png.len() > MAX_BROWSER_PREVIEW_CAPTURE_BYTES {
+                        return Err("browser screenshot exceeded the capture size limit".into());
+                    }
+                    Ok(BrowserPreviewSnapshot {
+                        png: png.to_vec(),
+                        width: bitmap.pixelsWide().max(0) as u32,
+                        height: bitmap.pixelsHigh().max(0) as u32,
+                    })
+                })();
+                let _ = sender.send(snapshot);
+            });
+            view.takeSnapshotWithConfiguration_completionHandler(None, &completion);
+        })
+        .map_err(|error| format!("could not request native browser snapshot: {error}"))?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver
+            .recv_timeout(BROWSER_PREVIEW_CAPTURE_TIMEOUT)
+            .map_err(|_| "native browser screenshot timed out".to_string())?
+    })
+    .await
+    .map_err(|error| format!("browser screenshot worker failed: {error}"))?
+}
+
+fn persist_browser_preview_capture(
+    paths: &GyroPaths,
+    png: &[u8],
+    width: u32,
+    height: u32,
+    created_at: chrono::DateTime<chrono::Utc>,
+) -> Result<BrowserPreviewCapture, String> {
+    const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    if !png.starts_with(PNG_SIGNATURE) {
+        return Err("browser screenshot did not contain valid PNG data".into());
+    }
+    if png.len() > MAX_BROWSER_PREVIEW_CAPTURE_BYTES {
+        return Err("browser screenshot exceeded the capture size limit".into());
+    }
+    ensure_private_browser_capture_directory(&paths.browser_captures_dir)?;
+    let timestamp = created_at.format("%Y%m%dT%H%M%S%3fZ");
+    let filename = format!("browser-preview-{timestamp}-{}.png", Uuid::new_v4());
+    let path = paths.browser_captures_dir.join(&filename);
+    let temporary_path = paths
+        .browser_captures_dir
+        .join(format!(".gyro-browser-capture-{}.tmp", Uuid::new_v4()));
+
+    let write_result = (|| -> Result<(), String> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary_path).map_err(to_string)?;
+        file.write_all(png).map_err(to_string)?;
+        file.sync_all().map_err(to_string)?;
+        fs::rename(&temporary_path, &path).map_err(to_string)?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(format!("could not save browser screenshot: {error}"));
+    }
+    if let Err(error) = prune_browser_preview_captures(&paths.browser_captures_dir) {
+        let _ = fs::remove_file(&path);
+        return Err(error);
+    }
+
+    Ok(BrowserPreviewCapture {
+        path: path.to_string_lossy().into_owned(),
+        filename,
+        width,
+        height,
+        created_at: created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    })
+}
+
+fn ensure_private_browser_capture_directory(directory: &Path) -> Result<(), String> {
+    if let Ok(metadata) = fs::symlink_metadata(directory) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("browser capture storage path is unsafe".into());
+        }
+    } else {
+        fs::create_dir_all(directory).map_err(to_string)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).map_err(to_string)?;
+    }
+    Ok(())
+}
+
+fn prune_browser_preview_captures(directory: &Path) -> Result<(), String> {
+    let mut captures = fs::read_dir(directory)
+        .map_err(to_string)?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let filename = entry.file_name().to_string_lossy().into_owned();
+            let file_type = entry.file_type().ok()?;
+            (file_type.is_file()
+                && filename.starts_with("browser-preview-")
+                && filename.ends_with(".png"))
+            .then_some((filename, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    captures.sort_by(|left, right| right.0.cmp(&left.0));
+    for (_, path) in captures.into_iter().skip(MAX_BROWSER_PREVIEW_CAPTURES) {
+        fs::remove_file(path).map_err(to_string)?;
+    }
+    Ok(())
 }
 
 fn check_provider_health_blocking(
@@ -4231,10 +6005,24 @@ fn run_provider_chat_with_retry(
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    run_provider_chat_with_retry_using(store, request, binding, |resume_cursor| {
+        run_provider_chat_once(app, request, resume_cursor)
+    })
+}
+
+fn run_provider_chat_with_retry_using<F>(
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+    binding: Option<ProviderSessionBinding>,
+    mut run_once: F,
+) -> anyhow::Result<ProviderRunnerOutput>
+where
+    F: FnMut(Option<&ProviderResumeCursor>) -> anyhow::Result<ProviderRunnerOutput>,
+{
     let binding_cursor = binding
         .as_ref()
         .and_then(|binding| provider_resume_cursor_from_binding(binding));
-    match run_provider_chat_once(app, request, binding_cursor.as_ref()) {
+    match run_once(binding_cursor.as_ref()) {
         Ok(mut output) => {
             output.resumed = binding_cursor.is_some();
             Ok(output)
@@ -4243,7 +6031,7 @@ fn run_provider_chat_with_retry(
             let session_id =
                 parse_uuid(&request.session_id).map_err(|error| anyhow::anyhow!(error))?;
             let _ = store.clear_provider_session_binding(session_id, &request.provider_id);
-            let mut output = run_provider_chat_once(app, request, None)?;
+            let mut output = run_once(None)?;
             output.retry_count = 1;
             output.resumed = false;
             output.output_summary = Some("stale resume cursor cleared and request retried".into());
@@ -4305,6 +6093,9 @@ fn run_openai_codex_chat(
             request.model_label.as_deref().unwrap_or("This model"),
             request.reasoning_effort.as_deref().unwrap_or("unknown")
         );
+    }
+    if request.require_command_approval || request.require_file_edit_approval {
+        return run_openai_codex_app_server_chat(app, request, resume_cursor);
     }
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
@@ -4410,6 +6201,855 @@ fn run_openai_codex_chat(
     anyhow::bail!("{}", truncate_error_detail(&combined));
 }
 
+fn run_openai_codex_app_server_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: Option<&ProviderResumeCursor>,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let contextual_message = provider_context_message(request);
+    let prompt = openai_codex_chat_prompt(
+        &contextual_message,
+        request.workspace_path.as_deref(),
+        request.model_label.as_deref(),
+        request.suggest_title,
+        request.mode == ChatMode::Normal,
+    );
+    let mut process = command_with_gui_path("codex");
+    process
+        .current_dir(&cwd)
+        .args(["app-server", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = process
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    let result = (|| -> anyhow::Result<ProviderRunnerOutput> {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Codex app server input is unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
+        let messages = spawn_codex_app_server_reader(stdout);
+        let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "gyro",
+                        "title": "Gyro",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "capabilities": { "experimentalApi": true },
+                },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let initialize = receive_codex_app_server_response(&messages, 1, deadline)
+            .map_err(anyhow::Error::msg)?;
+        codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
+        write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
+            .map_err(anyhow::Error::msg)?;
+
+        let resume_id = resume_cursor.and_then(|cursor| {
+            (cursor.kind == "codex-session").then_some(cursor.session_id.as_str())
+        });
+        let model = codex_model_arg(request.model_id.as_deref());
+        let (approval_policy, sandbox_mode, sandbox_policy) = codex_app_server_policy(
+            request.require_command_approval,
+            request.require_file_edit_approval,
+            &cwd,
+        );
+        let thread_request = if let Some(thread_id) = resume_id {
+            serde_json::json!({
+                "id": 2,
+                "method": "thread/resume",
+                "params": {
+                    "threadId": thread_id,
+                    "cwd": cwd,
+                    "model": model,
+                    "approvalPolicy": approval_policy,
+                    "approvalsReviewer": "user",
+                    "sandbox": sandbox_mode,
+                },
+            })
+        } else {
+            serde_json::json!({
+                "id": 2,
+                "method": "thread/start",
+                "params": {
+                    "cwd": cwd,
+                    "model": model,
+                    "approvalPolicy": approval_policy,
+                    "approvalsReviewer": "user",
+                    "sandbox": sandbox_mode,
+                    "ephemeral": false,
+                },
+            })
+        };
+        write_codex_app_server_message(&mut stdin, &thread_request).map_err(anyhow::Error::msg)?;
+        let thread_response = receive_codex_app_server_response(&messages, 2, deadline)
+            .map_err(anyhow::Error::msg)?;
+        let thread_result =
+            codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
+        let thread_id = thread_result
+            .pointer("/thread/id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?
+            .to_string();
+
+        let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
+        for attachment in request
+            .attachments
+            .iter()
+            .filter(|item| item.kind == "image")
+        {
+            input.push(serde_json::json!({
+                "type": "localImage",
+                "path": attachment.path,
+            }));
+        }
+        let mut turn_params = serde_json::json!({
+            "threadId": thread_id,
+            "input": input,
+            "cwd": cwd,
+            "model": model,
+            "approvalPolicy": approval_policy,
+            "approvalsReviewer": "user",
+            "sandboxPolicy": sandbox_policy,
+        });
+        if let Some(effort) = codex_reasoning_effort_arg(
+            request.model_id.as_deref(),
+            request.reasoning_effort.as_deref(),
+        ) {
+            turn_params["effort"] = serde_json::Value::String(effort);
+        }
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 3,
+                "method": "turn/start",
+                "params": turn_params,
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let mut response_text = String::new();
+        let mut completed_message = String::new();
+        let mut activities = Vec::new();
+        let mut patches = HashMap::<String, serde_json::Value>::new();
+        let mut turn_started = false;
+        loop {
+            if provider_chat_cancelled(app, &request.session_id) {
+                anyhow::bail!("chat cancelled by user");
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                anyhow::bail!("Codex app server turn timed out");
+            }
+            let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
+                Ok(message) => message.map_err(anyhow::Error::msg)?,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("Codex app server disconnected")
+                }
+            };
+            let method = message.get("method").and_then(serde_json::Value::as_str);
+            if method.is_some() && message.get("id").is_some() {
+                let method = method.expect("checked method");
+                let params = message.get("params").cloned().unwrap_or_default();
+                handle_codex_app_server_request(
+                    app, request, &mut stdin, &message, method, &params, &patches,
+                )?;
+                continue;
+            }
+            if message.get("id").and_then(serde_json::Value::as_u64) == Some(3) {
+                codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
+                turn_started = true;
+                continue;
+            }
+            let Some(method) = method else { continue };
+            let params = message.get("params").cloned().unwrap_or_default();
+            match method {
+                "item/agentMessage/delta" => {
+                    if let Some(delta) = params.get("delta").and_then(serde_json::Value::as_str) {
+                        response_text.push_str(delta);
+                        emit_provider_chat_event(
+                            app,
+                            request,
+                            "delta",
+                            Some(HarnessRunStatus::Running),
+                            Some(delta.to_string()),
+                            None,
+                            None,
+                        );
+                    }
+                }
+                "item/fileChange/patchUpdated" => {
+                    if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str)
+                    {
+                        if !patches
+                            .get(item_id)
+                            .and_then(|patch| patch.get("changes"))
+                            .is_some()
+                        {
+                            patches.insert(item_id.to_string(), params.clone());
+                        }
+                    }
+                }
+                "item/started" => {
+                    if let Some(item) = params.get("item") {
+                        if item.get("type").and_then(serde_json::Value::as_str)
+                            == Some("fileChange")
+                        {
+                            if let Some(item_id) =
+                                item.get("id").and_then(serde_json::Value::as_str)
+                            {
+                                patches.insert(
+                                    item_id.to_string(),
+                                    serde_json::json!({
+                                        "itemId": item_id,
+                                        "changes": item.get("changes").cloned().unwrap_or_default(),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                }
+                "item/completed" => {
+                    if let Some(item) = params.get("item") {
+                        match item.get("type").and_then(serde_json::Value::as_str) {
+                            Some("agentMessage") => {
+                                if let Some(text) =
+                                    item.get("text").and_then(serde_json::Value::as_str)
+                                {
+                                    completed_message = text.to_string();
+                                }
+                            }
+                            Some("commandExecution") => {
+                                let activity = codex_item_activity(item, "command", "Ran command");
+                                emit_provider_activity_event(app, request, &activity);
+                                activities.push(activity);
+                            }
+                            Some("fileChange") => {
+                                let activity = codex_item_activity(item, "file", "Updated files");
+                                emit_provider_activity_event(app, request, &activity);
+                                activities.push(activity);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "turn/completed" => {
+                    let status = params
+                        .pointer("/turn/status")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("failed");
+                    if status != "completed" {
+                        let detail = params
+                            .pointer("/turn/error/message")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("Codex turn did not complete");
+                        anyhow::bail!("{detail}");
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if !turn_started {
+            anyhow::bail!("Codex did not start the requested turn");
+        }
+        let response = sanitize_provider_chat_response(if completed_message.trim().is_empty() {
+            response_text.trim()
+        } else {
+            completed_message.trim()
+        });
+        if response.is_empty() {
+            anyhow::bail!("OpenAI finished, but Codex did not return a chat response.");
+        }
+        let response_chars = response.chars().count();
+        Ok(ProviderRunnerOutput {
+            activities: provider_activities_for_response(activities, &response),
+            response,
+            resume_cursor: Some(ProviderResumeCursor {
+                kind: "codex-session".into(),
+                session_id: thread_id.clone(),
+            }),
+            retry_count: 0,
+            resumed: resume_id.is_some(),
+            output_summary: Some(provider_output_summary(
+                "codex-app-server",
+                "completed",
+                Some(&thread_id),
+                response_chars,
+            )),
+        })
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+fn codex_app_server_policy(
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
+    cwd: &Path,
+) -> (&'static str, &'static str, serde_json::Value) {
+    let approval_policy = if require_command_approval {
+        "untrusted"
+    } else {
+        "on-request"
+    };
+    if require_file_edit_approval {
+        return (
+            approval_policy,
+            "read-only",
+            serde_json::json!({ "type": "readOnly", "networkAccess": false }),
+        );
+    }
+    (
+        approval_policy,
+        "workspace-write",
+        serde_json::json!({
+            "type": "workspaceWrite",
+            "writableRoots": [cwd],
+            "networkAccess": false,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+        }),
+    )
+}
+
+fn codex_item_activity(
+    item: &serde_json::Value,
+    kind: &str,
+    fallback_label: &str,
+) -> ProviderActivity {
+    let id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(fallback_label)
+        .to_string();
+    let label = item
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback_label)
+        .to_string();
+    let status = item
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("done")
+        .to_string();
+    ProviderActivity {
+        id,
+        kind: kind.into(),
+        label,
+        detail: None,
+        status,
+    }
+}
+
+fn handle_codex_app_server_request(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    stdin: &mut ChildStdin,
+    message: &serde_json::Value,
+    method: &str,
+    params: &serde_json::Value,
+    patches: &HashMap<String, serde_json::Value>,
+) -> anyhow::Result<()> {
+    let request_id = message
+        .get("id")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("Codex approval request did not include an id"))?;
+    let (decision, response) = match method {
+        "item/commandExecution/requestApproval" => {
+            let decision = if request.require_command_approval {
+                wait_for_provider_approval(app, request, "command", params.clone())?
+            } else {
+                ProviderApprovalDecision::Approve
+            };
+            let response = codex_provider_approval_response(decision);
+            (decision, serde_json::json!({ "decision": response }))
+        }
+        "item/fileChange/requestApproval" => {
+            let mut details = params.clone();
+            if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str) {
+                if let Some(patch) = patches.get(item_id) {
+                    details["patch"] = patch.clone();
+                }
+            }
+            let decision = if request.require_file_edit_approval {
+                wait_for_provider_approval(app, request, "file-change", details)?
+            } else {
+                ProviderApprovalDecision::Approve
+            };
+            let response = codex_provider_approval_response(decision);
+            (decision, serde_json::json!({ "decision": response }))
+        }
+        "item/permissions/requestApproval" => {
+            let decision = wait_for_provider_approval(app, request, "permissions", params.clone())?;
+            let response = if decision != ProviderApprovalDecision::Reject {
+                serde_json::json!({
+                    "permissions": params.get("permissions").cloned().unwrap_or_default(),
+                    "scope": "turn",
+                    "strictAutoReview": true,
+                })
+            } else {
+                serde_json::json!({
+                    "permissions": {},
+                    "scope": "turn",
+                    "strictAutoReview": true,
+                })
+            };
+            (decision, response)
+        }
+        _ => {
+            write_codex_app_server_message(
+                stdin,
+                &serde_json::json!({
+                    "id": request_id,
+                    "error": { "code": -32601, "message": "unsupported Gyro client request" }
+                }),
+            )
+            .map_err(anyhow::Error::msg)?;
+            return Ok(());
+        }
+    };
+    let _ = decision;
+    write_codex_app_server_message(
+        stdin,
+        &serde_json::json!({ "id": request_id, "result": response }),
+    )
+    .map_err(anyhow::Error::msg)
+}
+
+fn codex_provider_approval_response(decision: ProviderApprovalDecision) -> &'static str {
+    match decision {
+        ProviderApprovalDecision::Approve => "accept",
+        ProviderApprovalDecision::Reject | ProviderApprovalDecision::AppliedByGyro => "decline",
+    }
+}
+
+fn wait_for_provider_approval(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    approval_type: &str,
+    details: serde_json::Value,
+) -> anyhow::Result<ProviderApprovalDecision> {
+    let file_transaction = if approval_type == "file-change" {
+        let workspace_path = request
+            .workspace_path
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("provider file approval has no selected workspace"))?;
+        let changes = details
+            .pointer("/patch/changes")
+            .or_else(|| details.pointer("/change/changes"))
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("provider file approval did not include the reviewed file set")
+            })?;
+        let changes: Vec<ProviderFileChange> =
+            serde_json::from_value(changes).context("decode reviewed provider file changes")?;
+        Some(prepare_provider_mutation_transaction(
+            Path::new(workspace_path),
+            &changes,
+        )?)
+    } else {
+        None
+    };
+    wait_for_provider_approval_with_transaction(
+        app,
+        &ProviderApprovalContext::from(request),
+        approval_type,
+        details,
+        file_transaction,
+    )
+}
+
+fn wait_for_provider_approval_with_transaction(
+    app: &tauri::AppHandle,
+    context: &ProviderApprovalContext,
+    approval_type: &str,
+    details: serde_json::Value,
+    file_transaction: Option<PreparedProviderMutationTransaction>,
+) -> anyhow::Result<ProviderApprovalDecision> {
+    let approval_id = Uuid::new_v4();
+    let session_id = Uuid::parse_str(&context.session_id)?;
+    let turn_id = context
+        .turn_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()?;
+    let command = details
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .map(gyro_core::sanitize_harness_text);
+    let reason = details
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .map(gyro_core::sanitize_harness_text);
+    let mut payload = serde_json::json!({
+        "schema": "gyro.provider-approval.v1",
+        "kind": "provider-tool-approval",
+        "approvalId": approval_id,
+        "approvalType": approval_type,
+        "providerId": context.provider_id,
+        "providerLabel": context.provider_label,
+        "command": command,
+        "cwd": details.get("cwd"),
+        "reason": reason,
+        "details": details,
+        "status": "pending",
+        "risk": provider_approval_risk(approval_type),
+    });
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let event = store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::ApprovalRequested,
+        provider_approval_label(approval_type),
+        payload.clone(),
+        turn_id,
+    )?;
+    let (sender, receiver) = mpsc::channel();
+    app.state::<ProviderApprovalManager>()
+        .pending
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider approval state is unavailable"))?
+        .insert(
+            approval_id.to_string(),
+            PendingProviderApproval {
+                sender,
+                approval_id,
+                session_id,
+                turn_id,
+                payload: payload.clone(),
+                file_transaction,
+            },
+        );
+    let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(250)) {
+            Ok(decision) => return Ok(decision),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("provider approval channel closed")
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if provider_chat_cancelled(app, &context.session_id) {
+            app.state::<ProviderApprovalManager>()
+                .pending
+                .lock()
+                .ok()
+                .map(|mut pending| pending.remove(&approval_id.to_string()));
+            payload["status"] = serde_json::Value::String("cancelled".into());
+            let event = store.append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                "Provider approval cancelled",
+                payload,
+                turn_id,
+            )?;
+            let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+            anyhow::bail!("chat cancelled by user");
+        }
+    }
+}
+
+fn provider_approval_label(approval_type: &str) -> &'static str {
+    match approval_type {
+        "command" => "Review command",
+        "file-change" => "Review provider file changes",
+        _ => "Review provider permissions",
+    }
+}
+
+fn provider_approval_risk(approval_type: &str) -> &'static str {
+    match approval_type {
+        "command" => "Runs a command in the selected project",
+        "file-change" => "Allows the provider to apply the displayed workspace patch",
+        _ => "Expands provider access for this turn",
+    }
+}
+
+fn desktop_claude_approval_type(tool_name: &str) -> &'static str {
+    match tool_name {
+        "Bash" | "KillShell" => "command",
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => "file-change",
+        _ => "permissions",
+    }
+}
+
+fn sanitize_provider_approval_details(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(value) => {
+            serde_json::Value::String(gyro_core::security::redact_secrets(&value))
+        }
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .into_iter()
+                .map(sanitize_provider_approval_details)
+                .collect(),
+        ),
+        serde_json::Value::Object(values) => serde_json::Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, sanitize_provider_approval_details(value)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
+fn desktop_claude_approval_details(
+    request: &DesktopProviderApprovalRequest,
+    workspace_path: &Path,
+) -> serde_json::Value {
+    let command = request
+        .input
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .map(|command| truncate_chars(&gyro_core::security::redact_secrets(command), 12_000));
+    let reason = request
+        .input
+        .get("description")
+        .or_else(|| request.input.get("reason"))
+        .and_then(serde_json::Value::as_str)
+        .map(|reason| truncate_chars(&gyro_core::security::redact_secrets(reason), 2_000));
+    let file_path = request
+        .input
+        .get("file_path")
+        .or_else(|| request.input.get("filePath"))
+        .and_then(serde_json::Value::as_str);
+    let input_summary = match desktop_claude_approval_type(&request.tool_name) {
+        "file-change" => serde_json::json!({
+            "filePath": file_path,
+            "operation": request.tool_name,
+            "contentBytes": request
+                .input
+                .get("content")
+                .and_then(serde_json::Value::as_str)
+                .map(str::len),
+            "editCount": request
+                .input
+                .get("edits")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len)
+                .or_else(|| (request.tool_name == "Edit").then_some(1)),
+            "replaceAll": request
+                .input
+                .get("replace_all")
+                .or_else(|| request.input.get("replaceAll"))
+                .and_then(serde_json::Value::as_bool),
+        }),
+        "command" => serde_json::json!({
+            "command": command.clone(),
+            "cwd": workspace_path,
+        }),
+        _ => serde_json::json!({
+            "keys": request
+                .input
+                .as_object()
+                .map(|input| input.keys().take(32).cloned().collect::<Vec<_>>())
+                .unwrap_or_default(),
+        }),
+    };
+    let permission_suggestions = serde_json::to_string(&sanitize_provider_approval_details(
+        request.permission_suggestions.clone(),
+    ))
+    .ok()
+    .map(|value| truncate_chars(&value, 8_000));
+    sanitize_provider_approval_details(serde_json::json!({
+        "toolName": request.tool_name,
+        "input": input_summary,
+        "permissionSuggestions": permission_suggestions,
+        "command": command,
+        "cwd": workspace_path,
+        "reason": reason,
+        "patch": {
+            "changes": file_path
+                .map(|path| vec![serde_json::json!({ "path": path })])
+                .unwrap_or_default(),
+        },
+    }))
+}
+
+fn record_provider_approval_failure(
+    app: &tauri::AppHandle,
+    context: &ProviderApprovalContext,
+    approval_type: &str,
+    details: serde_json::Value,
+    error: &str,
+) {
+    let Ok(session_id) = Uuid::parse_str(&context.session_id) else {
+        return;
+    };
+    let turn_id = context
+        .turn_id
+        .as_deref()
+        .and_then(|turn_id| Uuid::parse_str(turn_id).ok());
+    let payload = serde_json::json!({
+        "schema": "gyro.provider-approval.v1",
+        "kind": "provider-tool-approval",
+        "approvalId": Uuid::new_v4(),
+        "approvalType": approval_type,
+        "providerId": context.provider_id,
+        "providerLabel": context.provider_label,
+        "details": details,
+        "status": "failed",
+        "risk": provider_approval_risk(approval_type),
+        "error": gyro_core::sanitize_harness_text(error),
+    });
+    let Ok(store) = open_store() else {
+        return;
+    };
+    if let Ok(event) = store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::ApprovalRequested,
+        "Provider action could not be reviewed",
+        payload,
+        turn_id,
+    ) {
+        let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    }
+}
+
+fn handle_desktop_provider_approval_request(
+    app: &tauri::AppHandle,
+    request: DesktopProviderApprovalRequest,
+) -> DesktopProviderApprovalResponse {
+    if request.schema != DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1
+        || !versions_compatible(&request.sender_version, env!("CARGO_PKG_VERSION"))
+    {
+        let mut response = DesktopProviderApprovalResponse::deny(
+            "The Claude approval helper does not match this Gyro.app version.",
+        );
+        response.compatible = false;
+        return response;
+    }
+    if request.provider_id != "anthropic" {
+        return DesktopProviderApprovalResponse::deny(
+            "Gyro rejected a provider approval request from an unexpected provider.",
+        );
+    }
+    let session_id = match Uuid::parse_str(&request.session_id) {
+        Ok(session_id) => session_id,
+        Err(_) => {
+            return DesktopProviderApprovalResponse::deny(
+                "Gyro rejected a provider approval request with an invalid session.",
+            )
+        }
+    };
+    if request
+        .turn_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .is_err()
+    {
+        return DesktopProviderApprovalResponse::deny(
+            "Gyro rejected a provider approval request with an invalid turn.",
+        );
+    }
+    let store = match open_store() {
+        Ok(store) => store,
+        Err(error) => return DesktopProviderApprovalResponse::deny(error),
+    };
+    let session = match store.get_session(session_id) {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            return DesktopProviderApprovalResponse::deny(
+                "Gyro could not find the chat that requested this approval.",
+            )
+        }
+        Err(error) => return DesktopProviderApprovalResponse::deny(error.to_string()),
+    };
+    let approval_type = desktop_claude_approval_type(&request.tool_name);
+    let required = match approval_type {
+        "command" => request.require_command_approval,
+        "file-change" => request.require_file_edit_approval,
+        _ => true,
+    };
+    if !required {
+        return DesktopProviderApprovalResponse::allow(
+            request.input,
+            "Gyro allowed this action under the current permissions.",
+        );
+    }
+    let details = desktop_claude_approval_details(&request, &session.workspace_path);
+    let context = ProviderApprovalContext {
+        session_id: request.session_id.clone(),
+        turn_id: request.turn_id.clone(),
+        provider_id: request.provider_id.clone(),
+        provider_label: request.provider_label.clone(),
+    };
+    let file_transaction = if approval_type == "file-change" {
+        match prepare_claude_provider_mutation_transaction(
+            &session.workspace_path,
+            &request.tool_name,
+            &request.input,
+        ) {
+            Ok(transaction) => Some(transaction),
+            Err(error) => {
+                record_provider_approval_failure(
+                    app,
+                    &context,
+                    approval_type,
+                    details,
+                    &error.to_string(),
+                );
+                return DesktopProviderApprovalResponse::deny(format!(
+                    "Gyro could not safely review this file change: {}",
+                    gyro_core::sanitize_harness_text(&error.to_string())
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    match wait_for_provider_approval_with_transaction(
+        app,
+        &context,
+        approval_type,
+        details,
+        file_transaction,
+    ) {
+        Ok(decision) => desktop_claude_approval_response(decision, request.input),
+        Err(error) => DesktopProviderApprovalResponse::deny(format!(
+            "Gyro could not complete this approval: {}",
+            gyro_core::sanitize_harness_text(&error.to_string())
+        )),
+    }
+}
+
+fn desktop_claude_approval_response(
+    decision: ProviderApprovalDecision,
+    input: serde_json::Value,
+) -> DesktopProviderApprovalResponse {
+    match decision {
+        ProviderApprovalDecision::Approve => DesktopProviderApprovalResponse::allow(
+            input,
+            "Gyro approved this provider action.",
+        ),
+        ProviderApprovalDecision::AppliedByGyro => DesktopProviderApprovalResponse::deny(
+            "Gyro already applied the reviewed file changes atomically. Re-read the files and continue without retrying the write.",
+        ),
+        ProviderApprovalDecision::Reject => DesktopProviderApprovalResponse::deny(
+            "The user rejected this provider action in Gyro.",
+        ),
+    }
+}
+
 fn run_anthropic_claude_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -4421,7 +7061,15 @@ fn run_anthropic_claude_chat(
         &contextual_message,
         request.workspace_path.as_deref(),
         request.suggest_title,
+        request.mode != ChatMode::Plan,
     );
+    let permission_mcp_config = if request.mode != ChatMode::Plan
+        && (request.require_command_approval || request.require_file_edit_approval)
+    {
+        Some(desktop_claude_permission_mcp_config(request)?)
+    } else {
+        None
+    };
     let session_id = resume_cursor
         .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -4436,6 +7084,7 @@ fn run_anthropic_claude_chat(
         &request.mode,
         request.require_command_approval,
         request.require_file_edit_approval,
+        permission_mcp_config.as_deref(),
         &prompt,
     ));
 
@@ -4513,7 +7162,7 @@ fn codex_chat_args(
         if full_access {
             args.push("--dangerously-bypass-approvals-and-sandbox".into());
         } else {
-            args.extend(["--sandbox".into(), "workspace-write".into()]);
+            args.extend(["--sandbox".into(), "read-only".into()]);
         }
     }
     args.push("--json".into());
@@ -4523,6 +7172,8 @@ fn codex_chat_args(
         args.push("--skip-git-repo-check".into());
         if full_access {
             args.push("--dangerously-bypass-approvals-and-sandbox".into());
+        } else {
+            args.extend(["--sandbox".into(), "read-only".into()]);
         }
     }
     if let Some(model) = codex_model_arg(model_id) {
@@ -4555,6 +7206,7 @@ fn claude_chat_args(
     mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
+    permission_mcp_config: Option<&str>,
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec![
@@ -4577,11 +7229,47 @@ fn claude_chat_args(
     if *mode == ChatMode::Plan {
         args.push("--permission-mode".into());
         args.push("plan".into());
+    } else if let Some(permission_mcp_config) = permission_mcp_config {
+        args.extend([
+            "--setting-sources".into(),
+            "".into(),
+            "--mcp-config".into(),
+            permission_mcp_config.into(),
+            "--strict-mcp-config".into(),
+            "--permission-prompt-tool".into(),
+            "mcp__gyro_approval__approve".into(),
+            "--allowedTools".into(),
+            "mcp__gyro_approval__approve".into(),
+            "--permission-mode".into(),
+            "default".into(),
+        ]);
     } else if !require_command_approval && !require_file_edit_approval {
         args.push("--dangerously-skip-permissions".into());
     }
     args.push(prompt.into());
     args
+}
+
+fn desktop_claude_permission_mcp_config(request: &ProviderChatRequest) -> anyhow::Result<String> {
+    let executable = std::env::current_exe().context("resolve Gyro desktop permission bridge")?;
+    serde_json::to_string(&serde_json::json!({
+        "mcpServers": {
+            "gyro_approval": {
+                "type": "stdio",
+                "command": executable,
+                "args": ["provider-permission-server"],
+                "env": {
+                    "GYRO_DESKTOP_PERMISSION_SESSION_ID": request.session_id,
+                    "GYRO_DESKTOP_PERMISSION_TURN_ID": request.turn_id.as_deref().unwrap_or(""),
+                    "GYRO_DESKTOP_PERMISSION_PROVIDER_ID": request.provider_id,
+                    "GYRO_DESKTOP_PERMISSION_PROVIDER_LABEL": request.provider_label.as_deref().unwrap_or("Anthropic"),
+                    "GYRO_DESKTOP_PERMISSION_REQUIRE_COMMAND": request.require_command_approval.to_string(),
+                    "GYRO_DESKTOP_PERMISSION_REQUIRE_FILE": request.require_file_edit_approval.to_string(),
+                }
+            }
+        }
+    }))
+    .context("encode Gyro desktop permission bridge config")
 }
 
 fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
@@ -4621,7 +7309,7 @@ fn openai_codex_chat_prompt(
         ""
     };
     let mutation_instruction = if allow_mutations {
-        "You may edit files, run commands, and complete requested workspace changes directly."
+        "You may edit files, run commands, and complete requested workspace changes directly. Gyro applies approved file changes through its own guarded transaction. If a native file-change callback is declined, re-read the affected files before reporting the outcome: the user may have rejected it, or Gyro may already have applied the reviewed change. Report the actual on-disk state and do not claim failure from the callback decision alone."
     } else {
         "Do not edit files, start servers, commit, push, or make destructive changes in this chat run."
     };
@@ -4642,7 +7330,12 @@ fn openai_codex_chat_prompt(
     )
 }
 
-fn claude_chat_prompt(message: &str, workspace_path: Option<&str>, suggest_title: bool) -> String {
+fn claude_chat_prompt(
+    message: &str,
+    workspace_path: Option<&str>,
+    suggest_title: bool,
+    allow_actions: bool,
+) -> String {
     let workspace = workspace_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
@@ -4651,6 +7344,11 @@ fn claude_chat_prompt(message: &str, workspace_path: Option<&str>, suggest_title
         "For this first turn, you may suggest a concise session title. If useful, put this exact hidden marker on the first line before the answer: GYRO_SESSION_TITLE: <2-6 word title>. The app hides this marker. Omit it if no good title is clear.\n"
     } else {
         ""
+    };
+    let action_instruction = if allow_actions {
+        "Use tools when they are needed to complete the user's request. Commands and file changes must follow Gyro's permission decisions. If Gyro reports that it already applied reviewed file changes, do not retry the write; re-read the files and continue. Do not commit, push, or perform destructive actions unless the user explicitly asks.\n"
+    } else {
+        "Stay in planning mode. Do not edit files, run mutating commands, start servers, commit, push, or make destructive changes.\n"
     };
     format!(
         "Answer as Gyro's chat model.\n\
@@ -4662,7 +7360,7 @@ fn claude_chat_prompt(message: &str, workspace_path: Option<&str>, suggest_title
          If the user asks what model you are, answer with the model label only.\n\
          {title_instruction}\
          Use the selected workspace only as optional context.\n\
-         Do not edit files, start servers, commit, push, or make destructive changes in this chat run.\n\
+         {action_instruction}\
          Selected workspace: {workspace}\n\n\
          User message:\n{message}"
     )
@@ -4779,6 +7477,37 @@ fn sanitize_session_title_candidate(title: &str) -> Option<String> {
     Some(title)
 }
 
+fn derive_session_summary(response: &str) -> Option<String> {
+    const MAX_SUMMARY_CHARS: usize = 420;
+    let plain = response
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("GYRO_SESSION_TITLE:")
+                && !line.starts_with("GYRO_PLAN_UPDATE:")
+        })
+        .map(|line| {
+            line.trim_start_matches(['#', '-', '*', '>'])
+                .trim()
+                .replace('`', "")
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if plain.is_empty() {
+        return None;
+    }
+    let mut summary = plain.chars().take(MAX_SUMMARY_CHARS).collect::<String>();
+    if plain.chars().count() > MAX_SUMMARY_CHARS {
+        if let Some(boundary) = summary.rfind(char::is_whitespace) {
+            summary.truncate(boundary);
+        }
+        summary.push_str("...");
+    }
+    Some(summary)
+}
+
 fn codex_model_arg(model_id: Option<&str>) -> Option<String> {
     let model = model_id?.trim();
     if model.is_empty() {
@@ -4863,6 +7592,17 @@ fn append_provider_status_event(
                 .map(serde_json::Value::String)
                 .unwrap_or(serde_json::Value::Null),
         );
+        if let Some(error) = error {
+            let (recovery_kind, recovery_message) = provider_failure_recovery(error);
+            object.insert(
+                "recoveryKind".into(),
+                serde_json::Value::String(recovery_kind.into()),
+            );
+            object.insert(
+                "recoveryMessage".into(),
+                serde_json::Value::String(recovery_message.into()),
+            );
+        }
         object.insert(
             "turnId".into(),
             turn_id
@@ -4905,6 +7645,42 @@ fn append_provider_status_event(
         provider_chat_status_message(&status, provider_label),
         payload,
         turn_id,
+    )
+}
+
+fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("offline")
+        || normalized.contains("network is unreachable")
+        || normalized.contains("connection refused")
+        || normalized.contains("could not resolve host")
+        || normalized.contains("dns")
+    {
+        return (
+            "offline",
+            "Check your internet connection, then retry this message.",
+        );
+    }
+    if normalized.contains("unauthorized")
+        || normalized.contains("authentication")
+        || normalized.contains("not logged in")
+        || normalized.contains("login required")
+        || normalized.contains("credential")
+    {
+        return (
+            "authentication",
+            "Reconnect this provider, then retry the message.",
+        );
+    }
+    if normalized.contains("rate limit") || normalized.contains("too many requests") {
+        return (
+            "rate-limit",
+            "Wait for the provider limit to reset, then retry.",
+        );
+    }
+    (
+        "retry",
+        "Retry the message. Gyro will preserve the conversation context.",
     )
 }
 
@@ -5333,6 +8109,15 @@ fn run_streaming_command(
             .then_some(stream_state.assistant_text),
         provider_session_id: stream_state.provider_session_id,
     })
+}
+
+fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) -> bool {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session_id).cloned())
+        .is_some_and(|control| control.cancellation.is_cancelled())
 }
 
 fn handle_provider_stdout_line(
@@ -5838,6 +8623,7 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
     TerminalPaneSnapshot {
         pane_id: process.request.pane_id.clone(),
         title: process.request.title.clone(),
+        profile_id: process.request.profile_id.clone(),
         command: std::iter::once(process.request.command.as_str())
             .chain(process.request.args.iter().map(String::as_str))
             .collect::<Vec<_>>()
@@ -5854,18 +8640,246 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
     }
 }
 
+struct DesktopProviderPermissionContext {
+    session_id: String,
+    turn_id: Option<String>,
+    provider_id: String,
+    provider_label: Option<String>,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
+}
+
+impl DesktopProviderPermissionContext {
+    fn from_env() -> anyhow::Result<Self> {
+        Ok(Self {
+            session_id: desktop_permission_env("GYRO_DESKTOP_PERMISSION_SESSION_ID")?,
+            turn_id: std::env::var("GYRO_DESKTOP_PERMISSION_TURN_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+            provider_id: desktop_permission_env("GYRO_DESKTOP_PERMISSION_PROVIDER_ID")?,
+            provider_label: std::env::var("GYRO_DESKTOP_PERMISSION_PROVIDER_LABEL")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+            require_command_approval: desktop_permission_env_bool(
+                "GYRO_DESKTOP_PERMISSION_REQUIRE_COMMAND",
+            )?,
+            require_file_edit_approval: desktop_permission_env_bool(
+                "GYRO_DESKTOP_PERMISSION_REQUIRE_FILE",
+            )?,
+        })
+    }
+}
+
+fn desktop_permission_env(name: &str) -> anyhow::Result<String> {
+    std::env::var(name)
+        .with_context(|| format!("missing desktop provider permission context {name}"))
+}
+
+fn desktop_permission_env_bool(name: &str) -> anyhow::Result<bool> {
+    match desktop_permission_env(name)?.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => anyhow::bail!("invalid desktop provider permission flag {name}"),
+    }
+}
+
+fn desktop_permission_tool_call(
+    paths: &GyroPaths,
+    context: &DesktopProviderPermissionContext,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    if params.get("name").and_then(serde_json::Value::as_str) != Some("approve") {
+        anyhow::bail!("unknown Gyro desktop approval tool");
+    }
+    let arguments = params.get("arguments").cloned().unwrap_or_default();
+    let tool_name = arguments
+        .get("tool_name")
+        .or_else(|| arguments.get("toolName"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let input = arguments
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let request = DesktopProviderApprovalRequest {
+        schema: DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1.into(),
+        sender_version: env!("CARGO_PKG_VERSION").into(),
+        session_id: context.session_id.clone(),
+        turn_id: context.turn_id.clone(),
+        provider_id: context.provider_id.clone(),
+        provider_label: context.provider_label.clone(),
+        tool_name,
+        input: input.clone(),
+        permission_suggestions: arguments
+            .get("permission_suggestions")
+            .or_else(|| arguments.get("permissionSuggestions"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+        require_command_approval: context.require_command_approval,
+        require_file_edit_approval: context.require_file_edit_approval,
+    };
+    let response = request_desktop_provider_approval(paths, &request).unwrap_or_else(|error| {
+        DesktopProviderApprovalResponse::deny(format!(
+            "Gyro denied this provider action because desktop approval was unavailable: {}",
+            gyro_core::sanitize_harness_text(&error.to_string())
+        ))
+    });
+    let permission_result = match response.behavior {
+        DesktopProviderApprovalBehavior::Allow => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": response.updated_input.unwrap_or(input),
+            "message": response.message,
+        }),
+        DesktopProviderApprovalBehavior::Deny => serde_json::json!({
+            "behavior": "deny",
+            "message": response.message,
+        }),
+    };
+    Ok(serde_json::json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string(&permission_result)?,
+        }],
+        "isError": false,
+    }))
+}
+
+fn write_desktop_mcp_message(
+    output: &mut impl Write,
+    message: &serde_json::Value,
+) -> anyhow::Result<()> {
+    serde_json::to_writer(&mut *output, message)?;
+    output.write_all(b"\n")?;
+    output.flush()?;
+    Ok(())
+}
+
+pub fn run_provider_permission_server() -> anyhow::Result<()> {
+    let context = DesktopProviderPermissionContext::from_env()?;
+    let paths = GyroPaths::for_current_user()?;
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().lock();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let request: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(request) => request,
+            Err(error) => {
+                write_desktop_mcp_message(
+                    &mut stdout,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": { "code": -32700, "message": error.to_string() },
+                    }),
+                )?;
+                continue;
+            }
+        };
+        let Some(method) = request.get("method").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(id) = request.get("id").cloned() else {
+            continue;
+        };
+        let result = match method {
+            "initialize" => Ok(serde_json::json!({
+                "protocolVersion": request
+                    .pointer("/params/protocolVersion")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("2024-11-05"),
+                "capabilities": { "tools": {} },
+                "serverInfo": {
+                    "name": "gyro-desktop-approval",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+            })),
+            "ping" => Ok(serde_json::json!({})),
+            "tools/list" => Ok(serde_json::json!({
+                "tools": [{
+                    "name": "approve",
+                    "description": "Ask Gyro.app to approve or reject one Claude Code tool action.",
+                    "inputSchema": {
+                        "type": "object",
+                        "additionalProperties": true,
+                    },
+                }],
+            })),
+            "tools/call" => desktop_permission_tool_call(
+                &paths,
+                &context,
+                request.get("params").cloned().unwrap_or_default(),
+            ),
+            _ => Err(anyhow::anyhow!("unsupported MCP method `{method}`")),
+        };
+        match result {
+            Ok(result) => write_desktop_mcp_message(
+                &mut stdout,
+                &serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+            )?,
+            Err(error) => write_desktop_mcp_message(
+                &mut stdout,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32603,
+                        "message": gyro_core::sanitize_harness_text(&error.to_string()),
+                    },
+                }),
+            )?,
+        }
+    }
+    Ok(())
+}
+
+pub fn run_entrypoint() {
+    if std::env::args().nth(1).as_deref() == Some("provider-permission-server") {
+        if let Err(error) = run_provider_permission_server() {
+            eprintln!(
+                "Gyro desktop permission bridge failed: {}",
+                gyro_core::sanitize_harness_text(&error.to_string())
+            );
+            std::process::exit(1);
+        }
+        return;
+    }
+    run();
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TerminalProcessManager::default())
         .manage(LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(ProviderApprovalManager::default())
+        .manage(AutomationSchedulerControl::default())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            restore_main_window(app.handle())?;
+            let paths = GyroPaths::for_current_user()?;
+            let store = SessionStore::open(paths.clone())?;
+            recover_provider_mutation_transactions(&paths.mutation_journals_dir, &store)?;
             start_cli_ipc_listener(app.handle().clone());
+            start_automation_scheduler(app.handle().clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Err(error) = window.hide() {
+                    eprintln!("could not hide Gyro window: {error}");
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             append_chat_context_event,
@@ -5876,9 +8890,11 @@ pub fn run() {
             check_provider_auth,
             check_browser_preview,
             check_provider_health,
+            capture_browser_preview,
             complete_automation_lease,
             create_automation,
             create_desktop_session,
+            create_file_mutation_proposal,
             create_terminal_pane,
             create_workspace_file,
             create_worktree_session,
@@ -5889,8 +8905,11 @@ pub fn run() {
             delete_workspace_path,
             export_diagnostics,
             get_account_session,
+            get_notification_permission,
             get_provider_usage,
             git_commit,
+            git_branches,
+            git_checkout_branch,
             git_diff,
             git_discard,
             git_stage,
@@ -5917,6 +8936,8 @@ pub fn run() {
             rename_workspace_path,
             refresh_account_session,
             resize_terminal_pane,
+            resolve_file_mutation_proposal,
+            resolve_provider_approval,
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
@@ -5924,22 +8945,68 @@ pub fn run() {
             save_config,
             search_workspace,
             set_session_model,
+            set_session_branch,
             set_automation_status,
             stat_workspace_file,
             start_account_login,
             stop_terminal_pane,
             stop_provider_chat,
+            terminal_pane_has_foreground_job,
             task_discover,
             task_run,
             test_discover,
+            test_notification,
             test_run,
             triage_automation,
             watch_workspace,
             write_workspace_file,
             write_terminal_input
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Gyro");
+        .build(tauri::generate_context!())
+        .expect("error while building Gyro");
+
+    app.run(|app, event| {
+        if run_event_wakes_automation_scheduler(&event) {
+            app.state::<AutomationSchedulerControl>().wake();
+        }
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = &event
+        {
+            if !*has_visible_windows {
+                if let Err(error) = restore_main_window(app) {
+                    eprintln!("could not reopen Gyro window: {error}");
+                }
+            }
+        }
+    });
+}
+
+fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
+    matches!(event, tauri::RunEvent::Resumed)
+}
+
+#[cfg(target_os = "macos")]
+fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.unminimize()?;
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+
+    let config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .context("Gyro has no configured main window")?;
+    let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
+    window.show()?;
+    window.set_focus()?;
+    Ok(())
 }
 
 fn open_store() -> Result<SessionStore, String> {
@@ -5972,6 +9039,7 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         #[cfg(unix)]
         {
+            use std::os::unix::fs::PermissionsExt;
             use std::os::unix::net::UnixListener;
 
             if paths.socket_path.exists() {
@@ -5989,35 +9057,270 @@ fn start_cli_ipc_listener(app: tauri::AppHandle) {
                     return;
                 }
             };
+            let _ = std::fs::set_permissions(
+                &paths.socket_path,
+                std::fs::Permissions::from_mode(0o600),
+            );
 
             for stream in listener.incoming() {
                 let Ok(stream) = stream else {
                     continue;
                 };
-                let mut reader = BufReader::new(stream);
-                let mut line = String::new();
-                if reader.read_line(&mut line).is_err() {
-                    continue;
-                }
-                let Ok(notification) = serde_json::from_str::<AppNotification>(line.trim()) else {
-                    continue;
-                };
-                if matches!(
-                    &notification.kind,
-                    AppNotificationKind::OpenSession | AppNotificationKind::AttachSession
-                ) {
-                    let _ = app.emit("gyro://app-notification", notification);
-                    let _ = reader.get_mut().write_all(b"ok\n");
-                    let _ = reader.get_mut().flush();
-                }
+                let app = app.clone();
+                std::thread::spawn(move || handle_cli_ipc_connection(&app, stream));
             }
         }
     });
 }
 
+#[cfg(unix)]
+fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net::UnixStream) {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    if value.get("schema").and_then(serde_json::Value::as_str)
+        == Some(DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1)
+    {
+        let response = match serde_json::from_value::<DesktopProviderApprovalRequest>(value) {
+            Ok(request) => handle_desktop_provider_approval_request(app, request),
+            Err(error) => DesktopProviderApprovalResponse::deny(format!(
+                "Gyro could not decode the provider approval request: {}",
+                gyro_core::sanitize_harness_text(&error.to_string())
+            )),
+        };
+        let _ = serde_json::to_writer(reader.get_mut(), &response);
+        let _ = reader.get_mut().write_all(b"\n");
+        let _ = reader.get_mut().flush();
+        return;
+    }
+    let Ok(notification) = serde_json::from_value::<AppNotification>(value) else {
+        return;
+    };
+    let acknowledgement = acknowledgement_for(&notification, env!("CARGO_PKG_VERSION"));
+    if matches!(
+        &notification.kind,
+        AppNotificationKind::OpenSession | AppNotificationKind::AttachSession
+    ) && acknowledgement.compatible
+    {
+        let _ = app.emit("gyro://app-notification", notification);
+    }
+    let _ = serde_json::to_writer(reader.get_mut(), &acknowledgement);
+    let _ = reader.get_mut().write_all(b"\n");
+    let _ = reader.get_mut().flush();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn anthropic_provider_request() -> ProviderChatRequest {
+        ProviderChatRequest {
+            session_id: Uuid::new_v4().to_string(),
+            message: "edit it".into(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "anthropic".into(),
+            provider_label: Some("Anthropic".into()),
+            model_id: Some("sonnet".into()),
+            model_label: Some("Claude Sonnet".into()),
+            reasoning_effort: None,
+            require_command_approval: true,
+            require_file_edit_approval: true,
+            suggest_title: false,
+            workspace_path: Some("/tmp/gyro-workspace".into()),
+            mode: ChatMode::Normal,
+            goal: None,
+            plan: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn gyro_applied_file_changes_are_not_applied_again_by_codex() {
+        assert_eq!(
+            codex_provider_approval_response(ProviderApprovalDecision::AppliedByGyro),
+            "decline"
+        );
+        assert_eq!(
+            codex_provider_approval_response(ProviderApprovalDecision::Approve),
+            "accept"
+        );
+    }
+
+    #[test]
+    fn gyro_applied_file_changes_are_not_applied_again_by_claude() {
+        let response = desktop_claude_approval_response(
+            ProviderApprovalDecision::AppliedByGyro,
+            serde_json::json!({ "file_path": "src/main.rs" }),
+        );
+
+        assert_eq!(response.behavior, DesktopProviderApprovalBehavior::Deny);
+        assert!(response.updated_input.is_none());
+        assert!(response.message.contains("already applied"));
+    }
+
+    #[test]
+    fn desktop_claude_mcp_config_uses_the_installed_binary_and_gated_context() {
+        let request = anthropic_provider_request();
+        let config: serde_json::Value =
+            serde_json::from_str(&desktop_claude_permission_mcp_config(&request).unwrap()).unwrap();
+        let server = &config["mcpServers"]["gyro_approval"];
+
+        assert!(server["command"]
+            .as_str()
+            .is_some_and(|command| !command.trim().is_empty()));
+        assert_eq!(
+            server["args"],
+            serde_json::json!(["provider-permission-server"])
+        );
+        assert_eq!(
+            server["env"]["GYRO_DESKTOP_PERMISSION_SESSION_ID"],
+            request.session_id
+        );
+        assert_eq!(
+            server["env"]["GYRO_DESKTOP_PERMISSION_REQUIRE_FILE"],
+            "true"
+        );
+    }
+
+    #[test]
+    fn desktop_claude_prompt_allows_approved_actions_but_plan_mode_stays_read_only() {
+        let actionable = claude_chat_prompt("edit it", Some("/tmp/project"), false, true);
+        assert!(actionable.contains("must follow Gyro's permission decisions"));
+        assert!(actionable.contains("do not retry the write"));
+        assert!(!actionable.contains("Stay in planning mode"));
+
+        let plan = claude_chat_prompt("plan it", Some("/tmp/project"), false, false);
+        assert!(plan.contains("Stay in planning mode"));
+        assert!(plan.contains("Do not edit files"));
+    }
+
+    #[test]
+    fn desktop_claude_approval_events_summarize_large_file_content() {
+        let request = DesktopProviderApprovalRequest {
+            schema: DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1.into(),
+            sender_version: env!("CARGO_PKG_VERSION").into(),
+            session_id: Uuid::new_v4().to_string(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "anthropic".into(),
+            provider_label: Some("Anthropic".into()),
+            tool_name: "Write".into(),
+            input: serde_json::json!({
+                "file_path": "large.txt",
+                "content": format!("secret-provider-token{}", "x".repeat(200_000)),
+            }),
+            permission_suggestions: serde_json::json!([]),
+            require_command_approval: true,
+            require_file_edit_approval: true,
+        };
+
+        let details = desktop_claude_approval_details(&request, Path::new("/tmp/project"));
+        let encoded = serde_json::to_vec(&details).unwrap();
+
+        assert!(encoded.len() < 32 * 1024);
+        assert_eq!(details["patch"]["changes"][0]["path"], "large.txt");
+        assert_eq!(details["input"]["operation"], "Write");
+        assert_eq!(details["input"]["contentBytes"], 200_021);
+        assert!(!String::from_utf8(encoded)
+            .unwrap()
+            .contains("secret-provider-token"));
+    }
+
+    #[test]
+    fn desktop_claude_permission_child_fails_closed_without_the_app() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let context = DesktopProviderPermissionContext {
+            session_id: Uuid::new_v4().to_string(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "anthropic".into(),
+            provider_label: Some("Anthropic".into()),
+            require_command_approval: true,
+            require_file_edit_approval: true,
+        };
+
+        let result = desktop_permission_tool_call(
+            &paths,
+            &context,
+            serde_json::json!({
+                "name": "approve",
+                "arguments": {
+                    "tool_name": "Bash",
+                    "input": { "command": "echo hello" },
+                },
+            }),
+        )
+        .unwrap();
+        let permission: serde_json::Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+
+        assert_eq!(permission["behavior"], "deny");
+        assert!(permission["message"]
+            .as_str()
+            .unwrap()
+            .contains("approval was unavailable"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_claude_permission_child_forwards_tool_context_to_the_app() {
+        use std::os::unix::net::UnixListener;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        std::fs::create_dir_all(paths.socket_path.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&paths.socket_path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: DesktopProviderApprovalRequest = serde_json::from_str(&line).unwrap();
+            assert_eq!(request.provider_id, "anthropic");
+            assert_eq!(request.tool_name, "Write");
+            assert_eq!(request.input["file_path"], "src/main.rs");
+            let mut stream = stream;
+            serde_json::to_writer(
+                &mut stream,
+                &DesktopProviderApprovalResponse::deny("Reviewed and rejected"),
+            )
+            .unwrap();
+            stream.write_all(b"\n").unwrap();
+            stream.flush().unwrap();
+        });
+        let context = DesktopProviderPermissionContext {
+            session_id: Uuid::new_v4().to_string(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "anthropic".into(),
+            provider_label: Some("Anthropic".into()),
+            require_command_approval: true,
+            require_file_edit_approval: true,
+        };
+
+        let result = desktop_permission_tool_call(
+            &paths,
+            &context,
+            serde_json::json!({
+                "name": "approve",
+                "arguments": {
+                    "tool_name": "Write",
+                    "input": { "file_path": "src/main.rs", "content": "fn main() {}\n" },
+                },
+            }),
+        )
+        .unwrap();
+        let permission: serde_json::Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+
+        assert_eq!(permission["behavior"], "deny");
+        assert_eq!(permission["message"], "Reviewed and rejected");
+        server.join().unwrap();
+    }
 
     #[test]
     fn codex_usage_windows_follow_reported_duration_instead_of_slot() {
@@ -6111,12 +9414,125 @@ mod tests {
         assert!(reachable.reachable);
         assert_eq!(reachable.status_code, Some(204));
         assert!(reachable.message.contains("HTTP 204"));
+        assert!(reachable.diagnostics_supported);
+        assert!(!reachable.diagnostics_captured);
+        assert!(reachable.diagnostics.is_empty());
 
         let rejected = check_browser_preview_blocking(BrowserPreviewCheckRequest {
             url: "file:///tmp/private".into(),
         })
         .unwrap_err();
         assert!(rejected.contains("http or https"));
+        assert!(!browser_preview_diagnostics_supported(
+            &url::Url::parse("https://example.com").unwrap()
+        ));
+        assert!(browser_preview_diagnostics_supported(
+            &url::Url::parse("http://[::1]:3000").unwrap()
+        ));
+    }
+
+    #[test]
+    fn browser_preview_diagnostics_are_bounded_redacted_and_query_free() {
+        let prefix = "gyro-browser-diagnostics:test:";
+        let script = browser_preview_capture_script(prefix).unwrap();
+        assert!(script.contains("console.error"));
+        assert!(script.contains("unhandledrejection"));
+        assert!(script.contains(prefix));
+        assert!(!script.contains("__TAURI__"));
+
+        let payload = serde_json::json!([
+            {
+                "kind": "console-error",
+                "message": "request failed api_key=sk-browser-secret",
+                "source": "http://localhost:3000/src/app.ts?token=private#frame",
+                "line": 12,
+                "column": 4
+            },
+            {
+                "kind": "unexpected",
+                "message": "fallback kind",
+                "source": null,
+                "line": null,
+                "column": null
+            }
+        ]);
+        let title = format!("{prefix}{payload}");
+        let diagnostics = parse_browser_preview_diagnostics(prefix, &title).unwrap();
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].kind, "console-error");
+        assert!(!diagnostics[0].message.contains("sk-browser-secret"));
+        assert_eq!(diagnostics[0].source.as_deref(), Some("/src/app.ts"));
+        assert_eq!(diagnostics[1].kind, "page-error");
+    }
+
+    #[test]
+    fn browser_preview_capture_dimensions_are_fixed_and_validated() {
+        assert_eq!(
+            browser_preview_capture_dimensions("desktop").unwrap(),
+            (1440, 900)
+        );
+        assert_eq!(
+            browser_preview_capture_dimensions("tablet").unwrap(),
+            (834, 1112)
+        );
+        assert_eq!(
+            browser_preview_capture_dimensions("mobile").unwrap(),
+            (390, 844)
+        );
+        assert!(browser_preview_capture_dimensions("watch").is_err());
+    }
+
+    #[test]
+    fn browser_preview_captures_are_private_and_pruned() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let png = b"\x89PNG\r\n\x1a\nlocal-preview";
+        let start = chrono::Utc::now();
+        let mut latest = None;
+        for offset in 0..(MAX_BROWSER_PREVIEW_CAPTURES + 2) {
+            latest = Some(
+                persist_browser_preview_capture(
+                    &paths,
+                    png,
+                    390,
+                    844,
+                    start + chrono::Duration::milliseconds(offset as i64),
+                )
+                .unwrap(),
+            );
+        }
+
+        let captures = fs::read_dir(&paths.browser_captures_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".png"))
+            .collect::<Vec<_>>();
+        assert_eq!(captures.len(), MAX_BROWSER_PREVIEW_CAPTURES);
+        assert!(Path::new(&latest.unwrap().path).exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let directory_mode = fs::metadata(&paths.browser_captures_dir)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let capture_mode = captures[0].metadata().unwrap().permissions().mode() & 0o777;
+            assert_eq!(directory_mode, 0o700);
+            assert_eq!(capture_mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn browser_preview_capture_rejects_invalid_png_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let error =
+            persist_browser_preview_capture(&paths, b"not an image", 1440, 900, chrono::Utc::now())
+                .unwrap_err();
+        assert!(error.contains("valid PNG"));
+        assert!(!paths.browser_captures_dir.exists());
     }
 
     #[test]
@@ -6625,7 +10041,7 @@ while True:
         );
         assert_eq!(fresh_codex[0], "exec");
         assert!(fresh_codex.contains(&"--sandbox".to_string()));
-        assert!(fresh_codex.contains(&"workspace-write".to_string()));
+        assert!(fresh_codex.contains(&"read-only".to_string()));
         assert!(fresh_codex.contains(&"--json".to_string()));
         assert!(fresh_codex.contains(&"--output-last-message".to_string()));
         assert!(fresh_codex.contains(&"gpt-5.6-sol".to_string()));
@@ -6665,6 +10081,9 @@ while True:
             ]
         );
         assert!(resumed_codex.contains(&"--skip-git-repo-check".to_string()));
+        assert!(resumed_codex
+            .windows(2)
+            .any(|args| args == ["--sandbox", "read-only"]));
         assert!(resumed_codex.ends_with(&["--".to_string(), "again".to_string()]));
 
         let fresh_claude = claude_chat_args(
@@ -6674,13 +10093,21 @@ while True:
             &ChatMode::Normal,
             true,
             true,
+            Some("{\"mcpServers\":{}}"),
             "hello",
         );
         assert!(fresh_claude.contains(&"--print".to_string()));
         assert!(fresh_claude.contains(&"stream-json".to_string()));
         assert!(fresh_claude.contains(&"--include-partial-messages".to_string()));
         assert!(fresh_claude.contains(&"--session-id".to_string()));
-        assert!(fresh_claude.ends_with(&["sonnet".to_string(), "hello".to_string()]));
+        assert!(fresh_claude.contains(&"--mcp-config".to_string()));
+        assert!(fresh_claude.contains(&"--permission-prompt-tool".to_string()));
+        assert!(fresh_claude.contains(&"mcp__gyro_approval__approve".to_string()));
+        assert!(!fresh_claude.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(fresh_claude
+            .windows(2)
+            .any(|args| args == ["--model", "sonnet"]));
+        assert_eq!(fresh_claude.last(), Some(&"hello".to_string()));
 
         let full_access_claude = claude_chat_args(
             None,
@@ -6689,6 +10116,7 @@ while True:
             &ChatMode::Normal,
             false,
             false,
+            None,
             "edit it",
         );
         assert!(full_access_claude.contains(&"--dangerously-skip-permissions".to_string()));
@@ -6700,11 +10128,31 @@ while True:
             &ChatMode::Plan,
             false,
             false,
+            Some("{\"mcpServers\":{}}"),
             "again",
         );
         assert!(resumed_claude.contains(&"--resume".to_string()));
         assert!(resumed_claude.contains(&"plan".to_string()));
+        assert!(!resumed_claude.contains(&"--mcp-config".to_string()));
         assert_eq!(resumed_claude.last(), Some(&"again".to_string()));
+    }
+
+    #[test]
+    fn codex_app_server_policy_keeps_gated_edits_read_only() {
+        let workspace = Path::new("/tmp/gyro-workspace");
+        let (approval, sandbox, policy) = codex_app_server_policy(true, true, workspace);
+        assert_eq!(approval, "untrusted");
+        assert_eq!(sandbox, "read-only");
+        assert_eq!(policy["type"], "readOnly");
+        assert_eq!(policy["networkAccess"], false);
+
+        let (approval, sandbox, policy) = codex_app_server_policy(false, false, workspace);
+        assert_eq!(approval, "on-request");
+        assert_eq!(sandbox, "workspace-write");
+        assert_eq!(policy["type"], "workspaceWrite");
+        assert_eq!(policy["writableRoots"][0], "/tmp/gyro-workspace");
+        assert_eq!(provider_approval_label("command"), "Review command");
+        assert!(provider_approval_risk("file-change").contains("workspace patch"));
     }
 
     #[test]
@@ -6917,6 +10365,132 @@ while True:
     }
 
     #[test]
+    fn provider_failures_have_specific_recovery_guidance() {
+        assert_eq!(
+            provider_failure_recovery("network is unreachable").0,
+            "offline"
+        );
+        assert_eq!(
+            provider_failure_recovery("authentication required").0,
+            "authentication"
+        );
+        assert_eq!(
+            provider_failure_recovery("rate limit exceeded").0,
+            "rate-limit"
+        );
+        assert_eq!(provider_failure_recovery("provider crashed").0, "retry");
+    }
+
+    #[test]
+    fn stale_resume_binding_is_cleared_and_retried_without_a_cursor() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "resume recovery")
+            .unwrap();
+        let binding = store
+            .upsert_provider_session_binding(
+                session.id,
+                "openai",
+                Some("gpt-5.5".into()),
+                Some("GPT-5.5".into()),
+                None,
+                serde_json::json!({
+                    "kind": "codex-session",
+                    "sessionId": "stale-provider-session",
+                }),
+                "ready",
+                None,
+            )
+            .unwrap();
+        let request = ProviderChatRequest {
+            session_id: session.id.to_string(),
+            message: "continue".into(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "openai".into(),
+            provider_label: Some("OpenAI".into()),
+            model_id: Some("gpt-5.5".into()),
+            model_label: Some("GPT-5.5".into()),
+            reasoning_effort: None,
+            require_command_approval: true,
+            require_file_edit_approval: true,
+            suggest_title: false,
+            workspace_path: Some(temp.path().display().to_string()),
+            mode: ChatMode::Normal,
+            goal: None,
+            plan: None,
+            attachments: Vec::new(),
+        };
+        let mut attempts = Vec::new();
+        let output =
+            run_provider_chat_with_retry_using(&store, &request, Some(binding), |resume_cursor| {
+                attempts.push(resume_cursor.map(|cursor| cursor.session_id.clone()));
+                if resume_cursor.is_some() {
+                    anyhow::bail!("Could not resume session: not found");
+                }
+                Ok(ProviderRunnerOutput {
+                    activities: Vec::new(),
+                    response: "Recovered".into(),
+                    resume_cursor: None,
+                    retry_count: 0,
+                    resumed: false,
+                    output_summary: None,
+                })
+            })
+            .unwrap();
+
+        assert_eq!(attempts, vec![Some("stale-provider-session".into()), None]);
+        assert_eq!(output.retry_count, 1);
+        assert!(!output.resumed);
+        assert_eq!(
+            output.output_summary.as_deref(),
+            Some("stale resume cursor cleared and request retried")
+        );
+        assert!(store
+            .get_provider_session_binding(session.id, "openai")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn pending_approval_is_restored_into_the_timeline_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "approval restore")
+            .unwrap();
+        let proposal = store
+            .create_mutation_proposal(
+                session.id,
+                Some(Uuid::new_v4()),
+                "restored.txt",
+                "pending\n",
+                None,
+                false,
+            )
+            .unwrap();
+
+        let first = read_session_events_from_store(&store, session.id).unwrap();
+        let second = read_session_events_from_store(&store, session.id).unwrap();
+        let matching = |events: &[SessionEvent]| {
+            events
+                .iter()
+                .filter(|event| event_mutation_proposal_id(event) == Some(proposal.id))
+                .count()
+        };
+        assert_eq!(matching(&first), 1);
+        assert_eq!(matching(&second), 1);
+        assert_eq!(
+            second
+                .iter()
+                .find(|event| event_mutation_proposal_id(event) == Some(proposal.id))
+                .unwrap()
+                .kind,
+            SessionEventKind::ApprovalRequested
+        );
+    }
+
+    #[test]
     fn extracts_hidden_session_title_marker() {
         let extracted =
             extract_session_title_marker("GYRO_SESSION_TITLE: Fix Model Picker\n\nDone.", true);
@@ -6928,6 +10502,26 @@ while True:
             extract_session_title_marker("GYRO_SESSION_TITLE: Fix Model Picker\n\nDone.", false);
         assert!(untouched.title.is_none());
         assert!(untouched.message.contains("GYRO_SESSION_TITLE"));
+    }
+
+    #[test]
+    fn derives_a_bounded_plain_text_summary_from_the_real_response() {
+        let summary = derive_session_summary(
+            "## Result\n\nInspected `src/main.rs` and fixed the startup path.\n\n- Tests pass.",
+        )
+        .unwrap();
+        assert_eq!(
+            summary,
+            "Result Inspected src/main.rs and fixed the startup path. Tests pass."
+        );
+        assert!(derive_session_summary(" \n\n").is_none());
+        assert!(
+            derive_session_summary(&"word ".repeat(200))
+                .unwrap()
+                .chars()
+                .count()
+                <= 423
+        );
     }
 
     #[test]
@@ -7057,6 +10651,7 @@ while True:
         let request = TerminalPaneRequest {
             pane_id: "blank-workspace".into(),
             title: "Shell".into(),
+            profile_id: Some("shell".into()),
             command: "zsh".into(),
             args: Vec::new(),
             workspace_path: Some("   ".into()),
@@ -7093,6 +10688,7 @@ while True:
         let local_request = TerminalPaneRequest {
             pane_id: "local-cwd".into(),
             title: "Shell".into(),
+            profile_id: Some("shell".into()),
             command: "zsh".into(),
             args: Vec::new(),
             workspace_path: Some(plan.worktree_path.display().to_string()),
@@ -7150,6 +10746,7 @@ while True:
             .create(TerminalPaneRequest {
                 pane_id: "pane-test".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec!["-c".into(), "printf hello".into()],
                 workspace_path: None,
@@ -7184,6 +10781,7 @@ while True:
             .create(TerminalPaneRequest {
                 pane_id: "pane-zsh".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "zsh".into(),
                 args: vec!["-il".into()],
                 workspace_path: None,
@@ -7194,12 +10792,62 @@ while True:
             })
             .unwrap();
         assert_eq!(snapshot.status, "running");
+        assert_eq!(snapshot.profile_id.as_deref(), Some("shell"));
+
+        let idle = (0..40).any(|_| {
+            let idle = !manager.has_foreground_job("pane-zsh").unwrap();
+            if !idle {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            idle
+        });
+        assert!(idle, "login zsh should settle at an idle prompt");
 
         manager
             .write("pane-zsh", "printf zsh-ready\\nexit\\n")
             .unwrap();
         let snapshot = wait_for_terminal_output(&manager, "pane-zsh", "zsh-ready");
         assert!(snapshot.output.contains("zsh-ready"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_manager_distinguishes_idle_shell_from_foreground_job() {
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-activity".into(),
+                title: "Shell".into(),
+                profile_id: Some("shell".into()),
+                command: "sh".into(),
+                args: Vec::new(),
+                workspace_path: None,
+                workspace_mode: None,
+                working_directory: None,
+                cols: None,
+                rows: None,
+            })
+            .unwrap();
+
+        let idle = (0..20).any(|_| {
+            let idle = !manager.has_foreground_job("pane-activity").unwrap();
+            if !idle {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            idle
+        });
+        assert!(idle, "interactive shell should settle at an idle prompt");
+
+        manager.write("pane-activity", "sleep 5\n").unwrap();
+        let busy = (0..20).any(|_| {
+            let busy = manager.has_foreground_job("pane-activity").unwrap();
+            if !busy {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            busy
+        });
+        assert!(busy, "foreground shell command should require confirmation");
+        manager.stop("pane-activity").unwrap();
     }
 
     #[test]
@@ -7209,6 +10857,7 @@ while True:
             .create(TerminalPaneRequest {
                 pane_id: "pane-input".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec!["-c".into(), "read line; printf out:$line".into()],
                 workspace_path: None,
@@ -7236,6 +10885,7 @@ while True:
             .create(TerminalPaneRequest {
                 pane_id: "pane-env".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec![
                     "-c".into(),
@@ -7293,6 +10943,7 @@ while True:
             .create(TerminalPaneRequest {
                 pane_id: "pane-color".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec![
                     "-c".into(),
@@ -7320,6 +10971,7 @@ while True:
             .create(TerminalPaneRequest {
                 pane_id: "pane-cwd".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec!["-c".into(), "pwd".into()],
                 workspace_path: Some(workspace.path().display().to_string()),
@@ -7377,6 +11029,36 @@ while True:
     }
 
     #[test]
+    fn git_branch_catalog_switches_clean_branches_and_refuses_dirty_workspaces() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("tracked.txt"), "main\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        run_git(repo.path(), &["branch", "feature/picker"]);
+
+        let workspace_path = repo.path().to_str().unwrap().to_string();
+        let catalog = git_branch_catalog_impl(&workspace_path).unwrap();
+        assert_eq!(catalog.current.as_deref(), Some("main"));
+        assert_eq!(catalog.branches, vec!["feature/picker", "main"]);
+
+        let switched = git_checkout_branch_impl(&GitCheckoutBranchRequest {
+            workspace_path: workspace_path.clone(),
+            branch: "feature/picker".into(),
+        })
+        .unwrap();
+        assert_eq!(switched.current.as_deref(), Some("feature/picker"));
+
+        fs::write(repo.path().join("tracked.txt"), "dirty\n").unwrap();
+        let error = git_checkout_branch_impl(&GitCheckoutBranchRequest {
+            workspace_path,
+            branch: "main".into(),
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("commit or stash"));
+    }
+
+    #[test]
     fn git_status_handles_unborn_binary_large_and_non_git_workspaces() {
         let repo = tempfile::tempdir().unwrap();
         init_git_repo(repo.path());
@@ -7421,12 +11103,451 @@ while True:
     }
 
     #[test]
+    fn scheduler_iteration_finishes_one_claimed_run_without_duplicates() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let automation = store
+            .create_automation(CreateAutomationRequest {
+                title: "Scheduled smoke".into(),
+                prompt: "Run checks".into(),
+                schedule: gyro_core::AutomationSchedule::Hourly,
+                project: "Gyro".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: None,
+                next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                execution: gyro_core::AutomationExecutionContext::default(),
+            })
+            .unwrap();
+
+        let completed = run_automation_scheduler_once_with(&paths, "worker-one", |_| {
+            Ok("All checks passed".into())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(completed.id, automation.id);
+        assert_eq!(completed.last_result, "All checks passed");
+        assert_eq!(completed.run_history[0].status, AutomationRunStatus::Passed);
+        assert!(completed.lease_owner.is_none());
+        assert!(
+            run_automation_scheduler_once_with(&paths, "worker-two", |_| {
+                panic!("a completed lease must not execute twice")
+            })
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn scheduler_machine_enforces_stop_condition_verdicts() {
+        let met_temp = tempfile::tempdir().unwrap();
+        let met_paths = GyroPaths::from_base_dir(met_temp.path().join("Gyro"));
+        create_due_stop_condition_automation(&met_paths);
+        let completed = run_automation_scheduler_once_with(&met_paths, "met-worker", |_| {
+            Ok(
+                "Checks are green.\n\n<!-- gyro-automation-result: {\"stopConditionMet\":true} -->"
+                    .into(),
+            )
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(completed.status, AutomationStatus::Completed);
+        assert_eq!(completed.last_result, "Checks are green.");
+        assert!(completed.next_run_at.is_none());
+        assert_eq!(completed.run_history[0].stop_condition_met, Some(true));
+
+        let pending_temp = tempfile::tempdir().unwrap();
+        let pending_paths = GyroPaths::from_base_dir(pending_temp.path().join("Gyro"));
+        create_due_stop_condition_automation(&pending_paths);
+        let pending = run_automation_scheduler_once_with(
+            &pending_paths,
+            "pending-worker",
+            |_| {
+                Ok("One check still fails.\n<!-- gyro-automation-result: {\"stopConditionMet\":false} -->"
+                    .into())
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(pending.status, AutomationStatus::Current);
+        assert_eq!(pending.run_history[0].stop_condition_met, Some(false));
+        assert!(pending.next_run_at.is_some());
+
+        let missing_temp = tempfile::tempdir().unwrap();
+        let missing_paths = GyroPaths::from_base_dir(missing_temp.path().join("Gyro"));
+        create_due_stop_condition_automation(&missing_paths);
+        let failed = run_automation_scheduler_once_with(&missing_paths, "missing-worker", |_| {
+            Ok("The provider forgot the verdict".into())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(failed.status, AutomationStatus::Current);
+        assert_eq!(failed.run_history[0].status, AutomationRunStatus::Failed);
+        assert_eq!(failed.run_history[0].stop_condition_met, None);
+        assert!(failed.last_result.contains("failed closed"));
+    }
+
+    #[test]
+    fn scheduler_wake_generation_cannot_be_lost_before_or_during_wait() {
+        let control = Arc::new(AutomationSchedulerControl::default());
+        let before_wake = control.generation();
+        control.wake();
+        let started = Instant::now();
+        let after_early_wake =
+            control.wait_for_change(before_wake, std::time::Duration::from_secs(1));
+        assert_ne!(after_early_wake, before_wake);
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let waiting_control = control.clone();
+        let observed = control.generation();
+        let waiter = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let generation =
+                waiting_control.wait_for_change(observed, std::time::Duration::from_secs(5));
+            done_tx.send(generation).unwrap();
+        });
+        ready_rx.recv().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        control.wake();
+        let generation = done_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        assert_ne!(generation, observed);
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn scheduler_clock_keeps_due_work_visible_after_a_backward_wall_change() {
+        let initial = chrono::Utc::now();
+        let backward_wall = initial - chrono::Duration::hours(2);
+        let effective = automation_scheduler_effective_now(
+            initial,
+            std::time::Duration::from_secs(3 * 60),
+            backward_wall,
+        );
+        assert_eq!(effective, initial + chrono::Duration::minutes(3));
+        assert_eq!(
+            automation_scheduler_effective_now(
+                effective,
+                std::time::Duration::from_secs(60),
+                initial + chrono::Duration::hours(5),
+            ),
+            initial + chrono::Duration::hours(5)
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let automation = store
+            .create_automation(CreateAutomationRequest {
+                title: "Clock correction smoke".into(),
+                prompt: "Run once after the clock changes".into(),
+                schedule: gyro_core::AutomationSchedule::Hourly,
+                project: "Gyro".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: None,
+                next_run_at: Some(initial + chrono::Duration::minutes(2)),
+                execution: gyro_core::AutomationExecutionContext::default(),
+            })
+            .unwrap();
+
+        let completed =
+            run_automation_scheduler_once_at_with(&paths, "clock-worker", effective, |_| {
+                Ok("Clock-safe run completed".into())
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.id, automation.id);
+        assert_eq!(completed.run_history[0].status, AutomationRunStatus::Passed);
+        assert!(completed
+            .last_run_at
+            .is_some_and(|ran_at| ran_at >= effective));
+        assert!(run_automation_scheduler_once_at_with(
+            &paths,
+            "duplicate-worker",
+            effective,
+            |_| panic!("a backward clock change must not duplicate the run"),
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn scheduler_heartbeat_renews_a_long_run_and_stops_before_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let automation = store
+            .create_automation(CreateAutomationRequest {
+                title: "Long-running approval".into(),
+                prompt: "Wait for approval".into(),
+                schedule: gyro_core::AutomationSchedule::Hourly,
+                project: "Gyro".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: None,
+                next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                execution: gyro_core::AutomationExecutionContext::default(),
+            })
+            .unwrap();
+
+        let completed = run_automation_scheduler_once_with_heartbeat_interval(
+            &paths,
+            "heartbeat-worker",
+            std::time::Duration::from_millis(10),
+            |claimed| {
+                let initial_expiry = claimed.lease_expires_at.unwrap();
+                for _ in 0..50 {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    let current = AutomationStore::open(paths.clone())
+                        .unwrap()
+                        .get_automation(automation.id)
+                        .unwrap()
+                        .unwrap();
+                    if current
+                        .lease_expires_at
+                        .is_some_and(|expiry| expiry > initial_expiry)
+                    {
+                        return Ok("Approval completed".into());
+                    }
+                }
+                panic!("lease heartbeat did not extend the active run");
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(completed.run_history[0].status, AutomationRunStatus::Passed);
+        assert!(completed.lease_owner.is_none());
+        assert!(completed.lease_expires_at.is_none());
+    }
+
+    #[test]
+    fn resumed_run_event_explicitly_wakes_the_scheduler() {
+        assert!(run_event_wakes_automation_scheduler(
+            &tauri::RunEvent::Resumed
+        ));
+        assert!(!run_event_wakes_automation_scheduler(
+            &tauri::RunEvent::Ready
+        ));
+    }
+
+    #[test]
+    fn stop_condition_parser_rejects_malformed_or_non_final_verdicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let automation = create_due_stop_condition_automation(&paths);
+
+        assert!(parse_automation_execution_outcome(
+            &automation,
+            "Done\n<!-- gyro-automation-result: {not-json} -->"
+        )
+        .unwrap_err()
+        .contains("invalid"));
+        assert!(parse_automation_execution_outcome(
+            &automation,
+            "<!-- gyro-automation-result: {\"stopConditionMet\":true} -->\nextra"
+        )
+        .unwrap_err()
+        .contains("final output"));
+
+        let prompt = automation_provider_prompt(&automation);
+        assert!(prompt.contains("Use true only when you verified"));
+        assert!(prompt.contains("\"stopConditionMet\":false"));
+    }
+
+    #[test]
+    fn scheduler_pauses_configuration_failures_instead_of_retrying_forever() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        store
+            .create_automation(CreateAutomationRequest {
+                title: "Missing workspace".into(),
+                prompt: "Run checks".into(),
+                schedule: gyro_core::AutomationSchedule::Heartbeat,
+                project: "Missing".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: None,
+                next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                execution: gyro_core::AutomationExecutionContext::default(),
+            })
+            .unwrap();
+
+        let failed = run_automation_scheduler_once_with(&paths, "worker", |_| {
+            Err("configuration: choose a workspace for this automation".into())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(failed.status, AutomationStatus::Paused);
+        assert!(failed.next_run_at.is_none());
+        assert_eq!(failed.run_history[0].status, AutomationRunStatus::Failed);
+        assert!(failed.last_result.contains("choose a workspace"));
+    }
+
+    #[test]
+    fn scheduler_recovers_an_interrupted_lease_once_before_retrying() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        store
+            .create_automation(CreateAutomationRequest {
+                title: "Interrupted run".into(),
+                prompt: "Run checks".into(),
+                schedule: gyro_core::AutomationSchedule::Hourly,
+                project: "Gyro".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: None,
+                next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                execution: gyro_core::AutomationExecutionContext::default(),
+            })
+            .unwrap();
+        store
+            .claim_due_automation("crashed-worker", 30)
+            .unwrap()
+            .unwrap();
+        let recovery_time = chrono::Utc::now() + chrono::Duration::minutes(1);
+        let mut outcomes = Vec::new();
+
+        assert_eq!(
+            recover_automation_scheduler_leases_with(&paths, recovery_time, |automation| {
+                outcomes.push(automation.clone());
+            })
+            .unwrap(),
+            1
+        );
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            outcomes[0].run_history[0].status,
+            AutomationRunStatus::Failed
+        );
+        assert!(outcomes[0].lease_owner.is_none());
+        assert!(
+            run_automation_scheduler_once_with(&paths, "replacement-worker", |_| {
+                panic!("recovery backoff must prevent an immediate duplicate run")
+            })
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(
+            recover_automation_scheduler_leases_with(&paths, recovery_time, |_| {
+                panic!("an interrupted lease must only be recovered once")
+            })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn automation_notifications_are_private_and_only_cover_actionable_outcomes() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = AutomationStore::open(paths.clone()).unwrap();
+        let automation = store
+            .create_automation(CreateAutomationRequest {
+                title: "Private customer incident".into(),
+                prompt: "Inspect /secret/workspace and summarize confidential files".into(),
+                schedule: gyro_core::AutomationSchedule::Manual,
+                project: "Secret workspace".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: None,
+                next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                execution: gyro_core::AutomationExecutionContext {
+                    workspace_path: Some("/secret/workspace".into()),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let completed = run_automation_scheduler_once_with(&paths, "worker", |_| {
+            Ok("Confidential result".into())
+        })
+        .unwrap()
+        .unwrap();
+
+        let (title, body) = automation_notification_content(&completed).unwrap();
+        let notification = format!("{title} {body}");
+        assert!(!notification.contains(&automation.title));
+        assert!(!notification.contains(&automation.prompt));
+        assert!(!notification.contains("/secret/workspace"));
+
+        let mut stopped = completed.clone();
+        stopped.run_history[0].status = AutomationRunStatus::Stopped;
+        assert!(automation_notification_content(&stopped).is_none());
+        let mut running = completed;
+        running.run_history[0].status = AutomationRunStatus::Running;
+        assert!(automation_notification_content(&running).is_none());
+    }
+
+    #[test]
+    fn automation_notifications_defer_to_the_focused_app() {
+        assert!(!should_show_automation_notification(true, true));
+        assert!(should_show_automation_notification(true, false));
+        assert!(should_show_automation_notification(false, false));
+        assert!(should_show_automation_notification(false, true));
+    }
+
+    #[test]
+    fn automation_notifications_require_explicit_native_permission() {
+        assert!(notification_permission_allows_delivery(
+            PermissionState::Granted
+        ));
+        assert!(!notification_permission_allows_delivery(
+            PermissionState::Denied
+        ));
+        assert!(!notification_permission_allows_delivery(
+            PermissionState::Prompt
+        ));
+        assert!(!notification_permission_allows_delivery(
+            PermissionState::PromptWithRationale
+        ));
+    }
+
+    fn create_due_stop_condition_automation(paths: &GyroPaths) -> Automation {
+        AutomationStore::open(paths.clone())
+            .unwrap()
+            .create_automation(CreateAutomationRequest {
+                title: "Stop-condition smoke".into(),
+                prompt: "Run checks".into(),
+                schedule: gyro_core::AutomationSchedule::Hourly,
+                project: "Gyro".into(),
+                provider: "Codex".into(),
+                branch: "main".into(),
+                workspace_mode: SessionWorkspaceMode::Local,
+                worktree_name: None,
+                stop_condition: Some("All checks pass".into()),
+                next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+                execution: gyro_core::AutomationExecutionContext::default(),
+            })
+            .unwrap()
+    }
+
+    #[test]
     fn terminal_manager_stops_running_process() {
         let manager = TerminalProcessManager::default();
         manager
             .create(TerminalPaneRequest {
                 pane_id: "pane-stop".into(),
                 title: "Shell".into(),
+                profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec!["-c".into(), "sleep 5".into()],
                 workspace_path: None,

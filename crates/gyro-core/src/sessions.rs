@@ -1,4 +1,5 @@
 use crate::paths::GyroPaths;
+use crate::worktrees::validate_branch_name;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -6,14 +7,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::path::Component;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const MAX_SESSION_TITLE_CHARS: usize = 160;
+const MAX_SESSION_SUMMARY_CHARS: usize = 600;
 const MAX_SESSION_EVENT_MESSAGE_CHARS: usize = 64_000;
 const MAX_SESSION_EVENT_PAYLOAD_BYTES: usize = 128 * 1024;
 const MAX_SESSION_EVENTS_READ: usize = 1_000;
 const SESSION_EVENT_TAIL_CHUNK_BYTES: usize = 64 * 1024;
+const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -124,6 +128,8 @@ pub struct Session {
     pub model_id: Option<String>,
     pub model_label: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub summary: Option<String>,
+    pub summary_updated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub events_path: PathBuf,
@@ -140,6 +146,77 @@ pub struct ProviderSessionBinding {
     pub resume_cursor_json: Value,
     pub status: String,
     pub last_error: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationProposalOperation {
+    Create,
+    Update,
+}
+
+impl MutationProposalOperation {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Update => "update",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "create" => Self::Create,
+            _ => Self::Update,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationProposalStatus {
+    Pending,
+    Applied,
+    Rejected,
+    Failed,
+}
+
+impl MutationProposalStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Applied => "applied",
+            Self::Rejected => "rejected",
+            Self::Failed => "failed",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "applied" => Self::Applied,
+            "rejected" => Self::Rejected,
+            "failed" => Self::Failed,
+            _ => Self::Pending,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationProposal {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<Uuid>,
+    pub workspace_path: PathBuf,
+    pub path: String,
+    pub operation: MutationProposalOperation,
+    pub content: String,
+    pub expected_hash: Option<String>,
+    pub base_exists: bool,
+    pub status: MutationProposalStatus,
+    pub error: Option<String>,
+    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -238,6 +315,8 @@ impl SessionStore {
             model_id: context.model_id,
             model_label: context.model_label,
             reasoning_effort: context.reasoning_effort,
+            summary: None,
+            summary_updated_at: None,
             created_at: now,
             updated_at: now,
             events_path,
@@ -292,7 +371,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 |row| row_to_session(row),
@@ -305,7 +384,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
                  from sessions order by updated_at desc limit 1",
                 [],
                 |row| row_to_session(row),
@@ -317,7 +396,7 @@ impl SessionStore {
     pub fn list_sessions(&self) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
              from sessions order by updated_at desc",
         )?;
         let rows = stmt.query_map([], |row| row_to_session(row))?;
@@ -343,6 +422,40 @@ impl SessionStore {
         self.get_session(session_id)
     }
 
+    pub fn update_session_summary(
+        &self,
+        session_id: Uuid,
+        summary: impl Into<String>,
+    ) -> Result<Option<Session>> {
+        let summary = normalize_session_summary(summary.into())?;
+        let updated_at = Utc::now();
+        let changed = self.conn.execute(
+            "update sessions set summary = ?1, summary_updated_at = ?2 where id = ?3",
+            params![summary, updated_at.to_rfc3339(), session_id.to_string()],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.get_session(session_id)
+    }
+
+    pub fn update_session_branch(
+        &self,
+        session_id: Uuid,
+        branch: impl Into<String>,
+    ) -> Result<Option<Session>> {
+        let branch = branch.into();
+        validate_branch_name(&branch)?;
+        let changed = self.conn.execute(
+            "update sessions set branch = ?1, updated_at = ?2 where id = ?3",
+            params![branch, Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.get_session(session_id)
+    }
+
     pub fn delete_session(&self, session_id: Uuid) -> Result<bool> {
         let Some(session) = self.get_session(session_id)? else {
             return Ok(false);
@@ -358,12 +471,164 @@ impl SessionStore {
             "delete from provider_session_bindings where session_id = ?1",
             params![session_id.to_string()],
         )?;
+        self.conn.execute(
+            "delete from mutation_proposals where session_id = ?1",
+            params![session_id.to_string()],
+        )?;
 
         let changed = self.conn.execute(
             "delete from sessions where id = ?1",
             params![session_id.to_string()],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn create_mutation_proposal(
+        &self,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+        path: impl Into<String>,
+        content: impl Into<String>,
+        expected_hash: Option<String>,
+        base_exists: bool,
+    ) -> Result<MutationProposal> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let path = normalize_mutation_path(path.into())?;
+        let content = content.into();
+        if content.len() > MAX_MUTATION_PROPOSAL_CONTENT_BYTES {
+            return Err(anyhow!("mutation proposal content is too large"));
+        }
+        if content.as_bytes().contains(&0) {
+            return Err(anyhow!("binary mutation proposals are not supported"));
+        }
+        if base_exists && expected_hash.as_deref().map_or(true, str::is_empty) {
+            return Err(anyhow!(
+                "an existing file mutation requires its expected content hash"
+            ));
+        }
+        let now = Utc::now();
+        let proposal = MutationProposal {
+            id: Uuid::new_v4(),
+            session_id,
+            turn_id,
+            workspace_path: session.workspace_path,
+            path,
+            operation: if base_exists {
+                MutationProposalOperation::Update
+            } else {
+                MutationProposalOperation::Create
+            },
+            content,
+            expected_hash,
+            base_exists,
+            status: MutationProposalStatus::Pending,
+            error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.conn.execute(
+            "insert into mutation_proposals
+             (id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                proposal.id.to_string(),
+                proposal.session_id.to_string(),
+                proposal.turn_id.map(|id| id.to_string()),
+                proposal.workspace_path.to_string_lossy(),
+                proposal.path,
+                proposal.operation.as_str(),
+                proposal.content,
+                proposal.expected_hash,
+                proposal.base_exists,
+                proposal.status.as_str(),
+                proposal.error,
+                proposal.created_at.to_rfc3339(),
+                proposal.updated_at.to_rfc3339(),
+            ],
+        )?;
+        self.get_mutation_proposal(proposal.id)?
+            .ok_or_else(|| anyhow!("mutation proposal was not persisted"))
+    }
+
+    pub fn get_mutation_proposal(&self, proposal_id: Uuid) -> Result<Option<MutationProposal>> {
+        self.conn
+            .query_row(
+                "select id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at
+                 from mutation_proposals where id = ?1",
+                params![proposal_id.to_string()],
+                row_to_mutation_proposal,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn list_pending_mutation_proposals(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<MutationProposal>> {
+        let mut stmt = self.conn.prepare(
+            "select id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at
+             from mutation_proposals where session_id = ?1 and status = 'pending'
+             order by created_at asc",
+        )?;
+        let rows = stmt.query_map(params![session_id.to_string()], row_to_mutation_proposal)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn list_pending_mutation_proposals_all(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<MutationProposal>> {
+        let mut stmt = self.conn.prepare(
+            "select id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at
+             from mutation_proposals where status = 'pending'
+             order by created_at asc limit ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], row_to_mutation_proposal)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn resolve_mutation_proposal_status(
+        &self,
+        proposal_id: Uuid,
+        status: MutationProposalStatus,
+        error: Option<String>,
+    ) -> Result<MutationProposal> {
+        if status == MutationProposalStatus::Pending {
+            return Err(anyhow!("a mutation decision must leave pending state"));
+        }
+        let current = self
+            .get_mutation_proposal(proposal_id)?
+            .ok_or_else(|| anyhow!("unknown mutation proposal {proposal_id}"))?;
+        if current.status != MutationProposalStatus::Pending {
+            if current.status == status {
+                return Ok(current);
+            }
+            return Err(anyhow!(
+                "mutation proposal is already {}",
+                current.status.as_str()
+            ));
+        }
+        let updated_at = Utc::now();
+        let changed = self.conn.execute(
+            "update mutation_proposals set status = ?1, error = ?2, updated_at = ?3
+             where id = ?4 and status = 'pending'",
+            params![
+                status.as_str(),
+                error,
+                updated_at.to_rfc3339(),
+                proposal_id.to_string(),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(anyhow!("mutation proposal changed while resolving"));
+        }
+        self.get_mutation_proposal(proposal_id)?
+            .ok_or_else(|| anyhow!("mutation proposal disappeared while resolving"))
     }
 
     pub fn update_session_model(
@@ -610,6 +875,8 @@ impl SessionStore {
                model_id text,
                model_label text,
                reasoning_effort text,
+               summary text,
+               summary_updated_at text,
                created_at text not null,
                updated_at text not null,
                events_path text not null
@@ -632,7 +899,27 @@ impl SessionStore {
              );
 
              create index if not exists idx_provider_session_bindings_updated_at
-             on provider_session_bindings(updated_at desc);",
+             on provider_session_bindings(updated_at desc);
+
+             create table if not exists mutation_proposals (
+               id text primary key not null,
+               session_id text not null,
+               turn_id text,
+               workspace_path text not null,
+               path text not null,
+               operation text not null,
+               content text not null,
+               expected_hash text,
+               base_exists integer not null,
+               status text not null,
+               error text,
+               created_at text not null,
+               updated_at text not null,
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create index if not exists idx_mutation_proposals_session_status
+             on mutation_proposals(session_id, status, created_at asc);",
         )?;
         self.ensure_column(
             "workspace_mode",
@@ -645,6 +932,8 @@ impl SessionStore {
         self.ensure_column("model_id", "model_id text")?;
         self.ensure_column("model_label", "model_label text")?;
         self.ensure_column("reasoning_effort", "reasoning_effort text")?;
+        self.ensure_column("summary", "summary text")?;
+        self.ensure_column("summary_updated_at", "summary_updated_at text")?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         Ok(())
     }
@@ -755,6 +1044,38 @@ fn row_to_provider_session_binding(
     })
 }
 
+fn row_to_mutation_proposal(row: &rusqlite::Row<'_>) -> rusqlite::Result<MutationProposal> {
+    let id: String = row.get(0)?;
+    let session_id: String = row.get(1)?;
+    let turn_id: Option<String> = row.get(2)?;
+    let workspace_path: String = row.get(3)?;
+    let operation: String = row.get(5)?;
+    let status: String = row.get(9)?;
+    let created_at: String = row.get(11)?;
+    let updated_at: String = row.get(12)?;
+    Ok(MutationProposal {
+        id: Uuid::parse_str(&id).map_err(parse_error)?,
+        session_id: Uuid::parse_str(&session_id).map_err(parse_error)?,
+        turn_id: turn_id
+            .map(|value| Uuid::parse_str(&value).map_err(parse_error))
+            .transpose()?,
+        workspace_path: PathBuf::from(workspace_path),
+        path: row.get(4)?,
+        operation: MutationProposalOperation::from_str(&operation),
+        content: row.get(6)?,
+        expected_hash: row.get(7)?,
+        base_exists: row.get(8)?,
+        status: MutationProposalStatus::from_str(&status),
+        error: row.get(10)?,
+        created_at: DateTime::parse_from_rfc3339(&created_at)
+            .map_err(parse_error)?
+            .with_timezone(&Utc),
+        updated_at: DateTime::parse_from_rfc3339(&updated_at)
+            .map_err(parse_error)?
+            .with_timezone(&Utc),
+    })
+}
+
 fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let id: String = row.get(0)?;
     let title: String = row.get(1)?;
@@ -771,6 +1092,8 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let model_id: Option<String> = row.get(12)?;
     let model_label: Option<String> = row.get(13)?;
     let reasoning_effort: Option<String> = row.get(14)?;
+    let summary: Option<String> = row.get(15)?;
+    let summary_updated_at: Option<String> = row.get(16)?;
 
     Ok(Session {
         id: Uuid::parse_str(&id).map_err(parse_error)?,
@@ -785,6 +1108,14 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         model_id,
         model_label,
         reasoning_effort,
+        summary,
+        summary_updated_at: summary_updated_at
+            .map(|value| {
+                DateTime::parse_from_rfc3339(&value)
+                    .map(|value| value.with_timezone(&Utc))
+                    .map_err(parse_error)
+            })
+            .transpose()?,
         created_at: DateTime::parse_from_rfc3339(&created_at)
             .map_err(parse_error)?
             .with_timezone(&Utc),
@@ -834,6 +1165,40 @@ fn normalize_session_event_message(message: impl Into<String>) -> Result<String>
         ));
     }
     Ok(message)
+}
+
+fn normalize_session_summary(summary: String) -> Result<String> {
+    let summary = summary.replace('\0', "").trim().to_string();
+    if summary.is_empty() {
+        return Err(anyhow!("session summary cannot be empty"));
+    }
+    if summary.chars().count() > MAX_SESSION_SUMMARY_CHARS {
+        return Err(anyhow!(
+            "session summary cannot exceed {MAX_SESSION_SUMMARY_CHARS} characters"
+        ));
+    }
+    Ok(summary)
+}
+
+fn normalize_mutation_path(path: String) -> Result<String> {
+    let path = path.replace('\0', "").trim().to_string();
+    if path.is_empty() {
+        return Err(anyhow!("mutation proposal path cannot be empty"));
+    }
+    let parsed = Path::new(&path);
+    if parsed.is_absolute()
+        || parsed.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(anyhow!(
+            "mutation proposal path must stay inside the workspace"
+        ));
+    }
+    Ok(parsed.to_string_lossy().to_string())
 }
 
 fn validate_session_event_payload(payload: Value) -> Result<Value> {
@@ -1217,6 +1582,24 @@ mod tests {
     }
 
     #[test]
+    fn stores_and_updates_session_branch() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "branch session")
+            .unwrap();
+
+        let updated = store
+            .update_session_branch(session.id, "feature/branch-picker")
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.branch, "feature/branch-picker");
+        assert!(store
+            .update_session_branch(session.id, "../invalid")
+            .is_err());
+    }
+
+    #[test]
     fn stores_updates_and_clears_provider_session_bindings() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -1346,5 +1729,110 @@ mod tests {
         assert!(store.get_session(session.id).unwrap().is_none());
         assert!(!events_path.exists());
         assert!(!store.delete_session(session.id).unwrap());
+    }
+
+    #[test]
+    fn stores_a_bounded_durable_session_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "summary session")
+            .unwrap();
+        let summarized = store
+            .update_session_summary(
+                session.id,
+                "Inspected the project and identified the provider boundary.",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            summarized.summary.as_deref(),
+            Some("Inspected the project and identified the provider boundary.")
+        );
+        assert!(summarized.summary_updated_at.is_some());
+        drop(store);
+
+        let reopened = SessionStore::open(paths).unwrap();
+        assert_eq!(
+            reopened
+                .get_session(session.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .as_deref(),
+            summarized.summary.as_deref()
+        );
+        assert!(reopened
+            .update_session_summary(session.id, "x".repeat(MAX_SESSION_SUMMARY_CHARS + 1))
+            .is_err());
+    }
+
+    #[test]
+    fn persists_and_resolves_mutation_proposals_across_store_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let session_id;
+        let proposal_id;
+        {
+            let store = SessionStore::open(paths.clone()).unwrap();
+            let session = store
+                .create_session(temp.path(), SessionOrigin::Desktop, "mutation session")
+                .unwrap();
+            session_id = session.id;
+            let proposal = store
+                .create_mutation_proposal(
+                    session.id,
+                    Some(Uuid::new_v4()),
+                    "src/main.rs",
+                    "fn main() {}\n",
+                    None,
+                    false,
+                )
+                .unwrap();
+            proposal_id = proposal.id;
+            assert_eq!(proposal.operation, MutationProposalOperation::Create);
+            assert_eq!(proposal.status, MutationProposalStatus::Pending);
+        }
+
+        let store = SessionStore::open(paths).unwrap();
+        let pending = store.list_pending_mutation_proposals(session_id).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, proposal_id);
+        let rejected = store
+            .resolve_mutation_proposal_status(proposal_id, MutationProposalStatus::Rejected, None)
+            .unwrap();
+        assert_eq!(rejected.status, MutationProposalStatus::Rejected);
+        assert!(store
+            .list_pending_mutation_proposals(session_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .resolve_mutation_proposal_status(
+                    proposal_id,
+                    MutationProposalStatus::Rejected,
+                    None,
+                )
+                .unwrap()
+                .status,
+            MutationProposalStatus::Rejected
+        );
+    }
+
+    #[test]
+    fn mutation_proposals_reject_unsafe_paths_and_unhashed_updates() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "mutation validation")
+            .unwrap();
+
+        assert!(store
+            .create_mutation_proposal(session.id, None, "../outside", "no", None, false)
+            .is_err());
+        assert!(store
+            .create_mutation_proposal(session.id, None, "src/lib.rs", "new", None, true)
+            .is_err());
     }
 }

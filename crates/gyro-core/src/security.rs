@@ -30,6 +30,7 @@ pub fn assert_path_inside_workspace(workspace: &Path, candidate: &Path) -> Resul
 pub fn redact_secrets(input: &str) -> String {
     let patterns = [
         r"sk-[A-Za-z0-9_-]{20,}",
+        r#"(?i)(\"(?:api[_-]?key|token|secret|password)\"\s*:\s*\")[^\"]+"#,
         r#"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['"]?[^'"\s]+"#,
         r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+",
     ];
@@ -60,6 +61,14 @@ mod tests {
         let redacted = redact_secrets("OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456");
         assert!(redacted.contains("[REDACTED]"));
         assert!(!redacted.contains("abcdefghijklmnopqrstuvwxyz"));
+
+        let redacted = redact_secrets(
+            r#"{"loggedIn":false,"token":"secret-provider-token","password":"hidden"}"#,
+        );
+        assert_eq!(
+            redacted,
+            r#"{"loggedIn":false,"token":"[REDACTED]","password":"[REDACTED]"}"#
+        );
     }
 
     #[test]

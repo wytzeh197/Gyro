@@ -32,6 +32,10 @@ type MonacoWorkerEnvironment = typeof globalThis & {
 
 loader.config({ monaco });
 
+export function disposeMonacoModel(path: string) {
+  monaco.editor.getModel(monaco.Uri.parse(path))?.dispose();
+}
+
 monaco.editor.defineTheme("gyro-dark", {
   base: "vs-dark",
   inherit: true,
@@ -42,26 +46,28 @@ monaco.editor.defineTheme("gyro-dark", {
     { token: "keyword", foreground: "86AEF7" },
   ],
   colors: {
-    "editor.background": "#030405",
-    "editor.foreground": "#D7DEE8",
-    "editorGutter.background": "#030405",
-    "editor.lineHighlightBackground": "#080B0F",
-    "editorLineNumber.foreground": "#4F5966",
-    "editorLineNumber.activeForeground": "#AAB4C0",
+    "editor.background": "#1E1F22",
+    "editor.foreground": "#D7D9DE",
+    "editorGutter.background": "#1E1F22",
+    "editor.lineHighlightBackground": "#25262A",
+    "editorLineNumber.foreground": "#626872",
+    "editorLineNumber.activeForeground": "#C2C5CB",
     "editorCursor.foreground": "#E9EDF2",
-    "editor.selectionBackground": "#1D3048",
-    "editor.inactiveSelectionBackground": "#152235",
-    "editorWidget.background": "#101318",
-    "editorWidget.border": "#222831",
-    "editorSuggestWidget.background": "#101318",
-    "editorSuggestWidget.border": "#222831",
-    "editorSuggestWidget.selectedBackground": "#1B2735",
-    "editorHoverWidget.background": "#101318",
-    "editorHoverWidget.border": "#222831",
-    "minimap.background": "#030405",
-    "scrollbarSlider.background": "#30384466",
-    "scrollbarSlider.hoverBackground": "#3D475580",
-    "scrollbarSlider.activeBackground": "#4B576699",
+    "editor.selectionBackground": "#294A73",
+    "editor.inactiveSelectionBackground": "#26394F",
+    "editorIndentGuide.background1": "#2C2E33",
+    "editorIndentGuide.activeBackground1": "#4A4E57",
+    "editorWidget.background": "#25272B",
+    "editorWidget.border": "#3A3D43",
+    "editorSuggestWidget.background": "#25272B",
+    "editorSuggestWidget.border": "#3A3D43",
+    "editorSuggestWidget.selectedBackground": "#343941",
+    "editorHoverWidget.background": "#25272B",
+    "editorHoverWidget.border": "#3A3D43",
+    "minimap.background": "#1E1F22",
+    "scrollbarSlider.background": "#5A5F694D",
+    "scrollbarSlider.hoverBackground": "#70768066",
+    "scrollbarSlider.activeBackground": "#878D9980",
   },
 });
 

@@ -56,6 +56,11 @@ the same local session from either surface.
   tests, output, diagnostics, diffs, and browser preview.
 - Provider setup checks, approval policies, redacted diagnostics, local
   worktrees, and persisted automations.
+- Gated Codex and supported Claude CLI and desktop Chat text changes applied by a shared
+  workspace-bound transaction with fresh-hash checks, multi-file rollback, and
+  durable approval events. A pre-commit journal in Gyro Application Support lets
+  CLI and desktop startup finish recorded changes or roll interrupted changes
+  back without adding metadata to the repository.
 
 ## Build From Source
 
@@ -100,10 +105,75 @@ cargo run -p gyro-cli -- setup
 cargo run -p gyro-cli -- run "Inspect this repository"
 cargo run -p gyro-cli -- sessions
 cargo run -p gyro-cli -- resume
+cargo run -p gyro-cli -- approvals
 ```
+
+`gyro doctor` labels checks as required or optional and prints the next recovery
+action when one is available. `gyro setup` combines that guidance with live app,
+profile, agent, and provider readiness checks.
 
 Use `--worktree` with `gyro run` or `gyro app attach` when you explicitly want
 an isolated Git worktree. Local mode is the default.
+
+Automation-facing commands emit the versioned `gyro.cli.v1` JSON contract with
+`--json`. Interactive chat uses newline-delimited events so input can be piped
+without prompts contaminating stdout:
+
+```bash
+cargo run -p gyro-cli -- sessions --json
+printf 'Inspect this repository\n/exit\n' | \
+  cargo run -p gyro-cli -- chat --profile codex --approve --json
+cargo run -p gyro-cli -- app open --json
+```
+
+Interactive Codex and Claude runs ask about each provider command or file action
+that reaches the active approval policy. Desktop Claude Chat sends those
+permission callbacks to Gyro.app over a versioned, user-only local socket.
+Non-interactive commands fail closed unless `--approve` explicitly auto-accepts
+those callbacks. Reviewed Codex file sets and Claude Write/Edit/MultiEdit
+actions are applied once through Gyro's shared atomic transaction before the
+provider's native write is suppressed;
+an Application Support journal makes final rename recovery restart-safe, while
+unsupported notebook or binary edits fail closed. Durable Gyro file proposals
+can be reviewed and decided from any terminal without exposing their content in
+the inbox:
+
+Codex and Claude provider session IDs are recorded as soon as the provider
+accepts them. A crashed or interrupted run remains resumable; if the provider
+reports that a stored session is stale, Gyro clears that cursor and retries once
+in a fresh provider session. Explicit profiles honor the shared provider toggle,
+so enable a disabled provider with `gyro config enable-provider <id>` before
+launching it. Structured authentication failures report the provider login
+command and preserve the Gyro session for a later `gyro resume`.
+
+```bash
+gyro approvals
+gyro approvals show <proposal-id>
+gyro approvals approve <proposal-id>
+gyro approvals reject <proposal-id>
+```
+
+Add `--json` to use the versioned `gyro.cli.v1` contract. Approval applies are
+content-hash guarded and fail if the file changed after it was proposed.
+
+CLI-to-app handoff uses a versioned local acknowledgement. Incompatible
+pre-1.0 minor versions fail closed and report both installed versions with a
+same-release-channel recovery instruction. Stale app sockets are detected with
+a live probe and removed before launch or resumable fallback; legacy app
+acknowledgements remain accepted during the transition.
+
+Generate shell completions directly from the installed binary:
+
+```bash
+gyro completions zsh > "${fpath[1]}/_gyro"
+gyro completions bash > ~/.local/share/bash-completion/completions/gyro
+gyro completions fish > ~/.config/fish/completions/gyro.fish
+```
+
+Tagged releases include separate Apple Silicon and Intel CLI archives, a
+matching `.sha256` sidecar for each archive, and an aggregate `SHA256SUMS` file.
+The release also includes a generated `gyro.rb` Formula with immutable URLs and
+the real checksums; the checked-in Formula is only the release template.
 
 ## How It Fits Together
 

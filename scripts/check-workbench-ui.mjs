@@ -6,12 +6,15 @@ import { fileURLToPath } from "node:url";
 
 import {
   CLI_LAUNCH_PRESET_MAX_PANES,
+  canSendChat,
   createInitialWorkbenchState,
   createTerminalPane,
   defaultCliLaunchPreset,
   defaultCommandProfiles,
+  isUserSelectedWorkspacePath,
   normalizeCliLaunchPreset,
   parseProviderHealthOutput,
+  sanitizeStoredIdeState,
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
 import {
@@ -48,6 +51,28 @@ function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
+function cssRules(source, selector) {
+  const rules = [];
+  const needle = `${selector} {`;
+  let selectorIndex = source.indexOf(needle);
+  while (selectorIndex !== -1) {
+    const ruleStart = source.indexOf("{", selectorIndex);
+    const ruleEnd = source.indexOf("}", ruleStart);
+    rules.push(source.slice(selectorIndex, ruleEnd + 1));
+    selectorIndex = source.indexOf(needle, ruleEnd + 1);
+  }
+  return rules;
+}
+
+expect(
+  !canSendChat(true) &&
+    !canSendChat(true, "/tmp/gyro-session-1783969000000") &&
+    !canSendChat(false, "/Users/example/Project") &&
+    canSendChat(true, "/Users/example/Project") &&
+    isUserSelectedWorkspacePath("/Users/example/Project"),
+  "Chat send requires a connected provider and a user-selected project.",
+);
+
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
 const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
 const providerStreamSource = readRepoFile(
@@ -63,16 +88,57 @@ const roadmapSource = readRepoFile("ROADMAP.md");
 const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
+const composerSourceStart = surfaceSource.indexOf("function Composer({");
+const composerSourceEnd = surfaceSource.indexOf(
+  "\nfunction ",
+  composerSourceStart + 1,
+);
+const composerSource = surfaceSource.slice(
+  composerSourceStart,
+  composerSourceEnd,
+);
+const composerHandlerStart = appSource.indexOf(
+  "const handleComposerAction = useCallback",
+);
+const composerHandlerEnd = appSource.indexOf(
+  "const splitTerminalPane = useCallback",
+  composerHandlerStart,
+);
+const composerHandlerSource = appSource.slice(
+  composerHandlerStart,
+  composerHandlerEnd,
+);
+const threadSurfaceRules = cssRules(
+  styleSource,
+  ".gyro-chat-surface.is-thread",
+);
+const threadTopbarRules = cssRules(
+  styleSource,
+  ".gyro-chat-surface.is-thread > .gyro-chat-thread-topbar",
+);
+const threadCanvasRules = cssRules(
+  styleSource,
+  ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas",
+);
+const threadRailRules = cssRules(
+  styleSource,
+  ".gyro-chat-surface.is-thread.has-environment > .gyro-environment-rail",
+);
 const typeSource = readRepoFile("packages/ui/src/types.ts");
 const reducerSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const coreHarnessSource = readRepoFile("crates/gyro-core/src/harness.rs");
 const coreExecutionSource = readRepoFile("crates/gyro-core/src/execution.rs");
+const coreAutomationSource = readRepoFile(
+  "crates/gyro-core/src/automations.rs",
+);
+const coreIpcSource = readRepoFile("crates/gyro-core/src/ipc.rs");
 const coreProviderHealthSource = readRepoFile(
   "crates/gyro-core/src/provider_health.rs",
 );
 const coreProviderStreamSource = readRepoFile(
   "crates/gyro-core/src/provider_stream.rs",
 );
+const coreMutationsSource = readRepoFile("crates/gyro-core/src/mutations.rs");
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 const updateControllerSource = readRepoFile(
@@ -82,6 +148,39 @@ const tauriConfigSource = readRepoFile(
   "apps/desktop/src-tauri/tauri.conf.json",
 );
 const releaseWorkflowSource = readRepoFile(".github/workflows/release.yml");
+
+const emittedComposerActions = new Set([
+  ...[...surfaceSource.matchAll(/onComposerAction\?\.\("([^"]+)"\)/g)].map(
+    (match) => match[1],
+  ),
+  ...[
+    ...composerSource.matchAll(
+      /action:[^,\n]*?(?:"([^"$]+)"|`([^`$]+)(?:\$\{|`))/g,
+    ),
+  ].map((match) => match[1] ?? match[2]),
+]);
+const handledComposerActions = new Set(
+  [...composerHandlerSource.matchAll(/case\s+"([^"]+)"\s*:/g)].map(
+    (match) => match[1],
+  ),
+);
+const handledComposerPrefixes = [
+  ...composerHandlerSource.matchAll(/action\.startsWith\("([^"]+)"\)/g),
+].map((match) => match[1]);
+const unhandledComposerActions = [...emittedComposerActions].filter(
+  (action) =>
+    !handledComposerActions.has(action) &&
+    !handledComposerPrefixes.some((prefix) => action.startsWith(prefix)),
+);
+expect(
+  composerSourceStart >= 0 &&
+    composerSourceEnd > composerSourceStart &&
+    composerHandlerStart >= 0 &&
+    composerHandlerEnd > composerHandlerStart &&
+    emittedComposerActions.size > 0 &&
+    unhandledComposerActions.length === 0,
+  `Every visible Chat/composer action should have a concrete handler; unhandled: ${unhandledComposerActions.join(", ") || "none"}.`,
+);
 
 const profiles = defaultCommandProfiles();
 expect(
@@ -350,11 +449,12 @@ editorGroupState = workbenchReducer(editorGroupState, {
 });
 const splitGroupId = editorGroupState.ide.layout.activeGroupId;
 expect(
-  editorGroupState.ide.layout.groups.length === 2 &&
+  splitGroupId === "group-2" &&
+    editorGroupState.ide.layout.groups.length === 2 &&
     editorGroupState.ide.layout.groups.every(
       (group) => group.activePath === "src/main.ts",
     ),
-  "Splitting the editor should create a second live group with the active file.",
+  "Splitting the editor should create a deterministic second live group with the active file.",
 );
 editorGroupState = workbenchReducer(editorGroupState, {
   type: "ide-close-group",
@@ -363,6 +463,70 @@ editorGroupState = workbenchReducer(editorGroupState, {
 expect(
   editorGroupState.ide.layout.groups.length === 1,
   "Closing an editor group should preserve one usable editor group.",
+);
+
+let tabMoveState = workbenchReducer(createInitialWorkbenchState(), {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/shared.ts",
+    title: "shared.ts",
+    dirty: false,
+    pinned: true,
+  },
+});
+tabMoveState = workbenchReducer(tabMoveState, {
+  type: "ide-split-group",
+  direction: "right",
+});
+const tabMoveSourceGroupId = tabMoveState.ide.layout.activeGroupId;
+tabMoveState = workbenchReducer(tabMoveState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/side-only.ts",
+    title: "side-only.ts",
+    dirty: false,
+    pinned: true,
+  },
+});
+tabMoveState = workbenchReducer(tabMoveState, {
+  type: "ide-split-group",
+  direction: "right",
+});
+const tabMoveTargetGroupId = tabMoveState.ide.layout.activeGroupId;
+expect(
+  tabMoveSourceGroupId === "group-2" && tabMoveTargetGroupId === "group-3",
+  "Repeated editor splits should allocate deterministic group IDs.",
+);
+tabMoveState = workbenchReducer(tabMoveState, {
+  type: "ide-move-tab",
+  path: "src/shared.ts",
+  fromGroupId: tabMoveSourceGroupId,
+  toGroupId: tabMoveTargetGroupId,
+});
+expect(
+  tabMoveState.ide.layout.groups
+    .find((group) => group.id === "group-main")
+    ?.tabs.some((tab) => tab.path === "src/shared.ts") &&
+    tabMoveState.ide.layout.groups
+      .find((group) => group.id === tabMoveSourceGroupId)
+      ?.tabs.every((tab) => tab.path !== "src/shared.ts") &&
+    tabMoveState.ide.layout.groups
+      .find((group) => group.id === tabMoveTargetGroupId)
+      ?.tabs.some((tab) => tab.path === "src/shared.ts"),
+  "Moving a duplicated editor should remove only the dragged group copy.",
+);
+tabMoveState = workbenchReducer(tabMoveState, {
+  type: "ide-move-tab",
+  path: "src/side-only.ts",
+  fromGroupId: tabMoveTargetGroupId,
+  toGroupId: tabMoveTargetGroupId,
+});
+expect(
+  tabMoveState.ide.layout.groups
+    .find((group) => group.id === tabMoveTargetGroupId)
+    ?.tabs.map((tab) => tab.path)
+    .join(",") === "src/shared.ts,src/side-only.ts",
+  "Dropping a tab within its group should reorder it without duplicating it.",
 );
 expect(
   initialState.terminalPanes.length === 0,
@@ -857,10 +1021,44 @@ expect(
   "Browser preview navigation should verify reachability before claiming success.",
 );
 state = workbenchReducer(state, { type: "browser-device", device: "mobile" });
-state = workbenchReducer(state, { type: "browser-screenshot" });
+state = workbenchReducer(state, { type: "browser-capture-start" });
+expect(
+  state.browserPreview.captureStatus === "capturing",
+  "Browser capture should expose a real in-progress state.",
+);
+state = workbenchReducer(state, {
+  type: "browser-capture-success",
+  capture: {
+    path: "/tmp/Gyro/browser-captures/browser-preview-smoke.png",
+    filename: "browser-preview-smoke.png",
+    width: 390,
+    height: 844,
+    createdAt: "2026-07-14T12:00:00.000Z",
+  },
+});
+state = workbenchReducer(state, {
+  type: "browser-status",
+  status: "console-error",
+  message: "Local preview reachable (HTTP 200)",
+  consoleErrors: 1,
+  diagnostics: [
+    {
+      kind: "page-error",
+      message: "Render failed",
+      source: "/src/app.ts",
+      line: 12,
+    },
+  ],
+  diagnosticsSupported: true,
+  diagnosticsCaptured: true,
+});
 expect(
   state.browserPreview.device === "mobile" &&
-    state.browserPreview.screenshotCount > 0,
+    state.browserPreview.captureStatus === "captured" &&
+    state.browserPreview.latestCapture?.width === 390 &&
+    state.browserPreview.consoleErrors === 1 &&
+    state.browserPreview.diagnostics[0]?.source === "/src/app.ts" &&
+    state.browserPreview.diagnosticsCaptured,
   "Browser preview transitions failed.",
 );
 
@@ -1077,6 +1275,411 @@ expect(
     state.activeTurn?.lastEvent === "Idle watchdog marked turn stale",
   "Active turn idle watchdog transition failed.",
 );
+
+const ideHydrationBase = createInitialWorkbenchState().ide;
+const restoredIde = sanitizeStoredIdeState(
+  {
+    ...ideHydrationBase,
+    activePath: "src/side.ts",
+    activeView: "search",
+    tabs: [
+      {
+        path: "src/main.ts",
+        title: "main.ts",
+        dirty: true,
+        pinned: true,
+      },
+      {
+        path: "src/side.ts",
+        title: "side.ts",
+        dirty: true,
+        preview: true,
+      },
+    ],
+    buffers: {
+      "src/main.ts": {
+        path: "src/main.ts",
+        content: "unsaved",
+        savedContent: "saved",
+        sizeBytes: 7,
+        truncated: false,
+        status: "dirty",
+        updatedAt: new Date().toISOString(),
+      },
+    },
+    diagnostics: [
+      {
+        id: "stale-diagnostic",
+        path: "src/main.ts",
+        lineNumber: 1,
+        column: 1,
+        endLineNumber: 1,
+        endColumn: 2,
+        message: "stale",
+        severity: "error",
+        source: "test",
+      },
+    ],
+    layout: {
+      groups: [
+        {
+          id: "group-main",
+          title: "Main",
+          activePath: "src/main.ts",
+          tabs: [{ path: "src/main.ts" }],
+          panes: [{ id: "unsafe-pane", path: "../escape" }],
+        },
+        {
+          id: "group-side",
+          title: "Side",
+          activePath: "src/side.ts",
+          tabs: [{ path: "src/side.ts" }],
+          panes: [],
+        },
+      ],
+      activeGroupId: "group-side",
+      splitDirection: "down",
+      minimapEnabled: false,
+      restoreOnLaunch: true,
+      rightAssistantOpen: false,
+    },
+  },
+  ideHydrationBase,
+);
+expect(
+  restoredIde.activePath === "src/side.ts" &&
+    restoredIde.activeView === "search" &&
+    restoredIde.tabs.length === 2 &&
+    restoredIde.tabs.every(
+      (tab) => tab.dirty === false && tab.preview === false,
+    ) &&
+    restoredIde.layout.groups.length === 2 &&
+    restoredIde.layout.activeGroupId === "group-side" &&
+    restoredIde.layout.splitDirection === "down" &&
+    restoredIde.layout.minimapEnabled === false &&
+    restoredIde.layout.rightAssistantOpen === false &&
+    restoredIde.layout.groups[1]?.panes[0]?.id === "group-side-pane" &&
+    Object.keys(restoredIde.buffers).length === 0 &&
+    restoredIde.diagnostics.length === 0,
+  "IDE hydration should restore validated layout state without transient buffers.",
+);
+
+const rejectedStoredIde = sanitizeStoredIdeState(
+  {
+    tabs: [
+      { path: "../outside.ts", title: "outside.ts", dirty: false },
+      { path: "/absolute.ts", title: "absolute.ts", dirty: false },
+      { path: "src/safe.ts", title: "safe.ts", dirty: false },
+      { path: "src/safe.ts", title: "duplicate.ts", dirty: false },
+    ],
+    activePath: "../outside.ts",
+    layout: {
+      groups: [
+        {
+          id: "group-main",
+          title: "Main",
+          activePath: "src/safe.ts",
+          tabs: [{ path: "src/safe.ts" }],
+        },
+        { id: "group-main", title: "Duplicate", tabs: [] },
+        { id: "bad group id", title: "Invalid", tabs: [] },
+      ],
+      activeGroupId: "bad group id",
+      splitDirection: "right",
+      minimapEnabled: true,
+      restoreOnLaunch: true,
+      rightAssistantOpen: true,
+    },
+  },
+  ideHydrationBase,
+);
+expect(
+  rejectedStoredIde.tabs.length === 1 &&
+    rejectedStoredIde.tabs[0]?.path === "src/safe.ts" &&
+    rejectedStoredIde.activePath === "src/safe.ts" &&
+    rejectedStoredIde.layout.groups.length === 1 &&
+    rejectedStoredIde.layout.activeGroupId === "group-main",
+  "IDE hydration should reject unsafe paths, duplicate tabs, and invalid groups.",
+);
+
+const restoreDisabledIde = sanitizeStoredIdeState(
+  {
+    activeView: "source-control",
+    tabs: [{ path: "src/main.ts", title: "main.ts", dirty: false }],
+    layout: {
+      ...ideHydrationBase.layout,
+      restoreOnLaunch: false,
+    },
+  },
+  ideHydrationBase,
+);
+expect(
+  restoreDisabledIde.tabs.length === 0 &&
+    restoreDisabledIde.activePath === undefined &&
+    restoreDisabledIde.activeView === "source-control" &&
+    restoreDisabledIde.layout.restoreOnLaunch === false &&
+    restoreDisabledIde.layout.groups.length === 1,
+  "IDE hydration should honor restore-on-launch being disabled.",
+);
+
+let backgroundScmState = createInitialWorkbenchState();
+backgroundScmState = workbenchReducer(backgroundScmState, {
+  type: "ide-select-view",
+  view: "search",
+});
+backgroundScmState = workbenchReducer(backgroundScmState, {
+  type: "ide-set-source-control",
+  sourceControl: {
+    ...backgroundScmState.ide.sourceControl,
+    available: true,
+    branch: "main",
+    files: [
+      {
+        path: "src/main.ts",
+        state: "modified",
+        staged: false,
+        additions: 1,
+        deletions: 0,
+      },
+    ],
+  },
+});
+expect(
+  backgroundScmState.ide.activeView === "search" &&
+    backgroundScmState.ide.sourceControl.branch === "main" &&
+    backgroundScmState.ide.fileDecorations[0]?.path === "src/main.ts",
+  "Background source-control refresh should not steal the active IDE view.",
+);
+
+let previewState = createInitialWorkbenchState();
+previewState = workbenchReducer(previewState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/preview-a.ts",
+    title: "preview-a.ts",
+    dirty: false,
+    preview: true,
+  },
+});
+previewState = workbenchReducer(previewState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/preview-b.ts",
+    title: "preview-b.ts",
+    dirty: false,
+    preview: true,
+  },
+});
+expect(
+  previewState.ide.tabs.length === 1 &&
+    previewState.ide.tabs[0]?.path === "src/preview-b.ts" &&
+    previewState.ide.layout.groups[0]?.tabs[0]?.preview === true,
+  "A clean preview tab should be replaced by the next preview file.",
+);
+previewState = workbenchReducer(previewState, {
+  type: "ide-pin-tab",
+  path: "src/preview-b.ts",
+});
+previewState = workbenchReducer(previewState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/preview-c.ts",
+    title: "preview-c.ts",
+    dirty: false,
+    preview: true,
+  },
+});
+expect(
+  previewState.ide.tabs.length === 2 &&
+    previewState.ide.tabs.find((tab) => tab.path === "src/preview-b.ts")
+      ?.pinned === true &&
+    previewState.ide.layout.groups[0]?.tabs.some(
+      (tab) => tab.path === "src/preview-c.ts" && tab.preview === true,
+    ),
+  "Pinned tabs should remain open beside a new preview tab.",
+);
+previewState = workbenchReducer(previewState, {
+  type: "ide-upsert-buffer",
+  buffer: {
+    path: "src/preview-c.ts",
+    content: "const preview = true;\n",
+    savedContent: "const preview = true;\n",
+    contentHash: "preview-hash",
+    sizeBytes: 22,
+    truncated: false,
+    status: "ready",
+    updatedAt: new Date().toISOString(),
+  },
+});
+previewState = workbenchReducer(previewState, {
+  type: "ide-update-buffer",
+  path: "src/preview-c.ts",
+  content: "const preview = false;\n",
+});
+expect(
+  previewState.ide.tabs.find((tab) => tab.path === "src/preview-c.ts")
+    ?.pinned === true &&
+    previewState.ide.layout.groups[0]?.tabs.some(
+      (tab) =>
+        tab.path === "src/preview-c.ts" &&
+        tab.preview === false &&
+        tab.dirty === true,
+    ),
+  "Editing a preview tab should pin it before it becomes dirty.",
+);
+
+let groupCloseState = createInitialWorkbenchState();
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/shared.ts",
+    title: "shared.ts",
+    dirty: false,
+    pinned: true,
+  },
+});
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-upsert-buffer",
+  buffer: {
+    path: "src/shared.ts",
+    content: "shared\n",
+    savedContent: "shared\n",
+    contentHash: "shared-hash",
+    sizeBytes: 7,
+    truncated: false,
+    status: "ready",
+    updatedAt: new Date().toISOString(),
+  },
+});
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-split-group",
+  direction: "right",
+});
+const groupCloseSplitId = groupCloseState.ide.layout.activeGroupId;
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-close-tab",
+  path: "src/shared.ts",
+  groupId: groupCloseSplitId,
+});
+expect(
+  groupCloseState.ide.tabs.some((tab) => tab.path === "src/shared.ts") &&
+    groupCloseState.ide.buffers["src/shared.ts"]?.status === "ready" &&
+    groupCloseState.ide.activePath === "src/shared.ts" &&
+    groupCloseState.ide.layout.activeGroupId === "group-main" &&
+    groupCloseState.ide.layout.groups[0]?.tabs.some(
+      (tab) => tab.path === "src/shared.ts",
+    ) &&
+    groupCloseState.ide.layout.groups
+      .find((group) => group.id === groupCloseSplitId)
+      ?.tabs.every((tab) => tab.path !== "src/shared.ts"),
+  "Closing a duplicated editor should affect only the targeted group.",
+);
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-select-group",
+  groupId: groupCloseSplitId,
+});
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/side-only.ts",
+    title: "side-only.ts",
+    dirty: false,
+    pinned: true,
+  },
+});
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-upsert-buffer",
+  buffer: {
+    path: "src/side-only.ts",
+    content: "side\n",
+    savedContent: "side\n",
+    contentHash: "side-hash",
+    sizeBytes: 5,
+    truncated: false,
+    status: "ready",
+    updatedAt: new Date().toISOString(),
+  },
+});
+groupCloseState = workbenchReducer(groupCloseState, {
+  type: "ide-close-group",
+  groupId: groupCloseSplitId,
+});
+expect(
+  groupCloseState.ide.layout.groups.length === 1 &&
+    groupCloseState.ide.layout.activeGroupId === "group-main" &&
+    groupCloseState.ide.activePath === "src/shared.ts" &&
+    groupCloseState.ide.tabs.length === 1 &&
+    groupCloseState.ide.tabs[0]?.path === "src/shared.ts" &&
+    groupCloseState.ide.buffers["src/shared.ts"]?.status === "ready" &&
+    groupCloseState.ide.buffers["src/side-only.ts"] === undefined,
+  "Closing an editor group should remove orphaned tabs and preserve shared editors.",
+);
+
+let pathMutationState = createInitialWorkbenchState();
+pathMutationState = workbenchReducer(pathMutationState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/components/Button.tsx",
+    title: "Button.tsx",
+    dirty: false,
+    pinned: true,
+  },
+});
+pathMutationState = workbenchReducer(pathMutationState, {
+  type: "ide-upsert-buffer",
+  buffer: {
+    path: "src/components/Button.tsx",
+    content: "export function Button() {}\n",
+    savedContent: "export function Button() {}\n",
+    contentHash: "button-hash",
+    sizeBytes: 28,
+    truncated: false,
+    status: "ready",
+    updatedAt: new Date().toISOString(),
+  },
+});
+pathMutationState = workbenchReducer(pathMutationState, {
+  type: "ide-set-selection",
+  selection: {
+    path: "src/components/Button.tsx",
+    startLineNumber: 1,
+    startColumn: 1,
+    endLineNumber: 1,
+    endColumn: 7,
+    text: "export",
+  },
+});
+pathMutationState = workbenchReducer(pathMutationState, {
+  type: "ide-rename-path",
+  fromPath: "src",
+  toPath: "app",
+});
+expect(
+  pathMutationState.ide.activePath === "app/components/Button.tsx" &&
+    pathMutationState.ide.tabs[0]?.path === "app/components/Button.tsx" &&
+    pathMutationState.ide.layout.groups[0]?.activePath ===
+      "app/components/Button.tsx" &&
+    pathMutationState.ide.layout.groups[0]?.tabs[0]?.path ===
+      "app/components/Button.tsx" &&
+    pathMutationState.ide.buffers["app/components/Button.tsx"]?.path ===
+      "app/components/Button.tsx" &&
+    pathMutationState.ide.buffers["src/components/Button.tsx"] === undefined &&
+    pathMutationState.ide.selection?.path === "app/components/Button.tsx",
+  "Renaming a workspace directory should remap descendant editor state atomically.",
+);
+pathMutationState = workbenchReducer(pathMutationState, {
+  type: "ide-delete-path",
+  path: "app/components",
+});
+expect(
+  pathMutationState.ide.activePath === undefined &&
+    pathMutationState.ide.tabs.length === 0 &&
+    pathMutationState.ide.layout.groups[0]?.tabs.length === 0 &&
+    Object.keys(pathMutationState.ide.buffers).length === 0 &&
+    pathMutationState.ide.selection === undefined,
+  "Deleting a workspace directory should remove descendant editor state atomically.",
+);
+
 state = workbenchReducer(state, {
   type: "ide-open-tab",
   tab: {
@@ -1106,7 +1709,13 @@ state = workbenchReducer(state, {
 expect(
   state.ide.activePath === "packages/ui/src/surfaces.tsx" &&
     state.ide.buffers["packages/ui/src/surfaces.tsx"]?.status === "dirty" &&
-    state.ide.tabs[0]?.dirty === true,
+    state.ide.tabs[0]?.dirty === true &&
+    state.ide.layout.groups.some((group) =>
+      group.tabs.some(
+        (tab) =>
+          tab.path === "packages/ui/src/surfaces.tsx" && tab.dirty === true,
+      ),
+    ),
   "IDE buffer dirty transition failed.",
 );
 state = workbenchReducer(state, {
@@ -1144,6 +1753,12 @@ state = workbenchReducer(state, {
 expect(
   state.ide.buffers["packages/ui/src/surfaces.tsx"]?.status === "saved" &&
     state.ide.tabs[0]?.dirty === false &&
+    state.ide.layout.groups.every((group) =>
+      group.tabs.every(
+        (tab) =>
+          tab.path !== "packages/ui/src/surfaces.tsx" || tab.dirty === false,
+      ),
+    ) &&
     state.ide.lastAssistantRequest?.action === "explain-selection",
   "IDE save, selection, and assistant request transitions failed.",
 );
@@ -1215,12 +1830,75 @@ for (const commandName of [
   "complete_automation_lease",
   "recover_automation_leases",
   "triage_automation",
+  "get_notification_permission",
+  "test_notification",
 ]) {
   expect(
     appSource.includes(commandName) || tauriSource.includes(commandName),
     `Desktop app no longer references stable Tauri command ${commandName}.`,
   );
 }
+
+expect(
+  tauriSource.includes("start_automation_scheduler(app.handle().clone())") &&
+    tauriSource.includes("run_automation_scheduler_once_with") &&
+    tauriSource.includes("execute_claimed_automation") &&
+    tauriSource.includes("tauri::RunEvent::Resumed") &&
+    tauriSource.includes("wait_for_change") &&
+    tauriSource.includes("AutomationSchedulerClock") &&
+    tauriSource.includes("automation_scheduler_effective_now") &&
+    tauriSource.includes("run_automation_scheduler_once_at_with") &&
+    tauriSource.includes("AutomationLeaseHeartbeat") &&
+    tauriSource.includes("AUTOMATION_LEASE_HEARTBEAT_INTERVAL") &&
+    tauriSource.includes("require_command_approval: true") &&
+    tauriSource.includes("require_file_edit_approval: true") &&
+    appSource.includes('listen<Automation>("gyro://automation-updated"') &&
+    !appSource.includes("pane-automation-${Date.now()}"),
+  "Automations should execute through the durable backend provider/session path without opening a terminal panel.",
+);
+
+expect(
+  tauriSource.includes("tauri_plugin_notification::init()") &&
+    tauriSource.includes("notify_automation_outcome") &&
+    tauriSource.includes("notification_permission_allows_delivery") &&
+    tauriSource.includes("permission_state()") &&
+    tauriSource.includes("request_permission()") &&
+    tauriSource.includes("A scheduled automation completed") &&
+    tauriSource.includes("A scheduled automation failed") &&
+    appSource.includes(
+      'invoke<NotificationPermissionState>("test_notification")',
+    ) &&
+    surfaceSource.includes("Test notification") &&
+    surfaceSource.includes("Gyro asks only when you run the test") &&
+    !tauriSource.includes("body(automation.prompt)") &&
+    !tauriSource.includes("body(automation.last_result)"),
+  "Background automation outcomes should require explicit native permission and use generic notices without exposing prompts or results.",
+);
+
+expect(
+  coreAutomationSource.includes("AutomationExecutionContext") &&
+    coreAutomationSource.includes("queue_automation_now") &&
+    coreAutomationSource.includes("claim_due_automation_at") &&
+    coreAutomationSource.includes("renew_automation_lease") &&
+    coreAutomationSource.includes("current_expiry.max(requested_expiry)") &&
+    coreAutomationSource.includes("finish_automation_lease") &&
+    coreAutomationSource.includes("recover_expired_automation_leases") &&
+    coreAutomationSource.includes("automation_retry_delay"),
+  "Automation storage should preserve execution context, deterministic due claims, leases, interruption recovery, and retry backoff.",
+);
+
+expect(
+  coreAutomationSource.includes("stop_condition_met: Option<bool>") &&
+    coreAutomationSource.includes(
+      "finish_automation_lease_with_stop_condition",
+    ) &&
+    tauriSource.includes("parse_automation_execution_outcome") &&
+    tauriSource.includes("gyro-automation-result") &&
+    tauriSource.includes("failed closed") &&
+    surfaceSource.includes("Stop condition met") &&
+    surfaceSource.includes("Reactivate"),
+  "Automation stop conditions should fail closed, persist their verdict, complete atomically, and remain visible to the user.",
+);
 
 expect(
   !/#\[tauri::command\]\s*fn /.test(tauriSource),
@@ -1305,6 +1983,13 @@ expect(
       "shouldSuggestSessionTitle(\n        activeSession,\n        events",
     ) &&
     appSource.includes("draftResetToken") &&
+    appSource.includes(
+      "setEvents(limitSessionEventsForUi(optimisticEvents));\n        resetChatDraft();",
+    ) &&
+    appSource.includes(
+      "sessionModel,\n          chatWorkspacePath,\n          provisionalTitle",
+    ) &&
+    appSource.includes('[NEW_CHAT_DRAFT_KEY]: ""') &&
     appSource.includes("resetChatDraft") &&
     !appSource.includes("const [draft, setDraft]") &&
     !appSource.includes("onDraftChange={setDraft}") &&
@@ -1784,6 +2469,20 @@ expect(
   "Running terminal panes should confirm before their PTY is terminated.",
 );
 expect(
+  appSource.includes('pane.profileId === "shell"') &&
+    appSource.includes("profileId: profile.id") &&
+    appSource.includes(
+      "snapshot.profileId ?? inferredTerminalProfileId(snapshot)",
+    ) &&
+    appSource.includes("restored snapshot; restart to reconnect") &&
+    appSource.includes("terminalPaneProcessIsMissing(error)") &&
+    appSource.includes('"terminal_pane_has_foreground_job"') &&
+    tauriSource.includes("profile_id: process.request.profile_id.clone()") &&
+    tauriSource.includes("fn has_foreground_job") &&
+    tauriSource.includes("terminal_pane_has_foreground_job"),
+  "Idle shells should preserve their profile identity and close directly while foreground jobs remain protected.",
+);
+expect(
   typeSource.includes(
     'export type TerminalPaneAttention = "waiting" | "failed"',
   ) &&
@@ -1956,6 +2655,9 @@ expect(
     surfaceSource.includes('role="separator"') &&
     surfaceSource.includes("onDoubleClick") &&
     surfaceSource.includes("resizeIdeSidebarWithKeyboard") &&
+    surfaceSource.includes("syncIdeSidebarBreakpoint") &&
+    surfaceSource.includes('window.addEventListener("resize"') &&
+    surfaceSource.includes("isIdeSidebarCustomized") &&
     surfaceSource.includes("requestAnimationFrame") &&
     surfaceSource.includes("appShellRef.current?.style.setProperty") &&
     styleSource.includes(".gyro-ide-sidebar-resizer") &&
@@ -2029,25 +2731,51 @@ expect(
 );
 
 expect(
-  appSource.includes('import { openUrl } from "@tauri-apps/plugin-opener"') &&
+  appSource.includes("openUrl, revealItemInDir") &&
     appSource.includes("openBrowserPreviewExternal") &&
+    appSource.includes("invoke<BrowserPreviewCapture>(") &&
+    appSource.includes('"capture_browser_preview"') &&
+    appSource.includes("browser-capture-success") &&
     surfaceSource.includes('title="Local browser preview"') &&
+    surfaceSource.includes('aria-label="Capture preview screenshot"') &&
+    surfaceSource.includes("isLoopbackBrowserPreviewUrl") &&
+    surfaceSource.includes("Screenshots are available for local previews") &&
+    surfaceSource.includes('onScreenshot?.("reveal")') &&
     surfaceSource.includes("normalizedBrowserPreviewUrl") &&
     surfaceSource.includes("<iframe") &&
+    surfaceSource.includes("Browser preview diagnostics") &&
+    surfaceSource.includes("No page errors") &&
+    appSource.includes("result.diagnostics.length") &&
+    tauriSource.includes("capture_browser_preview_diagnostics") &&
+    tauriSource.includes("capture_macos_browser_preview_snapshot") &&
+    tauriSource.includes("takeSnapshotWithConfiguration_completionHandler") &&
+    tauriSource.includes("persist_browser_preview_capture") &&
+    tauriSource.includes("MAX_BROWSER_PREVIEW_CAPTURES") &&
+    tauriSource.includes(
+      "screenshots are limited to local loopback previews",
+    ) &&
+    tauriSource.includes("browser_preview_capture_script") &&
+    tauriSource.includes(".incognito(true)") &&
+    tauriSource.includes(".visible(false)") &&
+    tauriSource.includes("console.error") &&
+    tauriSource.includes("unhandledrejection") &&
+    tauriSource.includes("redact_secrets") &&
+    !tauriSource.includes("dangerousRemoteDomainIpcAccess") &&
     !surfaceSource.includes("gyro-browser-skeleton") &&
-    !surfaceSource.includes("Screenshot {preview.screenshotCount}") &&
+    !reducerSource.includes("screenshotCount") &&
     reducerSource.includes('url: "http://localhost:3000"') &&
     tauriConfigSource.includes("frame-src http://localhost:*") &&
     tauriConfigSource.includes("http://127.0.0.1:*") &&
     styleSource.includes(".gyro-browser-page iframe"),
-  "Browser preview should render a real local URL and open it externally without simulated screenshot chrome.",
+  "Browser preview should render a real local URL, open it externally, and collect bounded loopback diagnostics without remote Tauri IPC.",
 );
 
 expect(
   appSource.includes("const started = await launchTerminalPane") &&
     appSource.includes("agent failed to start") &&
     appSource.includes("task.terminalPaneId") &&
-    appSource.includes("Automation running") &&
+    appSource.includes("Automation queued") &&
+    surfaceSource.includes("Running") &&
     surfaceSource.includes("Move to todo") &&
     surfaceSource.includes("Move to review") &&
     surfaceSource.includes('label: "Open providers"') &&
@@ -2064,6 +2792,29 @@ expect(
     readinessAuditSource.includes("Functional Readiness Matrix") &&
     readinessAuditSource.includes("Highest-Risk Gaps"),
   "The roadmap should distinguish implemented foundations from private-alpha blockers.",
+);
+expect(
+  surfaceSource.includes('className="gyro-ide-project-empty"') &&
+    surfaceSource.includes("Open a project to start coding") &&
+    surfaceSource.includes(
+      "Local workspace · guarded edits · reviewable changes",
+    ) &&
+    surfaceSource.includes("if (!workspacePath)") &&
+    appSource.includes(
+      "workspacePath={activeSession?.workspacePath ?? workspacePath}",
+    ) &&
+    appSource.includes("onOpenWorkspace={openWorkspace}") &&
+    appSource.includes('activeWorkspaceLayout !== "code" ||') &&
+    surfaceSource.includes(
+      'disabled={!workspacePath && view.id !== "settings"}',
+    ) &&
+    surfaceSource.includes(
+      'workspacePath ? (\n            <nav className="gyro-ide-panel-shortcuts"',
+    ) &&
+    styleSource.includes(".gyro-ide-surface.is-project-empty") &&
+    styleSource.includes(".gyro-ide-sidebar-activity button:disabled") &&
+    styleSource.includes(".gyro-ide-project-empty > button:focus-visible"),
+  "IDE should lead with one project-opening action and withhold inactive workbench regions until a project exists.",
 );
 const chatSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("{!isCliSidebar && !isIdeSidebar ? ("),
@@ -2189,35 +2940,102 @@ expect(
     appSource.includes("appendPlanEvent") &&
     surfaceSource.includes("ChatSurfaceControls") &&
     surfaceSource.includes("ChatSidePanel") &&
-    surfaceSource.includes("gyro-plan-rail"),
+    surfaceSource.includes("gyro-plan-rail") &&
+    surfaceSource.includes('aria-label="Close plan checklist"') &&
+    surfaceSource.includes("gyro-plan-inline-editor") &&
+    surfaceSource.includes('aria-label="Plan item title"') &&
+    surfaceSource.includes('aria-label="Save plan item"') &&
+    surfaceSource.includes('aria-label="Session goal"') &&
+    surfaceSource.includes('aria-label="Save session goal"') &&
+    surfaceSource.includes("Set session goal") &&
+    surfaceSource.includes('kind: "goal" | "item"') &&
+    surfaceSource.includes("editorRequest={planEditorRequest}") &&
+    surfaceSource.includes("onEditorRequestHandled?.()") &&
+    surfaceSource.includes("handledEditorRequestTokenRef") &&
+    surfaceSource.includes("const sidePanel = activeRailPanel ? (") &&
+    surfaceSource.includes("{sidePanel}") &&
+    surfaceSource.includes('"Reopen goal"') &&
+    surfaceSource.includes(
+      'sessionGoal.status === "complete" ? "reopen" : "complete"',
+    ) &&
+    appSource.includes('action === "set" || action === "reopen"') &&
+    appSource.includes("Goal reopened:") &&
+    surfaceSource.includes('event.kind === "goal-updated"') &&
+    surfaceSource.includes('event.kind === "chat-mode-changed"') &&
+    surfaceSource.includes('event.key === "Escape"') &&
+    appSource.includes("const title = value?.trim()") &&
+    appSource.includes("const appendGoalEvent = useCallback") &&
+    appSource.includes('kind: "goal",') &&
+    appSource.includes('kind: "item",') &&
+    appSource.includes("planEditorRequestTokenRef.current += 1") &&
+    !appSource.includes('window.prompt("Session goal"') &&
+    !appSource.includes('window.prompt("Add plan item"') &&
+    appSource.includes("createGoalSessionEvent") &&
+    appSource.includes('kind: "goal-updated"') &&
+    styleSource.includes(".gyro-plan-inline-editor") &&
+    styleSource.includes(
+      ".gyro-chat-surface.has-environment .gyro-plan-rail {",
+    ) &&
+    styleSource.includes("grid-template-columns: minmax(0, 1fr);") &&
+    styleSource.includes("grid-column: 1 / -1;") &&
+    styleSource.includes(".gyro-chat-surface.is-empty.has-environment") &&
+    styleSource.includes(".gyro-chat-start\n  .gyro-composer-shell") &&
+    styleSource.includes("padding-top: 60px;") &&
+    styleSource.includes("z-index: 71;") &&
+    styleSource.includes("cursor: pointer;"),
   "AI model checklist plan events should be typed, persisted, derived, and visible in chat.",
 );
 expect(
   surfaceSource.includes('activeRailPanel ? "has-environment" : ""') &&
-    surfaceSource.includes("<strong>Environment</strong>") &&
-    surfaceSource.includes(
-      '<div className="gyro-rail-heading">Changes</div>',
-    ) &&
-    surfaceSource.includes('<div className="gyro-rail-heading">Local</div>') &&
-    surfaceSource.includes('<div className="gyro-rail-heading">Branch</div>') &&
-    surfaceSource.includes(
-      '<div className="gyro-rail-heading">Commit or push</div>',
-    ) &&
-    surfaceSource.includes('<div className="gyro-rail-heading">Tasks</div>') &&
-    surfaceSource.includes(
-      '<div className="gyro-rail-heading">Sources</div>',
-    ) &&
-    surfaceSource.includes("No sources yet") &&
+    surfaceSource.includes('aria-label="Chat tools"') &&
+    surfaceSource.includes('className="gyro-chat-tool-launcher"') &&
+    surfaceSource.includes("<span>Changes</span>") &&
+    surfaceSource.includes("<span>Terminal</span>") &&
+    surfaceSource.includes("<span>Browser</span>") &&
+    surfaceSource.includes("<span>Files</span>") &&
+    surfaceSource.includes("<span>Plan</span>") &&
+    surfaceSource.includes("function chatToolBrowserStatusLabel") &&
+    surfaceSource.includes('return "Needs attention"') &&
+    surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
+    surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
+    surfaceSource.includes("Open Files in IDE") &&
+    surfaceSource.includes("<small>Open IDE</small>") &&
+    surfaceSource.includes('"has-activity"') &&
+    surfaceSource.includes('"has-warning"') &&
+    !surfaceSource.includes('(browserPreview?.status ?? "Ready")') &&
+    surfaceSource.includes('openTool("diff")') &&
+    surfaceSource.includes('openTool("terminal")') &&
+    surfaceSource.includes('openTool("browser")') &&
+    surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
+    surfaceSource.includes('"Close bottom drawer"') &&
+    surfaceSource.includes('"Open bottom drawer"') &&
+    appSource.includes("const toggleToolPanel = useCallback") &&
+    appSource.includes("openToolPanel(workbench.activePaneTab)") &&
+    surfaceSource.includes('"Open last used panel"') &&
+    surfaceSource.includes("onClick={onToggleToolPanel}") &&
+    surfaceSource.includes('onComposerAction?.("open-files")') &&
+    appSource.includes('case "open-files":') &&
+    appSource.includes('layout: "code"') &&
+    styleSource.includes(".gyro-chat-tool-launcher") &&
+    styleSource.includes("button.has-activity > small") &&
+    styleSource.includes("button.has-warning > small") &&
+    styleSource.includes("minmax(260px, 40vh)") &&
+    styleSource.includes("min-height: 36px;") &&
+    styleSource.includes(".gyro-chat-tool-close") &&
     appSource.includes('dispatchWorkbench({ type: "set-chat-panel" })') &&
-    surfaceSource.includes('onComposerAction?.("show-project-context")') &&
-    surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
+    surfaceSource.includes('action: "new-chat-select-workspace"') &&
+    surfaceSource.includes('"new-local-chat-select-workspace"') &&
+    surfaceSource.includes('"start-new-chat-mode:worktree"') &&
+    surfaceSource.includes("This context stays fixed for the current chat") &&
+    surfaceSource.includes("Keep this chat intact and choose another folder") &&
+    !surfaceSource.includes('onComposerAction?.("show-project-context")') &&
+    !surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
     surfaceSource.includes("diffAdditions") &&
     surfaceSource.includes("diffDeletions") &&
     surfaceSource.includes("sourceControl?.additions") &&
     surfaceSource.includes("sourceControl?.deletions") &&
     surfaceSource.includes("sourceControl?.files.length") &&
-    surfaceSource.includes("gyro-change-totals") &&
     surfaceSource.includes("gyro-thread-diff-pill") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
@@ -2240,6 +3058,9 @@ expect(
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
     surfaceSource.includes('popoverPlacement="up"') &&
     surfaceSource.includes('variant="hero"') &&
+    surfaceSource.includes("constrainToParent={Boolean(activeRailPanel)}") &&
+    surfaceSource.includes('constrainToParent ? "stretch" : "center"') &&
+    surfaceSource.includes("width: constrainToParent") &&
     surfaceSource.includes("showContextRow={false}") &&
     surfaceSource.includes(
       "const shouldShowContextRow = showContextRow ?? isHero",
@@ -2252,7 +3073,7 @@ expect(
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider",
     ) &&
-    styleSource.includes("width: min(820px, calc(100vw - 96px))") &&
+    styleSource.includes("width: min(820px, 100%)") &&
     surfaceSource.includes("!event.shiftKey") &&
     surfaceSource.includes("event.preventDefault()") &&
     styleSource.includes("--gyro-chat-content-width: 735px") &&
@@ -2266,6 +3087,34 @@ expect(
     styleSource.includes(
       "grid-template-columns: minmax(0, 1fr) minmax(288px, 316px)",
     ) &&
+    surfaceSource.includes('"gyro-chat-surface",\n        "is-thread"') &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-thread > .gyro-chat-thread-topbar",
+    ) &&
+    styleSource.includes("grid-column: 1 / -1") &&
+    styleSource.includes("justify-self: stretch") &&
+    styleSource.includes("padding-inline: 18px") &&
+    styleSource.includes("width: 100%") &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas",
+    ) &&
+    styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
+    threadSurfaceRules.some((rule) =>
+      rule.includes("grid-template-rows: 48px minmax(0, 1fr)"),
+    ) &&
+    threadTopbarRules.some(
+      (rule) =>
+        rule.includes("grid-column: 1 / -1") &&
+        rule.includes("grid-row: 1") &&
+        rule.includes("justify-self: stretch") &&
+        rule.includes("width: 100%"),
+    ) &&
+    threadCanvasRules.some(
+      (rule) => rule.includes("grid-row: 2") && rule.includes("min-height: 0"),
+    ) &&
+    threadRailRules.some(
+      (rule) => rule.includes("grid-column: 2") && rule.includes("grid-row: 2"),
+    ) &&
     surfaceSource.includes("function AssistantResponse") &&
     surfaceSource.includes("gyro-response-body") &&
     surfaceSource.includes('aria-label="Copy response"') &&
@@ -2277,7 +3126,7 @@ expect(
     surfaceSource.includes("isUser || isAssistant ? null") &&
     !surfaceSource.includes("<strong>Workbench activity</strong>") &&
     !surfaceSource.includes("Open terminal\n          </button>"),
-  "First chat should default to a clean Codex-style thread with topbar pills, provider status recovery, and matching docked composer.",
+  "First chat should default to a clean Codex-style thread with a fixed full-width topbar, provider status recovery, and matching docked composer.",
 );
 expect(
   reducerSource.includes("activeChatPanel: panel") &&
@@ -2373,10 +3222,13 @@ expect(
     appSource.includes("const selectContextFile") &&
     appSource.includes('title: "Select file"') &&
     appSource.includes("relativeFilePath") &&
-    appSource.includes('"Worktree chats need a repo or folder') &&
+    appSource.includes("isUserSelectedWorkspacePath(chatWorkspacePath)") &&
+    appSource.includes(
+      '"Select the folder Gyro should use before starting this chat."',
+    ) &&
     appSource.includes("void openWorkspace();") &&
     appSource.includes('void selectChatAttachment("workspace-file");') &&
-    appSource.includes('case "select-workspace-mode"') &&
+    appSource.includes('action.startsWith("start-new-chat-mode:")') &&
     appSource.includes('type: "set-workbench-mode"') &&
     appSource.includes('type: "close-tool-panel"') &&
     surfaceSource.includes("workspaceModeLabel") &&
@@ -2392,19 +3244,47 @@ expect(
     surfaceSource.includes(
       'style={{ width: "min(860px, calc(100vw - 96px))" }}',
     ) &&
-    surfaceSource.includes('width: "min(820px, calc(100vw - 96px))"') &&
+    surfaceSource.includes('"min(820px, calc(100vw - 96px))"') &&
     styleSource.includes("width: min(860px, calc(100vw - 96px))") &&
     styleSource.includes("width: min(820px, 100%)") &&
     surfaceSource.includes("What should we do in ") &&
     surfaceSource.includes("Choose folder") &&
+    surfaceSource.includes(
+      "const canSubmitChat = canSendChat(hasReadyProvider, workspacePath)",
+    ) &&
+    surfaceSource.includes("if (canSubmitChat && !isSending)") &&
+    surfaceSource.includes("disabled={isSending ? !onStop : !canSubmitChat}") &&
+    surfaceSource.includes("Choose a folder before sending") &&
+    surfaceSource.includes("Connect a provider before sending") &&
     surfaceSource.includes("branchLabel") &&
     surfaceSource.includes('action: "select-file"') &&
     surfaceSource.includes('action: "select-folder"') &&
     surfaceSource.includes('"set-workspace-mode:worktree"') &&
     surfaceSource.includes("New worktree branch") &&
     surfaceSource.includes("Select folder") &&
-    surfaceSource.includes("Change folder"),
+    surfaceSource.includes("Change folder") &&
+    appSource.includes('action === "new-chat-select-workspace"') &&
+    appSource.includes('action === "new-local-chat-select-workspace"') &&
+    appSource.includes('action.startsWith("start-new-chat-mode:")') &&
+    appSource.includes("startNewChat();"),
   "Composer controls should route to real workspace, provider, permission, branch, and workspace-mode actions.",
+);
+expect(
+  typeSource.includes("export type GitBranchCatalog") &&
+    surfaceSource.includes("function branchPopoverItems") &&
+    surfaceSource.includes("select-branch:${encodeURIComponent(branch)}") &&
+    surfaceSource.includes("This isolated chat keeps its worktree branch") &&
+    appSource.includes('action.startsWith("select-branch:")') &&
+    appSource.includes('invoke<GitBranchCatalog>("git_checkout_branch"') &&
+    appSource.includes('invoke<Session>("set_session_branch"') &&
+    !/case "select-branch":\s*setComposerWorkspaceMode/.test(appSource) &&
+    tauriSource.includes("git_branch_catalog_impl") &&
+    tauriSource.includes("git_checkout_branch_impl") &&
+    tauriSource.includes(
+      "commit or stash workspace changes before switching branches",
+    ) &&
+    coreSessionsSource.includes("update_session_branch"),
+  "Branch controls should list real local branches, guard dirty checkouts, preserve worktree branches, and persist the active session branch.",
 );
 expect(
   appSource.includes("CHAT_DRAFTS_STORAGE_KEY") &&
@@ -2426,6 +3306,47 @@ expect(
     coreSessionsSource.includes("GoalUpdated") &&
     coreSessionsSource.includes("ChatModeChanged"),
   "Chat should persist goals, plans, modes, drafts, attachments, and real provider cancellation.",
+);
+expect(
+  coreSessionsSource.includes(
+    "create table if not exists mutation_proposals",
+  ) &&
+    coreSessionsSource.includes("list_pending_mutation_proposals") &&
+    coreMutationsSource.includes("decide_mutation_proposal") &&
+    coreMutationsSource.includes("atomic_write_workspace_file") &&
+    coreMutationsSource.includes("file changed after approval was requested") &&
+    tauriSource.includes("create_file_mutation_proposal") &&
+    tauriSource.includes("resolve_file_mutation_proposal") &&
+    appSource.includes("handleMutationApprovalAction") &&
+    appSource.includes("mutationApprovalStatuses") &&
+    appSource.includes("resolvedMutationProposalIds") &&
+    surfaceSource.includes("function MutationApprovalCard") &&
+    surfaceSource.includes('decision: "approve" | "reject"') &&
+    surfaceSource.includes("mutationDecisions") &&
+    styleSource.includes(".gyro-mutation-approval"),
+  "Chat file changes should use durable typed approvals, guarded atomic writes, and restart-safe decision reconciliation.",
+);
+expect(
+  tauriSource.includes("run_provider_chat_with_retry_using") &&
+    tauriSource.includes("provider_failure_recovery") &&
+    tauriSource.includes('"recoveryKind"') &&
+    surfaceSource.includes("providerStatus.recoveryMessage") &&
+    surfaceSource.includes('providerStatus.recoveryKind === "authentication"'),
+  "Chat recovery should clear stale resume state and distinguish offline, authentication, and retry guidance.",
+);
+expect(
+  coreSessionsSource.includes("update_session_summary") &&
+    coreSessionsSource.includes("summary_updated_at") &&
+    tauriSource.includes("derive_session_summary") &&
+    typeSource.includes("summaryUpdatedAt?: string") &&
+    surfaceSource.includes('aria-label="Message Gyro"') &&
+    surfaceSource.includes('role="log"') &&
+    surfaceSource.includes('aria-live="polite"') &&
+    surfaceSource.includes("session.summary") &&
+    styleSource.includes(
+      ".gyro-mutation-approval-actions button:focus-visible",
+    ),
+  "Chat should persist real-response summaries and expose keyboard and screen-reader timeline semantics.",
 );
 expect(
   styleSource.includes(".gyro-composer-context-row") &&
@@ -2705,8 +3626,11 @@ expect(
     appSource.includes('lazy(() => import("./monaco-editor"))') &&
     monacoEditorSource.includes("loader.config({ monaco })") &&
     monacoEditorSource.includes("MonacoEnvironment") &&
+    monacoEditorSource.includes("export function disposeMonacoModel") &&
     monacoEditorSource.includes("new EditorWorker()") &&
     monacoEditorSource.includes("new TypeScriptWorker()") &&
+    appSource.includes("keepCurrentModel") &&
+    appSource.includes("function disposeEditorModels") &&
     surfaceSource.includes("renderEditor") &&
     surfaceSource.includes("gyro-editor-ai-bar") &&
     surfaceSource.includes("gyro-editor-contextbar") &&
@@ -2726,14 +3650,24 @@ expect(
     appSource.includes("const createWorkspacePath = useCallback") &&
     appSource.includes("const renameWorkspacePath = useCallback") &&
     appSource.includes("const deleteWorkspacePath = useCallback") &&
+    appSource.includes("const affectedEditorPaths") &&
     appSource.includes("const openSourceControlDiff = useCallback") &&
     appSource.includes("const startIdeDebugSession = useCallback") &&
     appSource.includes("const sendIdeDebugCommand = useCallback") &&
     appSource.includes("const stopIdeDebugSession = useCallback") &&
+    appSource.includes("const closesLastReference") &&
+    appSource.includes("Discard unsaved changes in") &&
     appSource.includes('method: "textDocument/didOpen"') &&
     appSource.includes('method: "textDocument/didChange"') &&
     reducerSource.includes('case "ide-select-group"') &&
+    reducerSource.includes('case "ide-rename-path"') &&
+    reducerSource.includes('case "ide-delete-path"') &&
+    reducerSource.includes("const pathStillOpen") &&
     reducerSource.includes('case "ide-set-language-server"') &&
+    surfaceSource.includes("onCloseEditorTab?.(path, group.id)") &&
+    surfaceSource.includes('"application/x-gyro-editor-group"') &&
+    surfaceSource.includes("onMoveEditorTab?.(path, group.id, fromGroupId)") &&
+    appSource.includes("onMoveEditorTab={(path, toGroupId, fromGroupId)") &&
     tauriSource.includes("impl LanguageServerManager") &&
     tauriSource.includes("spawn_lsp_message_reader") &&
     styleSource.includes(".gyro-editor-groups.is-split-right") &&
@@ -2813,7 +3747,7 @@ for (const className of [
   "gyro-tool-detail-trigger",
   "aria-expanded",
   "gyro-onboarding-steps",
-  "gyro-chat-surface is-empty",
+  "gyro-chat-surface.is-empty",
   "gyro-chat-start",
   "gyro-chat-thread-canvas",
   "gyro-chat-composer-dock",
@@ -2954,13 +3888,17 @@ expect(
 );
 
 expect(
-  styleSource.includes(
-    "grid-template-rows: 34px 28px 25px 34px minmax(0, 1fr)",
-  ) &&
-    styleSource.includes(".gyro-ide-editor-stack.is-editor-only") &&
-    styleSource.includes("height: 22px") &&
+  surfaceSource.includes("export function IdeStatusBar") &&
+    surfaceSource.includes('aria-label="IDE status"') &&
+    appSource.includes("<IdeStatusBar") &&
+    styleSource.includes(
+      ".gyro-workspace-route.is-code > .gyro-editor-statusbar",
+    ) &&
+    styleSource.includes("var(--gyro-ide-status-height)") &&
+    styleSource.includes(".gyro-editor-statusbar-group.is-secondary") &&
+    styleSource.includes("grid-template-rows: minmax(0, 1fr);") &&
     styleSource.includes(".gyro-code-surface .monaco-editor-background"),
-  "The IDE shell should reserve all five editor rows and keep the status bar constrained.",
+  "The IDE should keep the global status bar below the editor and tool panel with compact left and right metadata groups.",
 );
 
 expect(
@@ -2983,9 +3921,13 @@ expect(
 
 expect(
   monacoEditorSource.includes('monaco.editor.defineTheme("gyro-dark"') &&
-    monacoEditorSource.includes('"editor.background": "#030405"') &&
+    monacoEditorSource.includes('"editor.background": "#1E1F22"') &&
+    monacoEditorSource.includes(
+      '"editor.lineHighlightBackground": "#25262A"',
+    ) &&
+    appSource.includes("stickyScroll: { enabled: true, maxLineCount: 3 }") &&
     appSource.includes('theme={theme === "light" ? "vs" : "gyro-dark"}'),
-  "The IDE editor should use the same near-black graphite palette as the rest of dark mode.",
+  "The IDE editor should use a readable neutral graphite palette with built-in navigation aids.",
 );
 
 expect(
@@ -3156,6 +4098,49 @@ for (const settingsSelector of [
     `The line-based settings workspace should include ${settingsSelector}.`,
   );
 }
+
+expect(
+  tauriSource.includes('"item/commandExecution/requestApproval"') &&
+    tauriSource.includes('"item/fileChange/requestApproval"') &&
+    tauriSource.includes('"gyro://provider-approval-event"') &&
+    tauriSource.includes('"read-only"') &&
+    tauriSource.includes("AppliedByGyro") &&
+    tauriSource.includes("wait_for_provider_approval") &&
+    appSource.includes('"resolve_provider_approval"'),
+  "Default Permissions should route gated Codex actions through live Gyro approval decisions and keep file edits read-only until approved.",
+);
+
+expect(
+  tauriSource.includes("run_provider_permission_server") &&
+    tauriSource.includes("desktop_claude_permission_mcp_config") &&
+    tauriSource.includes('"--strict-mcp-config"') &&
+    tauriSource.includes("handle_desktop_provider_approval_request") &&
+    tauriSource.includes("wait_for_provider_approval_with_transaction") &&
+    coreIpcSource.includes("DesktopProviderApprovalRequest") &&
+    coreIpcSource.includes("request_desktop_provider_approval") &&
+    coreMutationsSource.includes(
+      "prepare_claude_provider_mutation_transaction",
+    ),
+  "Default Permissions should route desktop Claude callbacks through versioned local IPC and the shared journaled transaction.",
+);
+
+expect(
+  surfaceSource.includes("ProviderToolApprovalCard") &&
+    surfaceSource.includes(
+      'approvalType: "command" | "file-change" | "permissions"',
+    ) &&
+    surfaceSource.includes("providerApprovalDecisions") &&
+    surfaceSource.includes('status === "applied"') &&
+    surfaceSource.includes(
+      "approval.error ?? approval.reason ?? approval.risk",
+    ) &&
+    styleSource.includes(".gyro-provider-tool-approval") &&
+    styleSource.includes(".gyro-provider-tool-approval.is-applied") &&
+    styleSource.includes(
+      ".gyro-provider-tool-approval-actions button:focus-visible",
+    ),
+  "Provider command, file, and permission requests should render as reconciled accessible transcript cards.",
+);
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);
 

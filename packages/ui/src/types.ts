@@ -125,6 +125,16 @@ export type AutomationRun = {
   startedAt: string;
   finishedAt?: string;
   summary: string;
+  stopConditionMet?: boolean;
+};
+
+export type AutomationExecutionContext = {
+  workspacePath?: string;
+  providerId?: string;
+  providerLabel?: string;
+  modelId?: string;
+  modelLabel?: string;
+  reasoningEffort?: string;
 };
 
 export type Automation = {
@@ -140,6 +150,7 @@ export type Automation = {
   workspaceMode: WorkbenchMode;
   worktreeName?: string;
   stopCondition?: string;
+  execution?: AutomationExecutionContext;
   lastRunAt?: string;
   nextRunAt?: string;
   leaseOwner?: string;
@@ -210,13 +221,37 @@ export type BrowserPreviewStatus =
   | "verification-passed"
   | "verification-failed";
 
+export type BrowserPreviewDiagnostic = {
+  kind: "console-error" | "page-error" | "unhandled-rejection";
+  message: string;
+  source?: string;
+  line?: number;
+  column?: number;
+};
+
+export type BrowserPreviewCaptureStatus =
+  "idle" | "capturing" | "captured" | "failed";
+
+export type BrowserPreviewCapture = {
+  path: string;
+  filename: string;
+  width: number;
+  height: number;
+  createdAt: string;
+};
+
 export type BrowserPreview = {
   url: string;
   history: string[];
   historyIndex: number;
   device: BrowserPreviewDevice;
   consoleErrors: number;
-  screenshotCount: number;
+  diagnostics: BrowserPreviewDiagnostic[];
+  diagnosticsSupported: boolean;
+  diagnosticsCaptured: boolean;
+  captureStatus: BrowserPreviewCaptureStatus;
+  captureError?: string;
+  latestCapture?: BrowserPreviewCapture;
   status: BrowserPreviewStatus;
   verificationMessage: string;
 };
@@ -239,6 +274,9 @@ export type Notification = {
   createdAt: string;
   read: boolean;
 };
+
+export type NotificationPermissionState =
+  "granted" | "denied" | "prompt" | "prompt-with-rationale";
 
 export type ProviderConnectionStatus =
   "not-configured" | "checking" | "connected" | "failed" | "disconnected";
@@ -651,6 +689,13 @@ export type SourceControlState = {
   error?: string;
 };
 
+export type GitBranchCatalog = {
+  available: boolean;
+  current?: string;
+  branches: string[];
+  error?: string;
+};
+
 export type TaskDefinition = {
   id: string;
   label: string;
@@ -795,6 +840,8 @@ export type Session = {
   modelId?: string;
   modelLabel?: string;
   reasoningEffort?: ReasoningEffort;
+  summary?: string;
+  summaryUpdatedAt?: string;
   createdAt: string;
   updatedAt: string;
   eventsPath: string;
