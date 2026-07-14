@@ -27,9 +27,8 @@ use gyro_core::{
 use serde::Serialize;
 use std::error::Error as StdError;
 use std::fmt;
-use std::io::{self, BufRead, BufReader, IsTerminal, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,6 +38,32 @@ const CLI_JSON_SCHEMA_V1: &str = "gyro.cli.v1";
 const EXIT_PROVIDER_UNAVAILABLE: i32 = 3;
 
 const DEFAULT_SESSION_LIMIT: usize = 20;
+const MAX_PROVIDER_RESPONSE_FILE_BYTES: usize = 256 * 1024;
+const MAX_PERMISSION_MCP_MESSAGE_BYTES: usize = 1024 * 1024;
+
+fn read_bounded_provider_response_file(path: &Path) -> Result<String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("open provider response {}", path.display()))?;
+    if !file.metadata()?.is_file() {
+        return Err(anyhow!("provider response is not a regular file"));
+    }
+    let mut bytes = Vec::with_capacity(8 * 1024);
+    Read::by_ref(&mut file)
+        .take((MAX_PROVIDER_RESPONSE_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_PROVIDER_RESPONSE_FILE_BYTES {
+        return Err(anyhow!("provider response file exceeds its size limit"));
+    }
+    String::from_utf8(bytes).context("provider response file is not UTF-8")
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "gyro")]
@@ -879,7 +904,7 @@ fn decide_cli_mutation(
     let status = match result.proposal.status {
         MutationProposalStatus::Applied | MutationProposalStatus::Rejected => CliStatus::Done,
         MutationProposalStatus::Failed => CliStatus::Failed,
-        MutationProposalStatus::Pending => CliStatus::Waiting,
+        MutationProposalStatus::Pending | MutationProposalStatus::Applying => CliStatus::Waiting,
     };
     let message = match result.proposal.status {
         MutationProposalStatus::Applied => format!("applied {}", result.proposal.path),
@@ -888,6 +913,7 @@ fn decide_cli_mutation(
         }
         MutationProposalStatus::Failed => format!("could not apply {}", result.proposal.path),
         MutationProposalStatus::Pending => format!("{} is still pending", result.proposal.path),
+        MutationProposalStatus::Applying => format!("{} is being applied", result.proposal.path),
     };
     let output = ApprovalDecisionOutput {
         status,
@@ -983,12 +1009,12 @@ fn provider_permission_server() -> Result<()> {
     let (paths, store) = open_store()?;
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+    let mut stdin = stdin.lock();
+    while let Some(line) = read_bounded_mcp_line(&mut stdin)? {
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let request: serde_json::Value = match serde_json::from_str(&line) {
+        let request: serde_json::Value = match serde_json::from_slice(&line) {
             Ok(request) => request,
             Err(error) => {
                 write_mcp_message(
@@ -1268,10 +1294,35 @@ fn prompt_permission_on_tty(kind: CodexApprovalKind, details: &serde_json::Value
 }
 
 fn write_mcp_message(writer: &mut impl Write, message: &serde_json::Value) -> Result<()> {
-    serde_json::to_writer(&mut *writer, message)?;
+    let bytes = serde_json::to_vec(message)?;
+    if bytes.len() > MAX_PERMISSION_MCP_MESSAGE_BYTES {
+        return Err(anyhow!("permission MCP response exceeds its size limit"));
+    }
+    writer.write_all(&bytes)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
     Ok(())
+}
+
+fn read_bounded_mcp_line(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>> {
+    let mut line = Vec::with_capacity(8 * 1024);
+    let read = Read::by_ref(reader)
+        .take((MAX_PERMISSION_MCP_MESSAGE_BYTES + 1) as u64)
+        .read_until(b'\n', &mut line)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if line.len() > MAX_PERMISSION_MCP_MESSAGE_BYTES {
+        return Err(anyhow!("permission MCP request exceeds its size limit"));
+    }
+    if line.last() != Some(&b'\n') {
+        return Err(anyhow!("permission MCP request ended before its newline"));
+    }
+    line.pop();
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    Ok(Some(line))
 }
 
 fn permission_env(name: &str) -> Result<String> {
@@ -2324,7 +2375,35 @@ fn execute_codex_app_server_provider(
                 println!();
             }
             let response = gyro_core::sanitize_harness_text(output.response.trim());
-            store.upsert_provider_session_binding(
+            let assistant_payload = cli_provider_run_payload(
+                turn_id,
+                attempt_id,
+                mode,
+                HarnessRunStatus::Done,
+                Some(profile),
+                model.clone(),
+                session,
+            )
+            .unwrap_or_else(|error| {
+                serde_json::json!({
+                    "schema": gyro_core::HARNESS_SCHEMA_V1,
+                    "kind": "provider-response",
+                    "runId": turn_id,
+                    "attemptId": attempt_id,
+                    "status": "done",
+                    "metadataError": gyro_core::sanitize_harness_text(&error.to_string()),
+                })
+            });
+            store.append_event_with_turn_id(
+                session.id,
+                SessionEventKind::AssistantMessage,
+                response.clone(),
+                assistant_payload,
+                Some(turn_id),
+            )?;
+            // The assistant response is the durable source of truth. Never advance the
+            // provider cursor past a response that failed to persist locally.
+            if let Err(error) = store.upsert_provider_session_binding(
                 session.id,
                 provider_id.clone(),
                 model.clone(),
@@ -2336,23 +2415,13 @@ fn execute_codex_app_server_provider(
                 }),
                 "ready",
                 None,
-            )?;
-            store.append_event_with_turn_id(
-                session.id,
-                SessionEventKind::AssistantMessage,
-                response.clone(),
-                cli_provider_run_payload(
-                    turn_id,
-                    attempt_id,
-                    mode,
-                    HarnessRunStatus::Done,
-                    Some(profile),
-                    model.clone(),
-                    session,
-                )?,
-                Some(turn_id),
-            )?;
-            append_cli_run_status(
+            ) {
+                eprintln!(
+                    "provider response was saved but its resume cursor was not: {}",
+                    gyro_core::security::redact_secrets(&error.to_string())
+                );
+            }
+            let _ = append_cli_run_status(
                 store,
                 session,
                 turn_id,
@@ -2364,7 +2433,7 @@ fn execute_codex_app_server_provider(
                 "CLI provider run completed.",
                 None,
                 Some(output.duration_ms),
-            )?;
+            );
             Ok(CliRunOutput {
                 run_id: turn_id,
                 attempt_id,
@@ -2855,48 +2924,30 @@ fn execute_cli_provider(
                 if binding.is_some() && is_stale_provider_resume_error(&error.to_string()) =>
             {
                 store.clear_provider_session_binding(session.id, &provider_id)?;
-                let retry_attempt_id = Uuid::new_v4();
                 append_cli_run_status(
                     store,
                     session,
                     turn_id,
-                    retry_attempt_id,
+                    attempt_id,
                     mode,
-                    HarnessRunStatus::Running,
-                    profile,
-                    model.clone(),
-                    "Stale provider resume cursor cleared; CLI provider run retrying.",
-                    None,
-                    None,
-                )?;
-                if !json {
-                    eprintln!("Provider session expired; retrying in a new session...");
-                }
-                execute_codex_app_server_provider(
-                    store,
-                    mutation_journal_dir,
-                    session,
+                    HarnessRunStatus::Failed,
                     profile,
                     model,
-                    prompt,
-                    mode,
-                    config,
-                    approved,
-                    json,
-                    timeout_seconds,
-                    turn_id,
-                    retry_attempt_id,
+                    "Stale provider resume cursor cleared; retry explicitly to avoid replaying tools.",
+                    Some(&gyro_core::sanitize_harness_text(&error.to_string())),
                     None,
-                    cancellation,
-                )
+                )?;
+                Err(error.context(
+                    "stale provider cursor cleared; retry explicitly to avoid replaying tools",
+                ))
             }
             result => result,
         };
     }
     let permission_mcp_config =
         claude_permission_mcp_config(session, profile, turn_id, config, approved, json)?;
-    let mut active_attempt_id = attempt_id;
-    let mut resumed = resume_cursor.is_some();
+    let active_attempt_id = attempt_id;
+    let resumed = resume_cursor.is_some();
     let invocation = build_cli_provider_invocation(
         profile,
         &session.workspace_path,
@@ -2923,11 +2974,11 @@ fn execute_cli_provider(
     }
     let execution = run_cli_provider_invocation(invocation, cancellation.clone(), json);
     let CliProviderExecution {
-        mut output_path,
-        provider_kind: mut invocation_kind,
-        mut proposed_session_id,
-        mut decoder,
-        mut outcome,
+        output_path,
+        provider_kind: invocation_kind,
+        proposed_session_id,
+        decoder,
+        outcome,
     } = match execution {
         Ok(execution) => execution,
         Err(error) => {
@@ -2975,91 +3026,20 @@ fn execute_cli_provider(
             Some(outcome.duration_ms),
         )?;
         store.clear_provider_session_binding(session.id, &provider_id)?;
-        active_attempt_id = Uuid::new_v4();
-        resumed = false;
-        append_cli_run_status(
-            store,
-            session,
-            turn_id,
-            active_attempt_id,
-            mode,
-            HarnessRunStatus::Running,
-            profile,
-            model.clone(),
-            "Stale provider resume cursor cleared; CLI provider run retrying.",
-            None,
-            None,
-        )?;
-        if !json {
-            eprintln!("Provider session expired; retrying in a new session...");
+        if let Some(path) = output_path.as_ref() {
+            let _ = std::fs::remove_file(path);
         }
-        let retry_invocation = build_cli_provider_invocation(
-            profile,
-            &session.workspace_path,
-            prompt,
-            model.as_deref(),
-            None,
-            Some(&permission_mcp_config),
-            timeout_seconds,
-        )?;
-        if let Some(provider_session_id) = retry_invocation.proposed_session_id.as_deref() {
-            store.upsert_provider_session_binding(
-                session.id,
-                provider_id.clone(),
-                model.clone(),
-                model.clone(),
-                None,
-                serde_json::json!({
-                    "kind": "claude-session",
-                    "sessionId": provider_session_id,
-                }),
-                "running",
-                None,
-            )?;
-        }
-        let retry_execution =
-            match run_cli_provider_invocation(retry_invocation, cancellation, json) {
-                Ok(execution) => execution,
-                Err(error) => {
-                    let error = gyro_core::sanitize_harness_text(&error.to_string());
-                    update_cli_provider_binding_status(
-                        store,
-                        session.id,
-                        &provider_id,
-                        "failed",
-                        Some(&error),
-                    )?;
-                    append_cli_run_status(
-                        store,
-                        session,
-                        turn_id,
-                        active_attempt_id,
-                        mode,
-                        HarnessRunStatus::Failed,
-                        profile,
-                        model.clone(),
-                        "CLI provider retry failed to start.",
-                        Some(&error),
-                        None,
-                    )?;
-                    return Err(cli_failure(
-                        CliErrorCategory::ExecutionFailed,
-                        format!("execution failed: {error}"),
-                    ));
-                }
-            };
-        output_path = retry_execution.output_path;
-        invocation_kind = retry_execution.provider_kind;
-        proposed_session_id = retry_execution.proposed_session_id;
-        decoder = retry_execution.decoder;
-        outcome = retry_execution.outcome;
+        return Err(cli_failure(
+            CliErrorCategory::ExecutionFailed,
+            "stale provider cursor cleared; retry explicitly to avoid replaying tools",
+        ));
     }
     if !json && !decoder.response.is_empty() {
         println!();
     }
     let output_file_response = output_path
         .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|path| read_bounded_provider_response_file(path).ok())
         .unwrap_or_default();
     if let Some(path) = output_path.as_ref() {
         let _ = std::fs::remove_file(path);
@@ -3084,9 +3064,9 @@ fn execute_cli_provider(
     } else {
         match outcome.termination {
             ExecutionTermination::Cancelled => HarnessRunStatus::Cancelled,
-            ExecutionTermination::TimedOut | ExecutionTermination::Inactive => {
-                HarnessRunStatus::Failed
-            }
+            ExecutionTermination::TimedOut
+            | ExecutionTermination::Inactive
+            | ExecutionTermination::OutputLimit => HarnessRunStatus::Failed,
             ExecutionTermination::Exited { code: Some(0) } if !response.is_empty() => {
                 HarnessRunStatus::Done
             }
@@ -3117,6 +3097,10 @@ fn execute_cli_provider(
                 ExecutionTermination::Inactive => (
                     CliErrorCategory::ExecutionFailed,
                     "execution stopped after prolonged inactivity".into(),
+                ),
+                ExecutionTermination::OutputLimit => (
+                    CliErrorCategory::ExecutionFailed,
+                    "execution exceeded Gyro's output activity limit".into(),
                 ),
                 ExecutionTermination::Exited { code } => {
                     if let Some(failure) = decoder.provider_failure.as_ref() {
@@ -3175,6 +3159,7 @@ fn execute_cli_provider(
                 ExecutionTermination::Cancelled
                     | ExecutionTermination::TimedOut
                     | ExecutionTermination::Inactive
+                    | ExecutionTermination::OutputLimit
             ) {
                 "interrupted"
             } else {
@@ -4495,21 +4480,27 @@ fn launch_desktop_app(session_id: &Uuid, kind: AppNotificationKind) -> Result<()
             AppNotificationKind::OpenSession => "open",
             AppNotificationKind::AttachSession => "attach",
         };
-        let status = Command::new("open")
-            .args([
-                "-a",
-                "Gyro",
-                "--args",
-                &format!("gyro://{route}/{session_id}"),
-            ])
-            .status()
+        let mut request = ExecutionRequest::new("open");
+        request.args = [
+            "-a".to_string(),
+            "Gyro".to_string(),
+            "--args".to_string(),
+            format!("gyro://{route}/{session_id}"),
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+        request.timeout = Duration::from_secs(15);
+        request.max_stdout_chars = 8 * 1024;
+        request.max_stderr_chars = 8 * 1024;
+        let outcome = gyro_core::run_command(request, CancellationToken::default(), |_| {})
             .map_err(|error| {
                 cli_failure(
                     CliErrorCategory::ExecutionFailed,
                     format!("launch Gyro.app: {error}"),
                 )
             })?;
-        if status.success() {
+        if outcome.succeeded() {
             Ok(())
         } else {
             Err(cli_failure(
@@ -4571,7 +4562,7 @@ fn doctor(args: DoctorArgs) -> Result<()> {
 
 fn config_command(args: ConfigArgs) -> Result<()> {
     let paths = GyroPaths::for_current_user()?;
-    let mut config = GyroConfig::load(&paths)?;
+    let config = GyroConfig::load(&paths)?;
 
     match args.command {
         ConfigCommand::Show { json } => {
@@ -4621,7 +4612,6 @@ fn config_command(args: ConfigArgs) -> Result<()> {
         }
         ConfigCommand::SetUpdateChannel { channel, json } => {
             require_stable_update_source(&channel)?;
-            config.save(&paths)?;
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
                 action: "set-update-channel",
@@ -4635,7 +4625,7 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             }
         }
         ConfigCommand::EnableProvider { provider_id, json } => {
-            let display_name = {
+            let display_name = GyroConfig::update(&paths, |config| {
                 let provider = config
                     .model_providers
                     .iter_mut()
@@ -4647,9 +4637,8 @@ fn config_command(args: ConfigArgs) -> Result<()> {
                         )
                     })?;
                 provider.enabled = true;
-                provider.display_name.clone()
-            };
-            config.save(&paths)?;
+                Ok(provider.display_name.clone())
+            })?;
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
                 action: "enable-provider",

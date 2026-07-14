@@ -2,6 +2,7 @@ use crate::{
     config::{AccountOidcConfig, AccountSessionState, GyroConfig},
     keychain,
     paths::GyroPaths,
+    run_command, CancellationToken, ExecutionRequest,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -12,7 +13,6 @@ use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     net::TcpListener,
-    process::Command,
     time::{Duration, Instant},
 };
 use url::{form_urlencoded, Url};
@@ -20,6 +20,7 @@ use url::{form_urlencoded, Url};
 const TOKEN_ACCESS: &str = "access-token";
 const TOKEN_REFRESH: &str = "refresh-token";
 const TOKEN_ID: &str = "id-token";
+const REMOTE_OIDC_DISABLED_MESSAGE: &str = "remote OIDC access is disabled until Gyro verifies ID token signatures against the issuer JWKS";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PkceFlow {
@@ -48,28 +49,10 @@ struct TokenResponse {
 struct IdTokenClaims {
     iss: String,
     sub: String,
-    aud: Audience,
     exp: i64,
-    nonce: Option<String>,
     email: Option<String>,
     name: Option<String>,
     picture: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(untagged)]
-enum Audience {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl Audience {
-    fn contains(&self, expected: &str) -> bool {
-        match self {
-            Self::One(value) => value == expected,
-            Self::Many(values) => values.iter().any(|value| value == expected),
-        }
-    }
 }
 
 pub fn token_storage_key(kind: &str) -> String {
@@ -92,6 +75,7 @@ pub fn generate_pkce_flow() -> PkceFlow {
 
 pub fn stored_account_session(paths: &GyroPaths) -> Result<AccountSessionState> {
     let config = GyroConfig::load(paths)?;
+    ensure_oidc_configured(&config.account_oidc)?;
     if is_local_device_access(&config.account_oidc) && config.account_session.signed_in {
         return Ok(config.account_session);
     }
@@ -106,12 +90,12 @@ pub fn stored_account_session(paths: &GyroPaths) -> Result<AccountSessionState> 
 }
 
 pub fn start_account_login(paths: &GyroPaths) -> Result<AccountSessionState> {
-    let mut config = GyroConfig::load(paths)?;
+    let config = GyroConfig::load(paths)?;
     let oidc = config.account_oidc.clone();
     ensure_oidc_configured(&oidc)?;
 
     if is_local_device_access(&oidc) {
-        return authorize_local_device(paths, &mut config);
+        return authorize_local_device(paths);
     }
 
     let discovery = discover_oidc(&oidc)?;
@@ -138,13 +122,16 @@ pub fn start_account_login(paths: &GyroPaths) -> Result<AccountSessionState> {
     let claims = validate_id_token_claims(id_token, &oidc, Some(&flow.nonce))?;
     store_tokens(&token_response, None)?;
 
-    config.account_session = session_from_claims(&claims, &token_response);
-    config.save(paths)?;
-    Ok(config.account_session)
+    let session = session_from_claims(&claims, &token_response);
+    GyroConfig::update(paths, |config| {
+        config.account_session = session.clone();
+        Ok(())
+    })?;
+    Ok(session)
 }
 
 pub fn refresh_account_session(paths: &GyroPaths) -> Result<AccountSessionState> {
-    let mut config = GyroConfig::load(paths)?;
+    let config = GyroConfig::load(paths)?;
     let oidc = config.account_oidc.clone();
     ensure_oidc_configured(&oidc)?;
 
@@ -153,9 +140,12 @@ pub fn refresh_account_session(paths: &GyroPaths) -> Result<AccountSessionState>
     }
 
     let Some(refresh_token) = keychain::get_api_key(&token_storage_key(TOKEN_REFRESH))? else {
-        config.account_session = AccountSessionState::default();
-        config.save(paths)?;
-        return Ok(config.account_session);
+        let session = AccountSessionState::default();
+        GyroConfig::update(paths, |config| {
+            config.account_session = session.clone();
+            Ok(())
+        })?;
+        return Ok(session);
     };
 
     let discovery = discover_oidc(&oidc)?;
@@ -167,21 +157,27 @@ pub fn refresh_account_session(paths: &GyroPaths) -> Result<AccountSessionState>
     let claims = validate_id_token_claims(id_token, &oidc, None)?;
     store_tokens(&token_response, Some(&refresh_token))?;
 
-    config.account_session = session_from_claims(&claims, &token_response);
-    config.save(paths)?;
-    Ok(config.account_session)
+    let session = session_from_claims(&claims, &token_response);
+    GyroConfig::update(paths, |config| {
+        config.account_session = session.clone();
+        Ok(())
+    })?;
+    Ok(session)
 }
 
 pub fn logout_account(paths: &GyroPaths) -> Result<AccountSessionState> {
-    let mut config = GyroConfig::load(paths)?;
+    let config = GyroConfig::load(paths)?;
     if !is_local_device_access(&config.account_oidc) {
         for kind in [TOKEN_ACCESS, TOKEN_REFRESH, TOKEN_ID] {
             keychain::delete_api_key(&token_storage_key(kind))?;
         }
     }
-    config.account_session = AccountSessionState::default();
-    config.save(paths)?;
-    Ok(config.account_session)
+    let session = AccountSessionState::default();
+    GyroConfig::update(paths, |config| {
+        config.account_session = session.clone();
+        Ok(())
+    })?;
+    Ok(session)
 }
 
 fn ensure_oidc_configured(config: &AccountOidcConfig) -> Result<()> {
@@ -191,7 +187,12 @@ fn ensure_oidc_configured(config: &AccountOidcConfig) -> Result<()> {
     {
         bail!("Gyro local access is missing issuer, client ID, or loopback redirect config");
     }
-    Ok(())
+    if is_local_device_access(config) {
+        return Ok(());
+    }
+
+    validate_remote_oidc_security_assumptions(config)?;
+    bail!(REMOTE_OIDC_DISABLED_MESSAGE)
 }
 
 fn is_local_device_access(config: &AccountOidcConfig) -> bool {
@@ -199,11 +200,8 @@ fn is_local_device_access(config: &AccountOidcConfig) -> bool {
         && config.client_id == "gyro-local-device"
 }
 
-fn authorize_local_device(
-    paths: &GyroPaths,
-    config: &mut GyroConfig,
-) -> Result<AccountSessionState> {
-    config.account_session = AccountSessionState {
+fn authorize_local_device(paths: &GyroPaths) -> Result<AccountSessionState> {
+    let session = AccountSessionState {
         signed_in: true,
         user_id: Some("local-device".into()),
         email: None,
@@ -214,8 +212,11 @@ fn authorize_local_device(
             .checked_add_signed(chrono::Duration::days(30))
             .map(|value| value.to_rfc3339()),
     };
-    config.save(paths)?;
-    Ok(config.account_session.clone())
+    GyroConfig::update(paths, |config| {
+        config.account_session = session.clone();
+        Ok(())
+    })?;
+    Ok(session)
 }
 
 fn discover_oidc(config: &AccountOidcConfig) -> Result<OidcDiscovery> {
@@ -233,7 +234,10 @@ fn authorize_url(
     redirect_uri: &str,
     flow: &PkceFlow,
 ) -> Result<Url> {
-    let mut url = Url::parse(&discovery.authorization_endpoint)?;
+    let mut url = secure_https_url(
+        "OIDC authorization endpoint",
+        &discovery.authorization_endpoint,
+    )?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &config.client_id)
@@ -277,7 +281,8 @@ fn refresh_tokens(
 }
 
 fn post_token_request(token_endpoint: &str, body: &str) -> Result<TokenResponse> {
-    ureq::post(token_endpoint)
+    let token_endpoint = secure_https_url("OIDC token endpoint", token_endpoint)?;
+    ureq::post(token_endpoint.as_str())
         .set("content-type", "application/x-www-form-urlencoded")
         .send_string(body)
         .map_err(|error| anyhow!("OIDC token request failed: {error}"))?
@@ -303,31 +308,8 @@ fn validate_id_token_claims(
     config: &AccountOidcConfig,
     expected_nonce: Option<&str>,
 ) -> Result<IdTokenClaims> {
-    let payload = id_token
-        .split('.')
-        .nth(1)
-        .ok_or_else(|| anyhow!("id_token is not a compact JWT"))?;
-    let decoded = URL_SAFE_NO_PAD
-        .decode(payload)
-        .context("decode id_token payload")?;
-    let claims: IdTokenClaims =
-        serde_json::from_slice(&decoded).context("parse id_token claims")?;
-    let expected_issuer = issuer_url(config)?.to_string();
-    if claims.iss != expected_issuer {
-        bail!("id_token issuer did not match configured issuer");
-    }
-    if !claims.aud.contains(&config.client_id) {
-        bail!("id_token audience did not include Gyro client ID");
-    }
-    if let Some(expected_nonce) = expected_nonce {
-        if claims.nonce.as_deref() != Some(expected_nonce) {
-            bail!("id_token nonce did not match login request");
-        }
-    }
-    if claims.exp <= Utc::now().timestamp() {
-        bail!("id_token is expired");
-    }
-    Ok(claims)
+    let _ = (id_token, config, expected_nonce);
+    bail!(REMOTE_OIDC_DISABLED_MESSAGE)
 }
 
 fn session_from_claims(claims: &IdTokenClaims, response: &TokenResponse) -> AccountSessionState {
@@ -423,7 +405,7 @@ fn parse_callback_request(request: &str, expected_state: &str) -> Result<OAuthCa
 }
 
 fn loopback_bind_addr(config: &AccountOidcConfig) -> Result<String> {
-    let url = Url::parse(&config.redirect_loopback_base)?;
+    let url = validate_loopback_redirect_base(&config.redirect_loopback_base)?;
     let host = url
         .host_str()
         .filter(|host| *host == "127.0.0.1" || *host == "localhost")
@@ -432,7 +414,7 @@ fn loopback_bind_addr(config: &AccountOidcConfig) -> Result<String> {
 }
 
 fn loopback_redirect_uri(config: &AccountOidcConfig, port: u16) -> Result<String> {
-    let mut url = Url::parse(&config.redirect_loopback_base)?;
+    let mut url = validate_loopback_redirect_base(&config.redirect_loopback_base)?;
     url.set_port(Some(port))
         .map_err(|_| anyhow!("OAuth loopback redirect base cannot use this port"))?;
     url.set_path("callback");
@@ -440,25 +422,79 @@ fn loopback_redirect_uri(config: &AccountOidcConfig, port: u16) -> Result<String
 }
 
 fn issuer_url(config: &AccountOidcConfig) -> Result<Url> {
-    let mut url = Url::parse(&config.issuer_url)?;
+    let mut url = secure_https_url("OIDC issuer", &config.issuer_url)?;
+    if url.query().is_some() {
+        bail!("OIDC issuer URL cannot include a query");
+    }
     if !url.path().ends_with('/') {
         url.set_path(&format!("{}/", url.path()));
     }
     Ok(url)
 }
 
+fn validate_remote_oidc_security_assumptions(config: &AccountOidcConfig) -> Result<()> {
+    issuer_url(config)?;
+    validate_loopback_redirect_base(&config.redirect_loopback_base)?;
+    Ok(())
+}
+
+fn secure_https_url(label: &str, value: &str) -> Result<Url> {
+    let url = Url::parse(value).with_context(|| format!("parse {label}"))?;
+    if url.scheme() != "https" || url.host_str().is_none() {
+        bail!("{label} must use HTTPS and include a host");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("{label} cannot include user information");
+    }
+    if url.fragment().is_some() {
+        bail!("{label} cannot include a fragment");
+    }
+    Ok(url)
+}
+
+fn validate_loopback_redirect_base(value: &str) -> Result<Url> {
+    let url = Url::parse(value).context("parse OAuth loopback redirect base")?;
+    if !matches!(url.scheme(), "http" | "https") {
+        bail!("OAuth loopback redirect base must use http or https");
+    }
+    let loopback_host = url
+        .host_str()
+        .is_some_and(|host| host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"));
+    if !loopback_host {
+        bail!("OAuth loopback redirect must use 127.0.0.1 or localhost");
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        bail!("OAuth loopback redirect base cannot include credentials, a query, or a fragment");
+    }
+    if !matches!(url.path(), "" | "/") {
+        bail!("OAuth loopback redirect base cannot include a path");
+    }
+    Ok(url)
+}
+
 fn open_system_browser(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
-    let status = Command::new("open").arg(url).status();
+    let program = "open";
     #[cfg(target_os = "windows")]
-    let status = Command::new("cmd").args(["/C", "start", url]).status();
+    let program = "explorer.exe";
     #[cfg(all(unix, not(target_os = "macos")))]
-    let status = Command::new("xdg-open").arg(url).status();
+    let program = "xdg-open";
 
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => bail!("open browser command exited with {status}"),
-        Err(error) => Err(error).context("open system browser for Gyro access"),
+    let mut request = ExecutionRequest::new(program);
+    request.args.push(url.into());
+    request.timeout = Duration::from_secs(15);
+    request.max_stdout_chars = 4 * 1024;
+    request.max_stderr_chars = 8 * 1024;
+    let outcome = run_command(request, CancellationToken::default(), |_| {})
+        .context("open system browser for Gyro access")?;
+    if outcome.succeeded() {
+        Ok(())
+    } else {
+        bail!("open browser command ended with {:?}", outcome.termination)
     }
 }
 
@@ -538,26 +574,65 @@ mod tests {
     }
 
     #[test]
-    fn id_token_validation_rejects_wrong_issuer_and_expiry() {
-        let mut payload = serde_json::json!({
+    fn unsigned_and_tampered_id_tokens_are_rejected() {
+        let payload = serde_json::json!({
             "iss": "https://auth.example.com/",
             "sub": "user_123",
             "aud": "gyro-test",
             "exp": Utc::now().timestamp() + 60,
             "nonce": "nonce-1"
         });
-        let token = unsigned_id_token(payload.clone());
-        assert!(validate_id_token_claims(&token, &test_oidc_config(), Some("nonce-1")).is_ok());
+        let unsigned = unsigned_id_token(payload.clone());
+        let error =
+            validate_id_token_claims(&unsigned, &test_oidc_config(), Some("nonce-1")).unwrap_err();
+        assert!(error.to_string().contains("issuer JWKS"));
 
-        payload["iss"] = serde_json::json!("https://wrong.example.com/");
-        let wrong_issuer = unsigned_id_token(payload.clone());
-        assert!(
-            validate_id_token_claims(&wrong_issuer, &test_oidc_config(), Some("nonce-1")).is_err()
+        let signed_shape_with_invalid_signature = format!(
+            "{}.{}.tampered-signature",
+            URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"test"}"#),
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
         );
+        let error = validate_id_token_claims(
+            &signed_shape_with_invalid_signature,
+            &test_oidc_config(),
+            Some("nonce-1"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("issuer JWKS"));
+    }
 
-        payload["iss"] = serde_json::json!("https://auth.example.com/");
-        payload["exp"] = serde_json::json!(Utc::now().timestamp() - 60);
-        let expired = unsigned_id_token(payload);
-        assert!(validate_id_token_claims(&expired, &test_oidc_config(), Some("nonce-1")).is_err());
+    #[test]
+    fn remote_oidc_session_login_and_refresh_fail_closed() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let mut config = GyroConfig {
+            account_oidc: test_oidc_config(),
+            ..GyroConfig::default()
+        };
+        config.account_session.signed_in = true;
+        config.account_session.user_id = Some("unverified-user".into());
+        config.save(&paths).unwrap();
+
+        for result in [
+            stored_account_session(&paths),
+            start_account_login(&paths),
+            refresh_account_session(&paths),
+        ] {
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("issuer JWKS"));
+        }
+    }
+
+    #[test]
+    fn remote_oidc_requires_https_and_a_strict_loopback_redirect() {
+        let mut config = test_oidc_config();
+        config.issuer_url = "http://auth.example.com".into();
+        let error = ensure_oidc_configured(&config).unwrap_err();
+        assert!(error.to_string().contains("must use HTTPS"));
+
+        config.issuer_url = "https://auth.example.com".into();
+        config.redirect_loopback_base = "http://localhost.evil.example".into();
+        let error = ensure_oidc_configured(&config).unwrap_err();
+        assert!(error.to_string().contains("127.0.0.1 or localhost"));
     }
 }

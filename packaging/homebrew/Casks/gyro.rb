@@ -1,3 +1,5 @@
+# Planned template only. The current alpha workflow emits architecture-specific
+# DMGs and does not generate or validate this Cask; do not publish it as-is.
 cask "gyro" do
   version "0.1.0"
   sha256 "REPLACE_WITH_DMG_SHA256"

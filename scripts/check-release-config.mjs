@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,7 @@ const uiPackage = JSON.parse(
   readFileSync(resolve(repoRoot, "packages/ui/package.json"), "utf8"),
 );
 const cargoManifest = readFileSync(resolve(repoRoot, "Cargo.toml"), "utf8");
+const cargoLock = readFileSync(resolve(repoRoot, "Cargo.lock"), "utf8");
 const releaseWorkflow = readFileSync(
   resolve(repoRoot, ".github/workflows/release.yml"),
   "utf8",
@@ -83,11 +84,45 @@ const versions = new Map([
   ["Tauri config", config.version],
 ]);
 const expectedVersion = rootPackage.version;
+const releaseNotesPath = resolve(
+  repoRoot,
+  `docs/releases/v${expectedVersion}.md`,
+);
+if (!existsSync(releaseNotesPath)) {
+  failures.push(
+    `Versioned release notes are missing at docs/releases/v${expectedVersion}.md.`,
+  );
+} else {
+  const releaseNotes = readFileSync(releaseNotesPath, "utf8");
+  for (const marker of [
+    `# Gyro v${expectedVersion}`,
+    "## Upgrade and rollback",
+    "not Apple-signed or notarized",
+  ]) {
+    if (!releaseNotes.includes(marker)) {
+      failures.push(`Versioned release notes are missing ${marker}.`);
+    }
+  }
+}
 const expectedTauriCliVersion = "2.11.4";
 for (const [label, version] of versions) {
   if (version !== expectedVersion) {
     failures.push(
       `${label} version ${version ?? "missing"} does not match ${expectedVersion}.`,
+    );
+  }
+}
+
+for (const packageName of ["gyro-cli", "gyro-core", "gyro-desktop"]) {
+  const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lockedVersion = cargoLock.match(
+    new RegExp(
+      `\\[\\[package\\]\\]\\nname = "${escapedName}"\\nversion = "([^"]+)"`,
+    ),
+  )?.[1];
+  if (lockedVersion !== expectedVersion) {
+    failures.push(
+      `Cargo.lock ${packageName} version ${lockedVersion ?? "missing"} does not match ${expectedVersion}.`,
     );
   }
 }
@@ -130,12 +165,12 @@ for (const marker of [
   "gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz",
   "scripts/finalize-cli-release.mjs",
   "Build GitHub-hosted alpha and sign updater archive",
-  "Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
   "Refusing to overwrite published release",
   'gh release edit "$GITHUB_REF_NAME"',
   '--notes "$RELEASE_NOTES"',
+  'NOTES_PATH="docs/releases/${GITHUB_REF_NAME}.md"',
 ]) {
   if (!releaseWorkflow.includes(marker)) {
     failures.push(`Release workflow is missing ${marker}.`);

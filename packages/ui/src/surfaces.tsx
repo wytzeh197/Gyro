@@ -213,6 +213,7 @@ function useOutsidePointerDismiss<T extends HTMLElement>(
 type AppChromeProps = {
   sessions: Session[];
   activeSessionId?: string;
+  sendingSessionIds?: string[];
   activeDestination: AppDestination;
   activeWorkspaceLayout: WorkspaceLayoutId;
   workspacePath?: string;
@@ -327,6 +328,7 @@ const settingsSidebarItems: Array<{
 export function AppChrome({
   sessions,
   activeSessionId,
+  sendingSessionIds = [],
   activeDestination,
   activeWorkspaceLayout,
   workspacePath,
@@ -603,6 +605,7 @@ export function AppChrome({
               activePaneTab={activePaneTab}
               activeSession={activeSession}
               activeSessionId={activeSessionId}
+              sendingSessionIds={sendingSessionIds}
               activeWorkspaceLayout={activeWorkspaceLayout}
               files={files}
               ide={ide}
@@ -873,6 +876,7 @@ function SettingsSidebarContent({
 function WorkspaceSidebarContent({
   sessions,
   activeSessionId,
+  sendingSessionIds,
   activeSession,
   activeDestination,
   activeWorkspaceLayout,
@@ -926,6 +930,7 @@ function WorkspaceSidebarContent({
 }: {
   sessions: Session[];
   activeSessionId?: string;
+  sendingSessionIds: string[];
   activeSession?: Session;
   activeDestination: AppDestination;
   activeWorkspaceLayout: WorkspaceLayoutId;
@@ -1142,6 +1147,7 @@ function WorkspaceSidebarContent({
   const renderSessionRow = (session: Session) => (
     <SessionSidebarRow
       isActive={session.id === activeSessionId}
+      isSending={sendingSessionIds.includes(session.id)}
       isMenuOpen={openSessionMenuId === session.id}
       isPinned={pinnedSessionIds.includes(session.id)}
       key={session.id}
@@ -2111,6 +2117,7 @@ function SidebarProjectRow({
 function SessionSidebarRow({
   session,
   isActive,
+  isSending,
   isNested,
   isPinned,
   isMenuOpen,
@@ -2123,6 +2130,7 @@ function SessionSidebarRow({
 }: {
   session: Session;
   isActive: boolean;
+  isSending: boolean;
   isNested?: boolean;
   isPinned: boolean;
   isMenuOpen: boolean;
@@ -2150,6 +2158,7 @@ function SessionSidebarRow({
       className={[
         "gyro-session-row",
         isActive ? "is-active" : "",
+        isSending ? "is-sending" : "",
         isNested ? "is-nested" : "",
         isPinned ? "is-pinned" : "",
         isMenuOpen ? "is-menu-open" : "",
@@ -2177,8 +2186,18 @@ function SessionSidebarRow({
           </span>
         ) : null}
         <span>{session.title}</span>
-        <small className="gyro-session-time">
-          {relativeSessionTime(session.updatedAt)}
+        <small
+          aria-label={isSending ? "Chat working" : undefined}
+          className={
+            isSending ? "gyro-session-time is-working" : "gyro-session-time"
+          }
+          title={isSending ? "Chat working in the background" : undefined}
+        >
+          {isSending ? (
+            <CircleDashed aria-hidden="true" size={13} />
+          ) : (
+            relativeSessionTime(session.updatedAt)
+          )}
         </small>
       </button>
       <div className="gyro-session-actions" aria-label="Chat actions">
@@ -11337,7 +11356,10 @@ const ChatEvent = memo(function ChatEvent({
       <div className="gyro-message-avatar">
         {isUser ? <UserCircle size={17} /> : <Bot size={17} />}
       </div>
-      <div ref={detailRef}>
+      <div
+        className={isUser ? "gyro-user-message-content" : undefined}
+        ref={detailRef}
+      >
         {isUser || isAssistant ? null : (
           <div className="gyro-message-meta">
             {event.kind.replaceAll("-", " ")}
@@ -11345,22 +11367,40 @@ const ChatEvent = memo(function ChatEvent({
         )}
         {isAssistant ? (
           <AssistantResponse event={event} />
+        ) : isUser ? (
+          <div className="gyro-user-message-bubble">
+            <p>{event.message}</p>
+            <TranscriptAttachments event={event} />
+          </div>
         ) : (
           <p>{event.message}</p>
         )}
         {isUser ? (
-          <>
-            <TranscriptAttachments event={event} />
+          <footer className="gyro-user-message-meta">
             {onReusePrompt ? (
               <button
+                aria-label="Use prompt again"
                 className="gyro-use-again"
                 onClick={() => onReusePrompt(event.message)}
+                title="Use prompt again"
                 type="button"
               >
-                Use again
+                <RefreshCw aria-hidden="true" size={14} />
               </button>
             ) : null}
-          </>
+            <time dateTime={event.createdAt}>
+              {formatMessageTime(event.createdAt)}
+            </time>
+            <button
+              aria-label="Copy message"
+              className="gyro-copy-user-message"
+              onClick={() => copyAssistantResponse(event.message)}
+              title="Copy message"
+              type="button"
+            >
+              <Copy aria-hidden="true" size={15} />
+            </button>
+          </footer>
         ) : null}
         {canInspect ? (
           <button
@@ -11880,6 +11920,10 @@ function ChatTurn({
     ["queued", "running", "waiting"].includes(providerStatus.status),
   );
   const isRunning = isActive;
+  const [isThoughtCollapsed, setIsThoughtCollapsed] = useState(!isRunning);
+  useEffect(() => {
+    setIsThoughtCollapsed(!isRunning);
+  }, [isRunning]);
   const completedAt = !isRunning
     ? (turn.completedAt ?? turn.statusEvent?.createdAt)
     : undefined;
@@ -11887,6 +11931,14 @@ function ChatTurn({
     (event) =>
       event.kind === "assistant-message" && event.message.trim().length > 0,
   );
+  const responseEvents = turn.timelineEvents.filter(
+    (event) => event.kind === "assistant-message",
+  );
+  const thoughtEvents = turn.timelineEvents.filter(
+    (event) => event.kind !== "assistant-message",
+  );
+  const compactedThoughtEvents = compactThoughtTimelineEvents(thoughtEvents);
+  const canCollapseThought = !isRunning && thoughtEvents.length > 0;
   const changeSummary = chatTurnChangeSummary(
     turn.timelineEvents,
     sourceControl,
@@ -11906,7 +11958,10 @@ function ChatTurn({
         <ChatRunHeader
           completedAt={completedAt}
           durationMs={turn.durationMs}
+          isCollapsed={isThoughtCollapsed}
+          isCollapsible={canCollapseThought}
           isRunning={isRunning}
+          onToggle={() => setIsThoughtCollapsed((current) => !current)}
           startedAt={turn.runStartedAt ?? turn.startedAt}
         >
           {!isRunning && hasResponse && onContinueChat ? (
@@ -11920,17 +11975,14 @@ function ChatTurn({
             Thinking
           </div>
         ) : null}
-        {turn.timelineEvents.length > 0 ? (
-          <div className="gyro-chat-run-timeline" aria-label="Agent timeline">
-            {turn.timelineEvents.map((event) =>
-              event.kind === "assistant-message" ? (
-                <article className="gyro-message is-assistant" key={event.id}>
-                  <div>
-                    <AssistantResponse event={event} />
-                  </div>
-                </article>
-              ) : mutationApprovalFromEvent(event) ||
-                providerApprovalFromEvent(event) ? (
+        {thoughtEvents.length > 0 && !isThoughtCollapsed ? (
+          <div
+            className="gyro-chat-run-timeline is-thought-process"
+            aria-label="AI thought process"
+          >
+            {compactedThoughtEvents.map(({ count, event }) =>
+              mutationApprovalFromEvent(event) ||
+              providerApprovalFromEvent(event) ? (
                 <ChatEvent
                   event={event}
                   key={event.id}
@@ -11939,6 +11991,7 @@ function ChatTurn({
                 />
               ) : (
                 <ProviderActivityRow
+                  count={count}
                   event={event}
                   key={event.id}
                   onOpenChanges={onOpenChanges}
@@ -11947,6 +12000,20 @@ function ChatTurn({
                 />
               ),
             )}
+          </div>
+        ) : null}
+        {responseEvents.length > 0 ? (
+          <div
+            className="gyro-chat-run-timeline is-final-response"
+            aria-label="Final response"
+          >
+            {responseEvents.map((event) => (
+              <article className="gyro-message is-assistant" key={event.id}>
+                <div>
+                  <AssistantResponse event={event} />
+                </div>
+              </article>
+            ))}
           </div>
         ) : null}
         {changeSummary.paths.length > 0 ? (
@@ -12037,13 +12104,19 @@ function ChatRunHeader({
   children,
   completedAt,
   durationMs,
+  isCollapsed,
+  isCollapsible,
   isRunning,
+  onToggle,
   startedAt,
 }: {
   children?: ReactNode;
   completedAt?: string;
   durationMs?: number;
+  isCollapsed: boolean;
+  isCollapsible: boolean;
   isRunning: boolean;
+  onToggle: () => void;
   startedAt: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
@@ -12062,12 +12135,22 @@ function ChatRunHeader({
       : Number.isFinite(start)
         ? Math.max(0, Math.round((end - start) / 1_000))
         : 0;
+  const label = `${isRunning ? "Working" : "Thought"} for ${formatThoughtDuration(elapsedSeconds)}`;
   return (
     <div className="gyro-chat-run-header">
-      <span>
-        {isRunning ? "Working" : "Worked"} for {elapsedSeconds}s
-      </span>
-      {!isRunning ? <ChevronDown size={13} /> : null}
+      {isCollapsible ? (
+        <button
+          aria-expanded={!isCollapsed}
+          className="gyro-chat-run-toggle"
+          onClick={onToggle}
+          type="button"
+        >
+          <span>{label}</span>
+          {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        </button>
+      ) : (
+        <span>{label}</span>
+      )}
       {children ? (
         <div className="gyro-chat-run-controls">{children}</div>
       ) : null}
@@ -12075,12 +12158,80 @@ function ChatRunHeader({
   );
 }
 
+function formatThoughtDuration(elapsedSeconds: number) {
+  const hours = Math.floor(elapsedSeconds / 3_600);
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return [
+    hours > 0 ? `${hours}h` : undefined,
+    minutes % 60 > 0 ? `${minutes % 60}m` : undefined,
+    seconds > 0 || elapsedSeconds === 0 ? `${seconds}s` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function formatMessageTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+type CompactedThoughtTimelineEvent = {
+  count: number;
+  event: SessionEvent;
+};
+
+function compactThoughtTimelineEvents(events: SessionEvent[]) {
+  const groupedCounts = new Map<string, number>();
+  for (const event of events) {
+    const key = compactableActivityKey(event);
+    if (key) {
+      groupedCounts.set(key, (groupedCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const renderedKeys = new Set<string>();
+  const compacted: CompactedThoughtTimelineEvent[] = [];
+  for (const event of events) {
+    const key = compactableActivityKey(event);
+    if (!key) {
+      compacted.push({ count: 1, event });
+      continue;
+    }
+    if (renderedKeys.has(key)) {
+      continue;
+    }
+    renderedKeys.add(key);
+    compacted.push({ count: groupedCounts.get(key) ?? 1, event });
+  }
+  return compacted;
+}
+
+function compactableActivityKey(event: SessionEvent) {
+  const activity = providerActivityFromEvent(event);
+  if (
+    !activity ||
+    activity.status === "running" ||
+    !["command", "search", "tool"].includes(activity.kind)
+  ) {
+    return undefined;
+  }
+  return activity.kind;
+}
+
 function ProviderActivityRow({
+  count = 1,
   event,
   onOpenChanges,
   sourceControl,
   sourceControlBaseline,
 }: {
+  count?: number;
   event: SessionEvent;
   onOpenChanges?: () => void;
   sourceControl?: SourceControlState;
@@ -12100,6 +12251,14 @@ function ProviderActivityRow({
       </p>
     );
   }
+  const compactedLabel =
+    count > 1
+      ? activity.kind === "command"
+        ? `Ran ${count} commands`
+        : activity.kind === "search"
+          ? `Searched ${count} times`
+          : `Used ${count} tools`
+      : activity.label;
   if (activity.kind === "file") {
     const path = providerActivityFilePath(event);
     const file = path
@@ -12149,10 +12308,20 @@ function ProviderActivityRow({
   return (
     <div
       className={`gyro-chat-run-activity is-${activity.status}`}
-      title={activity.detail ?? activity.label}
+      title={
+        count > 1
+          ? `${compactedLabel}. Includes ${activity.label}`
+          : (activity.detail ?? activity.label)
+      }
     >
-      {activity.kind === "file" ? <FileText size={13} /> : <Search size={13} />}
-      <span>{activity.label}</span>
+      {activity.kind === "command" ? (
+        <Terminal size={13} />
+      ) : activity.kind === "tool" ? (
+        <Sparkles size={13} />
+      ) : (
+        <Search size={13} />
+      )}
+      <span>{compactedLabel}</span>
       {activity.status === "running" ? (
         <CircleDashed className="is-spinning" size={12} />
       ) : (

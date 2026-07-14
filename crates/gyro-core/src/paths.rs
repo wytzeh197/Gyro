@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use std::path::PathBuf;
+use anyhow::{anyhow, Context, Result};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GyroPaths {
@@ -42,29 +42,60 @@ impl GyroPaths {
     }
 
     pub fn ensure(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.base_dir)
-            .with_context(|| format!("create {}", self.base_dir.display()))?;
-        std::fs::create_dir_all(&self.sessions_dir)
-            .with_context(|| format!("create {}", self.sessions_dir.display()))?;
-        std::fs::create_dir_all(&self.worktrees_dir)
-            .with_context(|| format!("create {}", self.worktrees_dir.display()))?;
-        std::fs::create_dir_all(&self.logs_dir)
-            .with_context(|| format!("create {}", self.logs_dir.display()))?;
-        std::fs::create_dir_all(&self.mutation_journals_dir)
-            .with_context(|| format!("create {}", self.mutation_journals_dir.display()))?;
-        std::fs::create_dir_all(&self.browser_captures_dir)
-            .with_context(|| format!("create {}", self.browser_captures_dir.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                &self.browser_captures_dir,
-                std::fs::Permissions::from_mode(0o700),
-            )
-            .with_context(|| format!("secure {}", self.browser_captures_dir.display()))?;
+        for directory in [
+            &self.base_dir,
+            &self.sessions_dir,
+            &self.worktrees_dir,
+            &self.logs_dir,
+            &self.mutation_journals_dir,
+            &self.browser_captures_dir,
+        ] {
+            ensure_private_directory(directory)?;
         }
         Ok(())
     }
+}
+
+fn ensure_private_directory(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
+    let metadata =
+        std::fs::symlink_metadata(path).with_context(|| format!("inspect {}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(anyhow!(
+            "private Gyro data path is not a regular directory: {}",
+            path.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("secure {}", path.display()))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn reject_unsafe_private_file(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(anyhow!(
+            "private Gyro data path is not a regular file: {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("inspect {}", path.display())),
+    }
+}
+
+pub(crate) fn secure_private_file(path: &Path) -> Result<()> {
+    reject_unsafe_private_file(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("secure {}", path.display()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -95,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_private_browser_capture_storage() {
+    fn creates_private_data_directories() {
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
         paths.ensure().unwrap();
@@ -103,14 +134,39 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&paths.browser_captures_dir)
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o700
-            );
+            for directory in [
+                &paths.base_dir,
+                &paths.sessions_dir,
+                &paths.worktrees_dir,
+                &paths.logs_dir,
+                &paths.mutation_journals_dir,
+                &paths.browser_captures_dir,
+            ] {
+                assert_eq!(
+                    std::fs::metadata(directory).unwrap().permissions().mode() & 0o777,
+                    0o700,
+                    "{}",
+                    directory.display()
+                );
+            }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_private_data_directories() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        std::fs::create_dir_all(&paths.base_dir).unwrap();
+        symlink(outside.path(), &paths.sessions_dir).unwrap();
+
+        assert!(paths
+            .ensure()
+            .unwrap_err()
+            .to_string()
+            .contains("not a regular directory"));
     }
 }

@@ -1,11 +1,11 @@
-use crate::paths::GyroPaths;
+use crate::paths::{reject_unsafe_private_file, secure_private_file, GyroPaths};
 use crate::worktrees::validate_branch_name;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Component;
 use std::path::{Path, PathBuf};
@@ -17,6 +17,10 @@ const MAX_SESSION_EVENT_MESSAGE_CHARS: usize = 64_000;
 const MAX_SESSION_EVENT_PAYLOAD_BYTES: usize = 128 * 1024;
 const MAX_SESSION_EVENTS_READ: usize = 1_000;
 const SESSION_EVENT_TAIL_CHUNK_BYTES: usize = 64 * 1024;
+const MAX_SESSION_EVENT_LINE_BYTES: usize = 1024 * 1024;
+const MAX_SESSION_EVENT_TAIL_READ_BYTES: usize = 32 * 1024 * 1024;
+const MAX_SESSION_EVENT_BATCH: usize = 256;
+const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -176,6 +180,7 @@ impl MutationProposalOperation {
 #[serde(rename_all = "kebab-case")]
 pub enum MutationProposalStatus {
     Pending,
+    Applying,
     Applied,
     Rejected,
     Failed,
@@ -185,6 +190,7 @@ impl MutationProposalStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
+            Self::Applying => "applying",
             Self::Applied => "applied",
             Self::Rejected => "rejected",
             Self::Failed => "failed",
@@ -193,6 +199,7 @@ impl MutationProposalStatus {
 
     fn from_str(value: &str) -> Self {
         match value {
+            "applying" => Self::Applying,
             "applied" => Self::Applied,
             "rejected" => Self::Rejected,
             "failed" => Self::Failed,
@@ -256,8 +263,10 @@ pub struct SessionStore {
 impl SessionStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
+        reject_unsafe_private_file(&paths.database_path)?;
         let conn = Connection::open(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
+        secure_private_file(&paths.database_path)?;
         conn.busy_timeout(std::time::Duration::from_secs(2))?;
         conn.execute_batch(
             "pragma foreign_keys = on;
@@ -374,7 +383,7 @@ impl SessionStore {
                  , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
                  from sessions where id = ?1",
                 params![session_id.to_string()],
-                |row| row_to_session(row),
+                row_to_session,
             )
             .optional()
             .map_err(Into::into)
@@ -387,7 +396,7 @@ impl SessionStore {
                  , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
                  from sessions order by updated_at desc limit 1",
                 [],
-                |row| row_to_session(row),
+                row_to_session,
             )
             .optional()
             .map_err(Into::into)
@@ -399,7 +408,7 @@ impl SessionStore {
              , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
              from sessions order by updated_at desc",
         )?;
-        let rows = stmt.query_map([], |row| row_to_session(row))?;
+        let rows = stmt.query_map([], row_to_session)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
@@ -458,28 +467,58 @@ impl SessionStore {
 
     pub fn delete_session(&self, session_id: Uuid) -> Result<bool> {
         let Some(session) = self.get_session(session_id)? else {
+            let orphaned_events = self.session_events_path(session_id)?;
+            if let Err(error) = std::fs::remove_file(&orphaned_events) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!(
+                        "could not remove orphaned session event log {}: {error}",
+                        orphaned_events.display()
+                    );
+                }
+            }
             return Ok(false);
         };
 
         let events_path = self.session_events_path(session.id)?;
-        if events_path.exists() {
-            std::fs::remove_file(&events_path)
-                .with_context(|| format!("remove {}", events_path.display()))?;
-        }
+        let event_file = if events_path.exists() {
+            Some(open_session_event_log_for_append(&events_path)?)
+        } else {
+            None
+        };
+        let event_lock = event_file
+            .as_ref()
+            .map(|file| lock_session_event_file(file, SessionEventFileLockKind::Exclusive))
+            .transpose()
+            .with_context(|| format!("lock {} for deletion", events_path.display()))?;
 
-        self.conn.execute(
+        let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute(
             "delete from provider_session_bindings where session_id = ?1",
             params![session_id.to_string()],
         )?;
-        self.conn.execute(
+        transaction.execute(
             "delete from mutation_proposals where session_id = ?1",
             params![session_id.to_string()],
         )?;
-
-        let changed = self.conn.execute(
+        let changed = transaction.execute(
             "delete from sessions where id = ?1",
             params![session_id.to_string()],
         )?;
+        transaction.commit()?;
+
+        drop(event_lock);
+        drop(event_file);
+        if let Err(error) = std::fs::remove_file(&events_path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                // The database deletion is already durable, so do not report a
+                // false transactional failure. A repeated delete retries this
+                // private orphan cleanup via the branch above.
+                eprintln!(
+                    "could not remove deleted session event log {}: {error}",
+                    events_path.display()
+                );
+            }
+        }
         Ok(changed > 0)
     }
 
@@ -598,7 +637,10 @@ impl SessionStore {
         status: MutationProposalStatus,
         error: Option<String>,
     ) -> Result<MutationProposal> {
-        if status == MutationProposalStatus::Pending {
+        if matches!(
+            status,
+            MutationProposalStatus::Pending | MutationProposalStatus::Applying
+        ) {
             return Err(anyhow!("a mutation decision must leave pending state"));
         }
         let current = self
@@ -629,6 +671,77 @@ impl SessionStore {
         }
         self.get_mutation_proposal(proposal_id)?
             .ok_or_else(|| anyhow!("mutation proposal disappeared while resolving"))
+    }
+
+    pub fn claim_mutation_proposal(&self, proposal_id: Uuid) -> Result<MutationProposal> {
+        let updated_at = Utc::now();
+        let changed = self.conn.execute(
+            "update mutation_proposals set status = 'applying', error = null, updated_at = ?1
+             where id = ?2 and status = 'pending'",
+            params![updated_at.to_rfc3339(), proposal_id.to_string()],
+        )?;
+        if changed == 0 {
+            let current = self
+                .get_mutation_proposal(proposal_id)?
+                .ok_or_else(|| anyhow!("unknown mutation proposal {proposal_id}"))?;
+            return Err(anyhow!(
+                "mutation proposal is already {}",
+                current.status.as_str()
+            ));
+        }
+        self.get_mutation_proposal(proposal_id)?
+            .ok_or_else(|| anyhow!("mutation proposal disappeared while claiming"))
+    }
+
+    pub fn finish_claimed_mutation_proposal(
+        &self,
+        proposal_id: Uuid,
+        status: MutationProposalStatus,
+        error: Option<String>,
+    ) -> Result<MutationProposal> {
+        if !matches!(
+            status,
+            MutationProposalStatus::Applied | MutationProposalStatus::Failed
+        ) {
+            return Err(anyhow!(
+                "a claimed mutation may only finish as applied or failed"
+            ));
+        }
+        let updated_at = Utc::now();
+        let changed = self.conn.execute(
+            "update mutation_proposals set status = ?1, error = ?2, updated_at = ?3
+             where id = ?4 and status = 'applying'",
+            params![
+                status.as_str(),
+                error,
+                updated_at.to_rfc3339(),
+                proposal_id.to_string(),
+            ],
+        )?;
+        if changed == 0 {
+            let current = self
+                .get_mutation_proposal(proposal_id)?
+                .ok_or_else(|| anyhow!("unknown mutation proposal {proposal_id}"))?;
+            if current.status == status {
+                return Ok(current);
+            }
+            return Err(anyhow!(
+                "mutation proposal changed while it was being applied"
+            ));
+        }
+        self.get_mutation_proposal(proposal_id)?
+            .ok_or_else(|| anyhow!("mutation proposal disappeared while finishing"))
+    }
+
+    pub fn list_applying_mutation_proposals(&self) -> Result<Vec<MutationProposal>> {
+        let mut stmt = self.conn.prepare(
+            "select id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at
+             from mutation_proposals where status = 'applying'
+             order by updated_at asc limit 1000",
+        )?;
+        let rows = stmt.query_map([], row_to_mutation_proposal)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn update_session_model(
@@ -670,12 +783,15 @@ impl SessionStore {
                  from provider_session_bindings
                  where session_id = ?1 and provider_id = ?2",
                 params![session_id.to_string(), provider_id],
-                |row| row_to_provider_session_binding(row),
+                row_to_provider_session_binding,
             )
             .optional()
             .map_err(Into::into)
     }
 
+    // Keep the persisted binding fields explicit at this storage boundary; changing this
+    // established public API would force unrelated desktop and CLI call-site churn.
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_provider_session_binding(
         &self,
         session_id: Uuid,
@@ -784,25 +900,132 @@ impl SessionStore {
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
         let message = normalize_session_event_message(message)?;
         let payload = validate_session_event_payload(payload)?;
+        let events_path = self.session_events_path(session.id)?;
+        let mut file = open_session_event_log_for_append(&events_path)?;
+        let event_lock = lock_session_event_file(&file, SessionEventFileLockKind::Exclusive)
+            .with_context(|| format!("lock {} for append", events_path.display()))?;
+        repair_partial_session_event_tail(&mut file, &events_path)?;
+        if self.get_session(session_id)?.is_none() {
+            drop(event_lock);
+            drop(file);
+            let _ = std::fs::remove_file(&events_path);
+            return Err(anyhow!("session {session_id} was deleted while appending"));
+        }
+        if let Some(turn_id) = turn_id.filter(|_| {
+            matches!(
+                kind,
+                SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
+            )
+        }) {
+            if let Some(existing) = find_existing_turn_message(&events_path, turn_id, &kind)? {
+                if existing.message == message {
+                    return Ok(existing);
+                }
+                return Err(anyhow!(
+                    "turn {turn_id} already contains a different {:?} event",
+                    kind
+                ));
+            }
+        }
         let mut event = SessionEvent::new(session_id, kind, message, payload);
         event.turn_id = turn_id;
-        let encoded = serde_json::to_string(&event)?;
-        let events_path = self.session_events_path(session.id)?;
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&events_path)
-            .with_context(|| format!("open {}", events_path.display()))?;
-        writeln!(file, "{encoded}")?;
+        let mut encoded_line = serde_json::to_vec(&event)?;
+        encoded_line.push(b'\n');
+        if encoded_line.len() > MAX_SESSION_EVENT_LINE_BYTES {
+            return Err(anyhow!(
+                "session event exceeds the {} byte line limit",
+                MAX_SESSION_EVENT_LINE_BYTES
+            ));
+        }
+        file.write_all(&encoded_line)?;
         file.flush()?;
         file.sync_data()
             .with_context(|| format!("sync {}", events_path.display()))?;
+        drop(event_lock);
+        drop(file);
 
-        self.conn.execute(
+        if let Err(error) = self.conn.execute(
             "update sessions set updated_at = ?1 where id = ?2",
             params![event.created_at.to_rfc3339(), session_id.to_string()],
-        )?;
+        ) {
+            // The JSONL event is already fsynced and is the durable source of
+            // truth. Treat the SQLite timestamp as a repairable index update so
+            // callers do not retry and duplicate a successfully appended event.
+            eprintln!("session event was saved but its updated_at index was not: {error}");
+        }
         Ok(event)
+    }
+
+    pub fn append_system_events_with_turn_id(
+        &self,
+        session_id: Uuid,
+        entries: Vec<(String, Value, Option<Uuid>)>,
+    ) -> Result<Vec<SessionEvent>> {
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        if entries.len() > MAX_SESSION_EVENT_BATCH {
+            return Err(anyhow!(
+                "session event batch exceeds the {MAX_SESSION_EVENT_BATCH} event limit"
+            ));
+        }
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let mut events = Vec::with_capacity(entries.len());
+        let mut encoded = Vec::new();
+        for (message, payload, turn_id) in entries {
+            let message = normalize_session_event_message(message)?;
+            let payload = validate_session_event_payload(payload)?;
+            let mut event =
+                SessionEvent::new(session_id, SessionEventKind::SystemEvent, message, payload);
+            event.turn_id = turn_id;
+            let mut line = serde_json::to_vec(&event)?;
+            line.push(b'\n');
+            if line.len() > MAX_SESSION_EVENT_LINE_BYTES {
+                return Err(anyhow!(
+                    "session event exceeds the {} byte line limit",
+                    MAX_SESSION_EVENT_LINE_BYTES
+                ));
+            }
+            if encoded.len().saturating_add(line.len()) > MAX_SESSION_EVENT_BATCH_BYTES {
+                return Err(anyhow!(
+                    "session event batch exceeds the {MAX_SESSION_EVENT_BATCH_BYTES} byte limit"
+                ));
+            }
+            encoded.extend_from_slice(&line);
+            events.push(event);
+        }
+
+        let events_path = self.session_events_path(session.id)?;
+        let mut file = open_session_event_log_for_append(&events_path)?;
+        let event_lock = lock_session_event_file(&file, SessionEventFileLockKind::Exclusive)
+            .with_context(|| format!("lock {} for batch append", events_path.display()))?;
+        repair_partial_session_event_tail(&mut file, &events_path)?;
+        if self.get_session(session_id)?.is_none() {
+            drop(event_lock);
+            drop(file);
+            let _ = std::fs::remove_file(&events_path);
+            return Err(anyhow!("session {session_id} was deleted while appending"));
+        }
+        file.write_all(&encoded)?;
+        file.flush()?;
+        file.sync_data()
+            .with_context(|| format!("sync {}", events_path.display()))?;
+        drop(event_lock);
+        drop(file);
+
+        if let Some(last_event) = events.last() {
+            if let Err(error) = self.conn.execute(
+                "update sessions set updated_at = ?1 where id = ?2",
+                params![last_event.created_at.to_rfc3339(), session_id.to_string()],
+            ) {
+                eprintln!(
+                    "session event batch was saved but its updated_at index was not: {error}"
+                );
+            }
+        }
+        Ok(events)
     }
 
     pub fn read_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
@@ -823,10 +1046,10 @@ impl SessionStore {
             return Ok(Vec::new());
         }
 
-        let mut file = std::fs::File::open(&events_path)
-            .with_context(|| format!("open {}", events_path.display()))?;
-        let mut first_line = String::new();
-        BufReader::new(file.try_clone()?).read_line(&mut first_line)?;
+        let mut file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for read", events_path.display()))?;
+        let first_line = read_bounded_session_event_line(&mut BufReader::new(file.try_clone()?))?;
         let recent_lines = read_recent_event_lines(&mut file, max_recent_events)?;
         let mut events = recent_lines
             .iter()
@@ -839,8 +1062,8 @@ impl SessionStore {
                 }
             })
             .collect::<Result<Vec<_>>>()?;
-        if !first_line.trim().is_empty() {
-            let first_event = parse_session_event_line(&events_path, 0, first_line.trim_end())?;
+        if let Some(first_line) = first_line.filter(|line| !line.trim().is_empty()) {
+            let first_event = parse_session_event_line(&events_path, 0, &first_line)?;
             if first_event.kind == SessionEventKind::SessionCreated
                 && !events.iter().any(|item| item.id == first_event.id)
             {
@@ -968,6 +1191,178 @@ impl SessionStore {
     }
 }
 
+fn find_existing_turn_message(
+    path: &Path,
+    turn_id: Uuid,
+    kind: &SessionEventKind,
+) -> Result<Option<SessionEvent>> {
+    let mut file = open_session_event_log_for_read(path)?;
+    let lines = read_recent_event_lines(&mut file, MAX_SESSION_EVENTS_READ)?;
+    for (index, line) in lines.iter().enumerate().rev() {
+        if line.is_empty() {
+            continue;
+        }
+        let event = parse_session_event_line(path, index, line)?;
+        if event.turn_id == Some(turn_id) && &event.kind == kind {
+            return Ok(Some(event));
+        }
+    }
+    Ok(None)
+}
+
+fn open_session_event_log_for_append(path: &Path) -> Result<File> {
+    let mut options = OpenOptions::new();
+    options.append(true).create(true).read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options
+        .open(path)
+        .with_context(|| format!("open {}", path.display()))?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(anyhow!(
+            "session event path is not a regular file: {}",
+            path.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
+
+fn repair_partial_session_event_tail(file: &mut File, path: &Path) -> Result<()> {
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    if last[0] == b'\n' {
+        return Ok(());
+    }
+
+    let mut position = file_len;
+    let mut chunk = vec![0u8; SESSION_EVENT_TAIL_CHUNK_BYTES];
+    while position > 0 {
+        let chunk_len = usize::try_from(position.min(chunk.len() as u64))?;
+        position -= chunk_len as u64;
+        file.seek(SeekFrom::Start(position))?;
+        file.read_exact(&mut chunk[..chunk_len])?;
+        if let Some(newline) = chunk[..chunk_len].iter().rposition(|byte| *byte == b'\n') {
+            file.set_len(position + newline as u64 + 1)
+                .with_context(|| format!("repair partial session event in {}", path.display()))?;
+            file.sync_data()?;
+            return Ok(());
+        }
+    }
+    file.set_len(0)
+        .with_context(|| format!("remove partial session event in {}", path.display()))?;
+    file.sync_data()?;
+    Ok(())
+}
+
+fn open_session_event_log_for_read(path: &Path) -> Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .with_context(|| format!("open {}", path.display()))?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(anyhow!(
+            "session event path is not a regular file: {}",
+            path.display()
+        ));
+    }
+    Ok(file)
+}
+
+#[derive(Clone, Copy)]
+enum SessionEventFileLockKind {
+    Shared,
+    Exclusive,
+}
+
+struct SessionEventFileLock {
+    #[cfg(unix)]
+    descriptor: std::os::fd::RawFd,
+}
+
+fn lock_session_event_file(
+    file: &File,
+    kind: SessionEventFileLockKind,
+) -> Result<SessionEventFileLock> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+
+        let descriptor = file.as_raw_fd();
+        let operation = match kind {
+            SessionEventFileLockKind::Shared => libc::LOCK_SH,
+            SessionEventFileLockKind::Exclusive => libc::LOCK_EX,
+        };
+        loop {
+            if unsafe { libc::flock(descriptor, operation) } == 0 {
+                return Ok(SessionEventFileLock { descriptor });
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error).context("lock session event file");
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        let _ = kind;
+        Ok(SessionEventFileLock {})
+    }
+}
+
+impl Drop for SessionEventFileLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        unsafe {
+            libc::flock(self.descriptor, libc::LOCK_UN);
+        }
+    }
+}
+
+fn read_bounded_session_event_line(reader: &mut impl BufRead) -> Result<Option<String>> {
+    let mut bytes = Vec::new();
+    let read = reader
+        .take((MAX_SESSION_EVENT_LINE_BYTES + 1) as u64)
+        .read_until(b'\n', &mut bytes)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_SESSION_EVENT_LINE_BYTES {
+        return Err(anyhow!(
+            "session event line exceeds the {} byte limit",
+            MAX_SESSION_EVENT_LINE_BYTES
+        ));
+    }
+    while bytes
+        .last()
+        .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
+    {
+        bytes.pop();
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .context("session event log is not valid UTF-8")
+}
+
 fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result<Vec<String>> {
     if max_lines == 0 {
         return Ok(Vec::new());
@@ -980,13 +1375,44 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
     let mut chunks = Vec::new();
     let mut position = file_len;
     let mut newline_count = 0usize;
+    let mut current_line_bytes = 0usize;
+    let mut bytes_read = 0usize;
+    let max_tail_bytes = max_lines
+        .saturating_add(1)
+        .saturating_mul(MAX_SESSION_EVENT_LINE_BYTES)
+        .min(MAX_SESSION_EVENT_TAIL_READ_BYTES);
     while position > 0 && newline_count <= max_lines {
-        let chunk_len = usize::try_from(position.min(SESSION_EVENT_TAIL_CHUNK_BYTES as u64))?;
+        if bytes_read >= max_tail_bytes {
+            return Err(anyhow!(
+                "recent session event window exceeds the {} byte read limit",
+                max_tail_bytes
+            ));
+        }
+        let remaining_limit = max_tail_bytes - bytes_read;
+        let chunk_len = usize::try_from(
+            position
+                .min(SESSION_EVENT_TAIL_CHUNK_BYTES as u64)
+                .min(remaining_limit as u64),
+        )?;
         position -= chunk_len as u64;
         file.seek(SeekFrom::Start(position))?;
         let mut chunk = vec![0; chunk_len];
         file.read_exact(&mut chunk)?;
-        newline_count += chunk.iter().filter(|byte| **byte == b'\n').count();
+        bytes_read += chunk_len;
+        for byte in chunk.iter().rev() {
+            if *byte == b'\n' {
+                newline_count += 1;
+                current_line_bytes = 0;
+            } else {
+                current_line_bytes += 1;
+                if current_line_bytes > MAX_SESSION_EVENT_LINE_BYTES {
+                    return Err(anyhow!(
+                        "session event line exceeds the {} byte limit",
+                        MAX_SESSION_EVENT_LINE_BYTES
+                    ));
+                }
+            }
+        }
         chunks.push(chunk);
     }
     chunks.reverse();
@@ -1002,13 +1428,12 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
     let has_trailing_newline = bytes.last() == Some(&b'\n');
     let text = String::from_utf8(bytes).context("session event log is not valid UTF-8")?;
     let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
-    if !has_trailing_newline {
-        if lines
+    if !has_trailing_newline
+        && lines
             .last()
             .is_some_and(|line| serde_json::from_str::<SessionEvent>(line).is_err())
-        {
-            lines.pop();
-        }
+    {
+        lines.pop();
     }
     if lines.len() > max_lines {
         lines.drain(..lines.len() - max_lines);
@@ -1266,6 +1691,115 @@ mod tests {
         assert!(store.latest_session().unwrap().is_some());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn creates_private_session_event_logs() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "private log")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&session.events_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(&store.paths.database_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn concurrent_session_event_appends_remain_valid_and_complete() {
+        const WRITERS: usize = 6;
+        const EVENTS_PER_WRITER: usize = 20;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "concurrent log")
+            .unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+        let threads = (0..WRITERS)
+            .map(|writer| {
+                let paths = paths.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                let session_id = session.id;
+                std::thread::spawn(move || {
+                    let store = SessionStore::open(paths).unwrap();
+                    barrier.wait();
+                    for sequence in 0..EVENTS_PER_WRITER {
+                        store
+                            .append_event(
+                                session_id,
+                                SessionEventKind::SystemEvent,
+                                format!("writer-{writer}-event-{sequence}"),
+                                serde_json::json!({ "writer": writer, "sequence": sequence }),
+                            )
+                            .unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        let expected = 1 + WRITERS * EVENTS_PER_WRITER;
+        let events = store.read_recent_events(session.id, expected).unwrap();
+        assert_eq!(events.len(), expected);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.id)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            expected
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_session_event_lock_blocks_an_independent_writer() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "locked log")
+            .unwrap();
+        let first_file = open_session_event_log_for_append(&session.events_path).unwrap();
+        let first_lock =
+            lock_session_event_file(&first_file, SessionEventFileLockKind::Exclusive).unwrap();
+        let path = session.events_path.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let second_file = open_session_event_log_for_append(&path).unwrap();
+            let _second_lock =
+                lock_session_event_file(&second_file, SessionEventFileLockKind::Exclusive).unwrap();
+            sender.send(()).unwrap();
+        });
+
+        assert!(receiver
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
+        drop(first_lock);
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        writer.join().unwrap();
+    }
+
     #[test]
     fn appends_user_turn_messages_with_turn_identity() {
         let temp = tempfile::tempdir().unwrap();
@@ -1309,6 +1843,108 @@ mod tests {
 
         assert_eq!(event.turn_id, Some(turn_id));
         assert_eq!(event.payload["turnId"], turn_id.to_string());
+    }
+
+    #[test]
+    fn turn_message_append_is_idempotent_and_rejects_conflicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "idempotent turn")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+
+        let first = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "hello",
+                serde_json::json!({"attempt": 1}),
+                turn_id,
+            )
+            .unwrap();
+        let replay = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "hello",
+                serde_json::json!({"attempt": 2}),
+                turn_id,
+            )
+            .unwrap();
+
+        assert_eq!(replay.id, first.id);
+        assert_eq!(store.read_events(session.id).unwrap().len(), 2);
+        let error = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "different",
+                serde_json::json!({}),
+                turn_id,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("already contains a different"));
+    }
+
+    #[test]
+    fn appends_system_event_batch_in_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "event batch")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        let appended = store
+            .append_system_events_with_turn_id(
+                session.id,
+                (0..3)
+                    .map(|index| {
+                        (
+                            format!("activity {index}"),
+                            serde_json::json!({"index": index}),
+                            Some(turn_id),
+                        )
+                    })
+                    .collect(),
+            )
+            .unwrap();
+
+        assert_eq!(appended.len(), 3);
+        assert_eq!(appended[0].message, "activity 0");
+        assert_eq!(appended[2].message, "activity 2");
+        assert!(appended.iter().all(|event| event.turn_id == Some(turn_id)));
+        assert_eq!(store.read_events(session.id).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn append_repairs_a_partial_jsonl_tail_before_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "partial tail")
+            .unwrap();
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(br#"{"partial":true"#).unwrap();
+        file.sync_data().unwrap();
+
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "after recovery",
+                serde_json::json!({}),
+            )
+            .unwrap();
+
+        let events = store.read_events(session.id).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].message, "after recovery");
+        let repaired = std::fs::read_to_string(&session.events_path).unwrap();
+        assert!(!repaired.contains("\"partial\""));
+        assert!(repaired
+            .lines()
+            .all(|line| { serde_json::from_str::<SessionEvent>(line).is_ok() }));
     }
 
     #[test]
@@ -1405,6 +2041,42 @@ mod tests {
         file.flush().unwrap();
 
         assert!(store.read_events(session.id).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_first_session_event_line() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "oversized first line")
+            .unwrap();
+        std::fs::write(
+            &session.events_path,
+            vec![b'x'; MAX_SESSION_EVENT_LINE_BYTES + 1],
+        )
+        .unwrap();
+
+        let error = store.read_events(session.id).unwrap_err().to_string();
+        assert!(error.contains("line exceeds"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn rejects_oversized_trailing_session_event_line() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "oversized tail")
+            .unwrap();
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(&vec![b'x'; MAX_SESSION_EVENT_LINE_BYTES + 1])
+            .unwrap();
+        file.flush().unwrap();
+
+        let error = store.read_events(session.id).unwrap_err().to_string();
+        assert!(error.contains("line exceeds"), "unexpected error: {error}");
     }
 
     #[test]

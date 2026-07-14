@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::{Component, Path, PathBuf};
@@ -97,6 +97,8 @@ pub struct ProviderMutationResult {
 pub struct ProviderMutationRecoveryReport {
     pub rolled_back: usize,
     pub finalized: usize,
+    pub quarantined: usize,
+    pub reconciled_proposals: usize,
     pub skipped: bool,
 }
 
@@ -111,6 +113,7 @@ pub struct PendingProviderMutationCommit {
     result: ProviderMutationResult,
     journal_path: PathBuf,
     journal: ProviderMutationJournal,
+    _lock: ProviderMutationRecoveryLock,
 }
 
 impl PendingProviderMutationCommit {
@@ -182,9 +185,16 @@ where
     F: FnMut() -> bool,
 {
     ensure_mutation_not_cancelled(&mut is_cancelled)?;
+    let _mutation_lock =
+        acquire_provider_mutation_lock_blocking(&store.paths().mutation_journals_dir)?;
     let proposal = store
         .get_mutation_proposal(proposal_id)?
         .ok_or_else(|| anyhow!("unknown mutation proposal {proposal_id}"))?;
+    let proposal = if proposal.status == MutationProposalStatus::Applying {
+        reconcile_claimed_mutation_proposal(store, proposal)?
+    } else {
+        proposal
+    };
 
     match decision {
         MutationDecision::Reject => {
@@ -227,9 +237,10 @@ where
                 return Err(anyhow!("could not apply {}: {detail}", proposal.path));
             }
 
+            let proposal = store.claim_mutation_proposal(proposal_id)?;
             match apply_mutation_proposal(&proposal, &mut is_cancelled) {
                 Ok(changed_path) => {
-                    let proposal = store.resolve_mutation_proposal_status(
+                    let proposal = store.finish_claimed_mutation_proposal(
                         proposal_id,
                         MutationProposalStatus::Applied,
                         None,
@@ -242,17 +253,18 @@ where
                     })
                 }
                 Err(error) => {
-                    if mutation_decision_was_cancelled(&error) {
-                        return Err(error);
-                    }
+                    let cancelled = mutation_decision_was_cancelled(&error);
                     let detail = error.to_string();
-                    let proposal = store.resolve_mutation_proposal_status(
+                    let proposal = store.finish_claimed_mutation_proposal(
                         proposal_id,
                         MutationProposalStatus::Failed,
                         Some(detail.clone()),
                     )?;
                     let _event =
                         append_mutation_decision_event(store, &proposal, Some(detail.clone()))?;
+                    if cancelled {
+                        return Err(error);
+                    }
                     Err(anyhow!("could not apply {}: {detail}", proposal.path))
                 }
             }
@@ -302,6 +314,7 @@ fn append_mutation_decision_event(
             MutationProposalStatus::Applied => format!("Applied {}", proposal.path),
             MutationProposalStatus::Rejected => format!("Rejected changes to {}", proposal.path),
             MutationProposalStatus::Failed => format!("Could not apply {}", proposal.path),
+            MutationProposalStatus::Applying => format!("Applying {}", proposal.path),
             MutationProposalStatus::Pending => format!("Review changes to {}", proposal.path),
         },
         mutation_approval_payload(proposal, error),
@@ -314,12 +327,51 @@ fn read_original_content(proposal: &MutationProposal) -> Result<String> {
         return Ok(String::new());
     }
     let candidate = workspace_file_target(proposal)?;
-    let bytes = fs::read(&candidate)
-        .with_context(|| format!("read mutation target {}", candidate.display()))?;
+    let bytes = read_bounded_mutation_file(
+        &candidate,
+        MAX_PROVIDER_MUTATION_FILE_BYTES,
+        "mutation target",
+    )?;
     if bytes.contains(&0) {
         return Err(anyhow!("mutation target is a binary file"));
     }
     Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+fn reconcile_claimed_mutation_proposal(
+    store: &SessionStore,
+    proposal: MutationProposal,
+) -> Result<MutationProposal> {
+    let target = workspace_file_target(&proposal)?;
+    let desired_hash = content_hash(proposal.content.as_bytes());
+    let applied = target.is_file()
+        && read_bounded_mutation_file(
+            &target,
+            MAX_PROVIDER_MUTATION_FILE_BYTES,
+            "claimed mutation target",
+        )
+        .is_ok_and(|bytes| content_hash(&bytes) == desired_hash);
+    if applied {
+        store.finish_claimed_mutation_proposal(proposal.id, MutationProposalStatus::Applied, None)
+    } else {
+        store.finish_claimed_mutation_proposal(
+            proposal.id,
+            MutationProposalStatus::Failed,
+            Some("mutation application was interrupted; review the current file state".into()),
+        )
+    }
+}
+
+fn recover_claimed_mutation_proposals(store: &SessionStore) -> Result<usize> {
+    let proposals = store.list_applying_mutation_proposals()?;
+    let mut recovered = 0usize;
+    for proposal in proposals {
+        let proposal = reconcile_claimed_mutation_proposal(store, proposal)?;
+        let detail = proposal.error.clone();
+        let _ = append_mutation_decision_event(store, &proposal, detail);
+        recovered += 1;
+    }
+    Ok(recovered)
 }
 
 fn apply_mutation_proposal<F>(proposal: &MutationProposal, is_cancelled: &mut F) -> Result<PathBuf>
@@ -333,7 +385,11 @@ where
         if candidate.is_dir() {
             return Err(anyhow!("mutation target became a directory"));
         }
-        let current = fs::read(&candidate)?;
+        let current = read_bounded_mutation_file(
+            &candidate,
+            MAX_PROVIDER_MUTATION_FILE_BYTES,
+            "mutation target",
+        )?;
         if current.contains(&0) {
             return Err(anyhow!("mutation target became a binary file"));
         }
@@ -720,6 +776,7 @@ pub fn begin_provider_mutation_transaction_with_cancellation<F>(
 where
     F: FnMut() -> bool,
 {
+    let mutation_lock = acquire_provider_mutation_lock_blocking(journal_dir)?;
     validate_provider_mutation_transaction(transaction, &mut is_cancelled)?;
     let staged = stage_provider_mutation_transaction(transaction, &mut is_cancelled)?;
     let backups = provider_mutation_backup_paths(transaction);
@@ -745,13 +802,14 @@ where
             .collect(),
     };
     let journal_path = provider_mutation_journal_path(journal_dir, journal.id)?;
-    write_provider_mutation_journal(&journal_path, &journal).map_err(|error| {
+    write_provider_mutation_journal(&journal_path, &journal).inspect_err(|_error| {
         cleanup_provider_staging(&staged);
-        error
     })?;
-    if let Err(error) =
-        commit_provider_mutation_transaction(transaction, &staged, &backups, &mut is_cancelled)
-    {
+    let commit_result = validate_provider_mutation_transaction(transaction, &mut is_cancelled)
+        .and_then(|()| {
+            commit_provider_mutation_transaction(transaction, &staged, &backups, &mut is_cancelled)
+        });
+    if let Err(error) = commit_result {
         if rollback_provider_mutation_journal(&journal).is_ok() {
             let _ = remove_provider_mutation_journal(&journal_path);
         }
@@ -761,6 +819,7 @@ where
         result: provider_mutation_result(transaction),
         journal_path,
         journal,
+        _lock: mutation_lock,
     })
 }
 
@@ -959,9 +1018,37 @@ fn provider_relative_path(workspace: &Path, target: &Path) -> Result<String> {
 }
 
 fn read_provider_mutation_file(path: &Path, relative_path: &str) -> Result<Vec<u8>> {
-    let bytes =
-        fs::read(path).with_context(|| format!("read provider mutation target {relative_path}"))?;
+    let bytes = read_bounded_mutation_file(
+        path,
+        MAX_PROVIDER_MUTATION_FILE_BYTES,
+        &format!("provider mutation target {relative_path}"),
+    )?;
     ensure_provider_text(&bytes, relative_path)?;
+    Ok(bytes)
+}
+
+fn read_bounded_mutation_file(path: &Path, max_bytes: usize, label: &str) -> Result<Vec<u8>> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("open {label} {}", path.display()))?;
+    if !file.metadata()?.is_file() {
+        return Err(anyhow!("{label} is not a regular file"));
+    }
+    let mut bytes = Vec::with_capacity(max_bytes.min(8 * 1024));
+    Read::by_ref(&mut file)
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read {label} {}", path.display()))?;
+    if bytes.len() > max_bytes {
+        return Err(anyhow!("{label} exceeds the {max_bytes} byte size limit"));
+    }
     Ok(bytes)
 }
 
@@ -1141,19 +1228,48 @@ pub fn recover_provider_mutation_transactions(
     };
     let mut report = ProviderMutationRecoveryReport::default();
     for path in provider_mutation_journal_paths(journal_dir)? {
-        let finalized = recover_provider_mutation_journal(&path, store).map_err(|error| {
-            anyhow!(
-                "recover provider mutation journal {}: {error:#}",
-                path.display()
-            )
-        })?;
-        if finalized {
-            report.finalized += 1;
-        } else {
-            report.rolled_back += 1;
+        match recover_provider_mutation_journal(&path, store) {
+            Ok(true) => report.finalized += 1,
+            Ok(false) => report.rolled_back += 1,
+            Err(error) => {
+                let quarantined =
+                    quarantine_provider_mutation_journal(&path).with_context(|| {
+                        format!(
+                        "quarantine provider mutation journal {} after recovery failed: {error:#}",
+                        path.display()
+                    )
+                    })?;
+                eprintln!(
+                    "provider mutation journal {} requires manual review and was moved to {}: {error:#}",
+                    path.display(),
+                    quarantined.display()
+                );
+                report.quarantined += 1;
+            }
         }
     }
+    report.reconciled_proposals = recover_claimed_mutation_proposals(store)?;
     Ok(report)
+}
+
+fn quarantine_provider_mutation_journal(path: &Path) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("provider mutation journal has no parent"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("transaction.json");
+    let quarantined = parent.join(format!("quarantined-{file_name}-{}", Uuid::new_v4()));
+    fs::rename(path, &quarantined).with_context(|| {
+        format!(
+            "move provider mutation journal {} to {}",
+            path.display(),
+            quarantined.display()
+        )
+    })?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(quarantined)
 }
 
 fn provider_mutation_journal_paths(journal_dir: &Path) -> Result<Vec<PathBuf>> {
@@ -1172,15 +1288,31 @@ fn provider_mutation_journal_paths(journal_dir: &Path) -> Result<Vec<PathBuf>> {
 fn acquire_provider_mutation_recovery_lock(
     journal_dir: &Path,
 ) -> Result<Option<ProviderMutationRecoveryLock>> {
+    acquire_provider_mutation_lock(journal_dir, true)
+}
+
+fn acquire_provider_mutation_lock_blocking(
+    journal_dir: &Path,
+) -> Result<ProviderMutationRecoveryLock> {
+    acquire_provider_mutation_lock(journal_dir, false)?
+        .ok_or_else(|| anyhow!("provider mutation lock was unexpectedly unavailable"))
+}
+
+fn acquire_provider_mutation_lock(
+    journal_dir: &Path,
+    nonblocking: bool,
+) -> Result<Option<ProviderMutationRecoveryLock>> {
     fs::create_dir_all(journal_dir)?;
     let file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(journal_dir.join("recovery.lock"))?;
     #[cfg(unix)]
     {
-        let status = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        let operation = libc::LOCK_EX | if nonblocking { libc::LOCK_NB } else { 0 };
+        let status = unsafe { libc::flock(file.as_raw_fd(), operation) };
         if status != 0 {
             let error = std::io::Error::last_os_error();
             let code = error.raw_os_error();
@@ -1201,7 +1333,12 @@ fn recover_provider_mutation_journal(path: &Path, store: &SessionStore) -> Resul
             path.display()
         ));
     }
-    let journal: ProviderMutationJournal = serde_json::from_slice(&fs::read(path)?)
+    let journal_bytes = read_bounded_mutation_file(
+        path,
+        MAX_PROVIDER_MUTATION_JOURNAL_BYTES as usize,
+        "provider mutation journal",
+    )?;
+    let journal: ProviderMutationJournal = serde_json::from_slice(&journal_bytes)
         .with_context(|| format!("read provider mutation journal {}", path.display()))?;
     if journal.schema != PROVIDER_MUTATION_JOURNAL_SCHEMA {
         return Err(anyhow!(
@@ -1389,7 +1526,7 @@ fn sync_provider_mutation_journal_parents(journal: &ProviderMutationJournal) -> 
 
 fn ensure_recovery_hash(path: &Path, expected: Option<&str>, label: &str) -> Result<()> {
     let expected = expected.ok_or_else(|| anyhow!("provider journal is missing {label} hash"))?;
-    let bytes = fs::read(path).with_context(|| format!("read {label} {}", path.display()))?;
+    let bytes = read_bounded_mutation_file(path, MAX_PROVIDER_MUTATION_FILE_BYTES, label)?;
     if content_hash(&bytes) != expected {
         return Err(anyhow!(
             "{label} changed before provider mutation recovery; manual review is required"
@@ -1654,7 +1791,8 @@ mod tests {
         let error =
             decide_mutation_proposal(&store, proposal.id, MutationDecision::Approve).unwrap_err();
 
-        assert!(error.to_string().contains("outside the workspace"));
+        let error = error.to_string();
+        assert!(error.contains("outside") && error.contains("workspace"));
         assert!(!outside.path().join("out.txt").exists());
     }
 
@@ -1687,7 +1825,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_removes_the_temporary_file_and_keeps_the_proposal_pending() {
+    fn cancellation_removes_the_temporary_file_and_records_the_claim_as_failed() {
         let temp = tempfile::tempdir().unwrap();
         let (store, session_id) = proposal_store(&temp);
         let proposal = store
@@ -1714,14 +1852,9 @@ mod tests {
         .unwrap_err();
 
         assert!(mutation_decision_was_cancelled(&error));
-        assert_eq!(
-            store
-                .get_mutation_proposal(proposal.id)
-                .unwrap()
-                .unwrap()
-                .status,
-            MutationProposalStatus::Pending
-        );
+        let proposal = store.get_mutation_proposal(proposal.id).unwrap().unwrap();
+        assert_eq!(proposal.status, MutationProposalStatus::Failed);
+        assert!(proposal.error.unwrap().contains("cancelled"));
         assert!(!temp.path().join("cancelled.txt").exists());
         assert!(fs::read_dir(temp.path()).unwrap().all(|entry| {
             !entry
@@ -2252,14 +2385,69 @@ mod tests {
         drop(pending);
         fs::write(temp.path().join("file.txt"), "newer user content\n").unwrap();
 
-        let error = recover_provider_mutation_transactions(&journals, &store).unwrap_err();
+        let report = recover_provider_mutation_transactions(&journals, &store).unwrap();
 
-        assert!(error.to_string().contains("manual review is required"));
+        assert_eq!(report.quarantined, 1);
+        assert_eq!(report.finalized, 0);
+        assert_eq!(report.rolled_back, 0);
         assert_eq!(
             fs::read_to_string(temp.path().join("file.txt")).unwrap(),
             "newer user content\n"
         );
-        assert!(journal_path.exists());
+        assert!(!journal_path.exists());
+        let quarantined = fs::read_dir(&journals)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("quarantined-transaction-"))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(quarantined.len(), 1);
+        assert!(fs::read_to_string(&quarantined[0])
+            .unwrap()
+            .contains("file.txt"));
+    }
+
+    #[test]
+    fn recovery_reconciles_interrupted_applying_proposals_from_disk_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, session_id) = proposal_store(&temp);
+        let applied = store
+            .create_mutation_proposal(session_id, None, "applied.txt", "desired\n", None, false)
+            .unwrap();
+        let interrupted = store
+            .create_mutation_proposal(
+                session_id,
+                None,
+                "interrupted.txt",
+                "not-written\n",
+                None,
+                false,
+            )
+            .unwrap();
+        store.claim_mutation_proposal(applied.id).unwrap();
+        store.claim_mutation_proposal(interrupted.id).unwrap();
+        fs::write(temp.path().join("applied.txt"), "desired\n").unwrap();
+
+        let report =
+            recover_provider_mutation_transactions(&store.paths().mutation_journals_dir, &store)
+                .unwrap();
+
+        assert_eq!(report.reconciled_proposals, 2);
+        let applied = store.get_mutation_proposal(applied.id).unwrap().unwrap();
+        assert_eq!(applied.status, MutationProposalStatus::Applied);
+        assert_eq!(applied.error, None);
+        let interrupted = store
+            .get_mutation_proposal(interrupted.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(interrupted.status, MutationProposalStatus::Failed);
+        assert!(interrupted
+            .error
+            .unwrap()
+            .contains("application was interrupted"));
     }
 
     #[cfg(unix)]

@@ -12,6 +12,101 @@ use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_STDERR_BYTES: u64 = 64 * 1024;
+const MAX_APP_SERVER_FRAME_BYTES: usize = 1024 * 1024;
+const APP_SERVER_CHANNEL_CAPACITY: usize = 64;
+const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+const MAX_PROTOCOL_ACTIVITY_MESSAGES: usize = 100_000;
+const MAX_FILE_CHANGE_ENTRIES: usize = 64;
+const MAX_FILE_CHANGE_ENTRY_BYTES: usize = 256 * 1024;
+const MAX_FILE_CHANGE_TOTAL_BYTES: usize = 4 * 1024 * 1024;
+const MAX_FILE_CHANGE_ID_BYTES: usize = 512;
+const APP_SERVER_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+struct ProtocolGuard {
+    overall_deadline: Instant,
+    inactivity_deadline: Instant,
+    activity_messages: usize,
+}
+
+impl ProtocolGuard {
+    fn new(started_at: Instant, timeout: Duration) -> Self {
+        Self {
+            overall_deadline: started_at + timeout,
+            inactivity_deadline: started_at + APP_SERVER_INACTIVITY_TIMEOUT,
+            activity_messages: 0,
+        }
+    }
+
+    fn timed_out_at(&self, now: Instant) -> bool {
+        now >= self.overall_deadline || now >= self.inactivity_deadline
+    }
+
+    fn record_if_valid_at(&mut self, message: &Value, now: Instant) -> Result<bool> {
+        if !is_valid_protocol_activity(message) {
+            return Ok(false);
+        }
+        if self.activity_messages >= MAX_PROTOCOL_ACTIVITY_MESSAGES {
+            return Err(anyhow!(
+                "Codex app-server exceeded the {MAX_PROTOCOL_ACTIVITY_MESSAGES} message activity limit"
+            ));
+        }
+        self.activity_messages += 1;
+        self.inactivity_deadline = now + APP_SERVER_INACTIVITY_TIMEOUT;
+        Ok(true)
+    }
+}
+
+fn is_valid_protocol_activity(message: &Value) -> bool {
+    message.is_object()
+        && (message.get("id").is_some() || message.get("method").and_then(Value::as_str).is_some())
+}
+
+#[derive(Default)]
+struct FileChangeState {
+    values: HashMap<String, Value>,
+    encoded_sizes: HashMap<String, usize>,
+    total_bytes: usize,
+}
+
+impl FileChangeState {
+    fn insert(&mut self, item_id: &str, change: Value) -> Result<()> {
+        if item_id.len() > MAX_FILE_CHANGE_ID_BYTES {
+            return Err(anyhow!(
+                "Codex file-change id exceeded the {MAX_FILE_CHANGE_ID_BYTES}-byte limit"
+            ));
+        }
+        if !self.values.contains_key(item_id) && self.values.len() >= MAX_FILE_CHANGE_ENTRIES {
+            return Err(anyhow!(
+                "Codex returned more than {MAX_FILE_CHANGE_ENTRIES} file-change records"
+            ));
+        }
+        let encoded_size = serde_json::to_vec(&change)?.len();
+        if encoded_size > MAX_FILE_CHANGE_ENTRY_BYTES {
+            return Err(anyhow!(
+                "Codex file-change record exceeded the {MAX_FILE_CHANGE_ENTRY_BYTES}-byte limit"
+            ));
+        }
+        let old_size = self.encoded_sizes.get(item_id).copied().unwrap_or(0);
+        let next_total = self
+            .total_bytes
+            .checked_sub(old_size)
+            .and_then(|total| total.checked_add(encoded_size))
+            .ok_or_else(|| anyhow!("Codex file-change state size overflowed"))?;
+        if next_total > MAX_FILE_CHANGE_TOTAL_BYTES {
+            return Err(anyhow!(
+                "Codex file-change state exceeded the {MAX_FILE_CHANGE_TOTAL_BYTES}-byte limit"
+            ));
+        }
+        self.values.insert(item_id.to_string(), change);
+        self.encoded_sizes.insert(item_id.to_string(), encoded_size);
+        self.total_bytes = next_total;
+        Ok(())
+    }
+
+    fn get(&self, item_id: &str) -> Option<&Value> {
+        self.values.get(item_id)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ApprovalKind {
@@ -90,7 +185,7 @@ where
     }
 
     let started_at = Instant::now();
-    let deadline = started_at + request.timeout;
+    let mut protocol_guard = ProtocolGuard::new(started_at, request.timeout);
     let mut command = Command::new(&request.program);
     command
         .args(&request.program_args)
@@ -138,7 +233,13 @@ where
             },
         }),
     )?;
-    let initialize = receive_response(&messages, 1, deadline, &request.cancellation, started_at)?;
+    let initialize = receive_response(
+        &messages,
+        1,
+        &mut protocol_guard,
+        &request.cancellation,
+        started_at,
+    )?;
     if let Some(outcome) = terminal_outcome(&initialize, started_at, &stderr_output) {
         return Ok(outcome);
     }
@@ -196,8 +297,13 @@ where
         })
     };
     write_message(&mut stdin, &thread_request)?;
-    let thread_response =
-        receive_response(&messages, 2, deadline, &request.cancellation, started_at)?;
+    let thread_response = receive_response(
+        &messages,
+        2,
+        &mut protocol_guard,
+        &request.cancellation,
+        started_at,
+    )?;
     if let Some(outcome) = terminal_outcome(&thread_response, started_at, &stderr_output) {
         return Ok(outcome);
     }
@@ -228,7 +334,7 @@ where
 
     let mut response = String::new();
     let mut completed_response = String::new();
-    let mut file_changes = HashMap::<String, Value>::new();
+    let mut file_changes = FileChangeState::default();
     let mut turn_started = false;
     loop {
         if request.cancellation.is_cancelled() {
@@ -236,7 +342,7 @@ where
                 duration_ms: elapsed_ms(started_at),
             });
         }
-        if Instant::now() >= deadline {
+        if protocol_guard.timed_out_at(Instant::now()) {
             return Ok(CodexAppServerOutcome::TimedOut {
                 duration_ms: elapsed_ms(started_at),
             });
@@ -264,6 +370,13 @@ where
                 ));
             }
         };
+        if let Err(error) = protocol_guard.record_if_valid_at(&message, Instant::now()) {
+            return Ok(failed_outcome(
+                error.to_string(),
+                started_at,
+                &stderr_output,
+            ));
+        }
 
         let method = message.get("method").and_then(Value::as_str);
         if let Some(method) = method.filter(|_| message.get("id").is_some()) {
@@ -315,13 +428,30 @@ where
         match method {
             "item/agentMessage/delta" => {
                 if let Some(delta) = params.get("delta").and_then(Value::as_str) {
-                    response.push_str(delta);
+                    if let Err(error) = push_bounded_text(&mut response, delta, MAX_RESPONSE_BYTES)
+                    {
+                        return Ok(failed_outcome(
+                            error.to_string(),
+                            started_at,
+                            &stderr_output,
+                        ));
+                    }
                     on_delta(delta);
                 }
             }
             "item/fileChange/patchUpdated" => {
-                if let Some(item_id) = params.get("itemId").and_then(Value::as_str) {
-                    file_changes.insert(item_id.to_string(), params);
+                if let Some(item_id) = params
+                    .get("itemId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                {
+                    if let Err(error) = file_changes.insert(&item_id, params) {
+                        return Ok(failed_outcome(
+                            error.to_string(),
+                            started_at,
+                            &stderr_output,
+                        ));
+                    }
                 }
             }
             "item/started" | "item/completed" => {
@@ -329,12 +459,28 @@ where
                     match item.get("type").and_then(Value::as_str) {
                         Some("fileChange") => {
                             if let Some(item_id) = item.get("id").and_then(Value::as_str) {
-                                file_changes.insert(item_id.to_string(), item.clone());
+                                if let Err(error) = file_changes.insert(item_id, item.clone()) {
+                                    return Ok(failed_outcome(
+                                        error.to_string(),
+                                        started_at,
+                                        &stderr_output,
+                                    ));
+                                }
                             }
                         }
                         Some("agentMessage") if method == "item/completed" => {
                             if let Some(text) = item.get("text").and_then(Value::as_str) {
-                                completed_response = text.to_string();
+                                if text.len() > MAX_RESPONSE_BYTES {
+                                    return Ok(failed_outcome(
+                                        format!(
+                                            "Codex response exceeded the {MAX_RESPONSE_BYTES}-byte limit"
+                                        ),
+                                        started_at,
+                                        &stderr_output,
+                                    ));
+                                }
+                                completed_response.clear();
+                                completed_response.push_str(text);
                             }
                         }
                         _ => {}
@@ -387,7 +533,7 @@ where
 fn approval_request(
     method: &str,
     mut details: Value,
-    file_changes: &HashMap<String, Value>,
+    file_changes: &FileChangeState,
 ) -> Option<(ApprovalRequest, bool)> {
     let (kind, legacy) = match method {
         "item/commandExecution/requestApproval" => (ApprovalKind::Command, false),
@@ -447,7 +593,7 @@ fn write_approval_response(
 fn receive_response(
     messages: &Receiver<std::result::Result<Value, String>>,
     id: u64,
-    deadline: Instant,
+    protocol_guard: &mut ProtocolGuard,
     cancellation: &CancellationToken,
     started_at: Instant,
 ) -> Result<Value> {
@@ -457,16 +603,18 @@ fn receive_response(
                 json!({ "gyroTermination": "cancelled", "durationMs": elapsed_ms(started_at) }),
             );
         }
-        if Instant::now() >= deadline {
+        if protocol_guard.timed_out_at(Instant::now()) {
             return Ok(
                 json!({ "gyroTermination": "timed-out", "durationMs": elapsed_ms(started_at) }),
             );
         }
         match messages.recv_timeout(POLL_INTERVAL) {
-            Ok(Ok(message)) if message.get("id").and_then(Value::as_u64) == Some(id) => {
-                return Ok(message);
+            Ok(Ok(message)) => {
+                protocol_guard.record_if_valid_at(&message, Instant::now())?;
+                if message.get("id").and_then(Value::as_u64) == Some(id) {
+                    return Ok(message);
+                }
             }
-            Ok(Ok(_)) => {}
             Ok(Err(error)) => return Err(anyhow!(error)),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
@@ -507,25 +655,89 @@ fn protocol_result(message: &Value) -> Result<&Value> {
 }
 
 fn write_message(stdin: &mut ChildStdin, message: &Value) -> Result<()> {
-    serde_json::to_writer(&mut *stdin, message)?;
+    let payload = serde_json::to_vec(message)?;
+    if payload.len() > MAX_APP_SERVER_FRAME_BYTES {
+        return Err(anyhow!(
+            "Codex app-server request exceeded the {MAX_APP_SERVER_FRAME_BYTES}-byte frame limit"
+        ));
+    }
+    stdin.write_all(&payload)?;
     stdin.write_all(b"\n")?;
     stdin.flush()?;
     Ok(())
 }
 
 fn spawn_message_reader(stdout: ChildStdout) -> Receiver<std::result::Result<Value, String>> {
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(APP_SERVER_CHANNEL_CAPACITY);
     thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let message = line
-                .map_err(|error| error.to_string())
-                .and_then(|line| serde_json::from_str(&line).map_err(|error| error.to_string()));
-            if sender.send(message).is_err() {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let message = match read_bounded_protocol_frame(&mut reader, MAX_APP_SERVER_FRAME_BYTES)
+            {
+                Ok(Some(frame)) => serde_json::from_slice(&frame)
+                    .map_err(|error| format!("Codex app-server returned invalid JSON: {error}")),
+                Ok(None) => Err("Codex app-server closed its output stream".into()),
+                Err(error) => Err(error),
+            };
+            let stop = message.is_err();
+            if sender.send(message).is_err() || stop {
                 break;
             }
         }
     });
     receiver
+}
+
+fn read_bounded_protocol_frame<R: BufRead>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> std::result::Result<Option<Vec<u8>>, String> {
+    let mut frame = Vec::with_capacity(max_bytes.min(8 * 1024));
+    loop {
+        let available = reader
+            .fill_buf()
+            .map_err(|error| format!("could not read Codex app-server protocol data: {error}"))?;
+        if available.is_empty() {
+            return if frame.is_empty() {
+                Ok(None)
+            } else {
+                Err("Codex app-server closed with an unterminated protocol frame".into())
+            };
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let payload_len = newline.unwrap_or(available.len());
+        if frame
+            .len()
+            .checked_add(payload_len)
+            .map_or(true, |length| length > max_bytes)
+        {
+            return Err(format!(
+                "Codex app-server frame exceeded the {max_bytes}-byte limit"
+            ));
+        }
+        frame.extend_from_slice(&available[..payload_len]);
+        reader.consume(payload_len + usize::from(newline.is_some()));
+        if newline.is_some() {
+            if frame.last() == Some(&b'\r') {
+                frame.pop();
+            }
+            return Ok(Some(frame));
+        }
+    }
+}
+
+fn push_bounded_text(target: &mut String, text: &str, max_bytes: usize) -> Result<()> {
+    if target
+        .len()
+        .checked_add(text.len())
+        .map_or(true, |length| length > max_bytes)
+    {
+        return Err(anyhow!(
+            "Codex response exceeded the {max_bytes}-byte limit"
+        ));
+    }
+    target.push_str(text);
+    Ok(())
 }
 
 fn spawn_stderr_reader(stderr: impl Read + Send + 'static, output: Arc<Mutex<String>>) {
@@ -608,7 +820,11 @@ fn terminate_process_group(child: &mut Child) {
         libc::kill(process_group, libc::SIGTERM);
     }
     for _ in 0..10 {
-        if child.try_wait().ok().flatten().is_some() {
+        let _ = child.try_wait();
+        let group_exists = unsafe { libc::kill(process_group, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if !group_exists {
+            let _ = child.wait();
             return;
         }
         thread::sleep(Duration::from_millis(20));
@@ -638,6 +854,83 @@ mod tests {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&script, permissions).unwrap();
         (temp, script)
+    }
+
+    #[test]
+    fn protocol_frame_reader_is_incremental_and_bounded() {
+        let input = std::io::Cursor::new(b"{\"id\":1}\r\n{\"id\":2}\n".to_vec());
+        let mut reader = BufReader::with_capacity(3, input);
+
+        assert_eq!(
+            read_bounded_protocol_frame(&mut reader, 32).unwrap(),
+            Some(br#"{"id":1}"#.to_vec())
+        );
+        assert_eq!(
+            read_bounded_protocol_frame(&mut reader, 32).unwrap(),
+            Some(br#"{"id":2}"#.to_vec())
+        );
+
+        let oversized = std::io::Cursor::new(vec![b'x'; 33]);
+        let mut oversized = BufReader::with_capacity(5, oversized);
+        let error = read_bounded_protocol_frame(&mut oversized, 32).unwrap_err();
+        assert!(error.contains("32-byte limit"));
+    }
+
+    #[test]
+    fn valid_protocol_activity_resets_the_inactivity_deadline() {
+        let started_at = Instant::now();
+        let mut guard = ProtocolGuard::new(started_at, Duration::from_secs(60 * 60));
+        let original_deadline = guard.inactivity_deadline;
+
+        assert!(!guard
+            .record_if_valid_at(
+                &json!({ "notProtocol": true }),
+                started_at + Duration::from_secs(5)
+            )
+            .unwrap());
+        assert_eq!(guard.inactivity_deadline, original_deadline);
+
+        let activity_at = started_at + Duration::from_secs(10);
+        assert!(guard
+            .record_if_valid_at(&json!({ "method": "item/started" }), activity_at)
+            .unwrap());
+        assert_eq!(
+            guard.inactivity_deadline,
+            activity_at + APP_SERVER_INACTIVITY_TIMEOUT
+        );
+
+        guard.activity_messages = MAX_PROTOCOL_ACTIVITY_MESSAGES;
+        assert!(guard
+            .record_if_valid_at(&json!({ "id": 3 }), activity_at)
+            .unwrap_err()
+            .to_string()
+            .contains("message activity limit"));
+    }
+
+    #[test]
+    fn accumulated_response_and_file_changes_are_bounded() {
+        let mut response = String::new();
+        push_bounded_text(&mut response, "four", 4).unwrap();
+        assert!(push_bounded_text(&mut response, "!", 4).is_err());
+
+        let mut changes = FileChangeState::default();
+        for index in 0..MAX_FILE_CHANGE_ENTRIES {
+            changes
+                .insert(
+                    &format!("change-{index}"),
+                    json!({ "changes": [{ "path": "test.txt" }] }),
+                )
+                .unwrap();
+        }
+        assert!(changes
+            .insert("one-too-many", json!({ "changes": [] }))
+            .is_err());
+        assert!(FileChangeState::default()
+            .insert(
+                "oversized",
+                json!({ "changes": "x".repeat(MAX_FILE_CHANGE_ENTRY_BYTES) }),
+            )
+            .is_err());
     }
 
     #[test]

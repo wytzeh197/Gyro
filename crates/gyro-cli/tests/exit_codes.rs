@@ -1021,7 +1021,7 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
 }
 
 #[test]
-fn real_binary_retries_a_stale_codex_resume_with_a_fresh_thread() {
+fn real_binary_requires_explicit_retry_after_a_stale_codex_resume() {
     let root = PathBuf::from("/tmp").join(format!("gyro-codex-resume-{}", uuid::Uuid::new_v4()));
     let home = root.join("home");
     let workspace = root.join("workspace");
@@ -1068,7 +1068,35 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
         )
         .unwrap();
 
-    let output = gyro_command(&home, &workspace)
+    let stale_resume = gyro_command(&home, &workspace)
+        .env("GYRO_TEST_MARKER", &attempts)
+        .args([
+            "resume",
+            &session.id.to_string(),
+            "--profile",
+            "test-provider",
+            "--message",
+            "continue",
+            "--no-open",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert_failure(&stale_resume, 5, "execution-failed");
+    let failure: Value = serde_json::from_slice(&stale_resume.stderr).unwrap();
+    assert!(failure["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("retry explicitly"));
+    assert_eq!(fs::read_to_string(&attempts).unwrap(), "resume\n");
+    let reopened = SessionStore::open(paths.clone()).unwrap();
+    assert!(reopened
+        .get_provider_session_binding(session.id, "openai")
+        .unwrap()
+        .is_none());
+
+    let explicit_retry = gyro_command(&home, &workspace)
         .env("GYRO_TEST_MARKER", &attempts)
         .args([
             "resume",
@@ -1084,11 +1112,11 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
         .unwrap();
 
     assert!(
-        output.status.success(),
+        explicit_retry.status.success(),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&explicit_retry.stderr)
     );
-    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let value: Value = serde_json::from_slice(&explicit_retry.stdout).unwrap();
     assert_eq!(value["status"], "done");
     assert_eq!(value["run"]["resumed"], false);
     assert_eq!(value["run"]["response"], "recovered");
@@ -1210,7 +1238,7 @@ exit 9"#,
 }
 
 #[test]
-fn real_binary_retries_a_stale_claude_resume_with_a_fresh_session() {
+fn real_binary_requires_explicit_retry_after_a_stale_claude_resume() {
     let root = PathBuf::from("/tmp").join(format!("gyro-claude-resume-{}", uuid::Uuid::new_v4()));
     let home = root.join("home");
     let workspace = root.join("workspace");
@@ -1248,7 +1276,35 @@ printf '%s\n' '{"type":"item.completed","session_id":"claude-recovered","item":{
         )
         .unwrap();
 
-    let output = gyro_command(&home, &workspace)
+    let stale_resume = gyro_command(&home, &workspace)
+        .env("GYRO_TEST_MARKER", &attempts)
+        .args([
+            "resume",
+            &session.id.to_string(),
+            "--profile",
+            "test-provider",
+            "--message",
+            "continue",
+            "--no-open",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert_failure(&stale_resume, 5, "execution-failed");
+    let failure: Value = serde_json::from_slice(&stale_resume.stderr).unwrap();
+    assert!(failure["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("retry explicitly"));
+    assert_eq!(fs::read_to_string(&attempts).unwrap(), "resume\n");
+    let reopened = SessionStore::open(paths.clone()).unwrap();
+    assert!(reopened
+        .get_provider_session_binding(session.id, "anthropic")
+        .unwrap()
+        .is_none());
+
+    let explicit_retry = gyro_command(&home, &workspace)
         .env("GYRO_TEST_MARKER", &attempts)
         .args([
             "resume",
@@ -1264,11 +1320,11 @@ printf '%s\n' '{"type":"item.completed","session_id":"claude-recovered","item":{
         .unwrap();
 
     assert!(
-        output.status.success(),
+        explicit_retry.status.success(),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&explicit_retry.stderr)
     );
-    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let value: Value = serde_json::from_slice(&explicit_retry.stdout).unwrap();
     assert_eq!(value["status"], "done");
     assert_eq!(value["run"]["resumed"], false);
     assert_eq!(value["run"]["response"], "recovered");

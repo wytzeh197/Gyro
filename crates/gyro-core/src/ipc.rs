@@ -2,11 +2,18 @@ use crate::paths::GyroPaths;
 use crate::sessions::SessionWorkspaceMode;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub const APP_IPC_SCHEMA_V1: &str = "gyro.app-ipc.v1";
 pub const DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1: &str = "gyro.desktop-provider-approval-ipc.v1";
+
+const APP_NOTIFICATION_MAX_FRAME_BYTES: usize = 64 * 1024;
+const DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+const APP_NOTIFICATION_IO_TIMEOUT: Duration = Duration::from_millis(750);
+const DESKTOP_PROVIDER_APPROVAL_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const DESKTOP_PROVIDER_APPROVAL_READ_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -75,6 +82,7 @@ pub struct DesktopProviderApprovalRequest {
     pub sender_version: String,
     pub session_id: String,
     pub turn_id: Option<String>,
+    pub run_nonce: String,
     pub provider_id: String,
     pub provider_label: Option<String>,
     pub tool_name: String,
@@ -191,6 +199,62 @@ fn compatibility_line(version: &str) -> Option<(u64, u64)> {
     Some((major, minor))
 }
 
+fn read_bounded_frame<R: BufRead>(reader: &mut R, max_bytes: usize) -> io::Result<Option<Vec<u8>>> {
+    let mut frame = Vec::with_capacity(max_bytes.min(8 * 1024));
+    loop {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            return if frame.is_empty() {
+                Ok(None)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "IPC peer closed an unterminated frame",
+                ))
+            };
+        }
+
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let chunk_len = newline.unwrap_or(buffer.len());
+        if frame
+            .len()
+            .checked_add(chunk_len)
+            .map_or(true, |length| length > max_bytes)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("IPC frame exceeded the {max_bytes}-byte limit"),
+            ));
+        }
+        frame.extend_from_slice(&buffer[..chunk_len]);
+        reader.consume(chunk_len + usize::from(newline.is_some()));
+        if newline.is_some() {
+            if frame.last() == Some(&b'\r') {
+                frame.pop();
+            }
+            return Ok(Some(frame));
+        }
+    }
+}
+
+fn write_json_frame<W: Write, T: Serialize>(
+    writer: &mut W,
+    value: &T,
+    max_bytes: usize,
+    description: &str,
+) -> Result<()> {
+    let payload = serde_json::to_vec(value)?;
+    if payload.len() > max_bytes {
+        return Err(anyhow!(
+            "{description} exceeded the {max_bytes}-byte IPC frame limit"
+        ));
+    }
+    writer.write_all(&payload)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn notify_running_app(paths: &GyroPaths, notification: &AppNotification) -> Result<bool> {
     let result = notify_running_app_with_status(paths, notification)?;
     Ok(result.running && result.acknowledged && result.compatible)
@@ -218,28 +282,34 @@ pub fn notify_running_app_with_status(
         let Some(mut stream) = connect_running_app(paths)? else {
             return Ok(AppNotificationResult::not_running());
         };
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(750)))?;
-        stream.set_write_timeout(Some(std::time::Duration::from_millis(750)))?;
-        let payload = serde_json::to_vec(notification)?;
-        stream
-            .write_all(&payload)
-            .with_context(|| format!("notify app at {}", paths.socket_path.display()))?;
-        stream.write_all(b"\n")?;
-        stream.flush()?;
-        let mut acknowledgement = String::new();
-        if BufReader::new(stream)
-            .read_line(&mut acknowledgement)
-            .is_err()
-        {
-            return Ok(AppNotificationResult {
-                running: true,
-                acknowledged: false,
-                compatible: true,
-                app_version: None,
-                message: None,
-            });
-        }
-        let acknowledgement = acknowledgement.trim();
+        stream.set_read_timeout(Some(APP_NOTIFICATION_IO_TIMEOUT))?;
+        stream.set_write_timeout(Some(APP_NOTIFICATION_IO_TIMEOUT))?;
+        write_json_frame(
+            &mut stream,
+            notification,
+            APP_NOTIFICATION_MAX_FRAME_BYTES,
+            "app notification",
+        )
+        .with_context(|| format!("notify app at {}", paths.socket_path.display()))?;
+        let acknowledgement = match read_bounded_frame(
+            &mut BufReader::new(stream),
+            APP_NOTIFICATION_MAX_FRAME_BYTES,
+        ) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => Vec::new(),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Vec::new()
+            }
+            Err(error) => return Err(error).context("read Gyro.app acknowledgement"),
+        };
+        let acknowledgement = std::str::from_utf8(&acknowledgement)
+            .context("decode Gyro.app acknowledgement as UTF-8")?
+            .trim();
         if acknowledgement.is_empty() {
             return Ok(AppNotificationResult {
                 running: true,
@@ -288,24 +358,30 @@ pub fn request_desktop_provider_approval(
                 "Gyro.app is not running; provider approval was denied"
             ));
         };
-        stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(15 * 60)))?;
-        serde_json::to_writer(&mut stream, request).with_context(|| {
+        stream.set_write_timeout(Some(DESKTOP_PROVIDER_APPROVAL_WRITE_TIMEOUT))?;
+        stream.set_read_timeout(Some(DESKTOP_PROVIDER_APPROVAL_READ_TIMEOUT))?;
+        write_json_frame(
+            &mut stream,
+            request,
+            DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES,
+            "desktop provider approval request",
+        )
+        .with_context(|| {
             format!(
                 "request provider approval from {}",
                 paths.socket_path.display()
             )
         })?;
-        stream.write_all(b"\n")?;
-        stream.flush()?;
-        let mut response = String::new();
-        BufReader::new(stream)
-            .read_line(&mut response)
-            .context("read provider approval response from Gyro.app")?;
-        if response.trim().is_empty() {
+        let response = read_bounded_frame(
+            &mut BufReader::new(stream),
+            DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES,
+        )
+        .context("read provider approval response from Gyro.app")?
+        .ok_or_else(|| anyhow!("Gyro.app closed the provider approval request"))?;
+        if response.iter().all(u8::is_ascii_whitespace) {
             return Err(anyhow!("Gyro.app closed the provider approval request"));
         }
-        let response: DesktopProviderApprovalResponse = serde_json::from_str(response.trim())
+        let response: DesktopProviderApprovalResponse = serde_json::from_slice(&response)
             .context("decode provider approval response from Gyro.app")?;
         if response.schema != DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1 {
             return Err(anyhow!("Gyro.app returned an incompatible approval schema"));
@@ -386,7 +462,7 @@ fn remove_stale_app_socket(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Cursor, Write};
     use std::os::unix::net::UnixListener;
 
     fn notification() -> AppNotification {
@@ -408,6 +484,7 @@ mod tests {
             sender_version: env!("CARGO_PKG_VERSION").into(),
             session_id: "session-1".into(),
             turn_id: Some("turn-1".into()),
+            run_nonce: "run-nonce-1".into(),
             provider_id: "anthropic".into(),
             provider_label: Some("Anthropic".into()),
             tool_name: "Write".into(),
@@ -416,6 +493,27 @@ mod tests {
             require_command_approval: true,
             require_file_edit_approval: true,
         }
+    }
+
+    #[test]
+    fn bounded_frame_reads_incrementally_and_strips_crlf() {
+        let input = Cursor::new(b"{\"status\":\"ok\"}\r\ntrailing".to_vec());
+        let mut reader = BufReader::with_capacity(3, input);
+
+        let frame = read_bounded_frame(&mut reader, 32).unwrap().unwrap();
+
+        assert_eq!(frame, br#"{"status":"ok"}"#);
+    }
+
+    #[test]
+    fn bounded_frame_rejects_oversized_unterminated_input() {
+        let input = Cursor::new(vec![b'x'; 129]);
+        let mut reader = BufReader::with_capacity(7, input);
+
+        let error = read_bounded_frame(&mut reader, 128).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("128-byte limit"));
     }
 
     #[test]
@@ -454,6 +552,31 @@ mod tests {
         });
 
         assert!(!notify_running_app(&paths, &notification()).unwrap());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn rejects_oversized_unterminated_app_acknowledgement() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        std::fs::create_dir_all(paths.socket_path.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&paths.socket_path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            let mut stream = stream;
+            stream
+                .write_all(&vec![b'x'; APP_NOTIFICATION_MAX_FRAME_BYTES + 1])
+                .unwrap();
+            stream.flush().unwrap();
+        });
+
+        let error = notify_running_app_with_status(&paths, &notification()).unwrap_err();
+
+        assert!(format!("{error:#}").contains("IPC frame exceeded"));
         server.join().unwrap();
     }
 

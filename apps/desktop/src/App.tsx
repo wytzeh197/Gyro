@@ -490,6 +490,8 @@ export function App() {
   );
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const eventsRef = useRef<SessionEvent[]>([]);
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
@@ -1181,20 +1183,26 @@ export function App() {
   const refreshEvents = useCallback(async (sessionId: string) => {
     const optimisticEvents = optimisticEventsRef.current.get(sessionId);
     if (!isTauriRuntime()) {
-      setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
+      if (activeSessionIdRef.current === sessionId) {
+        setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
+      }
       return;
     }
     try {
       const nextEvents = await invoke<SessionEvent[]>("read_session_events", {
         sessionId,
       });
-      setEvents(
-        limitSessionEventsForUi(
-          mergePersistedAndOptimisticEvents(nextEvents, optimisticEvents),
-        ),
-      );
+      if (activeSessionIdRef.current === sessionId) {
+        setEvents(
+          limitSessionEventsForUi(
+            mergePersistedAndOptimisticEvents(nextEvents, optimisticEvents),
+          ),
+        );
+      }
     } catch {
-      setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
+      if (activeSessionIdRef.current === sessionId) {
+        setEvents(limitSessionEventsForUi(optimisticEvents ?? []));
+      }
     }
   }, []);
 
@@ -2968,9 +2976,13 @@ export function App() {
               profileId: profile.id,
               rows: size?.rows,
               title: profile.displayName,
-              workspacePath: activeSession?.workspacePath ?? workspacePath,
+              workspacePath: commandOverride
+                ? (activeSession?.workspacePath ?? workspacePath)
+                : undefined,
               workspaceMode: "local",
-              workingDirectory: profile.workingDirectory,
+              workingDirectory: commandOverride
+                ? profile.workingDirectory
+                : "Home",
             },
           },
         );
@@ -3280,9 +3292,9 @@ export function App() {
               command: profile.command,
               paneId,
               title: profile.displayName,
-              workspacePath: activeSession?.workspacePath ?? workspacePath,
+              workspacePath: undefined,
               workspaceMode: "local",
-              workingDirectory: profile.workingDirectory,
+              workingDirectory: "Home",
             },
           },
         );
@@ -4244,9 +4256,14 @@ export function App() {
             persistedSession,
             ...current.filter((item) => item.id !== session.id),
           ]);
-          setWorkspacePath(persistedSession.workspacePath);
-          setActiveSessionId(persistedSession.id);
-          setEvents(limitSessionEventsForUi(migratedEvents));
+          setActiveSessionId((current) =>
+            current === session.id ? persistedSession.id : current,
+          );
+          if (activeSessionIdRef.current === session.id) {
+            activeSessionIdRef.current = persistedSession.id;
+            setWorkspacePath(persistedSession.workspacePath);
+            setEvents(limitSessionEventsForUi(migratedEvents));
+          }
 
           const persistedTurnAttachments = await Promise.all(
             turnAttachments.map(async (attachment) => {
@@ -4311,9 +4328,16 @@ export function App() {
             );
           }
           if (contextEvents.length) {
-            setEvents((current) =>
-              limitSessionEventsForUi([...current, ...contextEvents]),
-            );
+            setEvents((current) => {
+              if (
+                !current.some(
+                  (event) => event.sessionId === persistedSession.id,
+                )
+              ) {
+                return current;
+              }
+              return limitSessionEventsForUi([...current, ...contextEvents]);
+            });
           }
 
           await invoke<SessionEvent>("append_user_message", {
@@ -5501,7 +5525,7 @@ export function App() {
   const closeTerminalPane = useCallback(async (paneId: string) => {
     if (isTauriRuntime()) {
       try {
-        await invoke<TerminalPaneSnapshot>("stop_terminal_pane", { paneId });
+        await invoke("close_terminal_pane", { paneId });
       } catch {
         // Closing the UI should still succeed if the backing PTY is already gone.
       }
@@ -7571,6 +7595,7 @@ export function App() {
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
       activeSessionId={activeSessionId}
+      sendingSessionIds={sendingSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
       updateState={updater.state}
@@ -10902,5 +10927,10 @@ function updateOptimisticProviderStatus(
       limitSessionEventsForUi(updateEvents(optimisticEvents)),
     );
   }
-  setEvents((current) => limitSessionEventsForUi(updateEvents(current)));
+  setEvents((current) => {
+    if (!current.some((event) => event.sessionId === sessionId)) {
+      return current;
+    }
+    return limitSessionEventsForUi(updateEvents(current));
+  });
 }
