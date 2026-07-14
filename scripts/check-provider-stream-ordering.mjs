@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   applyProviderChatStreamDeltas,
+  mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
 } from "../apps/desktop/src/provider-stream-events.ts";
@@ -55,6 +56,34 @@ assert.equal(
   "hello world",
 );
 
+const otherSessionEvent = {
+  id: "other-user-message",
+  sessionId: "session-2",
+  turnId: "turn-2",
+  createdAt: "2026-07-14T10:00:00.000Z",
+  kind: "user-message",
+  message: "Keep this chat visible",
+  payload: {},
+};
+renderedEvents = [otherSessionEvent];
+applyProviderChatStreamDeltas(
+  optimisticEventsRef,
+  (update) => {
+    renderedEvents =
+      typeof update === "function" ? update(renderedEvents) : update;
+  },
+  [streamEvent(3, "delta", " in the background")],
+);
+assert.deepEqual(renderedEvents, [otherSessionEvent]);
+const restoredBackgroundEvents = mergePersistedAndOptimisticEvents(
+  [],
+  optimisticEventsRef.current.get("session-1"),
+);
+assert.equal(
+  restoredBackgroundEvents[0]?.message,
+  "hello world in the background",
+);
+
 const runningStatus = {
   id: "status-running",
   sessionId: "session-1",
@@ -106,5 +135,5 @@ assert.equal(
 assert.equal(latestMergedStatus?.payload?.durationMs, 22_500);
 
 console.log(
-  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, retry timing).",
+  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing).",
 );

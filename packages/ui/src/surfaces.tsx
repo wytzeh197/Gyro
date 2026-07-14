@@ -14,6 +14,7 @@ import {
   Columns2,
   Command,
   Copy,
+  CornerDownRight,
   Download,
   Edit3,
   FileCode2,
@@ -998,7 +999,25 @@ function WorkspaceSidebarContent({
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
-  const projectGroups = sidebarProjectGroups(recentSessions, workspacePath);
+  const discoveredProjectGroups = useMemo(
+    () => sidebarProjectGroups(recentSessions, workspacePath),
+    [recentSessions, workspacePath],
+  );
+  const [projectOrder, setProjectOrder] = useState<string[]>(() =>
+    mergeSidebarProjectOrder(
+      loadSidebarProjectOrder(),
+      discoveredProjectGroups.map((project) => project.key),
+    ),
+  );
+  const [draggedProjectKey, setDraggedProjectKey] = useState<string>();
+  const [projectDropTarget, setProjectDropTarget] = useState<{
+    key: string;
+    position: "before" | "after";
+  }>();
+  const projectGroups = stableSidebarProjectGroups(
+    discoveredProjectGroups,
+    projectOrder,
+  );
   const visibleTerminalPanes = terminalPanes.slice(0, 6);
   const [collapsedWorkspaceDirectories, setCollapsedWorkspaceDirectories] =
     useState<Set<string>>(() => new Set());
@@ -1026,6 +1045,28 @@ function WorkspaceSidebarContent({
   useEffect(() => {
     setSidebarSearchDraft(ide?.searchQuery.query ?? "");
   }, [ide?.searchQuery.query]);
+  useEffect(() => {
+    const discoveredKeys = discoveredProjectGroups.map(
+      (project) => project.key,
+    );
+    setProjectOrder((current) => {
+      const next = mergeSidebarProjectOrder(current, discoveredKeys);
+      return next.length === current.length &&
+        next.every((key, index) => key === current[index])
+        ? current
+        : next;
+    });
+  }, [discoveredProjectGroups]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_PROJECT_ORDER_STORAGE_KEY,
+        JSON.stringify(projectOrder),
+      );
+    } catch {
+      // Project order remains available for the current app session.
+    }
+  }, [projectOrder]);
   useEffect(() => {
     setCollapsedWorkspaceDirectories(new Set());
     setSelectedExplorerPath(
@@ -1073,6 +1114,32 @@ function WorkspaceSidebarContent({
         ? current.filter((id) => id !== projectKey)
         : [...current, projectKey],
     );
+  };
+  const moveProject = (
+    sourceKey: string,
+    targetKey: string,
+    position: "before" | "after",
+  ) => {
+    if (sourceKey === targetKey) {
+      return;
+    }
+    setProjectOrder((current) => {
+      const visibleOrder = stableSidebarProjectGroups(
+        discoveredProjectGroups,
+        current,
+      ).map((project) => project.key);
+      const next = visibleOrder.filter((key) => key !== sourceKey);
+      const targetIndex = next.indexOf(targetKey);
+      if (targetIndex < 0) {
+        return current;
+      }
+      next.splice(targetIndex + (position === "after" ? 1 : 0), 0, sourceKey);
+      return next;
+    });
+  };
+  const finishProjectDrag = () => {
+    setDraggedProjectKey(undefined);
+    setProjectDropTarget(undefined);
   };
   const toggleWorkspaceDirectory = (path: string, collapsed?: boolean) => {
     setCollapsedWorkspaceDirectories((current) => {
@@ -1928,7 +1995,7 @@ function WorkspaceSidebarContent({
               </>
             ) : null}
             <div className="gyro-sidebar-small-title">Projects</div>
-            {projectGroups.map((project) => {
+            {projectGroups.map((project, projectIndex) => {
               const isCollapsed = collapsedProjectIds.includes(project.key);
               const isExpanded = expandedProjectIds.includes(project.key);
               const visibleProjectSessions = isExpanded
@@ -1937,11 +2004,87 @@ function WorkspaceSidebarContent({
               const hiddenCount =
                 project.sessions.length - visibleProjectSessions.length;
               return (
-                <div className="gyro-sidebar-project-group" key={project.key}>
+                <div
+                  className={[
+                    "gyro-sidebar-project-group",
+                    draggedProjectKey === project.key ? "is-dragging" : "",
+                    projectDropTarget?.key === project.key
+                      ? `is-drop-${projectDropTarget.position}`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={project.key}
+                  onDragOver={(event) => {
+                    if (
+                      !draggedProjectKey ||
+                      draggedProjectKey === project.key
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    const rect =
+                      event.currentTarget
+                        .querySelector<HTMLElement>(".gyro-sidebar-project-row")
+                        ?.getBoundingClientRect() ??
+                      event.currentTarget.getBoundingClientRect();
+                    setProjectDropTarget({
+                      key: project.key,
+                      position:
+                        event.clientY < rect.top + rect.height / 2
+                          ? "before"
+                          : "after",
+                    });
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const sourceKey =
+                      event.dataTransfer.getData("text/plain") ||
+                      draggedProjectKey;
+                    if (sourceKey && projectDropTarget) {
+                      moveProject(
+                        sourceKey,
+                        project.key,
+                        projectDropTarget.position,
+                      );
+                    }
+                    finishProjectDrag();
+                  }}
+                >
                   <SidebarProjectRow
+                    draggable
                     icon={project.hasWorkspace ? FileText : HardDrive}
+                    isDragging={draggedProjectKey === project.key}
                     isCollapsed={isCollapsed}
                     label={project.label}
+                    onDragEnd={finishProjectDrag}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", project.key);
+                      setDraggedProjectKey(project.key);
+                    }}
+                    onKeyDown={(event) => {
+                      if (!event.altKey) {
+                        return;
+                      }
+                      if (event.key === "ArrowUp" && projectIndex > 0) {
+                        event.preventDefault();
+                        const previous = projectGroups[projectIndex - 1];
+                        if (previous) {
+                          moveProject(project.key, previous.key, "before");
+                        }
+                      } else if (
+                        event.key === "ArrowDown" &&
+                        projectIndex < projectGroups.length - 1
+                      ) {
+                        event.preventDefault();
+                        const next = projectGroups[projectIndex + 1];
+                        if (next) {
+                          moveProject(project.key, next.key, "after");
+                        }
+                      }
+                    }}
                     onClick={() => toggleProject(project.key)}
                     onRemove={
                       project.hasWorkspace
@@ -2065,22 +2208,54 @@ function SidebarStaticRow({
 }
 
 function SidebarProjectRow({
+  draggable = false,
   icon: Icon,
+  isDragging,
   isCollapsed,
   label,
   meta,
   onClick,
+  onDragEnd,
+  onDragStart,
+  onKeyDown,
   onRemove,
 }: {
+  draggable?: boolean;
   icon: IconComponent;
+  isDragging?: boolean;
   isCollapsed?: boolean;
   label: string;
   meta?: string;
   onClick: () => void;
+  onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onRemove?: () => void;
 }) {
   return (
-    <div className="gyro-sidebar-project-row">
+    <div
+      aria-grabbed={draggable ? Boolean(isDragging) : undefined}
+      className={[
+        "gyro-sidebar-project-row",
+        draggable ? "is-draggable" : "",
+        isDragging ? "is-dragging" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      draggable={draggable}
+      onDragEnd={onDragEnd}
+      onDragStart={onDragStart}
+      onKeyDown={onKeyDown}
+    >
+      {draggable ? (
+        <span
+          aria-hidden="true"
+          className="gyro-sidebar-project-drag-handle"
+          title="Drag to reorder. Alt+Arrow keys also move this project."
+        >
+          <GripVertical size={13} />
+        </span>
+      ) : null}
       <button
         aria-expanded={isCollapsed === undefined ? undefined : !isCollapsed}
         className="gyro-sidebar-project-toggle"
@@ -2259,6 +2434,8 @@ type SidebarProjectGroupData = {
   sessions: Session[];
 };
 
+const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
+
 function sidebarProjectGroups(
   sessions: Session[],
   workspacePath?: string,
@@ -2290,29 +2467,53 @@ function sidebarProjectGroups(
     });
   }
 
-  return [...groups.values()].sort((first, second) => {
-    if (first.key === currentProjectKey) {
-      return -1;
-    }
-    if (second.key === currentProjectKey) {
-      return 1;
-    }
-    return (
-      mostRecentSessionTime(second.sessions) -
-      mostRecentSessionTime(first.sessions)
+  return [...groups.values()];
+}
+
+function stableSidebarProjectGroups(
+  groups: SidebarProjectGroupData[],
+  projectOrder: string[],
+) {
+  const order = new Map(projectOrder.map((key, index) => [key, index]));
+  return groups
+    .map((group, discoveredIndex) => ({ group, discoveredIndex }))
+    .sort(
+      (first, second) =>
+        (order.get(first.group.key) ??
+          projectOrder.length + first.discoveredIndex) -
+        (order.get(second.group.key) ??
+          projectOrder.length + second.discoveredIndex),
+    )
+    .map(({ group }) => group);
+}
+
+function loadSidebarProjectOrder() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const value = window.localStorage.getItem(
+      SIDEBAR_PROJECT_ORDER_STORAGE_KEY,
     );
-  });
+    const parsed: unknown = value ? JSON.parse(value) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((key): key is string => typeof key === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeSidebarProjectOrder(current: string[], discovered: string[]) {
+  const discoveredSet = new Set(discovered);
+  return [
+    ...current.filter((key) => discoveredSet.has(key)),
+    ...discovered.filter((key) => !current.includes(key)),
+  ];
 }
 
 function projectGroupKey(path?: string) {
   return path?.trim() || "gyro";
-}
-
-function mostRecentSessionTime(sessions: Session[]) {
-  return sessions.reduce((latest, session) => {
-    const timestamp = new Date(session.updatedAt).getTime();
-    return Number.isNaN(timestamp) ? latest : Math.max(latest, timestamp);
-  }, 0);
 }
 
 function SidebarThreadRow({
@@ -2786,6 +2987,7 @@ type ChatSurfaceProps = {
   onDraftChange?: (value: string) => void;
   onRemoveAttachment?: (attachmentId: string) => void;
   onRemoveQueuedMessage?: (messageId: string) => void;
+  onSteerQueuedMessage?: (messageId: string) => void;
   onAttachImageFiles?: (files: File[]) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
@@ -2862,6 +3064,7 @@ export function ChatSurface({
   onDraftChange,
   onRemoveAttachment,
   onRemoveQueuedMessage,
+  onSteerQueuedMessage,
   onAttachImageFiles,
   onReusePrompt,
   onStopChat,
@@ -2943,6 +3146,20 @@ export function ChatSurface({
       : undefined;
   const browserStatus = browserPreview?.status ?? "idle";
   const deferredEvents = useDeferredValue(events);
+  const contextUsage = useMemo(
+    () =>
+      estimateComposerContextUsage(
+        deferredEvents,
+        localDraft,
+        config.selectedProviderId ?? sessionModel?.providerId,
+      ),
+    [
+      config.selectedProviderId,
+      deferredEvents,
+      localDraft,
+      sessionModel?.providerId,
+    ],
+  );
   const transcriptState = useMemo(
     () => deriveTranscriptState(deferredEvents),
     [deferredEvents],
@@ -3114,6 +3331,7 @@ export function ChatSurface({
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
+            contextUsage={contextUsage}
           />
           {showOnboardingSteps ? (
             <OnboardingSteps
@@ -3363,6 +3581,7 @@ export function ChatSurface({
             <ChatMessageQueue
               messages={queuedMessages}
               onRemoveMessage={onRemoveQueuedMessage}
+              onSteerMessage={onSteerQueuedMessage}
             />
           ) : null}
           <Composer
@@ -3390,6 +3609,7 @@ export function ChatSurface({
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
+            contextUsage={contextUsage}
             showContextRow={false}
             popoverPlacement="up"
             variant="hero"
@@ -3404,6 +3624,7 @@ export function ChatSurface({
 function ChatMessageQueue({
   messages,
   onRemoveMessage,
+  onSteerMessage,
 }: {
   messages: Array<{
     attachmentCount: number;
@@ -3412,45 +3633,80 @@ function ChatMessageQueue({
     message: string;
   }>;
   onRemoveMessage?: (messageId: string) => void;
+  onSteerMessage?: (messageId: string) => void;
 }) {
+  const [expandedMessageId, setExpandedMessageId] = useState<string>();
   return (
     <section className="gyro-chat-message-queue" aria-label="Queued messages">
-      <header>
-        <span>Queued</span>
-        <small>{messages.length}</small>
-      </header>
-      <div>
+      <div className="gyro-chat-message-queue-list">
         {messages.map((message, index) => (
           <article
-            className={message.isDispatching ? "is-dispatching" : undefined}
+            className={[
+              message.isDispatching ? "is-dispatching" : "",
+              expandedMessageId === message.id ? "is-expanded" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             key={message.id}
           >
-            <span className="gyro-chat-message-queue-index">{index + 1}</span>
+            <CornerDownRight
+              aria-hidden="true"
+              className="gyro-chat-message-queue-icon"
+              size={15}
+            />
             <p>{message.message}</p>
-            <small>
-              {message.isDispatching
-                ? "Sending"
-                : message.attachmentCount > 0
-                  ? `${message.attachmentCount} attachment${message.attachmentCount === 1 ? "" : "s"}`
-                  : "Waiting"}
-            </small>
-            <button
-              aria-label={
-                message.isDispatching
-                  ? "Queued message is sending"
-                  : "Remove queued message"
-              }
-              disabled={message.isDispatching}
-              onClick={() => onRemoveMessage?.(message.id)}
-              title={
-                message.isDispatching
-                  ? "Message is sending"
-                  : "Remove from queue"
-              }
-              type="button"
-            >
-              <X size={13} />
-            </button>
+            <div className="gyro-chat-message-queue-actions">
+              <button
+                className="gyro-chat-message-queue-steer"
+                disabled={message.isDispatching}
+                onClick={() => onSteerMessage?.(message.id)}
+                title="Stop the current response and send this next"
+                type="button"
+              >
+                <CornerDownRight size={13} />
+                Steer
+              </button>
+              <button
+                aria-label={
+                  message.isDispatching
+                    ? "Queued message is sending"
+                    : "Remove queued message"
+                }
+                disabled={message.isDispatching}
+                onClick={() => onRemoveMessage?.(message.id)}
+                title={
+                  message.isDispatching
+                    ? "Message is sending"
+                    : "Remove from queue"
+                }
+                type="button"
+              >
+                <Trash2 size={14} />
+              </button>
+              <button
+                aria-expanded={expandedMessageId === message.id}
+                aria-label="Queued message details"
+                onClick={() =>
+                  setExpandedMessageId((current) =>
+                    current === message.id ? undefined : message.id,
+                  )
+                }
+                title="Queued message details"
+                type="button"
+              >
+                <MoreHorizontal size={15} />
+              </button>
+            </div>
+            {expandedMessageId === message.id ? (
+              <small className="gyro-chat-message-queue-detail">
+                {message.isDispatching
+                  ? "Sending now"
+                  : `Queue position ${index + 1}`}
+                {message.attachmentCount > 0
+                  ? ` · ${message.attachmentCount} attachment${message.attachmentCount === 1 ? "" : "s"}`
+                  : ""}
+              </small>
+            ) : null}
           </article>
         ))}
       </div>
@@ -10554,6 +10810,50 @@ function providerApprovalCopy(
   };
 }
 
+type ComposerContextUsage = {
+  label: string;
+  percent: number;
+};
+
+function estimateComposerContextUsage(
+  events: SessionEvent[],
+  draft: string,
+  providerId?: ProviderId,
+): ComposerContextUsage {
+  const contextWindowTokens =
+    providerId === "anthropic"
+      ? 200_000
+      : providerId === "gemini"
+        ? 1_000_000
+        : providerId === "xai"
+          ? 131_072
+          : 128_000;
+  const contextCharacters = events.reduce(
+    (total, event) =>
+      event.kind === "session-created" ? total : total + event.message.length,
+    draft.length,
+  );
+  const estimatedTokens = Math.ceil(contextCharacters / 4);
+  const percent = Math.min(
+    100,
+    Math.max(0, Math.round((estimatedTokens / contextWindowTokens) * 100)),
+  );
+  return {
+    label: `Estimated context: ${formatCompactTokenCount(estimatedTokens)} of ${formatCompactTokenCount(contextWindowTokens)} tokens (${percent}%)`,
+    percent,
+  };
+}
+
+function formatCompactTokenCount(tokens: number) {
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1)}M`;
+  }
+  if (tokens >= 1_000) {
+    return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1)}K`;
+  }
+  return String(tokens);
+}
+
 function Composer({
   attachments = [],
   chatMode = "normal",
@@ -10575,6 +10875,7 @@ function Composer({
   sessionModel,
   sessionGoal,
   promptHistory = [],
+  contextUsage,
   savedProjects = [],
   surfaceControls,
   isSending = false,
@@ -10609,6 +10910,7 @@ function Composer({
   };
   sessionGoal?: SessionGoal;
   promptHistory?: string[];
+  contextUsage?: ComposerContextUsage;
   savedProjects?: Array<{
     path: string;
     label: string;
@@ -10684,6 +10986,9 @@ function Composer({
     approvalMode === "direct"
       ? "gyro-composer-chip is-warning"
       : "gyro-composer-chip";
+  const isStopAction = Boolean(
+    isSending && onStop && draft.trim().length === 0,
+  );
   const workspaceModeLabel =
     workspaceMode === "worktree" ? "Worktree" : "Local";
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
@@ -11067,6 +11372,24 @@ function Composer({
           </button>
         ) : null}
         <div className="gyro-composer-spacer" />
+        {contextUsage ? (
+          <div
+            aria-label={contextUsage.label}
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={contextUsage.percent}
+            className="gyro-composer-context-wheel"
+            role="progressbar"
+            style={
+              {
+                "--context-usage": `${contextUsage.percent * 3.6}deg`,
+              } as CSSProperties
+            }
+            title={contextUsage.label}
+          >
+            <span />
+          </div>
+        ) : null}
         <div className="gyro-composer-control gyro-composer-control-model">
           <button
             className="gyro-composer-chip gyro-model-chip"
@@ -11145,41 +11468,45 @@ function Composer({
             ) : null}
           </div>
         ) : null}
-        {isSending && onStop ? (
-          <button
-            aria-label="Stop response"
-            className="gyro-composer-stop-button"
-            onClick={() => {
-              setActivePopover(null);
-              onStop();
-            }}
-            title="Stop response"
-            type="button"
-          >
-            <Square fill="currentColor" size={10} strokeWidth={0} />
-          </button>
-        ) : null}
         <button
-          aria-label={isSending ? "Queue message" : "Send message"}
+          aria-label={
+            isStopAction
+              ? "Stop response"
+              : isSending
+                ? "Queue message"
+                : "Send message"
+          }
           aria-busy={false}
           className="gyro-send-button"
-          disabled={!canSubmitChat || draft.trim().length === 0}
+          disabled={
+            !isStopAction && (!canSubmitChat || draft.trim().length === 0)
+          }
           onClick={() => {
             setActivePopover(null);
+            if (isStopAction) {
+              onStop?.();
+              return;
+            }
             onSend();
           }}
           title={
-            !hasUserWorkspace
-              ? "Choose a folder before sending"
-              : !hasReadyProvider
-                ? "Connect a provider before sending"
-                : isSending
-                  ? "Queue message"
-                  : "Send"
+            isStopAction
+              ? "Stop response"
+              : !hasUserWorkspace
+                ? "Choose a folder before sending"
+                : !hasReadyProvider
+                  ? "Connect a provider before sending"
+                  : isSending
+                    ? "Queue message"
+                    : "Send"
           }
           type="button"
         >
-          <ArrowUp size={17} />
+          {isStopAction ? (
+            <Square fill="currentColor" size={10} strokeWidth={0} />
+          ) : (
+            <ArrowUp size={17} />
+          )}
         </button>
       </div>
       {shouldShowContextRow ? (
@@ -12315,36 +12642,30 @@ type CompactedThoughtTimelineEvent = {
 function compactThoughtTimelineEvents(events: SessionEvent[]) {
   const compacted: CompactedThoughtTimelineEvent[] = [];
   for (const event of events) {
-    const previous = compacted.at(-1);
     const filePath = providerActivityFilePath(event);
-    const previousFilePath = previous
-      ? providerActivityFilePath(previous.event)
-      : undefined;
-    const previousActivity = previous
-      ? providerActivityFromEvent(previous.event)
-      : undefined;
-    if (
-      previous &&
-      filePath &&
-      previousFilePath &&
-      previousActivity?.status === "running"
-    ) {
-      const fileKey = filePath.replaceAll("\\", "/").replace(/\/+/g, "/");
-      const previousFileKey = previousFilePath
-        .replaceAll("\\", "/")
-        .replace(/\/+/g, "/");
-      if (fileKey === previousFileKey) {
-        compacted[compacted.length - 1] = {
-          count: 1,
-          event: {
-            ...event,
-            createdAt: previous.event.createdAt,
-            id: previous.event.id,
-          },
-        };
+    if (filePath) {
+      const existingFileIndex = compacted.findIndex((item) => {
+        const existingPath = providerActivityFilePath(item.event);
+        return Boolean(
+          existingPath && providerActivityPathsMatch(filePath, existingPath),
+        );
+      });
+      if (existingFileIndex >= 0) {
+        const existing = compacted[existingFileIndex];
+        if (existing) {
+          compacted[existingFileIndex] = {
+            count: 1,
+            event: {
+              ...event,
+              createdAt: existing.event.createdAt,
+              id: existing.event.id,
+            },
+          };
+        }
         continue;
       }
     }
+    const previous = compacted.at(-1);
     const key = compactableActivityKey(event);
     if (key && previous && compactableActivityKey(previous.event) === key) {
       previous.count += 1;
@@ -12353,6 +12674,18 @@ function compactThoughtTimelineEvents(events: SessionEvent[]) {
     compacted.push({ count: 1, event });
   }
   return compacted;
+}
+
+function providerActivityPathsMatch(first: string, second: string) {
+  const normalize = (path: string) =>
+    path.replaceAll("\\", "/").replace(/\/+/g, "/").replace(/\/$/, "");
+  const firstPath = normalize(first);
+  const secondPath = normalize(second);
+  return (
+    firstPath === secondPath ||
+    firstPath.endsWith(`/${secondPath}`) ||
+    secondPath.endsWith(`/${firstPath}`)
+  );
 }
 
 function compactableActivityKey(event: SessionEvent) {
@@ -12493,14 +12826,9 @@ function sourceControlFileForActivityPath(
   activityPath: string,
   sourceControl?: SourceControlState,
 ) {
-  const normalizedActivityPath = activityPath.replaceAll("\\", "/");
-  return sourceControl?.files.find((file) => {
-    const normalizedFilePath = file.path.replaceAll("\\", "/");
-    return (
-      normalizedFilePath === normalizedActivityPath ||
-      normalizedActivityPath.endsWith(`/${normalizedFilePath}`)
-    );
-  });
+  return sourceControl?.files.find((file) =>
+    providerActivityPathsMatch(activityPath, file.path),
+  );
 }
 
 function chatTurnChangeSummary(
@@ -12511,13 +12839,18 @@ function chatTurnChangeSummary(
     { additions: number; deletions: number }
   >,
 ) {
-  const paths = Array.from(
-    new Set(
-      events
-        .map(providerActivityFilePath)
-        .filter((path): path is string => Boolean(path)),
-    ),
-  );
+  const paths = events.reduce<string[]>((uniquePaths, event) => {
+    const path = providerActivityFilePath(event);
+    if (
+      path &&
+      !uniquePaths.some((existing) =>
+        providerActivityPathsMatch(path, existing),
+      )
+    ) {
+      uniquePaths.push(path);
+    }
+    return uniquePaths;
+  }, []);
   const files = paths
     .map((path) => sourceControlFileForActivityPath(path, sourceControl))
     .filter((file): file is SourceControlFile => Boolean(file));
@@ -12539,14 +12872,9 @@ function sourceControlStatsForActivityPath(
   activityPath: string,
   stats?: Record<string, { additions: number; deletions: number }>,
 ) {
-  const normalizedActivityPath = activityPath.replaceAll("\\", "/");
-  return Object.entries(stats ?? {}).find(([path]) => {
-    const normalizedPath = path.replaceAll("\\", "/");
-    return (
-      normalizedPath === normalizedActivityPath ||
-      normalizedActivityPath.endsWith(`/${normalizedPath}`)
-    );
-  })?.[1];
+  return Object.entries(stats ?? {}).find(([path]) =>
+    providerActivityPathsMatch(activityPath, path),
+  )?.[1];
 }
 
 function sourceControlFileDelta(
