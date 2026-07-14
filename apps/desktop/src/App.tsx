@@ -534,6 +534,7 @@ export function App() {
     Record<string, QueuedChatMessage[]>
   >({});
   const [pendingNewChatGoal, setPendingNewChatGoal] = useState<SessionGoal>();
+  const [isGoalComposerActive, setIsGoalComposerActive] = useState(false);
   const [pendingNewChatMode, setPendingNewChatMode] =
     useState<ChatMode>("normal");
   const [pendingNewChatPlan, setPendingNewChatPlan] = useState<SessionPlan>({
@@ -693,6 +694,9 @@ export function App() {
   const activeQueuedChatMessages = activeSessionId
     ? (chatMessageQueues[activeSessionId] ?? [])
     : [];
+  useEffect(() => {
+    setIsGoalComposerActive(false);
+  }, [activeSessionId]);
   const derivedActiveTurn = useMemo(
     () => deriveActiveTurn(deferredEventsForTurn, activeSession?.title),
     [activeSession?.title, deferredEventsForTurn],
@@ -4183,6 +4187,9 @@ export function App() {
       }
 
       switch (action) {
+        case "new-chat":
+          startNewChat();
+          break;
         case "add-context":
         case "select-file":
           void selectChatAttachment("workspace-file");
@@ -4196,12 +4203,11 @@ export function App() {
           void openWorkspace();
           break;
         case "add-goal":
-          dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
-          planEditorRequestTokenRef.current += 1;
-          setPlanEditorRequest({
-            kind: "goal",
-            token: planEditorRequestTokenRef.current,
-          });
+          dispatchWorkbench({ type: "set-chat-panel" });
+          setIsGoalComposerActive(true);
+          if (activeChatMode === "plan") {
+            void changeChatMode("normal");
+          }
           break;
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
@@ -4215,6 +4221,9 @@ export function App() {
         case "set-chat-mode-normal":
           {
             const mode: ChatMode = action.endsWith("plan") ? "plan" : "normal";
+            if (mode === "plan") {
+              setIsGoalComposerActive(false);
+            }
             void changeChatMode(mode);
           }
           break;
@@ -4273,6 +4282,7 @@ export function App() {
       }
     },
     [
+      activeChatMode,
       activeSession?.workspacePath,
       activateWorkspacePath,
       checkProviderReadiness,
@@ -4884,6 +4894,33 @@ export function App() {
       workbench.workspaceMode,
       workspacePath,
     ],
+  );
+
+  const handlePlanDecision = useCallback(
+    async (decision: "approve" | "reject") => {
+      if (decision === "reject") {
+        notify(
+          "terminal",
+          "Plan kept",
+          "Stay in Plan mode to revise it or ask another question.",
+        );
+        return true;
+      }
+      if (activeSessionPlan.items.length === 0) {
+        return false;
+      }
+      const modeChanged = await changeChatMode("normal");
+      if (!modeChanged) {
+        return false;
+      }
+      return sendDraft("Implement the approved plan.", {
+        goal: activeSessionGoal,
+        mode: "normal",
+        plan: activeSessionPlan,
+        preserveDraft: true,
+      });
+    },
+    [activeSessionGoal, activeSessionPlan, changeChatMode, notify, sendDraft],
   );
 
   useEffect(() => {
@@ -8185,6 +8222,7 @@ export function App() {
                 }
                 branchCatalog={branchCatalog}
                 isEnvironmentRailOpen={activeChatPanel === "environment"}
+                isGoalComposerActive={isGoalComposerActive}
                 isComposerSending={isActiveSessionSending}
                 isBranchLoading={isBranchLoading}
                 isToolPanelOpen={workbench.isToolPanelOpen}
@@ -8207,11 +8245,13 @@ export function App() {
                 onToggleToolPanel={toggleToolPanel}
                 onPlanItemStatusChange={changePlanItemStatus}
                 onPlanAction={changePlan}
+                onPlanDecision={handlePlanDecision}
                 planEditorRequest={planEditorRequest}
                 onPlanEditorRequestHandled={() =>
                   setPlanEditorRequest(undefined)
                 }
                 onGoalAction={changeGoal}
+                onCancelGoalComposer={() => setIsGoalComposerActive(false)}
                 onRemoveQueuedMessage={removeQueuedChatMessage}
                 onSteerQueuedMessage={steerQueuedChatMessage}
                 onMutationApprovalAction={handleMutationApprovalAction}
@@ -8596,6 +8636,7 @@ export function App() {
               : activeSession?.branch
           }
           isEnvironmentRailOpen={activeChatPanel === "environment"}
+          isGoalComposerActive={isGoalComposerActive}
           isComposerSending={isActiveSessionSending}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
@@ -8615,9 +8656,11 @@ export function App() {
           onToggleToolPanel={toggleToolPanel}
           onPlanItemStatusChange={changePlanItemStatus}
           onPlanAction={changePlan}
+          onPlanDecision={handlePlanDecision}
           planEditorRequest={planEditorRequest}
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
+          onCancelGoalComposer={() => setIsGoalComposerActive(false)}
           onRemoveQueuedMessage={removeQueuedChatMessage}
           onSteerQueuedMessage={steerQueuedChatMessage}
           onMutationApprovalAction={handleMutationApprovalAction}
