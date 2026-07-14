@@ -23,6 +23,26 @@ const releaseWorkflow = readFileSync(
   resolve(repoRoot, ".github/workflows/release.yml"),
   "utf8",
 );
+const ciWorkflow = readFileSync(
+  resolve(repoRoot, ".github/workflows/ci.yml"),
+  "utf8",
+);
+const cliPackager = readFileSync(
+  resolve(repoRoot, "scripts/package-cli-release.mjs"),
+  "utf8",
+);
+const cliFinalizer = readFileSync(
+  resolve(repoRoot, "scripts/finalize-cli-release.mjs"),
+  "utf8",
+);
+const macosReleaseVerifier = readFileSync(
+  resolve(repoRoot, "scripts/verify-macos-release.mjs"),
+  "utf8",
+);
+const homebrewFormula = readFileSync(
+  resolve(repoRoot, "packaging/homebrew/Formula/gyro.rb"),
+  "utf8",
+);
 
 const pubkey = config.plugins?.updater?.pubkey;
 const failures = [];
@@ -63,12 +83,22 @@ const versions = new Map([
   ["Tauri config", config.version],
 ]);
 const expectedVersion = rootPackage.version;
+const expectedTauriCliVersion = "2.11.4";
 for (const [label, version] of versions) {
   if (version !== expectedVersion) {
     failures.push(
       `${label} version ${version ?? "missing"} does not match ${expectedVersion}.`,
     );
   }
+}
+
+if (
+  desktopPackage.devDependencies?.["@tauri-apps/cli"] !==
+  expectedTauriCliVersion
+) {
+  failures.push(
+    `Desktop @tauri-apps/cli must be pinned to ${expectedTauriCliVersion} for the audited macOS certificate-import path.`,
+  );
 }
 
 const tag = process.env.GITHUB_REF_NAME;
@@ -78,6 +108,10 @@ if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
 
 for (const marker of [
   "needs: macos",
+  "Verify pinned Tauri release toolchain",
+  'tauri --version)" = "tauri-cli 2.11.4"',
+  "group: release-${{ github.ref }}",
+  "cancel-in-progress: false",
   "actions/upload-artifact@v4",
   "actions/download-artifact@v4",
   "merge-multiple: true",
@@ -89,9 +123,125 @@ for (const marker of [
   "updater_suffix: x64",
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
+  "runner: macos-15",
+  "runner: macos-15-intel",
+  "cargo build --release -p gyro-cli --target ${{ matrix.target }}",
+  "scripts/package-cli-release.mjs",
+  "gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz",
+  "scripts/finalize-cli-release.mjs",
+  "APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}",
+  "APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}",
+  "APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}",
+  "APPLE_ID: ${{ secrets.APPLE_ID }}",
+  "APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}",
+  "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}",
+  "Developer ID signed, notarized, and updater-signed",
+  "Notarize and staple signed DMGs",
+  'xcrun notarytool submit "$dmg"',
+  'test "$(jq -r \'.status\' "$RESULT")" = "Accepted"',
+  'xcrun stapler staple -v "$dmg"',
+  "Verify Apple signature, Gatekeeper, and notarization tickets",
+  "scripts/verify-macos-release.mjs",
+  'VERIFY_ARGS=(--app "$APP")',
+  'VERIFY_ARGS+=(--dmg "$dmg")',
+  "--json isDraft --jq '.isDraft'",
+  'if [ "$IS_DRAFT" != "true" ]',
+  "Refusing to overwrite published release",
+  'gh release edit "$GITHUB_REF_NAME"',
+  '--notes "$RELEASE_NOTES"',
 ]) {
   if (!releaseWorkflow.includes(marker)) {
     failures.push(`Release workflow is missing ${marker}.`);
+  }
+}
+
+const draftGuardIndex = releaseWorkflow.indexOf("--json isDraft");
+const releaseUploadIndex = releaseWorkflow.indexOf("gh release upload");
+if (
+  draftGuardIndex === -1 ||
+  releaseUploadIndex === -1 ||
+  draftGuardIndex > releaseUploadIndex
+) {
+  failures.push(
+    "Release workflow must verify an existing release is still a draft before uploading assets.",
+  );
+}
+
+for (const marker of [
+  'run("codesign", ["--verify", "--deep", "--strict"',
+  'details.includes("Authority=Developer ID Application:")',
+  'details.includes("Signature=adhoc")',
+  "TeamIdentifier=",
+  "hardened runtime",
+  'run("spctl", ["--assess", "--type", "execute"',
+  'run("xcrun", ["stapler", "validate", app])',
+  'run("xcrun", ["stapler", "validate", dmg])',
+]) {
+  if (!macosReleaseVerifier.includes(marker)) {
+    failures.push(`macOS release verifier is missing ${marker}.`);
+  }
+}
+
+for (const marker of [
+  "APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}",
+  "APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}",
+  "APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}",
+  "APPLE_ID: ${{ secrets.APPLE_ID }}",
+  "APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}",
+  "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}",
+]) {
+  const occurrences = releaseWorkflow.split(marker).length - 1;
+  if (occurrences < 2) {
+    failures.push(
+      `Release workflow must pass ${marker.split(":", 1)[0]} to both preflight and the Tauri build.`,
+    );
+  }
+}
+
+for (const marker of [
+  "cargo build -p gyro-cli",
+  "scripts/check-cli-release-packaging.mjs",
+]) {
+  if (!ciWorkflow.includes(marker)) {
+    failures.push(`CI workflow is missing ${marker}.`);
+  }
+}
+
+for (const marker of [
+  "gyro.cli.archive.v1",
+  "manifest.json",
+  "--verify",
+  "--run",
+  "doctor",
+  "completions",
+]) {
+  if (!cliPackager.includes(marker)) {
+    failures.push(`CLI release packager is missing ${marker}.`);
+  }
+}
+
+for (const marker of [
+  "SHA256SUMS",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "gyro.rb",
+  "generate_completions_from_executable",
+]) {
+  if (!cliFinalizer.includes(marker)) {
+    failures.push(`CLI release finalizer is missing ${marker}.`);
+  }
+}
+
+for (const marker of [
+  `version "${expectedVersion}"`,
+  "releases/download/v#{version}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz",
+  "releases/download/v#{version}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz",
+  "REPLACE_WITH_AARCH64_CLI_SHA256",
+  "REPLACE_WITH_X86_64_CLI_SHA256",
+  "generate_completions_from_executable",
+]) {
+  if (!homebrewFormula.includes(marker)) {
+    failures.push(`Homebrew Formula template is missing ${marker}.`);
   }
 }
 
@@ -107,6 +257,12 @@ if (process.env.CI) {
   for (const variable of [
     "TAURI_SIGNING_PRIVATE_KEY",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+    "APPLE_CERTIFICATE",
+    "APPLE_CERTIFICATE_PASSWORD",
+    "APPLE_SIGNING_IDENTITY",
+    "APPLE_ID",
+    "APPLE_PASSWORD",
+    "APPLE_TEAM_ID",
   ]) {
     if (!process.env[variable]?.trim()) {
       failures.push(`${variable} is missing from the release environment.`);
@@ -120,7 +276,7 @@ if (failures.length > 0) {
     console.error(`- ${failure}`);
   }
   console.error(
-    "\nGenerate keys with `pnpm --filter @gyro-dev/desktop tauri signer generate` and store the private key in CI secrets.",
+    "\nConfigure both the Tauri updater key and Apple Developer ID/notarization credentials in GitHub Actions before tagging a release.",
   );
   process.exit(1);
 }

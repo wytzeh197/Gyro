@@ -7,6 +7,7 @@ pub mod execution;
 pub mod harness;
 pub mod ipc;
 pub mod keychain;
+pub mod mutations;
 pub mod paths;
 pub mod policy;
 pub mod provider_health;
@@ -20,8 +21,8 @@ pub use account::{
     stored_account_session, token_storage_key, PkceFlow,
 };
 pub use automations::{
-    Automation, AutomationRun, AutomationRunStatus, AutomationSchedule, AutomationStatus,
-    AutomationStore, AutomationTriageState, CreateAutomationRequest,
+    Automation, AutomationExecutionContext, AutomationRun, AutomationRunStatus, AutomationSchedule,
+    AutomationStatus, AutomationStore, AutomationTriageState, CreateAutomationRequest,
 };
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
@@ -39,7 +40,22 @@ pub use harness::{
     FileEditProposalPayload, HarnessRunStatus, ProviderDiagnosticsPayload,
     ProviderResumeCursorPayload, ProviderRunPayload, TerminalRequestPayload, HARNESS_SCHEMA_V1,
 };
-pub use ipc::{AppNotification, AppNotificationKind};
+pub use ipc::{
+    AppNotification, AppNotificationKind, DesktopProviderApprovalBehavior,
+    DesktopProviderApprovalRequest, DesktopProviderApprovalResponse,
+    DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+};
+pub use mutations::{
+    apply_provider_mutation_transaction, apply_provider_mutation_transaction_with_cancellation,
+    begin_provider_mutation_transaction, begin_provider_mutation_transaction_with_cancellation,
+    decide_mutation_proposal, decide_mutation_proposal_with_cancellation,
+    mutation_approval_payload, mutation_decision_was_cancelled,
+    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
+    recover_provider_mutation_transactions, review_mutation_proposal, MutationDecision,
+    MutationDecisionResult, MutationReview, PendingProviderMutationCommit,
+    PreparedProviderMutationTransaction, ProviderFileChange, ProviderFileChangeKind,
+    ProviderMutationJournalContext, ProviderMutationRecoveryReport, ProviderMutationResult,
+};
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};
 pub use provider_health::{
@@ -52,8 +68,9 @@ pub use provider_stream::{
     extract_provider_text_value, ProviderTextChunk,
 };
 pub use sessions::{
-    CreateSessionContext, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
-    SessionOrigin, SessionStore, SessionWorkspaceMode,
+    CreateSessionContext, MutationProposal, MutationProposalOperation, MutationProposalStatus,
+    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode,
 };
 pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,

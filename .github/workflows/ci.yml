@@ -28,6 +28,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
+      - run: cargo build -p gyro-cli
+      - run: node scripts/check-cli-release-packaging.mjs
 
   tauri:
     name: Tauri build smoke

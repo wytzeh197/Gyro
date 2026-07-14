@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
 import type { Terminal as XTermInstance } from "@xterm/xterm";
@@ -12,6 +12,7 @@ import {
   AutomationsSurface,
   ChatSurface,
   CommandPaletteOverlay,
+  IdeStatusBar,
   IdeSurface,
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
@@ -25,6 +26,7 @@ import {
   createInitialWorkbenchState,
   createNotification,
   createTerminalPane,
+  isUserSelectedWorkspacePath,
   defaultCommandProfiles,
   getProviderModel,
   isProviderId,
@@ -32,10 +34,13 @@ import {
   normalizedConfig,
   parseProviderHealthOutput,
   providersForConfig,
+  sanitizeStoredIdeState,
   selectedReasoningEffort,
   workbenchReducer,
   type AppDestination,
   type Automation,
+  type BrowserPreviewCapture,
+  type BrowserPreviewDiagnostic,
   type ChatAttachment,
   type ChatMode,
   type ChatSidePanelId,
@@ -48,12 +53,14 @@ import {
   type GyroAccountSession,
   type GyroAccountStatus,
   type GyroConfig,
+  type GitBranchCatalog,
   type HarnessRunStatus,
   type IdeAssistantAction,
   type IdeAssistantRequest,
   type LanguageServerState,
   type OutputChannel,
   type ModelProviderConfig,
+  type NotificationPermissionState,
   type ProviderHealthDetails,
   type ProviderId,
   type ProviderUsageState,
@@ -129,6 +136,7 @@ type AppNotification = {
 type TerminalPaneSnapshot = {
   paneId: string;
   title: string;
+  profileId?: string | null;
   command: string;
   output: string;
   status: "running" | "done" | "failed";
@@ -229,6 +237,7 @@ type AutomationDraft = Pick<
   | "title"
   | "workspaceMode"
   | "worktreeName"
+  | "execution"
 >;
 
 type ModelStandardPrompt = {
@@ -305,6 +314,9 @@ type BrowserPreviewCheck = {
   reachable: boolean;
   statusCode?: number;
   message: string;
+  diagnostics: BrowserPreviewDiagnostic[];
+  diagnosticsSupported: boolean;
+  diagnosticsCaptured: boolean;
 };
 
 type ProviderUsageSnapshot = {
@@ -482,6 +494,8 @@ export function App() {
   const eventsRef = useRef<SessionEvent[]>([]);
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
   const [workspacePath, setWorkspacePath] = useState<string>();
+  const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
+  const [isBranchLoading, setIsBranchLoading] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
   const [editorRevealTarget, setEditorRevealTarget] =
@@ -516,6 +530,9 @@ export function App() {
     setTerminalSourceControlLoadingPaneId,
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermissionState>("prompt");
+  const [isTestingNotification, setIsTestingNotification] = useState(false);
   const [providerUsageByProvider, setProviderUsageByProvider] = useState<
     Partial<Record<ProviderId, ProviderUsageState>>
   >({});
@@ -530,6 +547,7 @@ export function App() {
   const selectedTerminalPaneIdRef = useRef(workbench.selectedTerminalPaneId);
   const terminalPanesRef = useRef(workbench.terminalPanes);
   const terminalSourceControlRequestRef = useRef<Record<string, number>>({});
+  const branchCatalogRequestRef = useRef(0);
   const [accountStatus, setAccountStatus] =
     useState<GyroAccountStatus>("checking");
   const [accountSession, setAccountSession] = useState<GyroAccountSession>({
@@ -552,6 +570,11 @@ export function App() {
   const sendingSessionIdsRef = useRef(new Set<string>());
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [planEditorRequest, setPlanEditorRequest] = useState<{
+    kind: "goal" | "item";
+    token: number;
+  }>();
+  const planEditorRequestTokenRef = useRef(0);
   const [modelStandardPrompt, setModelStandardPrompt] =
     useState<ModelStandardPrompt>();
   const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
@@ -721,6 +744,45 @@ export function App() {
     },
     [],
   );
+  useEffect(() => {
+    if (
+      activeDestination !== "settings" ||
+      workbench.preferences.lastSettingsSection !== "permissions" ||
+      !isTauriRuntime()
+    ) {
+      return;
+    }
+    void invoke<NotificationPermissionState>("get_notification_permission")
+      .then(setNotificationPermission)
+      .catch(() => undefined);
+  }, [activeDestination, workbench.preferences.lastSettingsSection]);
+  const testSystemNotification = useCallback(async () => {
+    if (isTestingNotification) return;
+    setIsTestingNotification(true);
+    try {
+      const permission = isTauriRuntime()
+        ? await invoke<NotificationPermissionState>("test_notification")
+        : "granted";
+      setNotificationPermission(permission);
+      if (permission === "granted") {
+        notify(
+          "terminal",
+          "Notification test sent",
+          "Gyro can report automation outcomes in the background.",
+        );
+      } else {
+        notify(
+          "command-failed",
+          "Notifications are blocked",
+          "Enable Gyro in macOS System Settings, then test again.",
+        );
+      }
+    } catch (error) {
+      notify("command-failed", "Notification test failed", String(error));
+    } finally {
+      setIsTestingNotification(false);
+    }
+  }, [isTestingNotification, notify]);
   const refreshProviderUsage = useCallback(
     async (providerId: ProviderId, showFailureNotification = false) => {
       const request = ++providerUsageRequestRef.current;
@@ -1256,6 +1318,40 @@ export function App() {
     };
   }, [flushProviderStreamBatches, queueProviderChatStreamEvent]);
 
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let isMounted = true;
+    let unlistenProviderApproval: (() => void) | undefined;
+    void listen<SessionEvent>("gyro://provider-approval-event", (event) => {
+      if (!isMounted) return;
+      const approvalEvent = event.payload;
+      const sessionId = approvalEvent.sessionId;
+      const mergeEvent = (items: SessionEvent[]) =>
+        limitSessionEventsForUi(
+          mergePersistedAndOptimisticEvents(items, [approvalEvent]),
+        );
+      optimisticEventsRef.current.set(
+        sessionId,
+        mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+      );
+      if (sessionId === activeSessionId) {
+        setEvents((current) => mergeEvent(current));
+      }
+    }).then((unlisten) => {
+      if (!isMounted) {
+        unlisten();
+        return;
+      }
+      unlistenProviderApproval = unlisten;
+    });
+    return () => {
+      isMounted = false;
+      unlistenProviderApproval?.();
+    };
+  }, [activeSessionId]);
+
   const applyProviderChatResponse = useCallback(
     (sessionId: string, response?: ProviderChatResponse) => {
       const updatedSession = response?.session;
@@ -1357,7 +1453,6 @@ export function App() {
       return;
     }
     try {
-      await invoke<number>(AUTOMATION_SCHEDULER_COMMANDS.recoverLeases);
       const automations = await invoke<Automation[]>(
         AUTOMATION_SCHEDULER_COMMANDS.list,
       );
@@ -1370,6 +1465,32 @@ export function App() {
       );
     }
   }, [notify]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let mounted = true;
+    let unlistenAutomation: (() => void) | undefined;
+    void listen<Automation>("gyro://automation-updated", (event) => {
+      if (!mounted) return;
+      dispatchWorkbench({
+        type: "upsert-automation",
+        automation: event.payload,
+      });
+      void refreshSessions();
+    }).then((unlisten) => {
+      if (!mounted) {
+        unlisten();
+        return;
+      }
+      unlistenAutomation = unlisten;
+    });
+    return () => {
+      mounted = false;
+      unlistenAutomation?.();
+    };
+  }, [refreshSessions]);
 
   const refreshConfig = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -1409,6 +1530,14 @@ export function App() {
     );
     dispatchWorkbench({ type: "open-tool-panel", tab });
   }, []);
+
+  const toggleToolPanel = useCallback(() => {
+    if (workbench.isToolPanelOpen) {
+      dispatchWorkbench({ type: "close-tool-panel" });
+      return;
+    }
+    openToolPanel(workbench.activePaneTab);
+  }, [openToolPanel, workbench.activePaneTab, workbench.isToolPanelOpen]);
 
   const revealToolPanel = useCallback(() => {
     setToolPanelHeight((current) =>
@@ -1471,6 +1600,120 @@ export function App() {
         }),
       );
   }, []);
+
+  const refreshWorkspaceBranches = useCallback(async (root?: string) => {
+    const requestId = branchCatalogRequestRef.current + 1;
+    branchCatalogRequestRef.current = requestId;
+    if (!root) {
+      setBranchCatalog(undefined);
+      setIsBranchLoading(false);
+      return;
+    }
+    setIsBranchLoading(true);
+    if (!isTauriRuntime()) {
+      setBranchCatalog({
+        available: true,
+        current: "main",
+        branches: ["main"],
+      });
+      setIsBranchLoading(false);
+      return;
+    }
+    try {
+      const catalog = await invoke<GitBranchCatalog>("git_branches", {
+        workspacePath: root,
+      });
+      if (branchCatalogRequestRef.current === requestId) {
+        setBranchCatalog(catalog);
+      }
+    } catch (error) {
+      if (branchCatalogRequestRef.current === requestId) {
+        setBranchCatalog({
+          available: false,
+          branches: [],
+          error: String(error),
+        });
+      }
+    } finally {
+      if (branchCatalogRequestRef.current === requestId) {
+        setIsBranchLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshWorkspaceBranches(
+      activeSession?.workspacePath ?? workspacePath,
+    );
+  }, [activeSession?.workspacePath, refreshWorkspaceBranches, workspacePath]);
+
+  const switchWorkspaceBranch = useCallback(
+    async (branch: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root) {
+        notify(
+          "command-failed",
+          "Choose a workspace",
+          "Select a Git repository before choosing a branch.",
+        );
+        return;
+      }
+      if (workbench.workspaceMode === "worktree") {
+        notify(
+          "command-failed",
+          "Worktree branch is fixed",
+          "Start a local chat to switch the shared workspace branch.",
+        );
+        return;
+      }
+      if (
+        (activeSessionId &&
+          sendingSessionIdsRef.current.has(activeSessionId)) ||
+        isStartingFirstTurn
+      ) {
+        notify(
+          "command-failed",
+          "Branch is busy",
+          "Wait for the active turn to finish before switching branches.",
+        );
+        return;
+      }
+      setIsBranchLoading(true);
+      try {
+        const catalog = isTauriRuntime()
+          ? await invoke<GitBranchCatalog>("git_checkout_branch", {
+              request: { workspacePath: root, branch },
+            })
+          : { available: true, current: branch, branches: [branch] };
+        setBranchCatalog(catalog);
+        if (activeSessionId && isTauriRuntime()) {
+          await invoke<Session>("set_session_branch", {
+            sessionId: activeSessionId,
+            branch,
+          });
+          await refreshSessions();
+        }
+        refreshIdeSourceControl(root);
+        notify("terminal", "Branch switched", branch);
+      } catch (error) {
+        notify("command-failed", "Could not switch branch", String(error));
+        await refreshWorkspaceBranches(root);
+      } finally {
+        setIsBranchLoading(false);
+      }
+    },
+    [
+      activeSession?.workspacePath,
+      activeSessionId,
+      isStartingFirstTurn,
+      notify,
+      refreshIdeSourceControl,
+      refreshSessions,
+      refreshWorkspaceBranches,
+      workbench.workspaceMode,
+      workspacePath,
+    ],
+  );
 
   const refreshIdeServices = useCallback(
     (root?: string) => {
@@ -2006,7 +2249,14 @@ export function App() {
       if (!root || !fromPath) {
         return;
       }
-      if (workbench.ide.buffers[fromPath]?.status === "dirty") {
+      const affectedEditorPaths = workbench.ide.tabs
+        .map((tab) => tab.path)
+        .filter((path) => editorPathMatches(path, fromPath));
+      if (
+        affectedEditorPaths.some(
+          (path) => workbench.ide.buffers[path]?.status === "dirty",
+        )
+      ) {
         notify(
           "command-failed",
           "Rename blocked",
@@ -2041,13 +2291,10 @@ export function App() {
           return;
         }
       }
-      if (workbench.ide.buffers[fromPath]) {
-        dispatchWorkbench({ type: "ide-close-tab", path: fromPath });
-        setSelectedFile(toPath);
-        dispatchWorkbench({
-          type: "ide-open-tab",
-          tab: { path: toPath, title: workspaceName(toPath), dirty: false },
-        });
+      dispatchWorkbench({ type: "ide-rename-path", fromPath, toPath });
+      disposeEditorModels(affectedEditorPaths);
+      if (selectedFile && editorPathMatches(selectedFile, fromPath)) {
+        setSelectedFile(renameEditorPath(selectedFile, fromPath, toPath));
       }
       notify("tests-passed", "Path renamed", toPath);
     },
@@ -2058,7 +2305,9 @@ export function App() {
       activeChatMode,
       notify,
       refreshWorkspaceTree,
+      selectedFile,
       workbench.ide.buffers,
+      workbench.ide.tabs,
       workspacePath,
     ],
   );
@@ -2069,8 +2318,15 @@ export function App() {
       if (!root || !path) {
         return;
       }
+      const affectedEditorPaths = workbench.ide.tabs
+        .map((tab) => tab.path)
+        .filter((tabPath) => editorPathMatches(tabPath, path));
       const buffer = workbench.ide.buffers[path];
-      if (buffer?.status === "dirty") {
+      if (
+        affectedEditorPaths.some(
+          (editorPath) => workbench.ide.buffers[editorPath]?.status === "dirty",
+        )
+      ) {
         notify(
           "command-failed",
           "Delete blocked",
@@ -2102,8 +2358,9 @@ export function App() {
           return;
         }
       }
-      dispatchWorkbench({ type: "ide-close-tab", path });
-      if (selectedFile === path) {
+      dispatchWorkbench({ type: "ide-delete-path", path });
+      disposeEditorModels(affectedEditorPaths);
+      if (selectedFile && editorPathMatches(selectedFile, path)) {
         setSelectedFile(undefined);
       }
       notify("tests-passed", "Path deleted", path);
@@ -2114,6 +2371,7 @@ export function App() {
       refreshWorkspaceTree,
       selectedFile,
       workbench.ide.buffers,
+      workbench.ide.tabs,
       workspacePath,
     ],
   );
@@ -2274,10 +2532,10 @@ export function App() {
     [notify, refreshIdeServices],
   );
 
-  const openWorkspace = useCallback(async () => {
+  const openWorkspace = useCallback(async (): Promise<boolean> => {
     if (!isTauriRuntime()) {
       await activateWorkspacePath(PREVIEW_WORKSPACE_PATH);
-      return;
+      return true;
     }
     try {
       const selected = await open({
@@ -2286,13 +2544,17 @@ export function App() {
         title: "Open workspace",
       });
       if (typeof selected !== "string") {
-        return;
+        return false;
       }
       await activateWorkspacePath(selected);
+      return true;
     } catch {
-      setWorkspacePath(PREVIEW_WORKSPACE_PATH);
-      setFiles(previewFiles);
-      notify("command-failed", "Workspace open failed", "Using preview files");
+      notify(
+        "command-failed",
+        "Workspace open failed",
+        "The current chat was left unchanged.",
+      );
+      return false;
     }
   }, [activateWorkspacePath, notify]);
 
@@ -2391,6 +2653,7 @@ export function App() {
         sessionLayout,
         workbench.workspaceMode,
         selectedSessionModelFromConfig(config),
+        workspacePath ?? "",
         "New chat",
       );
       setWorkspacePath(session.workspacePath);
@@ -2440,6 +2703,7 @@ export function App() {
         sessionLayout,
         workbench.workspaceMode,
         selectedSessionModelFromConfig(config),
+        workspacePath ?? "",
         "New chat",
       );
       setWorkspacePath(session.workspacePath);
@@ -2457,11 +2721,21 @@ export function App() {
     setIsStartingFirstTurn(false);
     setActiveSessionId(undefined);
     setEvents([]);
-    resetChatDraft();
+    setChatDrafts((current) => ({
+      ...current,
+      ...(activeSessionId ? { [activeSessionId]: "" } : {}),
+      [NEW_CHAT_DRAFT_KEY]: "",
+    }));
+    setChatAttachments((current) => ({
+      ...current,
+      ...(activeSessionId ? { [activeSessionId]: [] } : {}),
+      [NEW_CHAT_DRAFT_KEY]: [],
+    }));
+    setDraftResetToken((token) => token + 1);
     dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
     dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     dispatchWorkbench({ type: "close-tool-panel" });
-  }, [resetChatDraft]);
+  }, [activeSessionId]);
 
   const pinSession = useCallback(
     (sessionId: string) => {
@@ -2691,6 +2965,7 @@ export function App() {
               cols: size?.cols,
               command: process.command,
               paneId,
+              profileId: profile.id,
               rows: size?.rows,
               title: profile.displayName,
               workspacePath: activeSession?.workspacePath ?? workspacePath,
@@ -3470,24 +3745,31 @@ export function App() {
       const setComposerWorkspaceMode = (
         nextMode: WorkbenchState["workspaceMode"],
       ) => {
-        dispatchWorkbench({ type: "set-workbench-mode", mode: nextMode });
-        dispatchWorkbench({ type: "close-tool-panel" });
+        const applyWorkspaceMode = () => {
+          dispatchWorkbench({ type: "set-workbench-mode", mode: nextMode });
+          dispatchWorkbench({ type: "close-tool-panel" });
+          notify(
+            "terminal",
+            nextMode === "worktree" ? "Worktree mode" : "Local mode",
+            nextMode === "worktree"
+              ? "New runs will create an isolated worktree branch."
+              : "New runs will use the current workspace branch.",
+          );
+        };
         if (nextMode === "worktree" && !currentWorkspacePath) {
           notify(
             "terminal",
             "Choose a workspace",
             "Worktree mode needs a repo or folder before the chat starts.",
           );
-          void openWorkspace();
+          void openWorkspace().then((selected) => {
+            if (selected) {
+              applyWorkspaceMode();
+            }
+          });
           return;
         }
-        notify(
-          "terminal",
-          nextMode === "worktree" ? "Worktree mode" : "Local mode",
-          nextMode === "worktree"
-            ? "New runs will create an isolated worktree branch."
-            : "New runs will use the current workspace branch.",
-        );
+        applyWorkspaceMode();
       };
 
       if (action.startsWith("select-provider:")) {
@@ -3562,6 +3844,51 @@ export function App() {
         return;
       }
 
+      if (action === "new-chat-select-workspace") {
+        void openWorkspace().then((selected) => {
+          if (selected) {
+            startNewChat();
+          }
+        });
+        return;
+      }
+
+      if (action === "new-local-chat-select-workspace") {
+        void openWorkspace().then((selected) => {
+          if (selected) {
+            startNewChat();
+            dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
+          }
+        });
+        return;
+      }
+
+      if (action.startsWith("start-new-chat-mode:")) {
+        const nextMode = action.replace("start-new-chat-mode:", "");
+        if (nextMode === "local" || nextMode === "worktree") {
+          startNewChat();
+          setComposerWorkspaceMode(nextMode);
+        }
+        return;
+      }
+
+      if (action.startsWith("select-branch:")) {
+        const encodedBranch = action.replace("select-branch:", "");
+        try {
+          const branch = decodeURIComponent(encodedBranch);
+          if (branch) {
+            void switchWorkspaceBranch(branch);
+          }
+        } catch {
+          notify(
+            "command-failed",
+            "Invalid branch",
+            "The branch name could not be read.",
+          );
+        }
+        return;
+      }
+
       if (action.startsWith("remove-saved-project:")) {
         const encodedPath = action.replace("remove-saved-project:", "");
         try {
@@ -3633,60 +3960,19 @@ export function App() {
           break;
         case "add-goal":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
-          {
-            const text = window
-              .prompt("Session goal", activeSessionGoal?.text ?? "")
-              ?.trim();
-            if (text !== undefined && text.length > 0) {
-              if (!activeSessionId) {
-                setPendingNewChatGoal({ text, status: "active" });
-                break;
-              }
-              void invoke<SessionEvent>("append_chat_context_event", {
-                sessionId: activeSessionId,
-                eventKind: "goal-updated",
-                message: `Goal set: ${text}`,
-                payload: {
-                  action: "set",
-                  text,
-                  status: "active",
-                  sourceTurnId: workbench.activeTurn?.id,
-                },
-              }).then(() => refreshEvents(activeSessionId));
-            }
-          }
+          planEditorRequestTokenRef.current += 1;
+          setPlanEditorRequest({
+            kind: "goal",
+            token: planEditorRequestTokenRef.current,
+          });
           break;
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
-          {
-            const title = window.prompt("Add plan item")?.trim();
-            if (title) {
-              if (!activeSessionId) {
-                setPendingNewChatPlan((current) => ({
-                  ...current,
-                  items: [
-                    ...current.items,
-                    {
-                      id: crypto.randomUUID(),
-                      title,
-                      status: "todo",
-                      createdAt: new Date().toISOString(),
-                      updatedAt: new Date().toISOString(),
-                    },
-                  ],
-                }));
-                break;
-              }
-              void invoke<SessionEvent>("append_plan_event", {
-                sessionId: activeSessionId,
-                message: `Plan item added: ${title}`,
-                payload: {
-                  action: "add-item",
-                  item: { id: crypto.randomUUID(), title, status: "todo" },
-                },
-              }).then(() => refreshEvents(activeSessionId));
-            }
-          }
+          planEditorRequestTokenRef.current += 1;
+          setPlanEditorRequest({
+            kind: "item",
+            token: planEditorRequestTokenRef.current,
+          });
           break;
         case "set-chat-mode-plan":
         case "set-chat-mode-normal":
@@ -3704,9 +3990,6 @@ export function App() {
               payload: { mode },
             }).then(() => refreshEvents(activeSessionId));
           }
-          break;
-        case "show-project-context":
-          void openWorkspace();
           break;
         case "search-workspace":
           setCommandPaletteQuery("");
@@ -3743,22 +4026,20 @@ export function App() {
             destination: "providers",
           });
           break;
-        case "select-workspace-mode": {
-          const nextMode =
-            workbench.workspaceMode === "local" ? "worktree" : "local";
-          setComposerWorkspaceMode(nextMode);
-          break;
-        }
         case "select-branch":
-          setComposerWorkspaceMode(
-            workbench.workspaceMode === "worktree" ? "local" : "worktree",
-          );
+          void refreshWorkspaceBranches(currentWorkspacePath);
           break;
         case "open-terminal-panel":
           openToolPanel("terminal");
           break;
         case "open-browser-panel":
           openToolPanel("browser");
+          break;
+        case "open-files":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
           break;
         default:
           notify("terminal", "Composer action", action);
@@ -3779,6 +4060,9 @@ export function App() {
       selectProvider,
       selectProviderModel,
       selectProviderReasoningEffort,
+      switchWorkspaceBranch,
+      refreshWorkspaceBranches,
+      startNewChat,
       selectChatAttachment,
       sessions,
       workbench.workspaceMode,
@@ -3852,19 +4136,17 @@ export function App() {
         );
         return;
       }
-      if (!checkProviderReadiness("chat")) {
-        return;
-      }
-      if (
-        workbench.workspaceMode === "worktree" &&
-        !(activeSession?.workspacePath ?? workspacePath)
-      ) {
+      const chatWorkspacePath = activeSession?.workspacePath ?? workspacePath;
+      if (!isUserSelectedWorkspacePath(chatWorkspacePath)) {
         notify(
-          "terminal",
-          "Choose a workspace",
-          "Worktree chats need a repo or folder before Gyro can create the branch.",
+          "command-failed",
+          "Choose a project",
+          "Select the folder Gyro should use before starting this chat.",
         );
         void openWorkspace();
+        return;
+      }
+      if (!checkProviderReadiness("chat")) {
         return;
       }
       const retryTurnId = overrideContext?.retryTurnId;
@@ -3905,6 +4187,7 @@ export function App() {
           "thread",
           workbench.workspaceMode,
           sessionModel,
+          chatWorkspacePath,
           provisionalTitle,
         );
         const optimisticEvents = createOptimisticTurnEvents(
@@ -3923,6 +4206,7 @@ export function App() {
         setSessions((current) => [session, ...current]);
         setActiveSessionId(session.id);
         setEvents(limitSessionEventsForUi(optimisticEvents));
+        resetChatDraft();
         notify("terminal", "Message sending", "Starting chat");
 
         if (!isTauriRuntime()) {
@@ -4038,7 +4322,6 @@ export function App() {
             message,
             turnId,
           });
-          resetChatDraft();
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
             {
@@ -4149,6 +4432,7 @@ export function App() {
             mergePersistedAndOptimisticEvents(current, optimisticEvents),
           ),
         );
+        resetChatDraft();
       }
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
@@ -4171,7 +4455,6 @@ export function App() {
             message,
             turnId,
           });
-          resetChatDraft();
         }
         const providerResponse = await invoke<ProviderChatResponse>(
           "run_provider_chat",
@@ -4322,6 +4605,98 @@ export function App() {
     [connectProvider, sendDraft],
   );
 
+  const handleMutationApprovalAction = useCallback(
+    async (proposalId: string, decision: "approve" | "reject") => {
+      if (!activeSessionId || !isTauriRuntime()) {
+        return;
+      }
+      try {
+        const result = await invoke<{
+          proposal: { path: string; status: string };
+        }>("resolve_file_mutation_proposal", {
+          request: { proposalId, decision },
+        });
+        await refreshEvents(activeSessionId);
+        if (result.proposal.status === "applied") {
+          await refreshWorkspaceTree();
+          refreshIdeSourceControl(
+            activeSession?.workspacePath ?? workspacePath,
+          );
+          notify("diff-ready", "Change applied", result.proposal.path);
+        } else if (result.proposal.status === "rejected") {
+          notify("approval", "Change rejected", result.proposal.path);
+        } else if (result.proposal.status === "failed") {
+          notify(
+            "command-failed",
+            "Change needs a new review",
+            result.proposal.path,
+          );
+        }
+      } catch (error) {
+        notify(
+          "command-failed",
+          "Could not resolve change",
+          error instanceof Error ? error.message : String(error),
+        );
+        await refreshEvents(activeSessionId);
+      }
+    },
+    [
+      activeSession?.workspacePath,
+      activeSessionId,
+      notify,
+      refreshEvents,
+      refreshIdeSourceControl,
+      refreshWorkspaceTree,
+      workspacePath,
+    ],
+  );
+
+  const handleProviderApprovalAction = useCallback(
+    async (approvalId: string, decision: "approve" | "reject") => {
+      if (!activeSessionId || !isTauriRuntime()) return;
+      try {
+        const event = await invoke<SessionEvent>("resolve_provider_approval", {
+          request: { approvalId, decision },
+        });
+        const changedPaths = (
+          event.payload as { changedPaths?: unknown } | undefined
+        )?.changedPaths;
+        if (decision === "approve" && Array.isArray(changedPaths)) {
+          await refreshWorkspaceTree();
+          refreshIdeSourceControl(
+            activeSession?.workspacePath ?? workspacePath ?? undefined,
+          );
+        }
+        notify(
+          "approval",
+          decision === "approve"
+            ? "Provider action approved"
+            : "Provider action rejected",
+          decision === "approve"
+            ? "The turn is continuing"
+            : "The provider will continue without it",
+        );
+      } catch (error) {
+        notify(
+          "command-failed",
+          "Could not resolve provider action",
+          error instanceof Error ? error.message : String(error),
+        );
+        await refreshEvents(activeSessionId);
+      }
+    },
+    [
+      activeSession?.workspacePath,
+      activeSessionId,
+      notify,
+      refreshEvents,
+      refreshIdeSourceControl,
+      refreshWorkspaceTree,
+      workspacePath,
+    ],
+  );
+
   const stopActiveChat = useCallback(() => {
     if (
       !activeSessionId ||
@@ -4360,6 +4735,33 @@ export function App() {
       } catch {
         setEvents((current) => [...current, event]);
         notify("command-failed", "Plan update fallback", message);
+      }
+    },
+    [activeSessionId, notify, refreshEvents],
+  );
+
+  const appendGoalEvent = useCallback(
+    async (payload: Record<string, unknown>, message: string) => {
+      if (!activeSessionId) {
+        notify("command-failed", "No active session", "Start a chat first");
+        return;
+      }
+      const event = createGoalSessionEvent(activeSessionId, message, payload);
+      if (!isTauriRuntime()) {
+        setEvents((current) => [...current, event]);
+        return;
+      }
+      try {
+        await invoke<SessionEvent>("append_chat_context_event", {
+          sessionId: activeSessionId,
+          eventKind: "goal-updated",
+          message,
+          payload,
+        });
+        await refreshEvents(activeSessionId);
+      } catch {
+        setEvents((current) => [...current, event]);
+        notify("command-failed", "Goal update fallback", message);
       }
     },
     [activeSessionId, notify, refreshEvents],
@@ -4408,7 +4810,12 @@ export function App() {
       setSelectedFile(path);
       dispatchWorkbench({
         type: "ide-open-tab",
-        tab: { path, title: workspaceName(path), dirty: false },
+        tab: {
+          path,
+          title: workspaceName(path),
+          dirty: false,
+          preview: true,
+        },
       });
       void appendEditorEvent("editor-file-opened", `Opened ${path}`, {
         path,
@@ -4431,15 +4838,100 @@ export function App() {
   );
 
   const closeEditorTab = useCallback(
-    (path: string) => {
-      dispatchWorkbench({ type: "ide-close-tab", path });
-      const remaining = workbench.ide.tabs.filter((tab) => tab.path !== path);
-      if (selectedFile === path) {
-        setSelectedFile(remaining[remaining.length - 1]?.path);
+    (path: string, groupId?: string) => {
+      const groupsWithPath = workbench.ide.layout.groups.filter((group) =>
+        group.tabs.some((tab) => tab.path === path),
+      );
+      const closesLastReference = !groupId || groupsWithPath.length <= 1;
+      if (
+        closesLastReference &&
+        workbench.ide.buffers[path]?.status === "dirty" &&
+        !window.confirm(`Discard unsaved changes in ${workspaceName(path)}?`)
+      ) {
+        return;
+      }
+      dispatchWorkbench({ type: "ide-close-tab", path, groupId });
+      if (closesLastReference) {
+        disposeEditorModels([path]);
+      }
+      if (
+        selectedFile === path &&
+        (!groupId || groupId === workbench.ide.layout.activeGroupId)
+      ) {
+        const nextPath = groupId
+          ? (workbench.ide.layout.groups
+              .find((group) => group.id === groupId)
+              ?.tabs.filter((tab) => tab.path !== path)
+              .at(-1)?.path ??
+            workbench.ide.layout.groups.find(
+              (group) =>
+                group.id !== groupId &&
+                group.tabs.some((tab) => tab.path === path),
+            )?.activePath)
+          : workbench.ide.tabs.filter((tab) => tab.path !== path).at(-1)?.path;
+        setSelectedFile(nextPath);
       }
     },
-    [selectedFile, workbench.ide.tabs],
+    [
+      selectedFile,
+      workbench.ide.buffers,
+      workbench.ide.layout.activeGroupId,
+      workbench.ide.layout.groups,
+      workbench.ide.tabs,
+    ],
   );
+
+  const closeEditorGroup = useCallback(
+    (groupId: string) => {
+      const group = workbench.ide.layout.groups.find(
+        (item) => item.id === groupId,
+      );
+      if (!group) {
+        return;
+      }
+      const remaining = workbench.ide.layout.groups.filter(
+        (item) => item.id !== groupId,
+      );
+      const pathsStillOpen = new Set(
+        remaining.flatMap((item) => item.tabs.map((tab) => tab.path)),
+      );
+      const dirtyPaths = group.tabs
+        .map((tab) => tab.path)
+        .filter(
+          (path) =>
+            !pathsStillOpen.has(path) &&
+            workbench.ide.buffers[path]?.status === "dirty",
+        );
+      if (
+        dirtyPaths.length > 0 &&
+        !window.confirm(
+          dirtyPaths.length === 1
+            ? `Discard unsaved changes in ${workspaceName(dirtyPaths[0] ?? "file")}?`
+            : `Discard unsaved changes in ${dirtyPaths.length} files?`,
+        )
+      ) {
+        return;
+      }
+      const nextGroup =
+        remaining.find(
+          (item) => item.id === workbench.ide.layout.activeGroupId,
+        ) ?? remaining[0];
+      dispatchWorkbench({ type: "ide-close-group", groupId });
+      disposeEditorModels(
+        group.tabs
+          .map((tab) => tab.path)
+          .filter((path) => !pathsStillOpen.has(path)),
+      );
+      if (groupId === workbench.ide.layout.activeGroupId) {
+        setSelectedFile(nextGroup?.activePath);
+      }
+    },
+    [workbench.ide.buffers, workbench.ide.layout],
+  );
+
+  const pinEditorTab = useCallback((path: string) => {
+    dispatchWorkbench({ type: "ide-pin-tab", path });
+  }, []);
 
   const updateEditorBuffer = useCallback((path: string, content: string) => {
     dispatchWorkbench({ type: "ide-update-buffer", path, content });
@@ -4644,10 +5136,11 @@ export function App() {
     (
       action: "add" | "edit" | "remove" | "move-up" | "move-down",
       itemId?: string,
+      value?: string,
     ) => {
       const item = activeSessionPlan.items.find((entry) => entry.id === itemId);
       if (action === "add") {
-        const title = window.prompt("Add plan item")?.trim();
+        const title = value?.trim();
         if (title && !activeSessionId) {
           const now = new Date().toISOString();
           setPendingNewChatPlan((current) => ({
@@ -4677,7 +5170,7 @@ export function App() {
       if (!activeSessionId) {
         setPendingNewChatPlan((current) => {
           if (action === "edit") {
-            const title = window.prompt("Edit plan item", item.title)?.trim();
+            const title = value?.trim();
             return title
               ? {
                   ...current,
@@ -4708,7 +5201,7 @@ export function App() {
         return;
       }
       if (action === "edit") {
-        const title = window.prompt("Edit plan item", item.title)?.trim();
+        const title = value?.trim();
         if (title)
           void appendPlanEvent(
             { action: "update-item", item: { ...item, title } },
@@ -4741,13 +5234,22 @@ export function App() {
   );
 
   const changeGoal = useCallback(
-    (action: "edit" | "complete" | "clear") => {
-      if (!activeSessionGoal) return;
+    (
+      action: "set" | "edit" | "complete" | "reopen" | "clear",
+      value?: string,
+    ) => {
+      if (action !== "set" && !activeSessionGoal) return;
       const text =
-        action === "edit"
-          ? window.prompt("Session goal", activeSessionGoal.text)?.trim()
-          : activeSessionGoal.text;
-      if (action === "edit" && !text) return;
+        action === "set" || action === "edit"
+          ? value?.trim()
+          : activeSessionGoal?.text;
+      if ((action === "set" || action === "edit") && !text) return;
+      const status =
+        action === "complete"
+          ? "complete"
+          : action === "set" || action === "reopen"
+            ? "active"
+            : (activeSessionGoal?.status ?? "active");
       if (!activeSessionId) {
         setPendingNewChatGoal(
           action === "clear"
@@ -4755,8 +5257,7 @@ export function App() {
             : {
                 ...activeSessionGoal,
                 text: text!,
-                status:
-                  action === "complete" ? "complete" : activeSessionGoal.status,
+                status,
               },
         );
         return;
@@ -4767,22 +5268,21 @@ export function App() {
           : {
               action: "set",
               text,
-              status:
-                action === "complete" ? "complete" : activeSessionGoal.status,
+              status,
             };
-      void invoke<SessionEvent>("append_chat_context_event", {
-        sessionId: activeSessionId,
-        eventKind: "goal-updated",
-        message:
-          action === "clear"
-            ? "Goal cleared"
-            : action === "complete"
-              ? `Goal completed: ${text}`
-              : `Goal updated: ${text}`,
-        payload,
-      }).then(() => refreshEvents(activeSessionId));
+      const message =
+        action === "clear"
+          ? "Goal cleared"
+          : action === "complete"
+            ? `Goal completed: ${text}`
+            : action === "reopen"
+              ? `Goal reopened: ${text}`
+              : action === "set"
+                ? `Goal set: ${text}`
+                : `Goal updated: ${text}`;
+      void appendGoalEvent(payload, message);
     },
-    [activeSessionGoal, activeSessionId, refreshEvents],
+    [activeSessionGoal, activeSessionId, appendGoalEvent],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -5018,16 +5518,38 @@ export function App() {
   }, []);
 
   const requestCloseTerminalPane = useCallback(
-    (paneId: string) => {
+    async (paneId: string) => {
       const pane = workbench.terminalPanes.find((item) => item.id === paneId);
       if (!pane) {
         return;
       }
       if (pane.status === "running" || pane.status === "waiting") {
+        if (isPlainShellTerminal(pane)) {
+          if (!isTauriRuntime()) {
+            await closeTerminalPane(paneId);
+            return;
+          }
+          try {
+            const hasForegroundJob = await invoke<boolean>(
+              "terminal_pane_has_foreground_job",
+              { paneId },
+            );
+            if (!hasForegroundJob) {
+              await closeTerminalPane(paneId);
+              return;
+            }
+          } catch (error) {
+            if (terminalPaneProcessIsMissing(error)) {
+              await closeTerminalPane(paneId);
+              return;
+            }
+            // If activity cannot be determined, keep the protective confirmation.
+          }
+        }
         setTerminalTerminateCandidate(pane);
         return;
       }
-      void closeTerminalPane(paneId);
+      await closeTerminalPane(paneId);
     },
     [closeTerminalPane, workbench.terminalPanes],
   );
@@ -5159,6 +5681,62 @@ export function App() {
     }
   }, [notify, workbench.browserPreview.url]);
 
+  const captureBrowserPreview = useCallback(
+    async (action: "capture" | "reveal" = "capture") => {
+      if (action === "reveal") {
+        const path = workbench.browserPreview.latestCapture?.path;
+        if (!path) return;
+        try {
+          await revealItemInDir(path);
+        } catch (error) {
+          notify(
+            "command-failed",
+            "Could not reveal screenshot",
+            String(error),
+          );
+        }
+        return;
+      }
+
+      dispatchWorkbench({ type: "browser-capture-start" });
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "browser-capture-failure",
+          error: "Preview screenshots require the Gyro desktop app",
+        });
+        return;
+      }
+      try {
+        const capture = await invoke<BrowserPreviewCapture>(
+          "capture_browser_preview",
+          {
+            request: {
+              device: workbench.browserPreview.device,
+              url: normalizedPreviewUrl(workbench.browserPreview.url),
+            },
+          },
+        );
+        dispatchWorkbench({
+          type: "browser-capture-success",
+          capture,
+        });
+      } catch (error) {
+        const message = String(error);
+        dispatchWorkbench({
+          type: "browser-capture-failure",
+          error: message,
+        });
+        notify("command-failed", "Screenshot failed", message);
+      }
+    },
+    [
+      notify,
+      workbench.browserPreview.device,
+      workbench.browserPreview.latestCapture?.path,
+      workbench.browserPreview.url,
+    ],
+  );
+
   useEffect(() => {
     if (workbench.browserPreview.status !== "loading") return;
     const controller = new AbortController();
@@ -5180,6 +5758,9 @@ export function App() {
             ({
               reachable: true,
               message: "Local preview reachable",
+              diagnostics: [],
+              diagnosticsSupported: false,
+              diagnosticsCaptured: false,
             }) satisfies BrowserPreviewCheck,
         );
 
@@ -5188,8 +5769,16 @@ export function App() {
         if (disposed) return;
         dispatchWorkbench({
           type: "browser-status",
-          status: result.reachable ? "ready" : "verification-failed",
+          status: !result.reachable
+            ? "verification-failed"
+            : result.diagnostics.length > 0
+              ? "console-error"
+              : "ready",
           message: result.message,
+          consoleErrors: result.diagnostics.length,
+          diagnostics: result.diagnostics,
+          diagnosticsSupported: result.diagnosticsSupported,
+          diagnosticsCaptured: result.diagnosticsCaptured,
         });
       })
       .catch((error) => {
@@ -5317,7 +5906,48 @@ export function App() {
   );
 
   const createAutomation = useCallback(async () => {
-    const draft = createAutomationDraft(workbench.workspaceMode);
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root) {
+      notify(
+        "command-failed",
+        "Choose a workspace first",
+        "Automations need a concrete local folder before they can run",
+      );
+      return;
+    }
+    const providerConfigs = providersForConfig(config);
+    const provider =
+      providerConfigs.find(
+        (item) => item.id === config.selectedProviderId && item.enabled,
+      ) ?? providerConfigs.find((item) => item.enabled);
+    if (!provider || !EXECUTABLE_PROVIDER_IDS.has(provider.id)) {
+      notify(
+        "provider",
+        "Connect a provider first",
+        "Automations currently run through OpenAI Codex or Anthropic Claude",
+      );
+      return;
+    }
+    const providerHealth = workbench.providerStatuses.find(
+      (status) => status.id === provider.id,
+    );
+    const providerReady =
+      provider.authStatus === "connected" ||
+      (providerHealth?.connectionStatus === "connected" &&
+        providerHealth.runtimeStatus === "ready");
+    if (!providerReady) {
+      notify(
+        "provider",
+        `${provider.displayName} is not connected`,
+        "Connect the provider before scheduling unattended work",
+      );
+      return;
+    }
+    const draft = createAutomationDraft(
+      workbench.workspaceMode,
+      root,
+      provider,
+    );
 
     if (isTauriRuntime()) {
       try {
@@ -5339,7 +5969,14 @@ export function App() {
     const automation = createPreviewAutomation(draft);
     dispatchWorkbench({ type: "create-automation", automation });
     notify("terminal", "Automation created", automation.title);
-  }, [notify, workbench.workspaceMode]);
+  }, [
+    activeSession?.workspacePath,
+    config,
+    notify,
+    workbench.providerStatuses,
+    workbench.workspaceMode,
+    workspacePath,
+  ]);
 
   const runAutomation = useCallback(
     async (automationId: string) => {
@@ -5350,33 +5987,13 @@ export function App() {
         notify("command-failed", "Automation not found", automationId);
         return;
       }
-      const profileId = automation.provider.toLowerCase().includes("claude")
-        ? "claude"
-        : "codex";
-      const profile = getCommandProfile(commandProfiles, profileId);
-      const paneId = `pane-automation-${Date.now()}`;
-      const started = await launchTerminalPane({
-        paneId,
-        profile: {
-          ...profile,
-          args: [...profile.args, automation.prompt],
-        },
-        startingOutput: `Starting ${automation.title}`,
-      });
-      if (!started) {
-        notify("command-failed", "Automation run failed", automation.title);
-        return;
-      }
-      const summary = `${profile.displayName} started in terminal pane`;
-
       if (isTauriRuntime()) {
         try {
           const updated = await invoke<Automation>("run_automation", {
             automationId,
-            summary,
           });
           dispatchWorkbench({ type: "upsert-automation", automation: updated });
-          notify("terminal", "Automation running", updated.title);
+          notify("terminal", "Automation queued", updated.title);
         } catch {
           notify(
             "command-failed",
@@ -5390,11 +6007,11 @@ export function App() {
       dispatchWorkbench({
         type: "run-automation",
         automationId,
-        summary,
+        summary: "Preview automation completed",
       });
-      notify("terminal", "Automation running", automation.title);
+      notify("terminal", "Automation completed", automation.title);
     },
-    [commandProfiles, launchTerminalPane, notify, workbench.automations],
+    [notify, workbench.automations],
   );
 
   const toggleAutomation = useCallback(
@@ -5402,7 +6019,10 @@ export function App() {
       const automation = workbench.automations.find(
         (item) => item.id === automationId,
       );
-      const status = automation?.status === "paused" ? "current" : "paused";
+      const status =
+        automation?.status === "paused" || automation?.status === "completed"
+          ? "current"
+          : "paused";
 
       if (isTauriRuntime()) {
         try {
@@ -5413,7 +6033,11 @@ export function App() {
           dispatchWorkbench({ type: "upsert-automation", automation: updated });
           notify(
             "terminal",
-            status === "paused" ? "Automation paused" : "Automation resumed",
+            status === "paused"
+              ? "Automation paused"
+              : automation?.status === "completed"
+                ? "Automation reactivated"
+                : "Automation resumed",
             updated.title,
           );
         } catch {
@@ -5433,7 +6057,11 @@ export function App() {
       });
       notify(
         "terminal",
-        status === "paused" ? "Automation paused" : "Automation resumed",
+        status === "paused"
+          ? "Automation paused"
+          : automation?.status === "completed"
+            ? "Automation reactivated"
+            : "Automation resumed",
         automation?.title ?? automationId,
       );
     },
@@ -5798,6 +6426,24 @@ export function App() {
       .then((snapshots) => {
         if (cancelled) {
           return;
+        }
+        const livePaneIds = new Set(
+          snapshots
+            .filter((snapshot) => snapshot.status === "running")
+            .map((snapshot) => snapshot.paneId),
+        );
+        for (const pane of terminalPanesRef.current) {
+          if (
+            (pane.status === "running" || pane.status === "waiting") &&
+            !livePaneIds.has(pane.id)
+          ) {
+            dispatchWorkbench({
+              type: "set-terminal-pane-status",
+              paneId: pane.id,
+              status: "restored",
+              event: "restored snapshot; restart to reconnect",
+            });
+          }
         }
         for (const snapshot of snapshots) {
           dispatchWorkbench({
@@ -6620,12 +7266,30 @@ export function App() {
 
   useEffect(() => {
     const activeTurnId = workbench.activeTurn?.id ?? derivedActiveTurn?.id;
-    const freshEvents = deferredEventsForTurn.filter(
-      (event) =>
-        (event.kind === "file-edit-proposed" ||
-          event.kind === "approval-requested") &&
-        !ingestedSessionEventIds.current.has(event.id),
+    const resolvedMutationProposalIds = new Set(
+      deferredEventsForTurn
+        .filter((event) => event.kind === "system-event")
+        .map((event) => recordFromUnknown(event.payload))
+        .filter(
+          (payload) =>
+            stringFromRecord(payload, "kind") === "mutation-approval" &&
+            stringFromRecord(payload, "status") !== "pending",
+        )
+        .map((payload) => stringFromRecord(payload, "proposalId"))
+        .filter((proposalId): proposalId is string => Boolean(proposalId)),
     );
+    const freshEvents = deferredEventsForTurn.filter((event) => {
+      if (
+        (event.kind !== "file-edit-proposed" &&
+          event.kind !== "approval-requested") ||
+        ingestedSessionEventIds.current.has(event.id)
+      ) {
+        return false;
+      }
+      const payload = recordFromUnknown(event.payload);
+      const proposalId = stringFromRecord(payload, "proposalId");
+      return !proposalId || !resolvedMutationProposalIds.has(proposalId);
+    });
     if (freshEvents.length === 0) {
       return;
     }
@@ -6737,9 +7401,7 @@ export function App() {
       }
       onBrowserOpenExternal={openBrowserPreviewExternal}
       onBrowserReload={() => dispatchWorkbench({ type: "browser-reload" })}
-      onBrowserScreenshot={() =>
-        dispatchWorkbench({ type: "browser-screenshot" })
-      }
+      onBrowserScreenshot={captureBrowserPreview}
       onBrowserUrlChange={(url) =>
         dispatchWorkbench({ type: "set-browser-url", url })
       }
@@ -6934,6 +7596,7 @@ export function App() {
       onOpenWorkspace={openWorkspace}
       onUpdateAction={runUpdateAction}
       onOpenWorkspaceFile={openEditorLocation}
+      onPinEditorTab={pinEditorTab}
       onRefreshWorkspace={refreshWorkspaceTree}
       onCreateWorkspacePath={createWorkspacePath}
       onRenameWorkspacePath={renameWorkspacePath}
@@ -6998,9 +7661,15 @@ export function App() {
                 draftResetToken={draftResetToken}
                 draft={activeChatDraft}
                 events={events}
-                branchName={activeSession?.branch}
+                branchName={
+                  workbench.workspaceMode === "local"
+                    ? (branchCatalog?.current ?? activeSession?.branch)
+                    : activeSession?.branch
+                }
+                branchCatalog={branchCatalog}
                 isEnvironmentRailOpen={activeChatPanel === "environment"}
                 isComposerSending={isActiveSessionSending}
+                isBranchLoading={isBranchLoading}
                 isToolPanelOpen={workbench.isToolPanelOpen}
                 maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
                 onboarding={workbench.onboarding}
@@ -7018,9 +7687,16 @@ export function App() {
                 onStopChat={stopActiveChat}
                 onContinueChat={() => void sendDraft("Continue")}
                 onOpenToolPanel={openToolPanel}
+                onToggleToolPanel={toggleToolPanel}
                 onPlanItemStatusChange={changePlanItemStatus}
                 onPlanAction={changePlan}
+                planEditorRequest={planEditorRequest}
+                onPlanEditorRequestHandled={() =>
+                  setPlanEditorRequest(undefined)
+                }
                 onGoalAction={changeGoal}
+                onMutationApprovalAction={handleMutationApprovalAction}
+                onProviderApprovalAction={handleProviderApprovalAction}
                 onProviderStatusAction={handleProviderStatusAction}
                 onSend={sendDraft}
                 onSetOnboardingStep={(step) =>
@@ -7042,6 +7718,7 @@ export function App() {
                 }}
                 sessionPlan={activeSessionPlan}
                 sessionGoal={activeSessionGoal}
+                sessionSummary={activeSession?.summary}
                 sessionTitle={activeSession?.title}
                 sourceControl={workbench.ide.sourceControl}
                 terminalPanes={workbench.terminalPanes}
@@ -7072,6 +7749,8 @@ export function App() {
                 fileLoadState={selectedFileLoadState}
                 files={files}
                 ide={workbench.ide}
+                workspacePath={activeSession?.workspacePath ?? workspacePath}
+                onOpenWorkspace={openWorkspace}
                 onAcceptAllDiffs={() =>
                   dispatchWorkbench({
                     type: "set-diff-review-state",
@@ -7104,9 +7783,7 @@ export function App() {
                 onBrowserReload={() =>
                   dispatchWorkbench({ type: "browser-reload" })
                 }
-                onBrowserScreenshot={() =>
-                  dispatchWorkbench({ type: "browser-screenshot" })
-                }
+                onBrowserScreenshot={captureBrowserPreview}
                 onBrowserUrlChange={(url) =>
                   dispatchWorkbench({ type: "set-browser-url", url })
                 }
@@ -7157,6 +7834,7 @@ export function App() {
                   dispatchWorkbench({ type: "select-diff-file", path })
                 }
                 onSelectFile={openEditorFile}
+                onPinEditorTab={pinEditorTab}
                 onSelectEditorGroup={(groupId) => {
                   const group = workbench.ide.layout.groups.find(
                     (item) => item.id === groupId,
@@ -7166,30 +7844,18 @@ export function App() {
                     setSelectedFile(group.activePath);
                   }
                 }}
-                onMoveEditorTab={(path, toGroupId) =>
+                onMoveEditorTab={(path, toGroupId, fromGroupId) =>
                   dispatchWorkbench({
                     type: "ide-move-tab",
                     path,
                     toGroupId,
+                    fromGroupId,
                   })
                 }
                 onSelectTerminalPane={(paneId) =>
                   dispatchWorkbench({ type: "select-terminal-pane", paneId })
                 }
-                onCloseEditorGroup={(groupId) => {
-                  const remaining = workbench.ide.layout.groups.filter(
-                    (group) => group.id !== groupId,
-                  );
-                  const nextGroup =
-                    remaining.find(
-                      (group) =>
-                        group.id === workbench.ide.layout.activeGroupId,
-                    ) ?? remaining[0];
-                  dispatchWorkbench({ type: "ide-close-group", groupId });
-                  if (nextGroup?.activePath) {
-                    setSelectedFile(nextGroup.activePath);
-                  }
-                }}
+                onCloseEditorGroup={closeEditorGroup}
                 onSplitEditorGroup={(direction) =>
                   dispatchWorkbench({ type: "ide-split-group", direction })
                 }
@@ -7231,7 +7897,9 @@ export function App() {
             </section>
           ) : null}
 
-          {activeWorkspaceLayout !== "terminal-grid" ? (
+          {activeWorkspaceLayout !== "terminal-grid" &&
+          (activeWorkspaceLayout !== "code" ||
+            Boolean(activeSession?.workspacePath ?? workspacePath)) ? (
             workbench.isToolPanelOpen ? (
               renderWorkspaceToolPanel(false)
             ) : (
@@ -7241,6 +7909,17 @@ export function App() {
                 onReveal={revealToolPanel}
               />
             )
+          ) : null}
+          {activeWorkspaceLayout === "code" ? (
+            <IdeStatusBar
+              activeBuffer={activeEditorBuffer}
+              editorSelection={workbench.ide.selection}
+              fileContent={selectedFileContent}
+              fileLoadState={selectedFileLoadState}
+              groupCount={Math.max(workbench.ide.layout.groups.length, 1)}
+              ide={workbench.ide}
+              selectedPath={selectedFile}
+            />
           ) : null}
         </div>
       ) : null}
@@ -7273,6 +7952,9 @@ export function App() {
                   )
               : notify("terminal", "Diagnostics exported", "Preview bundle")
           }
+          isTestingNotification={isTestingNotification}
+          notificationPermission={notificationPermission}
+          onTestNotification={() => void testSystemNotification()}
           onResetUiState={() => dispatchWorkbench({ type: "reset-state" })}
           onSectionChange={(section: SettingsSectionId) =>
             dispatchWorkbench({ type: "set-settings-section", section })
@@ -7382,8 +8064,15 @@ export function App() {
           draftResetToken={draftResetToken}
           draft={activeChatDraft}
           events={[]}
+          branchCatalog={branchCatalog}
+          branchName={
+            workbench.workspaceMode === "local"
+              ? (branchCatalog?.current ?? activeSession?.branch)
+              : activeSession?.branch
+          }
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isComposerSending={isActiveSessionSending}
+          isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           onboarding={workbench.onboarding}
@@ -7398,9 +8087,14 @@ export function App() {
           onStopChat={stopActiveChat}
           onContinueChat={() => void sendDraft("Continue")}
           onOpenToolPanel={openToolPanel}
+          onToggleToolPanel={toggleToolPanel}
           onPlanItemStatusChange={changePlanItemStatus}
           onPlanAction={changePlan}
+          planEditorRequest={planEditorRequest}
+          onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
+          onMutationApprovalAction={handleMutationApprovalAction}
+          onProviderApprovalAction={handleProviderApprovalAction}
           onProviderStatusAction={handleProviderStatusAction}
           onSend={sendDraft}
           onSetOnboardingStep={(step) =>
@@ -7575,7 +8269,7 @@ function loadInitialWorkbenchState(): WorkbenchState {
       automations,
       browserPreview,
       diffReview,
-      ide: sanitizeStoredIde(parsed.ide, base),
+      ide: sanitizeStoredIdeState(parsed.ide, base.ide),
       isToolPanelOpen,
       notifications: Array.isArray(parsed.notifications)
         ? parsed.notifications.filter(
@@ -7740,39 +8434,47 @@ function sanitizeStoredBrowserPreview(
   ) {
     return base.browserPreview;
   }
+  const diagnostics = Array.isArray(browserPreview.diagnostics)
+    ? browserPreview.diagnostics
+        .filter((diagnostic): diagnostic is BrowserPreviewDiagnostic =>
+          Boolean(
+            diagnostic &&
+            ["console-error", "page-error", "unhandled-rejection"].includes(
+              diagnostic.kind,
+            ) &&
+            typeof diagnostic.message === "string",
+          ),
+        )
+        .slice(0, 8)
+        .map((diagnostic) => ({
+          ...diagnostic,
+          message: truncatePersistedText(diagnostic.message, 400),
+          source:
+            typeof diagnostic.source === "string"
+              ? truncatePersistedText(diagnostic.source, 400)
+              : undefined,
+          line:
+            typeof diagnostic.line === "number" &&
+            Number.isFinite(diagnostic.line)
+              ? diagnostic.line
+              : undefined,
+          column:
+            typeof diagnostic.column === "number" &&
+            Number.isFinite(diagnostic.column)
+              ? diagnostic.column
+              : undefined,
+        }))
+    : [];
   return {
     ...base.browserPreview,
     ...browserPreview,
-  };
-}
-
-function sanitizeStoredIde(
-  ide: Partial<WorkbenchState>["ide"],
-  base: WorkbenchState,
-): WorkbenchState["ide"] {
-  if (!ide || !Array.isArray(ide.tabs)) {
-    return base.ide;
-  }
-  const tabs = ide.tabs
-    .filter(
-      (tab) =>
-        tab && typeof tab.path === "string" && typeof tab.title === "string",
-    )
-    .map((tab) => ({
-      path: tab.path,
-      title: tab.title,
-      dirty: false,
-      pinned: tab.pinned === true,
-    }));
-  const activePath =
-    typeof ide.activePath === "string" &&
-    tabs.some((tab) => tab.path === ide.activePath)
-      ? ide.activePath
-      : tabs[0]?.path;
-  return {
-    ...base.ide,
-    activePath,
-    tabs,
+    consoleErrors: diagnostics.length,
+    diagnostics,
+    diagnosticsSupported: browserPreview.diagnosticsSupported === true,
+    diagnosticsCaptured: browserPreview.diagnosticsCaptured === true,
+    captureStatus: "idle",
+    captureError: undefined,
+    latestCapture: undefined,
   };
 }
 
@@ -8656,7 +9358,7 @@ function terminalPaneFromSnapshot(
   mode: WorkbenchState["workspaceMode"],
 ) {
   const profile = {
-    id: `restored-${snapshot.paneId}`,
+    id: snapshot.profileId ?? inferredTerminalProfileId(snapshot),
     displayName: snapshot.title,
     command: snapshot.command.split(" ")[0] ?? "sh",
     args: [],
@@ -8676,6 +9378,36 @@ function terminalPaneFromSnapshot(
         : `${snapshot.status} (${snapshot.exitCode})`,
     output: snapshot.output,
   };
+}
+
+function inferredTerminalProfileId(snapshot: TerminalPaneSnapshot): string {
+  const command = snapshot.command.trim().split(/\s+/, 1)[0] ?? "";
+  const executable = command.split("/").pop()?.toLowerCase();
+  if (
+    snapshot.title.trim().toLowerCase() === "shell" &&
+    executable &&
+    ["sh", "bash", "zsh", "fish"].includes(executable)
+  ) {
+    return "shell";
+  }
+  return `restored-${snapshot.paneId}`;
+}
+
+function isPlainShellTerminal(pane: TerminalPane): boolean {
+  if (pane.profileId === "shell") {
+    return true;
+  }
+  const command = pane.command.trim().split(/\s+/, 1)[0] ?? "";
+  const executable = command.split("/").pop()?.toLowerCase();
+  return (
+    pane.title.trim().toLowerCase() === "shell" &&
+    executable !== undefined &&
+    ["sh", "bash", "zsh", "fish"].includes(executable)
+  );
+}
+
+function terminalPaneProcessIsMissing(error: unknown): boolean {
+  return String(error).toLowerCase().includes("terminal pane not found");
 }
 
 function terminalSizeForTemplate(template: TerminalTemplate) {
@@ -8743,7 +9475,8 @@ function deriveActiveTurn(
 
   const turnId = turnIdFromSessionEvent(latestUserEvent) ?? latestUserEvent.id;
   const changedFiles = new Set<string>();
-  let approvalsPending = 0;
+  let genericApprovalsPending = 0;
+  const mutationApprovalStatuses = new Map<string, string>();
   let lastEvent = latestUserEvent;
   let hasCommandRequest = false;
   let hasCommandOutput = false;
@@ -8771,7 +9504,30 @@ function deriveActiveTurn(
     if (event.kind === "file-edit-proposed") {
       changedFiles.add(pathFromSessionEvent(event));
     } else if (event.kind === "approval-requested") {
-      approvalsPending += 1;
+      const payload = recordFromUnknown(event.payload);
+      const proposalId = stringFromRecord(payload, "proposalId");
+      if (
+        proposalId &&
+        stringFromRecord(payload, "kind") === "mutation-approval"
+      ) {
+        mutationApprovalStatuses.set(
+          proposalId,
+          stringFromRecord(payload, "status") ?? "pending",
+        );
+      } else {
+        genericApprovalsPending += 1;
+      }
+    } else if (event.kind === "system-event") {
+      const payload = recordFromUnknown(event.payload);
+      const proposalId = stringFromRecord(payload, "proposalId");
+      const status = stringFromRecord(payload, "status");
+      if (
+        proposalId &&
+        status &&
+        stringFromRecord(payload, "kind") === "mutation-approval"
+      ) {
+        mutationApprovalStatuses.set(proposalId, status);
+      }
     } else if (event.kind === "command-requested") {
       hasCommandRequest = true;
     } else if (event.kind === "command-output") {
@@ -8780,6 +9536,12 @@ function deriveActiveTurn(
       hasStreamingAssistant = true;
     }
   }
+
+  const approvalsPending =
+    genericApprovalsPending +
+    Array.from(mutationApprovalStatuses.values()).filter(
+      (status) => status === "pending",
+    ).length;
 
   const status =
     approvalsPending > 0
@@ -9091,6 +9853,21 @@ function createPlanSessionEvent(
   };
 }
 
+function createGoalSessionEvent(
+  sessionId: string,
+  message: string,
+  payload: Record<string, unknown>,
+): SessionEvent {
+  return {
+    id: `goal-${Date.now()}-${Math.round(Math.random() * 1000)}`,
+    sessionId,
+    createdAt: new Date().toISOString(),
+    kind: "goal-updated",
+    message,
+    payload,
+  };
+}
+
 function createEditorSessionEvent(
   sessionId: string,
   eventKind: string,
@@ -9233,10 +10010,32 @@ function relativeFilePath(path: string, parent: string) {
     : workspaceName(normalizedPath);
 }
 
+function editorPathMatches(path: string, root: string) {
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function renameEditorPath(path: string, fromPath: string, toPath: string) {
+  return editorPathMatches(path, fromPath)
+    ? `${toPath}${path.slice(fromPath.length)}`
+    : path;
+}
+
 function workspaceTreeSignature(files: WorkspaceFile[]) {
   return files
     .map((file) => `${file.kind}:${file.path}:${file.depth ?? ""}`)
     .join("\n");
+}
+
+function disposeEditorModels(paths: string[]) {
+  const uniquePaths = [...new Set(paths.filter(Boolean))];
+  if (uniquePaths.length === 0) {
+    return;
+  }
+  void import("./monaco-editor")
+    .then(({ disposeMonacoModel }) => {
+      uniquePaths.forEach(disposeMonacoModel);
+    })
+    .catch(() => undefined);
 }
 
 function MonacoEditorPane({
@@ -9450,6 +10249,7 @@ function MonacoEditorPane({
     >
       <MonacoEditor
         height="100%"
+        keepCurrentModel
         language={languageForPath(path)}
         onChange={(value) => onChange(value ?? "")}
         onMount={handleMount}
@@ -9459,12 +10259,20 @@ function MonacoEditorPane({
           fontFamily:
             "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
           fontLigatures: false,
-          fontSize: 13,
-          lineHeight: 20,
+          fontSize: 13.5,
+          guides: { bracketPairs: true, indentation: true },
+          lineHeight: 21,
           minimap: { enabled: minimapEnabled, scale: 0.75 },
-          padding: { top: 14, bottom: 14 },
+          overviewRulerBorder: false,
+          padding: { top: 8, bottom: 12 },
+          renderWhitespace: "selection",
+          scrollbar: {
+            horizontalScrollbarSize: 10,
+            verticalScrollbarSize: 10,
+          },
           scrollBeyondLastLine: false,
           smoothScrolling: true,
+          stickyScroll: { enabled: true, maxLineCount: 3 },
           tabSize: 2,
           wordWrap: "off",
         }}
@@ -9727,6 +10535,7 @@ function createPreviewSession(
       | "reasoningEffort"
     >
   > = {},
+  workspacePath = "",
   titleOverride?: string,
   sessionId = `preview-${Date.now()}`,
 ): Session {
@@ -9743,7 +10552,7 @@ function createPreviewSession(
   return {
     id: sessionId,
     title: normalizeSessionTitleInput(titleOverride ?? "") ?? defaultTitle,
-    workspacePath: "",
+    workspacePath,
     origin: layout === "terminal-grid" ? "cli" : "desktop",
     workspaceMode: metadata.workspaceMode,
     branch: metadata.branch,
@@ -9794,21 +10603,32 @@ async function createTauriThreadSession(
 
 function createAutomationDraft(
   mode: WorkbenchState["workspaceMode"],
+  workspacePath: string,
+  provider: ModelProviderConfig,
 ): AutomationDraft {
   const metadata = workspaceRunMetadata(mode, "heartbeat-automation");
+  const model = getProviderModel(provider);
   return {
     title: "Heartbeat check",
     prompt:
       "Check the workspace, run the smoke gate, and report only if attention is needed.",
     schedule: "heartbeat",
-    project: "Gyro",
-    provider: "Codex",
+    project: workspaceName(workspacePath),
+    provider: provider.displayName,
     branch: metadata.branch,
     workspaceMode: metadata.workspaceMode,
     worktreeName: metadata.worktreeName,
     stopCondition:
       "Stop after the workspace passes smoke twice without changes.",
     nextRunAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    execution: {
+      workspacePath,
+      providerId: provider.id,
+      providerLabel: provider.displayName,
+      modelId: model?.id ?? provider.selectedModelId,
+      modelLabel: model?.displayName,
+      reasoningEffort: selectedReasoningEffort(provider),
+    },
   };
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/workspace",
-  "version": "0.1.0-alpha.20",
+  "version": "0.1.0-alpha.21",
   "private": true,
   "description": "Open-source local-first coding agent workspace.",
   "license": "Apache-2.0",
@@ -22,6 +22,10 @@
     "lint": "pnpm -r lint",
     "launch:teaser": "bash scripts/render-launch-teaser.sh",
     "release:check": "node scripts/check-release-config.mjs",
+    "release:cli:check": "node scripts/check-cli-release-packaging.mjs",
+    "release:cli:package": "node scripts/package-cli-release.mjs",
+    "release:cli:finalize": "node scripts/finalize-cli-release.mjs",
+    "release:verify-macos": "node scripts/verify-macos-release.mjs",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs",
     "test": "pnpm test:reliability && pnpm -r test",
     "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs",

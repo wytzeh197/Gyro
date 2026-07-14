@@ -1,3 +1,3 @@
 fn main() {
-    gyro_desktop_lib::run();
+    gyro_desktop_lib::run_entrypoint();
 }
