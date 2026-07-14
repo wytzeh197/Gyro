@@ -1,7 +1,7 @@
 class Gyro < Formula
   desc "Open-source local-first coding agent workspace CLI"
   homepage "https://github.com/wytzeh197/Gyro"
-  version "0.1.0-alpha.23"
+  version "0.1.0-alpha.23.1"
   license "Apache-2.0"
 
   # The tagged release workflow generates gyro.rb with the real immutable

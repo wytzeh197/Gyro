@@ -1984,7 +1984,7 @@ expect(
     ) &&
     appSource.includes("draftResetToken") &&
     appSource.includes(
-      "setEvents(limitSessionEventsForUi(optimisticEvents));\n        resetChatDraft();",
+      "setEvents(limitSessionEventsForUi(optimisticEvents));\n        if (!overrideContext?.preserveDraft)",
     ) &&
     appSource.includes(
       "sessionModel,\n          chatWorkspacePath,\n          provisionalTitle",
@@ -2125,11 +2125,23 @@ expect(
     ) &&
     !surfaceSource.includes("assistantEvents: SessionEvent[]") &&
     !surfaceSource.includes("activityEvents: SessionEvent[]") &&
-    surfaceSource.includes('aria-label={isSending ? "Stop response"') &&
-    surfaceSource.includes("onStop?.();") &&
+    surfaceSource.includes('aria-label="Stop response"') &&
+    surfaceSource.includes("onStop();") &&
     surfaceSource.includes(
-      'className={`gyro-send-button${isSending ? " is-stop" : ""}`}',
+      'aria-label={isSending ? "Queue message" : "Send message"}',
     ) &&
+    surfaceSource.includes('className="gyro-send-button"') &&
+    surfaceSource.includes("function ChatMessageQueue") &&
+    appSource.includes('"Message queued"') &&
+    appSource.includes("MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
+    appSource.includes("MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
+    appSource.includes("const totalQueued = Object.values(current).reduce") &&
+    appSource.includes(".then((accepted) =>") &&
+    appSource.includes("if (!accepted)") &&
+    appSource.includes("queuedChatDispatchMessageIdsRef") &&
+    appSource.includes("sessionModel: { ...sessionModel }") &&
+    surfaceSource.includes("message.isDispatching") &&
+    surfaceSource.includes("disabled={message.isDispatching}") &&
     !surfaceSource.includes("isRunning && onStopChat") &&
     surfaceSource.includes('activity.kind === "commentary"') &&
     surfaceSource.includes("gyro-chat-run-commentary") &&
@@ -3256,6 +3268,25 @@ expect(
   "Signed updates should use one direct contextual action above Settings with progress and development safety.",
 );
 expect(
+  updateControllerSource.includes(
+    "const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1_000",
+  ) &&
+    updateControllerSource.includes(
+      "const UPDATE_CHECK_POLL_INTERVAL_MS = 60 * 1_000",
+    ) &&
+    updateControllerSource.includes("stateRef.current.status") &&
+    updateControllerSource.includes("updateRef.current !== null") &&
+    updateControllerSource.includes(
+      '["available", "downloading", "ready", "installing"].includes',
+    ) &&
+    updateControllerSource.includes("retryTimerRef.current = undefined") &&
+    updateControllerSource.includes("Number.isFinite(lastCheckedAt)") &&
+    updateControllerSource.includes("window.setInterval(") &&
+    updateControllerSource.includes("checkIfDue") &&
+    updateControllerSource.includes("window.clearInterval(periodicTimer)"),
+  "Automatic update checks should run every 30 minutes while Gyro remains open.",
+);
+expect(
   appSource.includes("const handleComposerAction") &&
     appSource.includes('case "select-model"') &&
     appSource.includes('destination: "providers"') &&
@@ -3283,19 +3314,21 @@ expect(
     surfaceSource.includes("gyroLogoTransparentDark") &&
     surfaceSource.includes("gyroLogoTransparentLight") &&
     surfaceSource.includes("gyro-chat-start-brand-word") &&
-    surfaceSource.includes(
-      'style={{ width: "min(860px, calc(100vw - 96px))" }}',
-    ) &&
-    surfaceSource.includes('"min(820px, calc(100vw - 96px))"') &&
-    styleSource.includes("width: min(860px, calc(100vw - 96px))") &&
+    surfaceSource.includes('style={{ width: "min(860px, 100%)" }}') &&
+    surfaceSource.includes('"min(820px, 100%)"') &&
+    styleSource.includes("grid-template-columns: minmax(0, 1fr)") &&
+    styleSource.includes("width: min(860px, 100%)") &&
+    !surfaceSource.includes("calc(100vw - 96px)") &&
     styleSource.includes("width: min(820px, 100%)") &&
     surfaceSource.includes("What should we do in ") &&
     surfaceSource.includes("Choose folder") &&
     surfaceSource.includes(
       "const canSubmitChat = canSendChat(hasReadyProvider, workspacePath)",
     ) &&
-    surfaceSource.includes("if (canSubmitChat && !isSending)") &&
-    surfaceSource.includes("disabled={isSending ? !onStop : !canSubmitChat}") &&
+    surfaceSource.includes("if (canSubmitChat && draft.trim().length > 0)") &&
+    surfaceSource.includes(
+      "disabled={!canSubmitChat || draft.trim().length === 0}",
+    ) &&
     surfaceSource.includes("Choose a folder before sending") &&
     surfaceSource.includes("Connect a provider before sending") &&
     surfaceSource.includes("branchLabel") &&
@@ -3589,6 +3622,44 @@ expect(
     appSource.includes('type: "set-chat-panel", panel: "plan"') &&
     styleSource.includes("min-height: 32px"),
   "Composer add popover should stay compact and expose only working context actions.",
+);
+expect(
+  !surfaceSource.includes("const fileActivityIndexes = new Map") &&
+    surfaceSource.includes("const previousFilePath = previous") &&
+    surfaceSource.includes('previousActivity?.status === "running"') &&
+    surfaceSource.includes("compacted[compacted.length - 1]") &&
+    surfaceSource.includes("createdAt: previous.event.createdAt") &&
+    styleSource.includes(".gyro-composer-image-fallback") &&
+    styleSource.includes(
+      ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
+    ) &&
+    styleSource.includes("backdrop-filter: none") &&
+    surfaceSource.includes(") : sessionGoal?.text ? (") &&
+    appSource.includes("const changeChatMode = useCallback") &&
+    appSource.includes(
+      'const shouldClearGoal = mode === "plan" && Boolean(activeSessionGoal)',
+    ) &&
+    appSource.includes(
+      'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
+    ) &&
+    appSource.includes('const modeChanged = await changeChatMode("normal")') &&
+    appSource.includes("if (!modeChanged)"),
+  "Live file edits, composer overlays, light context pills, and Goal/Plan exclusivity should remain enforced.",
+);
+expect(
+  styleSource.includes(
+    ".gyro-composer-shell > .gyro-composer-bar,\n.gyro-chat-start",
+  ) &&
+    styleSource.includes("z-index: 120") &&
+    styleSource.includes(
+      ".gyro-composer-control:has(.gyro-composer-popover, .gyro-provider-picker)",
+    ) &&
+    styleSource.includes(
+      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout\n  .gyro-chat-surface.is-thread\n  > .gyro-chat-thread-topbar",
+    ) &&
+    styleSource.lastIndexOf("z-index: 120") >
+      styleSource.lastIndexOf("/* Ordered chat activity"),
+  "Composer menus should stay above the composer and hidden-sidebar chat titles should clear native window controls.",
 );
 expect(
   surfaceSource.includes("OpenAI permissions") &&

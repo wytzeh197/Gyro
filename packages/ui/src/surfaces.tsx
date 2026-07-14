@@ -2756,6 +2756,12 @@ type ChatSurfaceProps = {
   promptHistory?: string[];
   chatMode?: ChatMode;
   attachments?: ChatAttachment[];
+  queuedMessages?: Array<{
+    attachmentCount: number;
+    id: string;
+    isDispatching: boolean;
+    message: string;
+  }>;
   savedProjects?: Array<{
     path: string;
     label: string;
@@ -2779,6 +2785,7 @@ type ChatSurfaceProps = {
   };
   onDraftChange?: (value: string) => void;
   onRemoveAttachment?: (attachmentId: string) => void;
+  onRemoveQueuedMessage?: (messageId: string) => void;
   onAttachImageFiles?: (files: File[]) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
@@ -2838,6 +2845,7 @@ export function ChatSurface({
   promptHistory = [],
   chatMode = "normal",
   attachments = [],
+  queuedMessages = [],
   savedProjects = [],
   branchName,
   branchCatalog,
@@ -2853,6 +2861,7 @@ export function ChatSurface({
   maxDraftLength,
   onDraftChange,
   onRemoveAttachment,
+  onRemoveQueuedMessage,
   onAttachImageFiles,
   onReusePrompt,
   onStopChat,
@@ -2901,6 +2910,32 @@ export function ChatSurface({
   const handleSend = useCallback(() => {
     onSend(localDraft);
   }, [localDraft, onSend]);
+  const handleImageDragOver = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (
+        Array.from(event.dataTransfer.items).some(
+          (item) => item.kind === "file",
+        )
+      ) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }
+    },
+    [],
+  );
+  const handleImageDrop = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      const files = Array.from(event.dataTransfer.files).filter((file) =>
+        file.type.startsWith("image/"),
+      );
+      if (!files.length) {
+        return;
+      }
+      event.preventDefault();
+      onAttachImageFiles?.(files);
+    },
+    [onAttachImageFiles],
+  );
   const terminalCount = terminalPanes?.length ?? 0;
   const startProjectLabel =
     workspacePath && !isGeneratedGyroWorkspace(workspacePath)
@@ -3013,6 +3048,8 @@ export function ChatSurface({
         ]
           .filter(Boolean)
           .join(" ")}
+        onDragOver={handleImageDragOver}
+        onDrop={handleImageDrop}
       >
         <div
           aria-hidden="true"
@@ -3022,7 +3059,7 @@ export function ChatSurface({
         <section
           className="gyro-chat-start"
           aria-label="New thread"
-          style={{ width: "min(860px, calc(100vw - 96px))" }}
+          style={{ width: "min(860px, 100%)" }}
         >
           <span className="gyro-brand-logo">
             <img
@@ -3150,6 +3187,8 @@ export function ChatSurface({
       ]
         .filter(Boolean)
         .join(" ")}
+      onDragOver={handleImageDragOver}
+      onDrop={handleImageDrop}
     >
       <div className="gyro-chat-thread-topbar">
         <div>
@@ -3320,6 +3359,12 @@ export function ChatSurface({
         </div>
 
         <div className="gyro-chat-composer-dock">
+          {queuedMessages.length > 0 ? (
+            <ChatMessageQueue
+              messages={queuedMessages}
+              onRemoveMessage={onRemoveQueuedMessage}
+            />
+          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -3353,6 +3398,63 @@ export function ChatSurface({
       </section>
       {sidePanel}
     </div>
+  );
+}
+
+function ChatMessageQueue({
+  messages,
+  onRemoveMessage,
+}: {
+  messages: Array<{
+    attachmentCount: number;
+    id: string;
+    isDispatching: boolean;
+    message: string;
+  }>;
+  onRemoveMessage?: (messageId: string) => void;
+}) {
+  return (
+    <section className="gyro-chat-message-queue" aria-label="Queued messages">
+      <header>
+        <span>Queued</span>
+        <small>{messages.length}</small>
+      </header>
+      <div>
+        {messages.map((message, index) => (
+          <article
+            className={message.isDispatching ? "is-dispatching" : undefined}
+            key={message.id}
+          >
+            <span className="gyro-chat-message-queue-index">{index + 1}</span>
+            <p>{message.message}</p>
+            <small>
+              {message.isDispatching
+                ? "Sending"
+                : message.attachmentCount > 0
+                  ? `${message.attachmentCount} attachment${message.attachmentCount === 1 ? "" : "s"}`
+                  : "Waiting"}
+            </small>
+            <button
+              aria-label={
+                message.isDispatching
+                  ? "Queued message is sending"
+                  : "Remove queued message"
+              }
+              disabled={message.isDispatching}
+              onClick={() => onRemoveMessage?.(message.id)}
+              title={
+                message.isDispatching
+                  ? "Message is sending"
+                  : "Remove from queue"
+              }
+              type="button"
+            >
+              <X size={13} />
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -10774,31 +10876,11 @@ function Composer({
           ? {
               justifySelf: constrainToParent ? "stretch" : "center",
               maxWidth: "820px",
-              width: constrainToParent
-                ? "100%"
-                : "min(820px, calc(100vw - 96px))",
+              width: constrainToParent ? "100%" : "min(820px, 100%)",
             }
           : undefined
       }
       ref={popoverScopeRef}
-      onDragOver={(event) => {
-        if (
-          Array.from(event.dataTransfer.items).some(
-            (item) => item.kind === "file",
-          )
-        ) {
-          event.preventDefault();
-        }
-      }}
-      onDrop={(event) => {
-        const files = Array.from(event.dataTransfer.files).filter((file) =>
-          file.type.startsWith("image/"),
-        );
-        if (files.length) {
-          event.preventDefault();
-          onAttachImageFiles?.(files);
-        }
-      }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && activePopover) {
           event.stopPropagation();
@@ -10814,10 +10896,8 @@ function Composer({
               className={`gyro-composer-attachment is-${attachment.kind}`}
               key={attachment.id}
             >
-              {attachment.kind === "image" && attachment.previewUrl ? (
-                <img alt={attachment.name} src={attachment.previewUrl} />
-              ) : attachment.kind === "image" ? (
-                <ImagePlus size={15} />
+              {attachment.kind === "image" ? (
+                <ComposerImagePreview attachment={attachment} />
               ) : (
                 <FileText size={15} />
               )}
@@ -10883,7 +10963,7 @@ function Composer({
           if (shouldSend) {
             event.preventDefault();
             setActivePopover(null);
-            if (canSubmitChat && !isSending) {
+            if (canSubmitChat && draft.trim().length > 0) {
               setHistoryIndex(undefined);
               onSend();
             }
@@ -10975,8 +11055,7 @@ function Composer({
               size={12}
             />
           </button>
-        ) : null}
-        {sessionGoal?.text ? (
+        ) : sessionGoal?.text ? (
           <button
             className="gyro-composer-chip is-goal"
             onClick={() => onComposerAction?.("add-goal")}
@@ -11066,35 +11145,41 @@ function Composer({
             ) : null}
           </div>
         ) : null}
+        {isSending && onStop ? (
+          <button
+            aria-label="Stop response"
+            className="gyro-composer-stop-button"
+            onClick={() => {
+              setActivePopover(null);
+              onStop();
+            }}
+            title="Stop response"
+            type="button"
+          >
+            <Square fill="currentColor" size={10} strokeWidth={0} />
+          </button>
+        ) : null}
         <button
-          aria-label={isSending ? "Stop response" : "Send message"}
-          aria-busy={isSending}
-          className={`gyro-send-button${isSending ? " is-stop" : ""}`}
-          disabled={isSending ? !onStop : !canSubmitChat}
+          aria-label={isSending ? "Queue message" : "Send message"}
+          aria-busy={false}
+          className="gyro-send-button"
+          disabled={!canSubmitChat || draft.trim().length === 0}
           onClick={() => {
             setActivePopover(null);
-            if (isSending) {
-              onStop?.();
-            } else {
-              onSend();
-            }
+            onSend();
           }}
           title={
-            isSending
-              ? "Stop response"
-              : !hasUserWorkspace
-                ? "Choose a folder before sending"
-                : !hasReadyProvider
-                  ? "Connect a provider before sending"
+            !hasUserWorkspace
+              ? "Choose a folder before sending"
+              : !hasReadyProvider
+                ? "Connect a provider before sending"
+                : isSending
+                  ? "Queue message"
                   : "Send"
           }
           type="button"
         >
-          {isSending ? (
-            <Square fill="currentColor" size={10} strokeWidth={0} />
-          ) : (
-            <ArrowUp size={17} />
-          )}
+          <ArrowUp size={17} />
         </button>
       </div>
       {shouldShowContextRow ? (
@@ -11218,6 +11303,26 @@ function Composer({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ComposerImagePreview({ attachment }: { attachment: ChatAttachment }) {
+  const [hasFailed, setHasFailed] = useState(false);
+  if (!attachment.previewUrl || hasFailed) {
+    return (
+      <ImagePlus
+        aria-hidden="true"
+        className="gyro-composer-image-fallback"
+        size={20}
+      />
+    );
+  }
+  return (
+    <img
+      alt={attachment.name}
+      onError={() => setHasFailed(true)}
+      src={attachment.previewUrl}
+    />
   );
 }
 
@@ -11369,8 +11474,8 @@ const ChatEvent = memo(function ChatEvent({
           <AssistantResponse event={event} />
         ) : isUser ? (
           <div className="gyro-user-message-bubble">
-            <p>{event.message}</p>
             <TranscriptAttachments event={event} />
+            <p>{event.message}</p>
           </div>
         ) : (
           <p>{event.message}</p>
@@ -11845,7 +11950,27 @@ function deriveTranscriptState(events: SessionEvent[]) {
       looseEvents.push(event);
     }
   }
+  for (const turn of turns) {
+    turn.timelineEvents.sort(compareTranscriptEvents);
+  }
+  turns.sort((first, second) =>
+    compareIsoTimestamps(first.startedAt, second.startedAt),
+  );
+  looseEvents.sort(compareTranscriptEvents);
   return { looseEvents, turns };
+}
+
+function compareTranscriptEvents(first: SessionEvent, second: SessionEvent) {
+  return compareIsoTimestamps(first.createdAt, second.createdAt);
+}
+
+function compareIsoTimestamps(first: string, second: string) {
+  const firstMs = Date.parse(first);
+  const secondMs = Date.parse(second);
+  if (!Number.isFinite(firstMs) || !Number.isFinite(secondMs)) {
+    return 0;
+  }
+  return firstMs - secondMs;
 }
 
 function isActiveRunStatus(status: string) {
@@ -12188,26 +12313,44 @@ type CompactedThoughtTimelineEvent = {
 };
 
 function compactThoughtTimelineEvents(events: SessionEvent[]) {
-  const groupedCounts = new Map<string, number>();
-  for (const event of events) {
-    const key = compactableActivityKey(event);
-    if (key) {
-      groupedCounts.set(key, (groupedCounts.get(key) ?? 0) + 1);
-    }
-  }
-  const renderedKeys = new Set<string>();
   const compacted: CompactedThoughtTimelineEvent[] = [];
   for (const event of events) {
+    const previous = compacted.at(-1);
+    const filePath = providerActivityFilePath(event);
+    const previousFilePath = previous
+      ? providerActivityFilePath(previous.event)
+      : undefined;
+    const previousActivity = previous
+      ? providerActivityFromEvent(previous.event)
+      : undefined;
+    if (
+      previous &&
+      filePath &&
+      previousFilePath &&
+      previousActivity?.status === "running"
+    ) {
+      const fileKey = filePath.replaceAll("\\", "/").replace(/\/+/g, "/");
+      const previousFileKey = previousFilePath
+        .replaceAll("\\", "/")
+        .replace(/\/+/g, "/");
+      if (fileKey === previousFileKey) {
+        compacted[compacted.length - 1] = {
+          count: 1,
+          event: {
+            ...event,
+            createdAt: previous.event.createdAt,
+            id: previous.event.id,
+          },
+        };
+        continue;
+      }
+    }
     const key = compactableActivityKey(event);
-    if (!key) {
-      compacted.push({ count: 1, event });
+    if (key && previous && compactableActivityKey(previous.event) === key) {
+      previous.count += 1;
       continue;
     }
-    if (renderedKeys.has(key)) {
-      continue;
-    }
-    renderedKeys.add(key);
-    compacted.push({ count: groupedCounts.get(key) ?? 1, event });
+    compacted.push({ count: 1, event });
   }
   return compacted;
 }

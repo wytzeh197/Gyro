@@ -4,7 +4,8 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { updateProgressPercent, type UpdateState } from "@gyro-dev/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1_000;
+const UPDATE_CHECK_POLL_INTERVAL_MS = 60 * 1_000;
 const UPDATE_RETRY_DELAYS_MS = [
   5 * 60 * 1_000,
   30 * 60 * 1_000,
@@ -38,6 +39,7 @@ export function useGyroUpdater({
     status: import.meta.env.DEV ? "development" : "checking",
     currentVersion: import.meta.env.DEV ? "development" : "unknown",
   });
+  const stateRef = useRef(state);
   const updateRef = useRef<Update | null>(null);
   const currentVersionRef = useRef("unknown");
   const retryCountRef = useRef(0);
@@ -46,7 +48,15 @@ export function useGyroUpdater({
 
   const checkForUpdate = useCallback(
     async (userInitiated = true): Promise<UpdateCheckResult> => {
-      if (import.meta.env.DEV || !isTauriRuntime() || checkingRef.current) {
+      const currentStatus = stateRef.current.status;
+      if (
+        import.meta.env.DEV ||
+        !isTauriRuntime() ||
+        checkingRef.current ||
+        (!userInitiated && updateRef.current !== null) ||
+        ["downloading", "ready", "installing"].includes(currentStatus) ||
+        (!userInitiated && currentStatus === "available")
+      ) {
         return { status: "skipped" };
       }
       checkingRef.current = true;
@@ -67,6 +77,8 @@ export function useGyroUpdater({
         });
         const checkedAt = new Date().toISOString();
         localStorage.setItem(LAST_UPDATE_CHECK_STORAGE_KEY, checkedAt);
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = undefined;
         retryCountRef.current = 0;
         if (!update) {
           await updateRef.current?.close().catch(() => undefined);
@@ -129,6 +141,10 @@ export function useGyroUpdater({
     },
     [automaticChecks],
   );
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const downloadUpdate = useCallback(async () => {
     const update = updateRef.current;
@@ -206,19 +222,35 @@ export function useGyroUpdater({
       () => void checkForUpdate(false),
       1_500,
     );
-    const onFocus = () => {
+    const checkIfDue = () => {
+      if (
+        updateRef.current !== null ||
+        ["available", "downloading", "ready", "installing"].includes(
+          stateRef.current.status,
+        )
+      ) {
+        return;
+      }
       const lastChecked = localStorage.getItem(LAST_UPDATE_CHECK_STORAGE_KEY);
+      const lastCheckedAt = lastChecked ? new Date(lastChecked).getTime() : NaN;
       if (
         !lastChecked ||
-        Date.now() - new Date(lastChecked).getTime() >= UPDATE_CHECK_INTERVAL_MS
+        !Number.isFinite(lastCheckedAt) ||
+        Date.now() - lastCheckedAt >= UPDATE_CHECK_INTERVAL_MS
       ) {
         void checkForUpdate(false);
       }
     };
+    const periodicTimer = window.setInterval(
+      checkIfDue,
+      UPDATE_CHECK_POLL_INTERVAL_MS,
+    );
+    const onFocus = () => checkIfDue();
     window.addEventListener("focus", onFocus);
     return () => {
       window.clearTimeout(launchTimer);
       window.clearTimeout(retryTimerRef.current);
+      window.clearInterval(periodicTimer);
       window.removeEventListener("focus", onFocus);
     };
   }, [automaticChecks, checkForUpdate]);
