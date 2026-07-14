@@ -25,7 +25,6 @@
     "release:cli:check": "node scripts/check-cli-release-packaging.mjs",
     "release:cli:package": "node scripts/package-cli-release.mjs",
     "release:cli:finalize": "node scripts/finalize-cli-release.mjs",
-    "release:verify-macos": "node scripts/verify-macos-release.mjs",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs",
     "test": "pnpm test:reliability && pnpm -r test",
     "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs",

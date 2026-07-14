@@ -50,12 +50,6 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - run: pnpm check
       - run: cargo test --workspace
       - name: Build native CLI
@@ -71,52 +65,18 @@ jobs:
           node scripts/package-cli-release.mjs \
             --verify "release-assets/gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz" \
             --run
-      - name: Build, Apple-sign, notarize, and sign updater archive
+      - name: Build GitHub-hosted alpha and sign updater archive
         run: pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: Notarize and staple signed DMGs
-        run: |
-          for dmg in target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
-            RESULT="$(mktemp)"
-            xcrun notarytool submit "$dmg" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" \
-              --wait \
-              --output-format json > "$RESULT"
-            cat "$RESULT"
-            test "$(jq -r '.status' "$RESULT")" = "Accepted"
-            xcrun stapler staple -v "$dmg"
-            rm -f "$RESULT"
-          done
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: Verify Apple signature, Gatekeeper, and notarization tickets
-        run: |
-          APP="target/${{ matrix.target }}/release/bundle/macos/Gyro.app"
-          DMGS=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
-          VERIFY_ARGS=(--app "$APP")
-          for dmg in "${DMGS[@]}"; do
-            VERIFY_ARGS+=(--dmg "$dmg")
-          done
-          node scripts/verify-macos-release.mjs "${VERIFY_ARGS[@]}"
-      - name: Collect signed release assets
+      - name: Collect release assets
         run: |
           mkdir -p release-assets
           cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
           cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz
           cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz.sig release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz.sig
-      - name: Upload signed architecture bundle
+      - name: Upload architecture bundle
         uses: actions/upload-artifact@v4
         with:
           name: gyro-${{ matrix.target }}
@@ -146,7 +106,7 @@ jobs:
       - name: Create one complete draft release
         run: |
           set -euo pipefail
-          RELEASE_NOTES="Developer ID signed, notarized, and updater-signed macOS release candidate for Apple Silicon and Intel."
+          RELEASE_NOTES="GitHub-built macOS alpha for Apple Silicon and Intel. Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized."
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             IS_DRAFT="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
             if [ "$IS_DRAFT" != "true" ]; then
