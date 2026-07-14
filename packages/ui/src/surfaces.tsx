@@ -14,6 +14,7 @@ import {
   Columns2,
   Command,
   Copy,
+  Download,
   Edit3,
   FileCode2,
   FileText,
@@ -1200,15 +1201,7 @@ function WorkspaceSidebarContent({
               title={updateSidebarLabel(updateState)}
               type="button"
             >
-              <RefreshCw
-                className={
-                  updateState.status === "downloading" ||
-                  updateState.status === "installing"
-                    ? "is-spinning"
-                    : ""
-                }
-                size={12}
-              />
+              <Download size={13} />
             </button>
             {isUpdatePopoverOpen ? (
               <UpdatePopover
