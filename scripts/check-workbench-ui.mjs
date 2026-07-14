@@ -2134,7 +2134,7 @@ expect(
     surfaceSource.includes('"Queue message"') &&
     surfaceSource.includes("onStop?.();") &&
     surfaceSource.includes(
-      "!isStopAction && (!canSubmitChat || draft.trim().length === 0)",
+      "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
     ) &&
     surfaceSource.includes('className="gyro-send-button"') &&
     !surfaceSource.includes('className="gyro-composer-stop-button"') &&
@@ -3026,7 +3026,12 @@ expect(
     surfaceSource.includes('event.key === "Escape"') &&
     appSource.includes("const title = value?.trim()") &&
     appSource.includes("const appendGoalEvent = useCallback") &&
-    appSource.includes('kind: "goal",') &&
+    appSource.includes('case "add-goal"') &&
+    appSource.includes("setIsGoalComposerActive(true)") &&
+    surfaceSource.includes("isGoalComposerActive ?") &&
+    surfaceSource.includes(
+      'onGoalAction?.(sessionGoal?.text ? "edit" : "set"',
+    ) &&
     appSource.includes('kind: "item",') &&
     appSource.includes("planEditorRequestTokenRef.current += 1") &&
     !appSource.includes('window.prompt("Session goal"') &&
@@ -3332,9 +3337,11 @@ expect(
     surfaceSource.includes(
       "const canSubmitChat = canSendChat(hasReadyProvider, workspacePath)",
     ) &&
-    surfaceSource.includes("if (canSubmitChat && draft.trim().length > 0)") &&
     surfaceSource.includes(
-      "!isStopAction && (!canSubmitChat || draft.trim().length === 0)",
+      "if (canSubmitComposer && draft.trim().length > 0)",
+    ) &&
+    surfaceSource.includes(
+      "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
     ) &&
     surfaceSource.includes("Choose a folder before sending") &&
     surfaceSource.includes("Connect a provider before sending") &&
@@ -3421,7 +3428,9 @@ expect(
     coreSessionsSource.includes("summary_updated_at") &&
     tauriSource.includes("derive_session_summary") &&
     typeSource.includes("summaryUpdatedAt?: string") &&
-    surfaceSource.includes('aria-label="Message Gyro"') &&
+    surfaceSource.includes(
+      'aria-label={isGoalComposerActive ? "Set session goal" : "Message Gyro"}',
+    ) &&
     surfaceSource.includes('role="log"') &&
     surfaceSource.includes('aria-live="polite"') &&
     surfaceSource.includes("session.summary") &&
@@ -3629,6 +3638,76 @@ expect(
     appSource.includes('type: "set-chat-panel", panel: "plan"') &&
     styleSource.includes("min-height: 32px"),
   "Composer add popover should stay compact and expose only working context actions.",
+);
+expect(
+  surfaceSource.includes("const slashCommands: ComposerSlashCommand[]") &&
+    [
+      "/goal",
+      "/plan",
+      "/normal",
+      "/image",
+      "/file",
+      "/folder",
+      "/search",
+      "/model",
+      "/permissions",
+      "/new",
+    ].every((command) => surfaceSource.includes(`command: "${command}"`)) &&
+    surfaceSource.includes("const filteredSlashCommands") &&
+    surfaceSource.includes("setActiveSlashCommandIndex") &&
+    surfaceSource.includes('event.key === "ArrowDown"') &&
+    surfaceSource.includes('event.key === "ArrowUp"') &&
+    surfaceSource.includes('event.key === "Tab"') &&
+    surfaceSource.includes('event.key === "Escape"') &&
+    /scrollIntoView\(\{\s*block:\s*"nearest",?\s*\}\)/.test(surfaceSource) &&
+    surfaceSource.includes("aria-activedescendant") &&
+    surfaceSource.includes("runSlashCommand(command)") &&
+    surfaceSource.includes('aria-label="Chat commands"') &&
+    appSource.includes('case "new-chat":') &&
+    styleSource.includes(".gyro-composer-slash-menu") &&
+    /\.gyro-composer-slash-menu\s*\{[\s\S]*?bottom:\s*calc\(100% \+ 8px\);[\s\S]*?position:\s*absolute;/.test(
+      styleSource,
+    ) &&
+    !styleSource.includes('.gyro-composer-slash-menu[data-placement="down"]') &&
+    !surfaceSource.includes(
+      'className="gyro-composer-slash-menu"\n          data-placement',
+    ),
+  "Chat composer should expose a filtered, keyboard-accessible slash command menu whose actions are wired.",
+);
+expect(
+  styleSource.includes(".gyro-composer-context-wheel") &&
+    /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
+      styleSource,
+    ) &&
+    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(
+      styleSource,
+    ),
+  "Composer context wheel should stay compact without removing its tooltip or progress semantics.",
+);
+expect(
+  surfaceSource.includes("function PlanDecisionCard") &&
+    surfaceSource.includes('aria-label="Plan ready for approval"') &&
+    surfaceSource.includes("Implement this plan?") &&
+    surfaceSource.includes("No, keep planning") &&
+    surfaceSource.includes("Yes, implement") &&
+    surfaceSource.includes('onDecision("reject")') &&
+    surfaceSource.includes('onDecision("approve")') &&
+    surfaceSource.includes('chatMode === "plan"') &&
+    surfaceSource.includes("latestPlanModeEnabledAt") &&
+    surfaceSource.includes(
+      "sessionPlan.updatedAt >= latestPlanModeEnabledAt",
+    ) &&
+    surfaceSource.includes("!isComposerSending") &&
+    appSource.includes("const handlePlanDecision = useCallback") &&
+    appSource.includes('await changeChatMode("normal")') &&
+    appSource.includes('sendDraft("Implement the approved plan."') &&
+    appSource.includes('mode: "normal"') &&
+    appSource.includes("plan: activeSessionPlan") &&
+    appSource.includes("preserveDraft: true") &&
+    styleSource.includes(".gyro-plan-decision-card") &&
+    styleSource.includes("max-height: min(420px") &&
+    styleSource.includes(':root[data-theme="light"] .gyro-plan-decision-card'),
+  "Completed Plan-mode output should surface an above-composer approval card whose Yes path exits read-only mode before implementation.",
 );
 expect(
   !surfaceSource.includes("const fileActivityIndexes = new Map") &&

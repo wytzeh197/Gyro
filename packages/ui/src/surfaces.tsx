@@ -2954,6 +2954,7 @@ type ChatSurfaceProps = {
   onboarding?: OnboardingState;
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
+  isGoalComposerActive?: boolean;
   promptHistory?: string[];
   chatMode?: ChatMode;
   attachments?: ChatAttachment[];
@@ -3015,10 +3016,14 @@ type ChatSurfaceProps = {
     itemId?: string,
     value?: string,
   ) => void;
+  onPlanDecision?: (
+    decision: "approve" | "reject",
+  ) => boolean | void | Promise<boolean | void>;
   onGoalAction?: (
     action: "set" | "edit" | "complete" | "reopen" | "clear",
     value?: string,
   ) => void;
+  onCancelGoalComposer?: () => void;
   onSetOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
   onCompleteOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
   onAgentAction?: (action: string) => void;
@@ -3044,6 +3049,7 @@ export function ChatSurface({
   onboarding,
   sessionPlan,
   sessionGoal,
+  isGoalComposerActive = false,
   promptHistory = [],
   chatMode = "normal",
   attachments = [],
@@ -3081,7 +3087,9 @@ export function ChatSurface({
   onToggleToolPanel,
   onPlanItemStatusChange,
   onPlanAction,
+  onPlanDecision,
   onGoalAction,
+  onCancelGoalComposer,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
   onPlanEditorRequestHandled,
@@ -3093,6 +3101,10 @@ export function ChatSurface({
   const diffDeletions =
     diffReview?.files.reduce((total, file) => total + file.deletions, 0) ?? 0;
   const [localDraft, setLocalDraft] = useState(draft);
+  const [dismissedPlanDecisionKey, setDismissedPlanDecisionKey] = useState<
+    string | undefined
+  >();
+  const [isPlanDecisionPending, setIsPlanDecisionPending] = useState(false);
   const [activeThreadContextMenu, setActiveThreadContextMenu] = useState<
     "project" | "workspace-mode" | "branch" | null
   >(null);
@@ -3111,8 +3123,25 @@ export function ChatSurface({
     [onDraftChange],
   );
   const handleSend = useCallback(() => {
+    if (isGoalComposerActive) {
+      const goal = localDraft.trim();
+      if (!goal) return;
+      onGoalAction?.(sessionGoal?.text ? "edit" : "set", goal);
+      setLocalDraft("");
+      onDraftChange?.("");
+      onCancelGoalComposer?.();
+      return;
+    }
     onSend(localDraft);
-  }, [localDraft, onSend]);
+  }, [
+    isGoalComposerActive,
+    localDraft,
+    onCancelGoalComposer,
+    onDraftChange,
+    onGoalAction,
+    onSend,
+    sessionGoal?.text,
+  ]);
   const handleImageDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
       if (
@@ -3138,6 +3167,54 @@ export function ChatSurface({
       onAttachImageFiles?.(files);
     },
     [onAttachImageFiles],
+  );
+  const latestPlanModeEnabledAt = useMemo(() => {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (!event || event.kind !== "chat-mode-changed") {
+        continue;
+      }
+      const mode = stringFromRecord(recordFromUnknown(event.payload), "mode");
+      return mode === "plan" ? event.createdAt : undefined;
+    }
+    return undefined;
+  }, [events]);
+  const planDecisionKey = useMemo(() => {
+    if (!sessionPlan?.updatedAt || sessionPlan.items.length === 0) {
+      return undefined;
+    }
+    return [
+      sessionPlan.sessionId ?? "session",
+      sessionPlan.sourceTurnId ?? "plan",
+      sessionPlan.updatedAt,
+      sessionPlan.items.map((item) => `${item.id}:${item.updatedAt}`).join("|"),
+    ].join(":");
+  }, [sessionPlan]);
+  const isPlanReadyForDecision = Boolean(
+    chatMode === "plan" &&
+    !isComposerSending &&
+    latestPlanModeEnabledAt &&
+    sessionPlan?.updatedAt &&
+    sessionPlan.updatedAt >= latestPlanModeEnabledAt &&
+    planDecisionKey &&
+    planDecisionKey !== dismissedPlanDecisionKey,
+  );
+  const handlePlanDecision = useCallback(
+    async (decision: "approve" | "reject") => {
+      if (!planDecisionKey || isPlanDecisionPending) {
+        return;
+      }
+      setIsPlanDecisionPending(true);
+      try {
+        const result = await onPlanDecision?.(decision);
+        if (result !== false) {
+          setDismissedPlanDecisionKey(planDecisionKey);
+        }
+      } finally {
+        setIsPlanDecisionPending(false);
+      }
+    },
+    [isPlanDecisionPending, onPlanDecision, planDecisionKey],
   );
   const terminalCount = terminalPanes?.length ?? 0;
   const startProjectLabel =
@@ -3328,6 +3405,8 @@ export function ChatSurface({
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
+            isGoalComposerActive={isGoalComposerActive}
+            onCancelGoalComposer={onCancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
@@ -3584,6 +3663,13 @@ export function ChatSurface({
               onSteerMessage={onSteerQueuedMessage}
             />
           ) : null}
+          {isPlanReadyForDecision && sessionPlan ? (
+            <PlanDecisionCard
+              isPending={isPlanDecisionPending}
+              onDecision={handlePlanDecision}
+              plan={sessionPlan}
+            />
+          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -3606,6 +3692,8 @@ export function ChatSurface({
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
+            isGoalComposerActive={isGoalComposerActive}
+            onCancelGoalComposer={onCancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
@@ -3618,6 +3706,73 @@ export function ChatSurface({
       </section>
       {sidePanel}
     </div>
+  );
+}
+
+function PlanDecisionCard({
+  isPending,
+  onDecision,
+  plan,
+}: {
+  isPending: boolean;
+  onDecision: (decision: "approve" | "reject") => void;
+  plan: SessionPlan;
+}) {
+  return (
+    <section
+      aria-label="Plan ready for approval"
+      className="gyro-plan-decision-card"
+    >
+      <header>
+        <span className="gyro-plan-decision-icon">
+          <ListChecks size={16} />
+        </span>
+        <div>
+          <small>Plan ready</small>
+          <strong>{plan.title || "Implementation plan"}</strong>
+        </div>
+      </header>
+      <ol>
+        {plan.items.map((item) => (
+          <li key={item.id}>
+            <span aria-hidden="true">
+              {item.status === "complete" ? (
+                <Check size={12} />
+              ) : item.status === "blocked" ? (
+                <X size={12} />
+              ) : (
+                <CircleDashed size={12} />
+              )}
+            </span>
+            <div>
+              <strong>{item.title}</strong>
+              {item.detail ? <small>{item.detail}</small> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <footer>
+        <span>Implement this plan?</span>
+        <div>
+          <button
+            className="is-secondary"
+            disabled={isPending}
+            onClick={() => onDecision("reject")}
+            type="button"
+          >
+            No, keep planning
+          </button>
+          <button
+            className="is-primary"
+            disabled={isPending}
+            onClick={() => onDecision("approve")}
+            type="button"
+          >
+            {isPending ? "Starting…" : "Yes, implement"}
+          </button>
+        </div>
+      </footer>
+    </section>
   );
 }
 
@@ -3993,7 +4148,7 @@ function ChatSidePanel({
           ) : (
             <button
               className="gyro-rail-row is-action"
-              onClick={() => setGoalEditor("")}
+              onClick={() => onComposerAction?.("add-goal")}
               type="button"
             >
               <Goal size={14} />
@@ -10316,6 +10471,15 @@ type ComposerPopoverItem = {
   hideIcon?: boolean;
 };
 
+type ComposerSlashCommand = {
+  command: string;
+  label: string;
+  detail: string;
+  icon: IconComponent;
+  action?: string;
+  popover?: Extract<ComposerPopoverId, "approval" | "provider">;
+};
+
 function branchPopoverItems({
   branchCatalog,
   branchName,
@@ -10872,10 +11036,12 @@ function Composer({
   config,
   providerReadiness,
   onComposerAction,
+  onCancelGoalComposer,
   sessionModel,
   sessionGoal,
   promptHistory = [],
   contextUsage,
+  isGoalComposerActive = false,
   savedProjects = [],
   surfaceControls,
   isSending = false,
@@ -10902,6 +11068,7 @@ function Composer({
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
   onComposerAction?: (action: string) => void;
+  onCancelGoalComposer?: () => void;
   sessionModel?: {
     modelLabel?: string;
     providerId?: ProviderId;
@@ -10911,6 +11078,7 @@ function Composer({
   sessionGoal?: SessionGoal;
   promptHistory?: string[];
   contextUsage?: ComposerContextUsage;
+  isGoalComposerActive?: boolean;
   savedProjects?: Array<{
     path: string;
     label: string;
@@ -10928,6 +11096,7 @@ function Composer({
   const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
     null,
   );
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
@@ -10938,6 +11107,9 @@ function Composer({
     "down",
   );
   const [historyIndex, setHistoryIndex] = useState<number>();
+  const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
+  const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
+  const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const providerPickerRef = useRef<HTMLDivElement | null>(null);
   const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(activePopover),
@@ -10947,6 +11119,11 @@ function Composer({
     },
   );
   const popoverBaseId = useId();
+  useEffect(() => {
+    if (isGoalComposerActive) {
+      composerTextareaRef.current?.focus();
+    }
+  }, [isGoalComposerActive]);
   const providerConfigs = providersForConfig(config);
   const selectedProvider = providerConfigs.find(
     (provider) => provider.id === config.selectedProviderId,
@@ -10987,12 +11164,13 @@ function Composer({
       ? "gyro-composer-chip is-warning"
       : "gyro-composer-chip";
   const isStopAction = Boolean(
-    isSending && onStop && draft.trim().length === 0,
+    !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
   );
   const workspaceModeLabel =
     workspaceMode === "worktree" ? "Worktree" : "Local";
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
   const canSubmitChat = canSendChat(hasReadyProvider, workspacePath);
+  const canSubmitComposer = isGoalComposerActive || canSubmitChat;
   const projectLabel = composerProjectLabel(workspacePath);
   const savedProjectItems: ComposerPopoverItem[] = savedProjects
     .filter((project) => project.path)
@@ -11110,6 +11288,100 @@ function Composer({
       label: "Search",
     },
   ];
+  const slashCommands: ComposerSlashCommand[] = [
+    {
+      action: "add-goal",
+      command: "/goal",
+      detail: sessionGoal?.text
+        ? "Edit the outcome for this chat"
+        : "Define the outcome for this chat",
+      icon: Goal,
+      label: sessionGoal?.text ? "Edit goal" : "Set goal",
+    },
+    chatMode === "plan"
+      ? {
+          action: "set-chat-mode-normal",
+          command: "/normal",
+          detail: "Return to regular agent execution",
+          icon: Play,
+          label: "Normal mode",
+        }
+      : {
+          action: "set-chat-mode-plan",
+          command: "/plan",
+          detail: "Explore and plan without changing files",
+          icon: LockKeyhole,
+          label: "Plan mode",
+        },
+    {
+      action: "select-image",
+      command: "/image",
+      detail: "Attach an image to your next message",
+      icon: ImagePlus,
+      label: "Attach image",
+    },
+    {
+      action: "select-file",
+      command: "/file",
+      detail: "Attach a file from the workspace",
+      icon: Paperclip,
+      label: "Attach file",
+    },
+    {
+      action: "select-folder",
+      command: "/folder",
+      detail: "Choose the workspace for this chat",
+      icon: Folder,
+      label: "Choose folder",
+    },
+    {
+      action: "search-workspace",
+      command: "/search",
+      detail: "Find a command or workspace file",
+      icon: Search,
+      label: "Search workspace",
+    },
+    {
+      command: "/model",
+      detail: "Choose a provider and model",
+      icon: Bot,
+      label: "Choose model",
+      popover: "provider",
+    },
+    {
+      command: "/permissions",
+      detail: "Choose whether Gyro asks before acting",
+      icon: ShieldCheck,
+      label: "Change permissions",
+      popover: "approval",
+    },
+    {
+      action: "new-chat",
+      command: "/new",
+      detail: "Start a fresh chat in this workspace",
+      icon: Edit3,
+      label: "New chat",
+    },
+  ];
+  const slashMatch = isGoalComposerActive ? null : draft.match(/^\/([^\s/]*)$/);
+  const slashQuery = slashMatch?.[1]?.toLocaleLowerCase();
+  const filteredSlashCommands =
+    slashQuery === undefined
+      ? []
+      : slashCommands.filter((command) => {
+          const commandName = command.command.slice(1).toLocaleLowerCase();
+          const labelWords = command.label.toLocaleLowerCase().split(/\s+/);
+          return (
+            commandName.startsWith(slashQuery) ||
+            labelWords.some((word) => word.startsWith(slashQuery))
+          );
+        });
+  const isSlashMenuOpen =
+    !isSlashMenuDismissed && filteredSlashCommands.length > 0;
+  const selectedSlashCommandIndex = Math.min(
+    activeSlashCommandIndex,
+    Math.max(0, filteredSlashCommands.length - 1),
+  );
 
   const togglePopover = (popover: ComposerPopoverId) => {
     setActivePopover((current) => (current === popover ? null : popover));
@@ -11131,6 +11403,21 @@ function Composer({
     setActivePopover(null);
     if (action) {
       onComposerAction?.(action);
+    }
+  };
+  const runSlashCommand = (command: ComposerSlashCommand) => {
+    setIsSlashMenuDismissed(true);
+    setHistoryIndex(undefined);
+    onDraftChange("");
+    if (command.popover) {
+      setModelPickerProviderId(undefined);
+      setActivePopover(command.popover);
+      composerTextareaRef.current?.focus();
+      return;
+    }
+    setActivePopover(null);
+    if (command.action) {
+      onComposerAction?.(command.action);
     }
   };
   const menuProps = (popover: ComposerPopoverId) => ({
@@ -11164,6 +11451,24 @@ function Composer({
       rect.top + modelFlyoutHeight > window.innerHeight - 16 ? "up" : "down",
     );
   }, [modelPickerProvider]);
+
+  useEffect(() => {
+    setActiveSlashCommandIndex(0);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    if (activeSlashCommandIndex >= filteredSlashCommands.length) {
+      setActiveSlashCommandIndex(0);
+    }
+  }, [activeSlashCommandIndex, filteredSlashCommands.length]);
+
+  useEffect(() => {
+    if (isSlashMenuOpen) {
+      slashCommandRefs.current[selectedSlashCommandIndex]?.scrollIntoView({
+        block: "nearest",
+      });
+    }
+  }, [isSlashMenuOpen, selectedSlashCommandIndex]);
 
   return (
     <div
@@ -11222,8 +11527,69 @@ function Composer({
           ))}
         </div>
       ) : null}
+      {isSlashMenuOpen ? (
+        <div
+          aria-label="Chat commands"
+          className="gyro-composer-slash-menu"
+          id={`${popoverBaseId}-slash-menu`}
+          role="menu"
+        >
+          <div className="gyro-composer-slash-menu-title">
+            <span>Commands</span>
+            <small>Type to filter</small>
+          </div>
+          <div className="gyro-composer-slash-menu-items">
+            {filteredSlashCommands.map((command, index) => {
+              const Icon = command.icon;
+              return (
+                <button
+                  aria-current={
+                    index === selectedSlashCommandIndex ? "true" : undefined
+                  }
+                  className={
+                    index === selectedSlashCommandIndex ? "is-selected" : ""
+                  }
+                  id={`${popoverBaseId}-slash-command-${index}`}
+                  key={command.command}
+                  onClick={() => runSlashCommand(command)}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onPointerEnter={() => setActiveSlashCommandIndex(index)}
+                  ref={(element) => {
+                    slashCommandRefs.current[index] = element;
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Icon size={15} />
+                  <span>
+                    <strong>{command.label}</strong>
+                    <small>{command.detail}</small>
+                  </span>
+                  <code>{command.command}</code>
+                </button>
+              );
+            })}
+          </div>
+          <div className="gyro-composer-slash-menu-hint">
+            <span>↑↓ Navigate</span>
+            <span>↵ Select</span>
+            <span>Esc Close</span>
+          </div>
+        </div>
+      ) : null}
       <textarea
-        aria-label="Message Gyro"
+        ref={composerTextareaRef}
+        aria-label={isGoalComposerActive ? "Set session goal" : "Message Gyro"}
+        aria-controls={
+          isSlashMenuOpen ? `${popoverBaseId}-slash-menu` : undefined
+        }
+        aria-activedescendant={
+          isSlashMenuOpen
+            ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
+            : undefined
+        }
+        aria-expanded={isSlashMenuOpen}
+        aria-haspopup="menu"
         onPaste={(event) => {
           const files = Array.from(event.clipboardData.files).filter((file) =>
             file.type.startsWith("image/"),
@@ -11233,11 +11599,54 @@ function Composer({
             onAttachImageFiles?.(files);
           }
         }}
-        onFocus={() => setActivePopover(null)}
-        maxLength={maxDraftLength}
-        onChange={(event) => onDraftChange(event.target.value)}
+        onFocus={() => {
+          setActivePopover(null);
+          setIsSlashMenuDismissed(false);
+        }}
+        maxLength={isGoalComposerActive ? 240 : maxDraftLength}
+        onChange={(event) => {
+          setIsSlashMenuDismissed(false);
+          onDraftChange(event.target.value);
+        }}
         onKeyDown={(event) => {
+          if (isGoalComposerActive && event.key === "Escape") {
+            event.preventDefault();
+            onCancelGoalComposer?.();
+            return;
+          }
+          if (isSlashMenuOpen) {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const direction = event.key === "ArrowDown" ? 1 : -1;
+              setActiveSlashCommandIndex(
+                (current) =>
+                  (current + direction + filteredSlashCommands.length) %
+                  filteredSlashCommands.length,
+              );
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setIsSlashMenuDismissed(true);
+              return;
+            }
+            if (
+              (event.key === "Enter" || event.key === "Tab") &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              const command =
+                filteredSlashCommands[selectedSlashCommandIndex] ??
+                filteredSlashCommands[0];
+              if (command) {
+                event.preventDefault();
+                runSlashCommand(command);
+                return;
+              }
+            }
+          }
           if (
+            !isGoalComposerActive &&
             (event.key === "ArrowUp" || event.key === "ArrowDown") &&
             !event.shiftKey &&
             (draft.length === 0 || historyIndex !== undefined)
@@ -11268,16 +11677,18 @@ function Composer({
           if (shouldSend) {
             event.preventDefault();
             setActivePopover(null);
-            if (canSubmitChat && draft.trim().length > 0) {
+            if (canSubmitComposer && draft.trim().length > 0) {
               setHistoryIndex(undefined);
               onSend();
             }
           }
         }}
         placeholder={
-          variant === "hero"
-            ? "Ask for follow-up changes or attach images"
-            : "Ask for follow-up changes or attach context"
+          isGoalComposerActive
+            ? "Define the outcome for this chat"
+            : variant === "hero"
+              ? "Ask for follow-up changes or attach images"
+              : "Ask for follow-up changes or attach context"
         }
         value={draft}
       />
@@ -11343,7 +11754,24 @@ function Composer({
           </>
         ) : null}
         {surfaceControls}
-        {chatMode === "plan" ? (
+        {isGoalComposerActive ? (
+          <button
+            aria-label="Cancel setting goal"
+            aria-pressed="true"
+            className="gyro-composer-chip is-goal"
+            onClick={onCancelGoalComposer}
+            title="Cancel setting goal"
+            type="button"
+          >
+            <Goal size={13} />
+            <span className="gyro-composer-label">Goal</span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : chatMode === "plan" ? (
           <button
             aria-label="Remove Plan mode"
             aria-pressed="true"
@@ -11373,21 +11801,31 @@ function Composer({
         ) : null}
         <div className="gyro-composer-spacer" />
         {contextUsage ? (
-          <div
-            aria-label={contextUsage.label}
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={contextUsage.percent}
-            className="gyro-composer-context-wheel"
-            role="progressbar"
-            style={
-              {
-                "--context-usage": `${contextUsage.percent * 3.6}deg`,
-              } as CSSProperties
-            }
-            title={contextUsage.label}
-          >
-            <span />
+          <div className="gyro-composer-context-meter">
+            <div
+              aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
+              aria-label={contextUsage.label}
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={contextUsage.percent}
+              className="gyro-composer-context-wheel"
+              role="progressbar"
+              style={
+                {
+                  "--context-usage": `${contextUsage.percent * 3.6}deg`,
+                } as CSSProperties
+              }
+              tabIndex={0}
+            >
+              <span />
+            </div>
+            <div
+              className="gyro-composer-context-tooltip"
+              id={`${popoverBaseId}-context-usage-tooltip`}
+              role="tooltip"
+            >
+              {contextUsage.label}
+            </div>
           </div>
         ) : null}
         <div className="gyro-composer-control gyro-composer-control-model">
@@ -11472,14 +11910,16 @@ function Composer({
           aria-label={
             isStopAction
               ? "Stop response"
-              : isSending
-                ? "Queue message"
-                : "Send message"
+              : isGoalComposerActive
+                ? "Set goal"
+                : isSending
+                  ? "Queue message"
+                  : "Send message"
           }
           aria-busy={false}
           className="gyro-send-button"
           disabled={
-            !isStopAction && (!canSubmitChat || draft.trim().length === 0)
+            !isStopAction && (!canSubmitComposer || draft.trim().length === 0)
           }
           onClick={() => {
             setActivePopover(null);
@@ -11492,13 +11932,15 @@ function Composer({
           title={
             isStopAction
               ? "Stop response"
-              : !hasUserWorkspace
-                ? "Choose a folder before sending"
-                : !hasReadyProvider
-                  ? "Connect a provider before sending"
-                  : isSending
-                    ? "Queue message"
-                    : "Send"
+              : isGoalComposerActive
+                ? "Set goal"
+                : !hasUserWorkspace
+                  ? "Choose a folder before sending"
+                  : !hasReadyProvider
+                    ? "Connect a provider before sending"
+                    : isSending
+                      ? "Queue message"
+                      : "Send"
           }
           type="button"
         >
