@@ -812,9 +812,9 @@ pre {
 }
 
 .download-stack-full {
-  max-width: 880px;
+  max-width: 760px;
   min-width: 0;
-  padding: 34px;
+  padding: 30px;
 }
 
 .download-stack-full > * {
@@ -825,19 +825,12 @@ pre {
 .download-card-header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.download-card-header .detect-status {
-  max-width: 320px;
-  text-align: right;
 }
 
 .architecture-selector-large {
   width: 100%;
   min-inline-size: 0;
-  margin-top: 28px;
+  margin-top: 24px;
 }
 
 .architecture-selector-large .segmented-control {
@@ -846,7 +839,7 @@ pre {
 }
 
 .architecture-selector-large .segmented-control label {
-  min-height: 92px;
+  min-height: 76px;
   align-content: center;
   border: 1px solid transparent;
 }
@@ -860,6 +853,15 @@ pre {
   opacity: 1;
 }
 
+.architecture-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .download-stack-full > .button-download {
   width: 100%;
   margin-top: 18px;
@@ -870,14 +872,47 @@ pre {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px 18px;
+  padding-top: 2px;
 }
 
 .release-details p {
   margin: 0;
 }
 
-.unsigned-notice-full {
-  margin-top: 6px;
+.checksum-disclosure {
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+}
+
+.checksum-disclosure > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  color: #aaa69f;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.checksum-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.checksum-disclosure > summary::after {
+  margin-left: auto;
+  color: var(--quiet);
+  content: "+";
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.checksum-disclosure[open] > summary::after {
+  content: "−";
+}
+
+.checksum-disclosure > summary:hover {
+  color: var(--text);
 }
 
 .checksum-card {
@@ -889,6 +924,10 @@ pre {
   border: 1px solid var(--line);
   border-radius: 13px;
   background: #0e0e0d;
+}
+
+.checksum-disclosure .checksum-card {
+  margin: 2px 0 6px;
 }
 
 .checksum-card .detail-label {
