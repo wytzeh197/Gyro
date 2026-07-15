@@ -148,7 +148,6 @@ containsAll(pages.home, "Homepage", [
   "assets/screenshots/cli-1600.webp",
   "assets/screenshots/workspace-1600.webp",
   "assets/social-preview.png",
-  "Local by default.",
   "Unsigned public alpha",
   "Read the safe install guide",
   "data-download-surface",
