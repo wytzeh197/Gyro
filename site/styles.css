@@ -523,17 +523,28 @@ pre {
 }
 
 .download-shell {
-  max-width: 800px;
+  max-width: 920px;
 }
 
 .download-heading {
   max-width: 680px;
-  margin: 0 auto 38px;
+  margin: 0 auto 42px;
   text-align: center;
 }
 
 .download-stack {
+  display: grid;
+  width: min(100%, 460px);
   min-width: 0;
+  gap: 17px;
+  margin-inline: auto;
+}
+
+.download-platform-note {
+  margin: 0 0 5px;
+  color: var(--quiet);
+  font-size: 13px;
+  text-align: center;
 }
 
 .macos-card,
@@ -545,25 +556,14 @@ pre {
 
 .macos-card {
   display: grid;
-  gap: 17px;
-  padding: 30px;
+  gap: 20px;
+  padding: 32px 28px 26px;
+  border-color: rgba(255, 96, 56, 0.42);
   border-radius: 18px;
   background: linear-gradient(145deg, #151514, #10100f 72%);
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.24);
-}
-
-.macos-card-header,
-.macos-card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.release-version {
-  margin: 0;
-  color: var(--quiet);
-  font-size: 13px;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.24),
+    0 0 50px rgba(255, 82, 42, 0.05);
 }
 
 .platform-identity {
@@ -587,6 +587,16 @@ pre {
   margin: 5px 0 0;
   color: var(--quiet);
   font-size: 13px;
+}
+
+.macos-card .platform-identity {
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.macos-card .platform-identity h3 {
+  font-size: 19px;
 }
 
 .architecture-selector {
@@ -662,8 +672,12 @@ pre {
 
 .macos-card .button-download {
   width: 100%;
-  min-height: 50px;
+  min-height: 48px;
   white-space: nowrap;
+}
+
+.macos-card .asset-meta {
+  text-align: center;
 }
 
 .macos-card .detect-status {
@@ -689,7 +703,14 @@ pre {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  justify-content: flex-end;
+  justify-content: center;
+  text-align: center;
+}
+
+.download-stack > .release-meta {
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  justify-self: center;
 }
 
 .release-fallback {
@@ -1275,14 +1296,11 @@ pre {
   }
 
   .macos-card {
-    padding: 24px;
+    padding: 28px 22px 24px;
   }
 
-  .macos-card-header,
-  .macos-card-meta {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
+  .download-stack > .release-meta {
+    max-width: calc(100vw - 32px);
   }
 
   .download-card-header,
@@ -1298,10 +1316,6 @@ pre {
   .download-card-header .detect-status {
     max-width: none;
     text-align: left;
-  }
-
-  .release-meta {
-    justify-content: flex-start;
   }
 
   .download-stack-full {

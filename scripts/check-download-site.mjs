@@ -148,8 +148,9 @@ containsAll(pages.home, "Homepage", [
   "assets/screenshots/cli-1600.webp",
   "assets/screenshots/workspace-1600.webp",
   "assets/social-preview.png",
-  "Ready when you are.",
-  "Gyro for Mac",
+  "Download Gyro for macOS.",
+  "The native workspace for complete coding runs.",
+  "DMG · Apple Silicon &amp; Intel",
   "Install guide",
   "data-download-surface",
 ]);
