@@ -3271,13 +3271,13 @@ expect(
     !releaseWorkflowSource.includes("tauri-apps/tauri-action") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
-    surfaceSource.includes("Private preview") &&
+    surfaceSource.includes("Public Alpha") &&
     surfaceSource.includes('"Check for updates"') &&
     surfaceSource.includes("formatUpdateCheckedAt") &&
     !surfaceSource.includes('label="Release channel"') &&
     !surfaceSource.includes('value="Valid"') &&
     !surfaceSource.includes('value="Today"'),
-  "Signed updates should use one direct contextual action above Settings with progress and development safety.",
+  "Updater-signed public Alpha releases should use one direct contextual action above Settings with progress and development safety.",
 );
 expect(
   updateControllerSource.includes(
