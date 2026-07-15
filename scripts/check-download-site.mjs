@@ -170,10 +170,6 @@ containsAll(pages.install, "Install page", [
   "Intel",
   "Download DMG",
   "Verify download",
-  "Move Gyro to Applications.",
-  "Try to open Gyro.",
-  "Choose Open Anyway.",
-  "Managed Mac?",
   "SHA-256 for selected DMG",
   'data-role="copy-checksum"',
   "Updates and rollback",
@@ -186,6 +182,13 @@ containsAll(pages.install, "Install page", [
 check(
   !pages.install.includes("Unsigned public alpha"),
   "Install page must not repeat the unsigned alpha warning",
+);
+
+check(
+  !pages.install.includes('class="install-guide') &&
+    !pages.install.includes("Open Gyro safely.") &&
+    !pages.install.includes("Choose Open Anyway."),
+  "Install page must not contain the removed first-launch section",
 );
 
 containsAll(pages.changelog, "Changelog page", [
