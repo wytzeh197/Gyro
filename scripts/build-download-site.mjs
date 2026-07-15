@@ -33,11 +33,13 @@ const files = [
   ["site/styles.css", "styles.css"],
   ["site/app.js", "app.js"],
   ["apps/desktop/src-tauri/icons/icon.png", "assets/gyro-logo.png"],
-  ["docs/media/launch/gyro-launch-film.mp4", "assets/gyro-launch-film.mp4"],
-  ["docs/media/launch/gyro-launch-poster.png", "assets/gyro-launch-poster.png"],
-  ["docs/screenshots/chat-thread.png", "assets/chat-thread.png"],
-  ["docs/screenshots/cli-workbench.png", "assets/cli-workbench.png"],
-  ["docs/screenshots/ide.png", "assets/ide.png"],
+  ["site/assets/apple.svg", "assets/apple.svg"],
+  ["site/assets/github.svg", "assets/github.svg"],
+  ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
+  ["site/assets/hero-workbench.png", "assets/hero-workbench.png"],
+  ["site/assets/chat-surface.png", "assets/chat-surface.png"],
+  ["site/assets/cli-surface.png", "assets/cli-surface.png"],
+  ["site/assets/workspace-surface.png", "assets/workspace-surface.png"],
 ];
 
 for (const [source] of files) {

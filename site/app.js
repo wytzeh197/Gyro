@@ -3,6 +3,19 @@ export const RELEASE_API =
   "https://api.github.com/repos/wytzeh197/Gyro/releases/latest";
 
 const FALLBACK_RELEASE = `${REPOSITORY}/releases/latest`;
+const RELEASE_REQUEST_TIMEOUT_MS = 8000;
+const DEFAULT_ARCHITECTURE = "apple-silicon";
+const ARCHITECTURES = ["apple-silicon", "intel"];
+
+let selectedArchitecture = DEFAULT_ARCHITECTURE;
+let recommendedArchitecture = null;
+let releaseAssets = {
+  appleSilicon: null,
+  intel: null,
+  checksums: null,
+};
+let selectorIsBound = false;
+let copyFeedbackTimer = null;
 
 export function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return "Size unavailable";
@@ -78,6 +91,89 @@ function cleanMarkdownText(value) {
     .trim();
 }
 
+export function isOutdatedReleaseLine(value) {
+  const text = cleanMarkdownText(value);
+  return /\blaunch\s+film\b/i.test(text) || /\bprivate\s+preview\b/i.test(text);
+}
+
+export function parseReleaseNoteBlocks(markdown) {
+  const blocks = [];
+  let paragraphLines = [];
+  let listItems = [];
+  let codeLines = null;
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) return;
+    blocks.push({ type: "paragraph", text: paragraphLines.join(" ") });
+    paragraphLines = [];
+  };
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    blocks.push({ type: "list", items: listItems });
+    listItems = [];
+  };
+
+  const flushCode = () => {
+    if (codeLines === null) return;
+    blocks.push({ type: "code", text: codeLines.join("\n") });
+    codeLines = null;
+  };
+
+  for (const rawLine of String(markdown ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+
+    if (/^```/.test(line)) {
+      if (codeLines === null) {
+        flushParagraph();
+        flushList();
+        codeLines = [];
+      } else {
+        flushCode();
+      }
+      continue;
+    }
+
+    if (codeLines !== null) {
+      codeLines.push(rawLine);
+      continue;
+    }
+
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const heading = line.match(/^#{1,4}\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", text: heading[1] });
+      continue;
+    }
+
+    const listItem = line.match(/^[-*]\s+(.+)$/);
+    if (listItem) {
+      flushParagraph();
+      listItems.push(listItem[1]);
+      continue;
+    }
+
+    if (listItems.length) {
+      listItems[listItems.length - 1] += ` ${line}`;
+      continue;
+    }
+
+    paragraphLines.push(line.replace(/^>\s?/, ""));
+  }
+
+  flushParagraph();
+  flushList();
+  flushCode();
+  return blocks;
+}
+
 function renderReleaseNotes(markdown) {
   const target = element("release-notes");
   if (!target) return;
@@ -91,39 +187,50 @@ function renderReleaseNotes(markdown) {
     return;
   }
 
-  let list = null;
-  const appendParagraph = (text) => {
-    const paragraph = document.createElement("p");
-    paragraph.textContent = cleanMarkdownText(text);
-    target.append(paragraph);
-  };
-
-  for (const rawLine of markdown.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) {
-      list = null;
+  for (const block of parseReleaseNoteBlocks(markdown)) {
+    if (block.type === "list") {
+      const visibleItems = block.items.filter(
+        (item) => !isOutdatedReleaseLine(item),
+      );
+      if (!visibleItems.length) continue;
+      const list = document.createElement("ul");
+      for (const value of visibleItems) {
+        const item = document.createElement("li");
+        item.textContent = cleanMarkdownText(value);
+        list.append(item);
+      }
+      target.append(list);
       continue;
     }
-    if (/^#\s/.test(line)) continue;
-    if (/^#{2,4}\s/.test(line)) {
-      list = null;
+
+    if (isOutdatedReleaseLine(block.text)) continue;
+
+    if (block.type === "heading") {
+      if (!target.childElementCount) continue;
       const heading = document.createElement("h3");
-      heading.textContent = cleanMarkdownText(line.replace(/^#{2,4}\s+/, ""));
+      heading.textContent = cleanMarkdownText(block.text);
       target.append(heading);
       continue;
     }
-    if (/^[-*]\s+/.test(line)) {
-      if (!list) {
-        list = document.createElement("ul");
-        target.append(list);
-      }
-      const item = document.createElement("li");
-      item.textContent = cleanMarkdownText(line.replace(/^[-*]\s+/, ""));
-      list.append(item);
+
+    if (block.type === "code") {
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.textContent = block.text;
+      pre.append(code);
+      target.append(pre);
       continue;
     }
-    list = null;
-    appendParagraph(line.replace(/^>\s?/, ""));
+
+    const paragraph = document.createElement("p");
+    paragraph.textContent = cleanMarkdownText(block.text);
+    target.append(paragraph);
+  }
+
+  if (!target.childElementCount) {
+    const empty = document.createElement("p");
+    empty.textContent = "Read the full release notes on GitHub.";
+    target.append(empty);
   }
 }
 
@@ -137,42 +244,186 @@ function formatPublishedDate(value) {
   }).format(date);
 }
 
-function configureDownload(kind, asset) {
-  const isAppleSilicon = kind === "apple-silicon";
-  const link = element(`${kind}-download`);
-  const meta = element(`${kind}-meta`);
-  const digest = element(`${kind}-digest`);
-  if (!link || !meta || !digest) return;
+function architectureLabel(kind) {
+  return kind === "intel" ? "Intel" : "Apple Silicon";
+}
 
-  if (!asset?.browser_download_url) {
-    link.href = FALLBACK_RELEASE;
-    link.textContent = "Find on GitHub ↗";
-    meta.textContent = "Direct DMG unavailable · Open release";
-    digest.textContent = "See SHA256SUMS on GitHub Releases";
+function assetForArchitecture(kind) {
+  return kind === "intel" ? releaseAssets.intel : releaseAssets.appleSilicon;
+}
+
+function resetCopyFeedback() {
+  if (copyFeedbackTimer) {
+    window.clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = null;
+  }
+
+  const button = element("copy-checksum");
+  if (!button) return;
+  if (button.dataset.defaultLabel) {
+    button.textContent = button.dataset.defaultLabel;
+  }
+  delete button.dataset.copyState;
+  const checksum = button.dataset.checksum;
+  const label = architectureLabel(selectedArchitecture);
+  button.setAttribute(
+    "aria-label",
+    checksum
+      ? `Copy the SHA-256 checksum for Gyro on ${label}`
+      : `SHA-256 checksum unavailable for Gyro on ${label}`,
+  );
+}
+
+function configureSelectedDownload() {
+  const asset = assetForArchitecture(selectedArchitecture);
+  const label = architectureLabel(selectedArchitecture);
+  const link = element("download-selected");
+  const meta = element("selected-asset-meta");
+  const digest = element("selected-digest");
+  const command = element("checksum-command");
+  const copyButton = element("copy-checksum");
+  const checksum = sha256FromDigest(asset?.digest);
+
+  resetCopyFeedback();
+  setText(
+    "download-selected-label",
+    asset?.browser_download_url ? "Download DMG" : "Open GitHub Releases",
+  );
+
+  if (link) {
+    link.href = asset?.browser_download_url ?? FALLBACK_RELEASE;
+    link.setAttribute(
+      "aria-label",
+      asset?.browser_download_url
+        ? `Download Gyro for ${label}, ${formatBytes(asset.size)}`
+        : `Find the Gyro ${label} DMG on GitHub Releases`,
+    );
+  }
+
+  if (meta) {
+    meta.textContent = asset?.name
+      ? `${asset.name} · ${formatBytes(asset.size)}`
+      : `${label} DMG unavailable · Open GitHub Releases`;
+  }
+
+  if (digest) {
+    digest.textContent = checksum ?? "See SHA256SUMS on GitHub Releases";
+    digest.title = checksum
+      ? `SHA-256: ${checksum}`
+      : "Digest unavailable from the GitHub API";
+  }
+
+  if (command) {
+    command.textContent = asset?.name
+      ? `shasum -a 256 "${asset.name}"`
+      : 'shasum -a 256 "<downloaded-dmg>"';
+  }
+
+  if (copyButton) {
+    if (!copyButton.dataset.defaultLabel) {
+      copyButton.dataset.defaultLabel = copyButton.textContent.trim() || "Copy";
+    }
+    copyButton.disabled = !checksum;
+    copyButton.dataset.checksum = checksum ?? "";
+    copyButton.setAttribute(
+      "aria-label",
+      checksum
+        ? `Copy the SHA-256 checksum for Gyro on ${label}`
+        : `SHA-256 checksum unavailable for Gyro on ${label}`,
+    );
+    copyButton.title = checksum ? "Copy SHA-256" : "Checksum unavailable";
+  }
+}
+
+function markRecommendedArchitecture(kind) {
+  recommendedArchitecture = kind;
+  for (const architecture of ARCHITECTURES) {
+    const input = element(`architecture-${architecture}`);
+    if (!input) continue;
+    const isRecommended = architecture === recommendedArchitecture;
+    input.toggleAttribute("data-recommended", isRecommended);
+    input.closest("label")?.classList.toggle("is-recommended", isRecommended);
+  }
+}
+
+function chooseArchitecture(kind) {
+  if (!ARCHITECTURES.includes(kind)) return;
+  selectedArchitecture = kind;
+  for (const architecture of ARCHITECTURES) {
+    const input = element(`architecture-${architecture}`);
+    if (input) input.checked = architecture === selectedArchitecture;
+  }
+  configureSelectedDownload();
+}
+
+async function writeClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
     return;
   }
 
-  link.href = asset.browser_download_url;
-  link.setAttribute(
-    "aria-label",
-    `Download Gyro for ${isAppleSilicon ? "Apple Silicon" : "Intel"}, ${formatBytes(asset.size)}`,
-  );
-  meta.textContent = `macOS 14+ · DMG · ${formatBytes(asset.size)}`;
-  const checksum = sha256FromDigest(asset.digest);
-  digest.textContent = checksum ?? "See SHA256SUMS for this asset";
-  digest.title = checksum
-    ? `SHA-256: ${checksum}`
-    : "Digest unavailable from API";
+  const temporary = document.createElement("textarea");
+  temporary.value = value;
+  temporary.setAttribute("readonly", "");
+  temporary.style.position = "fixed";
+  temporary.style.opacity = "0";
+  document.body.append(temporary);
+  temporary.select();
+  const copied = document.execCommand?.("copy");
+  temporary.remove();
+  if (!copied) throw new Error("Clipboard access is unavailable");
+}
+
+async function copySelectedChecksum() {
+  const button = element("copy-checksum");
+  const checksum = button?.dataset.checksum;
+  if (!button || !checksum) return;
+
+  try {
+    await writeClipboard(checksum);
+    button.textContent = "Copied";
+    button.dataset.copyState = "copied";
+    button.setAttribute("aria-label", "SHA-256 checksum copied");
+  } catch {
+    button.textContent = "Copy failed";
+    button.dataset.copyState = "failed";
+    button.setAttribute(
+      "aria-label",
+      "Checksum copy failed. Select and copy the checksum manually.",
+    );
+  }
+
+  copyFeedbackTimer = window.setTimeout(resetCopyFeedback, 1800);
+}
+
+function bindArchitectureSelector() {
+  if (selectorIsBound) return;
+  selectorIsBound = true;
+
+  for (const architecture of ARCHITECTURES) {
+    const input = element(`architecture-${architecture}`);
+    input?.addEventListener("change", () => {
+      if (input.checked) chooseArchitecture(architecture);
+    });
+  }
+
+  element("copy-checksum")?.addEventListener("click", () => {
+    void copySelectedChecksum();
+  });
+
+  chooseArchitecture(DEFAULT_ARCHITECTURE);
 }
 
 function configureRelease(release) {
   const assets = selectReleaseAssets(release);
+  releaseAssets = assets;
   const releasePage = release.html_url || FALLBACK_RELEASE;
   const version = release.tag_name.replace(/^v/, "");
   setText("release-version", `Gyro ${version} · Public alpha`);
   setText("release-date", formatPublishedDate(release.published_at));
-  configureDownload("apple-silicon", assets.appleSilicon);
-  configureDownload("intel", assets.intel);
+  const dateDivider = element("release-date-divider");
+  if (dateDivider) dateDivider.hidden = false;
+  configureSelectedDownload();
   renderReleaseNotes(release.body);
 
   const checksumLink = element("checksums-link");
@@ -180,17 +431,10 @@ function configureRelease(release) {
     checksumLink.href = assets.checksums?.browser_download_url ?? releasePage;
   }
 
-  const command = element("checksum-command");
-  if (command && assets.appleSilicon?.name) {
-    command.textContent = `shasum -a 256 "${assets.appleSilicon.name}"`;
-  }
-
   if (!assets.appleSilicon || !assets.intel) {
     const fallback = element("release-fallback");
     if (fallback) {
       fallback.hidden = false;
-      fallback.firstChild.textContent =
-        "One of the expected direct DMGs is missing from this release. ";
     }
   }
 }
@@ -198,8 +442,16 @@ function configureRelease(release) {
 function showReleaseFallback() {
   setText("release-version", "Latest public alpha on GitHub");
   setText("release-date", "");
-  setText("apple-silicon-digest", "Open GitHub Releases for SHA256SUMS");
-  setText("intel-digest", "Open GitHub Releases for SHA256SUMS");
+  const dateDivider = element("release-date-divider");
+  if (dateDivider) dateDivider.hidden = true;
+  releaseAssets = {
+    appleSilicon: null,
+    intel: null,
+    checksums: null,
+  };
+  configureSelectedDownload();
+  const checksumLink = element("checksums-link");
+  if (checksumLink) checksumLink.href = FALLBACK_RELEASE;
   const fallback = element("release-fallback");
   if (fallback) fallback.hidden = false;
   const notes = element("release-notes");
@@ -216,9 +468,16 @@ function showReleaseFallback() {
 }
 
 async function loadRelease() {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    RELEASE_REQUEST_TIMEOUT_MS,
+  );
+
   try {
     const response = await fetch(RELEASE_API, {
       headers: { Accept: "application/vnd.github+json" },
+      signal: controller.signal,
     });
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
     const release = await response.json();
@@ -228,6 +487,8 @@ async function loadRelease() {
   } catch (error) {
     console.warn("Unable to load the latest Gyro release", error);
     showReleaseFallback();
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -237,7 +498,7 @@ async function suggestArchitecture() {
   if (!userAgentData?.getHighEntropyValues) {
     if (status) {
       status.textContent =
-        "Automatic processor detection is not reliably available in this browser. Choose your Mac below.";
+        "Automatic processor detection is not reliably available in this browser. Choose your Mac processor.";
     }
     return;
   }
@@ -255,27 +516,28 @@ async function suggestArchitecture() {
     if (!architecture) {
       if (status) {
         status.textContent =
-          "We could not reliably detect this Mac’s processor. Choose your Mac below.";
+          "We could not reliably detect this Mac’s processor. Choose your Mac processor.";
       }
       return;
     }
-    const card = element(`${architecture}-card`);
-    if (card) card.classList.add("is-suggested");
+    markRecommendedArchitecture(architecture);
+    chooseArchitecture(architecture);
     if (status) {
-      status.textContent = `Suggested: ${
+      status.textContent = `Recommended for this Mac: ${
         architecture === "apple-silicon" ? "Apple Silicon" : "Intel"
       }. Confirm before downloading.`;
     }
   } catch {
     if (status) {
       status.textContent =
-        "We could not reliably detect this Mac’s processor. Choose your Mac below.";
+        "We could not reliably detect this Mac’s processor. Choose your Mac processor.";
     }
   }
 }
 
 export function startPage() {
   document.documentElement.classList.add("js");
+  bindArchitectureSelector();
   void Promise.all([loadRelease(), suggestArchitecture()]);
 }
 
