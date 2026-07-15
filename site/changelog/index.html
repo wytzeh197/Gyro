@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="same-origin" />
+    <meta
+      name="description"
+      content="Release history for the Gyro public alpha."
+    />
+    <meta name="theme-color" content="#0b0b0a" />
+    <meta property="og:title" content="Gyro changelog" />
+    <meta
+      property="og:description"
+      content="What changed in every published Gyro public alpha."
+    />
+    <meta
+      property="og:image"
+      content="https://wytzeh197.github.io/Gyro/assets/social-preview.png"
+    />
+    <meta
+      property="og:url"
+      content="https://wytzeh197.github.io/Gyro/changelog/"
+    />
+    <link rel="canonical" href="https://wytzeh197.github.io/Gyro/changelog/" />
+    <title>Gyro Changelog</title>
+    <link rel="icon" href="../assets/gyro-logo.png" />
+    <link rel="stylesheet" href="../styles.css" />
+    <script type="module" src="../changelog.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="../" aria-label="Gyro home"
+        ><img
+          src="../assets/gyro-logo.png"
+          alt=""
+          width="30"
+          height="30"
+        /><span>Gyro</span></a
+      >
+      <nav aria-label="Main navigation">
+        <a class="desktop-nav-link" href="../#product">Product</a
+        ><a class="desktop-nav-link" href="../install/">Install</a
+        ><a class="desktop-nav-link" href="./" aria-current="page">Changelog</a
+        ><a class="github-link" href="https://github.com/wytzeh197/Gyro"
+          ><img src="../assets/github.svg" alt="" width="18" height="18" /><span
+            >GitHub</span
+          ></a
+        ><a class="nav-download" href="../install/#download">Download</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero section-shell">
+        <p class="eyebrow"><span aria-hidden="true"></span> Public alpha</p>
+        <h1>Changelog.</h1>
+        <p>Every published alpha from version 21 onward.</p>
+        <p class="page-status" data-changelog-status aria-live="polite">
+          Loading release history…
+        </p>
+      </section>
+      <nav
+        class="mobile-version-jump section-shell"
+        data-version-jump
+        aria-label="Jump to a release"
+      >
+        <a href="https://github.com/wytzeh197/Gyro/releases">GitHub Releases</a>
+      </nav>
+      <section
+        class="changelog-layout section-shell"
+        aria-label="Release history"
+      >
+        <aside class="version-rail">
+          <p>Versions</p>
+          <nav data-version-rail aria-label="Release versions">
+            <a href="https://github.com/wytzeh197/Gyro/releases"
+              >GitHub Releases</a
+            >
+          </nav>
+        </aside>
+        <div class="release-list" data-changelog-list>
+          <article class="release-entry release-placeholder">
+            <header>
+              <p class="release-kicker">Loading</p>
+              <h2>Public alpha releases</h2>
+            </header>
+            <p>Fetching the latest release history from GitHub.</p>
+          </article>
+        </div>
+      </section>
+      <div
+        class="release-fallback section-shell"
+        data-changelog-fallback
+        hidden
+      >
+        GitHub release data is unavailable.
+        <a href="https://github.com/wytzeh197/Gyro/releases"
+          >Browse all releases on GitHub</a
+        >.
+      </div>
+      <noscript
+        ><p class="release-fallback section-shell">
+          JavaScript is off.
+          <a href="https://github.com/wytzeh197/Gyro/releases"
+            >Browse the release history on GitHub</a
+          >.
+        </p></noscript
+      >
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-grid">
+        <a class="brand" href="../"
+          ><img
+            src="../assets/gyro-logo.png"
+            alt=""
+            width="28"
+            height="28"
+          /><span>Gyro</span></a
+        >
+        <nav aria-label="Footer navigation">
+          <a href="../privacy/">Privacy &amp; Legal</a
+          ><a href="../install/">Install</a><a href="./">Changelog</a
+          ><a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
+            >Support</a
+          ><a href="https://github.com/wytzeh197/Gyro/security">Security</a
+          ><a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE"
+            >License</a
+          ><a href="../assets/ATTRIBUTIONS.md">Attributions</a
+          ><a href="https://github.com/wytzeh197/Gyro">Source</a>
+        </nav>
+        <p>Open source. Built for macOS.</p>
+      </div>
+    </footer>
+  </body>
+</html>

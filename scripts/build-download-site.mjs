@@ -30,16 +30,49 @@ if (outputRoot === repoRoot || outputRoot === sourceRoot) {
 
 const files = [
   ["site/index.html", "index.html"],
+  ["site/install/index.html", "install/index.html"],
+  ["site/changelog/index.html", "changelog/index.html"],
+  ["site/privacy/index.html", "privacy/index.html"],
   ["site/styles.css", "styles.css"],
   ["site/app.js", "app.js"],
-  ["apps/desktop/src-tauri/icons/icon.png", "assets/gyro-logo.png"],
+  ["site/changelog.js", "changelog.js"],
+  ["site/release-utils.js", "release-utils.js"],
+  ["site/assets/gyro-logo.png", "assets/gyro-logo.png"],
   ["site/assets/apple.svg", "assets/apple.svg"],
   ["site/assets/github.svg", "assets/github.svg"],
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
-  ["site/assets/hero-workbench.png", "assets/hero-workbench.png"],
-  ["site/assets/chat-surface.png", "assets/chat-surface.png"],
-  ["site/assets/cli-surface.png", "assets/cli-surface.png"],
-  ["site/assets/workspace-surface.png", "assets/workspace-surface.png"],
+  ["site/assets/social-preview.png", "assets/social-preview.png"],
+  [
+    "site/assets/screenshots/hero-1512.webp",
+    "assets/screenshots/hero-1512.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-3024.webp",
+    "assets/screenshots/hero-3024.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-mobile-600.webp",
+    "assets/screenshots/hero-mobile-600.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-mobile-1200.webp",
+    "assets/screenshots/hero-mobile-1200.webp",
+  ],
+  ["site/assets/screenshots/chat-900.webp", "assets/screenshots/chat-900.webp"],
+  [
+    "site/assets/screenshots/chat-1800.webp",
+    "assets/screenshots/chat-1800.webp",
+  ],
+  ["site/assets/screenshots/cli-800.webp", "assets/screenshots/cli-800.webp"],
+  ["site/assets/screenshots/cli-1600.webp", "assets/screenshots/cli-1600.webp"],
+  [
+    "site/assets/screenshots/workspace-800.webp",
+    "assets/screenshots/workspace-800.webp",
+  ],
+  [
+    "site/assets/screenshots/workspace-1600.webp",
+    "assets/screenshots/workspace-1600.webp",
+  ],
 ];
 
 for (const [source] of files) {

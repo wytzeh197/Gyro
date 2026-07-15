@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="same-origin" />
+    <meta
+      name="description"
+      content="Privacy and legal information for the Gyro public alpha and website."
+    />
+    <meta name="theme-color" content="#0b0b0a" />
+    <meta property="og:title" content="Gyro Privacy &amp; Legal" />
+    <meta
+      property="og:description"
+      content="How Gyro stores local data, handles provider context, and operates its analytics-free website."
+    />
+    <meta
+      property="og:image"
+      content="https://wytzeh197.github.io/Gyro/assets/social-preview.png"
+    />
+    <meta
+      property="og:url"
+      content="https://wytzeh197.github.io/Gyro/privacy/"
+    />
+    <link rel="canonical" href="https://wytzeh197.github.io/Gyro/privacy/" />
+    <title>Gyro Privacy &amp; Legal</title>
+    <link rel="icon" href="../assets/gyro-logo.png" />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="../" aria-label="Gyro home"
+        ><img
+          src="../assets/gyro-logo.png"
+          alt=""
+          width="30"
+          height="30"
+        /><span>Gyro</span></a
+      >
+      <nav aria-label="Main navigation">
+        <a class="desktop-nav-link" href="../#product">Product</a
+        ><a class="desktop-nav-link" href="../install/">Install</a
+        ><a class="desktop-nav-link" href="../changelog/">Changelog</a
+        ><a class="github-link" href="https://github.com/wytzeh197/Gyro"
+          ><img src="../assets/github.svg" alt="" width="18" height="18" /><span
+            >GitHub</span
+          ></a
+        ><a class="nav-download" href="../install/#download">Download</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero section-shell">
+        <p class="eyebrow">
+          <span aria-hidden="true"></span> Last updated 15 July 2026
+        </p>
+        <h1>Privacy &amp; Legal.</h1>
+        <p>Plain facts about the app, the website, and this public alpha.</p>
+      </section>
+      <div class="legal-layout section-shell">
+        <aside>
+          <nav aria-label="On this page">
+            <a href="#local-data">Local data</a
+            ><a href="#providers">Model providers</a
+            ><a href="#telemetry">Telemetry</a><a href="#deletion">Deletion</a
+            ><a href="#alpha">Alpha and license</a
+            ><a href="#marks">Trademarks</a><a href="#contact">Contact</a>
+          </nav>
+        </aside>
+        <article class="legal-copy">
+          <section id="local-data">
+            <h2>Local sessions and settings</h2>
+            <p>
+              Gyro stores sessions, workspace settings, logs, and local app
+              state on your Mac. Provider credentials are stored through the
+              macOS Keychain when that option is available. Gyro does not
+              require a Gyro account.
+            </p>
+          </section>
+          <section id="providers">
+            <h2>What model providers receive</h2>
+            <p>
+              When you run a configured coding agent or model provider, that
+              provider receives the prompts, selected files, tool context, and
+              other content needed to complete your request. Its own privacy
+              terms apply. Gyro does not operate a proxy service for that
+              traffic.
+            </p>
+          </section>
+          <section id="telemetry">
+            <h2>Telemetry and this website</h2>
+            <p>
+              Gyro app telemetry is off by default. This website has no
+              analytics, advertising cookies, account gate, remote fonts, or
+              tracking pixels. GitHub serves the site and release downloads, so
+              GitHub may process normal request metadata under its own policies.
+            </p>
+          </section>
+          <section id="deletion">
+            <h2>Delete your data</h2>
+            <p>
+              Delete individual sessions in Gyro. To remove the app, move
+              Gyro.app to the Trash. To remove local sessions and settings too,
+              delete <code>~/Library/Application Support/Gyro</code>. Data
+              already sent to a configured provider must be handled through that
+              provider.
+            </p>
+          </section>
+          <section id="alpha">
+            <h2>Public alpha, license, and support</h2>
+            <p>
+              Gyro is public-alpha software and may change, fail, or lose
+              compatibility. It is released under the Apache License 2.0 and
+              provided without warranties beyond those required by law. Support
+              is community-based and best effort.
+            </p>
+            <p>
+              This notice is informational. Gyro has no paid plan, hosted
+              service, or account contract.
+            </p>
+          </section>
+          <section id="marks">
+            <h2>Trademarks and assets</h2>
+            <p>
+              Apple, macOS, and the Apple logo are trademarks of Apple Inc.
+              GitHub and the GitHub logo are trademarks of GitHub, Inc. Their
+              appearance identifies relevant platforms and services; it does not
+              imply endorsement.
+            </p>
+            <p>
+              <a href="../assets/ATTRIBUTIONS.md"
+                >View icon and asset attributions</a
+              >.
+            </p>
+          </section>
+          <section id="contact">
+            <h2>Security and support</h2>
+            <p>
+              Report security issues through the repository’s private security
+              reporting flow. For installation or product help, use the support
+              guide or open a public issue when appropriate.
+            </p>
+            <p>
+              <a href="https://github.com/wytzeh197/Gyro/security"
+                >Security reporting</a
+              >
+              ·
+              <a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
+                >Support</a
+              >
+              · <a href="https://github.com/wytzeh197/Gyro">Source</a>
+            </p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-grid">
+        <a class="brand" href="../"
+          ><img
+            src="../assets/gyro-logo.png"
+            alt=""
+            width="28"
+            height="28"
+          /><span>Gyro</span></a
+        >
+        <nav aria-label="Footer navigation">
+          <a href="./">Privacy &amp; Legal</a><a href="../install/">Install</a
+          ><a href="../changelog/">Changelog</a
+          ><a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
+            >Support</a
+          ><a href="https://github.com/wytzeh197/Gyro/security">Security</a
+          ><a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE"
+            >License</a
+          ><a href="../assets/ATTRIBUTIONS.md">Attributions</a
+          ><a href="https://github.com/wytzeh197/Gyro">Source</a>
+        </nav>
+        <p>Open source. Built for macOS.</p>
+      </div>
+    </footer>
+  </body>
+</html>
