@@ -4,8 +4,13 @@ Gyro's dedicated tap distributes the `gyro` CLI only:
 
 ```bash
 brew tap wytzeh197/tap
+brew trust --formula wytzeh197/tap/gyro
 brew install gyro
 ```
+
+Homebrew requires explicit trust for third-party taps. Trusting only
+`wytzeh197/tap/gyro` keeps that approval scoped to Gyro's Formula instead of
+all present and future Formulae in the tap.
 
 Confirm the installation with:
 
@@ -70,6 +75,7 @@ To uninstall the CLI and optionally remove the tap:
 
 ```bash
 brew uninstall gyro
+brew untrust --formula wytzeh197/tap/gyro
 brew untap wytzeh197/tap
 ```
 
