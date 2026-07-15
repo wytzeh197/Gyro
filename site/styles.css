@@ -803,6 +803,28 @@ pre {
   margin-top: 24px;
 }
 
+.install-hero {
+  max-width: 760px;
+  padding: 96px 0 52px;
+  text-align: center;
+}
+
+.install-hero-mark {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 22px;
+  filter: drop-shadow(0 0 22px rgba(255, 96, 56, 0.22));
+}
+
+.install-hero .kicker {
+  margin: 0 0 17px;
+  color: var(--orange-soft);
+}
+
+.install-hero > p:not(.kicker) {
+  margin-inline: auto;
+}
+
 .install-download {
   padding: 0 0 64px;
   scroll-margin-top: 80px;
@@ -812,6 +834,7 @@ pre {
   max-width: 760px;
   min-width: 0;
   padding: 30px;
+  margin-inline: auto;
 }
 
 .download-stack-full > * {
@@ -1269,6 +1292,16 @@ pre {
   .hero,
   .page-hero {
     padding: 72px 0 56px;
+  }
+
+  .install-hero {
+    padding: 76px 0 42px;
+  }
+
+  .install-hero-mark {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 19px;
   }
 
   .hero h1,
