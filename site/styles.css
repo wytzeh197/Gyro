@@ -660,10 +660,6 @@ pre {
   min-height: 52px;
 }
 
-.macos-card .segmented-control small {
-  font-size: 13px;
-}
-
 .macos-card .button-download {
   width: 100%;
   min-height: 50px;
@@ -826,11 +822,6 @@ pre {
 
 .architecture-selector-large .segmented-control span {
   font-size: 16px;
-}
-
-.architecture-selector-large .segmented-control em {
-  color: var(--orange-soft);
-  opacity: 1;
 }
 
 .architecture-announcement {
