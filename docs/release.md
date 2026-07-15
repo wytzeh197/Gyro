@@ -152,6 +152,7 @@ exact asset, installs and tests it on both architectures, then writes it to
 
 ```bash
 brew tap wytzeh197/tap
+brew trust --formula wytzeh197/tap/gyro
 brew install gyro
 ```
 
