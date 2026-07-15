@@ -172,6 +172,10 @@ check(
     !pages.install.includes("Recommended for this Mac"),
   "Download pages must not show an automatic recommendation sentence",
 );
+check(
+  !css.toLowerCase().includes("gradient("),
+  "Site styles must not contain gradient backgrounds",
+);
 
 containsAll(pages.install, "Install page", [
   "Download Gyro.",
