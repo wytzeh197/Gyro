@@ -386,7 +386,6 @@ pre {
 }
 
 .product-section,
-.install-guide,
 .help-section {
   padding: 88px 0;
 }
@@ -534,7 +533,6 @@ pre {
 .unsigned-notice a,
 .checksum-card a,
 .detail-content a,
-.managed-warning a,
 .legal-copy a {
   color: #d8d3cd;
   text-decoration-color: rgba(255, 255, 255, 0.35);
@@ -546,7 +544,6 @@ pre {
 .unsigned-notice a:hover,
 .checksum-card a:hover,
 .detail-content a:hover,
-.managed-warning a:hover,
 .legal-copy a:hover {
   color: var(--text);
   text-decoration-color: var(--orange);
@@ -807,7 +804,7 @@ pre {
 }
 
 .install-download {
-  padding: 0 0 88px;
+  padding: 0 0 64px;
   scroll-margin-top: 80px;
 }
 
@@ -944,74 +941,9 @@ pre {
   white-space: nowrap;
 }
 
-.install-guide {
-  border-top: 1px solid var(--line);
-}
-
-.install-steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.install-steps li {
-  min-height: 230px;
-  padding: 26px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
-}
-
-.install-steps li > span {
-  color: var(--orange);
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-}
-
-.install-steps h3 {
-  margin: 34px 0 10px;
-  font-size: 19px;
-  letter-spacing: -0.025em;
-}
-
-.install-steps p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 15px;
-}
-
-.managed-warning {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 14px;
-  margin-top: 14px;
-  padding: 19px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  color: var(--muted);
-}
-
-.managed-warning strong {
-  color: var(--text);
-  font-size: 14px;
-}
-
-.managed-warning p {
-  margin: 0;
-  font-size: 14px;
-}
-
-.managed-warning a {
-  font-size: 13px;
-}
-
 .help-section {
   border-top: 1px solid var(--line);
+  padding-top: 72px;
 }
 
 .compact-heading {
@@ -1354,7 +1286,6 @@ pre {
   }
 
   .product-section,
-  .install-guide,
   .help-section {
     padding: 56px 0;
   }
@@ -1419,22 +1350,12 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .checksum-card,
-  .install-steps,
-  .managed-warning {
+  .checksum-card {
     grid-template-columns: 1fr;
   }
 
   .checksum-card .button {
     width: 100%;
-  }
-
-  .install-steps li {
-    min-height: 0;
-  }
-
-  .managed-warning {
-    gap: 7px;
   }
 
   .footer-grid {
