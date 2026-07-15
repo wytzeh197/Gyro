@@ -734,30 +734,33 @@ h3 {
 }
 
 .download-section {
+  padding-block: 90px 110px;
   border-bottom: 1px solid var(--line);
   background:
     radial-gradient(
-      circle at 82% 25%,
-      rgba(255, 104, 70, 0.09),
-      transparent 26rem
+      circle at 50% 0%,
+      rgba(255, 104, 70, 0.06),
+      transparent 30rem
     ),
     var(--bg-deep);
 }
 
-.download-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.38fr) minmax(0, 0.62fr);
-  gap: 86px;
+.download-shell {
+  max-width: 900px;
 }
 
-.section-intro {
-  position: sticky;
-  top: 116px;
-  align-self: start;
+.download-heading {
+  max-width: 620px;
+  margin-inline: auto;
+  text-align: center;
 }
 
-.section-intro > p:not(.kicker) {
-  margin: 26px 0 0;
+.download-heading h2 {
+  font-size: clamp(38px, 4vw, 52px);
+}
+
+.download-heading > p:not(.kicker) {
+  margin: 18px 0 0;
   color: var(--muted);
   font-size: 16px;
 }
@@ -766,10 +769,15 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 9px;
-  margin-top: 30px;
+  margin-top: 28px;
   color: var(--subtle);
   font-size: 12px;
+}
+
+.release-meta a {
+  color: #c58a6e;
 }
 
 .live-dot {
@@ -784,31 +792,35 @@ h3 {
 }
 
 .download-panel {
+  margin-top: 44px;
   min-width: 0;
 }
 
 .detect-status {
-  margin: 0 0 14px;
+  margin: 0 0 24px;
   color: var(--subtle);
   font-size: 12px;
+  text-align: center;
 }
 
 .download-options {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .download-card {
   position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  min-height: 280px;
   align-items: center;
-  gap: 20px;
-  min-height: 132px;
-  padding: 22px;
+  flex-direction: column;
+  gap: 0;
+  padding: 30px 22px 22px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 18px;
   background: var(--panel);
+  text-align: center;
   transition:
     border-color 160ms ease,
     transform 160ms ease,
@@ -824,14 +836,14 @@ h3 {
 .download-card.is-suggested {
   border-color: rgba(255, 104, 70, 0.52);
   background:
-    linear-gradient(90deg, rgba(255, 104, 70, 0.08), transparent 54%),
+    linear-gradient(180deg, rgba(255, 104, 70, 0.07), transparent 56%),
     var(--panel);
 }
 
 .suggestion-badge {
   position: absolute;
   top: -10px;
-  right: 18px;
+  left: 50%;
   display: none;
   padding: 3px 9px;
   border: 1px solid rgba(255, 104, 70, 0.35);
@@ -842,6 +854,8 @@ h3 {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .is-suggested .suggestion-badge {
@@ -850,14 +864,15 @@ h3 {
 
 .chip-art {
   display: grid;
-  width: 56px;
-  height: 56px;
+  width: 50px;
+  height: 50px;
   place-items: center;
+  margin-bottom: 20px;
   border: 1px solid rgba(243, 241, 235, 0.18);
-  border-radius: 15px;
+  border-radius: 14px;
   color: var(--paper-ink);
   background: var(--paper);
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 700;
 }
 
@@ -873,34 +888,36 @@ h3 {
 }
 
 .download-card-copy p {
-  margin: 4px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 13px;
 }
 
 .download-card-copy .asset-meta {
-  margin-top: 9px;
+  margin-top: 8px;
   color: var(--subtle);
   font-size: 11px;
 }
 
 .button-download {
-  min-width: 126px;
-  min-height: 42px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: auto;
   padding-inline: 15px;
-  border-color: var(--line-strong);
-  border-radius: 10px;
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.035);
+  border-color: transparent;
+  border-radius: 999px;
+  color: var(--paper-ink);
+  background: var(--text);
 }
 
 .button-download:hover {
-  border-color: rgba(243, 241, 235, 0.42);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: transparent;
+  background: #fffdf8;
 }
 
 .release-fallback {
-  margin: 14px 0 0;
+  max-width: 720px;
+  margin: 18px auto 0;
   padding: 13px 15px;
   border: 1px solid rgba(239, 190, 111, 0.2);
   border-radius: 10px;
@@ -917,7 +934,8 @@ h3 {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 15px;
-  margin-top: 20px;
+  max-width: 720px;
+  margin: 28px auto 0;
   padding: 20px;
   border: 1px solid rgba(255, 104, 70, 0.2);
   border-radius: var(--radius);
@@ -1255,15 +1273,9 @@ pre {
     grid-template-rows: 270px 440px;
   }
 
-  .principles-grid,
-  .download-grid {
+  .principles-grid {
     grid-template-columns: 1fr;
     gap: 64px;
-  }
-
-  .section-intro {
-    position: static;
-    max-width: 700px;
   }
 
   .install-steps {
@@ -1435,18 +1447,16 @@ pre {
     margin-bottom: 38px;
   }
 
-  .principles-grid,
-  .download-grid {
+  .principles-grid {
     gap: 54px;
   }
 
-  .download-card {
-    grid-template-columns: auto 1fr;
+  .download-options {
+    grid-template-columns: 1fr;
   }
 
-  .button-download {
-    grid-column: 1 / -1;
-    width: 100%;
+  .download-card {
+    min-height: 280px;
   }
 
   .managed-warning {
