@@ -3,14 +3,14 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,35 +27,110 @@ function containsAll(source, label, markers) {
   }
 }
 
-function sha256(path) {
+function fileHash(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-function pngDimensions(path) {
-  const bytes = readFileSync(path);
-  const signature = bytes.subarray(0, 8).toString("hex");
-  if (signature !== "89504e470d0a1a0a" || bytes.length < 24) return null;
-  return {
-    width: bytes.readUInt32BE(16),
-    height: bytes.readUInt32BE(20),
-  };
+function listFiles(root) {
+  const files = [];
+  function walk(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else files.push(relative(root, path));
+    }
+  }
+  walk(root);
+  return files.sort();
 }
 
-const html = read("site/index.html");
+function webpDimensions(path) {
+  const bytes = readFileSync(path);
+  if (
+    bytes.subarray(0, 4).toString() !== "RIFF" ||
+    bytes.subarray(8, 12).toString() !== "WEBP"
+  ) {
+    return null;
+  }
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const type = bytes.subarray(offset, offset + 4).toString();
+    const size = bytes.readUInt32LE(offset + 4);
+    const data = offset + 8;
+    if (type === "VP8X" && size >= 10) {
+      return {
+        width: 1 + bytes.readUIntLE(data + 4, 3),
+        height: 1 + bytes.readUIntLE(data + 7, 3),
+      };
+    }
+    if (type === "VP8 " && size >= 10) {
+      for (
+        let index = data;
+        index < Math.min(data + size - 9, bytes.length - 9);
+        index += 1
+      ) {
+        if (
+          bytes[index] === 0x9d &&
+          bytes[index + 1] === 0x01 &&
+          bytes[index + 2] === 0x2a
+        ) {
+          return {
+            width: bytes.readUInt16LE(index + 3) & 0x3fff,
+            height: bytes.readUInt16LE(index + 5) & 0x3fff,
+          };
+        }
+      }
+    }
+    if (type === "VP8L" && size >= 5 && bytes[data] === 0x2f) {
+      const bits = bytes.readUInt32LE(data + 1);
+      return {
+        width: (bits & 0x3fff) + 1,
+        height: ((bits >> 14) & 0x3fff) + 1,
+      };
+    }
+    offset = data + size + (size % 2);
+  }
+  return null;
+}
+
+const pages = {
+  home: read("site/index.html"),
+  install: read("site/install/index.html"),
+  changelog: read("site/changelog/index.html"),
+  privacy: read("site/privacy/index.html"),
+};
+const allHtml = Object.values(pages).join("\n");
 const css = read("site/styles.css");
 const app = read("site/app.js");
+const releaseUtils = read("site/release-utils.js");
+const changelogJs = read("site/changelog.js");
 const buildScript = read("scripts/build-download-site.mjs");
 const workflow = read(".github/workflows/pages.yml");
 const fixture = JSON.parse(read("site/fixtures/latest-release.json"));
 
-containsAll(html, "Download site HTML", [
-  '<html lang="en">',
-  'class="skip-link"',
-  '<main id="main">',
-  'id="top"',
-  'id="product"',
-  'id="download"',
-  'id="install"',
+for (const [name, html] of Object.entries(pages)) {
+  containsAll(html, `${name} page`, [
+    '<html lang="en">',
+    'class="skip-link"',
+    '<main id="main">',
+    "Content-Security-Policy",
+    "base-uri 'none'",
+    'rel="canonical"',
+    "Product",
+    "Install",
+    "Changelog",
+    "GitHub",
+    "Download",
+    "Privacy &amp; Legal",
+    "Support",
+    "Security",
+    "License",
+    "Attributions",
+    "Source",
+  ]);
+}
+
+containsAll(pages.home, "Homepage", [
   "Keep the whole coding run together.",
   "Chat, terminals, files, diffs, and approvals in one local workspace.",
   "Open source · No account · No analytics",
@@ -63,122 +138,137 @@ containsAll(html, "Download site HTML", [
   "Direct the work.",
   "Run it locally.",
   "Review every change.",
+  'class="surface-card surface-card-wide"',
+  'class="surface-pair"',
+  "assets/screenshots/hero-1512.webp",
+  "assets/screenshots/hero-3024.webp",
+  "assets/screenshots/hero-mobile-1200.webp",
+  "assets/screenshots/chat-1800.webp",
+  "assets/screenshots/cli-1600.webp",
+  "assets/screenshots/workspace-1600.webp",
+  "assets/social-preview.png",
   "Local by default.",
-  "No Gyro account",
-  "No analytics",
-  "assets/gyro-logo.png",
-  "assets/apple.svg",
-  "assets/github.svg",
-  "assets/hero-workbench.png",
-  "assets/chat-surface.png",
-  "assets/cli-surface.png",
-  "assets/workspace-surface.png",
-  'content="https://wytzeh197.github.io/Gyro/assets/hero-workbench.png"',
-  "Download Gyro",
-  "DMG · macOS 14+",
-  'id="architecture-apple-silicon"',
-  'id="architecture-intel"',
-  'type="radio"',
-  'name="architecture"',
-  'id="download-selected"',
-  'id="download-selected-label"',
-  "Open GitHub Releases",
-  "Nothing downloads automatically.",
   "Unsigned public alpha",
-  "Never disable Gatekeeper or remove quarantine.",
-  "Move Gyro to Applications.",
-  "Try to open Gyro once.",
-  "Choose Open Anyway.",
-  "managed Mac",
-  "administrator’s",
-  'id="selected-digest"',
-  'id="copy-checksum"',
-  'id="checksum-command"',
-  "Uninstall or roll back",
-  "Build from source",
-  "Release notes",
-  "previous releases",
-  "docs/privacy.md",
-  "SUPPORT.md",
-  "<noscript>",
+  "Read the safe install guide",
+  "data-download-surface",
 ]);
 
 check(
-  (html.match(/<section\b/g) ?? []).length === 5,
-  "Site must contain exactly five major sections",
+  (pages.home.match(/data-download-surface/g) ?? []).length === 1,
+  "Homepage must contain one compact download surface",
 );
 check(
-  (html.match(/class="macos-card"/g) ?? []).length === 1,
-  "Site must contain exactly one macOS download card",
+  !pages.home.includes("Move Gyro to Applications."),
+  "Homepage must not contain the full first-launch guide",
 );
 
-containsAll(css, "Download site CSS", [
+containsAll(pages.install, "Install page", [
+  "Choose your Mac processor",
+  "Apple Silicon",
+  "M1, M2, M3, M4 and newer",
+  "Intel",
+  "Download DMG",
+  "Unsigned public alpha",
+  "Never disable Gatekeeper",
+  "Move Gyro to Applications.",
+  "Try to open Gyro.",
+  "Choose Open Anyway.",
+  "Managed Mac?",
+  "SHA-256 for selected DMG",
+  'data-role="copy-checksum"',
+  "Updates and rollback",
+  "Uninstall Gyro",
+  "brew tap wytzeh197/tap",
+  "Build from source",
+  "Troubleshooting and support",
+]);
+
+containsAll(pages.changelog, "Changelog page", [
+  "Every published alpha from version 21 onward.",
+  "data-version-rail",
+  "data-version-jump",
+  "data-changelog-list",
+  "data-changelog-fallback",
+  "<noscript",
+]);
+
+containsAll(pages.privacy, "Privacy page", [
+  "Privacy &amp; Legal.",
+  "Local sessions and settings",
+  "What model providers receive",
+  "Telemetry and this website",
+  "Delete your data",
+  "Public alpha, license, and support",
+  "Trademarks and assets",
+  "Security and support",
+  "Last updated 15 July 2026",
+]);
+
+containsAll(css, "Shared CSS", [
   "--shell: min(1152px, calc(100% - 48px))",
-  "min-height: 64px",
+  "--header-height: 64px",
   "font-size: 56px",
   "font-size: 40px",
   "font-size: 21px",
   "font-size: 16px",
   "font-size: 13px",
-  "padding: 88px 0",
   "min-height: 44px",
-  ".release-meta a,",
-  ".unsigned-notice div > a,",
-  ".managed-warning a,",
-  ".detail-content > a",
-  "scroll-padding-top:",
-  "aspect-ratio: 4 / 3",
-  "overflow-wrap: normal",
-  "word-break: normal",
+  ".surface-card-wide",
+  "grid-template-columns: minmax(260px, 32%) minmax(0, 68%)",
+  ".surface-pair",
+  ".changelog-layout",
+  ".version-rail nav",
+  ".legal-layout",
+  "scroll-margin-top:",
   ":focus-visible",
-  ".skip-link:focus",
+  "@media (max-width: 900px)",
   "@media (max-width: 720px)",
   "@media (max-width: 390px)",
   "@media (prefers-reduced-motion: reduce)",
   "@media (prefers-contrast: more)",
 ]);
 
-containsAll(app, "Download site runtime", [
-  "api.github.com/repos/wytzeh197/Gyro/releases/latest",
+containsAll(app, "Download runtime", [
+  "LATEST_RELEASE_API",
   'DEFAULT_ARCHITECTURE = "apple-silicon"',
   "selectedArchitecture",
   "selectReleaseAssets",
   "sha256FromDigest",
   "getHighEntropyValues",
   "architectureFromHints",
-  "architecture-${architecture}",
-  'input?.addEventListener("change"',
   "configureSelectedDownload",
-  "copySelectedChecksum",
-  "RELEASE_REQUEST_TIMEOUT_MS",
-  "AbortController",
-  "signal: controller.signal",
-  "Open GitHub Releases",
-  "isOutdatedReleaseLine",
-  "parseReleaseNoteBlocks",
-  "GitHub returned",
-  "showReleaseFallback",
-  "Confirm before downloading.",
+  "copyChecksum",
 ]);
 
-containsAll(buildScript, "Download site builder", [
-  "site/assets/apple.svg",
-  "site/assets/github.svg",
-  "site/assets/ATTRIBUTIONS.md",
-  "site/assets/hero-workbench.png",
-  "site/assets/chat-surface.png",
-  "site/assets/cli-surface.png",
-  "site/assets/workspace-surface.png",
+containsAll(changelogJs, "Changelog runtime", [
+  "RELEASES_API",
+  "isPublicAlphaRelease",
+  "releaseAnchor",
+  "renderReleaseNotes",
+  "textContent",
+  "data-changelog-list",
+]);
+
+containsAll(releaseUtils, "Shared release utilities", [
+  "releases?per_page=30",
+  "REQUEST_TIMEOUT_MS = 8000",
+  "parseReleaseNoteBlocks",
+  "isOutdatedReleaseText",
+  "isPublicAlphaRelease",
+  "AbortController",
+]);
+
+containsAll(buildScript, "Site builder", [
+  "site/install/index.html",
+  "site/changelog/index.html",
+  "site/privacy/index.html",
+  "site/release-utils.js",
+  "site/changelog.js",
+  "site/assets/social-preview.png",
+  "site/assets/screenshots/hero-3024.webp",
+  "site/assets/screenshots/workspace-1600.webp",
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
 ]);
-
-const undersizedPixelFonts = [...css.matchAll(/font-size:\s*(\d+)px/g)]
-  .map((match) => Number(match[1]))
-  .filter((size) => size < 13);
-check(
-  undersizedPixelFonts.length === 0,
-  `Site metadata must be at least 13px; found ${undersizedPixelFonts.join(", ")}`,
-);
 
 containsAll(workflow, "Pages workflow", [
   "actions/configure-pages@v5",
@@ -186,44 +276,55 @@ containsAll(workflow, "Pages workflow", [
   "actions/deploy-pages@v4",
   "node scripts/check-download-site.mjs",
   "node scripts/build-download-site.mjs",
-  "permissions:",
   "pages: write",
   "id-token: write",
-  "github-pages",
 ]);
 
 for (const staleMarker of [
   "Private preview",
   "gyro-launch-film",
   "gyro-launch-poster",
-  "chat-thread.png",
-  "cli-workbench.png",
-  "assets/ide.png",
+  "hero-workbench.png",
+  "chat-surface.png",
+  "cli-surface.png",
+  "workspace-surface.png",
 ]) {
   check(
-    !`${html}\n${css}\n${app}\n${buildScript}\n${workflow}`.includes(
+    !`${allHtml}\n${css}\n${app}\n${changelogJs}\n${buildScript}`.includes(
       staleMarker,
     ),
-    `Site must not contain stale media marker ${staleMarker}`,
+    `Site output inputs must not contain stale marker ${staleMarker}`,
   );
 }
 
 check(
-  !/<script[^>]+src=["']https?:/i.test(html),
-  "Site must not load external JavaScript",
+  !/<script[^>]+src=["']https?:/i.test(allHtml),
+  "Pages must not load remote scripts",
 );
 check(
-  !/<link[^>]+rel=["']stylesheet["'][^>]+href=["']https?:/i.test(html),
-  "Site must not load external stylesheets",
+  !/<link[^>]+rel=["']stylesheet["'][^>]+href=["']https?:/i.test(allHtml),
+  "Pages must not load remote styles",
 );
 check(
-  !/<img[^>]+src=["']https?:/i.test(html),
-  "Site must not load external images",
+  !/<img[^>]+(?:src|srcset)=["'][^"']*https?:/i.test(allHtml),
+  "Pages must not load remote images",
 );
 check(
   !/@import\s+(?:url\()?['"]?https?:/i.test(css) &&
     !/url\(['"]?https?:/i.test(css),
-  "Site must not load external fonts or CSS assets",
+  "CSS must not load remote assets",
+);
+check(
+  !/navigator\.userAgent(?!Data)/.test(app),
+  "Architecture detection must not use the compatibility user agent",
+);
+check(
+  !/navigator\.platform/.test(app),
+  "Architecture detection must not use navigator.platform",
+);
+check(
+  !/(?:location|window\.location)\s*=/.test(app),
+  "Runtime must not navigate or download automatically",
 );
 
 for (const trackingMarker of [
@@ -234,217 +335,161 @@ for (const trackingMarker of [
   "posthog",
 ]) {
   check(
-    !`${html}\n${app}`.toLowerCase().includes(trackingMarker),
-    `Site must not contain tracking marker ${trackingMarker}`,
-  );
-}
-check(
-  !/navigator\.userAgent(?!Data)/.test(app),
-  "Architecture suggestion must not inspect the compatibility user agent",
-);
-check(
-  !/navigator\.platform/.test(app),
-  "Architecture suggestion must not use navigator.platform",
-);
-check(
-  !/(?:location|window\.location)\s*=/.test(app),
-  "Site must not initiate navigation or a download automatically",
-);
-
-const referencedIds = [
-  ...app.matchAll(/element\(["']([^"']+)["']\)/g),
-  ...app.matchAll(/setText\(["']([^"']+)["']/g),
-].map((match) => match[1]);
-for (const id of new Set(referencedIds)) {
-  check(
-    html.includes(`id="${id}"`),
-    `Runtime references missing HTML id ${id}`,
+    !`${allHtml}\n${app}\n${changelogJs}`
+      .toLowerCase()
+      .includes(trackingMarker),
+    `Site contains tracking marker ${trackingMarker}`,
   );
 }
 
-const runtime = await import(
-  `data:text/javascript;base64,${Buffer.from(app).toString("base64")}`
-);
-const selected = runtime.selectReleaseAssets(fixture);
+const undersizedPixelFonts = [...css.matchAll(/font-size:\s*(\d+)px/g)]
+  .map((match) => Number(match[1]))
+  .filter((size) => size < 13);
 check(
-  selected.appleSilicon?.name === "Gyro_9.8.7-alpha.1_aarch64.dmg",
-  "Fixture Apple Silicon DMG was not selected",
-);
-check(
-  selected.intel?.name === "Gyro_9.8.7-alpha.1_x64.dmg",
-  "Fixture Intel DMG was not selected",
-);
-check(
-  selected.checksums?.name === "SHA256SUMS",
-  "Fixture SHA256SUMS was not selected",
-);
-const missingIntel = runtime.selectReleaseAssets({
-  ...fixture,
-  assets: fixture.assets.filter((asset) => !asset.name.includes("_x64.dmg")),
-});
-check(
-  missingIntel.appleSilicon && !missingIntel.intel,
-  "A release with a missing Intel DMG must preserve only the available build",
-);
-check(runtime.isUsableRelease(fixture), "Fixture should be a usable release");
-check(
-  !runtime.isUsableRelease({ tag_name: "v1", assets: [] }),
-  "Release without html_url must be rejected",
-);
-check(
-  runtime.sha256FromDigest(fixture.assets[0].digest) === "a".repeat(64),
-  "Valid GitHub SHA-256 digest was not parsed",
-);
-check(
-  runtime.sha256FromDigest("sha256:not-a-digest") === null,
-  "Malformed SHA-256 digest must be rejected",
-);
-check(
-  runtime.formatBytes(12 * 1024 * 1024) === "12.0 MB",
-  "Byte formatter changed",
-);
-check(
-  runtime.architectureFromHints({ platform: "macOS", architecture: "arm" }) ===
-    "apple-silicon",
-  "Reliable macOS ARM hint must suggest Apple Silicon",
-);
-check(
-  runtime.architectureFromHints({ platform: "macOS", architecture: "x86" }) ===
-    "intel",
-  "Reliable macOS x86 hint must suggest Intel",
-);
-check(
-  runtime.architectureFromHints({
-    platform: "Windows",
-    architecture: "arm",
-  }) === null,
-  "Non-macOS architecture hints must not make a Mac suggestion",
-);
-check(
-  runtime.architectureFromHints({ platform: "macOS", architecture: "" }) ===
-    null,
-  "Missing architecture hint must not make a suggestion",
-);
-check(
-  runtime.isOutdatedReleaseLine("The launch film is included below."),
-  "Outdated launch-film release-note lines must be filtered",
-);
-check(
-  runtime.isOutdatedReleaseLine("Private preview soon"),
-  "Outdated private-preview release-note lines must be filtered",
-);
-check(
-  !runtime.isOutdatedReleaseLine("Native macOS downloads are available."),
-  "Current release-note lines must remain visible",
-);
-const parsedReleaseNotes = runtime.parseReleaseNoteBlocks(`## What changed
-
-- One wrapped list item that
-  continues on the next line.
-
-\`\`\`bash
-gyro doctor --json
-\`\`\``);
-check(
-  parsedReleaseNotes[1]?.type === "list" &&
-    parsedReleaseNotes[1]?.items[0] ===
-      "One wrapped list item that continues on the next line.",
-  "Wrapped release-note list items must remain intact",
-);
-check(
-  parsedReleaseNotes[2]?.type === "code" &&
-    parsedReleaseNotes[2]?.text === "gyro doctor --json",
-  "Release-note code fences must render as one code block",
+  undersizedPixelFonts.length === 0,
+  `Site text must be at least 13px; found ${undersizedPixelFonts.join(", ")}`,
 );
 
 const screenshotSpecs = [
-  ["site/assets/hero-workbench.png", 1600, 1000],
-  ["site/assets/chat-surface.png", 1200, 900],
-  ["site/assets/cli-surface.png", 1200, 900],
-  ["site/assets/workspace-surface.png", 1200, 900],
+  ["site/assets/screenshots/hero-1512.webp", 1512, 945],
+  ["site/assets/screenshots/hero-3024.webp", 3024, 1890],
+  ["site/assets/screenshots/hero-mobile-600.webp", 600, 480],
+  ["site/assets/screenshots/hero-mobile-1200.webp", 1200, 960],
+  ["site/assets/screenshots/chat-900.webp", 900, 600],
+  ["site/assets/screenshots/chat-1800.webp", 1800, 1200],
+  ["site/assets/screenshots/cli-800.webp", 800, 600],
+  ["site/assets/screenshots/cli-1600.webp", 1600, 1200],
+  ["site/assets/screenshots/workspace-800.webp", 800, 600],
+  ["site/assets/screenshots/workspace-1600.webp", 1600, 1200],
 ];
 for (const [path, width, height] of screenshotSpecs) {
-  const absolute = resolve(repoRoot, path);
-  check(existsSync(absolute), `Required screenshot is missing: ${path}`);
-  if (!existsSync(absolute)) continue;
-  const dimensions = pngDimensions(absolute);
-  check(Boolean(dimensions), `${path} must be a valid PNG`);
+  const dimensions = webpDimensions(resolve(repoRoot, path));
   check(
     dimensions?.width === width && dimensions?.height === height,
-    `${path} must be ${width}x${height}`,
+    `${path} must be ${width}x${height}; found ${dimensions ? `${dimensions.width}x${dimensions.height}` : "invalid WebP"}`,
   );
 }
 
-const buildRoot = mkdtempSync(resolve(tmpdir(), "gyro-download-site-"));
-try {
+const utilityRuntime = await import(
+  `data:text/javascript;base64,${Buffer.from(releaseUtils).toString("base64")}`
+);
+const assets = utilityRuntime.selectReleaseAssets(fixture);
+check(
+  assets.appleSilicon?.name === "Gyro_9.8.7-alpha.1_aarch64.dmg",
+  "Fixture Apple Silicon DMG was not selected",
+);
+check(
+  assets.intel?.name === "Gyro_9.8.7-alpha.1_x64.dmg",
+  "Fixture Intel DMG was not selected",
+);
+check(
+  assets.checksums?.name === "SHA256SUMS",
+  "Fixture SHA256SUMS was not selected",
+);
+check(
+  utilityRuntime.sha256FromDigest(fixture.assets[0].digest) === "a".repeat(64),
+  "SHA-256 digest parsing changed",
+);
+check(
+  utilityRuntime.architectureFromHints({
+    platform: "macOS",
+    architecture: "arm",
+  }) === "apple-silicon",
+  "macOS ARM hint must suggest Apple Silicon",
+);
+check(
+  utilityRuntime.architectureFromHints({
+    platform: "macOS",
+    architecture: "x86",
+  }) === "intel",
+  "macOS x86 hint must suggest Intel",
+);
+check(
+  utilityRuntime.architectureFromHints({
+    platform: "Windows",
+    architecture: "arm",
+  }) === null,
+  "Non-macOS hints must not suggest a Mac build",
+);
+check(
+  utilityRuntime.isPublicAlphaRelease({
+    ...fixture,
+    tag_name: "v0.1.0-alpha.21",
+    draft: false,
+  }),
+  "Alpha 21 must be public",
+);
+check(
+  !utilityRuntime.isPublicAlphaRelease({
+    ...fixture,
+    tag_name: "v0.1.0-alpha.20",
+    draft: false,
+  }),
+  "Alpha 20 must be excluded",
+);
+check(
+  !utilityRuntime.isPublicAlphaRelease({
+    ...fixture,
+    tag_name: "v1.0.0",
+    draft: false,
+  }),
+  "Non-alpha releases must be excluded",
+);
+check(
+  utilityRuntime.isOutdatedReleaseText("The launch film is included below."),
+  "Launch-film lines must be filtered",
+);
+
+const tempRoot = mkdtempSync(resolve(tmpdir(), "gyro-site-check-"));
+const buildA = resolve(tempRoot, "a");
+const buildB = resolve(tempRoot, "b");
+for (const output of [buildA, buildB]) {
   const result = spawnSync(
     process.execPath,
-    [
-      resolve(repoRoot, "scripts/build-download-site.mjs"),
-      "--output",
-      buildRoot,
-    ],
-    { cwd: repoRoot, encoding: "utf8" },
+    ["scripts/build-download-site.mjs", "--output", output],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
   );
   check(
     result.status === 0,
-    `Builder failed: ${(result.stderr || result.stdout).trim()}`,
+    `Site build failed: ${result.stderr || result.stdout}`,
   );
+}
 
-  const expectedOutputs = [
+if (!failures.length) {
+  const filesA = listFiles(buildA);
+  const filesB = listFiles(buildB);
+  check(
+    JSON.stringify(filesA) === JSON.stringify(filesB),
+    "Site builds produced different file manifests",
+  );
+  for (const file of filesA) {
+    check(
+      fileHash(resolve(buildA, file)) === fileHash(resolve(buildB, file)),
+      `Site build is not deterministic for ${file}`,
+    );
+  }
+  for (const route of [
     "index.html",
-    "styles.css",
-    "app.js",
-    ".nojekyll",
-    "assets/gyro-logo.png",
-    "assets/apple.svg",
-    "assets/github.svg",
-    "assets/ATTRIBUTIONS.md",
+    "install/index.html",
+    "changelog/index.html",
+    "privacy/index.html",
+  ]) {
+    check(filesA.includes(route), `Built site is missing route ${route}`);
+  }
+  for (const stale of [
     "assets/hero-workbench.png",
     "assets/chat-surface.png",
     "assets/cli-surface.png",
     "assets/workspace-surface.png",
-  ];
-  for (const path of expectedOutputs) {
-    const absolute = resolve(buildRoot, path);
-    check(existsSync(absolute), `Built site is missing ${path}`);
-    if (existsSync(absolute) && path !== ".nojekyll") {
-      check(statSync(absolute).size > 0, `Built site output ${path} is empty`);
-    }
-  }
-
-  const copiedAssets = [
-    ["apps/desktop/src-tauri/icons/icon.png", "assets/gyro-logo.png"],
-    ["site/assets/apple.svg", "assets/apple.svg"],
-    ["site/assets/github.svg", "assets/github.svg"],
-    ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
-    ...screenshotSpecs.map(([source]) => [source, source.replace("site/", "")]),
-  ];
-  for (const [source, destination] of copiedAssets) {
-    if (existsSync(resolve(buildRoot, destination))) {
-      check(
-        sha256(resolve(repoRoot, source)) ===
-          sha256(resolve(buildRoot, destination)),
-        `Built asset differs from ${source}`,
-      );
-    }
-  }
-
-  for (const staleOutput of [
-    "assets/gyro-launch-film.mp4",
-    "assets/gyro-launch-poster.png",
-    "assets/chat-thread.png",
-    "assets/cli-workbench.png",
-    "assets/ide.png",
   ]) {
-    check(
-      !existsSync(resolve(buildRoot, staleOutput)),
-      `Built site must not contain ${staleOutput}`,
-    );
+    check(!filesA.includes(stale), `Built site contains stale asset ${stale}`);
   }
-} finally {
-  rmSync(buildRoot, { force: true, recursive: true });
 }
+
+rmSync(tempRoot, { force: true, recursive: true });
 
 if (failures.length) {
   console.error("Download site checks failed:");
@@ -452,6 +497,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(
-  "Download site layout, runtime, fixtures, local media, and Pages workflow are valid.",
-);
+console.log("Download site checks passed.");

@@ -1,19 +1,33 @@
 # Privacy
 
-Gyro is local-first by default.
+Gyro is local-first and does not require a Gyro account.
 
-## Defaults
+## Local data
 
-- No telemetry is sent by default.
-- Gyro local access stores device-session material in macOS Keychain and only keeps non-secret local access metadata in config.
-- Provider keys are stored in macOS Keychain.
-- Session logs are stored locally.
-- User repositories are not modified with Gyro metadata unless the user opts in.
+- Sessions, workspace settings, logs, and app state are stored on the Mac.
+- Provider credentials are stored through macOS Keychain when available.
+- Gyro metadata is not written into user repositories unless the user chooses
+  an action that does so.
 
-## Model Context
+## Model providers
 
-Only selected workspace context should be sent to configured model providers. Gyro should show sensitive actions clearly and redact common secret patterns from logs and context.
+Configured coding agents and model providers receive the prompts, selected
+files, tool context, and other content needed for the user's request. The
+provider's own privacy terms apply. Gyro does not operate a proxy service for
+that traffic.
 
-## Future Telemetry
+## Telemetry and website
 
-Crash or usage reporting may be added later only as explicit opt-in. The UI must explain what is collected, where it is sent, and how to disable it.
+App telemetry is off by default. The public website has no analytics,
+advertising cookies, tracking pixels, account gate, remote fonts, or remote
+images. GitHub hosts the Pages site and release downloads.
+
+## Deletion
+
+Sessions can be deleted inside Gyro. Removing Gyro.app uninstalls the app;
+deleting `~/Library/Application Support/Gyro` also removes local sessions and
+settings. Data already sent to a provider must be handled through that
+provider.
+
+The public-facing notice is available at
+<https://wytzeh197.github.io/Gyro/privacy/>.

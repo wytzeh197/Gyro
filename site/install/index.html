@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="same-origin" />
+    <meta
+      name="description"
+      content="Download and install the unsigned Gyro public alpha safely on macOS."
+    />
+    <meta name="theme-color" content="#0b0b0a" />
+    <meta property="og:title" content="Install Gyro for macOS" />
+    <meta
+      property="og:description"
+      content="Choose the right DMG and follow Apple’s supported first-launch flow."
+    />
+    <meta
+      property="og:image"
+      content="https://wytzeh197.github.io/Gyro/assets/social-preview.png"
+    />
+    <meta
+      property="og:url"
+      content="https://wytzeh197.github.io/Gyro/install/"
+    />
+    <link rel="canonical" href="https://wytzeh197.github.io/Gyro/install/" />
+    <title>Install Gyro for macOS</title>
+    <link rel="icon" href="../assets/gyro-logo.png" />
+    <link rel="stylesheet" href="../styles.css" />
+    <script type="module" src="../app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="../" aria-label="Gyro home"
+        ><img
+          src="../assets/gyro-logo.png"
+          alt=""
+          width="30"
+          height="30"
+        /><span>Gyro</span></a
+      >
+      <nav aria-label="Main navigation">
+        <a class="desktop-nav-link" href="../#product">Product</a>
+        <a class="desktop-nav-link" href="./" aria-current="page">Install</a>
+        <a class="desktop-nav-link" href="../changelog/">Changelog</a>
+        <a class="github-link" href="https://github.com/wytzeh197/Gyro"
+          ><img src="../assets/github.svg" alt="" width="18" height="18" /><span
+            >GitHub</span
+          ></a
+        >
+        <a class="nav-download" href="#download">Download</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-hero section-shell">
+        <p class="eyebrow"><span aria-hidden="true"></span> macOS 14+</p>
+        <h1>Install Gyro.</h1>
+        <p>
+          Download the DMG, move Gyro to Applications, then approve the first
+          launch once.
+        </p>
+      </section>
+
+      <section
+        class="install-download section-shell"
+        id="download"
+        aria-labelledby="download-title"
+      >
+        <div class="download-stack download-stack-full" data-download-surface>
+          <header class="download-card-header">
+            <div class="platform-identity">
+              <img src="../assets/apple.svg" alt="" width="34" height="34" />
+              <div>
+                <h2 id="download-title">macOS</h2>
+                <p>DMG · macOS 14 or later</p>
+              </div>
+            </div>
+            <p
+              class="detect-status"
+              data-role="architecture-status"
+              aria-live="polite"
+            >
+              Apple Silicon is selected. Confirm before downloading.
+            </p>
+          </header>
+
+          <fieldset class="architecture-selector architecture-selector-large">
+            <legend>Choose your Mac processor</legend>
+            <div class="segmented-control">
+              <label>
+                <input
+                  type="radio"
+                  name="architecture"
+                  value="apple-silicon"
+                  checked
+                />
+                <span>Apple Silicon</span>
+                <small>M1, M2, M3, M4 and newer</small>
+                <em data-recommendation="apple-silicon" hidden
+                  >Recommended for this Mac</em
+                >
+              </label>
+              <label>
+                <input type="radio" name="architecture" value="intel" />
+                <span>Intel</span>
+                <small>Macs with an Intel processor</small>
+                <em data-recommendation="intel" hidden
+                  >Recommended for this Mac</em
+                >
+              </label>
+            </div>
+          </fieldset>
+
+          <a
+            class="button button-download"
+            data-role="download-link"
+            href="https://github.com/wytzeh197/Gyro/releases/latest"
+            ><span data-role="download-label">Download DMG on GitHub</span></a
+          >
+          <div class="release-details" aria-live="polite">
+            <p>
+              <strong data-role="release-version">Latest public alpha</strong
+              ><span aria-hidden="true"> · </span
+              ><span data-role="release-date">Loading date…</span>
+            </p>
+            <p data-role="asset-meta">Loading the latest release…</p>
+            <p>
+              <a
+                data-role="release-notes-link"
+                href="https://github.com/wytzeh197/Gyro/releases/latest"
+                >Release notes</a
+              ><span aria-hidden="true"> · </span
+              ><a
+                data-releases-link
+                href="https://github.com/wytzeh197/Gyro/releases"
+                >Previous releases</a
+              >
+            </p>
+          </div>
+          <p class="release-fallback" data-role="release-fallback" hidden>
+            Live details are unavailable.
+            <a href="https://github.com/wytzeh197/Gyro/releases/latest"
+              >Choose the correct DMG on GitHub</a
+            >.
+          </p>
+          <noscript
+            ><p class="release-fallback">
+              JavaScript is off. Choose <code>aarch64</code> for Apple Silicon
+              or <code>x64</code> for Intel on the latest GitHub Release.
+            </p></noscript
+          >
+
+          <aside class="unsigned-notice unsigned-notice-full">
+            <div>
+              <p class="notice-title">Unsigned public alpha</p>
+              <p>
+                Gyro is not Apple-notarized yet. Use Apple’s one-time Open
+                Anyway flow below. Never disable Gatekeeper or remove quarantine
+                globally.
+              </p>
+            </div>
+          </aside>
+
+          <div class="checksum-card">
+            <div>
+              <p class="detail-label">SHA-256 for selected DMG</p>
+              <code data-role="digest" tabindex="0">Loading checksum…</code>
+            </div>
+            <button
+              class="button button-quiet"
+              type="button"
+              data-role="copy-checksum"
+              disabled
+            >
+              Copy
+            </button>
+            <a
+              data-role="checksums-link"
+              href="https://github.com/wytzeh197/Gyro/releases/latest"
+              >SHA256SUMS</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="install-guide section-shell"
+        aria-labelledby="first-launch-title"
+      >
+        <header class="section-heading">
+          <p class="kicker">First launch</p>
+          <h2 id="first-launch-title">Open Gyro safely.</h2>
+          <p>Three steps. You only approve the app once.</p>
+        </header>
+        <ol class="install-steps">
+          <li>
+            <span>01</span>
+            <h3>Move Gyro to Applications.</h3>
+            <p>Open the DMG and drag Gyro into Applications.</p>
+          </li>
+          <li>
+            <span>02</span>
+            <h3>Try to open Gyro.</h3>
+            <p>Dismiss the unsigned-app warning.</p>
+          </li>
+          <li>
+            <span>03</span>
+            <h3>Choose Open Anyway.</h3>
+            <p>
+              Open System Settings → Privacy &amp; Security, select Open Anyway,
+              then confirm Open.
+            </p>
+          </li>
+        </ol>
+        <div class="managed-warning">
+          <strong>Managed Mac?</strong>
+          <p>
+            Your administrator may block Open Anyway. Gyro cannot override that
+            policy.
+          </p>
+          <a href="https://support.apple.com/en-us/102445">Apple’s guidance</a>
+        </div>
+      </section>
+
+      <section class="help-section section-shell" aria-labelledby="help-title">
+        <header class="section-heading compact-heading">
+          <p class="kicker">More options</p>
+          <h2 id="help-title">Help and recovery.</h2>
+        </header>
+        <div class="detail-list">
+          <details>
+            <summary>Updates and rollback</summary>
+            <div class="detail-content">
+              <p>
+                Gyro verifies its own updater signatures. Apple signing is
+                separate. To roll back, download a previous DMG, quit Gyro,
+                replace the app in Applications, and reopen it.
+              </p>
+              <a href="../changelog/">Browse the changelog</a>
+            </div>
+          </details>
+          <details>
+            <summary>Uninstall Gyro</summary>
+            <div class="detail-content">
+              <p>
+                Quit Gyro and move Gyro.app from Applications to the Trash. To
+                remove local sessions and settings too, delete
+                <code>~/Library/Application Support/Gyro</code>.
+              </p>
+            </div>
+          </details>
+          <details>
+            <summary>Install the CLI with Homebrew</summary>
+            <div class="detail-content">
+              <pre><code>brew tap wytzeh197/tap
+brew trust --formula wytzeh197/tap/gyro
+brew install gyro</code></pre>
+              <p>The tap installs the CLI only, not Gyro.app.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Build from source</summary>
+            <div class="detail-content">
+              <pre><code>git clone https://github.com/wytzeh197/Gyro.git
+cd Gyro
+pnpm install
+pnpm desktop:build</code></pre>
+              <a href="https://github.com/wytzeh197/Gyro#development"
+                >Development requirements</a
+              >
+            </div>
+          </details>
+          <details>
+            <summary>Troubleshooting and support</summary>
+            <div class="detail-content">
+              <p>
+                If the DMG will not open, confirm macOS 14+, the correct
+                processor build, and the published SHA-256. Do not use terminal
+                quarantine bypasses.
+              </p>
+              <a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
+                >Get support</a
+              >
+            </div>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-grid">
+        <a class="brand" href="../"
+          ><img
+            src="../assets/gyro-logo.png"
+            alt=""
+            width="28"
+            height="28"
+          /><span>Gyro</span></a
+        >
+        <nav aria-label="Footer navigation">
+          <a href="../privacy/">Privacy &amp; Legal</a><a href="./">Install</a
+          ><a href="../changelog/">Changelog</a
+          ><a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
+            >Support</a
+          ><a href="https://github.com/wytzeh197/Gyro/security">Security</a
+          ><a href="https://github.com/wytzeh197/Gyro/blob/main/LICENSE"
+            >License</a
+          ><a href="../assets/ATTRIBUTIONS.md">Attributions</a
+          ><a href="https://github.com/wytzeh197/Gyro">Source</a>
+        </nav>
+        <p>Open source. Built for macOS.</p>
+      </div>
+    </footer>
+  </body>
+</html>

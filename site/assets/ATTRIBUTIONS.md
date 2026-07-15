@@ -17,4 +17,6 @@ CDN or load third-party scripts.
   License: https://github.com/primer/octicons/blob/v19.24.1/LICENSE
   GitHub logo guidance: https://github.com/logos
 
-The Gyro logo and product screenshots are part of the Gyro project.
+The Gyro logo and product screenshots are part of the Gyro project. The site
+screenshots were captured from a local, isolated demo repository with a fake
+local provider and contain no customer, account, or private repository data.
