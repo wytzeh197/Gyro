@@ -70,6 +70,27 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Verify macOS DMG
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DMGS=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          if [ "${#DMGS[@]}" -ne 1 ]; then
+            echo "Expected exactly one DMG, found ${#DMGS[@]}." >&2
+            exit 1
+          fi
+          DMG_PATH="${DMGS[0]}"
+          DMG_DIRECTORY="$(dirname "$DMG_PATH")"
+          DMG_NAME="$(basename "$DMG_PATH")"
+          DMG_CHECKSUMS="$RUNNER_TEMP/SHA256SUMS"
+          (
+            cd "$DMG_DIRECTORY"
+            shasum -a 256 "$DMG_NAME"
+          ) > "$DMG_CHECKSUMS"
+          node scripts/verify-macos-release.mjs \
+            --dmg "$DMG_PATH" \
+            --target "${{ matrix.target }}" \
+            --checksums "$DMG_CHECKSUMS"
       - name: Collect release assets
         run: |
           mkdir -p release-assets
@@ -103,6 +124,10 @@ jobs:
         run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
       - name: Finalize CLI checksums and Homebrew Formula
         run: node scripts/finalize-cli-release.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
+      - name: Verify final release checksums
+        run: |
+          cd release-assets
+          sha256sum --check SHA256SUMS
       - name: Create one complete draft release
         run: |
           set -euo pipefail

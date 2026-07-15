@@ -10,7 +10,8 @@ the same local session from either surface.
 [![CI](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml/badge.svg)](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://github.com/wytzeh197/Gyro)
 
-[Download the latest alpha](https://github.com/wytzeh197/Gyro/releases/latest) ·
+[Download the latest Alpha](https://wytzeh197.github.io/Gyro/) ·
+[GitHub Releases](https://github.com/wytzeh197/Gyro/releases/latest) ·
 [Watch the launch film](docs/media/launch/gyro-launch-film.mp4) ·
 [Read the architecture](docs/architecture.md) ·
 [Contribute](CONTRIBUTING.md)
@@ -19,8 +20,10 @@ the same local session from either surface.
 
 > [!IMPORTANT]
 > Gyro is currently a public alpha for macOS and is not recommended for
-> production use. Preview downloads are not yet Apple-signed or notarized, so
-> macOS may show a security warning. Only install a preview if you are
+> production use. Alpha downloads are not signed with an Apple Developer ID or
+> notarized, so macOS requires a one-time **Open Anyway** confirmation. Follow
+> the [macOS installation guide](docs/install-macos.md); do not disable
+> Gatekeeper or remove quarantine globally. Only install Gyro if you are
 > comfortable testing software that can read files and run commands.
 
 ## Why Gyro
@@ -61,6 +64,30 @@ the same local session from either surface.
   durable approval events. A pre-commit journal in Gyro Application Support lets
   CLI and desktop startup finish recorded changes or roll interrupted changes
   back without adding metadata to the repository.
+
+## Install the Public Alpha
+
+Gyro.app requires macOS 14 or newer. Use the
+[download site](https://wytzeh197.github.io/Gyro/) to choose the Apple Silicon
+build for M-series Macs or the Intel build for Intel Macs. GitHub
+[Releases](https://github.com/wytzeh197/Gyro/releases/latest) remains the
+artifact source and fallback.
+
+The download is an explicitly unsigned Alpha: its app bundle is ad-hoc signed
+for structural integrity, but it has no Apple Developer ID signature or Apple
+notarization. Read [Install Gyro on macOS](docs/install-macos.md) for the safe
+one-time **System Settings → Privacy & Security → Open Anyway** flow,
+checksum verification, uninstall, and rollback instructions.
+
+Homebrew installs only the `gyro` CLI, not Gyro.app:
+
+```bash
+brew tap wytzeh197/tap
+brew install gyro
+```
+
+See [Homebrew packaging](docs/homebrew.md) for verification and upgrade
+commands.
 
 ## Build From Source
 
@@ -184,7 +211,7 @@ crates/gyro-cli        Terminal interface and app handoff
 apps/desktop           Tauri + React macOS application
 packages/ui            Shared React surfaces and components
 docs                   Architecture, privacy, release, and product notes
-packaging/homebrew     Release-time formula and cask templates
+packaging/homebrew     Release-time CLI Formula template
 ```
 
 Session metadata is stored in SQLite and events in append-only JSONL under:

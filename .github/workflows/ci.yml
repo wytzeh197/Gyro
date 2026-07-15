@@ -20,6 +20,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm release:check
+      - run: pnpm site:check
 
   rust:
     name: Rust

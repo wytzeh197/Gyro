@@ -1,0 +1,57 @@
+name: Deploy download site to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "site/**"
+      - "scripts/build-download-site.mjs"
+      - "scripts/check-download-site.mjs"
+      - "docs/media/launch/gyro-launch-film.mp4"
+      - "docs/media/launch/gyro-launch-poster.png"
+      - "docs/screenshots/chat-thread.png"
+      - "docs/screenshots/cli-workbench.png"
+      - "docs/screenshots/ide.png"
+      - "apps/desktop/src-tauri/icons/icon.png"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Validate download site
+        run: node scripts/check-download-site.mjs
+      - name: Build dependency-free site
+        run: node scripts/build-download-site.mjs --output "${RUNNER_TEMP}/gyro-pages"
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/gyro-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
