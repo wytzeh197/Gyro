@@ -8078,7 +8078,7 @@ export function App() {
       notify(
         "tests-passed",
         "Gyro is up to date",
-        `Version ${result.currentVersion} is the latest signed release`,
+        `Version ${result.currentVersion} is the latest public Alpha verified by Gyro's updater signature`,
       );
     } else if (result.status === "available") {
       notify(
