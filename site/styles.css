@@ -397,7 +397,6 @@ pre {
 
 .section-heading h2,
 .download-heading h2,
-.trust-grid h2,
 .compact-heading h2 {
   margin: 0;
   font-size: 40px;
@@ -490,41 +489,6 @@ pre {
 
 .surface-card-tall .surface-copy {
   min-height: 190px;
-}
-
-.trust-section {
-  border-block: 1px solid var(--line);
-  background: #0f0f0e;
-}
-
-.trust-grid {
-  display: grid;
-  min-height: 210px;
-  grid-template-columns: 1fr 1.35fr auto;
-  align-items: center;
-  gap: 48px;
-}
-
-.trust-grid .kicker {
-  margin-bottom: 10px;
-}
-
-.trust-grid h2 {
-  font-size: 30px;
-}
-
-.trust-grid ul {
-  display: flex;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.trust-grid li {
-  padding: 8px 22px;
-  border-left: 1px solid var(--line);
-  color: #d7d3cd;
-  font-size: 14px;
 }
 
 .text-link,
@@ -1187,7 +1151,6 @@ pre {
   .surface-card-wide,
   .surface-pair,
   .download-shell,
-  .trust-grid,
   .footer-grid,
   .changelog-layout,
   .legal-layout {
@@ -1207,20 +1170,6 @@ pre {
 
   .surface-card-tall .surface-copy {
     min-height: 0;
-  }
-
-  .trust-grid {
-    min-height: 0;
-    gap: 26px;
-    padding-block: 44px;
-  }
-
-  .trust-grid ul {
-    flex-wrap: wrap;
-  }
-
-  .trust-grid li {
-    flex: 1 1 30%;
   }
 
   .download-shell {
@@ -1340,11 +1289,6 @@ pre {
   .surface-copy h3 {
     margin-top: 22px;
     font-size: 19px;
-  }
-
-  .trust-grid li {
-    flex-basis: 100%;
-    padding: 10px 14px;
   }
 
   .download-section {
