@@ -38,24 +38,10 @@ function setStatus(surface, text) {
   if (status) status.textContent = text;
 }
 
-function resetRecommendations(surface) {
-  for (const badge of surface.querySelectorAll("[data-recommendation]")) {
-    badge.hidden = true;
-  }
-}
-
-function showRecommendation(surface, architecture) {
-  resetRecommendations(surface);
-  const badge = surface.querySelector(
-    `[data-recommendation="${architecture}"]`,
-  );
-  if (badge) badge.hidden = false;
+function applyArchitectureHint(surface, architecture) {
   const input = surface.querySelector(`input[value="${architecture}"]`);
   if (input) input.checked = true;
-  setStatus(
-    surface,
-    `Recommended for this Mac: ${ARCHITECTURE_LABELS[architecture]}.`,
-  );
+  setStatus(surface, `${ARCHITECTURE_LABELS[architecture]} selected.`);
 }
 
 function configureSelectedDownload(surface, release, assets) {
@@ -178,7 +164,8 @@ async function startDownloadSurfaces() {
   for (const surface of surfaces) bindSurface(surface);
   const recommendation = await reliableArchitectureHint();
   if (recommendation) {
-    for (const surface of surfaces) showRecommendation(surface, recommendation);
+    for (const surface of surfaces)
+      applyArchitectureHint(surface, recommendation);
   }
 
   try {

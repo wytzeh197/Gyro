@@ -166,6 +166,11 @@ check(
   !pages.home.includes("Unsigned public alpha"),
   "Homepage must not contain the removed unsigned warning panel",
 );
+check(
+  !pages.home.includes("Recommended for this Mac") &&
+    !pages.install.includes("Recommended for this Mac"),
+  "Download pages must not show an automatic recommendation sentence",
+);
 
 containsAll(pages.install, "Install page", [
   "Download Gyro.",
