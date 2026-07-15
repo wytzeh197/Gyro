@@ -38,6 +38,7 @@ const files = [
   ["site/changelog.js", "changelog.js"],
   ["site/release-utils.js", "release-utils.js"],
   ["site/assets/gyro-logo.png", "assets/gyro-logo.png"],
+  ["site/assets/gyro-mark.png", "assets/gyro-mark.png"],
   ["site/assets/apple.svg", "assets/apple.svg"],
   ["site/assets/github.svg", "assets/github.svg"],
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
