@@ -148,8 +148,9 @@ containsAll(pages.home, "Homepage", [
   "assets/screenshots/cli-1600.webp",
   "assets/screenshots/workspace-1600.webp",
   "assets/social-preview.png",
-  "Unsigned public alpha",
-  "Read the safe install guide",
+  "Ready when you are.",
+  "Gyro for Mac",
+  "Install guide",
   "data-download-surface",
 ]);
 
@@ -160,6 +161,10 @@ check(
 check(
   !pages.home.includes("Move Gyro to Applications."),
   "Homepage must not contain the full first-launch guide",
+);
+check(
+  !pages.home.includes("Unsigned public alpha"),
+  "Homepage must not contain the removed unsigned warning panel",
 );
 
 containsAll(pages.install, "Install page", [
