@@ -28,6 +28,10 @@ const ciWorkflow = readFileSync(
   resolve(repoRoot, ".github/workflows/ci.yml"),
   "utf8",
 );
+const homebrewWorkflow = readFileSync(
+  resolve(repoRoot, ".github/workflows/publish-homebrew.yml"),
+  "utf8",
+);
 const cliPackager = readFileSync(
   resolve(repoRoot, "scripts/package-cli-release.mjs"),
   "utf8",
@@ -225,6 +229,22 @@ for (const marker of [
 ]) {
   if (!ciWorkflow.includes(marker)) {
     failures.push(`CI workflow is missing ${marker}.`);
+  }
+}
+
+for (const marker of [
+  "workflow_dispatch:",
+  "brew tap-new gyro/release-validation",
+  'cp "$PWD/release-assets/gyro.rb" "$FORMULA_DIRECTORY/gyro.rb"',
+  "brew install --formula gyro/release-validation/gyro",
+  "brew test gyro/release-validation/gyro",
+  "runner: macos-15",
+  "runner: macos-15-intel",
+  "HOMEBREW_TAP_TOKEN",
+  "HOMEBREW_TAP_PUBLISH_ENABLED",
+]) {
+  if (!homebrewWorkflow.includes(marker)) {
+    failures.push(`Homebrew publish workflow is missing ${marker}.`);
   }
 }
 
