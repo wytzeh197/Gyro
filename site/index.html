@@ -10,20 +10,20 @@
     <meta name="referrer" content="same-origin" />
     <meta
       name="description"
-      content="Download Gyro, the open-source local-first coding agent workspace for macOS."
+      content="Download Gyro, the open-source local-first workspace for coding agents on macOS."
     />
-    <meta name="theme-color" content="#090907" />
+    <meta name="theme-color" content="#0b0b0a" />
     <meta
       property="og:title"
-      content="Gyro — the local-first agent workbench"
+      content="Gyro — keep the whole coding run together"
     />
     <meta
       property="og:description"
-      content="Chat, terminals, files, diffs, approvals, and agents in one macOS workspace."
+      content="Chat, CLI, code, diffs, approvals, and agent state in one local-first macOS workspace."
     />
     <meta property="og:image" content="assets/gyro-launch-poster.png" />
     <meta property="og:type" content="website" />
-    <title>Gyro — Download for macOS</title>
+    <title>Gyro — A focused workspace for coding agents</title>
     <link rel="icon" href="assets/gyro-logo.png" />
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="app.js"></script>
@@ -33,56 +33,259 @@
 
     <header class="site-header">
       <a class="brand" href="#top" aria-label="Gyro home">
-        <img src="assets/gyro-logo.png" alt="" width="34" height="34" />
+        <img src="assets/gyro-logo.png" alt="" width="32" height="32" />
         <span>Gyro</span>
-        <span class="alpha-pill">Alpha</span>
       </a>
       <nav aria-label="Main navigation">
-        <a href="#download">Download</a>
+        <a href="#product">Product</a>
         <a href="#install">Install</a>
-        <a href="#tour">Tour</a>
         <a href="https://github.com/wytzeh197/Gyro">GitHub</a>
+        <a class="nav-download" href="#download">Download</a>
       </nav>
     </header>
 
     <main id="main">
       <section class="hero section-shell" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
+          <div class="agent-rail" aria-hidden="true">
+            <span>Chat</span><i></i><span>CLI</span><i></i
+            ><span>Workspace</span>
+          </div>
           <p class="eyebrow">
             <span></span> Open-source public alpha · macOS 14+
           </p>
           <h1 id="hero-title">
-            Your coding agents.<br /><em>One place to move.</em>
+            Keep the whole<br />coding run <em>together.</em>
           </h1>
           <p class="hero-lede">
-            Gyro brings agent chat, terminals, files, diffs, approvals, tasks,
-            and provider state into one local-first workspace.
+            Gyro is a focused local workspace for coding agents—bringing chat,
+            terminals, files, diffs, approvals, and task state into one place.
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="#download"
-              >Download for macOS <span aria-hidden="true">↓</span></a
-            >
+            <a class="button button-primary" href="#download">
+              Download for macOS <span aria-hidden="true">↓</span>
+            </a>
             <a
               class="button button-secondary"
               href="https://github.com/wytzeh197/Gyro"
-              >View source <span aria-hidden="true">↗</span></a
             >
+              Star on GitHub <span aria-hidden="true">↗</span>
+            </a>
           </div>
-          <ul class="trust-list" aria-label="Product commitments">
-            <li>No account gate</li>
-            <li>No analytics</li>
-            <li>Local-first</li>
-          </ul>
+          <p class="hero-fineprint">
+            Free and open source. No account. No analytics.
+          </p>
         </div>
-        <div class="hero-art" aria-hidden="true">
-          <div class="orbit orbit-one"></div>
-          <div class="orbit orbit-two"></div>
-          <div class="hero-mark">
-            <img src="assets/gyro-logo.png" alt="" width="190" height="190" />
+
+        <div class="product-stage" aria-label="Gyro application preview">
+          <div class="stage-glow" aria-hidden="true"></div>
+          <div class="app-frame">
+            <div class="app-frame-bar" aria-hidden="true">
+              <span class="traffic-lights"><i></i><i></i><i></i></span>
+              <span>Gyro · local workspace</span>
+              <span class="frame-status"><i></i> Local</span>
+            </div>
+            <img
+              src="assets/cli-workbench.png"
+              alt="Gyro showing a coding-agent terminal with project controls and running sessions in view"
+            />
           </div>
-          <span class="surface-label surface-chat">Chat</span>
-          <span class="surface-label surface-cli">CLI</span>
-          <span class="surface-label surface-workspace">Workspace</span>
+          <div class="stage-caption" aria-hidden="true">
+            <span>01</span>
+            <p>One window for the conversation and the work around it.</p>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="product-intro section-shell"
+        id="product"
+        aria-labelledby="product-title"
+      >
+        <div class="section-copy">
+          <p class="kicker">One continuous workspace</p>
+          <h2 id="product-title">
+            Move between surfaces.<br />Keep the thread.
+          </h2>
+          <p>
+            Start with the right surface for the moment. Gyro keeps the project,
+            local session, and surrounding work close as you move.
+          </p>
+        </div>
+        <div class="surface-grid">
+          <article>
+            <span class="surface-number">01</span>
+            <div class="surface-icon" aria-hidden="true">↗</div>
+            <h3>Chat</h3>
+            <p>
+              Guide the agent while approvals, actions, and progress stay
+              legible.
+            </p>
+          </article>
+          <article>
+            <span class="surface-number">02</span>
+            <div class="surface-icon surface-icon-cli" aria-hidden="true">
+              ›_
+            </div>
+            <h3>CLI</h3>
+            <p>Start or resume the same local work from the command line.</p>
+          </article>
+          <article>
+            <span class="surface-number">03</span>
+            <div class="surface-icon surface-icon-workspace" aria-hidden="true">
+              ⌘
+            </div>
+            <h3>Workspace</h3>
+            <p>
+              Keep code, files, diffs, Git, tests, and output around the run.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section
+        class="feature-story section-shell"
+        aria-labelledby="story-title"
+      >
+        <div class="section-copy story-heading">
+          <p class="kicker">Built around the work</p>
+          <h2 id="story-title">See the whole job,<br />not just the prompt.</h2>
+          <p>
+            The most useful agent workspace is the one that keeps context
+            visible when the work moves from conversation to terminal to code.
+          </p>
+        </div>
+
+        <article class="feature feature-wide">
+          <div class="feature-copy">
+            <span class="feature-index">01 · Conversation</span>
+            <h3>Direction and action, in one frame.</h3>
+            <p>
+              Follow the thread without losing sight of tool calls, approvals,
+              and the project the agent is changing.
+            </p>
+          </div>
+          <div class="feature-image image-chat">
+            <img
+              src="assets/chat-thread.png"
+              alt="Gyro Chat with agent activity, approvals, and project navigation"
+              loading="lazy"
+            />
+          </div>
+        </article>
+
+        <div class="feature-pair">
+          <article class="feature">
+            <div class="feature-copy">
+              <span class="feature-index">02 · Terminal</span>
+              <h3>The command line stays close.</h3>
+              <p>
+                Run, inspect, and resume local agent work without rebuilding
+                context.
+              </p>
+            </div>
+            <div class="feature-image image-cli">
+              <img
+                src="assets/cli-workbench.png"
+                alt="Gyro CLI surface showing a local coding-agent session"
+                loading="lazy"
+              />
+            </div>
+          </article>
+
+          <article class="feature feature-dark">
+            <div class="feature-copy">
+              <span class="feature-index">03 · Workspace</span>
+              <h3>The result remains inspectable.</h3>
+              <p>
+                Keep files, changes, tests, Git state, and terminal output in
+                reach.
+              </p>
+            </div>
+            <div class="feature-image image-workspace">
+              <img
+                src="assets/ide.png"
+                alt="Gyro Workspace with files, editor, and terminal visible"
+                loading="lazy"
+              />
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section
+        class="film section-shell"
+        id="tour"
+        aria-labelledby="film-title"
+      >
+        <div class="section-heading split-heading">
+          <div>
+            <p class="kicker">Watch Gyro move</p>
+            <h2 id="film-title">A calmer way to direct the work.</h2>
+          </div>
+          <p>
+            A short look at how Gyro brings the active run and its surrounding
+            tools into one local-first workspace.
+          </p>
+        </div>
+        <div class="film-frame">
+          <video
+            controls
+            playsinline
+            preload="metadata"
+            poster="assets/gyro-launch-poster.png"
+            aria-label="Gyro launch film"
+          >
+            <source src="assets/gyro-launch-film.mp4" type="video/mp4" />
+            Your browser cannot play this film.
+            <a href="assets/gyro-launch-film.mp4">Download the MP4 instead</a>.
+          </video>
+        </div>
+      </section>
+
+      <section class="principles-section" aria-labelledby="principles-title">
+        <div class="section-shell principles-grid">
+          <div class="section-copy">
+            <p class="kicker">Your machine, your work</p>
+            <h2 id="principles-title">Local-first by design.</h2>
+            <p>
+              Gyro is the workspace layer on your Mac. It does not require a
+              Gyro account, an analytics opt-in, or a new place to upload your
+              repository.
+            </p>
+            <a
+              class="text-link"
+              href="https://github.com/wytzeh197/Gyro/blob/main/docs/privacy.md"
+            >
+              Read the privacy approach <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+          <div class="principle-list">
+            <article>
+              <span>01</span>
+              <div>
+                <h3>No account gate</h3>
+                <p>Download it, connect the tools you use, and work locally.</p>
+              </div>
+            </article>
+            <article>
+              <span>02</span>
+              <div>
+                <h3>No analytics</h3>
+                <p>No product telemetry is required to use the public alpha.</p>
+              </div>
+            </article>
+            <article>
+              <span>03</span>
+              <div>
+                <h3>Open source</h3>
+                <p>
+                  Inspect the code, the release process, and every published
+                  artifact.
+                </p>
+              </div>
+            </article>
+          </div>
         </div>
       </section>
 
@@ -194,85 +397,6 @@
       </section>
 
       <section
-        class="film section-shell"
-        id="tour"
-        aria-labelledby="film-title"
-      >
-        <div class="section-heading split-heading">
-          <div>
-            <p class="kicker">See the idea</p>
-            <h2 id="film-title">A workspace built around motion.</h2>
-          </div>
-          <p>
-            Start in the app or the Gyro CLI, then continue the same local
-            session without losing the work around it.
-          </p>
-        </div>
-        <div class="film-frame">
-          <video
-            controls
-            playsinline
-            preload="metadata"
-            poster="assets/gyro-launch-poster.png"
-            aria-label="Gyro launch film"
-          >
-            <source src="assets/gyro-launch-film.mp4" type="video/mp4" />
-            Your browser cannot play this film.
-            <a href="assets/gyro-launch-film.mp4">Download the MP4 instead</a>.
-          </video>
-        </div>
-      </section>
-
-      <section class="gallery section-shell" aria-labelledby="gallery-title">
-        <div class="section-heading">
-          <p class="kicker">Inside Gyro</p>
-          <h2 id="gallery-title">The whole run stays in view.</h2>
-        </div>
-        <div class="gallery-grid">
-          <figure class="gallery-wide">
-            <img
-              src="assets/chat-thread.png"
-              alt="Gyro chat with agent activity and approvals"
-              loading="lazy"
-            />
-            <figcaption>
-              <strong>Chat</strong
-              ><span
-                >Work with agents while actions and approvals stay
-                visible.</span
-              >
-            </figcaption>
-          </figure>
-          <figure>
-            <img
-              src="assets/cli-workbench.png"
-              alt="Gyro CLI workbench showing a local agent session"
-              loading="lazy"
-            />
-            <figcaption>
-              <strong>CLI</strong
-              ><span
-                >Start or resume the same local session from Terminal.</span
-              >
-            </figcaption>
-          </figure>
-          <figure>
-            <img
-              src="assets/ide.png"
-              alt="Gyro Workspace with files, editor, and terminal"
-              loading="lazy"
-            />
-            <figcaption>
-              <strong>Workspace</strong
-              ><span
-                >Keep files, diffs, Git, tests, and output around the run.</span
-              >
-            </figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section
         class="install-section"
         id="install"
         aria-labelledby="install-title"
@@ -371,12 +495,12 @@
 
         <div class="checksum-grid">
           <div class="checksum-card">
-            <span>Apple Silicon DMG</span>
-            <code id="apple-silicon-digest">Loading SHA-256…</code>
+            <span>Apple Silicon DMG</span
+            ><code id="apple-silicon-digest">Loading SHA-256…</code>
           </div>
           <div class="checksum-card">
-            <span>Intel DMG</span>
-            <code id="intel-digest">Loading SHA-256…</code>
+            <span>Intel DMG</span
+            ><code id="intel-digest">Loading SHA-256…</code>
           </div>
         </div>
         <div class="checksum-help">
@@ -452,6 +576,20 @@ pnpm desktop:install-local</code></pre>
           </details>
         </div>
       </section>
+
+      <section
+        class="closing-cta section-shell"
+        aria-labelledby="closing-title"
+      >
+        <img src="assets/gyro-logo.png" alt="" width="66" height="66" />
+        <h2 id="closing-title">Give the run one place to live.</h2>
+        <p>
+          Free, open source, and available now as a public alpha for macOS 14+.
+        </p>
+        <a class="button button-primary" href="#download"
+          >Download Gyro <span aria-hidden="true">↓</span></a
+        >
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -465,7 +603,7 @@ pnpm desktop:install-local</code></pre>
               height="30"
             /><span>Gyro</span></a
           >
-          <p>An open-source local-first agent workbench for macOS.</p>
+          <p>An open-source local-first agent workspace for macOS.</p>
         </div>
         <div class="footer-links">
           <a href="https://github.com/wytzeh197/Gyro/blob/main/docs/privacy.md"
