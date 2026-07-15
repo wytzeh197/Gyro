@@ -169,6 +169,7 @@ for (const marker of [
   "needs: macos",
   "Verify pinned Tauri release toolchain",
   'tauri --version)" = "tauri-cli 2.11.4"',
+  'GYRO_REQUIRE_RELEASE_SECRETS: "1"',
   "group: release-${{ github.ref }}",
   "cancel-in-progress: false",
   "actions/upload-artifact@v4",
@@ -324,7 +325,7 @@ for (const appleReleaseMarker of [
   }
 }
 
-if (process.env.CI) {
+if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {
   for (const variable of [
     "TAURI_SIGNING_PRIVATE_KEY",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
