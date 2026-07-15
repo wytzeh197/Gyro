@@ -10,7 +10,7 @@
     <meta name="referrer" content="same-origin" />
     <meta
       name="description"
-      content="Download and install the unsigned Gyro public alpha safely on macOS."
+      content="Download Gyro for macOS and follow the short first-launch guide."
     />
     <meta name="theme-color" content="#0b0b0a" />
     <meta property="og:title" content="Install Gyro for macOS" />
@@ -80,13 +80,6 @@
                 <p>DMG · macOS 14 or later</p>
               </div>
             </div>
-            <p
-              class="detect-status"
-              data-role="architecture-status"
-              aria-live="polite"
-            >
-              Apple Silicon is selected. Confirm before downloading.
-            </p>
           </header>
 
           <fieldset class="architecture-selector architecture-selector-large">
@@ -100,7 +93,7 @@
                   checked
                 />
                 <span>Apple Silicon</span>
-                <small>M1, M2, M3, M4 and newer</small>
+                <small>M1–M4 and newer</small>
                 <em data-recommendation="apple-silicon" hidden
                   >Recommended for this Mac</em
                 >
@@ -108,13 +101,20 @@
               <label>
                 <input type="radio" name="architecture" value="intel" />
                 <span>Intel</span>
-                <small>Macs with an Intel processor</small>
+                <small>Intel processor</small>
                 <em data-recommendation="intel" hidden
                   >Recommended for this Mac</em
                 >
               </label>
             </div>
           </fieldset>
+          <p
+            class="architecture-announcement"
+            data-role="architecture-status"
+            aria-live="polite"
+          >
+            Apple Silicon selected.
+          </p>
 
           <a
             class="button button-download"
@@ -124,7 +124,7 @@
           >
           <div class="release-details" aria-live="polite">
             <p>
-              <strong data-role="release-version">Latest public alpha</strong
+              <strong data-role="release-version">Latest release</strong
               ><span aria-hidden="true"> · </span
               ><span data-role="release-date">Loading date…</span>
             </p>
@@ -155,36 +155,28 @@
             </p></noscript
           >
 
-          <aside class="unsigned-notice unsigned-notice-full">
-            <div>
-              <p class="notice-title">Unsigned public alpha</p>
-              <p>
-                Gyro is not Apple-notarized yet. Use Apple’s one-time Open
-                Anyway flow below. Never disable Gatekeeper or remove quarantine
-                globally.
-              </p>
+          <details class="checksum-disclosure">
+            <summary>Verify download</summary>
+            <div class="checksum-card">
+              <div>
+                <p class="detail-label">SHA-256 for selected DMG</p>
+                <code data-role="digest" tabindex="0">Loading checksum…</code>
+              </div>
+              <button
+                class="button button-quiet"
+                type="button"
+                data-role="copy-checksum"
+                disabled
+              >
+                Copy
+              </button>
+              <a
+                data-role="checksums-link"
+                href="https://github.com/wytzeh197/Gyro/releases/latest"
+                >SHA256SUMS</a
+              >
             </div>
-          </aside>
-
-          <div class="checksum-card">
-            <div>
-              <p class="detail-label">SHA-256 for selected DMG</p>
-              <code data-role="digest" tabindex="0">Loading checksum…</code>
-            </div>
-            <button
-              class="button button-quiet"
-              type="button"
-              data-role="copy-checksum"
-              disabled
-            >
-              Copy
-            </button>
-            <a
-              data-role="checksums-link"
-              href="https://github.com/wytzeh197/Gyro/releases/latest"
-              >SHA256SUMS</a
-            >
-          </div>
+          </details>
         </div>
       </section>
 
@@ -206,7 +198,7 @@
           <li>
             <span>02</span>
             <h3>Try to open Gyro.</h3>
-            <p>Dismiss the unsigned-app warning.</p>
+            <p>Dismiss the macOS security warning.</p>
           </li>
           <li>
             <span>03</span>

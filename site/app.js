@@ -54,7 +54,7 @@ function showRecommendation(surface, architecture) {
   if (input) input.checked = true;
   setStatus(
     surface,
-    `${ARCHITECTURE_LABELS[architecture]} is recommended for this Mac. Confirm before downloading.`,
+    `Recommended for this Mac: ${ARCHITECTURE_LABELS[architecture]}.`,
   );
 }
 
@@ -149,7 +149,7 @@ function bindSurface(surface) {
       if (data) configureSelectedDownload(surface, data.release, data.assets);
       setStatus(
         surface,
-        `${ARCHITECTURE_LABELS[selectedArchitecture(surface)]} selected. Confirm before downloading.`,
+        `Selected: ${ARCHITECTURE_LABELS[selectedArchitecture(surface)]}.`,
       );
     });
   }

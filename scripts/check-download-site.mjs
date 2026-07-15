@@ -166,11 +166,10 @@ check(
 containsAll(pages.install, "Install page", [
   "Choose your Mac processor",
   "Apple Silicon",
-  "M1, M2, M3, M4 and newer",
+  "M1–M4 and newer",
   "Intel",
   "Download DMG",
-  "Unsigned public alpha",
-  "Never disable Gatekeeper",
+  "Verify download",
   "Move Gyro to Applications.",
   "Try to open Gyro.",
   "Choose Open Anyway.",
@@ -183,6 +182,11 @@ containsAll(pages.install, "Install page", [
   "Build from source",
   "Troubleshooting and support",
 ]);
+
+check(
+  !pages.install.includes("Unsigned public alpha"),
+  "Install page must not repeat the unsigned alpha warning",
+);
 
 containsAll(pages.changelog, "Changelog page", [
   "Every published alpha from version 21 onward.",
