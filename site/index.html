@@ -191,19 +191,24 @@
       >
         <div class="section-shell download-shell">
           <header class="download-heading">
-            <p class="kicker">Direct from GitHub</p>
-            <h2 id="download-title">Download Gyro.</h2>
-            <p>One DMG. Choose your Mac processor.</p>
+            <p class="kicker">Gyro for macOS</p>
+            <h2 id="download-title">Ready when you are.</h2>
+            <p>Choose your Mac processor and download the DMG.</p>
           </header>
 
           <div class="download-stack" data-download-surface>
             <article class="macos-card">
-              <div class="platform-identity">
-                <img src="assets/apple.svg" alt="" width="30" height="30" />
-                <div>
-                  <h3>macOS</h3>
-                  <p>DMG · macOS 14+</p>
+              <div class="macos-card-header">
+                <div class="platform-identity">
+                  <img src="assets/apple.svg" alt="" width="32" height="32" />
+                  <div>
+                    <h3>Gyro for Mac</h3>
+                    <p>DMG · macOS 14 or later</p>
+                  </div>
                 </div>
+                <p class="release-version" data-role="release-version">
+                  Latest release
+                </p>
               </div>
 
               <fieldset class="architecture-selector">
@@ -231,6 +236,14 @@
                 </div>
               </fieldset>
 
+              <p
+                class="detect-status"
+                data-role="architecture-status"
+                aria-live="polite"
+              >
+                Apple Silicon is selected. Confirm before downloading.
+              </p>
+
               <a
                 class="button button-download"
                 data-role="download-link"
@@ -238,50 +251,38 @@
               >
                 <span data-role="download-label">Open GitHub Releases</span>
               </a>
-              <p class="asset-meta" data-role="asset-meta">
-                Loading the latest release…
-              </p>
-            </article>
 
-            <p
-              class="detect-status"
-              data-role="architecture-status"
-              aria-live="polite"
-            >
-              Apple Silicon is selected. Confirm before downloading.
-            </p>
-            <p class="release-meta" aria-live="polite">
-              <span data-role="release-version">Latest public alpha</span>
-              <span aria-hidden="true">·</span>
-              <span data-role="release-date">Loading date…</span>
-              <span aria-hidden="true">·</span>
-              <a
-                data-role="release-notes-link"
-                href="https://github.com/wytzeh197/Gyro/releases/latest"
-                >Release notes</a
-              >
-            </p>
-            <p class="release-fallback" data-role="release-fallback" hidden>
-              Live details are unavailable.
-              <a href="https://github.com/wytzeh197/Gyro/releases/latest"
-                >Open GitHub Releases</a
-              >.
-            </p>
-            <noscript>
-              <p class="release-fallback">
-                JavaScript is off. Open the latest GitHub Release and choose
-                <code>aarch64</code> for Apple Silicon or <code>x64</code> for
-                Intel.
-              </p>
-            </noscript>
-
-            <aside class="unsigned-notice">
-              <div>
-                <p class="notice-title">Unsigned public alpha</p>
-                <p>macOS will ask you to approve the first launch.</p>
+              <div class="macos-card-meta">
+                <p class="asset-meta" data-role="asset-meta">
+                  Loading the latest release…
+                </p>
+                <p class="release-meta" aria-live="polite">
+                  <span data-role="release-date">Loading date…</span>
+                  <span aria-hidden="true">·</span>
+                  <a
+                    data-role="release-notes-link"
+                    href="https://github.com/wytzeh197/Gyro/releases/latest"
+                    >Release notes</a
+                  >
+                  <span aria-hidden="true">·</span>
+                  <a href="install/">Install guide</a>
+                </p>
               </div>
-              <a href="install/">Read the safe install guide</a>
-            </aside>
+
+              <p class="release-fallback" data-role="release-fallback" hidden>
+                Live details are unavailable.
+                <a href="https://github.com/wytzeh197/Gyro/releases/latest"
+                  >Open GitHub Releases</a
+                >.
+              </p>
+              <noscript>
+                <p class="release-fallback">
+                  JavaScript is off. Open the latest GitHub Release and choose
+                  <code>aarch64</code> for Apple Silicon or <code>x64</code> for
+                  Intel.
+                </p>
+              </noscript>
+            </article>
           </div>
         </div>
       </section>

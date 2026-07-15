@@ -494,7 +494,6 @@ pre {
 .text-link,
 .release-meta a,
 .release-details a,
-.unsigned-notice a,
 .checksum-card a,
 .detail-content a,
 .legal-copy a {
@@ -505,7 +504,6 @@ pre {
 .text-link:hover,
 .release-meta a:hover,
 .release-details a:hover,
-.unsigned-notice a:hover,
 .checksum-card a:hover,
 .detail-content a:hover,
 .legal-copy a:hover {
@@ -514,24 +512,28 @@ pre {
 }
 
 .download-section {
-  padding: 112px 0;
+  padding: 104px 0 112px;
+  background:
+    radial-gradient(
+      circle at 50% 55%,
+      rgba(255, 91, 52, 0.07),
+      transparent 34%
+    ),
+    var(--bg);
 }
 
 .download-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(520px, 1.2fr);
-  gap: 76px;
-  align-items: start;
+  max-width: 800px;
 }
 
 .download-heading {
-  position: sticky;
-  top: calc(var(--header-height) + 42px);
+  max-width: 680px;
+  margin: 0 auto 38px;
+  text-align: center;
 }
 
 .download-stack {
-  display: grid;
-  gap: 14px;
+  min-width: 0;
 }
 
 .macos-card,
@@ -543,10 +545,25 @@ pre {
 
 .macos-card {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(280px, 1.4fr) auto;
+  gap: 17px;
+  padding: 30px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #151514, #10100f 72%);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.24);
+}
+
+.macos-card-header,
+.macos-card-meta {
+  display: flex;
   align-items: center;
-  gap: 22px;
-  padding: 24px;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.release-version {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 13px;
 }
 
 .platform-identity {
@@ -639,19 +656,26 @@ pre {
   opacity: 0.68;
 }
 
+.macos-card .segmented-control label {
+  min-height: 52px;
+}
+
 .macos-card .segmented-control small {
-  position: absolute;
-  top: -27px;
-  width: max-content;
-  padding: 3px 8px;
-  border: 1px solid rgba(255, 96, 56, 0.5);
-  border-radius: 999px;
-  background: var(--orange-dark);
-  color: #ffd2c6;
   font-size: 13px;
 }
 
 .macos-card .button-download {
+  width: 100%;
+  min-height: 50px;
+  white-space: nowrap;
+}
+
+.macos-card .detect-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -669,7 +693,7 @@ pre {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  justify-content: center;
+  justify-content: flex-end;
 }
 
 .release-fallback {
@@ -679,34 +703,6 @@ pre {
   border-radius: 11px;
   background: rgba(255, 96, 56, 0.07);
   color: #d7b5ac;
-  font-size: 13px;
-}
-
-.unsigned-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 19px 21px;
-  border: 1px solid rgba(255, 96, 56, 0.35);
-  border-radius: 14px;
-  background: rgba(255, 96, 56, 0.07);
-}
-
-.unsigned-notice p {
-  margin: 2px 0;
-  color: #bbaaa5;
-  font-size: 13px;
-}
-
-.unsigned-notice .notice-title {
-  color: #ffc1b0;
-  font-size: 14px;
-  font-weight: 750;
-}
-
-.unsigned-notice a {
-  flex: 0 0 auto;
   font-size: 13px;
 }
 
@@ -1172,14 +1168,6 @@ pre {
     min-height: 0;
   }
 
-  .download-shell {
-    gap: 36px;
-  }
-
-  .download-heading {
-    position: static;
-  }
-
   .version-rail,
   .legal-layout aside {
     display: none;
@@ -1296,14 +1284,16 @@ pre {
   }
 
   .macos-card {
-    grid-template-columns: 1fr;
+    padding: 24px;
   }
 
-  .macos-card .button-download {
-    width: 100%;
+  .macos-card-header,
+  .macos-card-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
   }
 
-  .unsigned-notice,
   .download-card-header,
   .release-details {
     align-items: flex-start;
@@ -1317,6 +1307,10 @@ pre {
   .download-card-header .detect-status {
     max-width: none;
     text-align: left;
+  }
+
+  .release-meta {
+    justify-content: flex-start;
   }
 
   .download-stack-full {
