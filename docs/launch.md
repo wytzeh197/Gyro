@@ -49,7 +49,10 @@ Run a private alpha with 20-50 macOS developers.
 
 Acceptance goals:
 
-- Fresh install succeeds from DMG or Homebrew.
+- Fresh Gyro.app install succeeds from the matching architecture DMG through
+  the documented one-time **Open Anyway** flow.
+- The CLI installs independently from `wytzeh197/tap` on Apple Silicon and
+  Intel.
 - `gyro doctor` reports useful setup status.
 - CLI-created sessions open in Gyro.app.
 - App-created sessions can be continued from CLI.
@@ -58,15 +61,22 @@ Acceptance goals:
 
 ## Public Developer Preview
 
-Public install instructions should only be published after signed artifacts and
-a clean-machine installation have been verified.
+Public install instructions should identify the build as an unsigned Alpha and
+link to [Install Gyro on macOS](install-macos.md). Publish only after the
+ad-hoc-signed DMGs pass strict signature, checksum, and clean-machine
+installation checks. Do not suggest disabling Gatekeeper or removing
+quarantine.
 
 Launch order:
 
-1. GitHub public repository and signed release.
-2. Show HN with concrete technical details and a working download.
-3. Product Hunt after initial GitHub/HN feedback.
-4. Focused posts in Rust, Tauri, open-source, local-first AI, and coding-agent communities.
+1. GitHub public repository and manually accepted, immutable Alpha release.
+2. [Download site](https://wytzeh197.github.io/Gyro/) with direct Apple Silicon
+   and Intel choices, the unsigned disclosure, and install help.
+3. CLI-only Homebrew tap after both native Formula validations pass.
+4. Show HN with concrete technical details and a working download.
+5. Product Hunt after initial GitHub/HN feedback.
+6. Focused posts in Rust, Tauri, open-source, local-first AI, and coding-agent
+   communities.
 
 ## Positioning
 

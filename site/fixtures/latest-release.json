@@ -1,0 +1,27 @@
+{
+  "tag_name": "v9.8.7-alpha.1",
+  "name": "Gyro v9.8.7-alpha.1",
+  "published_at": "2026-07-15T10:00:00Z",
+  "html_url": "https://github.com/wytzeh197/Gyro/releases/tag/v9.8.7-alpha.1",
+  "body": "# Gyro v9.8.7-alpha.1\n\nFixture release for download-site validation.\n\n## What changed\n\n- Apple Silicon and Intel downloads are available.\n- The public alpha notice remains visible.",
+  "assets": [
+    {
+      "name": "Gyro_9.8.7-alpha.1_aarch64.dmg",
+      "size": 12582912,
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "browser_download_url": "https://example.invalid/Gyro_9.8.7-alpha.1_aarch64.dmg"
+    },
+    {
+      "name": "Gyro_9.8.7-alpha.1_x64.dmg",
+      "size": 13631488,
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "browser_download_url": "https://example.invalid/Gyro_9.8.7-alpha.1_x64.dmg"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 256,
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "browser_download_url": "https://example.invalid/SHA256SUMS"
+    }
+  ]
+}

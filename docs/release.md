@@ -1,149 +1,193 @@
 # Release Process
 
-Gyro v1 targets macOS first through direct downloads, with CLI Homebrew support
-planned through a dedicated tap. Preview
-artifacts are currently built and hosted through GitHub Actions without Apple
-Developer signing or notarization. They must be labeled as unsigned public
-alphas rather than stable or production-ready releases. Tauri updater
-signatures protect artifact integrity; they do not replace Apple code signing
-or notarization.
+Gyro ships a macOS 14+ public **Alpha** from GitHub Releases. The
+[download site](https://wytzeh197.github.io/Gyro/) is the user-facing front
+door; GitHub remains the binary source of truth and fallback.
 
-## Update Source
+Alpha app bundles are ad-hoc signed, not signed with an Apple Developer ID and
+not notarized. Users must follow the documented one-time
+[Open Anyway installation flow](install-macos.md). Never tell users to disable
+Gatekeeper or remove quarantine globally.
 
-Gyro uses one Stable update stream hosted by the public GitHub repository. The
-desktop updater reads:
+## Release and update channel
+
+The desktop updater and download site both resolve the latest published,
+non-prerelease GitHub release. The updater reads:
 
 ```text
 https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json
 ```
 
-Drafts and prereleases are not returned by GitHub's latest-release endpoint.
-Publishing a verified non-prerelease draft makes it available to installed apps.
+Drafts and releases marked as prereleases are excluded from GitHub's latest
+endpoint. Until Gyro has separate release channels, every public Alpha must be
+visibly labeled **Alpha** but published as a non-prerelease. A draft becomes
+available to the site and installed apps only after manual acceptance and
+publication.
 
-## Direct macOS Release
+## Public artifact contract
 
-Each release should publish:
+Every release must contain one complete, version-aligned set:
 
-- GitHub-built Apple Silicon DMG.
-- GitHub-built Intel DMG.
-- CLI tarballs for `aarch64-apple-darwin` and `x86_64-apple-darwin`.
-- SHA256 checksums.
-- Tauri updater artifacts.
-- Release notes with upgrade and rollback notes.
+- `Gyro_<version>_aarch64.dmg` for Apple Silicon.
+- `Gyro_<version>_x64.dmg` for Intel.
+- `gyro-cli-<version>-aarch64-apple-darwin.tar.gz` and its `.sha256` sidecar.
+- `gyro-cli-<version>-x86_64-apple-darwin.tar.gz` and its `.sha256` sidecar.
+- `Gyro_aarch64.app.tar.gz` and `.sig` updater artifacts.
+- `Gyro_x64.app.tar.gz` and `.sig` updater artifacts.
+- `latest.json`, `SHA256SUMS`, and the generated `gyro.rb` CLI Formula.
+- Versioned release notes with install, update, and rollback guidance.
 
-The tagged workflow builds `gyro` natively on Apple Silicon and Intel runners.
-Each archive is named
-`gyro-cli-<version>-<target>.tar.gz`, contains the executable, license, README,
-and a `gyro.cli.archive.v1` manifest, and has a matching `.sha256` sidecar. The
-finalize job also publishes `SHA256SUMS` and a generated `gyro.rb` whose URLs
-and architecture checksums point at that immutable tag.
+Do not add a universal DMG alias. Artifact names are a public interface used by
+the site, updater, release checks, documentation, and Homebrew automation.
 
-Before upload, the workflow installs each archived CLI into an isolated
-temporary home and runs `gyro --version`, zsh completion generation, and
-`gyro doctor --json`. This catches a runnable-architecture or packaging failure
-before a draft release is assembled.
+The CLI archives contain `gyro`, `LICENSE`, `README.md`, and a
+`gyro.cli.archive.v1` manifest. Release finalization calculates immutable
+architecture checksums and generates `gyro.rb` with URLs for the exact tag.
 
-The macOS job builds both architectures on GitHub-hosted macOS runners. The
-updater archives are signed with the Tauri updater key, while the `.app` bundles
-and DMGs remain explicitly not Apple-signed or notarized during the alpha.
+## macOS integrity contract
 
-## Required Secrets
+Tauri must set `bundle.macOS.signingIdentity` to `-` and
+`bundle.macOS.minimumSystemVersion` to `14.0`. This produces an ad-hoc signature
+without requiring an Apple account. It does not produce Apple trust or
+notarization.
 
-Every tagged GitHub release build needs the updater-signing secrets:
+Before an architecture bundle can be uploaded, the macOS release verifier must:
 
-- `TAURI_SIGNING_PRIVATE_KEY`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- run `hdiutil verify` and mount the DMG read-only;
+- require exactly one Gyro.app and an Applications shortcut;
+- pass `codesign --verify --deep --strict` on Gyro.app;
+- confirm an ad-hoc signature with no Developer ID authority or Team ID;
+- confirm bundle identifier `dev.gyro.desktop`, release version, icon, and
+  macOS 14 minimum;
+- confirm the expected single architecture for that runner; and
+- verify the final DMG digest recorded in `SHA256SUMS`.
 
-Add `TAURI_UPDATER_PUBLIC_KEY` as a GitHub Actions repository variable. The
-release workflow injects it before preflight; the matching private key remains
-only in GitHub Actions secrets.
+`pnpm release:check` must fail if the Tauri settings or release workflow omit
+these requirements. A partial or malformed signature is a release-blocking
+failure, even when the app launches on the build machine.
 
-`pnpm release:check` fails closed in GitHub Actions when either updater-signing
-secret is absent. The release toolchain is pinned to `tauri-cli 2.11.4`, and the
-job verifies that version before release configuration or updater signing
-begins.
+The updater archives retain their Tauri updater signatures. Those signatures
+authenticate Gyro-issued updates and are independent of the ad-hoc macOS code
+signature. Direct app installs and updates must reject missing or invalid
+updater signatures.
 
-Generate the Tauri updater keypair before the first public release.
+## Required repository configuration
 
-The committed updater public key is safe to distribute. Its matching private
-key is stored in GitHub Actions secrets and backed up locally outside the repo.
-Generate a replacement keypair only if no released build trusts the current key:
+The tagged release workflow needs:
 
-```bash
-pnpm --filter @gyro-dev/desktop tauri signer generate
-```
+- `TAURI_SIGNING_PRIVATE_KEY` Actions secret.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secret.
+- `TAURI_UPDATER_PUBLIC_KEY` Actions variable.
 
-## Homebrew CLI Formula
+The Homebrew publish workflow needs:
 
-Use a dedicated tap:
+- `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to
+  `wytzeh197/homebrew-tap` with **Contents: Read and write**.
+
+No Apple certificate or notarization secret belongs in the Alpha workflow.
+Keep the updater private key backed up outside the repository; rotate it only
+when no released app trusts the current public key.
+
+Enable GitHub immutable releases before publishing the corrected Alpha. Draft
+assets remain replaceable during acceptance; after publication, the tag and
+assets must be locked. The release workflow must continue to refuse any attempt
+to overwrite a published release.
+
+## Release notes contract
+
+Each versioned release body must include:
+
+1. **Alpha notice:** macOS 14+, Apple Silicon and Intel, no Apple Developer ID
+   signature or notarization, and a link to the
+   [Open Anyway guide](https://github.com/wytzeh197/Gyro/blob/main/docs/install-macos.md).
+2. **Direct downloads:** links to both versioned DMGs, labeled by architecture,
+   plus the [download site](https://wytzeh197.github.io/Gyro/) as the preferred
+   chooser.
+3. **Integrity:** a link to the tag's `SHA256SUMS` asset and a reminder to match
+   the exact filename.
+4. **Changes and known limits:** user-visible behavior and compatibility.
+5. **Update and rollback:** the supported update route, data-backup step, prior
+   version link, and any schema limitation.
+6. **CLI:** architecture archives and the CLI-only Homebrew commands after the
+   Formula is published.
+
+Use direct links of this form, substituting the exact tag and version:
 
 ```text
-gyro-dev/homebrew-tap
+https://github.com/wytzeh197/Gyro/releases/download/v<version>/Gyro_<version>_aarch64.dmg
+https://github.com/wytzeh197/Gyro/releases/download/v<version>/Gyro_<version>_x64.dmg
+https://github.com/wytzeh197/Gyro/releases/download/v<version>/SHA256SUMS
 ```
 
-The current alpha workflow generates `Formula/gyro.rb` for the CLI. The
-checked-in app Cask is a planned template only: it does not match the
-architecture-specific DMGs and must not be published as-is. Install Gyro.app
-from the matching direct-download DMG until a generated Cask is added to the
-release workflow.
+## Draft, accept, and publish
 
-The checked-in Formula is a release template and intentionally contains
-checksum markers. Do not publish that template. Download `gyro.rb` from the
-draft release after both architecture jobs complete, inspect it, and copy that
-generated file to the tap. It contains the real SHA256 values calculated from
-the uploaded archives.
+1. Update every version surface and add matching `docs/releases/v<version>.md`
+   notes. Do not reuse a published tag.
+2. Run the preflight checks below, then push the `v<version>` tag.
+3. Let `.github/workflows/release.yml` build both native architectures, verify
+   them, assemble `latest.json`, checksums and `gyro.rb`, and create one draft.
+4. Download the draft assets exactly as a user would. Match every digest to
+   `SHA256SUMS`, inspect the release body and install both architectures on the
+   appropriate hardware.
+5. Complete the clean-user Gatekeeper and updater acceptance checks. Publish
+   the draft as a non-prerelease only when every check passes.
+6. Confirm the Pages site and `/releases/latest` show the new version and that
+   updater metadata resolves. The `release.published` workflow then validates
+   the CLI Formula on Apple Silicon and Intel before updating the tap.
+7. If the prior latest release is defective, mark its title and first release
+   paragraph as superseded only after the replacement is live. Link to the
+   fixed release; never replace the old assets in place.
 
-After the generated Formula is published to the tap, Homebrew CLI users should
-update with:
+After the Pages deployment is verified, set the GitHub repository homepage to
+`https://wytzeh197.github.io/Gyro/` and keep repository topics aligned with the
+public product description.
+
+## Homebrew CLI
+
+`packaging/homebrew/Formula/gyro.rb` is a template containing checksum markers;
+never publish it. The release-generated `gyro.rb` has real checksums. On
+`release.published`, `.github/workflows/publish-homebrew.yml` preserves that
+exact asset, installs and tests it on both architectures, then writes it to
+`Formula/gyro.rb` in `wytzeh197/homebrew-tap`.
 
 ```bash
-brew update
-brew upgrade gyro
+brew tap wytzeh197/tap
+brew install gyro
 ```
 
-Direct app installs should use Tauri updater artifacts and refuse unsigned or invalid updates.
-The tagged workflow uploads `latest.json`, updater signatures, CLI archives and
-checksums, the generated Homebrew Formula, GitHub-built app artifacts, DMGs, and
-release notes for Apple Silicon and Intel macOS. It creates a draft; publishing
-remains an explicit decision after the manual checks below.
-Runs are serialized per tag. A rerun may refresh assets and notes only while the
-release is still a draft and fails before upload if that tag has already been
-published.
+There is no Homebrew Cask for Gyro.app during the unsigned Alpha. See
+[Homebrew packaging](homebrew.md) for tap setup and operations.
 
-Direct CLI users can verify an archive before installation:
+## Preflight and acceptance
+
+Run before tagging:
 
 ```bash
-shasum -a 256 -c gyro-cli-<version>-<target>.tar.gz.sha256
-tar -xzf gyro-cli-<version>-<target>.tar.gz
-./gyro --version
-./gyro doctor
-```
-
-## Preflight
-
-Before tagging:
-
-```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm doctor
 pnpm release:check
 pnpm check
+pnpm test
+cargo fmt --all -- --check
 cargo test --workspace
 cargo build -p gyro-cli
 pnpm release:cli:check
 cargo run -p gyro-cli -- doctor --json
-node scripts/package-cli-release.mjs --help
-pnpm --filter @gyro-dev/desktop tauri build
+git diff --check
 ```
 
-Manual checks:
+Manual acceptance must cover:
 
-- Install DMG on a clean macOS user.
-- Confirm the unsigned alpha warning is expected and clearly disclosed in the
-  release notes and README.
-- Run `gyro doctor`.
-- Verify both CLI checksum sidecars against `SHA256SUMS` and install the
-  generated Formula from the draft release on matching hardware.
-- Create a CLI session and open it in Gyro.app.
-- Create an app session and read it from CLI.
-- Verify updater signature failure is rejected using a deliberately invalid manifest in a staging channel.
+- both DMGs pass the full macOS integrity verifier and match `SHA256SUMS`;
+- the Apple Silicon DMG installs on a clean macOS 14+ user and reaches
+  **Open Anyway**, not a damaged/corrupt-app failure;
+- the Intel app and CLI execute on the Intel runner or Intel hardware;
+- both generated-Formula installs report the correct version, generate zsh,
+  bash, and fish completions, and return `gyro.cli.v1` from `doctor --json`;
+- an older approved Gyro installs the signed updater, relaunches, and preserves
+  sessions;
+- an invalid updater manifest or signature is rejected;
+- CLI-created sessions open in Gyro.app and app-created sessions remain visible
+  to the CLI; and
+- the site handles missing release data without hiding the GitHub Releases
+  fallback.

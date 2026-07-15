@@ -1,11 +1,13 @@
 class Gyro < Formula
   desc "Open-source local-first coding agent workspace CLI"
   homepage "https://github.com/wytzeh197/Gyro"
-  version "0.1.0-alpha.23.3"
+  version "0.1.0-alpha.24"
   license "Apache-2.0"
 
   # The tagged release workflow generates gyro.rb with the real immutable
-  # architecture checksums. Copy that generated Formula to the Homebrew tap.
+  # architecture checksums. The release.published workflow validates that
+  # generated Formula on Apple Silicon and Intel before publishing it to the
+  # CLI-only Homebrew tap.
   on_macos do
     on_arm do
       url "https://github.com/wytzeh197/Gyro/releases/download/v#{version}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"

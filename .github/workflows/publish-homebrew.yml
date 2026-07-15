@@ -1,0 +1,124 @@
+name: Publish Homebrew CLI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published Gyro release tag to validate and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare published Formula
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download generated Formula
+        run: |
+          mkdir -p release-assets
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern gyro.rb \
+            --dir release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Validate Formula metadata
+        run: |
+          set -euo pipefail
+          FORMULA="release-assets/gyro.rb"
+          VERSION="${TAG#v}"
+          test "$TAG" != "$VERSION"
+          test -s "$FORMULA"
+          ! grep -q "REPLACE_WITH" "$FORMULA"
+          grep -F 'homepage "https://github.com/wytzeh197/Gyro"' "$FORMULA"
+          grep -F "version \"$VERSION\"" "$FORMULA"
+          grep -F 'url "https://github.com/wytzeh197/Gyro/releases/download/v#{version}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"' "$FORMULA"
+          grep -F 'url "https://github.com/wytzeh197/Gyro/releases/download/v#{version}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz"' "$FORMULA"
+          test "$(grep -Ec '^[[:space:]]+sha256 "[0-9a-f]{64}"$' "$FORMULA")" -eq 2
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Preserve the exact Formula for validation and publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-homebrew-formula
+          path: release-assets/gyro.rb
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  validate:
+    name: Validate CLI (${{ matrix.architecture }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: Apple Silicon
+            runner: macos-15
+          - architecture: Intel
+            runner: macos-15-intel
+    steps:
+      - name: Download prepared Formula
+        uses: actions/download-artifact@v4
+        with:
+          name: published-homebrew-formula
+          path: release-assets
+      - name: Install and exercise the released CLI
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          brew install --formula "$PWD/release-assets/gyro.rb"
+          gyro --version | grep -F "$VERSION"
+          gyro completions zsh > "$RUNNER_TEMP/_gyro"
+          gyro completions bash > "$RUNNER_TEMP/gyro.bash"
+          gyro completions fish > "$RUNNER_TEMP/gyro.fish"
+          test -s "$RUNNER_TEMP/_gyro"
+          test -s "$RUNNER_TEMP/gyro.bash"
+          test -s "$RUNNER_TEMP/gyro.fish"
+          gyro doctor --json | jq -e '.schema == "gyro.cli.v1" and (.checks | type == "array")'
+          brew test gyro
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+  publish:
+    name: Publish CLI Formula to tap
+    needs: validate
+    if: ${{ vars.HOMEBREW_TAP_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the validated Formula
+        uses: actions/download-artifact@v4
+        with:
+          name: published-homebrew-formula
+          path: release-assets
+      - name: Publish to wytzeh197/homebrew-tap
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone wytzeh197/homebrew-tap tap -- --depth=1
+          mkdir -p tap/Formula
+          cp release-assets/gyro.rb tap/Formula/gyro.rb
+          git -C tap config user.name "github-actions[bot]"
+          git -C tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C tap add Formula/gyro.rb
+          if git -C tap diff --cached --quiet; then
+            echo "The tap already contains the Formula for $TAG."
+            exit 0
+          fi
+          git -C tap commit -m "gyro ${TAG#v}"
+          git -C tap push origin HEAD
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}

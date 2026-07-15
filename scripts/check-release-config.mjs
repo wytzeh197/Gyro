@@ -40,6 +40,10 @@ const updaterManifest = readFileSync(
   resolve(repoRoot, "scripts/create-updater-manifest.mjs"),
   "utf8",
 );
+const macosReleaseVerifier = readFileSync(
+  resolve(repoRoot, "scripts/verify-macos-release.mjs"),
+  "utf8",
+);
 const homebrewFormula = readFileSync(
   resolve(repoRoot, "packaging/homebrew/Formula/gyro.rb"),
   "utf8",
@@ -63,6 +67,18 @@ if (pubkey === "GYRO_DEV_UPDATER_PUBKEY_REPLACE_BEFORE_RELEASE") {
 if (config.bundle?.createUpdaterArtifacts !== true) {
   failures.push(
     "bundle.createUpdaterArtifacts must be true for direct app updates.",
+  );
+}
+
+if (config.bundle?.macOS?.signingIdentity !== "-") {
+  failures.push(
+    'bundle.macOS.signingIdentity must be "-" for a complete ad-hoc macOS signature.',
+  );
+}
+
+if (config.bundle?.macOS?.minimumSystemVersion !== "14.0") {
+  failures.push(
+    'bundle.macOS.minimumSystemVersion must be "14.0" for the supported macOS baseline.',
   );
 }
 
@@ -96,7 +112,15 @@ if (!existsSync(releaseNotesPath)) {
   const releaseNotes = readFileSync(releaseNotesPath, "utf8");
   for (const marker of [
     `# Gyro v${expectedVersion}`,
+    "## Download and install",
+    "https://wytzeh197.github.io/Gyro/",
+    `Gyro_${expectedVersion}_aarch64.dmg`,
+    `Gyro_${expectedVersion}_x64.dmg`,
+    "SHA256SUMS",
+    "docs/install-macos.md",
+    "macOS 14+",
     "## Upgrade and rollback",
+    "## CLI",
     "not Apple-signed or notarized",
   ]) {
     if (!releaseNotes.includes(marker)) {
@@ -164,6 +188,11 @@ for (const marker of [
   "scripts/package-cli-release.mjs",
   "gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz",
   "scripts/finalize-cli-release.mjs",
+  "scripts/verify-macos-release.mjs",
+  "Verify macOS DMG",
+  '--target "${{ matrix.target }}"',
+  '--checksums "$DMG_CHECKSUMS"',
+  "sha256sum --check SHA256SUMS",
   "Build GitHub-hosted alpha and sign updater archive",
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
@@ -195,6 +224,28 @@ for (const marker of [
 ]) {
   if (!ciWorkflow.includes(marker)) {
     failures.push(`CI workflow is missing ${marker}.`);
+  }
+}
+
+for (const marker of [
+  'run("hdiutil", ["verify", dmgPath])',
+  '"--verify", "--deep", "--strict"',
+  '"Signature=adhoc"',
+  '"TeamIdentifier=not set"',
+  '"Sealed Resources version="',
+  '"Developer ID"',
+  'plistValue(infoPlistPath, "CFBundleIdentifier")',
+  'plistValue(infoPlistPath, "CFBundleVersion")',
+  'plistValue(infoPlistPath, "CFBundleName")',
+  'plistValue(infoPlistPath, "LSMinimumSystemVersion")',
+  'plistValue(infoPlistPath, "CFBundleIconFile")',
+  "readlinkSync(shortcutPath)",
+  '"/Applications"',
+  '"SHA256SUMS"',
+  "supportedTargets.get(target)",
+]) {
+  if (!macosReleaseVerifier.includes(marker)) {
+    failures.push(`macOS release verifier is missing ${marker}.`);
   }
 }
 
@@ -246,7 +297,11 @@ for (const marker of [
   }
 }
 
-for (const unsafeMarker of ["tauri-apps/tauri-action", "includeUpdaterJson"]) {
+for (const unsafeMarker of [
+  "tauri-apps/tauri-action",
+  "includeUpdaterJson",
+  "--no-sign",
+]) {
   if (releaseWorkflow.includes(unsafeMarker)) {
     failures.push(
       `Release workflow must not use ${unsafeMarker}; parallel publishers can split a multi-architecture release.`,
@@ -261,7 +316,6 @@ for (const appleReleaseMarker of [
   "APPLE_PASSWORD",
   "APPLE_TEAM_ID",
   "notarytool",
-  "verify-macos-release",
 ]) {
   if (releaseWorkflow.includes(appleReleaseMarker)) {
     failures.push(
