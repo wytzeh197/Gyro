@@ -164,6 +164,8 @@ check(
 );
 
 containsAll(pages.install, "Install page", [
+  "Download Gyro.",
+  "Choose Apple Silicon or Intel.",
   "Choose your Mac processor",
   "Apple Silicon",
   "M1–M4 and newer",
