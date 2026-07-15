@@ -1157,32 +1157,6 @@ pre {
   margin-block: 7px;
 }
 
-.closing-cta {
-  padding-block: 112px 136px;
-  border-top: 1px solid var(--line);
-  text-align: center;
-}
-
-.closing-cta img {
-  margin-inline: auto;
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-}
-
-.closing-cta h2 {
-  max-width: 760px;
-  margin: 30px auto 0;
-}
-
-.closing-cta p {
-  margin: 22px auto 0;
-  color: var(--muted);
-}
-
-.closing-cta .button {
-  margin-top: 30px;
-}
-
 .site-footer {
   padding-block: 46px 26px;
   border-top: 1px solid var(--line);
@@ -1617,7 +1591,6 @@ pre {
   .site-header,
   .hero-actions,
   .film,
-  .closing-cta,
   .site-footer {
     display: none;
   }
