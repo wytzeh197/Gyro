@@ -85,6 +85,7 @@ export type {
   SessionGoal,
   SessionGoalStatus,
   SessionOrigin,
+  SessionsLayoutId,
   SessionPlan,
   SessionPlanItem,
   SessionPlanItemStatus,
@@ -175,6 +176,5 @@ export {
   TerminalPanel,
   ToolsSurface,
   WorkspaceToolPanel,
-  WorkspaceToolPanelPeek,
   WorkspaceHeader,
 } from "./surfaces";

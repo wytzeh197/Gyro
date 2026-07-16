@@ -17,7 +17,7 @@ and low-frequency impacts. It contains no licensed music or voiceover.
 
 - The teaser deliberately contains no product screenshots or interface footage.
 - Cinematic 3D plates and abstract interface fragments introduce Gyro's
-  connected Chat, CLI, and full IDE modes without revealing the interface.
+  connected Sessions and Workspace surfaces without revealing the interface.
 - The logo comes from `packages/ui/src/assets/gyro-logo-mark.png`.
 - Motion, typography, compositing, and procedural sound design are original to
   Gyro.

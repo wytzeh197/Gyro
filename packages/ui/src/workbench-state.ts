@@ -44,6 +44,7 @@ import type {
   ProviderStatus,
   ProviderReadinessStatus,
   SettingsSectionId,
+  SessionsLayoutId,
   SurfaceId,
   Task,
   TaskStatus,
@@ -416,7 +417,7 @@ function defaultIdeContributions(): IdeContribution[] {
   return [
     {
       id: "gyro-core-ide",
-      label: "Gyro Core IDE",
+      label: "Gyro Core Workspace",
       views: [
         "explorer",
         "search",
@@ -669,6 +670,7 @@ export type WorkbenchAction =
   | { type: "reset-state"; state?: WorkbenchState }
   | { type: "select-destination"; destination: AppDestination }
   | { type: "select-surface"; surface: SurfaceId }
+  | { type: "select-sessions" }
   | { type: "select-workspace-layout"; layout: WorkspaceLayoutId }
   | { type: "set-pane-tab"; tab: WorkbenchPaneTab }
   | { type: "open-tool-panel"; tab?: WorkbenchPaneTab }
@@ -929,6 +931,7 @@ export function createInitialWorkbenchState(
   return {
     activeDestination: "workspace",
     activeWorkspaceLayout: "thread",
+    lastSessionsLayout: "thread",
     activePaneTab: "terminal",
     isToolPanelOpen: false,
     workspaceMode: "local",
@@ -988,6 +991,9 @@ export function workbenchReducer(
         ...state,
         activeDestination: "workspace",
         activeWorkspaceLayout: layout,
+        lastSessionsLayout: isSessionsLayout(layout)
+          ? layout
+          : state.lastSessionsLayout,
         activePaneTab:
           layout === "terminal-grid" ? "terminal" : state.activePaneTab,
         isToolPanelOpen:
@@ -998,11 +1004,25 @@ export function workbenchReducer(
               : state.isToolPanelOpen,
       };
     }
+    case "select-sessions":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: state.lastSessionsLayout,
+        activePaneTab:
+          state.lastSessionsLayout === "terminal-grid"
+            ? "terminal"
+            : state.activePaneTab,
+        isToolPanelOpen: state.lastSessionsLayout === "terminal-grid",
+      };
     case "select-workspace-layout":
       return {
         ...state,
         activeDestination: "workspace",
         activeWorkspaceLayout: action.layout,
+        lastSessionsLayout: isSessionsLayout(action.layout)
+          ? action.layout
+          : state.lastSessionsLayout,
         activePaneTab:
           action.layout === "terminal-grid" ? "terminal" : state.activePaneTab,
         isToolPanelOpen:
@@ -1986,6 +2006,8 @@ export function workbenchReducer(
         (pane) => pane.id === action.paneId,
       );
       const nextCommand = action.command ?? existingPane?.command;
+      const nextWorkingDirectory =
+        action.workingDirectory ?? existingPane?.workingDirectory;
       const nextActivePaneTab =
         (state.isToolPanelOpen ||
           state.activeWorkspaceLayout === "terminal-grid") &&
@@ -1998,6 +2020,7 @@ export function workbenchReducer(
         existingPane &&
         state.activePaneTab === nextActivePaneTab &&
         existingPane.command === nextCommand &&
+        existingPane.workingDirectory === nextWorkingDirectory &&
         existingPane.lastEvent === action.event &&
         existingPane.output === action.output &&
         existingPane.status === action.status
@@ -2017,8 +2040,7 @@ export function workbenchReducer(
                 status: action.status,
                 attention:
                   action.status === "failed" ? "failed" : pane.attention,
-                workingDirectory:
-                  action.workingDirectory ?? pane.workingDirectory,
+                workingDirectory: nextWorkingDirectory,
               }
             : pane,
         ),
@@ -3326,6 +3348,12 @@ function workspaceLayoutForLegacySurface(
     return "code";
   }
   return "thread";
+}
+
+function isSessionsLayout(
+  layout: WorkspaceLayoutId,
+): layout is SessionsLayoutId {
+  return layout === "thread" || layout === "terminal-grid";
 }
 
 function chatPanelState(

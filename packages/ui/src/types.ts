@@ -4,6 +4,8 @@ export type SurfaceId = "chat" | "cli" | "ide";
 
 export type WorkspaceLayoutId = "thread" | "terminal-grid" | "code";
 
+export type SessionsLayoutId = Exclude<WorkspaceLayoutId, "code">;
+
 export type AppDestination =
   | "workspace"
   | "tools"
@@ -803,6 +805,7 @@ export type IdeState = {
 export type WorkbenchState = {
   activeDestination: AppDestination;
   activeWorkspaceLayout: WorkspaceLayoutId;
+  lastSessionsLayout: SessionsLayoutId;
   activePaneTab: WorkbenchPaneTab;
   isToolPanelOpen: boolean;
   workspaceMode: WorkbenchMode;

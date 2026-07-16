@@ -82,7 +82,7 @@ Launch order:
 
 Primary line:
 
-> Gyro is an open-source coding agent workspace that runs as a macOS app, CLI, and eventually an IDE layer.
+> Gyro is an open-source coding agent workspace that runs as a macOS app and CLI, with a built-in Workspace surface.
 
 Avoid claiming Gyro replaces VS Code in v1. v1 is an agent workspace with chat, terminal, editor surface, diffs, settings, and CLI attach.
 
