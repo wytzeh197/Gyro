@@ -772,7 +772,8 @@ struct TerminalPaneSnapshot {
     title: String,
     profile_id: Option<String>,
     command: String,
-    output: String,
+    output: Option<String>,
+    output_revision: u64,
     status: String,
     exit_code: Option<i32>,
     working_directory: Option<String>,
@@ -1022,11 +1023,23 @@ struct ProviderChatStreamEvent {
 #[derive(Debug)]
 struct ProviderRunnerOutput {
     activities: Vec<ProviderActivity>,
+    context_usage: Option<ProviderContextUsage>,
     response: String,
     resume_cursor: Option<ProviderResumeCursor>,
     retry_count: u32,
     resumed: bool,
     output_summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderContextUsage {
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    output_tokens: u64,
+    reasoning_output_tokens: u64,
+    total_tokens: u64,
+    model_context_window: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1140,12 +1153,18 @@ struct TerminalProcess {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send>,
-    output: Arc<Mutex<VecDeque<u8>>>,
+    output: Arc<Mutex<TerminalOutputBuffer>>,
     status: String,
     exit_code: Option<i32>,
     cols: u16,
     rows: u16,
     terminated: bool,
+}
+
+#[derive(Default)]
+struct TerminalOutputBuffer {
+    bytes: VecDeque<u8>,
+    revision: u64,
 }
 
 impl Drop for TerminalProcess {
@@ -1167,7 +1186,7 @@ impl TerminalProcessManager {
             anyhow::bail!("terminal process limit reached; close a terminal pane first");
         }
         let mut process = spawn_terminal_process(request)?;
-        let snapshot = snapshot_terminal_process(&mut process);
+        let snapshot = snapshot_terminal_process(&mut process, None);
         processes.insert(process.request.pane_id.clone(), process);
         Ok(snapshot)
     }
@@ -1185,10 +1204,14 @@ impl TerminalProcessManager {
         }
         process.writer.write_all(input.as_bytes())?;
         process.writer.flush()?;
-        Ok(snapshot_terminal_process(process))
+        Ok(snapshot_terminal_process(process, None))
     }
 
-    fn read(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
+    fn read(
+        &self,
+        pane_id: &str,
+        known_output_revision: Option<u64>,
+    ) -> anyhow::Result<TerminalPaneSnapshot> {
         let mut processes = self
             .processes
             .lock()
@@ -1196,7 +1219,7 @@ impl TerminalProcessManager {
         let process = processes
             .get_mut(pane_id)
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        Ok(snapshot_terminal_process(process))
+        Ok(snapshot_terminal_process(process, known_output_revision))
     }
 
     fn resize(&self, pane_id: &str, cols: u16, rows: u16) -> anyhow::Result<TerminalPaneSnapshot> {
@@ -1215,7 +1238,7 @@ impl TerminalProcessManager {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        Ok(snapshot_terminal_process(process))
+        Ok(snapshot_terminal_process(process, None))
     }
 
     fn has_foreground_job(&self, pane_id: &str) -> anyhow::Result<bool> {
@@ -1226,7 +1249,7 @@ impl TerminalProcessManager {
         let process = processes
             .get_mut(pane_id)
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
-        let snapshot = snapshot_terminal_process(process);
+        let snapshot = snapshot_terminal_process(process, None);
         if snapshot.status != "running" {
             return Ok(false);
         }
@@ -1255,7 +1278,7 @@ impl TerminalProcessManager {
             .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
         terminate_terminal_process(process);
         process.status = "failed".into();
-        Ok(snapshot_terminal_process(process))
+        Ok(snapshot_terminal_process(process, None))
     }
 
     fn close(&self, pane_id: &str) -> anyhow::Result<()> {
@@ -1295,7 +1318,7 @@ impl TerminalProcessManager {
             .map_err(|_| anyhow::anyhow!("terminal process manager lock poisoned"))?;
         Ok(processes
             .values_mut()
-            .map(snapshot_terminal_process)
+            .map(|process| snapshot_terminal_process(process, None))
             .collect())
     }
 }
@@ -2670,6 +2693,12 @@ fn run_provider_chat_blocking(
                 .map(|title| serde_json::Value::String(title.clone()))
                 .unwrap_or(serde_json::Value::Null),
         );
+        if let Some(context_usage) = runner_output.context_usage.as_ref() {
+            object.insert(
+                "contextUsage".into(),
+                serde_json::to_value(context_usage).map_err(to_string)?,
+            );
+        }
     }
     let assistant_event = store
         .append_event_with_turn_id(
@@ -3609,19 +3638,33 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
         });
     }
 
-    entries.sort_by(|a, b| {
-        let a_parent = Path::new(&a.path).parent();
-        let b_parent = Path::new(&b.path).parent();
-        a_parent
-            .cmp(&b_parent)
-            .then_with(|| a.kind.cmp(&b.kind))
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    entries.sort_by(compare_workspace_tree_entries);
     Ok(WorkspaceTreeSnapshot {
         files: entries,
         directories,
         scanned_at: Instant::now(),
     })
+}
+
+fn compare_workspace_tree_entries(a: &WorkspaceFile, b: &WorkspaceFile) -> std::cmp::Ordering {
+    let mut a_components = Path::new(&a.path).components().peekable();
+    let mut b_components = Path::new(&b.path).components().peekable();
+
+    loop {
+        match (a_components.next(), b_components.next()) {
+            (Some(a_component), Some(b_component)) if a_component == b_component => continue,
+            (Some(a_component), Some(b_component)) => {
+                let a_is_directory = a_components.peek().is_some() || a.kind == "directory";
+                let b_is_directory = b_components.peek().is_some() || b.kind == "directory";
+                return b_is_directory
+                    .cmp(&a_is_directory)
+                    .then_with(|| a_component.as_os_str().cmp(b_component.as_os_str()));
+            }
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (None, None) => return std::cmp::Ordering::Equal,
+        }
+    }
 }
 
 impl WorkspaceDirectoryStamp {
@@ -6221,11 +6264,16 @@ async fn write_terminal_input(
 async fn read_terminal_output(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
+    known_output_revision: Option<u64>,
 ) -> Result<TerminalPaneSnapshot, String> {
     let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.read(&pane_id).map_err(to_string))
-        .await
-        .map_err(|error| format!("terminal read worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        manager
+            .read(&pane_id, known_output_revision)
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("terminal read worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -7178,7 +7226,7 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     }
 
     let child = pair.slave.spawn_command(command)?;
-    let output = Arc::new(Mutex::new(VecDeque::new()));
+    let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
     let reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
     spawn_terminal_reader(reader, Arc::clone(&output));
@@ -7493,6 +7541,7 @@ fn run_openai_codex_chat(
             let provider_session_id = output.provider_session_id.clone();
             return Ok(ProviderRunnerOutput {
                 activities: provider_activities_for_response(output.activities, &response),
+                context_usage: output.context_usage,
                 response,
                 resume_cursor: provider_session_id
                     .clone()
@@ -7516,6 +7565,7 @@ fn run_openai_codex_chat(
             let provider_session_id = output.provider_session_id.clone();
             return Ok(ProviderRunnerOutput {
                 activities: provider_activities_for_response(output.activities, &stdout),
+                context_usage: output.context_usage,
                 response: stdout,
                 resume_cursor: provider_session_id
                     .clone()
@@ -7715,6 +7765,7 @@ fn run_openai_codex_app_server_chat(
         let mut completed_message = String::new();
         let mut activities = Vec::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
+        let mut context_usage = None;
         let mut turn_started = false;
         let mut last_protocol_activity = Instant::now();
         let mut protocol_messages = 0usize;
@@ -7776,6 +7827,11 @@ fn run_openai_codex_app_server_chat(
             let Some(method) = method else { continue };
             let params = message.get("params").cloned().unwrap_or_default();
             match method {
+                "thread/tokenUsage/updated" => {
+                    if let Some(usage) = provider_context_usage_from_app_server(&params) {
+                        context_usage = Some(usage);
+                    }
+                }
                 "item/agentMessage/delta" => {
                     if let Some(delta) = params.get("delta").and_then(serde_json::Value::as_str) {
                         if !response_text_truncated {
@@ -7898,6 +7954,7 @@ fn run_openai_codex_app_server_chat(
         let response_chars = response.chars().count();
         Ok(ProviderRunnerOutput {
             activities: provider_activities_for_response(activities, &response),
+            context_usage,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "codex-session".into(),
@@ -8654,6 +8711,7 @@ fn run_anthropic_claude_chat(
         let provider_session_id = session_id.clone();
         return Ok(ProviderRunnerOutput {
             activities: provider_activities_for_response(output.activities, &response),
+            context_usage: None,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -9452,6 +9510,7 @@ fn push_bounded(
 
 struct StreamingCommandOutput {
     activities: Vec<ProviderActivity>,
+    context_usage: Option<ProviderContextUsage>,
     status_success: bool,
     status_label: String,
     stdout: String,
@@ -9462,6 +9521,7 @@ struct StreamingCommandOutput {
 
 struct StreamingCommandState {
     activities: Vec<ProviderActivity>,
+    context_usage: Option<ProviderContextUsage>,
     stdout_text: String,
     stdout_text_chars: usize,
     stdout_text_truncated: bool,
@@ -9479,6 +9539,7 @@ impl StreamingCommandState {
     fn new() -> Self {
         Self {
             activities: Vec::new(),
+            context_usage: None,
             stdout_text: String::new(),
             stdout_text_chars: 0,
             stdout_text_truncated: false,
@@ -9697,6 +9758,7 @@ fn run_streaming_command(
         .unwrap_or_else(|| "terminated by signal".into());
     Ok(StreamingCommandOutput {
         activities: stream_state.activities,
+        context_usage: stream_state.context_usage,
         status_success: outcome.succeeded(),
         status_label,
         stdout: stream_state.stdout_text,
@@ -9727,6 +9789,9 @@ fn handle_provider_stdout_line(
     };
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
+    }
+    if let Some(context_usage) = provider_context_usage_from_codex_exec(&value) {
+        stream_state.context_usage = Some(context_usage);
     }
     if let Some(commentary) = extract_provider_commentary_activity(&value) {
         if stream_state.push_activity(commentary.clone()) {
@@ -9765,6 +9830,67 @@ fn handle_provider_stdout_line(
         }
         stream_state.flush_pending_delta(app, request, false);
     }
+}
+
+fn provider_context_usage_from_app_server(
+    params: &serde_json::Value,
+) -> Option<ProviderContextUsage> {
+    let token_usage = params.get("tokenUsage")?;
+    let last = token_usage.get("last")?;
+    Some(ProviderContextUsage {
+        input_tokens: last.get("inputTokens")?.as_u64()?,
+        cached_input_tokens: last
+            .get("cachedInputTokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        output_tokens: last
+            .get("outputTokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        reasoning_output_tokens: last
+            .get("reasoningOutputTokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        total_tokens: last
+            .get("totalTokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        model_context_window: token_usage
+            .get("modelContextWindow")
+            .and_then(serde_json::Value::as_u64),
+    })
+}
+
+fn provider_context_usage_from_codex_exec(
+    value: &serde_json::Value,
+) -> Option<ProviderContextUsage> {
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("turn.completed") {
+        return None;
+    }
+    let usage = value.get("usage")?;
+    Some(ProviderContextUsage {
+        input_tokens: usage.get("input_tokens")?.as_u64()?,
+        cached_input_tokens: usage
+            .get("cached_input_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        output_tokens: usage
+            .get("output_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        reasoning_output_tokens: usage
+            .get("reasoning_output_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        total_tokens: usage
+            .get("total_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        model_context_window: usage
+            .get("model_context_window")
+            .or_else(|| value.get("model_context_window"))
+            .and_then(serde_json::Value::as_u64),
+    })
 }
 
 fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
@@ -10243,7 +10369,7 @@ fn node_version_key(path: &Path) -> (u64, u64, u64) {
     )
 }
 
-fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<VecDeque<u8>>>)
+fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<TerminalOutputBuffer>>)
 where
     R: Read + Send + 'static,
 {
@@ -10260,13 +10386,17 @@ where
     });
 }
 
-fn append_terminal_output(output: &Arc<Mutex<VecDeque<u8>>>, bytes: &[u8]) {
+fn append_terminal_output(output: &Arc<Mutex<TerminalOutputBuffer>>, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
     let Ok(mut output) = output.lock() else {
         return;
     };
+    output.revision = output.revision.wrapping_add(1).max(1);
     if bytes.len() >= MAX_TERMINAL_OUTPUT_BYTES {
-        output.clear();
-        output.extend(
+        output.bytes.clear();
+        output.bytes.extend(
             bytes[bytes.len() - MAX_TERMINAL_OUTPUT_BYTES..]
                 .iter()
                 .copied(),
@@ -10274,16 +10404,20 @@ fn append_terminal_output(output: &Arc<Mutex<VecDeque<u8>>>, bytes: &[u8]) {
         return;
     }
     let overflow = output
+        .bytes
         .len()
         .saturating_add(bytes.len())
         .saturating_sub(MAX_TERMINAL_OUTPUT_BYTES);
     if overflow > 0 {
-        output.drain(..overflow);
+        output.bytes.drain(..overflow);
     }
-    output.extend(bytes.iter().copied());
+    output.bytes.extend(bytes.iter().copied());
 }
 
-fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnapshot {
+fn snapshot_terminal_process(
+    process: &mut TerminalProcess,
+    known_output_revision: Option<u64>,
+) -> TerminalPaneSnapshot {
     match process.child.try_wait() {
         Ok(Some(status)) => {
             process.exit_code = Some(status.exit_code() as i32);
@@ -10304,11 +10438,11 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
         }
     }
 
-    let output = process
+    let (output, output_revision) = process
         .output
         .lock()
-        .map(|value| terminal_output_text(&value))
-        .unwrap_or_default();
+        .map(|value| snapshot_terminal_output(&value, known_output_revision))
+        .unwrap_or((None, 0));
     TerminalPaneSnapshot {
         pane_id: process.request.pane_id.clone(),
         title: process.request.title.clone(),
@@ -10318,6 +10452,7 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
             .collect::<Vec<_>>()
             .join(" "),
         output,
+        output_revision,
         status: process.status.clone(),
         exit_code: process.exit_code,
         working_directory: process
@@ -10327,6 +10462,15 @@ fn snapshot_terminal_process(process: &mut TerminalProcess) -> TerminalPaneSnaps
         cols: process.cols,
         rows: process.rows,
     }
+}
+
+fn snapshot_terminal_output(
+    output: &TerminalOutputBuffer,
+    known_output_revision: Option<u64>,
+) -> (Option<String>, u64) {
+    let text = (known_output_revision != Some(output.revision))
+        .then(|| terminal_output_text(&output.bytes));
+    (text, output.revision)
 }
 
 fn terminal_output_text(output: &VecDeque<u8>) -> String {
@@ -10896,6 +11040,71 @@ fn write_bounded_json_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_tree_entries_are_sorted_depth_first() {
+        let mut files = vec![
+            WorkspaceFile {
+                path: "root.txt".into(),
+                kind: "file".into(),
+                depth: 1,
+            },
+            WorkspaceFile {
+                path: "apps/desktop".into(),
+                kind: "directory".into(),
+                depth: 2,
+            },
+            WorkspaceFile {
+                path: "docs".into(),
+                kind: "directory".into(),
+                depth: 1,
+            },
+            WorkspaceFile {
+                path: "apps/a.ts".into(),
+                kind: "file".into(),
+                depth: 2,
+            },
+            WorkspaceFile {
+                path: "apps".into(),
+                kind: "directory".into(),
+                depth: 1,
+            },
+            WorkspaceFile {
+                path: "Cargo.toml".into(),
+                kind: "file".into(),
+                depth: 1,
+            },
+            WorkspaceFile {
+                path: "apps/desktop/main.ts".into(),
+                kind: "file".into(),
+                depth: 3,
+            },
+            WorkspaceFile {
+                path: "apps/z.ts".into(),
+                kind: "file".into(),
+                depth: 2,
+            },
+        ];
+
+        files.sort_by(compare_workspace_tree_entries);
+
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "apps",
+                "apps/desktop",
+                "apps/desktop/main.ts",
+                "apps/a.ts",
+                "apps/z.ts",
+                "docs",
+                "Cargo.toml",
+                "root.txt",
+            ]
+        );
+    }
 
     fn anthropic_provider_request() -> ProviderChatRequest {
         ProviderChatRequest {
@@ -12275,6 +12484,43 @@ while True:
     }
 
     #[test]
+    fn parses_codex_app_server_context_usage() {
+        let usage = provider_context_usage_from_app_server(&serde_json::json!({
+            "tokenUsage": {
+                "last": {
+                    "inputTokens": 42137,
+                    "cachedInputTokens": 40000,
+                    "outputTokens": 812,
+                    "reasoningOutputTokens": 205,
+                    "totalTokens": 42949
+                },
+                "modelContextWindow": 128000
+            }
+        }))
+        .unwrap();
+        assert_eq!(usage.input_tokens, 42_137);
+        assert_eq!(usage.model_context_window, Some(128_000));
+    }
+
+    #[test]
+    fn parses_codex_exec_context_usage() {
+        let usage = provider_context_usage_from_codex_exec(&serde_json::json!({
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 42137,
+                "cached_input_tokens": 40000,
+                "output_tokens": 812,
+                "reasoning_output_tokens": 205,
+                "total_tokens": 42949,
+                "model_context_window": 128000
+            }
+        }))
+        .unwrap();
+        assert_eq!(usage.input_tokens, 42_137);
+        assert_eq!(usage.model_context_window, Some(128_000));
+    }
+
+    #[test]
     fn provider_failures_have_specific_recovery_guidance() {
         assert_eq!(
             provider_failure_recovery("network is unreachable").0,
@@ -12340,6 +12586,7 @@ while True:
                 }
                 Ok(ProviderRunnerOutput {
                     activities: Vec::new(),
+                    context_usage: None,
                     response: "Recovered".into(),
                     resume_cursor: None,
                     retry_count: 0,
@@ -12879,7 +13126,11 @@ while True:
         assert_eq!(snapshot.status, "running");
 
         let snapshot = wait_for_terminal_output(&manager, "pane-test", "hello");
-        assert!(snapshot.output.contains("hello"));
+        assert!(snapshot
+            .output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("hello"));
         assert_eq!(snapshot.status, "done");
     }
 
@@ -12927,7 +13178,11 @@ while True:
             .write("pane-zsh", "printf zsh-ready\\nexit\\n")
             .unwrap();
         let snapshot = wait_for_terminal_output(&manager, "pane-zsh", "zsh-ready");
-        assert!(snapshot.output.contains("zsh-ready"));
+        assert!(snapshot
+            .output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("zsh-ready"));
     }
 
     #[cfg(unix)]
@@ -12994,7 +13249,11 @@ while True:
         assert_eq!(resized.rows, 24);
 
         let snapshot = wait_for_terminal_output(&manager, "pane-input", "out:ok");
-        assert!(snapshot.output.contains("out:ok"));
+        assert!(snapshot
+            .output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("out:ok"));
         assert_eq!(snapshot.status, "done");
     }
 
@@ -13020,7 +13279,11 @@ while True:
             .unwrap();
 
         let snapshot = wait_for_terminal_output(&manager, "pane-env", "xterm-256color");
-        assert!(snapshot.output.contains("xterm-256color truecolor Gyro"));
+        assert!(snapshot
+            .output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("xterm-256color truecolor Gyro"));
         assert_eq!(snapshot.status, "done");
     }
 
@@ -13078,8 +13341,9 @@ while True:
             .unwrap();
 
         let snapshot = wait_for_terminal_output(&manager, "pane-color", "YOLO");
-        assert!(snapshot.output.contains("\u{1b}[35mYOLO\u{1b}[0m"));
-        assert!(snapshot.output.contains("\u{1b}[36m/model\u{1b}[0m"));
+        let output = snapshot.output.as_deref().unwrap_or_default();
+        assert!(output.contains("\u{1b}[35mYOLO\u{1b}[0m"));
+        assert!(output.contains("\u{1b}[36m/model\u{1b}[0m"));
         assert_eq!(snapshot.status, "done");
     }
 
@@ -13685,24 +13949,44 @@ while True:
 
     #[test]
     fn terminal_output_retains_only_the_newest_bytes() {
-        let output = Arc::new(Mutex::new(VecDeque::new()));
+        let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
         append_terminal_output(
             &output,
             &vec![b'a'; MAX_TERMINAL_OUTPUT_BYTES.saturating_sub(4)],
         );
         append_terminal_output(&output, b"12345678");
 
-        let retained = output.lock().unwrap().iter().copied().collect::<Vec<_>>();
+        let output_guard = output.lock().unwrap();
+        let retained = output_guard.bytes.iter().copied().collect::<Vec<_>>();
         assert_eq!(retained.len(), MAX_TERMINAL_OUTPUT_BYTES);
+        assert_eq!(output_guard.revision, 2);
         assert!(retained[..retained.len() - 8]
             .iter()
             .all(|byte| *byte == b'a'));
         assert_eq!(&retained[retained.len() - 8..], b"12345678");
+        drop(output_guard);
 
         let oversized = vec![b'z'; MAX_TERMINAL_OUTPUT_BYTES + 32];
         append_terminal_output(&output, &oversized);
-        let retained = output.lock().unwrap().iter().copied().collect::<Vec<_>>();
+        let output_guard = output.lock().unwrap();
+        let retained = output_guard.bytes.iter().copied().collect::<Vec<_>>();
         assert_eq!(retained, oversized[32..]);
+        assert_eq!(output_guard.revision, 3);
+    }
+
+    #[test]
+    fn terminal_output_revision_skips_unchanged_payloads() {
+        let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
+        append_terminal_output(&output, b"hello");
+
+        let output_guard = output.lock().unwrap();
+        let (initial, revision) = snapshot_terminal_output(&output_guard, None);
+        let (unchanged, unchanged_revision) =
+            snapshot_terminal_output(&output_guard, Some(revision));
+
+        assert_eq!(initial.as_deref(), Some("hello"));
+        assert!(unchanged.is_none());
+        assert_eq!(unchanged_revision, revision);
     }
 
     #[test]
@@ -13728,7 +14012,7 @@ while True:
 
         assert!(!manager.processes.lock().unwrap().contains_key("pane-close"));
         assert!(manager.restore().unwrap().is_empty());
-        assert!(manager.read("pane-close").is_err());
+        assert!(manager.read("pane-close", None).is_err());
     }
 
     #[test]
@@ -13818,13 +14102,19 @@ while True:
         expected: &str,
     ) -> TerminalPaneSnapshot {
         for _ in 0..20 {
-            let snapshot = manager.read(pane_id).unwrap();
-            if snapshot.output.contains(expected) && snapshot.status != "running" {
+            let snapshot = manager.read(pane_id, None).unwrap();
+            if snapshot
+                .output
+                .as_deref()
+                .unwrap_or_default()
+                .contains(expected)
+                && snapshot.status != "running"
+            {
                 return snapshot;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        manager.read(pane_id).unwrap()
+        manager.read(pane_id, None).unwrap()
     }
 
     fn init_git_repo(repo: &Path) {

@@ -13,7 +13,7 @@ personal use on macOS, not full VS Code parity or multi-agent orchestration.
 
 Strengths:
 
-- The shared shell already gives Chat, CLI, and IDE stable navigation.
+- The shared shell already gives Sessions and Workspace stable navigation.
 - Core surfaces favor compact operational layouts over marketing composition.
 - Status vocabulary and provider identity are visible across most workflows.
 - Monaco and xterm remain in the desktop boundary, while shared UI stays mostly
@@ -48,8 +48,8 @@ Polish direction applied:
 | Desktop terminals         | PTY, xterm, input, resize, stop, restart, restore, presets                                                                                                                                                 | Ready                                                                            |
 | Chat                      | Codex and Claude adapters, streaming, retry, resume, diagnostics                                                                                                                                           | Ready with provider setup                                                        |
 | Providers                 | OpenAI and Anthropic execute; xAI and Gemini report readiness only                                                                                                                                         | Partial by design                                                                |
-| IDE files                 | tree, Monaco, tabs, guarded read/write, stale-hash protection                                                                                                                                              | Ready                                                                            |
-| IDE search and Git        | rg search, status, stage, unstage, task discovery/run                                                                                                                                                      | Ready                                                                            |
+| Workspace files           | tree, Monaco, tabs, guarded read/write, stale-hash protection                                                                                                                                              | Ready                                                                            |
+| Workspace search and Git  | rg search, status, stage, unstage, task discovery/run                                                                                                                                                      | Ready                                                                            |
 | LSP and debugger          | discovery and UI state; process orchestration scaffolded                                                                                                                                                   | Experimental                                                                     |
 | Diff review               | review state, file navigation, durable proposals, guarded provider transactions, and restart recovery                                                                                                      | Implemented for supported text actions; acceptance remains                       |
 | Tasks                     | local task state and real agent terminal dispatch                                                                                                                                                          | Ready for manual use                                                             |
@@ -139,7 +139,7 @@ not a hidden or misclassified CLI failure.
 - TypeScript: UI and desktop typechecks plus workbench smoke assertions.
 - Rust: workspace tests, focused terminal manager tests, formatting, and release
   configuration checks.
-- Manual: Chat, CLI, and IDE route checks at desktop and compact widths; a real
+- Manual: Sessions Chat/CLI and Workspace route checks at desktop and compact widths; a real
   shell command; one Codex or Claude message; a guarded editor save; Git stage
   and unstage; task dispatch; one backend automation run plus pause/cancel; and
   local preview load.

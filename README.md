@@ -28,8 +28,8 @@ the same local session from either surface.
 
 ## Why Gyro
 
-- **One run, three views.** Chat, CLI, and IDE surfaces share projects, sessions,
-  providers, approvals, and history.
+- **Two surfaces, one execution engine.** Sessions unifies Chat and subscription
+  CLI work; Workspace keeps files, diffs, Git, tests, and diagnostics in view.
 - **Local by default.** Session history, configuration, and worktrees stay on
   your Mac. Gyro does not send telemetry by default.
 - **Visible control.** Commands and file changes follow an explicit approval
@@ -43,7 +43,7 @@ the same local session from either surface.
 
 <p align="center">
   <img src="docs/screenshots/chat-thread.png" alt="Gyro agent chat and run activity" width="49%">
-  <img src="docs/screenshots/ide.png" alt="Gyro IDE workbench" width="49%">
+  <img src="docs/screenshots/ide.png" alt="Gyro Workspace" width="49%">
 </p>
 <p align="center">
   <img src="docs/screenshots/cli-workbench.png" alt="Gyro CLI workbench" width="49%">

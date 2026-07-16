@@ -1,12 +1,16 @@
 # Architecture
 
-Gyro uses one engine and multiple surfaces.
+Gyro uses one engine across its desktop surfaces and terminal entrypoints.
 
 ## Surfaces
 
-- `gyro` CLI for terminal-first workflows.
-- Gyro.app for a native macOS coding workspace.
-- Future IDE integrations should call the same core engine instead of reimplementing session behavior.
+- **Sessions** in Gyro.app for Chat conversations and app-hosted subscription
+  CLI panes such as Codex CLI and Claude Code.
+- **Workspace** in Gyro.app for files, editing, Git, diffs, tests, diagnostics,
+  terminals, and browser evidence.
+- The standalone `gyro` CLI for terminal-first control and automation.
+- Future editor integrations should call the same core engine instead of
+  reimplementing session behavior.
 
 The CLI is a terminal-native control plane, not a full TUI dashboard. Its
 `chat`, `run`, and `resume` workflows execute supported provider CLIs through
@@ -37,7 +41,7 @@ store.
 
 ## Data Flow
 
-1. A surface opens a workspace.
+1. A surface or terminal entrypoint opens a workspace.
 2. `gyro-core` creates or loads a session.
 3. User messages, system events, command requests, and file-edit proposals are appended to the session JSONL log.
 4. CLI execution metadata includes `profileId`, `model`, `workspaceMode`,
@@ -57,8 +61,8 @@ Shared harness payloads live in `gyro-core` and serialize into the existing
 append-only JSONL log. The V1 run statuses are `queued`, `running`, `waiting`,
 `blocked`, `done`, `failed`, and `cancelled`. Provider runs, provider
 diagnostics, approval requests, terminal requests, file-edit proposals, and diff
-proposals should use typed payloads so desktop, CLI, and future IDE surfaces can
-render the same state.
+proposals should use typed payloads so Sessions, Workspace, the standalone CLI,
+and future editor integrations can render the same state.
 
 Live provider events carry a turn-local monotonic sequence. The desktop orders
 out-of-order events, discards duplicates, bounds pending gaps, and coalesces text

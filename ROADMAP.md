@@ -45,7 +45,7 @@ developer build and a dependable private alpha.
   xterm rendering, profiles, presets, and pane ordering.
 - Desktop execution through Codex CLI and Claude Code with streaming, retries,
   resume cursors, diagnostics, and readiness checks.
-- IDE workbench with workspace tree, Monaco buffers, guarded saves, search, Git
+- Workspace workbench with workspace tree, Monaco buffers, guarded saves, search, Git
   status/stage/unstage, tasks, tests, output, and diagnostics.
 - Local tasks, persisted automations, provider setup, diff review, settings, and
   a live local browser preview.
@@ -83,23 +83,23 @@ end-to-end exit gate.
 - The public download journey and first-run activation flow are not yet a single
   tested funnel.
 
-## Surface Roadmaps
+## Product Roadmaps
 
-Chat, CLI, and IDE are three views into the same local-first execution engine.
-They must share projects, sessions, providers, approvals, events, and recovery,
-but each surface has a distinct primary job:
+Gyro.app has two top-level surfaces: Sessions and Workspace. Sessions supports
+both Chat conversations and subscription-CLI panes; Workspace contains the
+code workbench. They share projects, providers, approvals, events, and recovery:
 
-| Surface | Primary job                                                  | Must not become                                        |
-| ------- | ------------------------------------------------------------ | ------------------------------------------------------ |
-| Chat    | Direct, review, and resume an agent run                      | A decorative message feed detached from real execution |
-| CLI     | Operate Gyro quickly from a terminal and bridge into the app | A second session system with different rules           |
-| IDE     | Understand, edit, run, and verify code with agent assistance | An editor clone that bypasses Gyro's trust model       |
+| Area            | Primary job                                                  | Must not become                                        |
+| --------------- | ------------------------------------------------------------ | ------------------------------------------------------ |
+| Sessions · Chat | Direct, review, and resume an agent run                      | A decorative message feed detached from real execution |
+| Sessions · CLI  | Work through a terminal-native subscription CLI              | A second session system with different rules           |
+| Workspace       | Understand, edit, run, and verify code with agent assistance | An editor clone that bypasses Gyro's trust model       |
 
 Shared engine capabilities are planned once in the milestone roadmap below.
 The surface tracks describe how each capability must appear and behave for the
 user.
 
-### Chat Surface Roadmap
+### Chat Session Roadmap
 
 #### Product role
 
@@ -199,7 +199,7 @@ Exit gate:
 
 Deliver:
 
-- Symbol, diagnostic, test, diff, and debugger context selected through typed IDE
+- Symbol, diagnostic, test, diff, and debugger context selected through typed Workspace
   references.
 - Agent answers that link back to exact workspace evidence and preserve stale
   context warnings.
@@ -316,7 +316,7 @@ Later milestone status:
   state, but Chat does not yet provide typed handoff previews, task or goal
   grouping, cross-run evidence references, or simultaneous-run attention
   controls.
-- v0.4 has plan state and file-activity links, but typed IDE references, exact
+- v0.4 has plan state and file-activity links, but typed Workspace references, exact
   evidence citations with stale-context warnings, and visible skill or project
   policy context are not implemented.
 
@@ -329,7 +329,7 @@ Next completion slice:
 3. Define a reviewed policy for notebook and non-text mutations without
    weakening the current fail-closed boundary.
 
-### CLI Surface Roadmap
+### CLI Workflow Roadmap
 
 #### Product role
 
@@ -362,7 +362,7 @@ Deliver:
 - Project discovery and explicit workspace selection without unsafe implicit
   traversal.
 - Terminal-native command and file-edit approvals using the same typed proposal
-  contract as Chat and IDE.
+  contract as Chat and Workspace.
 - Signal-safe cancellation and cleanup for Ctrl-C, terminated providers, and
   interrupted writes.
 - Durable session creation and resume with correct working directory, branch,
@@ -458,23 +458,23 @@ Exit gate:
 - Ctrl-C and crash cleanup correctness.
 - JSON contract compatibility across releases.
 
-### IDE Surface Roadmap
+### Workspace Surface Roadmap
 
 #### Product role
 
-The IDE surface is where Gyro turns agent intent into inspectable code work. It
+Workspace is where Gyro turns agent intent into inspectable code work. It
 combines files, editor buffers, Git state, tasks, tests, diagnostics, terminals,
 diffs, and browser evidence while keeping every mutation inside the shared trust
 model.
 
-The IDE owns:
+Workspace owns:
 
 - Workspace navigation, reading, editing, guarded saving, search, Git review,
   task/test execution, diagnostics, and verification evidence.
 - Precise code context selection for agent actions.
 - Visual review of proposals and the resulting on-disk/Git state.
 
-The IDE does not own a second session engine, direct unlogged provider writes,
+The Workspace surface does not own a second session engine, direct unlogged provider writes,
 or editor actions that bypass workspace and approval boundaries.
 
 #### v0.2 — Trusted code workbench
@@ -571,12 +571,12 @@ Exit gate:
 - Language and debug intelligence remain recoverable, cancellable, and clearly
   labelled when unavailable; no experimental scaffold is presented as complete.
 
-#### IDE measures
+#### Workspace measures
 
 - Project-open and workspace-index success.
 - Guarded-save success, stale-buffer recovery, and path-boundary violations.
 - Task/test completion and cancellation reliability.
-- Git state accuracy after every IDE action.
+- Git state accuracy after every Workspace action.
 - Terminal and browser verification success.
 - Time from diagnostic or failed test to a reviewed fix.
 
@@ -586,11 +586,11 @@ The three surface roadmaps are complete only when continuity also holds:
 
 1. A CLI-created session opens in Chat with the same project, provider, model,
    approval policy, and durable history.
-2. A Chat proposal opens in IDE diff review without changing its identity,
+2. A Chat proposal opens in Workspace diff review without changing its identity,
    scope, or approval state.
-3. An IDE-selected file, range, diagnostic, diff, or test failure enters Chat
+3. A Workspace-selected file, range, diagnostic, diff, or test failure enters Chat
    only after a visible context preview.
-4. Commands launched from Chat or IDE appear in the same terminal/event model as
+4. Commands launched from Chat or Workspace appear in the same terminal/event model as
    CLI execution.
 5. Stop, failure, approval, and completion state cannot disagree between
    surfaces.
@@ -607,7 +607,7 @@ design does not mean removing capability. It means showing the right layer of
 complexity at the right time and giving every visible element a clear role.
 
 The design must remain recognizably Gyro: local-first, approval-aware, precise,
-and built around continuity between Chat, CLI, and IDE. Visual polish must make
+and built around continuity between Chat and CLI sessions and Workspace. Visual polish must make
 trust and state easier to understand rather than simply making the application
 look quieter.
 
@@ -640,7 +640,8 @@ look quieter.
 
 ### Visual system foundations
 
-Define and document a small, enforceable system for all three surfaces:
+Define and document a small, enforceable system for both surfaces and both
+session canvases:
 
 - A restrained graphite surface scale for window, sidebar, canvas, raised
   control, hover, active, and overlay states.
@@ -670,7 +671,7 @@ Goal:
 
 Deliver:
 
-- Inventory every visible Chat, CLI, IDE, settings, task, automation, provider,
+- Inventory every visible Chat session, CLI session, Workspace, settings, task, automation, provider,
   diff, terminal, and browser surface.
 - Classify each element as primary content, secondary context, operational
   state, navigation, action, or decoration.
@@ -691,11 +692,11 @@ Deliver:
 
 Surface-specific priorities:
 
-- **Chat:** emphasize the prompt, current run, approvals, and result; make
+- **Chat session:** emphasize the prompt, current run, approvals, and result; make
   project/provider/policy context compact but visible beside the composer.
-- **CLI:** reduce decorative shell around terminals; prioritize process identity,
+- **CLI session:** reduce decorative shell around terminals; prioritize process identity,
   working directory, status, output, and stop/restart actions.
-- **IDE:** allow higher information density while keeping file ownership,
+- **Workspace:** allow higher information density while keeping file ownership,
   dirty/stale state, Git state, problems, terminal, and diff hierarchy clear.
 
 Validation:
@@ -711,8 +712,9 @@ Validation:
 
 Exit gate:
 
-- Chat, CLI, and IDE share one recognizable design system, each has one obvious
-  primary purpose, and operational state is more prominent than decoration.
+- Sessions and Workspace share one recognizable design system; the Chat and CLI
+  canvases each have one obvious primary purpose, and operational state is more
+  prominent than decoration.
 
 ### v0.2.2 — Entry, empty state, and activation design
 
@@ -725,7 +727,7 @@ Deliver:
 
 - A short first-launch sequence for local storage, provider readiness, project
   selection, and permission behavior.
-- Project-first empty states for Chat and IDE, plus CLI-session continuation when
+- Project-first empty states for Chat and Workspace, plus CLI-session continuation when
   available.
 - A central starting action with surrounding execution context rendered as quiet
   metadata until interaction.
@@ -857,16 +859,16 @@ and at least one real surface integration before it is considered complete.
 
 ## Milestone Overview
 
-| Milestone | Outcome                                             | Depends on                                     |
-| --------- | --------------------------------------------------- | ---------------------------------------------- |
-| v0.1.0    | A trustworthy macOS developer preview               | Stable IDE upgrade and launch blockers closed  |
-| v0.1.x    | Activation, design, and release hardening           | Real v0.1.0 user and release evidence          |
-| v0.2      | A dependable private alpha for daily macOS use      | Proven trusted single-run behavior             |
-| v0.2.1    | A more mature install and update channel            | v0.2 trust transaction and release foundation  |
-| v0.2.2    | A measured download-to-first-run journey            | Signed artifacts and provider readiness        |
-| v0.3      | Safe parallel work across projects and worktrees    | Proven single-run reliability                  |
-| v0.4      | Deeper IDE intelligence and stable extension points | Stable workbench contracts                     |
-| v0.5      | Additional platforms and optional collaboration     | macOS reliability and a complete privacy model |
+| Milestone | Outcome                                                   | Depends on                                          |
+| --------- | --------------------------------------------------------- | --------------------------------------------------- |
+| v0.1.0    | A trustworthy macOS developer preview                     | Stable Workspace upgrade and launch blockers closed |
+| v0.1.x    | Activation, design, and release hardening                 | Real v0.1.0 user and release evidence               |
+| v0.2      | A dependable private alpha for daily macOS use            | Proven trusted single-run behavior                  |
+| v0.2.1    | A more mature install and update channel                  | v0.2 trust transaction and release foundation       |
+| v0.2.2    | A measured download-to-first-run journey                  | Signed artifacts and provider readiness             |
+| v0.3      | Safe parallel work across projects and worktrees          | Proven single-run reliability                       |
+| v0.4      | Deeper Workspace intelligence and stable extension points | Stable workbench contracts                          |
+| v0.5      | Additional platforms and optional collaboration           | macOS reliability and a complete privacy model      |
 
 Version labels describe product milestones. Patch sequencing may change during
 implementation, but milestone exit gates must not be weakened to fit a version.
@@ -904,14 +906,14 @@ The engineering foundation is stronger than the pre-alpha label suggests:
 - The CLI supports setup, doctor, run, resume, sessions, and app handoff.
 - The terminal stack uses real PTYs and supports input, resize, stop, restart,
   restore, and visible output.
-- The IDE supports workspace navigation, Monaco buffers, guarded writes, search,
+- The Workspace surface supports navigation, Monaco buffers, guarded writes, search,
   Git state, tasks, tests, output, diagnostics, and browser preview.
 - TypeScript checks, workbench smoke coverage, the production frontend build,
   Rust formatting, and the Rust workspace tests currently pass.
 
 The product is not launch-ready because:
 
-- A large IDE and design upgrade is still active and must be stabilized as one
+- A large Workspace and design upgrade is still active and must be stabilized as one
   coherent release candidate.
 - Codex and supported Claude text edits in CLI and desktop Chat now use the
   shared journaled approval transaction with startup reconciliation; installed
@@ -927,13 +929,13 @@ The product is not launch-ready because:
 - The first-run and download journey exists as a plan rather than a tested
   end-to-end funnel.
 
-### Launch blocker 1: Stabilize the active IDE upgrade
+### Launch blocker 1: Stabilize the active Workspace upgrade
 
 Deliver:
 
-- Complete the current IDE implementation without mixing partial generations of
+- Complete the current Workspace implementation without mixing partial generations of
   shell, workbench, or CSS behavior.
-- Reconcile Chat, CLI, and IDE context, navigation, panels, state vocabulary,
+- Reconcile Chat and CLI session context with Workspace navigation, panels, state vocabulary,
   and shared components.
 - Remove temporary overrides, obsolete paths, dead controls, and unused
   scaffolding introduced during the upgrade.
@@ -944,7 +946,7 @@ Deliver:
 
 Exit gate:
 
-- The IDE upgrade is committed as a reviewable baseline, all required checks
+- The Workspace upgrade is committed as a reviewable baseline, all required checks
   pass, and no primary surface depends on an unfinished parallel implementation.
 
 ### Launch blocker 2: Atomic mutation approval
@@ -1002,11 +1004,11 @@ Exit gate:
 
 ### Launch blocker 4: Focused v0.1 design pass
 
-Run this pass after the active IDE upgrade is settled.
+Run this pass after the active Workspace upgrade is settled.
 
 Deliver:
 
-- One dominant purpose and primary action for Chat, CLI, and IDE.
+- One dominant purpose and primary action for Chat sessions, CLI sessions, and Workspace.
 - Shared surface, typography, spacing, radius, border, shadow, icon, control,
   focus, and motion tokens.
 - Fewer nested cards and clearer architectural regions.
@@ -1021,7 +1023,7 @@ Deliver:
 
 Exit gate:
 
-- The three surfaces feel like one Gyro product, every primary action is obvious,
+- Sessions and Workspace feel like one Gyro product, every primary action is obvious,
   and no design treatment makes incomplete functionality appear ready.
 
 ### Launch blocker 5: Production distribution
@@ -1129,10 +1131,10 @@ visible.
 
 v0.1.0 may be tagged only when:
 
-1. The active IDE upgrade is stable and fully reviewed.
+1. The active Workspace upgrade is stable and fully reviewed.
 2. Supported mutations use the atomic approval transaction.
 3. Codex and Claude pass clean-machine activation.
-4. Chat, CLI, and IDE share truthful session and approval state.
+4. Chat and CLI sessions and Workspace share truthful session and approval state.
 5. The focused design and accessibility pass is complete.
 6. Production signing, notarization, checksums, updater, Homebrew, and download
    paths are working.
@@ -1262,7 +1264,7 @@ Deliver:
   private, bounded capture-file lifecycle.
 - Experimental labelling for LSP and DAP until process lifecycle and recovery
   are complete.
-- Consistent visual state vocabulary across Chat, CLI, IDE, tasks, automations,
+- Consistent visual state vocabulary across Chat, CLI, Workspace, tasks, automations,
   diffs, and updates.
 
 Validation:
@@ -1503,7 +1505,7 @@ always understanding ownership, branch state, provider state, and cleanup risk.
 - Parallel work is isolated, resource-bounded, recoverable, and no less
   inspectable than a single v0.2 run.
 
-## v0.4 — IDE Intelligence and Extension Points
+## v0.4 — Workspace Intelligence and Extension Points
 
 ### Product outcome
 
@@ -1525,7 +1527,7 @@ trusted agent engine into a collection of disconnected features.
 
 ### Exit gate
 
-- IDE and extension features use the same storage, provider, approval, event,
+- Workspace and extension features use the same storage, provider, approval, event,
   and recovery contracts as the desktop workbench and CLI.
 
 ## v0.5 — Platforms and Optional Collaboration
@@ -1598,5 +1600,5 @@ The roadmap is succeeding when:
 - Signed installs and updates succeed consistently on supported macOS systems.
 - Every visible action is functional, truthfully unavailable, or intentionally
   omitted.
-- Parallel and IDE capabilities add leverage without weakening the local-first
+- Parallel and Workspace capabilities add leverage without weakening the local-first
   approval and recovery model.

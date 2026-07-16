@@ -88,6 +88,7 @@ const roadmapSource = readRepoFile("ROADMAP.md");
 const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
+const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
 const composerSourceEnd = surfaceSource.indexOf(
   "\nfunction ",
@@ -613,13 +614,24 @@ expect(
 expect(
   initialState.activeDestination === "workspace" &&
     initialState.activeWorkspaceLayout === "thread" &&
+    initialState.lastSessionsLayout === "thread" &&
     initialState.isToolPanelOpen === false,
-  "Initial workbench state should start on the thread workspace with the tool panel closed.",
+  "Initial workbench state should start in Chat within Sessions with the tool panel closed.",
 );
 expect(
   appSource.includes('activeWorkspaceLayout === "thread"') &&
     appSource.includes("isToolPanelOpen = false"),
   "Persisted chat/thread restore should force the shared tool panel closed.",
+);
+expect(
+  typeSource.includes(
+    'export type SessionsLayoutId = Exclude<WorkspaceLayoutId, "code">',
+  ) &&
+    typeSource.includes("lastSessionsLayout: SessionsLayoutId") &&
+    reducerSource.includes('case "select-sessions"') &&
+    appSource.includes("normalizeStoredSessionsLayout") &&
+    appSource.includes("parsed.lastSessionsLayout"),
+  "Sessions routing should persist and safely hydrate the last Chat or CLI layout.",
 );
 
 let state = workbenchReducer(initialState, {
@@ -732,6 +744,25 @@ expect(
     state.activeWorkspaceLayout === "code",
   "Code layout should activate the persistent workspace shell.",
 );
+let sessionsState = workbenchReducer(initialState, {
+  type: "select-workspace-layout",
+  layout: "terminal-grid",
+});
+sessionsState = workbenchReducer(sessionsState, {
+  type: "select-workspace-layout",
+  layout: "code",
+});
+expect(
+  sessionsState.lastSessionsLayout === "terminal-grid",
+  "Workspace navigation should preserve the last Chat or CLI layout.",
+);
+sessionsState = workbenchReducer(sessionsState, { type: "select-sessions" });
+expect(
+  sessionsState.activeWorkspaceLayout === "terminal-grid" &&
+    sessionsState.activePaneTab === "terminal" &&
+    sessionsState.isToolPanelOpen === true,
+  "Sessions should restore the last-used CLI layout and terminal focus.",
+);
 state = workbenchReducer(state, { type: "open-tool-panel", tab: "browser" });
 expect(
   state.activeDestination === "workspace" &&
@@ -809,6 +840,22 @@ if (codexProfile) {
     unchangedTerminalState === state,
     "Unchanged terminal snapshots should not create new workbench state.",
   );
+  const movedTerminalState = workbenchReducer(state, {
+    type: "sync-terminal-pane-snapshot",
+    paneId: pane.id,
+    status: "done",
+    event: "done (0)",
+    command: "codex --help",
+    output: "terminal output captured",
+    workingDirectory: "/tmp/gyro-worktree-final",
+  });
+  expect(
+    movedTerminalState !== state &&
+      movedTerminalState.terminalPanes.find((item) => item.id === pane.id)
+        ?.workingDirectory === "/tmp/gyro-worktree-final",
+    "Terminal snapshots should apply working-directory-only updates.",
+  );
+  state = movedTerminalState;
   let terminalLayoutState = workbenchReducer(state, {
     type: "set-terminal-pane-layout",
     paneId: pane.id,
@@ -1975,7 +2022,7 @@ expect(
     appSource.includes("sendingSessionIdsRef") &&
     appSource.includes("setSessionSending") &&
     appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
-    appSource.includes("[activeSessionId, events.length]") &&
+    appSource.includes("[activeSessionId, events]") &&
     /shouldSuggestSessionTitle\(\s*activeSession,\s*activeSessionHasTranscriptEvents/.test(
       appSource,
     ) &&
@@ -2143,6 +2190,9 @@ expect(
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
     appSource.includes("const totalQueued = Object.values(current).reduce") &&
+    /queuedChatDispatchMessageIdsRef\.current\.set\([\s\S]*?setChatMessageQueues\([\s\S]*?item\.id !== nextMessage\.id[\s\S]*?void sendDraft\(nextMessage\.message/.test(
+      appSource,
+    ) &&
     appSource.includes(".then((accepted) =>") &&
     appSource.includes("if (!accepted)") &&
     appSource.includes("queuedChatDispatchMessageIdsRef") &&
@@ -2161,7 +2211,10 @@ expect(
     surfaceSource.includes("gyro-chat-run-change-summary") &&
     surfaceSource.includes('activity.kind === "file"') &&
     surfaceSource.includes('activity.status === "running"') &&
-    surfaceSource.includes('"Updating totals…"') &&
+    surfaceSource.includes(
+      "!isRunning && hasResponse && changeSummary.paths.length > 0",
+    ) &&
+    surfaceSource.includes("changeSummary.fileChanges.slice(0, 5)") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
     appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
@@ -2543,7 +2596,7 @@ expect(
     reducerSource.includes('case "set-terminal-pane-attention"') &&
     surfaceSource.includes("TerminalDiffControl") &&
     surfaceSource.includes("gyro-terminal-diff-popover") &&
-    surfaceSource.includes("Review in IDE") &&
+    surfaceSource.includes("Review in Workspace") &&
     surfaceSource.includes("gyro-terminal-attention is-waiting") &&
     surfaceSource.includes("gyro-terminal-attention is-failed") &&
     styleSource.includes(".gyro-terminal-awareness") &&
@@ -2556,6 +2609,22 @@ expect(
     tauriSource.includes("apply_git_diff_stats") &&
     tauriSource.includes("untracked_text_additions"),
   "The CLI awareness layer should show selected-pane Git changes and exceptional terminal attention.",
+);
+expect(
+  appSource.includes("sessionEventsRequestRef") &&
+    appSource.includes(
+      "sessionEventsRequestRef.current[sessionId] === requestId",
+    ) &&
+    appSource.includes("optimisticEvents && optimisticEvents.length > 0") &&
+    appSource.includes("workspaceSearchRequestRef") &&
+    appSource.includes("workspaceTreeRequestRef") &&
+    appSource.includes("ideSourceControlRequestRef") &&
+    appSource.includes("ideServicesRequestRef") &&
+    appSource.includes("if (cancelled)") &&
+    reducerSource.includes(
+      "existingPane.workingDirectory === nextWorkingDirectory",
+    ),
+  "Chat, CLI, and Workspace async refreshes should reject stale results and preserve current state on transient failures.",
 );
 expect(
   appSource.includes("TerminalPaneSnapshot[]") &&
@@ -2572,7 +2641,9 @@ expect(
     appSource.includes("liveTerminalPaneIds.includes(selectedPaneId)") &&
     appSource.includes("const pollInterval = isActiveSessionSending") &&
     appSource.includes("selectedPaneId === snapshot.paneId") &&
-    appSource.includes("current === snapshot.output ? current") &&
+    appSource.includes("knownOutputRevision") &&
+    appSource.includes("terminalOutputRevisionRef") &&
+    appSource.includes("terminalReadInFlightRef") &&
     appSource.includes("restore_terminal_panes") &&
     appSource.includes("write_terminal_input") &&
     appSource.includes("resize_terminal_pane") &&
@@ -2584,6 +2655,9 @@ expect(
     tauriSource.includes("async fn write_terminal_input") &&
     tauriSource.includes("terminal input worker failed") &&
     tauriSource.includes("async fn read_terminal_output") &&
+    tauriSource.includes("known_output_revision") &&
+    tauriSource.includes("output_revision") &&
+    tauriSource.includes("snapshot_terminal_output") &&
     tauriSource.includes("terminal read worker failed") &&
     tauriSource.includes("async fn resize_terminal_pane") &&
     tauriSource.includes("terminal resize worker failed") &&
@@ -2685,6 +2759,8 @@ expect(
 );
 expect(
   surfaceSource.includes("gyro-sidebar-windowbar") &&
+    surfaceSource.includes("gyro-sidebar-persistent-header") &&
+    styleSource.includes(".gyro-sidebar-persistent-header") &&
     surfaceSource.includes('aria-label="Window navigation"') &&
     surfaceSource.includes('aria-label="Hide sidebar"') &&
     surfaceSource.includes('aria-label="Show sidebar"') &&
@@ -2708,11 +2784,11 @@ expect(
     tauriConfigSource.includes('"titleBarStyle": "Overlay"') &&
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
-    surfaceSource.includes("New chat") &&
-    surfaceSource.includes('aria-label="Workspace modes"') &&
+    surfaceSource.includes("New Chat") &&
+    surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
     surfaceSource.includes("ideSidebarMinimumWidth * 2") &&
-    surfaceSource.includes('aria-label="Resize IDE sidebar"') &&
+    surfaceSource.includes('aria-label="Resize Workspace sidebar"') &&
     surfaceSource.includes('role="separator"') &&
     surfaceSource.includes("onDoubleClick") &&
     surfaceSource.includes("resizeIdeSidebarWithKeyboard") &&
@@ -2724,10 +2800,10 @@ expect(
     styleSource.includes(".gyro-ide-sidebar-resizer") &&
     styleSource.includes("grid-template-columns 180ms") &&
     styleSource.includes("will-change: grid-template-columns") &&
-    surfaceSource.includes('label="Chat"') &&
-    surfaceSource.includes('label="CLI"') &&
-    surfaceSource.includes('label="IDE"') &&
-    surfaceSource.indexOf('aria-label="Workspace modes"') <
+    surfaceSource.includes('label="Sessions"') &&
+    surfaceSource.includes('label="Workspace"') &&
+    !surfaceSource.includes('label="IDE"') &&
+    surfaceSource.indexOf('aria-label="Primary surfaces"') <
       surfaceSource.indexOf('className="gyro-sidebar-actions"') &&
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
@@ -2741,7 +2817,8 @@ expect(
     styleSource.includes(".gyro-sidebar-more-button") &&
     surfaceSource.includes("projectSidebarName") &&
     surfaceSource.includes("SessionSidebarRow") &&
-    surfaceSource.includes('title="Terminal panes"') &&
+    surfaceSource.includes("localCliPanes.map(renderCliPaneRow)") &&
+    surfaceSource.includes("Choose CLI session") &&
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
     surfaceSource.includes('title="Explorer"') &&
@@ -2758,7 +2835,7 @@ expect(
     !surfaceSource.includes('title="Chats"') &&
     !surfaceSource.includes("primarySidebarActionForLayout") &&
     !surfaceSource.includes('<SidebarSection title="Layouts">'),
-  "Mode-specific sidebar should keep overlay chrome while giving Chat, CLI, and IDE distinct content.",
+  "The shared shell should expose Sessions and Workspace while preserving Chat, CLI, and Workspace-specific content.",
 );
 
 expect(
@@ -2878,22 +2955,36 @@ expect(
   "IDE should lead with one project-opening action and withhold inactive workbench regions until a project exists.",
 );
 const chatSidebarSource = surfaceSource.slice(
-  surfaceSource.indexOf("{!isCliSidebar && !isIdeSidebar ? ("),
+  surfaceSource.indexOf("{isSessionsSidebar ? ("),
   surfaceSource.indexOf("function SidebarSection"),
 );
 expect(
-  chatSidebarSource.includes("New chat") &&
+  chatSidebarSource.includes("New Chat") &&
+    chatSidebarSource.includes("New CLI") &&
+    chatSidebarSource.includes("CLI session location") &&
+    chatSidebarSource.includes("commandProfiles.map") &&
     chatSidebarSource.includes("Search") &&
     chatSidebarSource.includes("gyro-sidebar-project-chat-list") &&
     chatSidebarSource.includes("Pinned") &&
     chatSidebarSource.includes("Projects") &&
     chatSidebarSource.includes("pinnedSessions.map(renderSessionRow)") &&
     chatSidebarSource.includes("projectGroups.map") &&
-    chatSidebarSource.includes("project.sessions.slice(0, 3)") &&
+    chatSidebarSource.includes("project.items.slice(0, 3)") &&
+    surfaceSource.includes("const primaryGyroProjectPath = [") &&
+    surfaceSource.includes("projectGroupKey(path, primaryGyroProjectPath)") &&
+    surfaceSource.includes('projectSidebarName(normalizedPath) === "Gyro"') &&
+    chatSidebarSource.includes(
+      "const activeProjectSession = project.items.find",
+    ) &&
+    chatSidebarSource.includes(
+      "!collapsedProjectSessions.includes(activeProjectSession)",
+    ) &&
+    chatSidebarSource.includes("...collapsedProjectSessions.slice(0, 2)") &&
     chatSidebarSource.includes("toggleProject(project.key)") &&
     chatSidebarSource.includes("toggleProjectMore(project.key)") &&
     chatSidebarSource.includes("gyro-sidebar-more-button") &&
-    chatSidebarSource.includes("No recent chats") &&
+    chatSidebarSource.includes("No recent sessions") &&
+    chatSidebarSource.includes("Local CLI") &&
     !chatSidebarSource.includes("<small>Start one</small>") &&
     !chatSidebarSource.includes("onClick={onOpenWorkspace}") &&
     !chatSidebarSource.includes("Scheduled") &&
@@ -2901,7 +2992,18 @@ expect(
     !chatSidebarSource.includes('title="Projects"') &&
     !chatSidebarSource.includes("activeSession.worktreeName") &&
     !chatSidebarSource.includes('onSelectDestination("automations")'),
-  "Chat sidebar should show clean project and recent chat rows, without Scheduled.",
+  "Sessions sidebar should combine Chat and CLI rows, merge duplicate Gyro workspace groups, keep the active row visible, and omit unrelated destinations.",
+);
+expect(
+  appSource.includes("const createCliSession = useCallback") &&
+    appSource.includes("workspacePathOverride: projectPath") &&
+    appSource.includes("workingDirectory: workspacePathOverride") &&
+    appSource.includes("onCreateCliSession={createCliSession}") &&
+    appSource.includes('type: "select-sessions"') &&
+    surfaceSource.includes("onCreateCliSession(") &&
+    surfaceSource.includes("newCliWorkspacePath || undefined") &&
+    surfaceSource.includes("selectedTerminalPaneId"),
+  "New CLI should choose a profile and project or Home, then restore through Sessions.",
 );
 expect(
   styleSource.includes(".gyro-sidebar-mode-row:focus-visible") &&
@@ -2911,7 +3013,7 @@ expect(
     styleSource.includes(
       "box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft)",
     ),
-  "Sidebar Chat/CLI/IDE tabs should keep a quiet active/focus state without the underglow.",
+  "Sidebar Sessions/Workspace tabs should keep a quiet active/focus state without the underglow.",
 );
 expect(
   appSource.includes("REMOVED_PROJECTS_STORAGE_KEY") &&
@@ -2976,21 +3078,25 @@ expect(
   "Settings should move section navigation to the sidebar and keep exactly one active subpage in content.",
 );
 expect(
-  appSource.includes("WorkspaceToolPanelPeek") &&
+  !appSource.includes("WorkspaceToolPanelPeek") &&
     appSource.includes("toolPanelHeight") &&
     appSource.includes("DEFAULT_TOOL_PANEL_HEIGHT = 280") &&
     surfaceSource.includes("TOOL_PANEL_DEFAULT_HEIGHT = 280") &&
-    surfaceSource.includes("data-active-tab={activePaneTab}") &&
+    surfaceSource.includes("data-active-tab={effectivePaneTab}") &&
     surfaceSource.includes("terminalTitle={activeTerminalPane?.title}") &&
     surfaceSource.includes("gyro-tool-panel-resize-handle") &&
-    surfaceSource.includes("gyro-tool-panel-reveal") &&
     surfaceSource.includes("TOOL_PANEL_COLLAPSE_HEIGHT") &&
+    surfaceSource.includes(
+      'const effectivePaneTab = terminalOnly ? "terminal" : activePaneTab',
+    ) &&
+    surfaceSource.includes('tab.id === "terminal"') &&
+    appSource.includes('openToolPanel("terminal")') &&
+    !styleSource.includes(".gyro-tool-panel-reveal") &&
     styleSource.includes(".gyro-workspace-tool-panel.is-resizable") &&
-    styleSource.includes(".gyro-tool-panel-reveal-button") &&
     styleSource.includes('[data-active-tab="terminal"]') &&
     styleSource.includes(".gyro-terminal-toolbar {\n  display: none;") &&
     !styleSource.includes("button:not(.gyro-pane-add):not(.is-active)"),
-  "Bottom workspace tool panel should support a compact chat tray, drag resizing, drag-to-collapse, and a reveal handle.",
+  "Chat bottom panel should be a terminal-only tray opened from the explicit top control, with no reveal strip.",
 );
 expect(
   typeSource.includes('| "plan-updated"') &&
@@ -3064,8 +3170,8 @@ expect(
     surfaceSource.includes('return "Needs attention"') &&
     surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
     surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
-    surfaceSource.includes("Open Files in IDE") &&
-    surfaceSource.includes("<small>Open IDE</small>") &&
+    surfaceSource.includes("Open files in Workspace") &&
+    surfaceSource.includes("<small>Open Workspace</small>") &&
     surfaceSource.includes('"has-activity"') &&
     surfaceSource.includes('"has-warning"') &&
     !surfaceSource.includes('(browserPreview?.status ?? "Ready")') &&
@@ -3075,9 +3181,9 @@ expect(
     surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
     surfaceSource.includes('"Close bottom drawer"') &&
     surfaceSource.includes('"Open bottom drawer"') &&
-    appSource.includes("const toggleToolPanel = useCallback") &&
-    appSource.includes("openToolPanel(workbench.activePaneTab)") &&
-    surfaceSource.includes('"Open last used panel"') &&
+    appSource.includes("const toggleChatTerminalPanel = useCallback") &&
+    appSource.includes('openToolPanel("terminal")') &&
+    !surfaceSource.includes('"Open last used panel"') &&
     surfaceSource.includes("onClick={onToggleToolPanel}") &&
     surfaceSource.includes('onComposerAction?.("open-files")') &&
     appSource.includes('case "open-files":') &&
@@ -3097,12 +3203,14 @@ expect(
     !surfaceSource.includes('onComposerAction?.("show-project-context")') &&
     !surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
-    surfaceSource.includes("diffAdditions") &&
-    surfaceSource.includes("diffDeletions") &&
     surfaceSource.includes("sourceControl?.additions") &&
     surfaceSource.includes("sourceControl?.deletions") &&
     surfaceSource.includes("sourceControl?.files.length") &&
-    surfaceSource.includes("gyro-thread-diff-pill") &&
+    !surfaceSource.includes("gyro-thread-diff-pill") &&
+    surfaceSource.includes(
+      "!isRunning && hasResponse && changeSummary.paths.length > 0",
+    ) &&
+    surfaceSource.includes("Edited {changeSummary.paths.length}") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
@@ -3676,13 +3784,13 @@ expect(
 );
 expect(
   styleSource.includes(".gyro-composer-context-wheel") &&
-    /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
+    /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*20px;[\s\S]*?width:\s*20px;/.test(
       styleSource,
     ) &&
-    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(
+    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*14px;[\s\S]*?width:\s*14px;/.test(
       styleSource,
     ),
-  "Composer context wheel should stay compact without removing its tooltip or progress semantics.",
+  "Composer context wheel should stay compact while remaining legible.",
 );
 expect(
   surfaceSource.includes("function PlanDecisionCard") &&
@@ -3767,8 +3875,7 @@ expect(
   "Permission controls should expose only Default Permissions and orange Full Access while keeping backend settings separate.",
 );
 expect(
-  styleSource.includes(".gyro-tool-panel-reveal") &&
-    styleSource.includes("min-height: 10px") &&
+  !styleSource.includes(".gyro-tool-panel-reveal") &&
     styleSource.includes(".gyro-sidebar-footer") &&
     styleSource.includes(".gyro-sidebar-windowbar") &&
     styleSource.includes(".gyro-sidebar-restore-button") &&
@@ -3804,7 +3911,7 @@ expect(
     surfaceSource.includes(
       "if (turns.length === 0 && looseEvents.length === 0)",
     ) &&
-    surfaceSource.includes('aria-label="New thread"'),
+    surfaceSource.includes('aria-label="New Chat"'),
   "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
 );
 expect(
@@ -4056,16 +4163,19 @@ for (const secretPattern of [
 }
 
 expect(
-  surfaceSource.includes("data-active-mode={activeWorkspaceLayout}") &&
+  surfaceSource.includes(
+    'data-active-mode={isIdeSidebar ? "workspace" : "sessions"}',
+  ) &&
     styleSource.includes(
-      '.gyro-sidebar-mode-group[data-active-mode="terminal-grid"]::before',
+      '.gyro-sidebar-mode-group[data-active-mode="workspace"]::before',
     ) &&
-    styleSource.includes(
-      '.gyro-sidebar-mode-group[data-active-mode="code"]::before',
-    ) &&
+    styleSource.includes(".gyro-sidebar-mode-row > span") &&
+    styleSource.includes("font-weight: 450") &&
+    styleSource.includes("font-weight: 500") &&
+    styleSource.includes("line-height: 16px") &&
     styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
     styleSource.includes("@keyframes gyro-native-surface-enter"),
-  "Workspace mode switching should use the shared sliding indicator and restrained surface motion.",
+  "Sessions and Workspace switching should use centered reference typography, the shared sliding indicator, and restrained surface motion.",
 );
 
 expect(
@@ -4087,7 +4197,7 @@ expect(
 
 expect(
   surfaceSource.includes("export function IdeStatusBar") &&
-    surfaceSource.includes('aria-label="IDE status"') &&
+    surfaceSource.includes('aria-label="Workspace status"') &&
     appSource.includes("<IdeStatusBar") &&
     styleSource.includes(
       ".gyro-workspace-route.is-code > .gyro-editor-statusbar",
@@ -4096,7 +4206,7 @@ expect(
     styleSource.includes(".gyro-editor-statusbar-group.is-secondary") &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr);") &&
     styleSource.includes(".gyro-code-surface .monaco-editor-background"),
-  "The IDE should keep the global status bar below the editor and tool panel with compact left and right metadata groups.",
+  "Workspace should keep the global status bar below the editor and tool panel with compact left and right metadata groups.",
 );
 
 expect(
@@ -4341,6 +4451,30 @@ expect(
       ".gyro-provider-tool-approval-actions button:focus-visible",
     ),
   "Provider command, file, and permission requests should render as reconciled accessible transcript cards.",
+);
+
+expect(
+  surfaceSource.includes("eventPayloadRecord(event)?.contextUsage") &&
+    surfaceSource.includes(
+      'title: isReported ? "Context window" : "Context estimate"',
+    ) &&
+    surfaceSource.includes("gyro-composer-context-bar") &&
+    styleSource.includes("min-width: 316px") &&
+    styleSource.includes("border-radius: 2px") &&
+    desktopRustSource.includes('"thread/tokenUsage/updated"') &&
+    desktopRustSource.includes("provider_context_usage_from_codex_exec") &&
+    desktopRustSource.includes('"contextUsage".into()'),
+  "Composer context usage should prefer provider telemetry and render a readable detail card.",
+);
+
+expect(
+  styleSource.includes("Codex-matched chat typography") &&
+    styleSource.includes("font-size: 14px;\n  line-height: 1.5;") &&
+    styleSource.includes(".gyro-user-message-bubble p") &&
+    styleSource.includes(".gyro-chat-run-commentary") &&
+    styleSource.includes("font-size: 13px;\n  line-height: 18px;") &&
+    styleSource.includes(".gyro-change-summary-files > button"),
+  "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
 );
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

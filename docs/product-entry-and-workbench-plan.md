@@ -193,7 +193,7 @@ operational identity distinct.
 
 ### Information architecture
 
-- Keep Gyro's stable Chat, CLI, and IDE modes rather than adopting a generic
+- Keep Gyro's stable Sessions and Workspace surfaces rather than adopting a generic
   studio/projects split.
 - Use the left region for projects, sessions, search, tasks, and automations;
   keep active repository and branch context visible.
