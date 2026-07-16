@@ -148,6 +148,7 @@ const updateControllerSource = readRepoFile(
 const tauriConfigSource = readRepoFile(
   "apps/desktop/src-tauri/tauri.conf.json",
 );
+const tauriConfig = JSON.parse(tauriConfigSource);
 const releaseWorkflowSource = readRepoFile(".github/workflows/release.yml");
 
 const emittedComposerActions = new Set([
@@ -2784,6 +2785,8 @@ expect(
     tauriConfigSource.includes('"titleBarStyle": "Overlay"') &&
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
+    tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 24 &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
@@ -3886,8 +3889,18 @@ expect(
     styleSource.includes(".gyro-sidebar-mode-group") &&
     styleSource.includes("padding: 0 9px 0") &&
     styleSource.includes("height: 58px") &&
-    styleSource.includes("height: 50px") &&
-    styleSource.includes("padding: 9px 5px 6px 84px") &&
+    cssRules(styleSource, ".gyro-sidebar-windowbar").some(
+      (rule) =>
+        rule.includes("height: 48px") &&
+        rule.includes("min-height: 48px") &&
+        rule.includes("padding: 0 5px 0 84px"),
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-restore-button").some((rule) =>
+      rule.includes("top: 14px"),
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-restore-button").every(
+      (rule) => !rule.includes("top: 16px"),
+    ) &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
     styleSource.includes("margin: auto -9px 0"),
