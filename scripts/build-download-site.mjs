@@ -43,13 +43,10 @@ const files = [
   ["site/assets/github.svg", "assets/github.svg"],
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
   ["site/assets/social-preview.png", "assets/social-preview.png"],
+  ["site/assets/screenshots/hero-960.webp", "assets/screenshots/hero-960.webp"],
   [
-    "site/assets/screenshots/hero-1512.webp",
-    "assets/screenshots/hero-1512.webp",
-  ],
-  [
-    "site/assets/screenshots/hero-3024.webp",
-    "assets/screenshots/hero-3024.webp",
+    "site/assets/screenshots/hero-1920.webp",
+    "assets/screenshots/hero-1920.webp",
   ],
   [
     "site/assets/screenshots/hero-mobile-600.webp",
@@ -59,10 +56,10 @@ const files = [
     "site/assets/screenshots/hero-mobile-1200.webp",
     "assets/screenshots/hero-mobile-1200.webp",
   ],
-  ["site/assets/screenshots/chat-900.webp", "assets/screenshots/chat-900.webp"],
+  ["site/assets/screenshots/chat-800.webp", "assets/screenshots/chat-800.webp"],
   [
-    "site/assets/screenshots/chat-1800.webp",
-    "assets/screenshots/chat-1800.webp",
+    "site/assets/screenshots/chat-1600.webp",
+    "assets/screenshots/chat-1600.webp",
   ],
   ["site/assets/screenshots/cli-800.webp", "assets/screenshots/cli-800.webp"],
   ["site/assets/screenshots/cli-1600.webp", "assets/screenshots/cli-1600.webp"],

@@ -141,10 +141,10 @@ containsAll(pages.home, "Homepage", [
   "assets/gyro-mark.png",
   'class="surface-card surface-card-wide"',
   'class="surface-pair"',
-  "assets/screenshots/hero-1512.webp",
-  "assets/screenshots/hero-3024.webp",
+  "assets/screenshots/hero-960.webp",
+  "assets/screenshots/hero-1920.webp",
   "assets/screenshots/hero-mobile-1200.webp",
-  "assets/screenshots/chat-1800.webp",
+  "assets/screenshots/chat-1600.webp",
   "assets/screenshots/cli-1600.webp",
   "assets/screenshots/workspace-1600.webp",
   "assets/social-preview.png",
@@ -290,7 +290,7 @@ containsAll(buildScript, "Site builder", [
   "site/changelog.js",
   "site/assets/gyro-mark.png",
   "site/assets/social-preview.png",
-  "site/assets/screenshots/hero-3024.webp",
+  "site/assets/screenshots/hero-1920.webp",
   "site/assets/screenshots/workspace-1600.webp",
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
 ]);
@@ -376,16 +376,16 @@ check(
 );
 
 const screenshotSpecs = [
-  ["site/assets/screenshots/hero-1512.webp", 1512, 945],
-  ["site/assets/screenshots/hero-3024.webp", 3024, 1890],
+  ["site/assets/screenshots/hero-960.webp", 960, 540],
+  ["site/assets/screenshots/hero-1920.webp", 1920, 1080],
   ["site/assets/screenshots/hero-mobile-600.webp", 600, 480],
   ["site/assets/screenshots/hero-mobile-1200.webp", 1200, 960],
-  ["site/assets/screenshots/chat-900.webp", 900, 600],
-  ["site/assets/screenshots/chat-1800.webp", 1800, 1200],
-  ["site/assets/screenshots/cli-800.webp", 800, 600],
-  ["site/assets/screenshots/cli-1600.webp", 1600, 1200],
-  ["site/assets/screenshots/workspace-800.webp", 800, 600],
-  ["site/assets/screenshots/workspace-1600.webp", 1600, 1200],
+  ["site/assets/screenshots/chat-800.webp", 800, 450],
+  ["site/assets/screenshots/chat-1600.webp", 1600, 900],
+  ["site/assets/screenshots/cli-800.webp", 800, 450],
+  ["site/assets/screenshots/cli-1600.webp", 1600, 900],
+  ["site/assets/screenshots/workspace-800.webp", 800, 450],
+  ["site/assets/screenshots/workspace-1600.webp", 1600, 900],
 ];
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));
