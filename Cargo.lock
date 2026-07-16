@@ -1636,7 +1636,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-cli"
-version = "0.1.0-alpha.25"
+version = "0.1.0-alpha.25.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-core"
-version = "0.1.0-alpha.25"
+version = "0.1.0-alpha.25.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1678,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-desktop"
-version = "0.1.0-alpha.25"
+version = "0.1.0-alpha.25.1"
 dependencies = [
  "anyhow",
  "block2",
