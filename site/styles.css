@@ -1,17 +1,18 @@
 :root {
-  color-scheme: dark;
-  --bg: #0b0b0a;
-  --surface: #121211;
-  --surface-raised: #171613;
-  --surface-soft: #1c1916;
-  --text: #f3f1ed;
-  --muted: #aaa6a0;
-  --quiet: #77736d;
-  --line: rgba(255, 255, 255, 0.12);
-  --line-strong: rgba(255, 255, 255, 0.2);
-  --orange: #ff6038;
-  --orange-soft: #ff8b6e;
-  --orange-dark: #32150e;
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f7f7f5;
+  --surface-raised: #ffffff;
+  --surface-soft: #f1f1ee;
+  --text: #171714;
+  --muted: #626560;
+  --quiet: #858883;
+  --line: rgba(23, 23, 20, 0.11);
+  --line-strong: rgba(23, 23, 20, 0.19);
+  --orange: #f05a34;
+  --orange-soft: #c74322;
+  --orange-dark: #9f3218;
+  --accent: var(--orange);
   --shell: min(1152px, calc(100% - 48px));
   --radius: 18px;
   --header-height: 64px;
@@ -80,9 +81,9 @@ pre {
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #090908;
+  background: var(--surface-soft);
   padding: 18px;
-  color: #e7e3dc;
+  color: var(--text);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -125,14 +126,12 @@ pre {
   min-height: 60px;
   padding: 7px 8px 7px 14px;
   margin-inline: auto;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--line);
   border-radius: 17px;
-  background: rgba(18, 17, 15, 0.78);
-  box-shadow:
-    0 18px 46px rgba(0, 0, 0, 0.28),
-    inset 0 1px rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(22px) saturate(125%);
-  -webkit-backdrop-filter: blur(22px) saturate(125%);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 30px rgba(23, 23, 20, 0.07);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .brand {
@@ -153,6 +152,7 @@ pre {
 
 .site-header .brand img {
   border-radius: 0;
+  filter: invert(1);
 }
 
 .site-header nav,
@@ -170,7 +170,7 @@ pre {
   gap: 8px;
   padding: 0 13px;
   border-radius: 11px;
-  color: #aaa69f;
+  color: var(--muted);
   font-size: 13px;
   font-weight: 620;
   text-decoration: none;
@@ -183,12 +183,12 @@ pre {
 
 .site-header nav a:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--surface-soft);
 }
 
 .site-header nav a[aria-current="page"] {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--surface-soft);
 }
 
 .site-header nav a[aria-current="page"]::after {
@@ -205,28 +205,27 @@ pre {
 
 .site-header .github-link {
   margin-left: 7px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--line);
   border-radius: 0 11px 11px 0;
   padding-left: 15px;
 }
 
 .site-header .nav-download {
   margin-left: 6px;
-  border: 1px solid rgba(255, 95, 56, 0.34);
-  background: rgba(255, 95, 56, 0.12);
-  color: #ffd7cc !important;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--text);
+  background: var(--text);
+  color: #fff !important;
 }
 
 .site-header .nav-download:hover {
-  border-color: rgba(255, 95, 56, 0.58);
-  background: rgba(255, 95, 56, 0.2);
+  border-color: var(--orange-dark);
+  background: var(--orange-dark);
   color: #fff !important;
   transform: translateY(-1px);
 }
 
 .github-link img {
-  filter: invert(1);
+  filter: none;
 }
 
 .hero {
@@ -244,7 +243,7 @@ pre {
 .release-kicker,
 .detail-label {
   margin: 0 0 18px;
-  color: #c8c3bc;
+  color: var(--muted);
   font-size: 13px;
   font-weight: 760;
   letter-spacing: 0.14em;
@@ -263,7 +262,6 @@ pre {
   height: 7px;
   border-radius: 999px;
   background: var(--orange);
-  box-shadow: 0 0 16px rgba(255, 96, 56, 0.8);
 }
 
 .hero h1,
@@ -313,23 +311,23 @@ pre {
 .button-download {
   border-color: var(--text);
   background: var(--text);
-  color: #111;
+  color: #fff;
 }
 
 .button-primary:hover,
 .button-download:hover {
-  border-color: #fff;
-  background: #fff;
+  border-color: var(--orange-dark);
+  background: var(--orange-dark);
 }
 
 .button-secondary:hover,
 .button-quiet:hover {
-  border-color: rgba(255, 255, 255, 0.34);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
 }
 
 .button-secondary img {
-  filter: invert(1);
+  filter: none;
 }
 
 .button-quiet:disabled {
@@ -348,23 +346,12 @@ pre {
   margin: 72px 0 0;
 }
 
-.product-stage::before {
-  position: absolute;
-  z-index: -1;
-  inset: -12% 12% auto;
-  height: 48%;
-  border-radius: 50%;
-  background: rgba(255, 96, 56, 0.16);
-  filter: blur(75px);
-  content: "";
-}
-
 .product-stage picture {
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 20px;
   background: #e9e8e5;
-  box-shadow: 0 38px 90px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 24px 60px rgba(23, 23, 20, 0.12);
 }
 
 .product-stage img {
@@ -422,7 +409,7 @@ pre {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-raised);
 }
 
 .surface-card-wide {
@@ -491,8 +478,8 @@ pre {
 .checksum-card a,
 .detail-content a,
 .legal-copy a {
-  color: #d8d3cd;
-  text-decoration-color: rgba(255, 255, 255, 0.35);
+  color: var(--text);
+  text-decoration-color: var(--line-strong);
 }
 
 .text-link:hover,
@@ -507,7 +494,8 @@ pre {
 
 .download-section {
   padding: 104px 0 112px;
-  background: var(--bg);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
 
 .download-shell {
@@ -539,19 +527,17 @@ pre {
 .download-stack-full {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-raised);
 }
 
 .macos-card {
   display: grid;
   gap: 20px;
   padding: 32px 28px 26px;
-  border-color: rgba(255, 96, 56, 0.42);
+  border-color: var(--line-strong);
   border-radius: 18px;
-  background: var(--surface);
-  box-shadow:
-    0 28px 80px rgba(0, 0, 0, 0.24),
-    0 0 50px rgba(255, 82, 42, 0.05);
+  background: var(--surface-raised);
+  box-shadow: 0 20px 50px rgba(23, 23, 20, 0.09);
 }
 
 .platform-identity {
@@ -561,7 +547,7 @@ pre {
 }
 
 .platform-identity img {
-  filter: invert(1);
+  filter: none;
 }
 
 .platform-identity h2,
@@ -609,7 +595,7 @@ pre {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #0d0d0c;
+  background: var(--surface-soft);
 }
 
 .segmented-control label {
@@ -630,8 +616,10 @@ pre {
 }
 
 .segmented-control label:has(input:checked) {
-  background: var(--text);
-  color: #111;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(23, 23, 20, 0.07);
 }
 
 .segmented-control label:has(input:focus-visible) {
@@ -704,10 +692,10 @@ pre {
 .release-fallback {
   margin: 0;
   padding: 14px 16px;
-  border: 1px solid rgba(255, 96, 56, 0.35);
+  border: 1px solid rgba(240, 90, 52, 0.28);
   border-radius: 11px;
-  background: rgba(255, 96, 56, 0.07);
-  color: #d7b5ac;
+  background: #fff5f1;
+  color: #8b3823;
   font-size: 13px;
 }
 
@@ -778,7 +766,7 @@ pre {
   width: 46px;
   height: 46px;
   margin: 0 auto 22px;
-  filter: drop-shadow(0 0 22px rgba(255, 96, 56, 0.22));
+  filter: invert(1);
 }
 
 .install-hero .kicker {
@@ -868,7 +856,7 @@ pre {
   display: flex;
   min-height: 44px;
   align-items: center;
-  color: #aaa69f;
+  color: var(--muted);
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
@@ -903,7 +891,7 @@ pre {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 13px;
-  background: #0e0e0d;
+  background: var(--surface-soft);
 }
 
 .checksum-disclosure .checksum-card {
@@ -919,7 +907,7 @@ pre {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
-  color: #d6d1ca;
+  color: var(--text);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -1019,7 +1007,7 @@ pre {
 
 .version-rail a:hover,
 .version-rail a:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-soft);
   color: var(--text);
 }
 
@@ -1059,7 +1047,7 @@ pre {
 }
 
 .release-notes-content {
-  color: #bcb8b1;
+  color: var(--muted);
 }
 
 .release-notes-content h3 {
@@ -1131,7 +1119,7 @@ pre {
 
 .legal-copy p {
   margin: 0 0 14px;
-  color: #bcb8b1;
+  color: var(--muted);
   font-size: 16px;
 }
 
@@ -1380,9 +1368,9 @@ pre {
 
 @media (prefers-contrast: more) {
   :root {
-    --muted: #d2cec7;
-    --quiet: #b8b3ab;
-    --line: rgba(255, 255, 255, 0.28);
-    --line-strong: rgba(255, 255, 255, 0.45);
+    --muted: #41433f;
+    --quiet: #555852;
+    --line: rgba(23, 23, 20, 0.28);
+    --line-strong: rgba(23, 23, 20, 0.45);
   }
 }

@@ -3,6 +3,7 @@ import type {
   ModelProviderConfig,
   ProviderAuthStatus,
   ProviderConnectionStatus,
+  ProviderCapabilities,
   ProviderId,
   ProviderModel,
   ProviderRuntimeStatus,
@@ -24,6 +25,7 @@ export const GPT_56_REASONING_EFFORTS: ReasoningEffort[] = [
 ];
 
 type ProviderCatalogEntry = ModelProviderConfig & {
+  capabilities: ProviderCapabilities;
   defaultModelId: string;
   effort: ProviderStatus["effort"];
   allowedTools: string[];
@@ -41,6 +43,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     defaultModelId: "gpt-5.6-sol",
     selectedModelId: "gpt-5.6-sol",
     selectedReasoningEffort: "medium",
+    capabilities: {
+      executionKind: "codex-cli",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: true,
+      supportsResume: true,
+      supportsUsage: true,
+      visibility: "standard",
+    },
     models: [
       {
         id: "gpt-5.6-sol",
@@ -98,6 +109,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "claude-sonnet-5",
     selectedModelId: "claude-sonnet-5",
+    capabilities: {
+      executionKind: "claude-code",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: true,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "standard",
+    },
     models: [
       {
         id: "claude-fable-5",
@@ -124,6 +144,39 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     allowedTools: ["files", "terminal", "diff"],
   },
   {
+    id: "kimi",
+    displayName: "Kimi",
+    apiKeyRef: "provider-cli:kimi",
+    enabled: false,
+    authMode: "cli",
+    authStatus: "not-connected",
+    baseUrl: null,
+    defaultModelId: "k3",
+    selectedModelId: "k3",
+    selectedReasoningEffort: "max",
+    capabilities: {
+      executionKind: "kimi-acp",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: true,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "standard",
+    },
+    models: [
+      {
+        id: "k3",
+        displayName: "Kimi K3",
+        description:
+          "Kimi's flagship model for long-horizon coding and knowledge work.",
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: ["max"],
+      },
+    ],
+    effort: "extra-high",
+    allowedTools: ["files", "terminal", "diff"],
+  },
+  {
     id: "xai",
     displayName: "xAI",
     apiKeyRef: "provider-env:XAI_API_KEY",
@@ -133,6 +186,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "grok-build-0.1",
     selectedModelId: "grok-build-0.1",
+    capabilities: {
+      executionKind: "readiness-only",
+      executable: false,
+      supportsApprovals: false,
+      supportsImages: false,
+      supportsResume: false,
+      supportsUsage: false,
+      visibility: "readiness-only",
+    },
     models: [
       {
         id: "grok-build-0.1",
@@ -158,6 +220,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "gemini-default",
     selectedModelId: "gemini-default",
+    capabilities: {
+      executionKind: "readiness-only",
+      executable: false,
+      supportsApprovals: false,
+      supportsImages: false,
+      supportsResume: false,
+      supportsUsage: false,
+      visibility: "readiness-only",
+    },
     models: [
       {
         id: "gemini-default",
@@ -177,6 +248,18 @@ export function isProviderId(value: unknown): value is ProviderId {
 
 export function getProviderCatalogEntry(providerId: ProviderId) {
   return providerCatalog.find((provider) => provider.id === providerId);
+}
+
+export function providerCapabilities(providerId: ProviderId) {
+  return getProviderCatalogEntry(providerId)?.capabilities;
+}
+
+export function isProviderExecutable(providerId: ProviderId) {
+  return providerCapabilities(providerId)?.executable === true;
+}
+
+export function providerSupportsUsage(providerId: ProviderId) {
+  return providerCapabilities(providerId)?.supportsUsage === true;
 }
 
 export function getProviderModel(
@@ -304,6 +387,7 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
           ? savedProvider.authMode
           : catalogProvider.authMode,
       authStatus,
+      capabilities: catalogProvider.capabilities,
       baseUrl: savedProvider?.baseUrl ?? catalogProvider.baseUrl,
       enabled: authStatus === "connected",
       models,

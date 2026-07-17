@@ -1,6 +1,8 @@
 use anyhow::Context;
+use base64::Engine as _;
 use gyro_core::{
-    begin_provider_mutation_transaction, create_worktree, decide_mutation_proposal,
+    apply_provider_mutation_transaction_with_cancellation, begin_provider_mutation_transaction,
+    create_worktree, decide_mutation_proposal,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval, versions_compatible,
         AppNotification, DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
@@ -8,16 +10,19 @@ use gyro_core::{
     },
     logout_account as account_logout, mutation_approval_payload,
     prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
+    prepare_provider_text_replacement_transaction, provider_descriptor,
     recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
-    start_account_login as account_start_login, stored_account_session as account_stored_session,
-    AccountSessionState, AppNotificationKind, Automation, AutomationRunStatus, AutomationStatus,
-    AutomationStore, AutomationTriageState, CancellationToken, CreateAutomationRequest,
-    CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
-    GyroPaths, HarnessRunStatus, MutationDecision, MutationProposal, PendingProviderMutationCommit,
-    PreparedProviderMutationTransaction, ProviderDiagnosticsPayload, ProviderFileChange,
-    ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
-    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
-    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
+    run_kimi_acp, start_account_login as account_start_login,
+    stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
+    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
+    CancellationToken, CreateAutomationRequest, CreateSessionContext, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest, MutationDecision,
+    MutationProposal, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
+    ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
+    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
+    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
+    SessionOrigin, SessionStore, SessionWorkspaceMode,
 };
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -1056,6 +1061,7 @@ struct ProviderActivity {
 enum ProviderAdapterKind {
     OpenAiCodex,
     AnthropicClaude,
+    KimiAcp,
     ReadinessOnly,
 }
 
@@ -2733,7 +2739,14 @@ fn run_provider_chat_blocking(
     // Timeline enrichment is intentionally best-effort after the assistant
     // response is durable. A title, activity, or diagnostics failure must not
     // turn a completed provider request into a duplicate retry.
-    let plan_event = plan_extraction.payload.clone().and_then(|payload| {
+    let plan_payload = plan_extraction.payload.clone().or_else(|| {
+        runner_output
+            .activities
+            .iter()
+            .rev()
+            .find_map(kimi_acp_plan_payload)
+    });
+    let plan_event = plan_payload.and_then(|payload| {
         store
             .append_event_with_turn_id(
                 session_id,
@@ -7454,11 +7467,195 @@ fn run_provider_chat_once(
     match provider_adapter_for(&request.provider_id).kind {
         ProviderAdapterKind::OpenAiCodex => run_openai_codex_chat(app, request, resume_cursor),
         ProviderAdapterKind::AnthropicClaude => run_anthropic_claude_chat(app, request, resume_cursor),
+        ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor),
         ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
             "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
             request.provider_label.as_deref().unwrap_or("Provider")
         ),
     }
+}
+
+fn run_kimi_acp_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: Option<&ProviderResumeCursor>,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    let workspace = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let cancellation = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
+        .get(&request.session_id)
+        .map(|control| control.cancellation.clone())
+        .ok_or_else(|| anyhow::anyhow!("provider run control is unavailable"))?;
+    let mut prompt = vec![serde_json::json!({
+        "type": "text",
+        "text": provider_context_message(request),
+    })];
+    for attachment in &request.attachments {
+        if attachment.kind == "image" {
+            let bytes = fs::read(&attachment.path)
+                .with_context(|| format!("read image attachment {}", attachment.name))?;
+            if bytes.len() > MAX_CHAT_IMAGE_BYTES as usize {
+                anyhow::bail!("{} exceeds the image attachment limit", attachment.name);
+            }
+            prompt.push(serde_json::json!({
+                "type": "image",
+                "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+                "mimeType": attachment.mime_type.as_deref().unwrap_or("application/octet-stream"),
+            }));
+        } else if attachment.kind == "workspace-file" {
+            let content = fs::read_to_string(&attachment.path)
+                .with_context(|| format!("read workspace attachment {}", attachment.name))?;
+            prompt.push(serde_json::json!({
+                "type": "resource",
+                "resource": {
+                    "uri": format!("file://{}", attachment.path),
+                    "mimeType": attachment.mime_type.as_deref().unwrap_or("text/plain"),
+                    "text": content,
+                },
+            }));
+        }
+    }
+
+    let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
+    let activity_sink = activities.clone();
+    let approved_file_writes = Arc::new(AtomicUsize::new(0));
+    let approval_write_tokens = approved_file_writes.clone();
+    let write_tokens = approved_file_writes.clone();
+    let approval_context = ProviderApprovalContext::from(request);
+    let plan_mode = request.mode == ChatMode::Plan;
+    let require_command_approval = request.require_command_approval;
+    let require_file_approval = request.require_file_edit_approval;
+    let output = run_kimi_acp(
+        KimiAcpRequest {
+            program: "kimi".into(),
+            program_args: vec!["acp".into()],
+            workspace: workspace.clone(),
+            prompt,
+            model: request.model_id.clone().unwrap_or_else(|| "k3".into()),
+            reasoning_effort: request
+                .reasoning_effort
+                .clone()
+                .unwrap_or_else(|| "max".into()),
+            mode: if plan_mode {
+                KimiAcpMode::Plan
+            } else {
+                KimiAcpMode::Normal
+            },
+            resume_session_id: resume_cursor
+                .filter(|cursor| cursor.kind == "kimi-acp-session")
+                .map(|cursor| cursor.session_id.clone()),
+            timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+            inactivity_timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+            cancellation: cancellation.clone(),
+        },
+        |delta| {
+            emit_provider_chat_event(
+                app,
+                request,
+                "delta",
+                Some(HarnessRunStatus::Running),
+                Some(delta.to_string()),
+                None,
+                None,
+            );
+        },
+        |activity| {
+            let activity = ProviderActivity {
+                id: activity.id.clone(),
+                kind: activity.kind.clone(),
+                label: activity.label.clone(),
+                detail: activity.detail.clone(),
+                status: activity.status.clone(),
+            };
+            emit_provider_activity_event(app, request, &activity);
+            if let Ok(mut sink) = activity_sink.lock() {
+                sink.push(activity);
+            }
+        },
+        |approval| {
+            if plan_mode
+                && matches!(
+                    approval.kind,
+                    KimiAcpApprovalKind::Command | KimiAcpApprovalKind::FileChange
+                )
+            {
+                return Ok(KimiAcpApprovalDecision::RejectOnce);
+            }
+            let approval_type = match approval.kind {
+                KimiAcpApprovalKind::Command => "command",
+                KimiAcpApprovalKind::FileChange => "file-change",
+                KimiAcpApprovalKind::Other => "permissions",
+            };
+            let auto_allow = match approval.kind {
+                KimiAcpApprovalKind::Command => !require_command_approval,
+                KimiAcpApprovalKind::FileChange => !require_file_approval,
+                KimiAcpApprovalKind::Other => false,
+            };
+            let allowed = if auto_allow {
+                true
+            } else {
+                wait_for_provider_approval_with_transaction(
+                    app,
+                    &approval_context,
+                    approval_type,
+                    sanitize_provider_approval_details(approval.tool_call.clone()),
+                    None,
+                )? != ProviderApprovalDecision::Reject
+            };
+            if allowed && approval.kind == KimiAcpApprovalKind::FileChange {
+                approval_write_tokens.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(if allowed {
+                KimiAcpApprovalDecision::AllowOnce
+            } else {
+                KimiAcpApprovalDecision::RejectOnce
+            })
+        },
+        |target, content| {
+            if plan_mode {
+                anyhow::bail!("Kimi file writes are disabled in plan mode");
+            }
+            if write_tokens
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |tokens| {
+                    tokens.checked_sub(1)
+                })
+                .is_err()
+            {
+                anyhow::bail!("Kimi requested an unapproved workspace write");
+            }
+            let transaction =
+                prepare_provider_text_replacement_transaction(&workspace, target, content)?;
+            apply_provider_mutation_transaction_with_cancellation(&transaction, || {
+                cancellation.is_cancelled()
+            })?;
+            Ok(())
+        },
+    )?;
+    let activities = activities
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Kimi activity state is unavailable"))?
+        .clone();
+    let response = gyro_core::sanitize_harness_text(&output.response);
+    Ok(ProviderRunnerOutput {
+        activities,
+        context_usage: None,
+        response: response.clone(),
+        resume_cursor: Some(ProviderResumeCursor {
+            kind: "kimi-acp-session".into(),
+            session_id: output.session_id.clone(),
+        }),
+        retry_count: 0,
+        resumed: output.resumed,
+        output_summary: Some(provider_output_summary(
+            "kimi-acp",
+            &output.stop_reason,
+            Some(&output.session_id),
+            response.chars().count(),
+        )),
+    })
 }
 
 fn provider_resume_cursor_from_binding(
@@ -9362,6 +9559,51 @@ fn provider_activity_event_entry(
     (activity.label.clone(), payload, Some(turn_id))
 }
 
+fn kimi_acp_plan_payload(activity: &ProviderActivity) -> Option<serde_json::Value> {
+    if activity.kind != "plan" {
+        return None;
+    }
+    let entries = serde_json::from_str::<serde_json::Value>(activity.detail.as_deref()?).ok()?;
+    let items = entries
+        .as_array()?
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let title = entry
+                .get("title")
+                .or_else(|| entry.get("content"))
+                .or_else(|| entry.get("label"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Plan step");
+            let status = match entry
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("todo")
+            {
+                "completed" | "done" | "complete" => "complete",
+                "in_progress" | "in-progress" | "running" => "in-progress",
+                "blocked" => "blocked",
+                _ => "todo",
+            };
+            serde_json::json!({
+                "id": entry
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("kimi-plan-{index}")),
+                "title": title,
+                "status": status,
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(serde_json::json!({
+        "action": "replace",
+        "title": "Plan",
+        "providerId": "kimi",
+        "items": items,
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn append_provider_diagnostics_event(
     store: &SessionStore,
@@ -10171,30 +10413,28 @@ fn extract_codex_agent_message_text(value: &serde_json::Value) -> Option<String>
 }
 
 fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
-    match provider_id {
-        "openai" => ProviderAdapterDescriptor {
-            kind: ProviderAdapterKind::OpenAiCodex,
-            runner: "codex-cli",
-            auth_owner: "chatgpt-local-codex-login",
-            timeout_seconds: PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
-        },
-        "anthropic" => ProviderAdapterDescriptor {
-            kind: ProviderAdapterKind::AnthropicClaude,
-            runner: "claude-code",
-            auth_owner: "anthropic-local-claude-login",
-            timeout_seconds: PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
-        },
-        "xai" | "gemini" => ProviderAdapterDescriptor {
-            kind: ProviderAdapterKind::ReadinessOnly,
-            runner: "readiness-only",
-            auth_owner: "provider-env",
-            timeout_seconds: 0,
-        },
-        _ => ProviderAdapterDescriptor {
+    let Some(descriptor) = provider_descriptor(provider_id) else {
+        return ProviderAdapterDescriptor {
             kind: ProviderAdapterKind::ReadinessOnly,
             runner: "readiness-only",
             auth_owner: "provider-owned",
             timeout_seconds: 0,
+        };
+    };
+    let kind = match descriptor.execution_kind {
+        ProviderExecutionKind::CodexCli => ProviderAdapterKind::OpenAiCodex,
+        ProviderExecutionKind::ClaudeCode => ProviderAdapterKind::AnthropicClaude,
+        ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
+        ProviderExecutionKind::ReadinessOnly => ProviderAdapterKind::ReadinessOnly,
+    };
+    ProviderAdapterDescriptor {
+        kind,
+        runner: descriptor.runner,
+        auth_owner: descriptor.auth_owner,
+        timeout_seconds: if kind == ProviderAdapterKind::ReadinessOnly {
+            0
+        } else {
+            PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS
         },
     }
 }
@@ -12274,7 +12514,7 @@ while True:
     }
 
     #[test]
-    fn provider_adapter_registry_keeps_xai_and_gemini_readiness_only() {
+    fn provider_adapter_registry_executes_kimi_and_keeps_readiness_only_entries() {
         let openai = provider_adapter_for("openai");
         assert_eq!(openai.kind, ProviderAdapterKind::OpenAiCodex);
         assert_eq!(openai.runner, "codex-cli");
@@ -12283,12 +12523,38 @@ while True:
         assert_eq!(anthropic.kind, ProviderAdapterKind::AnthropicClaude);
         assert_eq!(anthropic.runner, "claude-code");
 
+        let kimi = provider_adapter_for("kimi");
+        assert_eq!(kimi.kind, ProviderAdapterKind::KimiAcp);
+        assert_eq!(kimi.runner, "kimi-acp");
+
         for provider_id in ["xai", "gemini"] {
             let adapter = provider_adapter_for(provider_id);
             assert_eq!(adapter.kind, ProviderAdapterKind::ReadinessOnly);
             assert_eq!(adapter.runner, "readiness-only");
             assert_eq!(adapter.auth_owner, "provider-env");
         }
+    }
+
+    #[test]
+    fn kimi_acp_plan_activity_maps_to_the_existing_plan_payload() {
+        let payload = kimi_acp_plan_payload(&ProviderActivity {
+            id: "kimi-plan".into(),
+            kind: "plan".into(),
+            label: "Updated plan".into(),
+            detail: Some(
+                serde_json::json!([
+                    {"content": "Inspect", "status": "in_progress"},
+                    {"title": "Implement", "status": "completed"}
+                ])
+                .to_string(),
+            ),
+            status: "done".into(),
+        })
+        .unwrap();
+        assert_eq!(payload["action"], "replace");
+        assert_eq!(payload["items"][0]["title"], "Inspect");
+        assert_eq!(payload["items"][0]["status"], "in-progress");
+        assert_eq!(payload["items"][1]["status"], "complete");
     }
 
     #[test]
