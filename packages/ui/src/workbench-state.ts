@@ -1106,16 +1106,14 @@ export function workbenchReducer(
     case "toggle-chat-environment-rail":
       return chatPanelState(
         state,
-        state.preferences.activeChatPanel === "environment"
-          ? undefined
-          : "environment",
+        state.preferences.activeChatPanel ? undefined : "environment",
       );
     case "set-chat-environment-rail":
       return chatPanelState(state, action.open ? "environment" : undefined);
     case "toggle-chat-plan":
       return chatPanelState(
         state,
-        state.preferences.activeChatPanel === "plan" ? undefined : "plan",
+        state.preferences.activeChatPanel === "plan" ? "environment" : "plan",
       );
     case "set-chat-panel":
       return chatPanelState(state, action.panel);
@@ -3381,7 +3379,7 @@ function chatPanelState(
     preferences: {
       ...state.preferences,
       activeChatPanel: panel,
-      chatEnvironmentRailOpen: panel === "environment",
+      chatEnvironmentRailOpen: panel !== undefined,
     },
   };
 }

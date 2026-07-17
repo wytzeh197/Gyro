@@ -278,6 +278,11 @@ expect(
   appSource.includes("retryTurnId") &&
     appSource.includes("if (!isRetry)") &&
     appSource.includes("resetStreamingAssistantForRetry") &&
+    appSource.includes(
+      "const attachments = Array.isArray(userPayload?.attachments)",
+    ) &&
+    appSource.includes("attachments,") &&
+    desktopRustSource.includes('"attachments": attachments') &&
     surfaceSource.includes("Previous send was interrupted") &&
     surfaceSource.includes("Retry continues the same message") &&
     surfaceSource.includes(
@@ -320,7 +325,8 @@ expect(
       .every(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
-          "low,medium,high,xhigh,max,ultra",
+            "low,medium,high,xhigh,max,ultra" &&
+          model.contextWindowTokens === 1_050_000,
       ),
   "OpenAI should expose all GPT-5.6 variants with their supported effort levels.",
 );
@@ -719,9 +725,9 @@ expect(
 state = workbenchReducer(state, { type: "toggle-chat-plan" });
 expect(
   state.preferences.activeChatPanel === "plan" &&
-    state.preferences.chatEnvironmentRailOpen === false &&
+    state.preferences.chatEnvironmentRailOpen === true &&
     state.isToolPanelOpen === false,
-  "Chat plan toggle should open the checklist without opening the bottom drawer.",
+  "Chat plan toggle should expand the checklist inside the environment rail without opening the bottom drawer.",
 );
 state = workbenchReducer(
   { ...state, activeWorkspaceLayout: "thread", isToolPanelOpen: true },
@@ -2231,6 +2237,13 @@ expect(
     surfaceSource.includes('className="gyro-send-button"') &&
     !surfaceSource.includes('className="gyro-composer-stop-button"') &&
     surfaceSource.includes("function ChatMessageQueue") &&
+    surfaceSource.includes('aria-label="Queued message options"') &&
+    surfaceSource.includes("gyro-chat-message-queue-menu") &&
+    surfaceSource.includes("<span>Edit</span>") &&
+    surfaceSource.includes("<span>Delete</span>") &&
+    appSource.includes("const editQueuedChatMessage") &&
+    appSource.includes("onEditQueuedMessage={editQueuedChatMessage}") &&
+    styleSource.includes(".gyro-chat-message-queue-menu") &&
     appSource.includes('"Message queued"') &&
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
@@ -2241,6 +2254,14 @@ expect(
     appSource.includes(".then((accepted) =>") &&
     appSource.includes("if (!accepted)") &&
     appSource.includes("queuedChatDispatchMessageIdsRef") &&
+    appSource.includes("persistedChatTurnIdsRef") &&
+    appSource.includes("didDeliverProviderResponse") &&
+    appSource.includes("deliveryAttempts < 2") &&
+    appSource.includes('status: shouldRetry ? "waiting" : "failed"') &&
+    appSource.includes("Date.now() + 1_500") &&
+    appSource.includes("Queued delivery failed") &&
+    surfaceSource.includes('message.hasFailed ? "Retry" : "Steer"') &&
+    styleSource.includes(".gyro-chat-message-queue article.is-failed") &&
     appSource.includes("sessionModel: { ...sessionModel }") &&
     surfaceSource.includes("message.isDispatching") &&
     surfaceSource.includes("disabled={message.isDispatching}") &&
@@ -2259,7 +2280,7 @@ expect(
     surfaceSource.includes(
       "!isRunning && hasResponse && changeSummary.paths.length > 0",
     ) &&
-    surfaceSource.includes("changeSummary.fileChanges.slice(0, 5)") &&
+    surfaceSource.includes("showAllChangeFiles ? undefined : 5") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
     appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
@@ -3166,8 +3187,10 @@ expect(
     appSource.includes("appendPlanEvent") &&
     surfaceSource.includes("ChatSurfaceControls") &&
     surfaceSource.includes("ChatSidePanel") &&
-    surfaceSource.includes("gyro-plan-rail") &&
-    surfaceSource.includes('aria-label="Close plan checklist"') &&
+    surfaceSource.includes("function PlanDocument") &&
+    surfaceSource.includes("function PlanArtifactCard") &&
+    typeSource.includes("content?: string") &&
+    appSource.includes("assistantContentByTurnId") &&
     surfaceSource.includes("gyro-plan-inline-editor") &&
     surfaceSource.includes('aria-label="Plan item title"') &&
     surfaceSource.includes('aria-label="Save plan item"') &&
@@ -3181,8 +3204,8 @@ expect(
     surfaceSource.includes("const sidePanel = activeRailPanel ? (") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
-    surfaceSource.includes(
-      'sessionGoal.status === "complete" ? "reopen" : "complete"',
+    /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
+      surfaceSource,
     ) &&
     appSource.includes('action === "set" || action === "reopen"') &&
     appSource.includes("Goal reopened:") &&
@@ -3204,11 +3227,13 @@ expect(
     appSource.includes("createGoalSessionEvent") &&
     appSource.includes('kind: "goal-updated"') &&
     styleSource.includes(".gyro-plan-inline-editor") &&
-    styleSource.includes(
-      ".gyro-chat-surface.has-environment .gyro-plan-rail {",
-    ) &&
-    styleSource.includes("grid-template-columns: minmax(0, 1fr);") &&
-    styleSource.includes("grid-column: 1 / -1;") &&
+    styleSource.includes(".gyro-plan-artifact-card") &&
+    styleSource.includes(".gyro-plan-harness") &&
+    styleSource.includes(".gyro-plan-progress") &&
+    surfaceSource.includes('aria-label="Plan harness"') &&
+    surfaceSource.includes('role="progressbar"') &&
+    surfaceSource.includes("model-managed checklist") &&
+    !surfaceSource.includes('activeRailPanel === "plan" ? "has-plan"') &&
     styleSource.includes(".gyro-chat-surface.is-empty.has-environment") &&
     styleSource.includes(".gyro-chat-start\n  .gyro-composer-shell") &&
     styleSource.includes("padding-top: 60px;") &&
@@ -3218,7 +3243,9 @@ expect(
 );
 expect(
   surfaceSource.includes('activeRailPanel ? "has-environment" : ""') &&
-    surfaceSource.includes('aria-label="Chat tools"') &&
+    surfaceSource.includes('aria-label="Environment"') &&
+    surfaceSource.includes('aria-label="Plan harness"') &&
+    surfaceSource.includes("function ChatEnvironmentLauncher") &&
     surfaceSource.includes('className="gyro-chat-tool-launcher"') &&
     surfaceSource.includes("<span>Changes</span>") &&
     surfaceSource.includes("<span>Terminal</span>") &&
@@ -3234,9 +3261,9 @@ expect(
     surfaceSource.includes('"has-activity"') &&
     surfaceSource.includes('"has-warning"') &&
     !surfaceSource.includes('(browserPreview?.status ?? "Ready")') &&
-    surfaceSource.includes('openTool("diff")') &&
-    surfaceSource.includes('openTool("terminal")') &&
-    surfaceSource.includes('openTool("browser")') &&
+    surfaceSource.includes('onOpenTool("diff")') &&
+    surfaceSource.includes('onOpenTool("terminal")') &&
+    surfaceSource.includes('onOpenTool("browser")') &&
     surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
     surfaceSource.includes('"Close bottom drawer"') &&
     surfaceSource.includes('"Open bottom drawer"') &&
@@ -3306,10 +3333,12 @@ expect(
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider",
     ) &&
-    styleSource.includes("width: min(820px, 100%)") &&
+    /\.gyro-chat-composer-dock \.gyro-composer-shell\.is-hero\.has-provider\s*\{[\s\S]*?max-width:\s*var\(--gyro-chat-content-width\);[\s\S]*?width:\s*min\(100%,\s*var\(--gyro-chat-content-width\)\);/.test(
+      styleSource,
+    ) &&
     surfaceSource.includes("!event.shiftKey") &&
     surfaceSource.includes("event.preventDefault()") &&
-    styleSource.includes("--gyro-chat-content-width: 735px") &&
+    styleSource.includes("--gyro-chat-content-width: 772px") &&
     styleSource.includes("max-width: var(--gyro-chat-content-width)") &&
     styleSource.includes("border-radius: 21px") &&
     styleSource.includes("color: #ff8a3d") &&
@@ -3362,10 +3391,14 @@ expect(
   "First chat should default to a clean Codex-style thread with a fixed full-width topbar, provider status recovery, and matching docked composer.",
 );
 expect(
+  /:root\[data-theme="dark"\] \.gyro-chat-surface:not\(\.is-empty\),[\s\S]*?\.gyro-chat-composer-dock \{\s*background: var\(--gyro-app\);\s*\}/.test(
+    styleSource,
+  ),
+  "Start-chat and in-chat canvases should share the same dark app background.",
+);
+expect(
   reducerSource.includes("activeChatPanel: panel") &&
-    reducerSource.includes(
-      'chatEnvironmentRailOpen: panel === "environment"',
-    ) &&
+    reducerSource.includes("chatEnvironmentRailOpen: panel !== undefined") &&
     appSource.includes('dispatchWorkbench({ type: "set-chat-panel" });') &&
     !appSource.includes(
       'panel: "environment" });\n        dispatchWorkbench({\n          type: "select-workspace-layout"',
@@ -3874,6 +3907,7 @@ expect(
     appSource.includes("plan: activeSessionPlan") &&
     appSource.includes("preserveDraft: true") &&
     styleSource.includes(".gyro-plan-decision-card") &&
+    styleSource.includes(".gyro-plan-decision-actions") &&
     styleSource.includes("max-height: min(420px") &&
     styleSource.includes(':root[data-theme="light"] .gyro-plan-decision-card'),
   "Completed Plan-mode output should surface an above-composer approval card whose Yes path exits read-only mode before implementation.",
@@ -3918,7 +3952,8 @@ expect(
 expect(
   surfaceSource.includes("OpenAI permissions") &&
     surfaceSource.includes("Anthropic permissions") &&
-    surfaceSource.includes("Default Permissions") &&
+    surfaceSource.includes("Ask Before Executing") &&
+    surfaceSource.includes("Auto Approve") &&
     surfaceSource.includes("Full Access") &&
     !surfaceSource.includes('action: "toggle-access"') &&
     !surfaceSource.includes("Codex settings") &&
@@ -3927,13 +3962,17 @@ expect(
     surfaceSource.includes("File edit policy") &&
     surfaceSource.includes("approvalChipClassName") &&
     surfaceSource.includes('approvalMode === "direct"') &&
-    surfaceSource.includes('approvalMode !== "direct"') &&
+    surfaceSource.includes('approvalMode === "auto"') &&
+    surfaceSource.includes('action: "set-approval-auto"') &&
     surfaceSource.includes('kind: "permission-direct"') &&
     styleSource.includes(".gyro-composer-menu-item.is-permission-direct") &&
     surfaceSource.includes('"gyro-composer-chip is-warning"') &&
     surfaceSource.includes("className={approvalChipClassName}") &&
-    appSource.includes("approvalNotificationCopy"),
-  "Permission controls should expose only Default Permissions and orange Full Access while keeping backend settings separate.",
+    appSource.includes("approvalNotificationCopy") &&
+    appSource.includes("fullAccess: true") &&
+    desktopRustSource.includes("request.full_access = config.full_access") &&
+    desktopRustSource.includes('"never"'),
+  "Permission controls should expose ask, sandboxed auto-approval, and orange Full Access as distinct backend modes.",
 );
 expect(
   !styleSource.includes(".gyro-tool-panel-reveal") &&
@@ -4525,9 +4564,13 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("eventPayloadRecord(event)?.contextUsage") &&
-    surfaceSource.includes(
-      'title: isReported ? "Context window" : "Context estimate"',
+  surfaceSource.includes("estimateComposerContextUsage") &&
+    surfaceSource.includes("contextUsage.remainingLabel") &&
+    readRepoFile("packages/ui/src/context-usage.ts").includes(
+      "eventModelId !== model.modelId",
+    ) &&
+    readRepoFile("packages/ui/src/context-usage.ts").includes(
+      "reportedTokens + liveEstimatedTokens",
     ) &&
     surfaceSource.includes("gyro-composer-context-bar") &&
     styleSource.includes("min-width: 316px") &&
@@ -4544,7 +4587,13 @@ expect(
     styleSource.includes(".gyro-user-message-bubble p") &&
     styleSource.includes(".gyro-chat-run-commentary") &&
     styleSource.includes("font-size: 13px;\n  line-height: 18px;") &&
-    styleSource.includes(".gyro-change-summary-files > button"),
+    styleSource.includes(".gyro-change-summary-file > button") &&
+    surfaceSource.includes("function ChangeSummaryFile") &&
+    surfaceSource.includes("aria-label={`Changes in ${path}`}") &&
+    surfaceSource.includes("showAllChangeFiles") &&
+    surfaceSource.includes("aria-expanded={showAllChangeFiles}") &&
+    styleSource.includes(".gyro-change-summary-diff-scroll") &&
+    styleSource.includes("max-height: min(420px, 48vh)"),
   "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
 );
 

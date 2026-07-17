@@ -803,6 +803,8 @@ struct ProviderChatRequest {
     #[serde(default = "default_true")]
     require_file_edit_approval: bool,
     #[serde(default)]
+    full_access: bool,
+    #[serde(default)]
     suggest_title: bool,
     workspace_path: Option<String>,
     #[serde(default)]
@@ -2233,6 +2235,7 @@ fn execute_claimed_automation(
         reasoning_effort: automation.execution.reasoning_effort.clone(),
         require_command_approval: true,
         require_file_edit_approval: true,
+        full_access: false,
         suggest_title: false,
         workspace_path: Some(workspace_path.display().to_string()),
         mode: ChatMode::Normal,
@@ -2922,6 +2925,7 @@ fn bind_provider_chat_request(
     request.workspace_path = Some(workspace.display().to_string());
     request.require_command_approval = config.require_command_approval;
     request.require_file_edit_approval = config.require_file_edit_approval;
+    request.full_access = config.full_access;
     Ok(())
 }
 
@@ -3047,6 +3051,7 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
+        context.push("When the plan is ready for implementation, present the complete plan as polished Markdown with a descriptive heading and clear sections. Gyro displays that response as the Plan document.".into());
     }
     if let Some(goal) = request.goal.as_ref().filter(|goal| goal.status == "active") {
         context.push(format!("Active Gyro session goal: {}", goal.text.trim()));
@@ -7592,7 +7597,7 @@ fn run_kimi_acp_chat(
             let auto_allow = match approval.kind {
                 KimiAcpApprovalKind::Command => !require_command_approval,
                 KimiAcpApprovalKind::FileChange => !require_file_approval,
-                KimiAcpApprovalKind::Other => false,
+                KimiAcpApprovalKind::Other => !require_command_approval && !require_file_approval,
             };
             let allowed = if auto_allow {
                 true
@@ -7682,7 +7687,10 @@ fn run_openai_codex_chat(
             request.reasoning_effort.as_deref().unwrap_or("unknown")
         );
     }
-    if request.require_command_approval || request.require_file_edit_approval {
+    if request.require_command_approval
+        || request.require_file_edit_approval
+        || !request.full_access
+    {
         return run_openai_codex_app_server_chat(app, request, resume_cursor);
     }
     let output_path =
@@ -7711,6 +7719,7 @@ fn run_openai_codex_chat(
         &request.mode,
         request.require_command_approval,
         request.require_file_edit_approval,
+        request.full_access,
         &request.attachments,
         &prompt,
     ));
@@ -7879,6 +7888,7 @@ fn run_openai_codex_app_server_chat(
             &request.mode,
             request.require_command_approval,
             request.require_file_edit_approval,
+            request.full_access,
             &cwd,
         );
         let thread_request = if let Some(thread_id) = resume_id {
@@ -8176,10 +8186,13 @@ fn codex_app_server_policy(
     mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
+    full_access: bool,
     cwd: &Path,
 ) -> (&'static str, &'static str, serde_json::Value) {
     let approval_policy = if *mode == ChatMode::Plan || require_command_approval {
         "untrusted"
+    } else if !full_access {
+        "never"
     } else {
         "on-request"
     };
@@ -8767,7 +8780,7 @@ fn handle_desktop_provider_approval_request(
     let required = match approval_type {
         "command" => config.require_command_approval,
         "file-change" => config.require_file_edit_approval,
-        _ => true,
+        _ => config.require_command_approval || config.require_file_edit_approval,
     };
     if !required {
         return DesktopProviderApprovalResponse::allow(
@@ -8852,9 +8865,7 @@ fn run_anthropic_claude_chat(
         request.suggest_title,
         request.mode != ChatMode::Plan,
     );
-    let permission_mcp_config = if request.mode != ChatMode::Plan
-        && (request.require_command_approval || request.require_file_edit_approval)
-    {
+    let permission_mcp_config = if request.mode != ChatMode::Plan && !request.full_access {
         let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
         Some(desktop_claude_permission_mcp_config(
             request,
@@ -8877,6 +8888,7 @@ fn run_anthropic_claude_chat(
         &request.mode,
         request.require_command_approval,
         request.require_file_edit_approval,
+        request.full_access,
         permission_mcp_config.as_deref(),
         &prompt,
     ));
@@ -8946,12 +8958,15 @@ fn codex_chat_args(
     mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
+    full_access: bool,
     attachments: &[ChatAttachmentRequest],
     prompt: &str,
 ) -> Vec<String> {
     let mut args = vec!["exec".into()];
-    let full_access =
-        *mode == ChatMode::Normal && !require_command_approval && !require_file_edit_approval;
+    let full_access = *mode == ChatMode::Normal
+        && full_access
+        && !require_command_approval
+        && !require_file_edit_approval;
     if resume_session_id.is_some() {
         args.push("resume".into());
     } else {
@@ -9007,6 +9022,7 @@ fn claude_chat_args(
     mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
+    full_access: bool,
     permission_mcp_config: Option<&str>,
     prompt: &str,
 ) -> Vec<String> {
@@ -9044,7 +9060,7 @@ fn claude_chat_args(
             "--permission-mode".into(),
             "default".into(),
         ]);
-    } else if !require_command_approval && !require_file_edit_approval {
+    } else if full_access && !require_command_approval && !require_file_edit_approval {
         args.push("--dangerously-skip-permissions".into());
     }
     args.push(prompt.into());
@@ -11363,6 +11379,7 @@ mod tests {
             reasoning_effort: None,
             require_command_approval: true,
             require_file_edit_approval: true,
+            full_access: false,
             suggest_title: false,
             workspace_path: Some("/tmp/gyro-workspace".into()),
             mode: ChatMode::Normal,
@@ -12230,6 +12247,7 @@ while True:
             reasoning_effort: None,
             require_command_approval: true,
             require_file_edit_approval: true,
+            full_access: false,
             suggest_title: false,
             workspace_path: Some(workspace.path().display().to_string()),
             mode: ChatMode::Plan,
@@ -12348,6 +12366,7 @@ while True:
             &ChatMode::Normal,
             true,
             true,
+            false,
             std::slice::from_ref(&image),
             "hello",
         );
@@ -12375,6 +12394,7 @@ while True:
             &ChatMode::Normal,
             false,
             false,
+            true,
             &[],
             "edit it",
         );
@@ -12391,6 +12411,7 @@ while True:
             &ChatMode::Normal,
             true,
             true,
+            false,
             &[],
             "again",
         );
@@ -12418,6 +12439,7 @@ while True:
                 &ChatMode::Plan,
                 false,
                 false,
+                false,
                 &[],
                 "inspect only",
             );
@@ -12442,6 +12464,7 @@ while True:
             &ChatMode::Normal,
             true,
             true,
+            false,
             Some("{\"mcpServers\":{}}"),
             "hello",
         );
@@ -12458,6 +12481,20 @@ while True:
             .any(|args| args == ["--model", "sonnet"]));
         assert_eq!(fresh_claude.last(), Some(&"hello".to_string()));
 
+        let auto_approve_claude = claude_chat_args(
+            None,
+            "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
+            None,
+            &ChatMode::Normal,
+            false,
+            false,
+            false,
+            Some("{\"mcpServers\":{}}"),
+            "edit it",
+        );
+        assert!(auto_approve_claude.contains(&"--permission-prompt-tool".to_string()));
+        assert!(!auto_approve_claude.contains(&"--dangerously-skip-permissions".to_string()));
+
         let full_access_claude = claude_chat_args(
             None,
             "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
@@ -12465,6 +12502,7 @@ while True:
             &ChatMode::Normal,
             false,
             false,
+            true,
             None,
             "edit it",
         );
@@ -12475,6 +12513,7 @@ while True:
             "unused",
             None,
             &ChatMode::Plan,
+            false,
             false,
             false,
             Some("{\"mcpServers\":{}}"),
@@ -12490,21 +12529,21 @@ while True:
     fn codex_app_server_policy_keeps_gated_edits_read_only() {
         let workspace = Path::new("/tmp/gyro-workspace");
         let (approval, sandbox, policy) =
-            codex_app_server_policy(&ChatMode::Normal, true, true, workspace);
+            codex_app_server_policy(&ChatMode::Normal, true, true, false, workspace);
         assert_eq!(approval, "untrusted");
         assert_eq!(sandbox, "read-only");
         assert_eq!(policy["type"], "readOnly");
         assert_eq!(policy["networkAccess"], false);
 
         let (approval, sandbox, policy) =
-            codex_app_server_policy(&ChatMode::Normal, false, false, workspace);
-        assert_eq!(approval, "on-request");
+            codex_app_server_policy(&ChatMode::Normal, false, false, false, workspace);
+        assert_eq!(approval, "never");
         assert_eq!(sandbox, "workspace-write");
         assert_eq!(policy["type"], "workspaceWrite");
         assert_eq!(policy["writableRoots"][0], "/tmp/gyro-workspace");
 
         let (approval, sandbox, policy) =
-            codex_app_server_policy(&ChatMode::Plan, false, false, workspace);
+            codex_app_server_policy(&ChatMode::Plan, false, false, false, workspace);
         assert_eq!(approval, "untrusted");
         assert_eq!(sandbox, "read-only");
         assert_eq!(policy["type"], "readOnly");
@@ -12850,6 +12889,7 @@ while True:
             reasoning_effort: None,
             require_command_approval: true,
             require_file_edit_approval: true,
+            full_access: false,
             suggest_title: false,
             workspace_path: Some(temp.path().display().to_string()),
             mode: ChatMode::Normal,
@@ -12992,6 +13032,7 @@ while True:
             reasoning_effort: Some("high".into()),
             require_command_approval: true,
             require_file_edit_approval: true,
+            full_access: false,
             suggest_title: false,
             workspace_path: Some(temp.path().display().to_string()),
             mode: ChatMode::Normal,
@@ -13076,6 +13117,7 @@ while True:
             reasoning_effort: Some("high".into()),
             require_command_approval: false,
             require_file_edit_approval: false,
+            full_access: true,
             suggest_title: false,
             workspace_path: None,
             mode: ChatMode::Normal,
