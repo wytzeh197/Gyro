@@ -481,13 +481,13 @@ fn push_bounded(
 }
 
 #[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
+pub(crate) fn configure_process_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;
     command.process_group(0);
 }
 
 #[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command) {}
+pub(crate) fn configure_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
 fn terminate_descendants_after_exit(process_group_id: u32) {
@@ -506,7 +506,7 @@ fn terminate_descendants_after_exit(process_group_id: u32) {
 fn terminate_descendants_after_exit(_process_group_id: u32) {}
 
 #[cfg(unix)]
-fn terminate_process_group(child: &mut std::process::Child) {
+pub(crate) fn terminate_process_group(child: &mut std::process::Child) {
     let process_group = -(child.id() as i32);
     unsafe {
         libc::kill(process_group, libc::SIGTERM);
@@ -531,7 +531,7 @@ fn terminate_process_group(child: &mut std::process::Child) {
 }
 
 #[cfg(not(unix))]
-fn terminate_process_group(child: &mut std::process::Child) {
+pub(crate) fn terminate_process_group(child: &mut std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
 }

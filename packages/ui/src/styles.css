@@ -80,6 +80,7 @@
   --gyro-chat-content-width: 735px;
   --gyro-provider-openai: #7fd2b6;
   --gyro-provider-anthropic: #ff8a3d;
+  --gyro-provider-kimi: #7d8cff;
   --gyro-provider-xai: #f6f2ea;
   --gyro-provider-gemini: #8bb8ff;
   --gyro-hero-heading: #f4f4f1;
@@ -417,6 +418,7 @@
   --gyro-premium-focus: rgba(53, 111, 214, 0.25);
   --gyro-provider-openai: #0f8f72;
   --gyro-provider-anthropic: #c15d12;
+  --gyro-provider-kimi: #5364d8;
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
   --gyro-hero-heading: #20242b;
@@ -13018,6 +13020,10 @@ textarea,
   filter: drop-shadow(0 0 8px rgba(255, 138, 61, 0.12));
 }
 
+.gyro-provider-logo.is-kimi {
+  color: var(--gyro-provider-kimi);
+}
+
 .gyro-provider-logo.is-xai {
   color: var(--gyro-provider-xai);
 }
@@ -17196,6 +17202,226 @@ button.gyro-settings-row em::after {
   }
 }
 
+/* Native settings system: shared rails, controls, states, and provider rows. */
+.gyro-settings-section > header {
+  min-height: 74px;
+  padding: 0 8px 24px;
+}
+
+.gyro-settings-section > header strong {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.gyro-settings-section > header span {
+  display: block;
+  max-width: 720px;
+}
+
+.gyro-settings-group {
+  grid-template-columns: 160px minmax(0, 1fr);
+}
+
+.gyro-settings-group > h2 {
+  padding-inline: 8px 20px;
+}
+
+.gyro-settings-row,
+.gyro-settings-group .gyro-provider-row {
+  min-height: 64px;
+}
+
+:root[data-density="comfortable"] .gyro-settings-row,
+:root[data-density="comfortable"] .gyro-settings-group .gyro-provider-row,
+:root[data-density="comfortable"] .gyro-provider-table > .gyro-provider-row {
+  min-height: 76px;
+  padding-block: 15px;
+}
+
+.gyro-settings-row:hover,
+.gyro-settings-group .gyro-provider-row:hover,
+.gyro-provider-table > .gyro-provider-row:hover {
+  background: color-mix(in srgb, var(--gyro-text) 3.5%, transparent);
+  transform: none;
+}
+
+.gyro-settings-row:has(:focus-visible),
+.gyro-settings-group .gyro-provider-row:has(:focus-visible),
+.gyro-provider-table > .gyro-provider-row:has(:focus-visible) {
+  background: color-mix(in srgb, var(--gyro-accent) 6%, transparent);
+}
+
+.gyro-settings-status {
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.gyro-settings-status i {
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 9%, transparent);
+}
+
+.gyro-provider-table.is-native-list {
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-strong);
+}
+
+.gyro-provider-table.is-native-list > .gyro-provider-row {
+  transition: background-color 120ms ease;
+}
+
+.gyro-provider-table.is-native-list > .gyro-provider-row.is-readiness-only {
+  background: color-mix(in srgb, var(--gyro-pane) 26%, transparent);
+}
+
+.gyro-provider-identity {
+  align-items: center;
+  display: grid;
+  gap: 11px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.gyro-provider-identity > .gyro-provider-logo {
+  background: color-mix(in srgb, currentColor 9%, var(--gyro-pane));
+  border: 0.5px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 9px;
+  height: 34px;
+  padding: 7px;
+  width: 34px;
+}
+
+.gyro-provider-identity > .gyro-provider-logo > span {
+  border: 0;
+  font-size: 11px;
+  height: 19px;
+  width: 19px;
+}
+
+.gyro-provider-identity > div,
+.gyro-provider-capability {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-provider-identity strong,
+.gyro-provider-capability strong {
+  color: var(--gyro-text);
+  font-size: 12.5px;
+  font-weight: 590;
+}
+
+.gyro-provider-identity span,
+.gyro-provider-capability span {
+  color: var(--gyro-muted);
+  font-size: 10.75px;
+  line-height: 1.35;
+}
+
+.gyro-provider-capability span {
+  max-width: 210px;
+}
+
+.gyro-settings-provider-actions > button {
+  white-space: nowrap;
+}
+
+.gyro-settings-provider-actions .gyro-primary-button,
+.gyro-settings-provider-actions .gyro-secondary-button {
+  min-height: 30px;
+  padding-inline: 10px;
+}
+
+.gyro-settings-provider-actions .gyro-primary-button:disabled {
+  background: color-mix(in srgb, #48b87a 14%, var(--gyro-premium-control));
+  border-color: color-mix(in srgb, #48b87a 30%, var(--gyro-border));
+  color: color-mix(in srgb, #48b87a 76%, var(--gyro-text));
+  opacity: 1;
+}
+
+.gyro-provider-details > summary:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-provider-details[open] > summary {
+  background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
+}
+
+.gyro-provider-details > summary:focus-visible,
+.gyro-settings-provider-actions button:focus-visible,
+.gyro-settings-switch:focus-visible,
+.gyro-settings-segmented button:focus-visible,
+.gyro-resource-links a:focus-visible,
+.gyro-danger-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 78%, white 10%);
+  outline-offset: 2px;
+}
+
+.gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(in srgb, #d86464 24%, var(--gyro-premium-control));
+}
+
+:root[data-theme="light"] .gyro-provider-details > div,
+:root[data-theme="light"] .gyro-settings-confirm-overlay > section {
+  box-shadow: 0 14px 38px rgb(32 42 56 / 18%);
+}
+
+@media (max-width: 900px) {
+  .gyro-settings-surface {
+    padding-inline: 22px;
+  }
+
+  .gyro-settings-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gyro-settings-group > h2 {
+    padding: 14px 4px 10px;
+  }
+
+  .gyro-settings-group-rows {
+    border-left: 0;
+  }
+
+  .gyro-settings-row,
+  .gyro-settings-group .gyro-provider-row {
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 4px;
+  }
+
+  .gyro-settings-control-column {
+    border-left: 0;
+    justify-content: flex-start;
+    padding-left: 0;
+    width: 100%;
+  }
+
+  .gyro-provider-table.is-native-list > .gyro-provider-row {
+    align-items: start;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px 4px;
+  }
+
+  .gyro-provider-capability span {
+    max-width: none;
+  }
+
+  .gyro-settings-provider-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-provider-table.is-native-list > .gyro-provider-row,
+  .gyro-provider-details > summary,
+  .gyro-settings-provider-actions button {
+    transition: none;
+  }
+}
+
 /* Synara-level hero composer polish */
 .gyro-chat-start {
   grid-template-columns: minmax(0, 1fr);
@@ -20017,10 +20243,10 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   color: var(--gyro-text);
   display: flex;
-  font-size: 20px;
-  font-weight: 640;
+  font-size: 22px;
+  font-weight: 650;
   gap: 9px;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
   line-height: 1.2;
   margin: 0;
 }

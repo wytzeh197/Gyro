@@ -610,6 +610,40 @@ pub fn prepare_provider_mutation_transaction(
     })
 }
 
+pub fn prepare_provider_text_replacement_transaction(
+    workspace: &Path,
+    target: &Path,
+    desired: &str,
+) -> Result<PreparedProviderMutationTransaction> {
+    let workspace_path = workspace
+        .canonicalize()
+        .with_context(|| format!("resolve provider workspace {}", workspace.display()))?;
+    let relative_path = provider_relative_path(&workspace_path, target)?;
+    let change = if target.exists() {
+        let current = read_provider_mutation_file(target, &relative_path)?;
+        let current = String::from_utf8(current)
+            .with_context(|| format!("read provider mutation target {relative_path} as UTF-8"))?;
+        ProviderFileChange {
+            path: relative_path,
+            kind: ProviderFileChangeKind {
+                change_type: "update".into(),
+                move_path: None,
+            },
+            diff: diffy::create_patch(&current, desired).to_string(),
+        }
+    } else {
+        ProviderFileChange {
+            path: relative_path,
+            kind: ProviderFileChangeKind {
+                change_type: "create".into(),
+                move_path: None,
+            },
+            diff: desired.to_string(),
+        }
+    };
+    prepare_provider_mutation_transaction(&workspace_path, &[change])
+}
+
 pub fn prepare_claude_provider_mutation_transaction(
     workspace: &Path,
     tool_name: &str,
