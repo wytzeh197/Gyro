@@ -9609,6 +9609,7 @@ export function SettingsSurface({
                 aria-label="Theme"
               >
                 <button
+                  aria-pressed={themeMode === "dark"}
                   className={themeMode === "dark" ? "is-active" : ""}
                   onClick={() => onThemeChange("dark")}
                   type="button"
@@ -9617,6 +9618,7 @@ export function SettingsSurface({
                   <span>Dark</span>
                 </button>
                 <button
+                  aria-pressed={themeMode === "light"}
                   className={themeMode === "light" ? "is-active" : ""}
                   onClick={() => onThemeChange("light")}
                   type="button"
@@ -10393,10 +10395,10 @@ function SettingsSection({
     <section className="gyro-settings-section">
       <header>
         <div>
-          <strong>
+          <h1>
             <Icon aria-hidden="true" size={18} />
             {title}
-          </strong>
+          </h1>
           <span>{description}</span>
         </div>
       </header>
@@ -10456,7 +10458,7 @@ function SettingsGroup({
 }) {
   return (
     <section className="gyro-settings-group">
-      <h3>{label}</h3>
+      <h2>{label}</h2>
       <div className="gyro-settings-group-rows">{children}</div>
     </section>
   );
