@@ -150,6 +150,8 @@ import {
 } from "./workbench-state";
 import {
   getProviderModel,
+  isProviderExecutable,
+  providerCapabilities,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
@@ -9805,85 +9807,95 @@ export function SettingsSurface({
             title="Providers"
             description="Connect model providers separately from local Gyro access; credentials stay in provider CLI, SDK, Keychain, or env storage."
           >
-            <div className="gyro-provider-table">
+            <div className="gyro-provider-table is-native-list">
               <div className="gyro-provider-table-head">
                 <span>Provider</span>
                 <span>Connection</span>
-                <span>Source</span>
+                <span>Capability</span>
                 <span>Actions</span>
               </div>
-              {[...enabledProviders, ...disabledProviders].map((provider) => (
-                <div className="gyro-provider-row" key={provider.id}>
-                  <div className="gyro-provider-identity">
-                    <strong>{provider.displayName}</strong>
-                  </div>
-                  <SettingsStatus
-                    status={
-                      provider.authStatus === "connected"
-                        ? "good"
-                        : provider.authStatus === "connecting"
-                          ? "warning"
-                          : "neutral"
-                    }
+              {[...enabledProviders, ...disabledProviders].map((provider) => {
+                const capabilities = providerCapabilities(provider.id);
+                return (
+                  <div
+                    className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}`}
+                    key={provider.id}
                   >
-                    {providerConnectionLabel(provider)}
-                  </SettingsStatus>
-                  <span className="gyro-provider-source">
-                    {providerAuthSummary(provider.id)}
-                  </span>
-                  <div className="gyro-settings-provider-actions">
-                    <button
-                      className={
-                        provider.authStatus === "connected"
-                          ? "gyro-secondary-button"
-                          : "gyro-primary-button"
-                      }
-                      disabled={provider.authStatus === "connecting"}
-                      onClick={() =>
-                        provider.authStatus === "connected"
-                          ? onTestProvider?.(provider.id)
-                          : onToggleProvider?.(provider.id)
-                      }
-                      type="button"
-                    >
-                      {provider.authStatus === "connected"
-                        ? "Test connection"
-                        : provider.authMode === "env"
-                          ? "Check environment"
-                          : "Connect"}
-                    </button>
-                    <details className="gyro-provider-details">
-                      <summary aria-label={`${provider.displayName} details`}>
-                        <MoreHorizontal size={16} />
-                      </summary>
+                    <div className="gyro-provider-identity">
+                      <ProviderLogo providerId={provider.id} />
                       <div>
-                        <strong>Technical details</strong>
-                        <code>{provider.apiKeyRef}</code>
-                        <span>
-                          {provider.authMode.toUpperCase()} authentication
-                        </span>
-                        {provider.authStatus === "connected" ? (
-                          <button
-                            className="gyro-danger-button"
-                            onClick={() => onToggleProvider?.(provider.id)}
-                            type="button"
-                          >
-                            Disable in Gyro
-                          </button>
-                        ) : (
-                          <button
-                            className="gyro-secondary-button"
-                            onClick={() => onTestProvider?.(provider.id)}
-                            type="button"
-                          >
-                            Test connection
-                          </button>
-                        )}
+                        <strong>{provider.displayName}</strong>
+                        <span>{selectedModelLabel(provider)}</span>
                       </div>
-                    </details>
+                    </div>
+                    <SettingsStatus
+                      status={
+                        provider.authStatus === "connected"
+                          ? "good"
+                          : provider.authStatus === "connecting"
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
+                      {providerConnectionLabel(provider)}
+                    </SettingsStatus>
+                    <div className="gyro-provider-capability">
+                      <strong>
+                        {capabilities?.executable
+                          ? "Runs in Gyro"
+                          : "Readiness only"}
+                      </strong>
+                      <span>{providerAuthSummary(provider.id)}</span>
+                    </div>
+                    <div className="gyro-settings-provider-actions">
+                      <button
+                        className="gyro-primary-button"
+                        disabled={
+                          provider.authStatus === "connecting" ||
+                          provider.authStatus === "connected"
+                        }
+                        onClick={() => onToggleProvider?.(provider.id)}
+                        type="button"
+                      >
+                        {provider.authStatus === "connected"
+                          ? "Connected"
+                          : provider.authMode === "env"
+                            ? "Check environment"
+                            : providerPrimaryActionLabel(provider)}
+                      </button>
+                      <button
+                        className="gyro-secondary-button"
+                        disabled={provider.authStatus === "connecting"}
+                        onClick={() => onTestProvider?.(provider.id)}
+                        type="button"
+                      >
+                        {providerTestActionLabel(provider)}
+                      </button>
+                      <details className="gyro-provider-details">
+                        <summary aria-label={`${provider.displayName} details`}>
+                          <MoreHorizontal size={16} />
+                        </summary>
+                        <div>
+                          <strong>Technical details</strong>
+                          <code>{provider.apiKeyRef}</code>
+                          <span>
+                            {provider.authMode.toUpperCase()} authentication
+                          </span>
+                          {provider.authStatus === "connected" ? (
+                            <button
+                              className="gyro-danger-button"
+                              onClick={() => onToggleProvider?.(provider.id)}
+                              type="button"
+                            >
+                              Disable in Gyro
+                            </button>
+                          ) : null}
+                        </div>
+                      </details>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </SettingsSection>
         ) : null}
@@ -10882,6 +10894,9 @@ function providerAuthOwnershipDetail(providerId: ProviderId) {
   if (providerId === "anthropic") {
     return "Uses Claude Code login and claude auth status so Pro, Max, Team, or Enterprise subscriptions stay Anthropic-owned.";
   }
+  if (providerId === "kimi") {
+    return "Uses the local Kimi Code OAuth session. Kimi tokens and account data stay in Kimi-owned storage.";
+  }
   if (providerId === "xai") {
     return "Uses XAI_API_KEY from the local environment; Grok API keys and team billing stay with xAI.";
   }
@@ -10897,6 +10912,9 @@ function providerAuthSummary(providerId: ProviderId) {
   }
   if (providerId === "anthropic") {
     return "Claude Code auth";
+  }
+  if (providerId === "kimi") {
+    return "Kimi Code sign-in";
   }
   if (providerId === "xai") {
     return "XAI_API_KEY";
@@ -10924,6 +10942,9 @@ function providerConnectionLabel(provider: {
   if (provider.authStatus === "connected" && provider.id === "anthropic") {
     return "verified via Claude Code";
   }
+  if (provider.authStatus === "connected" && provider.id === "kimi") {
+    return "verified via Kimi Code";
+  }
   if (provider.authStatus === "connected") {
     return "verified";
   }
@@ -10936,6 +10957,9 @@ function providerConnectedHealthCopy(provider: { id: ProviderId }) {
   }
   if (provider.id === "anthropic") {
     return "Anthropic is available through the local Claude Code sign-in on this Mac.";
+  }
+  if (provider.id === "kimi") {
+    return "Kimi is available through the local Kimi Code sign-in on this Mac.";
   }
   return "Provider-owned credentials were verified on this Mac.";
 }
@@ -10954,6 +10978,9 @@ function providerPrimaryActionLabel(provider: {
   if (provider.id === "openai") {
     return "Use Codex sign-in";
   }
+  if (provider.id === "kimi") {
+    return "Use Kimi sign-in";
+  }
   if (provider.authMode === "cli") {
     return "Start CLI sign-in";
   }
@@ -10969,6 +10996,9 @@ function providerTestActionLabel(provider: {
 }) {
   if (provider.id === "openai") {
     return "Test Codex";
+  }
+  if (provider.id === "kimi") {
+    return "Test Kimi";
   }
   if (provider.authMode === "cli") {
     return "Test CLI";
@@ -11010,6 +11040,18 @@ function ProviderLogo({ providerId }: { providerId: ProviderId }) {
             fill="currentColor"
           />
         </svg>
+      </span>
+    );
+  }
+
+  if (providerId === "kimi") {
+    return (
+      <span
+        aria-hidden="true"
+        className="gyro-provider-logo is-kimi"
+        title="Kimi"
+      >
+        <span>K</span>
       </span>
     );
   }
@@ -11149,11 +11191,13 @@ function estimateComposerContextUsage(
   const defaultContextWindowTokens =
     providerId === "anthropic"
       ? 200_000
-      : providerId === "gemini"
+      : providerId === "kimi"
         ? 1_000_000
-        : providerId === "xai"
-          ? 131_072
-          : 128_000;
+        : providerId === "gemini"
+          ? 1_000_000
+          : providerId === "xai"
+            ? 131_072
+            : 128_000;
   const reportedUsage = events
     .slice()
     .reverse()
@@ -11406,20 +11450,22 @@ function Composer({
           },
         ]
       : []),
-    ...providerConfigs.map((provider) => {
-      const isConnected = provider.authStatus === "connected";
-      return {
-        action: isConnected ? `select-provider:${provider.id}` : undefined,
-        active: isConnected && provider.id === config.selectedProviderId,
-        disabled: !isConnected,
-        icon: isConnected ? Bot : KeyRound,
-        kind: "provider" as const,
-        label: provider.displayName,
-        providerId: provider.id,
-        showChevron: isConnected,
-        trailingLabel: isConnected ? undefined : "Unavailable",
-      };
-    }),
+    ...providerConfigs
+      .filter((provider) => isProviderExecutable(provider.id))
+      .map((provider) => {
+        const isConnected = provider.authStatus === "connected";
+        return {
+          action: isConnected ? `select-provider:${provider.id}` : undefined,
+          active: isConnected && provider.id === config.selectedProviderId,
+          disabled: !isConnected,
+          icon: isConnected ? Bot : KeyRound,
+          kind: "provider" as const,
+          label: provider.displayName,
+          providerId: provider.id,
+          showChevron: isConnected,
+          trailingLabel: isConnected ? undefined : "Unavailable",
+        };
+      }),
   ];
   const providerModelItems: ComposerPopoverItem[] = [
     ...(modelPickerProvider
@@ -14451,6 +14497,15 @@ function commandProfilesWithDefaults(
       command: "claude",
       args: ["--continue"],
       workingDirectory: "Workspace",
+    },
+    {
+      id: "kimi-code",
+      displayName: "Kimi Code",
+      command: "kimi",
+      args: [],
+      workingDirectory: "Workspace",
+      providerId: "kimi",
+      defaultModel: "k3",
     },
     {
       id: "cursor",
