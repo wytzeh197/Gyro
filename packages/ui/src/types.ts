@@ -285,7 +285,20 @@ export type ProviderConnectionStatus =
   "not-configured" | "checking" | "connected" | "failed" | "disconnected";
 
 export type ProviderId =
-  "openai" | "anthropic" | "xai" | "cursor" | "gemini" | "opencode";
+  "openai" | "anthropic" | "kimi" | "xai" | "cursor" | "gemini" | "opencode";
+
+export type ProviderExecutionKind =
+  "codex-cli" | "claude-code" | "kimi-acp" | "readiness-only";
+
+export type ProviderCapabilities = {
+  executionKind: ProviderExecutionKind;
+  executable: boolean;
+  supportsApprovals: boolean;
+  supportsImages: boolean;
+  supportsResume: boolean;
+  supportsUsage: boolean;
+  visibility: "standard" | "readiness-only";
+};
 
 export type ProviderAuthMode = "cli" | "env" | "sdk";
 
@@ -894,6 +907,7 @@ export type ModelProviderConfig = {
   models: ProviderModel[];
   selectedModelId?: string;
   selectedReasoningEffort?: ReasoningEffort;
+  capabilities?: ProviderCapabilities;
 };
 
 export type GyroAccountStatus =

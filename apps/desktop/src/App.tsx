@@ -30,12 +30,14 @@ import {
   defaultCommandProfiles,
   getProviderModel,
   isProviderId,
+  isProviderExecutable,
   isProviderRuntimeUsable,
   normalizeCliLaunchPreset,
   normalizedConfig,
   parseProviderHealthOutput,
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
+  providerSupportsUsage,
   providersForConfig,
   sanitizeStoredIdeState,
   selectedReasoningEffort,
@@ -325,7 +327,6 @@ const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
 const PROVIDER_STREAM_FLUSH_MS = 80;
-const EXECUTABLE_PROVIDER_IDS = new Set<ProviderId>(["openai", "anthropic"]);
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
@@ -395,6 +396,15 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
       command: "opencode",
       displayName: "OpenCode Login",
       id: "opencode-login",
+      workingDirectory: null,
+    };
+  }
+  if (providerId === "kimi") {
+    return {
+      args: ["login"],
+      command: "kimi",
+      displayName: "Kimi Login",
+      id: "kimi-login",
       workingDirectory: null,
     };
   }
@@ -840,7 +850,7 @@ export function App() {
         },
       }));
 
-      if (providerId !== "openai") {
+      if (!providerSupportsUsage(providerId)) {
         setProviderUsageByProvider((current) => ({
           ...current,
           [providerId]: {
@@ -1019,7 +1029,7 @@ export function App() {
           (status) => status.id === provider.id,
         );
         return (
-          EXECUTABLE_PROVIDER_IDS.has(provider.id) &&
+          isProviderExecutable(provider.id) &&
           isProviderRuntimeUsable(provider, health)
         );
       });
@@ -1044,7 +1054,7 @@ export function App() {
       const message =
         targetProviderId &&
         (!isProviderId(targetProviderId) ||
-          !EXECUTABLE_PROVIDER_IDS.has(targetProviderId))
+          !isProviderExecutable(targetProviderId))
           ? `${targetProvider ?? targetProviderId} is visible for readiness only and cannot execute ${intent} runs`
           : targetProvider
             ? `${targetProvider} is not connected yet`
@@ -6536,11 +6546,11 @@ export function App() {
       providerConfigs.find(
         (item) => item.id === config.selectedProviderId && item.enabled,
       ) ?? providerConfigs.find((item) => item.enabled);
-    if (!provider || !EXECUTABLE_PROVIDER_IDS.has(provider.id)) {
+    if (!provider || !isProviderExecutable(provider.id)) {
       notify(
         "provider",
         "Connect a provider first",
-        "Automations currently run through OpenAI Codex or Anthropic Claude",
+        "Automations run through a connected executable provider",
       );
       return;
     }
@@ -7001,8 +7011,7 @@ export function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     const providers = providersForConfig(config).filter(
-      (provider) =>
-        provider.enabled && EXECUTABLE_PROVIDER_IDS.has(provider.id),
+      (provider) => provider.enabled && isProviderExecutable(provider.id),
     );
     if (providers.length === 0) return;
     let cancelled = false;
@@ -8999,6 +9008,7 @@ function loadInitialWorkbenchState(): WorkbenchState {
               .map((provider) =>
                 provider.id === "openai" ||
                 provider.id === "anthropic" ||
+                provider.id === "kimi" ||
                 provider.id === "xai" ||
                 provider.id === "gemini"
                   ? { ...provider, connectionStatus: "not-configured" as const }
@@ -11145,28 +11155,23 @@ function approvalNotificationCopy(
   config: GyroConfig,
   mode: "direct" | "gated",
 ) {
-  const isAnthropic = config.selectedProviderId === "anthropic";
+  const providerName =
+    config.selectedProviderId === "anthropic"
+      ? "Claude"
+      : config.selectedProviderId === "kimi"
+        ? "Kimi"
+        : "Codex";
   if (mode === "gated") {
-    return isAnthropic
-      ? {
-          title: "Ask first",
-          detail: "Claude will ask before tool use and file edits.",
-        }
-      : {
-          title: "Approval gated",
-          detail: "Codex will ask before commands and file edits.",
-        };
+    return {
+      title: "Ask first",
+      detail: `${providerName} will ask before commands and file edits.`,
+    };
   }
 
-  return isAnthropic
-    ? {
-        title: "Auto-approve",
-        detail: "Claude can use tools and apply edits without prompts.",
-      }
-    : {
-        title: "Full access",
-        detail: "Codex can run commands and apply edits without prompts.",
-      };
+  return {
+    title: "Full access",
+    detail: `${providerName} can run commands and apply edits without prompts.`,
+  };
 }
 
 function createProviderHealthOutput(
@@ -11182,6 +11187,8 @@ function createProviderHealthOutput(
       return "codex auth status: authenticated; model probe ok";
     case "anthropic":
       return "claude auth status: authenticated; local credential metadata verified";
+    case "kimi":
+      return "Kimi Code ACP authenticated; provider-owned token value was not read by Gyro.";
     case "xai":
       return "xai provider-env auth available; XAI_API_KEY is set; value not read by Gyro.";
     case "cursor":
