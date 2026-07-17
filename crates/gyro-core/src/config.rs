@@ -91,6 +91,8 @@ pub struct GyroConfig {
     pub require_command_approval: bool,
     pub require_file_edit_approval: bool,
     #[serde(default)]
+    pub full_access: bool,
+    #[serde(default)]
     pub account_oidc: AccountOidcConfig,
     #[serde(default)]
     pub account_session: AccountSessionState,
@@ -105,6 +107,7 @@ impl Default for GyroConfig {
             telemetry_enabled: false,
             require_command_approval: true,
             require_file_edit_approval: true,
+            full_access: false,
             account_oidc: AccountOidcConfig::default(),
             account_session: AccountSessionState::default(),
             model_providers: vec![
@@ -467,6 +470,7 @@ mod tests {
         assert!(!config.telemetry_enabled);
         assert!(config.require_command_approval);
         assert!(config.require_file_edit_approval);
+        assert!(!config.full_access);
         assert!(config.automatic_update_checks);
         assert_eq!(
             config.account_oidc.scopes,

@@ -328,6 +328,7 @@ export type ProviderModel = {
   id: string;
   displayName: string;
   description?: string;
+  contextWindowTokens?: number;
   defaultReasoningEffort?: ReasoningEffort;
   supportedReasoningEfforts?: ReasoningEffort[];
 };
@@ -466,6 +467,7 @@ export type SessionPlanItem = {
 export type SessionPlan = {
   sessionId?: string;
   title: string;
+  content?: string;
   items: SessionPlanItem[];
   sourceTurnId?: string;
   providerId?: string;
@@ -935,6 +937,7 @@ export type GyroConfig = {
   telemetryEnabled: boolean;
   requireCommandApproval: boolean;
   requireFileEditApproval: boolean;
+  fullAccess?: boolean;
   accountOidc?: GyroAccountOidcConfig;
   accountSession?: GyroAccountSession;
   selectedProviderId?: ProviderId;

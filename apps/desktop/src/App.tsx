@@ -220,16 +220,20 @@ type ChatTurnContextSnapshot = {
   sessionModel?: SessionModelSelection;
   requireCommandApproval?: boolean;
   requireFileEditApproval?: boolean;
+  fullAccess?: boolean;
   workspacePath?: string;
   preserveDraft?: boolean;
+  turnId?: string;
   retryTurnId?: string;
 };
 
 type QueuedChatMessage = {
+  deliveryAttempts?: number;
   id: string;
   message: string;
   context: ChatTurnContextSnapshot;
-  status: "waiting" | "sending";
+  retryAt?: number;
+  status: "failed" | "waiting" | "sending";
 };
 
 type WorkspaceFileWriteRequest = {
@@ -296,6 +300,7 @@ const EMPTY_CONFIG: GyroConfig = {
   telemetryEnabled: false,
   requireCommandApproval: true,
   requireFileEditApproval: true,
+  fullAccess: false,
   accountOidc: {
     issuerUrl: "local-device://gyro",
     clientId: "gyro-local-device",
@@ -614,6 +619,8 @@ export function App() {
   const sendingSessionIdsRef = useRef(new Set<string>());
   const queuedChatDispatchesRef = useRef(new Set<string>());
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
+  const persistedChatTurnIdsRef = useRef(new Set<string>());
+  const [queueRetryTick, setQueueRetryTick] = useState(0);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [planEditorRequest, setPlanEditorRequest] = useState<{
@@ -804,7 +811,7 @@ export function App() {
       workbench.preferences.lastSettingsSection !== "permissions" ||
       !isTauriRuntime()
     ) {
-      return;
+      return undefined;
     }
     void invoke<NotificationPermissionState>("get_notification_permission")
       .then(setNotificationPermission)
@@ -930,7 +937,7 @@ export function App() {
       workbench.preferences.lastSettingsSection !== "usage-limits" ||
       !selectedUsageProviderId
     ) {
-      return;
+      return undefined;
     }
     void refreshProviderUsage(selectedUsageProviderId);
   }, [
@@ -2540,6 +2547,56 @@ export function App() {
       }
     },
     [activeSession?.workspacePath, openSourceControlDiffForRoot, workspacePath],
+  );
+
+  const loadInlineChangeDiff = useCallback(
+    async (path: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root) {
+        throw new Error("Open a workspace to inspect this change.");
+      }
+      if (!isTauriRuntime()) {
+        return `diff --git a/${path} b/${path}\n@@ Preview @@\n+Inline diff preview for ${path}`;
+      }
+
+      const normalizedPath = path.replaceAll("\\", "/");
+      const file = workbench.ide.sourceControl.files.find(
+        (item) => item.path.replaceAll("\\", "/") === normalizedPath,
+      );
+      const requests: Array<Promise<IdeCommandOutput>> = [];
+      if (file?.staged) {
+        requests.push(
+          invoke<IdeCommandOutput>("git_diff", {
+            request: { workspacePath: root, path, staged: true },
+          }),
+        );
+      }
+      requests.push(
+        invoke<IdeCommandOutput>("git_diff", {
+          request: { workspacePath: root, path, staged: false },
+        }),
+      );
+      const outputs = await Promise.all(requests);
+      const diff = outputs
+        .map((output) => output.stdout || output.stderr)
+        .filter((output) => output.trim())
+        .join("\n");
+      if (diff) return diff;
+
+      if (file?.state === "untracked" || file?.state === "added") {
+        const content = await invoke<WorkspaceFileContent>(
+          "read_workspace_file_full",
+          { workspacePath: root, path },
+        );
+        return untrackedWorkspaceFileDiff(path, content);
+      }
+      return "No changes to display.";
+    },
+    [
+      activeSession?.workspacePath,
+      workspacePath,
+      workbench.ide.sourceControl.files,
+    ],
   );
 
   const reviewTerminalChanges = useCallback(
@@ -4326,9 +4383,22 @@ export function App() {
             ...config,
             requireCommandApproval: true,
             requireFileEditApproval: true,
+            fullAccess: false,
           });
           {
             const copy = approvalNotificationCopy(config, "gated");
+            notify("terminal", copy.title, copy.detail);
+          }
+          break;
+        case "set-approval-auto":
+          void persistConfig({
+            ...config,
+            requireCommandApproval: false,
+            requireFileEditApproval: false,
+            fullAccess: false,
+          });
+          {
+            const copy = approvalNotificationCopy(config, "auto");
             notify("terminal", copy.title, copy.detail);
           }
           break;
@@ -4337,6 +4407,7 @@ export function App() {
             ...config,
             requireCommandApproval: false,
             requireFileEditApproval: false,
+            fullAccess: true,
           });
           {
             const copy = approvalNotificationCopy(config, "direct");
@@ -4450,6 +4521,8 @@ export function App() {
       const requireFileEditApproval =
         overrideContext?.requireFileEditApproval ??
         config.requireFileEditApproval;
+      const fullAccess =
+        overrideContext?.fullAccess ?? Boolean(config.fullAccess);
       const chatWorkspacePath =
         overrideContext?.workspacePath ??
         activeSession?.workspacePath ??
@@ -4496,6 +4569,7 @@ export function App() {
           return false;
         }
         const queuedMessage: QueuedChatMessage = {
+          deliveryAttempts: 0,
           id: `queued-${createTurnId()}`,
           message,
           status: "waiting",
@@ -4512,6 +4586,8 @@ export function App() {
             sessionModel: { ...sessionModel },
             requireCommandApproval,
             requireFileEditApproval,
+            fullAccess,
+            turnId: createTurnId(),
             workspacePath: chatWorkspacePath,
           },
         };
@@ -4555,7 +4631,7 @@ export function App() {
         return false;
       }
       const retryTurnId = overrideContext?.retryTurnId;
-      const turnId = retryTurnId ?? createTurnId();
+      const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
       setTurnSourceControlBaselines((current) => {
         if (current[turnId]) {
           return current;
@@ -4626,7 +4702,7 @@ export function App() {
         }
 
         let optimisticSessionId = session.id;
-        let didPersistUserMessage = false;
+        let didDeliverProviderResponse = false;
         try {
           await waitForNextPaint();
           const persistedSession = await createTauriThreadSession(
@@ -4727,6 +4803,7 @@ export function App() {
                 payload: {
                   action: "replace",
                   title: turnPlan.title,
+                  content: turnPlan.content,
                   items: turnPlan.items,
                 },
               }),
@@ -4751,7 +4828,7 @@ export function App() {
             message,
             turnId,
           });
-          didPersistUserMessage = true;
+          persistedChatTurnIdsRef.current.add(turnId);
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
             {
@@ -4770,6 +4847,7 @@ export function App() {
                 reasoningEffort: sessionModel.reasoningEffort,
                 requireCommandApproval,
                 requireFileEditApproval,
+                fullAccess,
                 mode: turnMode,
                 goal: turnGoal?.text ? turnGoal : undefined,
                 plan: turnPlan.items.length ? turnPlan : undefined,
@@ -4780,6 +4858,8 @@ export function App() {
             },
           );
           applyProviderChatResponse(persistedSession.id, providerResponse);
+          didDeliverProviderResponse = true;
+          persistedChatTurnIdsRef.current.delete(turnId);
           setPendingNewChatGoal(undefined);
           setPendingNewChatMode("normal");
           setPendingNewChatPlan({ title: "Plan", items: [] });
@@ -4816,7 +4896,7 @@ export function App() {
           setSessionSending(sendingSessionId, false);
           setIsStartingFirstTurn(false);
         }
-        return didPersistUserMessage;
+        return didDeliverProviderResponse;
       }
 
       const optimisticEvents = isRetry
@@ -4882,7 +4962,7 @@ export function App() {
         notify("terminal", "Message added", "Local optimistic event");
         return true;
       }
-      let didPersistUserMessage = isRetry;
+      let didDeliverProviderResponse = false;
       try {
         await waitForNextPaint();
         if (!isRetry) {
@@ -4892,7 +4972,7 @@ export function App() {
             message,
             turnId,
           });
-          didPersistUserMessage = true;
+          persistedChatTurnIdsRef.current.add(turnId);
         }
         const providerResponse = await invoke<ProviderChatResponse>(
           "run_provider_chat",
@@ -4912,6 +4992,7 @@ export function App() {
               reasoningEffort: sessionModel.reasoningEffort,
               requireCommandApproval,
               requireFileEditApproval,
+              fullAccess,
               mode: turnMode,
               goal: turnGoal?.text ? turnGoal : undefined,
               plan: turnPlan.items.length ? turnPlan : undefined,
@@ -4922,6 +5003,8 @@ export function App() {
           },
         );
         applyProviderChatResponse(activeSessionId, providerResponse);
+        didDeliverProviderResponse = true;
+        persistedChatTurnIdsRef.current.delete(turnId);
         optimisticEventsRef.current.delete(activeSessionId);
       } catch (error) {
         const errorMessage = String(error);
@@ -4952,7 +5035,7 @@ export function App() {
       } finally {
         setSessionSending(activeSessionId, false);
       }
-      return didPersistUserMessage;
+      return didDeliverProviderResponse;
     },
     [
       activeSessionId,
@@ -5016,11 +5099,21 @@ export function App() {
       sendingSessionIdsRef.current.has(activeSessionId) ||
       queuedChatDispatchesRef.current.has(activeSessionId)
     ) {
-      return;
+      return undefined;
     }
-    const nextMessage = chatMessageQueues[activeSessionId]?.[0];
+    const nextMessage = chatMessageQueues[activeSessionId]?.find(
+      (message) => message.status !== "failed",
+    );
     if (!nextMessage) {
-      return;
+      return undefined;
+    }
+    const retryDelay = (nextMessage.retryAt ?? 0) - Date.now();
+    if (retryDelay > 0) {
+      const timer = window.setTimeout(
+        () => setQueueRetryTick((current) => current + 1),
+        retryDelay,
+      );
+      return () => window.clearTimeout(timer);
     }
     queuedChatDispatchesRef.current.add(activeSessionId);
     queuedChatDispatchMessageIdsRef.current.set(
@@ -5044,26 +5137,59 @@ export function App() {
     })
       .then((accepted) => {
         if (!accepted) {
+          const willRetry = (nextMessage.deliveryAttempts ?? 0) + 1 < 2;
           setChatMessageQueues((current) => {
             const queued = current[activeSessionId] ?? [];
             if (queued.some((item) => item.id === nextMessage.id)) {
               return current;
             }
+            const deliveryAttempts = (nextMessage.deliveryAttempts ?? 0) + 1;
+            const stableTurnId =
+              nextMessage.context.retryTurnId ?? nextMessage.context.turnId;
+            const didPersist = Boolean(
+              stableTurnId && persistedChatTurnIdsRef.current.has(stableTurnId),
+            );
+            const shouldRetry = deliveryAttempts < 2;
             return {
               ...current,
               [activeSessionId]: [
-                { ...nextMessage, status: "waiting" },
+                {
+                  ...nextMessage,
+                  context: {
+                    ...nextMessage.context,
+                    retryTurnId: didPersist ? stableTurnId : undefined,
+                    turnId: didPersist ? undefined : stableTurnId,
+                  },
+                  deliveryAttempts,
+                  retryAt: shouldRetry ? Date.now() + 1_500 : undefined,
+                  status: shouldRetry ? "waiting" : "failed",
+                },
                 ...queued,
               ],
             };
           });
+          notify(
+            "command-failed",
+            willRetry ? "Queued delivery delayed" : "Queued delivery failed",
+            willRetry
+              ? "Gyro kept the message and will retry it once."
+              : "Gyro kept the message in the queue. Retry, edit, or delete it.",
+          );
         }
       })
       .finally(() => {
         queuedChatDispatchesRef.current.delete(activeSessionId);
         queuedChatDispatchMessageIdsRef.current.delete(activeSessionId);
       });
-  }, [activeSessionId, chatMessageQueues, sendDraft, sendingSessionIds]);
+    return undefined;
+  }, [
+    activeSessionId,
+    chatMessageQueues,
+    notify,
+    queueRetryTick,
+    sendDraft,
+    sendingSessionIds,
+  ]);
 
   const removeQueuedChatMessage = useCallback(
     (messageId: string) => {
@@ -5094,6 +5220,58 @@ export function App() {
       });
     },
     [activeSessionId, notify],
+  );
+
+  const editQueuedChatMessage = useCallback(
+    (messageId: string) => {
+      if (!activeSessionId) {
+        return;
+      }
+      if (
+        queuedChatDispatchMessageIdsRef.current.get(activeSessionId) ===
+        messageId
+      ) {
+        notify(
+          "terminal",
+          "Message already sending",
+          "Stop the active response before editing this queued turn.",
+        );
+        return;
+      }
+      const selected = (chatMessageQueues[activeSessionId] ?? []).find(
+        (item) => item.id === messageId,
+      );
+      if (!selected) {
+        return;
+      }
+      setChatDrafts((current) => ({
+        ...current,
+        [activeDraftKey]: selected.message,
+      }));
+      setChatAttachments((current) => ({
+        ...current,
+        [activeDraftKey]: (selected.context.attachments ?? []).map(
+          (attachment) => ({ ...attachment }),
+        ),
+      }));
+      setChatMessageQueues((current) => {
+        const remaining = (current[activeSessionId] ?? []).filter(
+          (item) => item.id !== messageId,
+        );
+        if (remaining.length === 0) {
+          const next = { ...current };
+          delete next[activeSessionId];
+          return next;
+        }
+        return { ...current, [activeSessionId]: remaining };
+      });
+      notify(
+        "terminal",
+        "Editing queued message",
+        "The message is back in the composer.",
+      );
+    },
+    [activeDraftKey, activeSessionId, chatMessageQueues, notify],
   );
 
   const handleProviderStatusAction = useCallback(
@@ -5127,6 +5305,21 @@ export function App() {
       }
 
       if (action === "retry-send" && userMessage) {
+        if (turnId) {
+          setChatMessageQueues((current) => {
+            const queued = current[event.sessionId] ?? [];
+            const remaining = queued.filter(
+              (item) =>
+                item.context.retryTurnId !== turnId &&
+                item.context.turnId !== turnId,
+            );
+            if (remaining.length === queued.length) return current;
+            const next = { ...current };
+            if (remaining.length) next[event.sessionId] = remaining;
+            else delete next[event.sessionId];
+            return next;
+          });
+        }
         const userPayload = recordFromUnknown(userEvent?.payload);
         const attachments = Array.isArray(userPayload?.attachments)
           ? (userPayload.attachments as ChatAttachment[])
@@ -5285,7 +5478,12 @@ export function App() {
         return {
           ...current,
           [activeSessionId]: [
-            selected,
+            {
+              ...selected,
+              deliveryAttempts: 0,
+              retryAt: undefined,
+              status: "waiting",
+            },
             ...queued.filter((item) => item.id !== messageId),
           ],
         };
@@ -8385,6 +8583,8 @@ export function App() {
                 }
                 onGoalAction={changeGoal}
                 onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                onLoadChangeDiff={loadInlineChangeDiff}
+                onEditQueuedMessage={editQueuedChatMessage}
                 onRemoveQueuedMessage={removeQueuedChatMessage}
                 onSteerQueuedMessage={steerQueuedChatMessage}
                 onMutationApprovalAction={handleMutationApprovalAction}
@@ -8403,6 +8603,7 @@ export function App() {
                 providerReadiness={workbench.providerReadiness}
                 queuedMessages={activeQueuedChatMessages.map((item) => ({
                   attachmentCount: item.context.attachments?.length ?? 0,
+                  hasFailed: item.status === "failed",
                   id: item.id,
                   isDispatching: item.status === "sending",
                   message: item.message,
@@ -8788,6 +8989,7 @@ export function App() {
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
           onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+          onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
           onSteerQueuedMessage={steerQueuedChatMessage}
           onMutationApprovalAction={handleMutationApprovalAction}
@@ -8813,6 +9015,7 @@ export function App() {
           providerReadiness={workbench.providerReadiness}
           queuedMessages={activeQueuedChatMessages.map((item) => ({
             attachmentCount: item.context.attachments?.length ?? 0,
+            hasFailed: item.status === "failed",
             id: item.id,
             isDispatching: item.status === "sending",
             message: item.message,
@@ -10327,6 +10530,16 @@ function deriveSessionPlan(
   events: SessionEvent[],
   sessionId?: string,
 ): SessionPlan {
+  const assistantContentByTurnId = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind !== "assistant-message" || !event.message.trim()) {
+      continue;
+    }
+    const turnId = turnIdFromSessionEvent(event);
+    if (turnId) {
+      assistantContentByTurnId.set(turnId, event.message.trim());
+    }
+  }
   let plan: SessionPlan = {
     sessionId,
     title: "Plan",
@@ -10346,10 +10559,19 @@ function deriveSessionPlan(
       turnIdFromSessionEvent(event) ?? stringFromRecord(payload, "turnId");
     const providerId = stringFromRecord(payload, "providerId");
     const title = stringFromRecord(payload, "title");
+    const content =
+      stringFromRecord(payload, "content") ??
+      stringFromRecord(payload, "markdown") ??
+      (action === "replace" && sourceTurnId
+        ? assistantContentByTurnId.get(sourceTurnId)
+        : undefined);
     if (title) {
       plan = { ...plan, title };
     }
-    if (sourceTurnId) {
+    if (content) {
+      plan = { ...plan, content };
+    }
+    if (sourceTurnId && (action === "replace" || !plan.sourceTurnId)) {
       plan = { ...plan, sourceTurnId };
     }
     if (providerId) {
@@ -10357,7 +10579,12 @@ function deriveSessionPlan(
     }
 
     if (action === "clear") {
-      plan = { ...plan, items: [], updatedAt: event.createdAt };
+      plan = {
+        ...plan,
+        content: undefined,
+        items: [],
+        updatedAt: event.createdAt,
+      };
       continue;
     }
 
@@ -10625,6 +10852,19 @@ function workspaceContentToEditorBuffer(
     status: "ready",
     updatedAt: new Date().toISOString(),
   };
+}
+
+function untrackedWorkspaceFileDiff(path: string, file: WorkspaceFileContent) {
+  const lines = file.content.length > 0 ? file.content.split("\n") : [];
+  return [
+    `diff --git a/${path} b/${path}`,
+    "new file mode 100644",
+    "--- /dev/null",
+    `+++ b/${path}`,
+    `@@ -0,0 +1,${lines.length} @@`,
+    ...lines.map((line) => `+${line}`),
+    ...(file.truncated ? ["+… file preview truncated …"] : []),
+  ].join("\n");
 }
 
 function sourceControlLineStats(sourceControl: SourceControlState) {
@@ -11153,7 +11393,7 @@ function selectedSessionModelFromConfig(config: GyroConfig) {
 
 function approvalNotificationCopy(
   config: GyroConfig,
-  mode: "direct" | "gated",
+  mode: "auto" | "direct" | "gated",
 ) {
   const providerName =
     config.selectedProviderId === "anthropic"
@@ -11163,8 +11403,15 @@ function approvalNotificationCopy(
         : "Codex";
   if (mode === "gated") {
     return {
-      title: "Ask first",
+      title: "Ask before executing",
       detail: `${providerName} will ask before commands and file edits.`,
+    };
+  }
+
+  if (mode === "auto") {
+    return {
+      title: "Auto approve",
+      detail: `${providerName} can work without prompts inside the workspace boundary.`,
     };
   }
 
