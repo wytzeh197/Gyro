@@ -761,6 +761,7 @@ export type WorkbenchAction =
       status: TerminalPaneStatus;
       event: string;
       command?: string;
+      projectPath?: string;
       workingDirectory?: string;
     }
   | {
@@ -2006,6 +2007,7 @@ export function workbenchReducer(
         (pane) => pane.id === action.paneId,
       );
       const nextCommand = action.command ?? existingPane?.command;
+      const nextProjectPath = action.projectPath ?? existingPane?.projectPath;
       const nextWorkingDirectory =
         action.workingDirectory ?? existingPane?.workingDirectory;
       const nextActivePaneTab =
@@ -2020,6 +2022,7 @@ export function workbenchReducer(
         existingPane &&
         state.activePaneTab === nextActivePaneTab &&
         existingPane.command === nextCommand &&
+        existingPane.projectPath === nextProjectPath &&
         existingPane.workingDirectory === nextWorkingDirectory &&
         existingPane.lastEvent === action.event &&
         existingPane.output === action.output &&
@@ -2040,6 +2043,7 @@ export function workbenchReducer(
                 status: action.status,
                 attention:
                   action.status === "failed" ? "failed" : pane.attention,
+                projectPath: nextProjectPath,
                 workingDirectory: nextWorkingDirectory,
               }
             : pane,
@@ -2765,6 +2769,7 @@ export function createTerminalPane(
     workspaceMode?: WorkbenchMode;
     branch?: string;
     worktreeName?: string;
+    projectPath?: string;
     workingDirectory?: string;
   } = {},
 ): TerminalPane {
@@ -2782,6 +2787,7 @@ export function createTerminalPane(
       options.branch ??
       (workspaceMode === "worktree" ? "gyro/worktree" : "main"),
     worktreeName: options.worktreeName,
+    projectPath: options.projectPath,
     workingDirectory: options.workingDirectory,
     createdAt: new Date().toISOString(),
   };
@@ -2798,6 +2804,7 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     branch:
       pane.branch ?? (workspaceMode === "worktree" ? "gyro/worktree" : "main"),
     worktreeName: pane.worktreeName,
+    projectPath: pane.projectPath,
     workingDirectory: pane.workingDirectory,
     attention:
       pane.attention === "waiting" || pane.attention === "failed"
