@@ -143,6 +143,7 @@ type TerminalPaneSnapshot = {
   outputRevision: number;
   status: "running" | "done" | "failed";
   exitCode?: number | null;
+  workspacePath?: string;
   workingDirectory?: string;
   cols: number;
   rows: number;
@@ -3013,25 +3014,29 @@ export function App() {
       workspacePathOverride?: string;
     }) => {
       const process = terminalProcessForProfile(profile, commandOverride);
-      const launchWorkspacePath =
-        workspacePathOverride ??
-        (commandOverride
-          ? (activeSession?.workspacePath ?? workspacePath)
-          : undefined);
-      const paneExists = workbench.terminalPanes.some(
+      const existingPane = workbench.terminalPanes.find(
         (pane) => pane.id === paneId,
       );
+      const selectedPane = workbench.terminalPanes.find(
+        (pane) => pane.id === workbench.selectedTerminalPaneId,
+      );
+      const launchWorkspacePath =
+        workspacePathOverride ??
+        existingPane?.projectPath ??
+        selectedPane?.projectPath ??
+        activeSession?.workspacePath ??
+        workspacePath ??
+        savedProjects[0]?.path;
+      const paneExists = Boolean(existingPane);
       if (!paneExists) {
-        const pane = createTerminalPane(
-          paneId,
-          profile,
-          "running",
-          workspaceRunMetadata(
+        const pane = createTerminalPane(paneId, profile, "running", {
+          ...workspaceRunMetadata(
             "local",
             profile.displayName,
             launchWorkspacePath,
           ),
-        );
+          projectPath: launchWorkspacePath,
+        });
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
         } else {
@@ -3077,11 +3082,9 @@ export function App() {
               title: profile.displayName,
               workspacePath: launchWorkspacePath,
               workspaceMode: "local",
-              workingDirectory: workspacePathOverride
+              workingDirectory: launchWorkspacePath
                 ? "Workspace"
-                : commandOverride
-                  ? profile.workingDirectory
-                  : "Home",
+                : profile.workingDirectory,
             },
           },
         );
@@ -3090,6 +3093,7 @@ export function App() {
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
           command: snapshot.command,
+          projectPath: snapshot.workspacePath ?? launchWorkspacePath,
           workingDirectory: snapshot.workingDirectory,
           event:
             snapshot.exitCode === null || snapshot.exitCode === undefined
@@ -3119,6 +3123,8 @@ export function App() {
     [
       activeSession?.workspacePath,
       notify,
+      savedProjects,
+      workbench.selectedTerminalPaneId,
       workbench.terminalPanes,
       workbench.workspaceMode,
       workspacePath,
@@ -3137,7 +3143,7 @@ export function App() {
   }, [activeProfileId, commandProfiles, launchTerminalPane, notify]);
 
   const createCliSession = useCallback(
-    (profileId: string, projectPath?: string) => {
+    (profileId: string, projectPath: string) => {
       const profile = getCommandProfile(commandProfiles, profileId);
       dispatchWorkbench({
         type: "select-workspace-layout",
@@ -3150,7 +3156,7 @@ export function App() {
         notify(
           started ? "terminal" : "command-failed",
           started ? "CLI session started" : "CLI session failed",
-          `${profile.displayName} · ${projectPath ? workspaceName(projectPath) : "Home"}`,
+          `${profile.displayName} · ${workspaceName(projectPath)}`,
         );
       });
     },
@@ -3424,6 +3430,7 @@ export function App() {
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
           command: snapshot.command,
+          projectPath: snapshot.workspacePath,
           workingDirectory: snapshot.workingDirectory,
           event:
             snapshot.exitCode === null || snapshot.exitCode === undefined
@@ -5880,6 +5887,7 @@ export function App() {
       type: "sync-terminal-pane-snapshot",
       paneId: snapshot.paneId,
       command: snapshot.command,
+      projectPath: snapshot.workspacePath,
       workingDirectory: snapshot.workingDirectory,
       event:
         snapshot.exitCode === null || snapshot.exitCode === undefined
@@ -10069,6 +10077,7 @@ function terminalPaneFromSnapshot(
       terminalStatusFromSnapshot(snapshot.status),
       workspaceRunMetadata(mode, snapshot.title, snapshot.workingDirectory),
     ),
+    projectPath: snapshot.workspacePath,
     command: snapshot.command,
     lastEvent:
       snapshot.exitCode === null || snapshot.exitCode === undefined

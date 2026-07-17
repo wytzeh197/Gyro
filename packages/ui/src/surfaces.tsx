@@ -239,7 +239,7 @@ type AppChromeProps = {
   onOpenSettingsSection?: (section: SettingsSectionId) => void;
   onOpenCommandPalette: () => void;
   onCreateSession: () => void;
-  onCreateCliSession: (profileId: string, workspacePath?: string) => void;
+  onCreateCliSession: (profileId: string, workspacePath: string) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
   onOpenWorkspaceFile?: (
@@ -965,7 +965,7 @@ function WorkspaceSidebarContent({
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
   onCreateSession: () => void;
-  onCreateCliSession: (profileId: string, workspacePath?: string) => void;
+  onCreateCliSession: (profileId: string, workspacePath: string) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
   onOpenWorkspaceFile?: (
@@ -1019,8 +1019,26 @@ function WorkspaceSidebarContent({
   const [newSessionMenuView, setNewSessionMenuView] = useState<
     "closed" | "root" | "cli"
   >("closed");
+  const cliProjects = useMemo(() => {
+    const selectedProjectPath = terminalPanes.find(
+      (pane) => pane.id === selectedTerminalPaneId,
+    )?.projectPath;
+    const projects = [selectedProjectPath, workspacePath]
+      .filter((path): path is string => Boolean(path))
+      .map((path) => ({ path, label: projectSidebarName(path) }))
+      .concat(savedProjects);
+    return projects.filter(
+      (project, index) =>
+        isUserSelectedWorkspacePath(project.path) &&
+        projects.findIndex(
+          (candidate) =>
+            normalizeSidebarPath(candidate.path) ===
+            normalizeSidebarPath(project.path),
+        ) === index,
+    );
+  }, [savedProjects, selectedTerminalPaneId, terminalPanes, workspacePath]);
   const [newCliWorkspacePath, setNewCliWorkspacePath] = useState(
-    workspacePath ?? "",
+    cliProjects[0]?.path ?? "",
   );
   const newSessionMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
     newSessionMenuView !== "closed",
@@ -1038,8 +1056,7 @@ function WorkspaceSidebarContent({
       ),
     [recentSessions, savedProjects, terminalPanes, workspacePath],
   );
-  const discoveredProjectGroups = discoveredSessionNavigation.groups;
-  const localCliPanes = discoveredSessionNavigation.localCliPanes;
+  const discoveredProjectGroups = discoveredSessionNavigation;
   const [projectOrder, setProjectOrder] = useState<string[]>(() =>
     mergeSidebarProjectOrder(
       loadSidebarProjectOrder(),
@@ -1083,9 +1100,9 @@ function WorkspaceSidebarContent({
   }, [ide?.searchQuery.query]);
   useEffect(() => {
     if (newSessionMenuView === "closed") {
-      setNewCliWorkspacePath(workspacePath ?? "");
+      setNewCliWorkspacePath(cliProjects[0]?.path ?? "");
     }
-  }, [newSessionMenuView, workspacePath]);
+  }, [cliProjects, newSessionMenuView]);
   useEffect(() => {
     const discoveredKeys = discoveredProjectGroups.map(
       (project) => project.key,
@@ -1251,10 +1268,11 @@ function WorkspaceSidebarContent({
       }
     }
   };
-  const renderSessionRow = (session: Session) => (
+  const renderSessionRow = (session: Session, isNested = false) => (
     <SessionSidebarRow
       isActive={session.id === activeSessionId}
       isSending={sendingSessionIds.includes(session.id)}
+      isNested={isNested}
       isMenuOpen={openSessionMenuId === session.id}
       isPinned={pinnedSessionIds.includes(session.id)}
       key={session.id}
@@ -1280,13 +1298,14 @@ function WorkspaceSidebarContent({
       session={session}
     />
   );
-  const renderCliPaneRow = (pane: TerminalPane) => {
+  const renderCliPaneRow = (pane: TerminalPane, isNested = false) => {
     const profileLabel =
       commandProfiles.find((profile) => profile.id === pane.profileId)
         ?.displayName ?? pane.profileId;
     return (
       <SidebarThreadRow
         icon={Terminal}
+        indent={isNested}
         isActive={
           activeWorkspaceLayout === "terminal-grid" &&
           pane.id === selectedTerminalPaneId
@@ -1301,8 +1320,8 @@ function WorkspaceSidebarContent({
   };
   const renderNavigationItem = (item: SidebarSessionItem) =>
     item.kind === "chat"
-      ? renderSessionRow(item.session)
-      : renderCliPaneRow(item.pane);
+      ? renderSessionRow(item.session, true)
+      : renderCliPaneRow(item.pane, true);
 
   return (
     <>
@@ -2018,12 +2037,13 @@ function WorkspaceSidebarContent({
                       ? "Choose CLI session"
                       : "Create session"
                   }
-                  className="gyro-sidebar-new-session-menu"
+                  className={`gyro-sidebar-new-session-menu is-${newSessionMenuView}`}
                   role="menu"
                 >
                   {newSessionMenuView === "root" ? (
                     <>
                       <button
+                        aria-label="New Chat"
                         onClick={() => {
                           setNewSessionMenuView("closed");
                           onCreateSession();
@@ -2033,19 +2053,18 @@ function WorkspaceSidebarContent({
                       >
                         <MessageSquare size={15} />
                         <span>
-                          <strong>New Chat</strong>
-                          <small>Start a Gyro conversation</small>
+                          <strong>Chat</strong>
                         </span>
                       </button>
                       <button
+                        aria-label="New CLI"
                         onClick={() => setNewSessionMenuView("cli")}
                         role="menuitem"
                         type="button"
                       >
                         <Terminal size={15} />
                         <span>
-                          <strong>New CLI</strong>
-                          <small>Use a subscription CLI or shell</small>
+                          <strong>CLI</strong>
                         </span>
                         <ChevronRight size={13} />
                       </button>
@@ -2060,8 +2079,7 @@ function WorkspaceSidebarContent({
                       >
                         <ArrowLeft size={14} />
                         <span>
-                          <strong>New CLI</strong>
-                          <small>Choose where and how to start</small>
+                          <strong>CLI</strong>
                         </span>
                       </button>
                       <label className="gyro-sidebar-cli-location">
@@ -2073,8 +2091,10 @@ function WorkspaceSidebarContent({
                           }
                           value={newCliWorkspacePath}
                         >
-                          <option value="">Home</option>
-                          {savedProjects.map((project) => (
+                          {cliProjects.length === 0 ? (
+                            <option value="">Open a project first</option>
+                          ) : null}
+                          {cliProjects.map((project) => (
                             <option key={project.path} value={project.path}>
                               {project.label}
                             </option>
@@ -2084,12 +2104,18 @@ function WorkspaceSidebarContent({
                       <div className="gyro-sidebar-cli-profiles">
                         {commandProfiles.map((profile) => (
                           <button
-                            disabled={profile.readiness === "blocked"}
+                            disabled={
+                              profile.readiness === "blocked" ||
+                              !newCliWorkspacePath
+                            }
                             key={profile.id}
                             onClick={() => {
+                              if (!newCliWorkspacePath) {
+                                return;
+                              }
                               onCreateCliSession(
                                 profile.id,
-                                newCliWorkspacePath || undefined,
+                                newCliWorkspacePath,
                               );
                               setNewSessionMenuView("closed");
                             }}
@@ -2131,13 +2157,7 @@ function WorkspaceSidebarContent({
             {pinnedSessions.length > 0 ? (
               <>
                 <div className="gyro-sidebar-small-title">Pinned</div>
-                {pinnedSessions.map(renderSessionRow)}
-              </>
-            ) : null}
-            {localCliPanes.length > 0 ? (
-              <>
-                <div className="gyro-sidebar-small-title">Local CLI</div>
-                {localCliPanes.map(renderCliPaneRow)}
+                {pinnedSessions.map((session) => renderSessionRow(session))}
               </>
             ) : null}
             <div className="gyro-sidebar-small-title">Projects</div>
@@ -2602,10 +2622,7 @@ function sidebarProjectGroups(
   terminalPanes: TerminalPane[],
   savedProjects: Array<{ path: string; label: string }>,
   workspacePath?: string,
-): {
-  groups: SidebarProjectGroupData[];
-  localCliPanes: TerminalPane[];
-} {
+): SidebarProjectGroupData[] {
   const groups = new Map<string, SidebarProjectGroupData>();
   const primaryGyroProjectPath = [
     workspacePath,
@@ -2620,6 +2637,14 @@ function sidebarProjectGroups(
   const groupKeyForPath = (path?: string) =>
     projectGroupKey(path, primaryGyroProjectPath);
   const currentProjectKey = groupKeyForPath(workspacePath);
+  const fallbackProject = [
+    workspacePath
+      ? { path: workspacePath, label: projectSidebarName(workspacePath) }
+      : undefined,
+    ...savedProjects,
+  ].find((project): project is { path: string; label: string } =>
+    Boolean(project && isUserSelectedWorkspacePath(project.path)),
+  );
 
   for (const session of sessions) {
     const key = groupKeyForPath(session.workspacePath);
@@ -2646,27 +2671,28 @@ function sidebarProjectGroups(
       (first, second) =>
         second.normalizedPath.length - first.normalizedPath.length,
     );
-  const localCliPanes: TerminalPane[] = [];
   for (const pane of terminalPanes) {
-    const panePath = normalizeSidebarPath(pane.workingDirectory);
+    const panePath = normalizeSidebarPath(
+      pane.projectPath ?? pane.workingDirectory,
+    );
     const project = projectPaths.find(
       (candidate) =>
         panePath === candidate.normalizedPath ||
         panePath.startsWith(`${candidate.normalizedPath}/`),
     );
-    if (!project) {
-      localCliPanes.push(pane);
-      continue;
-    }
-    const key = groupKeyForPath(project.path);
+    const linkedProject = project ?? fallbackProject;
+    const linkedPath = linkedProject?.path;
+    const key = groupKeyForPath(linkedPath);
     const existing = groups.get(key);
     if (existing) {
       existing.items.push({ kind: "cli", pane });
     } else {
       groups.set(key, {
-        hasWorkspace: true,
+        hasWorkspace: Boolean(
+          linkedPath && isUserSelectedWorkspacePath(linkedPath),
+        ),
         key,
-        label: project.label,
+        label: linkedProject?.label ?? projectSidebarName(linkedPath),
         items: [{ kind: "cli", pane }],
       });
     }
@@ -2687,12 +2713,7 @@ function sidebarProjectGroups(
         sidebarSessionTimestamp(second) - sidebarSessionTimestamp(first),
     );
   }
-  localCliPanes.sort(
-    (first, second) =>
-      new Date(second.createdAt).getTime() -
-      new Date(first.createdAt).getTime(),
-  );
-  return { groups: [...groups.values()], localCliPanes };
+  return [...groups.values()];
 }
 
 function sidebarSessionTimestamp(item: SidebarSessionItem) {

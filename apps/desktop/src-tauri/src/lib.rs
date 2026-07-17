@@ -776,6 +776,7 @@ struct TerminalPaneSnapshot {
     output_revision: u64,
     status: String,
     exit_code: Option<i32>,
+    workspace_path: Option<String>,
     working_directory: Option<String>,
     cols: u16,
     rows: u16,
@@ -8772,7 +8773,10 @@ fn codex_chat_args(
         if full_access {
             args.push("--dangerously-bypass-approvals-and-sandbox".into());
         } else {
-            args.extend(["--sandbox".into(), "read-only".into()]);
+            // `codex exec resume` does not accept the top-level `--sandbox`
+            // option. Apply the same read-only policy through its supported
+            // config override so Plan mode and approval-gated resumes start.
+            args.extend(["--config".into(), "sandbox_mode=\"read-only\"".into()]);
         }
     }
     if let Some(model) = codex_model_arg(model_id) {
@@ -10455,6 +10459,7 @@ fn snapshot_terminal_process(
         output_revision,
         status: process.status.clone(),
         exit_code: process.exit_code,
+        workspace_path: process.request.workspace_path.clone(),
         working_directory: process
             .working_directory
             .as_ref()
@@ -12160,7 +12165,8 @@ while True:
         assert!(resumed_codex.contains(&"--skip-git-repo-check".to_string()));
         assert!(resumed_codex
             .windows(2)
-            .any(|args| args == ["--sandbox", "read-only"]));
+            .any(|args| args == ["--config", "sandbox_mode=\"read-only\""]));
+        assert!(!resumed_codex.contains(&"--sandbox".to_string()));
         assert!(resumed_codex.ends_with(&["--".to_string(), "again".to_string()]));
 
         for resume_session_id in [None, Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e")] {
@@ -12175,9 +12181,17 @@ while True:
                 &[],
                 "inspect only",
             );
+            let expected_read_only_args = if resume_session_id.is_some() {
+                ["--config", "sandbox_mode=\"read-only\""]
+            } else {
+                ["--sandbox", "read-only"]
+            };
             assert!(plan_codex
                 .windows(2)
-                .any(|args| args == ["--sandbox", "read-only"]));
+                .any(|args| args == expected_read_only_args));
+            if resume_session_id.is_some() {
+                assert!(!plan_codex.contains(&"--sandbox".to_string()));
+            }
             assert!(!plan_codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         }
 
@@ -13348,8 +13362,9 @@ while True:
     }
 
     #[test]
-    fn terminal_snapshot_keeps_resolved_working_directory() {
+    fn terminal_snapshot_keeps_project_and_resolved_working_directory() {
         let workspace = tempfile::tempdir().unwrap();
+        let workspace_path = workspace.path().display().to_string();
         let manager = TerminalProcessManager::default();
         manager
             .create(TerminalPaneRequest {
@@ -13358,7 +13373,7 @@ while True:
                 profile_id: Some("shell".into()),
                 command: "sh".into(),
                 args: vec!["-c".into(), "pwd".into()],
-                workspace_path: Some(workspace.path().display().to_string()),
+                workspace_path: Some(workspace_path.clone()),
                 workspace_mode: Some("local".into()),
                 working_directory: None,
                 cols: None,
@@ -13375,6 +13390,7 @@ while True:
             snapshot.working_directory.as_deref(),
             Some(workspace.path().canonicalize().unwrap().to_str().unwrap())
         );
+        assert_eq!(snapshot.workspace_path.as_deref(), Some(&*workspace_path));
     }
 
     #[test]

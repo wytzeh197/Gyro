@@ -14054,9 +14054,18 @@ textarea,
   color: #555b64;
 }
 
+:root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool {
+  background: #f3f4f6;
+  border-color: #e1e4e8;
+}
+
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-chip:hover,
-:root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool:hover {
+:root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-tool:hover,
+:root[data-theme="light"]
+  .gyro-chat-composer-dock
+  .gyro-composer-tool[aria-expanded="true"] {
   background: rgba(31, 41, 55, 0.06);
+  border-color: #d6dae0;
   color: #151a21;
 }
 
@@ -19420,20 +19429,20 @@ button.gyro-account-menu-row:hover,
     var(--gyro-app) 4%
   );
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 12px;
+  border-radius: 10px;
   bottom: calc(100% + 8px);
-  box-shadow: 0 18px 46px rgb(0 0 0 / 34%);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 30%);
   box-sizing: border-box;
   color: var(--gyro-text);
   display: flex;
   flex-direction: column;
-  left: 10px;
-  max-height: min(350px, calc(100vh - 48px));
+  left: 8px;
+  max-height: min(288px, calc(100vh - 40px));
   overflow: hidden;
-  padding: 6px;
+  padding: 4px;
   position: absolute;
-  right: 10px;
-  width: min(430px, calc(100% - 20px));
+  right: 8px;
+  width: min(370px, calc(100% - 16px));
   z-index: 140;
 }
 
@@ -19442,26 +19451,26 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   color: var(--gyro-faint);
   display: flex;
-  font-size: 10px;
+  font-size: 9px;
   justify-content: space-between;
   letter-spacing: 0.02em;
-  padding: 5px 7px 7px;
+  padding: 3px 6px 5px;
 }
 
 .gyro-composer-slash-menu-title span {
   color: var(--gyro-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 
 .gyro-composer-slash-menu-title small {
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .gyro-composer-slash-menu-items {
   display: grid;
   flex: 1 1 auto;
-  gap: 2px;
+  gap: 1px;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -19471,14 +19480,14 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--gyro-muted);
   display: grid;
   font: inherit;
-  gap: 9px;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  min-height: 44px;
-  padding: 6px 8px;
+  gap: 7px;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  min-height: 36px;
+  padding: 4px 6px;
   text-align: left;
   width: 100%;
 }
@@ -19495,21 +19504,21 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-slash-menu button > span {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
 .gyro-composer-slash-menu button strong {
   color: var(--gyro-text);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 1.2;
 }
 
 .gyro-composer-slash-menu button small {
   color: var(--gyro-faint);
-  font-size: 10px;
-  line-height: 1.25;
+  font-size: 9px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -19521,16 +19530,16 @@ button.gyro-account-menu-row:hover,
   border-radius: 5px;
   color: var(--gyro-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  padding: 3px 5px;
+  font-size: 9px;
+  padding: 2px 4px;
 }
 
 .gyro-composer-slash-menu-hint {
   border-top: 1px solid var(--gyro-premium-hairline-soft);
-  gap: 12px;
+  gap: 10px;
   justify-content: flex-start;
-  margin-top: 5px;
-  padding: 7px 7px 3px;
+  margin-top: 3px;
+  padding: 5px 6px 2px;
 }
 
 :root[data-theme="light"] .gyro-composer-slash-menu {
@@ -19541,10 +19550,10 @@ button.gyro-account-menu-row:hover,
 
 @media (max-width: 620px) {
   .gyro-composer-slash-menu {
-    left: 6px;
-    max-height: min(270px, calc(100vh - 36px));
-    right: 6px;
-    width: calc(100% - 12px);
+    left: 4px;
+    max-height: min(244px, calc(100vh - 32px));
+    right: 4px;
+    width: calc(100% - 8px);
   }
 
   .gyro-composer-slash-menu-hint {
@@ -19916,6 +19925,16 @@ button.gyro-account-menu-row:hover,
   width: 100%;
 }
 
+.gyro-sidebar-new-session-menu.is-root {
+  gap: 1px;
+  padding: 4px;
+}
+
+.gyro-sidebar-new-session-menu.is-root > button {
+  min-height: 34px;
+  padding: 4px 7px;
+}
+
 .gyro-sidebar-new-session-menu > button:hover,
 .gyro-sidebar-new-session-menu > button:focus-visible,
 .gyro-sidebar-cli-profiles button:hover,
@@ -19957,6 +19976,7 @@ button.gyro-account-menu-row:hover,
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   border-radius: 0;
   margin-bottom: 2px;
+  min-height: 34px;
 }
 
 .gyro-sidebar-cli-location {

@@ -2820,7 +2820,7 @@ expect(
     styleSource.includes(".gyro-sidebar-more-button") &&
     surfaceSource.includes("projectSidebarName") &&
     surfaceSource.includes("SessionSidebarRow") &&
-    surfaceSource.includes("localCliPanes.map(renderCliPaneRow)") &&
+    !surfaceSource.includes("localCliPanes") &&
     surfaceSource.includes("Choose CLI session") &&
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
@@ -2970,7 +2970,9 @@ expect(
     chatSidebarSource.includes("gyro-sidebar-project-chat-list") &&
     chatSidebarSource.includes("Pinned") &&
     chatSidebarSource.includes("Projects") &&
-    chatSidebarSource.includes("pinnedSessions.map(renderSessionRow)") &&
+    chatSidebarSource.includes(
+      "pinnedSessions.map((session) => renderSessionRow(session))",
+    ) &&
     chatSidebarSource.includes("projectGroups.map") &&
     chatSidebarSource.includes("project.items.slice(0, 3)") &&
     surfaceSource.includes("const primaryGyroProjectPath = [") &&
@@ -2987,7 +2989,7 @@ expect(
     chatSidebarSource.includes("toggleProjectMore(project.key)") &&
     chatSidebarSource.includes("gyro-sidebar-more-button") &&
     chatSidebarSource.includes("No recent sessions") &&
-    chatSidebarSource.includes("Local CLI") &&
+    !chatSidebarSource.includes("Local CLI") &&
     !chatSidebarSource.includes("<small>Start one</small>") &&
     !chatSidebarSource.includes("onClick={onOpenWorkspace}") &&
     !chatSidebarSource.includes("Scheduled") &&
@@ -3000,13 +3002,20 @@ expect(
 expect(
   appSource.includes("const createCliSession = useCallback") &&
     appSource.includes("workspacePathOverride: projectPath") &&
-    appSource.includes("workingDirectory: workspacePathOverride") &&
+    appSource.includes("workingDirectory: launchWorkspacePath") &&
+    appSource.includes("existingPane?.projectPath") &&
+    appSource.includes("selectedPane?.projectPath") &&
+    appSource.includes("projectPath: snapshot.workspacePath") &&
     appSource.includes("onCreateCliSession={createCliSession}") &&
     appSource.includes('type: "select-sessions"') &&
     surfaceSource.includes("onCreateCliSession(") &&
-    surfaceSource.includes("newCliWorkspacePath || undefined") &&
+    /onCreateCliSession\(\s*profile\.id,\s*newCliWorkspacePath,/m.test(
+      surfaceSource,
+    ) &&
+    surfaceSource.includes("!newCliWorkspacePath") &&
+    surfaceSource.includes("pane.projectPath ?? pane.workingDirectory") &&
     surfaceSource.includes("selectedTerminalPaneId"),
-  "New CLI should choose a profile and project or Home, then restore through Sessions.",
+  "New CLI should require a project and restore beneath that project in Sessions.",
 );
 expect(
   styleSource.includes(".gyro-sidebar-mode-row:focus-visible") &&

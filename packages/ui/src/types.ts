@@ -86,6 +86,7 @@ export type TerminalPane = {
   workspaceMode: WorkbenchMode;
   branch: string;
   worktreeName?: string;
+  projectPath?: string;
   workingDirectory?: string;
   attention?: TerminalPaneAttention;
   layout?: TerminalPaneLayout;
