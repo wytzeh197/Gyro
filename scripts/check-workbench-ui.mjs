@@ -18,6 +18,7 @@ import {
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
 import {
+  isProviderExecutable,
   isProviderRuntimeUsable,
   normalizedConfig,
   providerCatalog,
@@ -190,8 +191,8 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,xai,gemini",
-  "Composer provider picker should show OpenAI, Anthropic, xAI, and Gemini only.",
+    "openai,anthropic,kimi,xai,gemini",
+  "Provider catalog should include executable Kimi between Anthropic and readiness-only providers.",
 );
 const orderedStreamState = new Map();
 const orderedStreamBase = {
@@ -351,6 +352,16 @@ expect(
     (provider) => provider.id === "openai",
   )?.authStatus === "connected",
   "Saved enabled providers should rehydrate as connected when backend config omits authStatus.",
+);
+const kimiCatalog = providerCatalog.find((provider) => provider.id === "kimi");
+expect(
+  kimiCatalog?.selectedModelId === "k3" &&
+    kimiCatalog.models[0]?.displayName === "Kimi K3" &&
+    kimiCatalog.models[0]?.supportedReasoningEfforts?.join(",") === "max" &&
+    isProviderExecutable("kimi") &&
+    !isProviderExecutable("xai") &&
+    !isProviderExecutable("gemini"),
+  "Kimi should default to K3/Max while xAI and Gemini remain readiness-only.",
 );
 
 const streamRegressionEvents = [
@@ -550,9 +561,10 @@ expect(
   "Initial workbench state should start without demo diff review files.",
 );
 expect(
-  initialState.providerStatuses.length === 4 &&
+  initialState.providerStatuses.length === 5 &&
+    initialState.providerStatuses.some((provider) => provider.id === "kimi") &&
     initialState.providerStatuses.some((provider) => provider.id === "xai"),
-  "Initial workbench state should include OpenAI, Anthropic, xAI, and Gemini provider statuses.",
+  "Initial workbench state should include Kimi and the readiness-only provider statuses.",
 );
 expect(
   initialState.browserPreview.status === "idle",
@@ -3607,6 +3619,8 @@ expect(
   appSource.includes("function providerLoginProfile") &&
     appSource.includes('args: ["login", "--device-auth"]') &&
     appSource.includes('args: ["auth", "login"]') &&
+    appSource.includes('command: "kimi"') &&
+    appSource.includes('args: ["login"]') &&
     appSource.includes('command: "cursor-agent"') &&
     appSource.includes('command: "opencode"') &&
     appSource.includes('"check_provider_health"') &&
@@ -3614,7 +3628,7 @@ expect(
     appSource.includes("configSaveQueueRef.current") &&
     appSource.includes("PROVIDER_AUTH_POLL_ATTEMPTS") &&
     appSource.includes("Gyro will connect automatically.") &&
-    appSource.includes("EXECUTABLE_PROVIDER_IDS.has(provider.id)") &&
+    appSource.includes("isProviderExecutable(provider.id)") &&
     appSource.includes("isProviderRuntimeUsable(provider, health)") &&
     appSource.includes('provider?.authStatus === "connected"') &&
     appSource.includes('layout: "terminal-grid"') &&

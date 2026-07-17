@@ -2989,6 +2989,15 @@ export function defaultCommandProfiles(): CommandProfile[] {
       workingDirectory: "Workspace",
     },
     {
+      id: "kimi-code",
+      displayName: "Kimi Code",
+      command: "kimi",
+      args: [],
+      workingDirectory: "Workspace",
+      providerId: "kimi",
+      defaultModel: "k3",
+    },
+    {
       id: "cursor",
       displayName: "Cursor Agent",
       command: "cursor-agent",

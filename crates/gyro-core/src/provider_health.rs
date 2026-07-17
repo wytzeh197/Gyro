@@ -1,6 +1,7 @@
 use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
+use crate::{check_kimi_acp_health, provider_descriptor, KimiAcpHealthStatus, ProviderHealthKind};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -51,9 +52,11 @@ pub struct ProviderHealthService;
 
 impl ProviderHealthService {
     pub fn check(&self, request: ProviderHealthRequest) -> Result<ProviderHealthCheck> {
-        match request.provider_id.as_str() {
-            "openai" => self.check_openai(request),
-            "anthropic" => self.cli_check(
+        let descriptor = provider_descriptor(&request.provider_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", request.provider_id))?;
+        match descriptor.health_kind {
+            ProviderHealthKind::CodexCli => self.check_openai(request),
+            ProviderHealthKind::ClaudeCli => self.cli_check(
                 "anthropic",
                 "provider-cli",
                 "claude",
@@ -61,7 +64,8 @@ impl ProviderHealthService {
                 Some("claude auth login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
-            "cursor" => self.cli_check(
+            ProviderHealthKind::KimiAcp => Ok(kimi_provider_health()),
+            ProviderHealthKind::CursorCli => self.cli_check(
                 "cursor",
                 "provider-cli",
                 "cursor-agent",
@@ -69,13 +73,11 @@ impl ProviderHealthService {
                 Some("cursor-agent login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
-            "xai" => Ok(env_provider_health(
-                "xai",
-                request.api_key_ref.as_deref(),
-                &["XAI_API_KEY"],
-            )),
-            "gemini" => Ok(env_provider_health(
-                "gemini",
+            ProviderHealthKind::Environment if request.provider_id == "xai" => Ok(
+                env_provider_health("xai", request.api_key_ref.as_deref(), &["XAI_API_KEY"]),
+            ),
+            ProviderHealthKind::Environment => Ok(env_provider_health(
+                &request.provider_id,
                 request.api_key_ref.as_deref(),
                 &[
                     "GEMINI_API_KEY",
@@ -83,7 +85,7 @@ impl ProviderHealthService {
                     "GOOGLE_APPLICATION_CREDENTIALS",
                 ],
             )),
-            "opencode" => self.cli_check(
+            ProviderHealthKind::OpenCodeCli => self.cli_check(
                 "opencode",
                 "provider-cli",
                 "opencode",
@@ -91,7 +93,6 @@ impl ProviderHealthService {
                 Some("opencode auth login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
-            _ => anyhow::bail!("unknown provider `{}`", request.provider_id),
         }
     }
 
@@ -155,6 +156,30 @@ impl ProviderHealthService {
             diagnostics_opt_in: false,
             output,
         })
+    }
+}
+
+fn kimi_provider_health() -> ProviderHealthCheck {
+    let health = check_kimi_acp_health("kimi", PROVIDER_HEALTH_TIMEOUT);
+    let runtime_status = match health.status {
+        KimiAcpHealthStatus::Ready => "ready",
+        KimiAcpHealthStatus::NotInstalled => "not-installed",
+        KimiAcpHealthStatus::NotLoggedIn => "not-logged-in",
+        KimiAcpHealthStatus::Warning => "warning",
+    };
+    ProviderHealthCheck {
+        provider_id: "kimi".into(),
+        output: health.output,
+        runtime_status: runtime_status.into(),
+        auth_owner: "provider-cli".into(),
+        auth_command: Some("kimi acp".into()),
+        login_command: Some("kimi login".into()),
+        account_label: None,
+        subscription_label: None,
+        provider_mode: Some("Kimi Code ACP".into()),
+        secret_storage: "Kimi Code provider-owned files".into(),
+        privacy_note: "Gyro stores readiness summaries only; Kimi tokens stay outside Gyro.".into(),
+        diagnostics_opt_in: false,
     }
 }
 

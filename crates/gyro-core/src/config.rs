@@ -122,6 +122,13 @@ impl Default for GyroConfig {
                     api_key_ref: "provider:anthropic".into(),
                     enabled: false,
                 },
+                ModelProviderConfig {
+                    id: "kimi".into(),
+                    display_name: "Kimi".into(),
+                    base_url: None,
+                    api_key_ref: "provider-cli:kimi".into(),
+                    enabled: false,
+                },
             ],
             command_profiles: vec![
                 CommandProfile {
@@ -152,6 +159,16 @@ impl Default for GyroConfig {
                     working_directory: None,
                     provider_id: Some("openai".into()),
                     default_model: None,
+                    readiness: CommandProfileReadiness::Waiting,
+                },
+                CommandProfile {
+                    id: "kimi-code".into(),
+                    display_name: "Kimi Code".into(),
+                    command: "kimi".into(),
+                    args: Vec::new(),
+                    working_directory: None,
+                    provider_id: Some("kimi".into()),
+                    default_model: Some("k3".into()),
                     readiness: CommandProfileReadiness::Waiting,
                 },
             ],
@@ -241,9 +258,40 @@ impl GyroConfig {
                 profile.provider_id = match profile.id.as_str() {
                     "codex" => Some("openai".into()),
                     "claude" | "claude-code" => Some("anthropic".into()),
+                    "kimi" | "kimi-code" => Some("kimi".into()),
                     _ => None,
                 };
             }
+        }
+
+        if !self
+            .model_providers
+            .iter()
+            .any(|provider| provider.id == "kimi")
+        {
+            self.model_providers.push(ModelProviderConfig {
+                id: "kimi".into(),
+                display_name: "Kimi".into(),
+                base_url: None,
+                api_key_ref: "provider-cli:kimi".into(),
+                enabled: false,
+            });
+        }
+        if !self
+            .command_profiles
+            .iter()
+            .any(|profile| profile.id == "kimi-code")
+        {
+            self.command_profiles.push(CommandProfile {
+                id: "kimi-code".into(),
+                display_name: "Kimi Code".into(),
+                command: "kimi".into(),
+                args: Vec::new(),
+                working_directory: None,
+                provider_id: Some("kimi".into()),
+                default_model: Some("k3".into()),
+                readiness: CommandProfileReadiness::Waiting,
+            });
         }
     }
 }
