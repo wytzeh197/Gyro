@@ -30,9 +30,12 @@ import {
   defaultCommandProfiles,
   getProviderModel,
   isProviderId,
+  isProviderRuntimeUsable,
   normalizeCliLaunchPreset,
   normalizedConfig,
   parseProviderHealthOutput,
+  providerAuthStatusAfterHealth,
+  providerConnectionStatusFromRuntime,
   providersForConfig,
   sanitizeStoredIdeState,
   selectedReasoningEffort,
@@ -553,6 +556,7 @@ export function App() {
     setTerminalSourceControlLoadingPaneId,
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const configRef = useRef(config);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
   const [isTestingNotification, setIsTestingNotification] = useState(false);
@@ -672,6 +676,7 @@ export function App() {
       workbench.workspaceMode,
     ],
   );
+  configRef.current = config;
   eventsRef.current = events;
   selectedTerminalPaneIdRef.current = workbench.selectedTerminalPaneId;
   terminalPanesRef.current = workbench.terminalPanes;
@@ -1014,11 +1019,8 @@ export function App() {
           (status) => status.id === provider.id,
         );
         return (
-          provider.enabled &&
           EXECUTABLE_PROVIDER_IDS.has(provider.id) &&
-          (provider.authStatus === "connected" ||
-            (health?.connectionStatus === "connected" &&
-              health.runtimeStatus === "ready"))
+          isProviderRuntimeUsable(provider, health)
         );
       });
 
@@ -1071,6 +1073,7 @@ export function App() {
     ) => {
       const shouldNotifySuccess = options.notifySuccess ?? true;
       const normalizedNextConfig = normalizedConfig(nextConfig);
+      configRef.current = normalizedNextConfig;
       setConfig(normalizedNextConfig);
       safeSetLocalStorage(
         PREVIEW_CONFIG_STORAGE_KEY,
@@ -3237,7 +3240,14 @@ export function App() {
 
   const setProviderAuthStatus = useCallback(
     (providerId: ProviderId, authStatus: ModelProviderConfig["authStatus"]) => {
-      const providers = providersForConfig(config).map((provider) =>
+      const currentConfig = configRef.current;
+      const currentProvider = providersForConfig(currentConfig).find(
+        (provider) => provider.id === providerId,
+      );
+      if (currentProvider?.authStatus === authStatus) {
+        return;
+      }
+      const providers = providersForConfig(currentConfig).map((provider) =>
         provider.id === providerId
           ? {
               ...provider,
@@ -3248,7 +3258,7 @@ export function App() {
       );
       void persistConfig(
         {
-          ...config,
+          ...currentConfig,
           selectedProviderId: providerId,
           modelProviders: providers,
         },
@@ -3260,15 +3270,26 @@ export function App() {
         status: authStatus === "connected" ? "connected" : "disconnected",
       });
     },
-    [config, persistConfig],
+    [persistConfig],
   );
 
   const recordProviderHealthOutput = useCallback(
     (providerId: ProviderId, output: string, check?: ProviderHealthCheck) => {
-      const result = parseProviderHealthOutput(providerId, output);
+      const parsed = parseProviderHealthOutput(providerId, output);
       const details = check
-        ? providerHealthDetailsFromCheck(check, result.healthDetails)
-        : result.healthDetails;
+        ? providerHealthDetailsFromCheck(check, parsed.healthDetails)
+        : parsed.healthDetails;
+      const result = {
+        ...parsed,
+        connectionStatus: check
+          ? providerConnectionStatusFromRuntime(
+              check.runtimeStatus as ProviderHealthDetails["runtimeStatus"],
+              parsed.connectionStatus,
+            )
+          : parsed.connectionStatus,
+        healthDetails: details,
+        runtimeStatus: details.runtimeStatus,
+      };
       dispatchWorkbench({
         type: "record-provider-health",
         providerId,
@@ -3278,12 +3299,17 @@ export function App() {
         output,
       });
 
-      if (result.connectionStatus === "connected") {
-        setProviderAuthStatus(providerId, "connected");
-      } else if (result.connectionStatus === "not-configured") {
-        setProviderAuthStatus(providerId, "not-connected");
-      } else if (result.connectionStatus === "failed") {
-        setProviderAuthStatus(providerId, "failed");
+      const provider = providersForConfig(configRef.current).find(
+        (item) => item.id === providerId,
+      );
+      if (provider) {
+        const nextAuthStatus = providerAuthStatusAfterHealth(
+          provider.authStatus,
+          result.connectionStatus,
+        );
+        if (nextAuthStatus !== provider.authStatus) {
+          setProviderAuthStatus(providerId, nextAuthStatus);
+        }
       }
 
       return result;
@@ -3297,19 +3323,6 @@ export function App() {
         (item) => item.id === providerId,
       );
       const providerLabel = provider?.displayName ?? providerId;
-      const providers = providersForConfig(config).map((item) =>
-        item.id === providerId
-          ? { ...item, authStatus: "connecting" as const, enabled: false }
-          : item,
-      );
-      void persistConfig(
-        {
-          ...config,
-          selectedProviderId: providerId,
-          modelProviders: providers,
-        },
-        { notifySuccess: false },
-      );
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
@@ -3375,7 +3388,6 @@ export function App() {
       }
 
       if (provider?.authMode === "env") {
-        setProviderAuthStatus(providerId, "not-connected");
         notify(
           "approval",
           "Provider env setup needed",
@@ -3488,7 +3500,6 @@ export function App() {
           }
         }
 
-        setProviderAuthStatus(providerId, "not-connected");
         notify(
           "approval",
           "Provider sign-in still pending",
@@ -3511,8 +3522,6 @@ export function App() {
       activeSession?.workspacePath,
       config,
       notify,
-      persistConfig,
-      refreshEvents,
       recordProviderHealthOutput,
       setProviderAuthStatus,
       workbench.workspaceMode,
@@ -6538,10 +6547,7 @@ export function App() {
     const providerHealth = workbench.providerStatuses.find(
       (status) => status.id === provider.id,
     );
-    const providerReady =
-      provider.authStatus === "connected" ||
-      (providerHealth?.connectionStatus === "connected" &&
-        providerHealth.runtimeStatus === "ready");
+    const providerReady = isProviderRuntimeUsable(provider, providerHealth);
     if (!providerReady) {
       notify(
         "provider",

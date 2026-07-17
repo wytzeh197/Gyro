@@ -16620,7 +16620,7 @@ button.gyro-settings-row em::after {
   grid-template-columns: 150px minmax(0, 1fr);
 }
 
-.gyro-settings-group > h3 {
+.gyro-settings-group > h2 {
   color: var(--gyro-muted);
   font-size: 10.5px;
   font-weight: 650;
@@ -17143,7 +17143,7 @@ button.gyro-settings-row em::after {
   .gyro-settings-group {
     grid-template-columns: 1fr;
   }
-  .gyro-settings-group > h3 {
+  .gyro-settings-group > h2 {
     padding-bottom: 10px;
   }
   .gyro-settings-group-rows {
@@ -20010,4 +20010,52 @@ button.gyro-account-menu-row:hover,
 
 .gyro-sidebar-thread.has-icon > svg {
   color: var(--gyro-premium-muted);
+}
+
+/* Settings hierarchy and minimum-window polish. */
+.gyro-settings-section > header h1 {
+  align-items: center;
+  color: var(--gyro-text);
+  display: flex;
+  font-size: 20px;
+  font-weight: 640;
+  gap: 9px;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.gyro-settings-section > header h1 svg {
+  color: var(--gyro-muted);
+}
+
+.gyro-theme-picker button {
+  border-width: 0.5px;
+}
+
+.gyro-theme-picker button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 7%, var(--gyro-control-bg));
+  border-color: var(--gyro-premium-hairline-strong);
+  box-shadow: none;
+}
+
+.gyro-theme-picker button:focus-visible {
+  outline: 1px solid var(--gyro-premium-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 980px) and (min-width: 781px) {
+  .gyro-sidebar-windowbar.is-settings {
+    gap: 6px;
+    padding-right: 2px;
+  }
+
+  .gyro-sidebar-windowbar.is-settings .gyro-sidebar-window-actions {
+    gap: 4px;
+  }
+
+  .gyro-settings-sidebar-title {
+    font-size: 12px;
+    letter-spacing: -0.01em;
+  }
 }

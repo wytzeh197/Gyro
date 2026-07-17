@@ -133,7 +133,7 @@ impl ProviderHealthService {
         let output = match command_output(command, args) {
             Ok(output) => output,
             Err(CommandOutputError::Unavailable(error)) => {
-                format!("{command} not installed or unavailable: {error}")
+                format!("{command} unavailable: {error}")
             }
             Err(CommandOutputError::Terminated(error)) => {
                 format!("{command} health check failed: {error}")
@@ -272,6 +272,7 @@ pub fn provider_runtime_status_from_output(output: &str) -> &'static str {
         || normalized.contains("failed")
         || normalized.contains("invalid")
         || normalized.contains("denied")
+        || normalized.contains("unavailable")
     {
         "warning"
     } else {
@@ -344,7 +345,15 @@ fn command_output_with_limits(
         .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
     match &outcome.termination {
         ExecutionTermination::Exited { code } => {
-            let combined = combined_command_output(&outcome);
+            let mut combined = combined_command_output(&outcome);
+            if let Some(code) = code.filter(|code| *code != 0) {
+                if !combined.is_empty() {
+                    combined.push('\n');
+                }
+                combined.push_str(&format!(
+                    "[{command} health check failed with exit status {code}]"
+                ));
+            }
             if combined.is_empty() {
                 let status = match code {
                     Some(code) => format!("exit status: {code}"),
@@ -529,5 +538,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(output, "1234\n[stdout truncated]");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nonzero_health_command_is_never_reported_as_inconclusive() {
+        let output = command_output_with_limits(
+            "/bin/sh",
+            &["-c", "exit 17"],
+            Duration::from_secs(1),
+            128,
+            128,
+        )
+        .unwrap();
+
+        assert_eq!(provider_runtime_status_from_output(&output), "warning");
+        assert!(output.contains("health check failed with exit status 17"));
+    }
+
+    #[test]
+    fn transient_unavailability_is_a_warning_not_missing_auth() {
+        assert_eq!(
+            provider_runtime_status_from_output(
+                "codex unavailable: Resource temporarily unavailable"
+            ),
+            "warning"
+        );
     }
 }

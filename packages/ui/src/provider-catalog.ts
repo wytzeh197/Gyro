@@ -1,8 +1,11 @@
 import type {
   GyroConfig,
   ModelProviderConfig,
+  ProviderAuthStatus,
+  ProviderConnectionStatus,
   ProviderId,
   ProviderModel,
+  ProviderRuntimeStatus,
   ProviderStatus,
   ReasoningEffort,
 } from "./types";
@@ -204,6 +207,57 @@ export function selectedReasoningEffort(provider: ModelProviderConfig) {
     return provider.selectedReasoningEffort;
   }
   return model?.defaultReasoningEffort ?? supported[0];
+}
+
+/** Health probes observe provider state; they do not represent logout actions. */
+export function providerAuthStatusAfterHealth(
+  current: ProviderAuthStatus,
+  connectionStatus: ProviderConnectionStatus,
+): ProviderAuthStatus {
+  return connectionStatus === "connected" ? "connected" : current;
+}
+
+export function providerConnectionStatusFromRuntime(
+  runtimeStatus: ProviderRuntimeStatus,
+  fallback: ProviderConnectionStatus = "disconnected",
+): ProviderConnectionStatus {
+  switch (runtimeStatus) {
+    case "ready":
+      return "connected";
+    case "not-installed":
+    case "not-logged-in":
+      return "not-configured";
+    case "warning":
+      return "failed";
+    case "unknown":
+    default:
+      return fallback;
+  }
+}
+
+/**
+ * Definitive setup failures block execution. Transient warnings retain an
+ * enabled provider so an offline or flaky probe cannot disable recoverable
+ * work.
+ */
+export function isProviderRuntimeUsable(
+  provider: ModelProviderConfig,
+  health?: Pick<ProviderStatus, "connectionStatus" | "runtimeStatus">,
+) {
+  if (!provider.enabled) {
+    return false;
+  }
+  if (
+    health?.runtimeStatus === "not-installed" ||
+    health?.runtimeStatus === "not-logged-in"
+  ) {
+    return false;
+  }
+  return (
+    provider.authStatus === "connected" ||
+    (health?.connectionStatus === "connected" &&
+      health.runtimeStatus === "ready")
+  );
 }
 
 export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {

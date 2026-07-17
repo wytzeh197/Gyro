@@ -18,8 +18,11 @@ import {
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
 import {
+  isProviderRuntimeUsable,
   normalizedConfig,
   providerCatalog,
+  providerAuthStatusAfterHealth,
+  providerConnectionStatusFromRuntime,
   providersForConfig,
 } from "../packages/ui/src/provider-catalog.ts";
 import {
@@ -1168,6 +1171,35 @@ expect(
   parsedXaiEnvProvider.connectionStatus === "connected" &&
     parsedXaiEnvProvider.authOwner === "provider-env",
   "Provider health parser should support xAI env-owned readiness.",
+);
+expect(
+  providerConnectionStatusFromRuntime("ready") === "connected" &&
+    providerConnectionStatusFromRuntime("not-logged-in") === "not-configured" &&
+    providerConnectionStatusFromRuntime("warning") === "failed",
+  "Typed backend runtime status should drive the provider connection result.",
+);
+expect(
+  providerAuthStatusAfterHealth("connected", "failed") === "connected" &&
+    providerAuthStatusAfterHealth("connected", "not-configured") ===
+      "connected" &&
+    providerAuthStatusAfterHealth("not-connected", "connected") === "connected",
+  "Provider probes should promote success without persisting failures as logout.",
+);
+const enabledOpenAiProvider = {
+  ...providerCatalog.find((provider) => provider.id === "openai"),
+  authStatus: "connected",
+  enabled: true,
+};
+expect(
+  isProviderRuntimeUsable(enabledOpenAiProvider, {
+    connectionStatus: "failed",
+    runtimeStatus: "warning",
+  }) &&
+    !isProviderRuntimeUsable(enabledOpenAiProvider, {
+      connectionStatus: "not-configured",
+      runtimeStatus: "not-logged-in",
+    }),
+  "Transient health warnings should retain enabled providers while definitive auth failures block execution.",
 );
 state = workbenchReducer(state, {
   type: "record-provider-health",
@@ -2786,7 +2818,7 @@ expect(
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 24 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 21 &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
@@ -3066,6 +3098,8 @@ expect(
     surfaceSource.includes("No settings found") &&
     surfaceSource.includes('aria-label="Back from settings"') &&
     surfaceSource.includes("gyro-settings-back-button") &&
+    surfaceSource.includes("<h2>{label}</h2>") &&
+    surfaceSource.includes('aria-pressed={themeMode === "dark"}') &&
     surfaceSource.includes('onOpenSettingsSection("general")') &&
     surfaceSource.includes('activeDestination !== "settings"') &&
     surfaceSource.includes("General") &&
@@ -3085,6 +3119,7 @@ expect(
     !surfaceSource.includes('<nav className="gyro-settings-nav"') &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr);") &&
     styleSource.includes(".gyro-settings-back-button") &&
+    styleSource.includes(".gyro-settings-section > header h1") &&
     appSource.includes("lastNonSettingsDestinationRef") &&
     appSource.includes("returnFromSettings"),
   "Settings should move section navigation to the sidebar and keep exactly one active subpage in content.",
@@ -3580,7 +3615,7 @@ expect(
     appSource.includes("PROVIDER_AUTH_POLL_ATTEMPTS") &&
     appSource.includes("Gyro will connect automatically.") &&
     appSource.includes("EXECUTABLE_PROVIDER_IDS.has(provider.id)") &&
-    appSource.includes('health?.connectionStatus === "connected"') &&
+    appSource.includes("isProviderRuntimeUsable(provider, health)") &&
     appSource.includes('provider?.authStatus === "connected"') &&
     appSource.includes('layout: "terminal-grid"') &&
     appSource.includes('tab: "terminal"') &&
