@@ -7059,7 +7059,7 @@ textarea:focus-visible {
 }
 
 .gyro-url-bar {
-  min-width: 220px;
+  min-width: 316px;
 }
 
 .gyro-browser-frame {
@@ -7352,6 +7352,432 @@ textarea:focus-visible {
 
   .gyro-ide-editor-stack.is-editor-only {
     grid-template-rows: minmax(360px, 1fr) 22px;
+  }
+}
+
+/* Global navigation search: quiet, grouped, and keyboard-first. */
+.gyro-sidebar-action .gyro-sidebar-shortcut {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border: 0.5px solid var(--gyro-premium-hairline-soft);
+  border-radius: 5px;
+  color: var(--gyro-faint);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 620;
+  line-height: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+}
+
+.gyro-command-overlay {
+  background: rgb(0 0 0 / 52%);
+  padding: clamp(54px, 8vh, 92px) 20px 24px;
+  z-index: 140;
+}
+
+.gyro-command-palette.is-global-search {
+  background: color-mix(in srgb, var(--gyro-pane) 97%, transparent);
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 15px;
+  box-shadow:
+    0 30px 90px rgb(0 0 0 / 42%),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+  max-width: 680px;
+  overflow: hidden;
+  width: min(680px, calc(100vw - 40px));
+}
+
+.gyro-command-palette.is-global-search > header {
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-soft);
+  gap: 12px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  min-height: 62px;
+  padding: 0 18px;
+}
+
+.gyro-command-palette.is-global-search > header > svg {
+  color: var(--gyro-muted);
+}
+
+.gyro-command-palette.is-global-search > header input {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.gyro-command-palette.is-global-search > header input::placeholder {
+  color: var(--gyro-faint);
+}
+
+.gyro-command-palette.is-global-search kbd,
+.gyro-global-search-footer kbd {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border: 0.5px solid var(--gyro-premium-hairline-soft);
+  border-radius: 5px;
+  color: var(--gyro-faint);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 640;
+  line-height: 20px;
+  min-width: 22px;
+  padding: 0 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.gyro-command-palette.is-global-search .gyro-command-list {
+  display: block;
+  max-height: min(580px, calc(100vh - 210px));
+  padding: 8px;
+}
+
+.gyro-global-search-group + .gyro-global-search-group {
+  margin-top: 8px;
+}
+
+.gyro-global-search-heading {
+  color: var(--gyro-faint);
+  font-size: 10px;
+  font-weight: 680;
+  letter-spacing: 0.055em;
+  padding: 8px 10px 5px;
+  text-transform: uppercase;
+}
+
+.gyro-command-palette.is-global-search .gyro-command-list button {
+  align-items: center;
+  border: 0.5px solid transparent;
+  border-radius: 9px;
+  color: var(--gyro-text);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  min-height: 48px;
+  padding: 6px 10px;
+  width: 100%;
+}
+
+.gyro-command-palette.is-global-search .gyro-command-list button:hover,
+.gyro-command-palette.is-global-search .gyro-command-list button.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-premium-hairline-soft) 72%,
+    transparent
+  );
+  transform: none;
+}
+
+.gyro-command-palette.is-global-search
+  .gyro-command-list
+  button.is-active::before {
+  display: none;
+}
+
+.gyro-global-search-icon {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  justify-content: center;
+}
+
+.gyro-command-list button.is-active .gyro-global-search-icon {
+  color: var(--gyro-text);
+}
+
+.gyro-global-search-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-global-search-copy strong,
+.gyro-global-search-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-global-search-copy strong {
+  font-size: 13px;
+  font-weight: 570;
+}
+
+.gyro-global-search-copy small {
+  color: var(--gyro-faint);
+  font-size: 10.5px;
+  font-weight: 450;
+}
+
+.gyro-global-search-empty {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  min-height: 190px;
+  padding: 24px;
+  text-align: center;
+}
+
+.gyro-global-search-empty strong {
+  color: var(--gyro-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gyro-global-search-empty span {
+  font-size: 11px;
+}
+
+.gyro-global-search-footer {
+  align-items: center;
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: 10px;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 14px 0 18px;
+}
+
+.gyro-global-search-footer > span:last-child {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.gyro-global-search-footer kbd {
+  line-height: 17px;
+  min-width: 19px;
+  padding: 0 4px;
+}
+
+.gyro-sr-only {
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (max-width: 700px) {
+  .gyro-command-overlay {
+    padding: 42px 12px 12px;
+  }
+
+  .gyro-command-palette.is-global-search {
+    width: calc(100vw - 24px);
+  }
+
+  .gyro-global-search-footer > span:first-child {
+    display: none;
+  }
+
+  .gyro-global-search-footer {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-command-palette.is-global-search,
+  .gyro-command-palette.is-global-search * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Workspace preparation lives in window chrome, separate from Settings. */
+.gyro-workspace-preparation {
+  margin-left: auto;
+  position: relative;
+  z-index: 82;
+}
+
+.gyro-workspace-preparation-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border: 0.5px solid var(--gyro-premium-hairline-soft);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 680;
+  gap: 5px;
+  height: 25px;
+  padding: 0 7px 0 4px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.gyro-workspace-preparation-button:hover,
+.gyro-workspace-preparation-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-workspace-preparation-button[data-status="degraded"],
+.gyro-workspace-preparation-button[data-status="failed"] {
+  color: #d7a866;
+}
+
+.gyro-workspace-preparation-ring {
+  --gyro-preparation-progress: 0%;
+  align-items: center;
+  background: conic-gradient(
+    var(--gyro-text) var(--gyro-preparation-progress),
+    color-mix(in srgb, var(--gyro-text) 12%, transparent) 0
+  );
+  border-radius: 50%;
+  color: var(--gyro-pane);
+  display: inline-flex;
+  height: 17px;
+  justify-content: center;
+  position: relative;
+  width: 17px;
+}
+
+.gyro-workspace-preparation-ring::after {
+  background: var(--gyro-sidebar);
+  border-radius: 50%;
+  content: "";
+  inset: 3px;
+  position: absolute;
+}
+
+.gyro-workspace-preparation-ring > svg {
+  color: var(--gyro-text);
+  position: relative;
+  z-index: 1;
+}
+
+.gyro-workspace-preparation-popover {
+  background: color-mix(in srgb, var(--gyro-pane) 98%, transparent);
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 38%);
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  position: absolute;
+  right: 0;
+  top: 31px;
+  width: min(292px, calc(100vw - 28px));
+  z-index: 160;
+}
+
+.gyro-workspace-preparation-popover > header {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.gyro-workspace-preparation-popover > header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-workspace-preparation-popover header strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+}
+
+.gyro-workspace-preparation-popover header span {
+  color: var(--gyro-faint);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-workspace-preparation-popover header button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.gyro-workspace-preparation-bar {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  border-radius: 999px;
+  height: 3px;
+  overflow: hidden;
+}
+
+.gyro-workspace-preparation-bar > span {
+  background: color-mix(in srgb, var(--gyro-text) 72%, transparent);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+}
+
+.gyro-workspace-preparation-stages {
+  display: grid;
+  gap: 2px;
+}
+
+.gyro-workspace-preparation-stages > div {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: grid;
+  font-size: 10.5px;
+  gap: 8px;
+  grid-template-columns: 14px minmax(0, 1fr);
+  min-height: 25px;
+}
+
+.gyro-workspace-preparation-stages > div[data-state="done"] {
+  color: var(--gyro-muted);
+}
+
+.gyro-workspace-preparation-stages > div[data-state="active"] {
+  color: var(--gyro-text);
+}
+
+.gyro-workspace-preparation-stages > div[data-state="failed"] {
+  color: #d7a866;
+}
+
+.gyro-workspace-preparation-popover > p {
+  color: #d7a866;
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.gyro-workspace-preparation-popover > .gyro-update-primary {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.gyro-sidebar-restore-cluster .gyro-workspace-preparation {
+  left: 121px;
+  margin: 0;
+  position: fixed;
+  top: 10px;
+}
+
+.gyro-sidebar-restore-cluster .gyro-workspace-preparation-popover {
+  left: 0;
+  right: auto;
+}
+
+@media (max-width: 980px) {
+  .gyro-workspace-preparation-button > span:last-child {
+    display: none;
+  }
+
+  .gyro-workspace-preparation-button {
+    padding-right: 4px;
   }
 }
 
@@ -9468,40 +9894,40 @@ textarea:focus-visible {
 
 .gyro-context-picker {
   border-color: #363a40;
-  border-radius: 12px;
-  gap: 2px;
-  min-width: 286px;
-  padding: 7px;
+  border-radius: 10px;
+  gap: 1px;
+  min-width: 208px;
+  padding: 5px;
 }
 
 .gyro-context-picker .gyro-composer-popover-title {
   color: #9298a1;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.01em;
-  padding: 4px 8px 6px;
+  padding: 3px 7px 4px;
 }
 
 .gyro-context-picker .gyro-composer-menu-item {
-  border-radius: 8px;
-  gap: 10px;
-  grid-template-columns: 18px minmax(0, 1fr);
-  min-height: 46px;
-  padding: 6px 9px;
+  border-radius: 6px;
+  gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 32px;
+  padding: 4px 7px;
 }
 
 .gyro-context-picker .gyro-composer-menu-item > svg {
   color: #a6acb5;
-  height: 16px;
-  width: 16px;
+  height: 15px;
+  width: 15px;
 }
 
 .gyro-context-picker .gyro-composer-menu-item span {
-  gap: 3px;
+  gap: 0;
 }
 
 .gyro-context-picker .gyro-composer-menu-item strong {
   color: #e4e6e9;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 590;
 }
 
@@ -17834,6 +18260,8 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-start .gyro-composer-chip,
 .gyro-chat-start .gyro-composer-tool {
+  background: transparent;
+  border-color: transparent;
   color: var(--gyro-hero-muted);
   font-size: 12px;
   min-height: 28px;
@@ -17948,6 +18376,8 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-composer-dock .gyro-composer-chip,
 .gyro-chat-composer-dock .gyro-composer-tool {
+  background: transparent;
+  border-color: transparent;
   color: var(--gyro-hero-muted);
   font-size: 12px;
   min-height: 28px;
@@ -19780,6 +20210,11 @@ button.gyro-account-menu-row:hover,
   z-index: 1;
 }
 
+.gyro-chat-message-queue:has(.gyro-chat-message-queue-menu) {
+  overflow: visible;
+  z-index: 3;
+}
+
 .gyro-chat-message-queue-list {
   display: grid;
   gap: 2px;
@@ -20292,10 +20727,10 @@ button.gyro-account-menu-row:hover,
   box-sizing: border-box;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 20px;
+  height: 18px;
   justify-content: center;
   margin-inline: 1px 0;
-  width: 20px;
+  width: 18px;
 }
 
 .gyro-composer-context-wheel:focus-visible {
@@ -20313,7 +20748,7 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-premium-text);
   font-size: 12px;
   line-height: 1.4;
-  min-width: 316px;
+  min-width: 220px;
   opacity: 0;
   padding: 0;
   pointer-events: none;
@@ -20333,14 +20768,14 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   display: flex;
   justify-content: space-between;
-  min-height: 42px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 0 11px;
   border-bottom: 1px solid #2c3036;
 }
 
 .gyro-composer-context-tooltip > header strong {
   color: #f0f2f5;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -20351,21 +20786,21 @@ button.gyro-account-menu-row:hover,
   color: #c5cbd4;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  line-height: 22px;
-  padding: 0 7px;
+  line-height: 20px;
+  padding: 0 6px;
 }
 
 .gyro-composer-context-value {
   align-items: baseline;
   display: flex;
   gap: 6px;
-  margin-top: 13px;
-  padding: 0 14px;
+  margin-top: 9px;
+  padding: 0 11px;
 }
 
 .gyro-composer-context-value strong {
   color: #f4f6f8;
-  font-size: 20px;
+  font-size: 17px;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
   letter-spacing: -0.02em;
@@ -20375,27 +20810,12 @@ button.gyro-account-menu-row:hover,
   color: #969da8;
 }
 
-.gyro-composer-context-remaining {
-  align-items: center;
-  color: #969da8;
-  display: flex;
-  justify-content: space-between;
-  margin-top: 5px;
-  padding: 0 14px;
-}
-
-.gyro-composer-context-remaining strong {
-  color: #d7dce3;
-  font-variant-numeric: tabular-nums;
-  font-weight: 620;
-}
-
 .gyro-composer-context-bar {
   background: #282c32;
   border: 1px solid #30353c;
   border-radius: 2px;
-  height: 8px;
-  margin: 12px 14px 0;
+  height: 6px;
+  margin: 9px 11px 11px;
   overflow: hidden;
 }
 
@@ -20405,13 +20825,6 @@ button.gyro-account-menu-row:hover,
   display: block;
   height: 100%;
   min-width: 2px;
-}
-
-.gyro-composer-context-tooltip > p {
-  color: #858c97;
-  font-size: 11px;
-  margin: 10px 0 0;
-  padding: 0 14px 13px;
 }
 
 .gyro-composer-context-tooltip::after {
@@ -20437,8 +20850,8 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-context-wheel > span {
   background: var(--gyro-premium-panel-strong);
   border-radius: inherit;
-  height: 14px;
-  width: 14px;
+  height: 12px;
+  width: 12px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-context-wheel > span,

@@ -250,7 +250,14 @@ export function mergeProviderResponseEvents(
         isProviderStatusEvent(existing) &&
         isProviderStatusEvent(responseEvent)
           ? mergeProviderStatusAttemptTiming(existing, responseEvent)
-          : responseEvent;
+          : existing &&
+              isProviderActivityEvent(existing) &&
+              isProviderActivityEvent(responseEvent)
+            ? {
+                ...responseEvent,
+                createdAt: existing.createdAt,
+              }
+            : responseEvent;
       merged = next;
       continue;
     }

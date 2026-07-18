@@ -87,6 +87,10 @@ import {
   estimateComposerContextUsage,
   type ComposerContextUsage,
 } from "./context-usage";
+import {
+  globalSearchMatchScore,
+  normalizedGlobalSearchText,
+} from "./global-search";
 import type {
   AppDestination,
   Automation,
@@ -109,6 +113,8 @@ import type {
   IdeState,
   IdeViewId,
   GitReviewActionId,
+  GlobalSearchProject,
+  GlobalSearchSelection,
   GitBranchCatalog,
   GyroConfig,
   Notification,
@@ -144,6 +150,7 @@ import type {
   WorkspaceFile,
   WorkspaceFileContent,
   WorkspaceLayoutId,
+  WorkspacePreparationProgress,
 } from "./types";
 import {
   CLI_LAUNCH_PRESET_MAX_PANES,
@@ -236,6 +243,7 @@ type AppChromeProps = {
   activePaneTab?: WorkbenchPaneTab;
   activeSettingsSection?: SettingsSectionId;
   updateState?: UpdateState;
+  workspacePreparation?: WorkspacePreparationProgress;
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onSelectDestination: (destination: AppDestination) => void;
@@ -283,6 +291,7 @@ type AppChromeProps = {
   onSettingsSectionChange?: (section: SettingsSectionId) => void;
   onSettingsBack?: () => void;
   onUpdateAction?: (state: UpdateState) => void;
+  onRetryWorkspacePreparation?: () => void;
   children: ReactNode;
 };
 
@@ -395,6 +404,8 @@ export function AppChrome({
   onSettingsSectionChange,
   onSettingsBack,
   onUpdateAction,
+  workspacePreparation,
+  onRetryWorkspacePreparation,
   children,
 }: AppChromeProps) {
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
@@ -402,6 +413,12 @@ export function AppChrome({
   const updatePopoverRef = useOutsidePointerDismiss<HTMLDivElement>(
     isUpdatePopoverOpen,
     () => setIsUpdatePopoverOpen(false),
+  );
+  const [isWorkspacePreparationOpen, setIsWorkspacePreparationOpen] =
+    useState(false);
+  const workspacePreparationRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isWorkspacePreparationOpen,
+    () => setIsWorkspacePreparationOpen(false),
   );
   const [ideSidebarMinimumWidth, setIdeSidebarMinimumWidth] =
     useState(restingSidebarWidth);
@@ -595,14 +612,26 @@ export function AppChrome({
       ref={appShellRef}
     >
       {isSidebarHidden ? (
-        <button
-          aria-label="Show sidebar"
-          className="gyro-sidebar-restore-button"
-          onClick={() => setIsSidebarHidden(false)}
-          type="button"
-        >
-          <PanelLeftClose size={13} />
-        </button>
+        <div className="gyro-sidebar-restore-cluster">
+          <button
+            aria-label="Show sidebar"
+            className="gyro-sidebar-restore-button"
+            onClick={() => setIsSidebarHidden(false)}
+            type="button"
+          >
+            <PanelLeftClose size={13} />
+          </button>
+          <WorkspacePreparationControl
+            controlRef={workspacePreparationRef}
+            isOpen={isWorkspacePreparationOpen}
+            onClose={() => setIsWorkspacePreparationOpen(false)}
+            onRetry={onRetryWorkspacePreparation}
+            onToggle={() =>
+              setIsWorkspacePreparationOpen((current) => !current)
+            }
+            progress={workspacePreparation}
+          />
+        </div>
       ) : (
         <aside className="gyro-sidebar">
           {activeDestination === "settings" ? (
@@ -613,6 +642,16 @@ export function AppChrome({
               }
               onSectionChange={onSettingsSectionChange}
               onToggleSidebar={() => setIsSidebarHidden(true)}
+              isWorkspacePreparationOpen={isWorkspacePreparationOpen}
+              onCloseWorkspacePreparation={() =>
+                setIsWorkspacePreparationOpen(false)
+              }
+              onRetryWorkspacePreparation={onRetryWorkspacePreparation}
+              onToggleWorkspacePreparation={() =>
+                setIsWorkspacePreparationOpen((current) => !current)
+              }
+              workspacePreparation={workspacePreparation}
+              workspacePreparationRef={workspacePreparationRef}
             />
           ) : (
             <WorkspaceSidebarContent
@@ -674,6 +713,16 @@ export function AppChrome({
                 setIsUpdatePopoverOpen((open) => !open)
               }
               onCloseUpdatePopover={() => setIsUpdatePopoverOpen(false)}
+              isWorkspacePreparationOpen={isWorkspacePreparationOpen}
+              onCloseWorkspacePreparation={() =>
+                setIsWorkspacePreparationOpen(false)
+              }
+              onRetryWorkspacePreparation={onRetryWorkspacePreparation}
+              onToggleWorkspacePreparation={() =>
+                setIsWorkspacePreparationOpen((current) => !current)
+              }
+              workspacePreparation={workspacePreparation}
+              workspacePreparationRef={workspacePreparationRef}
               workspacePath={workspacePath}
             />
           )}
@@ -799,16 +848,171 @@ function UpdatePopover({
   );
 }
 
+const workspacePreparationStages = [
+  { id: "catalog", label: "Catalog workspace" },
+  { id: "watcher", label: "Start file watcher" },
+  { id: "git", label: "Inspect Git" },
+  { id: "tasks", label: "Discover tasks" },
+  { id: "tests", label: "Discover tests" },
+] as const;
+
+function WorkspacePreparationControl({
+  progress,
+  isOpen,
+  onToggle,
+  onClose,
+  onRetry,
+  controlRef,
+}: {
+  progress?: WorkspacePreparationProgress;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onRetry?: () => void;
+  controlRef: RefObject<HTMLDivElement | null>;
+}) {
+  if (!progress) return null;
+  const percent = Math.round(
+    (Math.min(progress.completedSteps, progress.totalSteps) /
+      Math.max(1, progress.totalSteps)) *
+      100,
+  );
+  const failedPhases = new Set(progress.errors.map((error) => error.phase));
+  const phaseIndex = workspacePreparationStages.findIndex(
+    (stage) => stage.id === progress.phase,
+  );
+
+  return (
+    <div className="gyro-workspace-preparation" ref={controlRef as never}>
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={`${progress.message}, ${percent}%`}
+        className="gyro-workspace-preparation-button"
+        data-status={progress.status}
+        onClick={onToggle}
+        title={`${progress.message} · ${percent}%`}
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          className="gyro-workspace-preparation-ring"
+          style={
+            { "--gyro-preparation-progress": `${percent}%` } as CSSProperties
+          }
+        >
+          {progress.status === "ready" ? <Check size={9} /> : null}
+          {progress.status === "degraded" || progress.status === "failed" ? (
+            <TriangleAlert size={9} />
+          ) : null}
+        </span>
+        <span>
+          {progress.status === "preparing" ? `${percent}%` : progress.status}
+        </span>
+      </button>
+      {isOpen ? (
+        <section
+          aria-label="Workspace preparation details"
+          className="gyro-workspace-preparation-popover"
+          role="dialog"
+        >
+          <header>
+            <div>
+              <strong>{progress.message}</strong>
+              <span title={progress.workspacePath}>
+                {workspaceName(progress.workspacePath)} · {percent}%
+              </span>
+            </div>
+            <button
+              aria-label="Close preparation details"
+              onClick={onClose}
+              type="button"
+            >
+              <X size={13} />
+            </button>
+          </header>
+          <div
+            aria-label="Workspace preparation progress"
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={percent}
+            className="gyro-workspace-preparation-bar"
+            role="progressbar"
+          >
+            <span style={{ width: `${percent}%` }} />
+          </div>
+          <div className="gyro-workspace-preparation-stages">
+            {workspacePreparationStages.map((stage, index) => {
+              const isFailed = failedPhases.has(stage.id);
+              const isDone = index < progress.completedSteps && !isFailed;
+              const isActive =
+                progress.status === "preparing" && index === phaseIndex;
+              return (
+                <div
+                  data-state={
+                    isFailed
+                      ? "failed"
+                      : isDone
+                        ? "done"
+                        : isActive
+                          ? "active"
+                          : "waiting"
+                  }
+                  key={stage.id}
+                >
+                  {isFailed ? (
+                    <TriangleAlert size={12} />
+                  ) : isDone ? (
+                    <Check size={12} />
+                  ) : (
+                    <CircleDashed size={12} />
+                  )}
+                  <span>{stage.label}</span>
+                </div>
+              );
+            })}
+          </div>
+          {progress.errors.length > 0 ? (
+            <p>{progress.errors.map((error) => error.message).join(" · ")}</p>
+          ) : null}
+          {progress.status === "degraded" || progress.status === "failed" ? (
+            <button
+              className="gyro-update-primary"
+              onClick={onRetry}
+              type="button"
+            >
+              <RefreshCw size={12} />
+              Retry preparation
+            </button>
+          ) : null}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 function SettingsSidebarContent({
   activeSection,
   onBack,
   onSectionChange,
   onToggleSidebar,
+  workspacePreparation,
+  isWorkspacePreparationOpen,
+  onToggleWorkspacePreparation,
+  onCloseWorkspacePreparation,
+  onRetryWorkspacePreparation,
+  workspacePreparationRef,
 }: {
   activeSection: SettingsSectionId;
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onToggleSidebar: () => void;
+  workspacePreparation?: WorkspacePreparationProgress;
+  isWorkspacePreparationOpen: boolean;
+  onToggleWorkspacePreparation: () => void;
+  onCloseWorkspacePreparation: () => void;
+  onRetryWorkspacePreparation?: () => void;
+  workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
@@ -840,6 +1044,14 @@ function SettingsSidebarContent({
           </button>
         </div>
         <strong className="gyro-settings-sidebar-title">Settings</strong>
+        <WorkspacePreparationControl
+          controlRef={workspacePreparationRef}
+          isOpen={isWorkspacePreparationOpen}
+          onClose={onCloseWorkspacePreparation}
+          onRetry={onRetryWorkspacePreparation}
+          onToggle={onToggleWorkspacePreparation}
+          progress={workspacePreparation}
+        />
         <div
           aria-hidden="true"
           className="gyro-sidebar-titlebar-drag-region"
@@ -950,6 +1162,12 @@ function WorkspaceSidebarContent({
   onCloseUpdatePopover,
   onUpdateAction,
   updatePopoverRef,
+  workspacePreparation,
+  isWorkspacePreparationOpen,
+  onToggleWorkspacePreparation,
+  onCloseWorkspacePreparation,
+  onRetryWorkspacePreparation,
+  workspacePreparationRef,
 }: {
   sessions: Session[];
   commandProfiles: CommandProfile[];
@@ -1015,6 +1233,12 @@ function WorkspaceSidebarContent({
   onCloseUpdatePopover: () => void;
   onUpdateAction?: (state: UpdateState) => void;
   updatePopoverRef: RefObject<HTMLDivElement | null>;
+  workspacePreparation?: WorkspacePreparationProgress;
+  isWorkspacePreparationOpen: boolean;
+  onToggleWorkspacePreparation: () => void;
+  onCloseWorkspacePreparation: () => void;
+  onRetryWorkspacePreparation?: () => void;
+  workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
   const pinnedSessions = sessions.filter((session) =>
     pinnedSessionIds.includes(session.id),
@@ -1079,7 +1303,7 @@ function WorkspaceSidebarContent({
     discoveredProjectGroups,
     projectOrder,
   );
-  const [collapsedWorkspaceDirectories, setCollapsedWorkspaceDirectories] =
+  const [expandedWorkspaceDirectories, setExpandedWorkspaceDirectories] =
     useState<Set<string>>(() => new Set());
   const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
   const [sourceControlMessage, setSourceControlMessage] = useState("");
@@ -1087,11 +1311,11 @@ function WorkspaceSidebarContent({
   const visibleFiles = useMemo(
     () =>
       files.filter((file) =>
-        workspaceAncestorPaths(file.path).every(
-          (ancestor) => !collapsedWorkspaceDirectories.has(ancestor),
+        workspaceAncestorPaths(file.path).every((ancestor) =>
+          expandedWorkspaceDirectories.has(ancestor),
         ),
       ),
-    [collapsedWorkspaceDirectories, files],
+    [expandedWorkspaceDirectories, files],
   );
   const explorerTreeRef = useRef<HTMLDivElement>(null);
   const explorerRowRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1133,7 +1357,7 @@ function WorkspaceSidebarContent({
     }
   }, [projectOrder]);
   useEffect(() => {
-    setCollapsedWorkspaceDirectories(new Set());
+    setExpandedWorkspaceDirectories(new Set());
     setSelectedExplorerPath(
       ide?.activePath && files.some((file) => file.path === ide.activePath)
         ? ide.activePath
@@ -1206,12 +1430,12 @@ function WorkspaceSidebarContent({
     setProjectDropTarget(undefined);
   };
   const toggleWorkspaceDirectory = (path: string, collapsed?: boolean) => {
-    setCollapsedWorkspaceDirectories((current) => {
+    setExpandedWorkspaceDirectories((current) => {
       const next = new Set(current);
-      if (collapsed ?? !next.has(path)) {
-        next.add(path);
-      } else {
+      if (collapsed ?? next.has(path)) {
         next.delete(path);
+      } else {
+        next.add(path);
       }
       return next;
     });
@@ -1244,7 +1468,7 @@ function WorkspaceSidebarContent({
       focusExplorerPath(visibleFiles.at(-1)?.path);
     } else if (event.key === "ArrowRight" && file.kind === "directory") {
       event.preventDefault();
-      if (collapsedWorkspaceDirectories.has(file.path)) {
+      if (!expandedWorkspaceDirectories.has(file.path)) {
         toggleWorkspaceDirectory(file.path, false);
       } else {
         const child = visibleFiles.find(
@@ -1257,7 +1481,7 @@ function WorkspaceSidebarContent({
       const parentPath = workspaceAncestorPaths(file.path).at(-1);
       if (
         file.kind === "directory" &&
-        !collapsedWorkspaceDirectories.has(file.path)
+        expandedWorkspaceDirectories.has(file.path)
       ) {
         event.preventDefault();
         toggleWorkspaceDirectory(file.path, true);
@@ -1349,6 +1573,14 @@ function WorkspaceSidebarContent({
               <ArrowRight size={13} />
             </button>
           </div>
+          <WorkspacePreparationControl
+            controlRef={workspacePreparationRef}
+            isOpen={isWorkspacePreparationOpen}
+            onClose={onCloseWorkspacePreparation}
+            onRetry={onRetryWorkspacePreparation}
+            onToggle={onToggleWorkspacePreparation}
+            progress={workspacePreparation}
+          />
           {updateState ? (
             <div
               className="gyro-sidebar-update is-windowbar"
@@ -1543,9 +1775,9 @@ function WorkspaceSidebarContent({
                         );
                         return (
                           <WorkspaceExplorerRow
-                            collapsed={collapsedWorkspaceDirectories.has(
-                              file.path,
-                            )}
+                            collapsed={
+                              !expandedWorkspaceDirectories.has(file.path)
+                            }
                             decoration={decoration}
                             depth={
                               file.depth ?? file.path.split(/[\\/]/).length
@@ -2156,7 +2388,10 @@ function WorkspaceSidebarContent({
               type="button"
             >
               <Search size={15} />
-              Search
+              <span>Search</span>
+              <kbd className="gyro-sidebar-shortcut">
+                {primaryGlobalSearchShortcut()}
+              </kbd>
             </button>
           </div>
 
@@ -6142,13 +6377,13 @@ type FileTreeProps = {
 };
 
 export function FileTree({ files, selectedPath, onSelectFile }: FileTreeProps) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const visibleFiles = files.filter((file) => {
-    const parents = parentSegments(file.path);
-    return !parents.some((parent) => collapsed.has(parent));
+    const parents = workspaceAncestorPaths(file.path);
+    return parents.every((parent) => expanded.has(parent));
   });
   const toggleDirectory = (path: string) => {
-    setCollapsed((current) => {
+    setExpanded((current) => {
       const next = new Set(current);
       if (next.has(path)) {
         next.delete(path);
@@ -6190,10 +6425,10 @@ export function FileTree({ files, selectedPath, onSelectFile }: FileTreeProps) {
               type="button"
             >
               {file.kind === "directory" ? (
-                collapsed.has(file.path) ? (
-                  <ChevronRight size={14} />
-                ) : (
+                expanded.has(file.path) ? (
                   <ChevronDown size={14} />
+                ) : (
+                  <ChevronRight size={14} />
                 )
               ) : (
                 <FileText size={14} />
@@ -9121,198 +9356,365 @@ function isLoopbackBrowserPreviewUrl(value: string) {
   }
 }
 
+type GlobalSearchAction = {
+  id: string;
+  label: string;
+  meta: string;
+  destination?: AppDestination;
+  layout?: WorkspaceLayoutId;
+  toolTab?: WorkbenchPaneTab;
+  icon: IconComponent;
+  keywords?: string;
+  shortcut?: { mac: string; other: string };
+};
+
+type GlobalSearchEntry = {
+  id: string;
+  label: string;
+  detail: string;
+  icon: IconComponent;
+  selection: GlobalSearchSelection;
+  shortcut?: string;
+  searchText: string;
+  priority: number;
+  action?: GlobalSearchAction;
+};
+
+type GlobalSearchGroup = {
+  id: string;
+  label: string;
+  entries: GlobalSearchEntry[];
+};
+
+const globalSearchActions: GlobalSearchAction[] = [
+  {
+    id: "new-chat",
+    label: "New chat",
+    meta: "Start a desktop session",
+    destination: "workspace",
+    layout: "thread",
+    icon: MessageSquare,
+    keywords: "thread conversation",
+    shortcut: { mac: "⌘N", other: "Ctrl N" },
+  },
+  {
+    id: "open-workspace",
+    label: "Open project",
+    meta: "Choose a local folder",
+    destination: "workspace",
+    layout: "thread",
+    icon: Folder,
+    keywords: "workspace folder add",
+  },
+  {
+    id: "new-terminal",
+    label: "New terminal",
+    meta: "Open a local shell pane",
+    destination: "workspace",
+    layout: "terminal-grid",
+    toolTab: "terminal",
+    icon: Terminal,
+    shortcut: { mac: "⌘T", other: "Ctrl T" },
+  },
+  {
+    id: "search-files",
+    label: "Search files",
+    meta: "Search workspace content",
+    destination: "workspace",
+    layout: "code",
+    icon: Search,
+    keywords: "code find",
+    shortcut: { mac: "⇧⌘F", other: "Ctrl Shift F" },
+  },
+  {
+    id: "open-settings",
+    label: "Open settings",
+    meta: "Preferences",
+    destination: "settings",
+    icon: Settings,
+    shortcut: { mac: "⌘,", other: "Ctrl ," },
+  },
+  {
+    id: "toggle-theme",
+    label: "Toggle theme",
+    meta: "Switch between dark and light",
+    icon: Palette,
+    keywords: "appearance color",
+  },
+  {
+    id: "run-codex",
+    label: "Start Codex CLI",
+    meta: "Open Codex in a terminal pane",
+    destination: "workspace",
+    layout: "terminal-grid",
+    toolTab: "terminal",
+    icon: Bot,
+  },
+  {
+    id: "run-claude",
+    label: "Start Claude Code",
+    meta: "Open Claude in a terminal pane",
+    destination: "workspace",
+    layout: "terminal-grid",
+    toolTab: "terminal",
+    icon: Bot,
+  },
+  {
+    id: "split-terminal",
+    label: "Split terminal",
+    meta: "Choose a pane template",
+    destination: "workspace",
+    layout: "terminal-grid",
+    toolTab: "terminal",
+    icon: PanelRight,
+    shortcut: { mac: "⌘\\", other: "Ctrl \\" },
+  },
+  {
+    id: "configure-cli-launcher",
+    label: "Set CLI launch preset",
+    meta: "Choose agents and pane counts",
+    destination: "settings",
+    icon: SlidersHorizontal,
+  },
+  {
+    id: "open-browser-preview",
+    label: "Open browser preview",
+    meta: "Inspect a local web app",
+    destination: "workspace",
+    toolTab: "browser",
+    icon: Globe2,
+  },
+  {
+    id: "show-diffs",
+    label: "Show diffs",
+    meta: "Review workspace changes",
+    destination: "workspace",
+    toolTab: "diff",
+    icon: GitPullRequest,
+  },
+  {
+    id: "run-tests",
+    label: "Run tests",
+    meta: "Send the test command to a terminal",
+    destination: "workspace",
+    layout: "terminal-grid",
+    toolTab: "terminal",
+    icon: Play,
+  },
+  {
+    id: "create-task",
+    label: "Create task",
+    meta: "Add an item to the plan board",
+    destination: "tasks",
+    icon: Activity,
+  },
+  {
+    id: "open-automations",
+    label: "Open automations",
+    meta: "View scheduled local runs",
+    destination: "automations",
+    icon: CalendarClock,
+  },
+  {
+    id: "create-automation",
+    label: "Create automation",
+    meta: "Schedule an agent check",
+    destination: "automations",
+    icon: CalendarClock,
+  },
+  {
+    id: "run-automation",
+    label: "Run automation",
+    meta: "Queue the selected automation",
+    destination: "automations",
+    icon: Play,
+  },
+  {
+    id: "open-providers",
+    label: "Open providers",
+    meta: "Profiles, health, and handoffs",
+    destination: "providers",
+    icon: KeyRound,
+  },
+];
+
+function isMacPlatform() {
+  return (
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad/.test(navigator.platform)
+  );
+}
+
+function primaryGlobalSearchShortcut() {
+  return isMacPlatform() ? "⌘K" : "Ctrl K";
+}
+
 export function CommandPaletteOverlay({
   onClose,
   onSelectDestination,
   onSelectWorkspaceLayout,
   onOpenToolPanel,
   recents = [],
+  sessions = [],
+  projects = [],
+  pinnedSessionIds = [],
   query = "",
   onQueryChange,
   onCommand,
+  onSelectSession,
+  onSelectProject,
 }: {
   onClose: () => void;
   onSelectDestination: (destination: AppDestination) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
   recents?: string[];
+  sessions?: Session[];
+  projects?: GlobalSearchProject[];
+  pinnedSessionIds?: string[];
   query?: string;
   onQueryChange?: (query: string) => void;
   onCommand?: (commandId: string) => void;
+  onSelectSession?: (sessionId: string) => void;
+  onSelectProject?: (path: string) => void;
 }) {
-  const commands: Array<{
-    id: string;
-    label: string;
-    meta: string;
-    destination?: AppDestination;
-    layout?: WorkspaceLayoutId;
-    toolTab?: WorkbenchPaneTab;
-    icon: IconComponent;
-  }> = [
-    {
-      id: "new-chat",
-      label: "New Chat",
-      meta: "Start a desktop session",
-      destination: "workspace",
-      layout: "thread",
-      icon: MessageSquare,
-    },
-    {
-      id: "open-workspace",
-      label: "Open workspace",
-      meta: "Choose a local folder",
-      destination: "workspace",
-      layout: "thread",
-      icon: Folder,
-    },
-    {
-      id: "new-terminal",
-      label: "New Terminal",
-      meta: "Open a local shell pane",
-      destination: "workspace",
-      layout: "terminal-grid",
-      toolTab: "terminal",
-      icon: Terminal,
-    },
-    {
-      id: "run-codex",
-      label: "Start Codex CLI",
-      meta: "Open Codex in a terminal pane",
-      destination: "workspace",
-      layout: "terminal-grid",
-      toolTab: "terminal",
-      icon: Bot,
-    },
-    {
-      id: "run-claude",
-      label: "Start Claude Code",
-      meta: "Open Claude in a terminal pane",
-      destination: "workspace",
-      layout: "terminal-grid",
-      toolTab: "terminal",
-      icon: Bot,
-    },
-    {
-      id: "split-terminal",
-      label: "Split terminal",
-      meta: "Choose a pane template",
-      destination: "workspace",
-      layout: "terminal-grid",
-      toolTab: "terminal",
-      icon: PanelRight,
-    },
-    {
-      id: "open-settings",
-      label: "Open settings",
-      meta: "Preferences",
-      destination: "settings",
-      icon: Settings,
-    },
-    {
-      id: "configure-cli-launcher",
-      label: "Set CLI launch preset",
-      meta: "Choose agents and pane counts",
-      destination: "settings",
-      icon: SlidersHorizontal,
-    },
-    {
-      id: "search-files",
-      label: "Search files",
-      meta: "Workspace search",
-      destination: "workspace",
-      layout: "code",
-      icon: Search,
-    },
-    {
-      id: "toggle-theme",
-      label: "Toggle theme",
-      meta: "Dark or light",
-      icon: Palette,
-    },
-    {
-      id: "open-browser-preview",
-      label: "Open browser preview",
-      meta: "Localhost pane",
-      destination: "workspace",
-      toolTab: "browser",
-      icon: Globe2,
-    },
-    {
-      id: "show-diffs",
-      label: "Show diffs",
-      meta: "Review changes",
-      destination: "workspace",
-      toolTab: "diff",
-      icon: GitPullRequest,
-    },
-    {
-      id: "run-tests",
-      label: "Run tests",
-      meta: "Send command to terminal",
-      destination: "workspace",
-      layout: "terminal-grid",
-      toolTab: "terminal",
-      icon: Play,
-    },
-    {
-      id: "create-task",
-      label: "Create task",
-      meta: "Add to plan board",
-      destination: "tasks",
-      icon: Activity,
-    },
-    {
-      id: "open-automations",
-      label: "Open automations",
-      meta: "Scheduled local runs",
-      destination: "automations",
-      icon: CalendarClock,
-    },
-    {
-      id: "create-automation",
-      label: "Create automation",
-      meta: "Schedule an agent check",
-      destination: "automations",
-      icon: CalendarClock,
-    },
-    {
-      id: "run-automation",
-      label: "Run automation",
-      meta: "Queue selected automation",
-      destination: "automations",
-      icon: Play,
-    },
-    {
-      id: "open-providers",
-      label: "Open providers",
-      meta: "Profiles, health, and handoffs",
-      destination: "providers",
-      icon: KeyRound,
-    },
-  ];
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredCommands = commands
-    .filter((command) =>
-      normalizedQuery === ""
-        ? true
-        : `${command.label} ${command.meta}`
-            .toLowerCase()
-            .includes(normalizedQuery),
-    )
-    .sort((a, b) => {
-      const aRecent = recents.indexOf(a.id);
-      const bRecent = recents.indexOf(b.id);
-      if (aRecent === -1 && bRecent === -1) {
-        return 0;
-      }
-      if (aRecent === -1) {
-        return 1;
-      }
-      if (bRecent === -1) {
-        return -1;
-      }
-      return aRecent - bRecent;
-    });
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const listboxId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const normalizedQuery = normalizedGlobalSearchText(query);
+  const platformShortcut = (shortcut?: GlobalSearchAction["shortcut"]) =>
+    shortcut ? (isMacPlatform() ? shortcut.mac : shortcut.other) : undefined;
+  const actionEntries = useMemo(
+    () =>
+      globalSearchActions.map<GlobalSearchEntry>((action, index) => ({
+        id: `action:${action.id}`,
+        label: action.label,
+        detail: action.meta,
+        icon: action.icon,
+        selection: { kind: "action", id: action.id },
+        shortcut: platformShortcut(action.shortcut),
+        searchText: `${action.label} ${action.meta} ${action.keywords ?? ""}`,
+        priority:
+          recents.indexOf(action.id) >= 0
+            ? recents.indexOf(action.id)
+            : 100 + index,
+        action,
+      })),
+    [recents],
+  );
+  const sessionEntries = useMemo(() => {
+    const pinned = new Set(pinnedSessionIds);
+    return [...sessions]
+      .sort(
+        (first, second) =>
+          Number(pinned.has(second.id)) - Number(pinned.has(first.id)) ||
+          new Date(second.updatedAt).getTime() -
+            new Date(first.updatedAt).getTime(),
+      )
+      .map<GlobalSearchEntry>((session, index) => ({
+        id: `session:${session.id}`,
+        label: session.title || "Untitled session",
+        detail:
+          session.summary ||
+          `${workspaceName(session.workspacePath)}${session.providerLabel ? ` · ${session.providerLabel}` : ""}`,
+        icon: pinned.has(session.id) ? Pin : MessageSquare,
+        selection: { kind: "session", sessionId: session.id },
+        searchText: `${session.title} ${session.summary ?? ""} ${session.workspacePath} ${session.providerLabel ?? ""}`,
+        priority: (pinned.has(session.id) ? 0 : 100) + index,
+      }));
+  }, [pinnedSessionIds, sessions]);
+  const projectEntries = useMemo(
+    () =>
+      projects.map<GlobalSearchEntry>((project, index) => ({
+        id: `project:${project.path}`,
+        label: project.label,
+        detail: project.current
+          ? "Current project"
+          : project.detail || project.path,
+        icon: project.current ? Folder : HardDrive,
+        selection: { kind: "project", path: project.path },
+        searchText: `${project.label} ${project.path} ${project.detail ?? ""}`,
+        priority: (project.current ? 0 : 100) + index,
+      })),
+    [projects],
+  );
+  const groups = useMemo<GlobalSearchGroup[]>(() => {
+    if (!normalizedQuery) {
+      return [
+        {
+          id: "suggested",
+          label: "Suggested",
+          entries: actionEntries.slice(0, 6),
+        },
+        {
+          id: "recent-sessions",
+          label: "Recent sessions",
+          entries: sessionEntries.slice(0, 5),
+        },
+        {
+          id: "projects",
+          label: "Projects",
+          entries: projectEntries.slice(0, 4),
+        },
+      ].filter((group) => group.entries.length > 0);
+    }
+    const ranked = (entries: GlobalSearchEntry[]) =>
+      entries
+        .map((entry) => ({
+          entry,
+          score: globalSearchMatchScore(query, entry.label, entry.searchText),
+        }))
+        .filter(({ score }) => Number.isFinite(score))
+        .sort(
+          (first, second) =>
+            first.score - second.score ||
+            first.entry.priority - second.entry.priority ||
+            first.entry.label.localeCompare(second.entry.label),
+        )
+        .slice(0, 8)
+        .map(({ entry }) => entry);
+    return [
+      { id: "projects", label: "Projects", entries: ranked(projectEntries) },
+      { id: "sessions", label: "Sessions", entries: ranked(sessionEntries) },
+      { id: "actions", label: "Actions", entries: ranked(actionEntries) },
+    ].filter((group) => group.entries.length > 0);
+  }, [actionEntries, normalizedQuery, projectEntries, query, sessionEntries]);
+  const visibleEntries = groups.flatMap((group) => group.entries);
+  const activeEntry = visibleEntries[selectedIndex];
+
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => returnFocusRef.current?.focus();
+  }, []);
+  useEffect(() => setSelectedIndex(0), [query]);
+  useEffect(() => {
+    if (selectedIndex >= visibleEntries.length) {
+      setSelectedIndex(Math.max(0, visibleEntries.length - 1));
+    }
+  }, [selectedIndex, visibleEntries.length]);
+
+  const activateEntry = (entry?: GlobalSearchEntry) => {
+    if (!entry) return;
+    if (entry.selection.kind === "session") {
+      onSelectSession?.(entry.selection.sessionId);
+      onClose();
+      return;
+    }
+    if (entry.selection.kind === "project") {
+      onSelectProject?.(entry.selection.path);
+      onClose();
+      return;
+    }
+    const command = entry.action;
+    if (!command) return;
+    onCommand?.(command.id);
+    if (command.destination) onSelectDestination(command.destination);
+    if (command.layout) onSelectWorkspaceLayout(command.layout);
+    if (command.toolTab) onOpenToolPanel(command.toolTab);
+    onClose();
+  };
 
   return (
     <div
@@ -9325,55 +9727,104 @@ export function CommandPaletteOverlay({
       }}
       role="dialog"
     >
-      <div className="gyro-command-palette">
+      <div
+        aria-label="Search Gyro"
+        className="gyro-command-palette is-global-search"
+      >
         <header>
           <Search size={17} />
           <input
-            autoFocus
+            aria-activedescendant={activeEntry?.id}
+            aria-autocomplete="list"
+            aria-controls={listboxId}
+            aria-expanded="true"
+            aria-label="Search projects, sessions, and actions"
             onChange={(event) => onQueryChange?.(event.target.value)}
-            placeholder="Search commands"
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                if (visibleEntries.length === 0) return;
+                const direction = event.key === "ArrowDown" ? 1 : -1;
+                setSelectedIndex(
+                  (current) =>
+                    (current + direction + visibleEntries.length) %
+                    visibleEntries.length,
+                );
+              } else if (event.key === "Home") {
+                event.preventDefault();
+                setSelectedIndex(0);
+              } else if (event.key === "End") {
+                event.preventDefault();
+                setSelectedIndex(Math.max(0, visibleEntries.length - 1));
+              } else if (event.key === "Enter") {
+                event.preventDefault();
+                activateEntry(activeEntry);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onClose();
+              }
+            }}
+            placeholder="Search projects, sessions, and actions"
+            ref={inputRef}
+            role="combobox"
             value={query}
           />
-          <button
-            aria-label="Close command palette"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={16} />
-          </button>
+          <kbd>{primaryGlobalSearchShortcut()}</kbd>
         </header>
-        <div className="gyro-command-list">
-          {filteredCommands.length === 0 ? (
-            <div className="gyro-empty-row">No matching commands</div>
+        <div
+          aria-label="Search results"
+          className="gyro-command-list"
+          id={listboxId}
+          role="listbox"
+        >
+          {visibleEntries.length === 0 ? (
+            <div className="gyro-global-search-empty">
+              <Search size={18} />
+              <strong>No results for “{query.trim()}”</strong>
+              <span>Try a project, session title, or Gyro action.</span>
+            </div>
           ) : null}
-          {filteredCommands.map((command, index) => {
-            const Icon = command.icon;
-            return (
-              <button
-                className={index === 0 ? "is-active" : ""}
-                key={command.label}
-                onClick={() => {
-                  onCommand?.(command.id);
-                  if (command.destination) {
-                    onSelectDestination(command.destination);
-                  }
-                  if (command.layout) {
-                    onSelectWorkspaceLayout(command.layout);
-                  }
-                  if (command.toolTab) {
-                    onOpenToolPanel(command.toolTab);
-                  }
-                  onClose();
-                }}
-                type="button"
-              >
-                <Icon size={16} />
-                <span>{command.label}</span>
-                <small>{command.meta}</small>
-              </button>
-            );
-          })}
+          {groups.map((group) => (
+            <section className="gyro-global-search-group" key={group.id}>
+              <div className="gyro-global-search-heading">{group.label}</div>
+              {group.entries.map((entry) => {
+                const Icon = entry.icon;
+                const index = visibleEntries.indexOf(entry);
+                return (
+                  <button
+                    aria-selected={index === selectedIndex}
+                    className={index === selectedIndex ? "is-active" : ""}
+                    id={entry.id}
+                    key={entry.id}
+                    onClick={() => activateEntry(entry)}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onPointerMove={() => setSelectedIndex(index)}
+                    role="option"
+                    type="button"
+                  >
+                    <span className="gyro-global-search-icon">
+                      <Icon size={16} />
+                    </span>
+                    <span className="gyro-global-search-copy">
+                      <strong>{entry.label}</strong>
+                      <small>{entry.detail}</small>
+                    </span>
+                    {entry.shortcut ? <kbd>{entry.shortcut}</kbd> : null}
+                  </button>
+                );
+              })}
+            </section>
+          ))}
+          <span aria-live="polite" className="gyro-sr-only">
+            {visibleEntries.length} results
+          </span>
         </div>
+        <footer className="gyro-global-search-footer">
+          <span>Search stays local to this Mac.</span>
+          <span>
+            <kbd>↑↓</kbd> navigate <kbd>↵</kbd> open <kbd>esc</kbd> close
+          </span>
+        </footer>
       </div>
     </div>
   );
@@ -11702,37 +12153,31 @@ function Composer({
   const contextItems: ComposerPopoverItem[] = [
     {
       action: "select-image",
-      detail: "Attach an image to your next message",
       icon: ImagePlus,
       label: "Image",
     },
     {
       action: "select-file",
-      detail: "Attach a file from the workspace",
       icon: Paperclip,
       label: "File",
     },
     {
       action: "select-folder",
-      detail: "Choose the workspace for this chat",
       icon: Folder,
       label: "Folder",
     },
     {
       action: "add-goal",
-      detail: "Set an outcome to keep pursuing",
       icon: Goal,
       label: "Goal",
     },
     {
       action: "set-chat-mode-plan",
-      detail: "Explore and plan without changing files",
       icon: LockKeyhole,
       label: "Plan",
     },
     {
       action: "search-workspace",
-      detail: "Find a command or workspace file",
       icon: Search,
       label: "Search",
     },
@@ -12281,16 +12726,15 @@ function Composer({
               role="tooltip"
             >
               <header>
-                <strong>{contextUsage.title}</strong>
+                <strong>Context</strong>
                 <span>{contextUsage.percentLabel}</span>
               </header>
               <div className="gyro-composer-context-value">
                 <strong>{contextUsage.usedLabel}</strong>
-                <span>used of {contextUsage.windowLabel} tokens</span>
-              </div>
-              <div className="gyro-composer-context-remaining">
-                <span>Remaining</span>
-                <strong>{contextUsage.remainingLabel}</strong>
+                <span>
+                  of {contextUsage.windowLabel} · {contextUsage.remainingLabel}{" "}
+                  remaining
+                </span>
               </div>
               <div
                 aria-label="Context window used"
@@ -12302,7 +12746,6 @@ function Composer({
               >
                 <span style={{ width: `${contextUsage.percent}%` }} />
               </div>
-              <p>{contextUsage.detail}</p>
             </div>
           </div>
         ) : null}
@@ -13197,9 +13640,9 @@ function deriveTranscriptState(events: SessionEvent[]) {
       looseEvents.push(event);
     }
   }
-  for (const turn of turns) {
-    turn.timelineEvents.sort(compareTranscriptEvents);
-  }
+  // Timeline events already arrive in provider sequence. Keep that order so
+  // coarse or rewritten persistence timestamps cannot move an early note
+  // below commands that appeared later in the run.
   turns.sort((first, second) =>
     compareIsoTimestamps(first.startedAt, second.startedAt),
   );
@@ -13903,7 +14346,9 @@ function providerActivityFilePath(event: SessionEvent) {
   const labelPath = activity.label
     .replace(/^(?:Editing|Edited|Updated)\s+/, "")
     .trim();
-  return labelPath && labelPath !== "workspace files" ? labelPath : undefined;
+  return labelPath && !["file", "files", "workspace files"].includes(labelPath)
+    ? labelPath
+    : undefined;
 }
 
 function sourceControlFileForActivityPath(
@@ -13923,7 +14368,7 @@ function chatTurnChangeSummary(
     { additions: number; deletions: number }
   >,
 ) {
-  const paths = events.reduce<string[]>((uniquePaths, event) => {
+  const activityPaths = events.reduce<string[]>((uniquePaths, event) => {
     const path = providerActivityFilePath(event);
     if (
       path &&
@@ -13935,6 +14380,23 @@ function chatTurnChangeSummary(
     }
     return uniquePaths;
   }, []);
+  const hasGenericFileActivity = events.some((event) => {
+    const activity = providerActivityFromEvent(event);
+    return activity?.kind === "file" && !providerActivityFilePath(event);
+  });
+  const inferredPaths = hasGenericFileActivity
+    ? (sourceControl?.files ?? [])
+        .filter((file) =>
+          sourceControlFileChangedSinceBaseline(file, sourceControlBaseline),
+        )
+        .map((file) => file.path)
+    : [];
+  const paths = [...activityPaths];
+  for (const path of inferredPaths) {
+    if (!paths.some((existing) => providerActivityPathsMatch(path, existing))) {
+      paths.push(path);
+    }
+  }
   const files = paths
     .map((path) => sourceControlFileForActivityPath(path, sourceControl))
     .filter((file): file is SourceControlFile => Boolean(file));
@@ -13965,6 +14427,21 @@ function chatTurnChangeSummary(
     fileChanges,
     paths,
   };
+}
+
+function sourceControlFileChangedSinceBaseline(
+  file: SourceControlFile,
+  baseline?: Record<string, { additions: number; deletions: number }>,
+) {
+  if (!baseline) {
+    return true;
+  }
+  const previous = sourceControlStatsForActivityPath(file.path, baseline);
+  return (
+    !previous ||
+    previous.additions !== file.additions ||
+    previous.deletions !== file.deletions
+  );
 }
 
 function sourceControlStatsForActivityPath(
