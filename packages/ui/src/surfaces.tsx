@@ -97,6 +97,8 @@ import type {
   BrowserPreview,
   BrowserPreviewDevice,
   ChatAttachment,
+  ChatPaneRef,
+  ChatProjectLayout,
   ChatMode,
   ChatSidePanelId,
   CliLaunchPreset,
@@ -170,14 +172,12 @@ import {
 } from "./provider-catalog";
 
 type BrowserScreenshotAction = "capture" | "reveal";
-import {
-  shouldShowSidebarUpdate,
-  updatePrimaryActionLabel,
-  updateSidebarLabel,
-} from "./update-state";
+import { shouldShowSidebarUpdate, updateSidebarLabel } from "./update-state";
 
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
+const CHAT_SESSION_DRAG_MIME = "application/x-gyro-chat-session";
+const CHAT_PANE_DRAG_MIME = "application/x-gyro-chat-pane";
 const TOOL_PANEL_DEFAULT_HEIGHT = 280;
 const TOOL_PANEL_MIN_HEIGHT = 140;
 const TOOL_PANEL_COLLAPSE_HEIGHT = 96;
@@ -235,6 +235,7 @@ type AppChromeProps = {
   workspacePath?: string;
   notifications?: Notification[];
   pinnedSessionIds?: string[];
+  openChatSessionIds?: string[];
   isChatsCollapsed?: boolean;
   terminalPanes?: TerminalPane[];
   selectedTerminalPaneId?: string;
@@ -245,6 +246,7 @@ type AppChromeProps = {
   updateState?: UpdateState;
   workspacePreparation?: WorkspacePreparationProgress;
   onSelectSession: (sessionId: string) => void;
+  onAddSessionToGrid?: (sessionId: string) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onSelectDestination: (destination: AppDestination) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
@@ -356,6 +358,7 @@ export function AppChrome({
   workspacePath,
   notifications = [],
   pinnedSessionIds = [],
+  openChatSessionIds = [],
   isChatsCollapsed = false,
   terminalPanes = [],
   selectedTerminalPaneId,
@@ -365,6 +368,7 @@ export function AppChrome({
   activeSettingsSection = "general",
   updateState,
   onSelectSession,
+  onAddSessionToGrid,
   onSelectWorkspaceLayout,
   onSelectDestination,
   onOpenToolPanel,
@@ -409,11 +413,7 @@ export function AppChrome({
   children,
 }: AppChromeProps) {
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
-  const [isUpdatePopoverOpen, setIsUpdatePopoverOpen] = useState(false);
-  const updatePopoverRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isUpdatePopoverOpen,
-    () => setIsUpdatePopoverOpen(false),
-  );
+  const [settingsQuery, setSettingsQuery] = useState("");
   const [isWorkspacePreparationOpen, setIsWorkspacePreparationOpen] =
     useState(false);
   const workspacePreparationRef = useOutsidePointerDismiss<HTMLDivElement>(
@@ -446,12 +446,6 @@ export function AppChrome({
   const showSidebarUpdate = updateState
     ? shouldShowSidebarUpdate(updateState)
     : false;
-
-  useEffect(() => {
-    if (!showSidebarUpdate) {
-      setIsUpdatePopoverOpen(false);
-    }
-  }, [showSidebarUpdate]);
 
   useEffect(() => {
     if (!isIdeSurface) {
@@ -637,11 +631,13 @@ export function AppChrome({
           {activeDestination === "settings" ? (
             <SettingsSidebarContent
               activeSection={activeSettingsSection}
-              onBack={
-                onSettingsBack ?? (() => onSelectDestination("workspace"))
-              }
+              onBack={() => {
+                setSettingsQuery("");
+                (onSettingsBack ?? (() => onSelectDestination("workspace")))();
+              }}
               onSectionChange={onSettingsSectionChange}
               onToggleSidebar={() => setIsSidebarHidden(true)}
+              query={settingsQuery}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -693,6 +689,7 @@ export function AppChrome({
               onSelectDestination={onSelectDestination}
               onSelectIdeView={onSelectIdeView}
               onSelectSession={onSelectSession}
+              onAddSessionToGrid={onAddSessionToGrid}
               onSelectSessions={onSelectSessions}
               onSelectTerminalPane={onSelectTerminalPane}
               onSelectWorkspaceLayout={onSelectWorkspaceLayout}
@@ -702,17 +699,12 @@ export function AppChrome({
               onToggleSidebar={() => setIsSidebarHidden(true)}
               onUpdateAction={onUpdateAction}
               pinnedSessionIds={pinnedSessionIds}
+              openChatSessionIds={openChatSessionIds}
               savedProjects={savedProjects}
               selectedTerminalPaneId={selectedTerminalPaneId}
               sessions={sessions}
               terminalPanes={terminalPanes}
-              updatePopoverRef={updatePopoverRef}
               updateState={showSidebarUpdate ? updateState : undefined}
-              isUpdatePopoverOpen={isUpdatePopoverOpen}
-              onToggleUpdatePopover={() =>
-                setIsUpdatePopoverOpen((open) => !open)
-              }
-              onCloseUpdatePopover={() => setIsUpdatePopoverOpen(false)}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -772,9 +764,38 @@ export function AppChrome({
         </aside>
       )}
       <main className="gyro-main">
-        {activeDestination === "workspace" &&
-        activeWorkspaceLayout === "thread" &&
-        !activeSession ? (
+        {activeDestination === "settings" ? (
+          <div className="gyro-settings-topbar">
+            <div
+              aria-hidden="true"
+              className="gyro-settings-topbar-drag-region"
+              data-tauri-drag-region
+            />
+            <div className="gyro-settings-topbar-search">
+              <Search aria-hidden="true" size={14} />
+              <input
+                aria-label="Search settings"
+                onChange={(event) => setSettingsQuery(event.target.value)}
+                placeholder="Search settings"
+                type="search"
+                value={settingsQuery}
+              />
+              {settingsQuery ? (
+                <button
+                  aria-label="Clear settings search"
+                  onClick={() => setSettingsQuery("")}
+                  type="button"
+                >
+                  <X size={13} />
+                </button>
+              ) : (
+                <span aria-hidden="true" />
+              )}
+            </div>
+          </div>
+        ) : activeDestination === "workspace" &&
+          activeWorkspaceLayout === "thread" &&
+          !activeSession ? (
           <div
             aria-hidden="true"
             className="gyro-main-titlebar-drag-region"
@@ -784,67 +805,6 @@ export function AppChrome({
         {children}
       </main>
     </div>
-  );
-}
-
-function UpdatePopover({
-  onAction,
-  onClose,
-  state,
-}: {
-  onAction: () => void;
-  onClose: () => void;
-  state: UpdateState;
-}) {
-  const actionDisabled =
-    state.status === "downloading" || state.status === "installing";
-  return (
-    <section
-      aria-label="Gyro update"
-      aria-modal="false"
-      className="gyro-update-popover"
-      role="dialog"
-    >
-      <header>
-        <div>
-          <strong>{updateSidebarLabel(state)}</strong>
-          <span>
-            {state.nextVersion
-              ? `${state.currentVersion} → ${state.nextVersion}`
-              : `Gyro ${state.currentVersion}`}
-          </span>
-        </div>
-        <button
-          aria-label="Close update details"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={14} />
-        </button>
-      </header>
-      {state.releaseNotes ? <p>{state.releaseNotes}</p> : null}
-      {state.status === "downloading" ? (
-        <div
-          aria-label="Update download progress"
-          aria-valuemax={100}
-          aria-valuemin={0}
-          aria-valuenow={state.progressPercent}
-          className="gyro-update-progress"
-          role="progressbar"
-        >
-          <span style={{ width: `${state.progressPercent ?? 0}%` }} />
-        </div>
-      ) : null}
-      {state.error ? <small>{state.error}</small> : null}
-      <button
-        className="gyro-update-primary"
-        disabled={actionDisabled}
-        onClick={onAction}
-        type="button"
-      >
-        {updatePrimaryActionLabel(state)}
-      </button>
-    </section>
   );
 }
 
@@ -994,6 +954,7 @@ function WorkspacePreparationControl({
 function SettingsSidebarContent({
   activeSection,
   onBack,
+  query,
   onSectionChange,
   onToggleSidebar,
   workspacePreparation,
@@ -1005,6 +966,7 @@ function SettingsSidebarContent({
 }: {
   activeSection: SettingsSectionId;
   onBack: () => void;
+  query: string;
   onSectionChange?: (section: SettingsSectionId) => void;
   onToggleSidebar: () => void;
   workspacePreparation?: WorkspacePreparationProgress;
@@ -1014,7 +976,6 @@ function SettingsSidebarContent({
   onRetryWorkspacePreparation?: () => void;
   workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
-  const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
   const visibleItems = settingsSidebarItems.filter(({ label }) =>
     label.toLowerCase().includes(normalizedQuery),
@@ -1022,52 +983,43 @@ function SettingsSidebarContent({
 
   return (
     <>
-      <div
-        className="gyro-sidebar-windowbar is-settings"
-        aria-label="Settings navigation"
-      >
-        <div className="gyro-sidebar-window-actions">
-          <button
-            aria-label="Hide sidebar"
-            onClick={onToggleSidebar}
-            type="button"
-          >
-            <PanelLeftClose size={13} />
-          </button>
-          <button
-            aria-label="Back from settings"
-            className="gyro-settings-back-button"
-            onClick={onBack}
-            type="button"
-          >
-            <ArrowLeft size={13} />
-          </button>
-        </div>
-        <strong className="gyro-settings-sidebar-title">Settings</strong>
-        <WorkspacePreparationControl
-          controlRef={workspacePreparationRef}
-          isOpen={isWorkspacePreparationOpen}
-          onClose={onCloseWorkspacePreparation}
-          onRetry={onRetryWorkspacePreparation}
-          onToggle={onToggleWorkspacePreparation}
-          progress={workspacePreparation}
-        />
+      <div className="gyro-sidebar-persistent-header is-settings">
         <div
-          aria-hidden="true"
-          className="gyro-sidebar-titlebar-drag-region"
-          data-tauri-drag-region
-        />
-      </div>
-
-      <div className="gyro-settings-sidebar-search">
-        <Search aria-hidden="true" size={13} />
-        <input
-          aria-label="Search settings"
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search settings"
-          type="search"
-          value={query}
-        />
+          className="gyro-sidebar-windowbar is-settings"
+          aria-label="Settings navigation"
+        >
+          <div className="gyro-sidebar-window-actions">
+            <button
+              aria-label="Hide sidebar"
+              onClick={onToggleSidebar}
+              type="button"
+            >
+              <PanelLeftClose size={13} />
+            </button>
+            <button
+              aria-label="Back from settings"
+              className="gyro-settings-back-button"
+              onClick={onBack}
+              type="button"
+            >
+              <ArrowLeft size={13} />
+            </button>
+          </div>
+          <strong className="gyro-settings-sidebar-title">Settings</strong>
+          <WorkspacePreparationControl
+            controlRef={workspacePreparationRef}
+            isOpen={isWorkspacePreparationOpen}
+            onClose={onCloseWorkspacePreparation}
+            onRetry={onRetryWorkspacePreparation}
+            onToggle={onToggleWorkspacePreparation}
+            progress={workspacePreparation}
+          />
+          <div
+            aria-hidden="true"
+            className="gyro-sidebar-titlebar-drag-region"
+            data-tauri-drag-region
+          />
+        </div>
       </div>
 
       <div className="gyro-sidebar-actions is-settings-pages">
@@ -1121,7 +1073,9 @@ function WorkspaceSidebarContent({
   isChatsCollapsed,
   workspacePath,
   pinnedSessionIds,
+  openChatSessionIds,
   onSelectSession,
+  onAddSessionToGrid,
   onSelectDestination,
   onSelectWorkspaceLayout,
   onOpenToolPanel,
@@ -1157,11 +1111,7 @@ function WorkspaceSidebarContent({
   onToggleChatsCollapsed,
   onToggleSidebar,
   updateState,
-  isUpdatePopoverOpen,
-  onToggleUpdatePopover,
-  onCloseUpdatePopover,
   onUpdateAction,
-  updatePopoverRef,
   workspacePreparation,
   isWorkspacePreparationOpen,
   onToggleWorkspacePreparation,
@@ -1185,7 +1135,9 @@ function WorkspaceSidebarContent({
   isChatsCollapsed: boolean;
   workspacePath?: string;
   pinnedSessionIds: string[];
+  openChatSessionIds: string[];
   onSelectSession: (sessionId: string) => void;
+  onAddSessionToGrid?: (sessionId: string) => void;
   onSelectDestination: (destination: AppDestination) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
@@ -1228,11 +1180,7 @@ function WorkspaceSidebarContent({
   onToggleChatsCollapsed?: () => void;
   onToggleSidebar: () => void;
   updateState?: UpdateState;
-  isUpdatePopoverOpen: boolean;
-  onToggleUpdatePopover: () => void;
-  onCloseUpdatePopover: () => void;
   onUpdateAction?: (state: UpdateState) => void;
-  updatePopoverRef: RefObject<HTMLDivElement | null>;
   workspacePreparation?: WorkspacePreparationProgress;
   isWorkspacePreparationOpen: boolean;
   onToggleWorkspacePreparation: () => void;
@@ -1248,13 +1196,13 @@ function WorkspaceSidebarContent({
   );
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
   const [newSessionMenuView, setNewSessionMenuView] = useState<
-    "closed" | "root" | "cli"
+    "closed" | "root"
   >("closed");
   const cliProjects = useMemo(() => {
     const selectedProjectPath = terminalPanes.find(
       (pane) => pane.id === selectedTerminalPaneId,
     )?.projectPath;
-    const projects = [selectedProjectPath, workspacePath]
+    const projects = [workspacePath, selectedProjectPath]
       .filter((path): path is string => Boolean(path))
       .map((path) => ({ path, label: projectSidebarName(path) }))
       .concat(savedProjects);
@@ -1506,6 +1454,7 @@ function WorkspaceSidebarContent({
       isNested={isNested}
       isMenuOpen={openSessionMenuId === session.id}
       isPinned={pinnedSessionIds.includes(session.id)}
+      isOpen={openChatSessionIds.includes(session.id)}
       key={session.id}
       onDelete={() => {
         onDeleteSession?.(session.id);
@@ -1522,9 +1471,24 @@ function WorkspaceSidebarContent({
         onRenameSession?.(session.id);
         setOpenSessionMenuId(undefined);
       }}
+      onOpenInGrid={() => {
+        onAddSessionToGrid?.(session.id);
+        setOpenSessionMenuId(undefined);
+      }}
       onSelect={() => {
         onSelectSession(session.id);
         setOpenSessionMenuId(undefined);
+      }}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "copyMove";
+        event.dataTransfer.setData(
+          CHAT_SESSION_DRAG_MIME,
+          JSON.stringify({
+            sessionId: session.id,
+            projectKey: normalizeSidebarPath(session.workspacePath),
+          }),
+        );
+        event.dataTransfer.setData("text/plain", session.id);
       }}
       session={session}
     />
@@ -1582,29 +1546,39 @@ function WorkspaceSidebarContent({
             progress={workspacePreparation}
           />
           {updateState ? (
-            <div
-              className="gyro-sidebar-update is-windowbar"
-              ref={updatePopoverRef as never}
-            >
+            <div className="gyro-sidebar-update is-windowbar">
               <button
-                aria-expanded={isUpdatePopoverOpen}
-                aria-haspopup="dialog"
+                aria-busy={
+                  updateState.status === "downloading" ||
+                  updateState.status === "installing"
+                }
                 aria-label={updateSidebarLabel(updateState)}
                 className="gyro-sidebar-update-button"
                 data-status={updateState.status}
-                onClick={onToggleUpdatePopover}
+                disabled={
+                  updateState.status === "downloading" ||
+                  updateState.status === "installing"
+                }
+                onClick={() => onUpdateAction?.(updateState)}
                 title={updateSidebarLabel(updateState)}
                 type="button"
               >
-                <Download size={13} />
+                {updateState.status === "downloading" ? (
+                  <span className="gyro-sidebar-update-percent">
+                    {updateState.progressPercent ?? 0}%
+                  </span>
+                ) : updateState.status === "ready" ||
+                  updateState.status === "installing" ? (
+                  <RefreshCw
+                    className={
+                      updateState.status === "installing" ? "is-spinning" : ""
+                    }
+                    size={11}
+                  />
+                ) : (
+                  <Download size={11} />
+                )}
               </button>
-              {isUpdatePopoverOpen ? (
-                <UpdatePopover
-                  onAction={() => onUpdateAction?.(updateState)}
-                  onClose={onCloseUpdatePopover}
-                  state={updateState}
-                />
-              ) : null}
             </div>
           ) : null}
           <div
@@ -2271,114 +2245,93 @@ function WorkspaceSidebarContent({
               </button>
               {newSessionMenuView !== "closed" ? (
                 <div
-                  aria-label={
-                    newSessionMenuView === "cli"
-                      ? "Choose CLI session"
-                      : "Create session"
-                  }
-                  className={`gyro-sidebar-new-session-menu is-${newSessionMenuView}`}
+                  aria-label="Create Chat or CLI session"
+                  className="gyro-sidebar-new-session-menu is-root"
                   role="menu"
                 >
-                  {newSessionMenuView === "root" ? (
-                    <>
+                  <button
+                    aria-label="New Chat"
+                    onClick={() => {
+                      setNewSessionMenuView("closed");
+                      onCreateSession();
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <MessageSquare size={15} />
+                    <span>
+                      <strong>New Chat</strong>
+                      <small>Start in the focused project</small>
+                    </span>
+                  </button>
+                  <div className="gyro-sidebar-new-session-divider" />
+                  <label className="gyro-sidebar-cli-location">
+                    <span>Run CLI in</span>
+                    <select
+                      aria-label="CLI session location"
+                      onChange={(event) =>
+                        setNewCliWorkspacePath(event.target.value)
+                      }
+                      value={newCliWorkspacePath}
+                    >
+                      {cliProjects.length === 0 ? (
+                        <option value="">Open a project first</option>
+                      ) : null}
+                      {cliProjects.map((project) => (
+                        <option key={project.path} value={project.path}>
+                          {project.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {cliProjects.length === 0 ? (
+                    <button
+                      onClick={() => {
+                        setNewSessionMenuView("closed");
+                        onOpenWorkspace();
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <Folder size={15} />
+                      <span>
+                        <strong>Open project</strong>
+                        <small>Choose where the CLI should run</small>
+                      </span>
+                    </button>
+                  ) : null}
+                  <div className="gyro-sidebar-cli-profiles">
+                    {commandProfiles.map((profile) => (
                       <button
-                        aria-label="New Chat"
+                        disabled={
+                          profile.readiness === "blocked" ||
+                          !newCliWorkspacePath
+                        }
+                        key={profile.id}
                         onClick={() => {
+                          if (!newCliWorkspacePath) return;
+                          onCreateCliSession(profile.id, newCliWorkspacePath);
                           setNewSessionMenuView("closed");
-                          onCreateSession();
                         }}
                         role="menuitem"
                         type="button"
                       >
-                        <MessageSquare size={15} />
+                        {profile.providerId ? (
+                          <Bot size={15} />
+                        ) : (
+                          <Terminal size={15} />
+                        )}
                         <span>
-                          <strong>Chat</strong>
+                          <strong>{profile.displayName}</strong>
+                          <small>
+                            {profile.readiness === "blocked"
+                              ? "Setup required"
+                              : profile.command}
+                          </small>
                         </span>
                       </button>
-                      <button
-                        aria-label="New CLI"
-                        onClick={() => setNewSessionMenuView("cli")}
-                        role="menuitem"
-                        type="button"
-                      >
-                        <Terminal size={15} />
-                        <span>
-                          <strong>CLI</strong>
-                        </span>
-                        <ChevronRight size={13} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        className="is-back"
-                        onClick={() => setNewSessionMenuView("root")}
-                        role="menuitem"
-                        type="button"
-                      >
-                        <ArrowLeft size={14} />
-                        <span>
-                          <strong>CLI</strong>
-                        </span>
-                      </button>
-                      <label className="gyro-sidebar-cli-location">
-                        <span>Run in</span>
-                        <select
-                          aria-label="CLI session location"
-                          onChange={(event) =>
-                            setNewCliWorkspacePath(event.target.value)
-                          }
-                          value={newCliWorkspacePath}
-                        >
-                          {cliProjects.length === 0 ? (
-                            <option value="">Open a project first</option>
-                          ) : null}
-                          {cliProjects.map((project) => (
-                            <option key={project.path} value={project.path}>
-                              {project.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="gyro-sidebar-cli-profiles">
-                        {commandProfiles.map((profile) => (
-                          <button
-                            disabled={
-                              profile.readiness === "blocked" ||
-                              !newCliWorkspacePath
-                            }
-                            key={profile.id}
-                            onClick={() => {
-                              if (!newCliWorkspacePath) {
-                                return;
-                              }
-                              onCreateCliSession(
-                                profile.id,
-                                newCliWorkspacePath,
-                              );
-                              setNewSessionMenuView("closed");
-                            }}
-                            role="menuitem"
-                            type="button"
-                          >
-                            {profile.providerId ? (
-                              <Bot size={15} />
-                            ) : (
-                              <Terminal size={15} />
-                            )}
-                            <span>
-                              <strong>{profile.displayName}</strong>
-                              <small>
-                                {profile.readiness === "blocked"
-                                  ? "Setup required"
-                                  : profile.command}
-                              </small>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -2715,26 +2668,32 @@ function SessionSidebarRow({
   isSending,
   isNested,
   isPinned,
+  isOpen,
   isMenuOpen,
   onSelect,
   onPin,
   onMenuToggle,
   onMenuClose,
   onRename,
+  onOpenInGrid,
   onDelete,
+  onDragStart,
 }: {
   session: Session;
   isActive: boolean;
   isSending: boolean;
   isNested?: boolean;
   isPinned: boolean;
+  isOpen?: boolean;
   isMenuOpen: boolean;
   onSelect: () => void;
   onPin: () => void;
   onMenuToggle: () => void;
   onMenuClose: () => void;
   onRename: () => void;
+  onOpenInGrid?: () => void;
   onDelete: () => void;
+  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
 }) {
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
     isMenuOpen,
@@ -2756,10 +2715,22 @@ function SessionSidebarRow({
         isSending ? "is-sending" : "",
         isNested ? "is-nested" : "",
         isPinned ? "is-pinned" : "",
+        isOpen ? "is-open" : "",
         isMenuOpen ? "is-menu-open" : "",
       ].join(" ")}
       ref={menuRef}
     >
+      <button
+        aria-label={`Drag ${session.title} into the chat grid`}
+        className="gyro-session-drag-handle"
+        draggable
+        onClick={onSelect}
+        onDragStart={onDragStart}
+        title="Drag into the chat grid"
+        type="button"
+      >
+        <GripVertical size={12} />
+      </button>
       <button
         aria-label={
           session.summary
@@ -2821,6 +2792,11 @@ function SessionSidebarRow({
       </div>
       {isMenuOpen ? (
         <div className="gyro-session-menu" role="menu">
+          {onOpenInGrid ? (
+            <button onClick={onOpenInGrid} role="menuitem" type="button">
+              Open in chat grid
+            </button>
+          ) : null}
           <button onClick={onRename} role="menuitem" type="button">
             Rename
           </button>
@@ -3434,6 +3410,217 @@ export function ChatUtilityBar({
   );
 }
 
+export function ChatGridSurface({
+  layout,
+  maximizedPaneId,
+  onClosePane,
+  onDropSession,
+  onFocusPane,
+  onMovePane,
+  onToggleMaximize,
+  renderPane,
+}: {
+  layout: ChatProjectLayout;
+  maximizedPaneId?: string;
+  onClosePane: (pane: ChatPaneRef) => void;
+  onDropSession: (
+    sessionId: string,
+    sourceProjectKey: string,
+    slotIndex: number,
+  ) => void;
+  onFocusPane: (pane: ChatPaneRef) => void;
+  onMovePane: (paneId: string, slotIndex: number) => void;
+  onToggleMaximize: (paneId: string) => void;
+  renderPane: (
+    pane: ChatPaneRef,
+    options: { isMaximized: boolean; isTiled: boolean },
+  ) => ReactNode;
+}) {
+  const [isChatDragging, setIsChatDragging] = useState(false);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number>();
+  const occupiedCount = layout.slots.filter(Boolean).length;
+  const isMaximized = Boolean(maximizedPaneId);
+  const slots = layout.slots.slice(0, 4);
+  while (slots.length < 4) slots.push(null);
+
+  const finishDrag = () => {
+    setIsChatDragging(false);
+    setDropTargetIndex(undefined);
+  };
+
+  return (
+    <div
+      className={[
+        "gyro-chat-grid",
+        `is-count-${occupiedCount}`,
+        isChatDragging ? "is-dragging" : "",
+        isMaximized ? "is-maximized" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      onDragEnd={finishDrag}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          finishDrag();
+        }
+      }}
+      onDragOver={(event) => {
+        if (
+          event.dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME) ||
+          event.dataTransfer.types.includes(CHAT_PANE_DRAG_MIME)
+        ) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setIsChatDragging(true);
+        }
+      }}
+    >
+      {slots.map((pane, slotIndex) => {
+        const paneMaximized = pane?.paneId === maximizedPaneId;
+        const hiddenByMaximize = isMaximized && !paneMaximized;
+        const isFocused = pane?.paneId === layout.focusedPaneId;
+        return (
+          <section
+            aria-label={pane ? `Chat pane ${slotIndex + 1}` : "Empty chat pane"}
+            className={[
+              "gyro-chat-grid-slot",
+              pane ? "is-occupied" : "is-empty",
+              isFocused ? "is-focused" : "",
+              paneMaximized ? "is-pane-maximized" : "",
+              hiddenByMaximize ? "is-hidden-by-maximize" : "",
+              dropTargetIndex === slotIndex ? "is-drop-target" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            key={pane?.paneId ?? `empty-${slotIndex}`}
+            onDragOver={(event) => {
+              if (
+                event.dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME) ||
+                event.dataTransfer.types.includes(CHAT_PANE_DRAG_MIME)
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                setIsChatDragging(true);
+                setDropTargetIndex(slotIndex);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const paneId = event.dataTransfer.getData(CHAT_PANE_DRAG_MIME);
+              if (paneId) {
+                onMovePane(paneId, slotIndex);
+                finishDrag();
+                return;
+              }
+              const raw = event.dataTransfer.getData(CHAT_SESSION_DRAG_MIME);
+              if (raw) {
+                try {
+                  const payload = JSON.parse(raw) as {
+                    sessionId?: string;
+                    projectKey?: string;
+                  };
+                  if (payload.sessionId) {
+                    onDropSession(
+                      payload.sessionId,
+                      payload.projectKey ?? "",
+                      slotIndex,
+                    );
+                  }
+                } catch {
+                  // Ignore external or malformed drag payloads.
+                }
+              }
+              finishDrag();
+            }}
+            onFocusCapture={() => pane && onFocusPane(pane)}
+            onPointerDown={() => pane && onFocusPane(pane)}
+          >
+            {pane ? (
+              <>
+                <div className="gyro-chat-pane-frame-actions">
+                  <button
+                    aria-label={`Move chat pane ${slotIndex + 1}`}
+                    className="gyro-chat-pane-drag-handle"
+                    draggable
+                    onClick={() => onFocusPane(pane)}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData(
+                        CHAT_PANE_DRAG_MIME,
+                        pane.paneId,
+                      );
+                      setIsChatDragging(true);
+                    }}
+                    onKeyDown={(event) => {
+                      if (!event.altKey) return;
+                      if (
+                        event.key === "ArrowLeft" ||
+                        event.key === "ArrowUp"
+                      ) {
+                        event.preventDefault();
+                        onMovePane(pane.paneId, Math.max(0, slotIndex - 1));
+                      } else if (
+                        event.key === "ArrowRight" ||
+                        event.key === "ArrowDown"
+                      ) {
+                        event.preventDefault();
+                        onMovePane(pane.paneId, Math.min(3, slotIndex + 1));
+                      }
+                    }}
+                    title="Drag to move. Alt+Arrow also moves this pane."
+                    type="button"
+                  >
+                    <GripVertical size={12} />
+                    <span>{slotIndex + 1}</span>
+                  </button>
+                  <button
+                    aria-label={
+                      paneMaximized ? "Restore chat grid" : "Maximize chat"
+                    }
+                    onClick={() => onToggleMaximize(pane.paneId)}
+                    title={paneMaximized ? "Restore grid" : "Maximize chat"}
+                    type="button"
+                  >
+                    {paneMaximized ? (
+                      <Minimize2 size={12} />
+                    ) : (
+                      <Maximize2 size={12} />
+                    )}
+                  </button>
+                  <button
+                    aria-label="Close chat pane"
+                    onClick={() => onClosePane(pane)}
+                    title="Close pane"
+                    type="button"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                {renderPane(pane, {
+                  isMaximized: paneMaximized,
+                  isTiled: occupiedCount > 1 && !paneMaximized,
+                })}
+              </>
+            ) : occupiedCount >= 3 || isChatDragging ? (
+              <div className="gyro-chat-grid-empty-target">
+                <MessageSquare size={18} />
+                <strong>Slot {slotIndex + 1}</strong>
+                <span>Drag another chat here</span>
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
+      {isChatDragging ? (
+        <span aria-live="polite" className="gyro-sr-only">
+          Choose one of four chat slots.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 type ChatSurfaceProps = {
   events: SessionEvent[];
   draft?: string;
@@ -3487,6 +3674,7 @@ type ChatSurfaceProps = {
   isEnvironmentRailOpen?: boolean;
   isToolPanelOpen?: boolean;
   isComposerSending?: boolean;
+  isTiled?: boolean;
   maxDraftLength?: number;
   activeChatPanel?: ChatSidePanelId;
   planEditorRequest?: {
@@ -3575,6 +3763,7 @@ export function ChatSurface({
   isEnvironmentRailOpen,
   isToolPanelOpen,
   isComposerSending,
+  isTiled = false,
   isBranchLoading,
   maxDraftLength,
   onDraftChange,
@@ -3867,6 +4056,7 @@ export function ChatSurface({
         className={[
           "gyro-chat-surface",
           "is-empty",
+          isTiled ? "is-tiled" : "",
           activeRailPanel ? "has-environment" : "",
         ]
           .filter(Boolean)
@@ -4007,6 +4197,7 @@ export function ChatSurface({
       className={[
         "gyro-chat-surface",
         "is-thread",
+        isTiled ? "is-tiled" : "",
         activeRailPanel ? "has-environment" : "",
       ]
         .filter(Boolean)
@@ -12237,7 +12428,7 @@ function Composer({
     },
     {
       action: "set-chat-mode-plan",
-      icon: LockKeyhole,
+      icon: Lightbulb,
       label: "Plan",
     },
     {
@@ -12670,7 +12861,6 @@ function Composer({
                   id={`${popoverBaseId}-context`}
                   items={contextItems}
                   onAction={runPopoverAction}
-                  title="Add"
                 />
               ) : null}
             </div>
@@ -13047,6 +13237,7 @@ function Composer({
             </button>
             {activePopover === "branch" ? (
               <ComposerPopover
+                className="gyro-composer-branch-picker"
                 id={`${popoverBaseId}-branch`}
                 items={branchItems}
                 onAction={runPopoverAction}
@@ -14385,6 +14576,8 @@ function ProviderActivityRow({
         <Terminal size={13} />
       ) : activity.kind === "tool" ? (
         <Sparkles size={13} />
+      ) : activity.kind === "context" ? (
+        <Minimize2 size={13} />
       ) : (
         <Search size={13} />
       )}
