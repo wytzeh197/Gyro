@@ -5656,6 +5656,10 @@ export function IdeSurface({
           aria-labelledby="gyro-ide-project-empty-title"
           className="gyro-ide-project-empty"
         >
+          <span className="gyro-ide-project-empty-eyebrow">
+            <Sparkles size={12} />
+            Workspace
+          </span>
           <div aria-hidden="true" className="gyro-ide-project-empty-icon">
             <Folder size={22} />
           </div>
@@ -5672,7 +5676,20 @@ export function IdeSurface({
             <Folder size={15} />
             Open a project
           </button>
-          <small>Local workspace · guarded edits · reviewable changes</small>
+          <div
+            className="gyro-ide-project-empty-features"
+            aria-label="Local workspace · guarded edits · reviewable changes"
+          >
+            <span>
+              <HardDrive size={12} /> Local files
+            </span>
+            <span>
+              <ShieldCheck size={12} /> Guarded edits
+            </span>
+            <span>
+              <GitPullRequest size={12} /> Reviewable changes
+            </span>
+          </div>
         </section>
       </div>
     );
@@ -7780,11 +7797,18 @@ export function ToolsSurface({
   return (
     <div className="gyro-tools-surface">
       <section className="gyro-tools-panel" aria-label="Workspace tools">
-        <header className="gyro-tools-head">
-          <div>
-            <span>Workspace</span>
-            <h1>Tools</h1>
+        <header className="gyro-tools-head gyro-surface-page-header">
+          <div className="gyro-surface-page-title">
+            <span className="gyro-surface-page-icon" aria-hidden="true">
+              <LayoutPanelLeft size={18} />
+            </span>
+            <div>
+              <span className="gyro-surface-page-eyebrow">Workspace suite</span>
+              <h1>Tools</h1>
+              <p>Plan work, schedule runs, and manage your agent stack.</p>
+            </div>
           </div>
+          <span className="gyro-surface-page-badge">3 surfaces</span>
         </header>
         <div className="gyro-tools-grid">
           <button
@@ -7792,27 +7816,49 @@ export function ToolsSurface({
             onClick={() => onSelectDestination("tasks")}
             type="button"
           >
-            <Activity size={18} />
-            <strong>Tasks</strong>
-            <span>{taskCount} queued</span>
+            <span className="gyro-tools-card-icon">
+              <Activity size={18} />
+            </span>
+            <span className="gyro-tools-card-copy">
+              <strong>Tasks</strong>
+              <small>Plan and dispatch focused agent work.</small>
+            </span>
+            <span className="gyro-tools-card-meta">{taskCount} queued</span>
+            <ChevronRight className="gyro-tools-card-arrow" size={15} />
           </button>
           <button
             className="gyro-tools-card"
             onClick={() => onSelectDestination("automations")}
             type="button"
           >
-            <CalendarClock size={18} />
-            <strong>Automations</strong>
-            <span>{automationCount} scheduled</span>
+            <span className="gyro-tools-card-icon">
+              <CalendarClock size={18} />
+            </span>
+            <span className="gyro-tools-card-copy">
+              <strong>Automations</strong>
+              <small>Schedule recurring checks and follow-ups.</small>
+            </span>
+            <span className="gyro-tools-card-meta">
+              {automationCount} scheduled
+            </span>
+            <ChevronRight className="gyro-tools-card-arrow" size={15} />
           </button>
           <button
             className="gyro-tools-card"
             onClick={() => onSelectDestination("providers")}
             type="button"
           >
-            <KeyRound size={18} />
-            <strong>Providers</strong>
-            <span>{connectedProviderCount} connected</span>
+            <span className="gyro-tools-card-icon">
+              <KeyRound size={18} />
+            </span>
+            <span className="gyro-tools-card-copy">
+              <strong>Providers</strong>
+              <small>Configure models, auth, and handoffs.</small>
+            </span>
+            <span className="gyro-tools-card-meta">
+              {connectedProviderCount} connected
+            </span>
+            <ChevronRight className="gyro-tools-card-arrow" size={15} />
           </button>
         </div>
       </section>
@@ -7871,10 +7917,16 @@ export function TaskBoardSurface({
 
   return (
     <div className="gyro-board-surface">
-      <div className="gyro-board-toolbar">
-        <div>
-          <strong>Plan</strong>
-          <span>Dispatch tasks into app-hosted CLI panes</span>
+      <header className="gyro-board-toolbar gyro-surface-page-header">
+        <div className="gyro-surface-page-title">
+          <span className="gyro-surface-page-icon" aria-hidden="true">
+            <ListChecks size={18} />
+          </span>
+          <div>
+            <span className="gyro-surface-page-eyebrow">Workspace plan</span>
+            <h1>Tasks</h1>
+            <p>Dispatch focused work into app-hosted agent sessions.</p>
+          </div>
         </div>
         <div className="gyro-board-actions">
           <button
@@ -7895,7 +7947,7 @@ export function TaskBoardSurface({
             Create task
           </button>
         </div>
-      </div>
+      </header>
       <div className="gyro-kanban-grid">
         {columns.map((column) => (
           <section className="gyro-kanban-column" key={column.title}>
@@ -8014,12 +8066,18 @@ export function AutomationsSurface({
 
   return (
     <div className="gyro-automations-surface">
-      <header className="gyro-automation-toolbar">
-        <div>
-          <strong>Automations</strong>
-          <span>
-            Scheduled agent runs with local triage and stop conditions
+      <header className="gyro-automation-toolbar gyro-surface-page-header">
+        <div className="gyro-surface-page-title">
+          <span className="gyro-surface-page-icon" aria-hidden="true">
+            <CalendarClock size={18} />
           </span>
+          <div>
+            <span className="gyro-surface-page-eyebrow">Scheduled work</span>
+            <h1>Automations</h1>
+            <p>
+              Run recurring agent work with local triage and stop conditions.
+            </p>
+          </div>
         </div>
         <div className="gyro-board-actions">
           <button
@@ -8345,16 +8403,22 @@ export function ProvidersSurface({
 
   return (
     <div className="gyro-providers-surface">
-      <section className="gyro-provider-hero">
-        <div>
-          <strong>Agents & Providers</strong>
-          <span>
-            Gyro local access stays separate from provider CLI, SDK, and env
-            auth.
+      <header className="gyro-provider-hero gyro-surface-page-header">
+        <div className="gyro-surface-page-title">
+          <span className="gyro-surface-page-icon" aria-hidden="true">
+            <KeyRound size={18} />
           </span>
+          <div>
+            <span className="gyro-surface-page-eyebrow">Agent stack</span>
+            <h1>Agents &amp; Providers</h1>
+            <p>
+              Gyro local access stays separate from provider CLI, SDK, and env
+              auth. Manage models without blurring local trust boundaries.
+            </p>
+          </div>
         </div>
         <span className="gyro-live-pill">{enabledProviderCount} connected</span>
-      </section>
+      </header>
 
       <section className="gyro-provider-boundary" aria-label="Auth boundary">
         <div>
