@@ -98,6 +98,9 @@ import {
   type WorkspaceFile,
   type WorkspaceFileContent,
   type WorkspaceFileStat,
+  type WorkspaceChangedEvent,
+  type WorkspacePreparationProgress,
+  type WorkspacePreparationSnapshot,
   type WorkspaceSearchQuery,
   type WorkspaceSearchResult,
   type WorkspaceLayoutId,
@@ -623,6 +626,22 @@ export function App() {
   const [queueRetryTick, setQueueRetryTick] = useState(0);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [workspacePreparation, setWorkspacePreparation] =
+    useState<WorkspacePreparationProgress>();
+  const [workspaceWatchMode, setWorkspaceWatchMode] = useState<
+    "event" | "polling"
+  >("polling");
+  const [workspaceChangeGeneration, setWorkspaceChangeGeneration] = useState(0);
+  const workspacePreparationRunRef = useRef("");
+  const workspacePreparationReadyTimerRef = useRef<number>();
+  const openGlobalSearch = useCallback(() => {
+    setCommandPaletteQuery("");
+    setIsCommandPaletteOpen(true);
+  }, []);
+  const closeGlobalSearch = useCallback(() => {
+    setIsCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+  }, []);
   const [planEditorRequest, setPlanEditorRequest] = useState<{
     kind: "goal" | "item";
     token: number;
@@ -754,7 +773,7 @@ export function App() {
       },
     );
   }, [pinnedSessionIds, removedProjectPaths, sessions]);
-  const savedProjects = useMemo(
+  const searchableProjects = useMemo(
     () =>
       savedProjectsFromSessions(
         sessions,
@@ -763,6 +782,10 @@ export function App() {
         recentProjectPaths,
       ),
     [recentProjectPaths, removedProjectPaths, sessions, workspacePath],
+  );
+  const savedProjects = useMemo(
+    () => searchableProjects.slice(0, 6),
+    [searchableProjects],
   );
 
   useEffect(() => {
@@ -1618,13 +1641,13 @@ export function App() {
     dispatchWorkbench({ type: "open-tool-panel", tab });
   }, []);
 
-  const toggleChatTerminalPanel = useCallback(() => {
+  const toggleChatToolPanel = useCallback(() => {
     if (workbench.isToolPanelOpen) {
       dispatchWorkbench({ type: "close-tool-panel" });
       return;
     }
-    openToolPanel("terminal");
-  }, [openToolPanel, workbench.isToolPanelOpen]);
+    openToolPanel(workbench.activePaneTab);
+  }, [openToolPanel, workbench.activePaneTab, workbench.isToolPanelOpen]);
 
   const openSettingsSection = useCallback((section: SettingsSectionId) => {
     dispatchWorkbench({ type: "set-settings-section", section });
@@ -1926,6 +1949,135 @@ export function App() {
       }
     },
     [activeSession?.workspacePath, notify, workspacePath],
+  );
+
+  const settleWorkspacePreparation = useCallback(
+    (progress: WorkspacePreparationProgress) => {
+      if (progress.runId !== workspacePreparationRunRef.current) return;
+      setWorkspacePreparation(progress);
+      if (workspacePreparationReadyTimerRef.current !== undefined) {
+        window.clearTimeout(workspacePreparationReadyTimerRef.current);
+        workspacePreparationReadyTimerRef.current = undefined;
+      }
+      if (progress.status === "ready") {
+        workspacePreparationReadyTimerRef.current = window.setTimeout(() => {
+          if (workspacePreparationRunRef.current === progress.runId) {
+            setWorkspacePreparation(undefined);
+          }
+        }, 1500);
+      }
+    },
+    [],
+  );
+
+  const prepareWorkspace = useCallback(
+    async (root: string) => {
+      const runId =
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `workspace-${Date.now()}`;
+      workspacePreparationRunRef.current = runId;
+      settleWorkspacePreparation({
+        runId,
+        workspacePath: root,
+        phase: "catalog",
+        status: "preparing",
+        completedSteps: 0,
+        totalSteps: 5,
+        message: "Cataloging workspace",
+        errors: [],
+      });
+      if (!isTauriRuntime()) {
+        setFiles(previewFiles);
+        setWorkspaceWatchMode("polling");
+        settleWorkspacePreparation({
+          runId,
+          workspacePath: root,
+          phase: "tests",
+          status: "ready",
+          completedSteps: 5,
+          totalSteps: 5,
+          message: "Workspace ready",
+          errors: [],
+        });
+        return;
+      }
+      try {
+        const snapshot = await invoke<WorkspacePreparationSnapshot>(
+          "prepare_workspace",
+          { request: { workspacePath: root, runId } },
+        );
+        if (workspacePreparationRunRef.current !== runId) return;
+        setFiles(snapshot.files);
+        setWorkspaceWatchMode(snapshot.watcherMode);
+        setWorkspaceChangeGeneration(snapshot.generation);
+        if (snapshot.sourceControl) {
+          dispatchWorkbench({
+            type: "ide-set-source-control",
+            sourceControl: snapshot.sourceControl,
+          });
+        }
+        if (snapshot.branches) setBranchCatalog(snapshot.branches);
+        dispatchWorkbench({ type: "ide-set-tasks", tasks: snapshot.tasks });
+        dispatchWorkbench({ type: "ide-set-test-tree", tests: snapshot.tests });
+        settleWorkspacePreparation(snapshot);
+      } catch (error) {
+        if (workspacePreparationRunRef.current !== runId) return;
+        settleWorkspacePreparation({
+          runId,
+          workspacePath: root,
+          phase: "catalog",
+          status: "failed",
+          completedSteps: 1,
+          totalSteps: 5,
+          message: "Workspace preparation failed",
+          errors: [{ phase: "catalog", message: String(error) }],
+        });
+      }
+    },
+    [settleWorkspacePreparation],
+  );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenWorkspace: (() => void) | undefined;
+    void listen<WorkspacePreparationProgress>(
+      "gyro://workspace-preparation",
+      (event) => settleWorkspacePreparation(event.payload),
+    ).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenProgress = unlisten;
+    });
+    void listen<WorkspaceChangedEvent>("gyro://workspace-changed", (event) => {
+      const currentRoot = activeSession?.workspacePath ?? workspacePath;
+      if (
+        normalizeProjectPath(event.payload.workspacePath) !==
+        normalizeProjectPath(currentRoot)
+      ) {
+        return;
+      }
+      setFiles(event.payload.files);
+      setWorkspaceChangeGeneration(event.payload.generation);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenWorkspace = unlisten;
+    });
+    return () => {
+      disposed = true;
+      unlistenProgress?.();
+      unlistenWorkspace?.();
+    };
+  }, [activeSession?.workspacePath, settleWorkspacePreparation, workspacePath]);
+
+  useEffect(
+    () => () => {
+      if (workspacePreparationReadyTimerRef.current !== undefined) {
+        window.clearTimeout(workspacePreparationReadyTimerRef.current);
+      }
+    },
+    [],
   );
 
   const refreshSourceControl = useCallback(() => {
@@ -2680,20 +2832,16 @@ export function App() {
         return;
       }
 
-      const workspaceFiles = await invoke<WorkspaceFile[]>(
-        "list_workspace_tree",
-        { depth: 5, workspacePath: selected },
-      );
       setWorkspacePath(selected);
-      setFiles(workspaceFiles);
-      refreshIdeServices(selected);
+      setFiles([]);
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "workspace",
       });
       notify("terminal", notificationTitle, workspaceName(selected));
+      await prepareWorkspace(selected);
     },
-    [notify, refreshIdeServices],
+    [notify, prepareWorkspace, refreshIdeServices],
   );
 
   const openWorkspace = useCallback(async (): Promise<boolean> => {
@@ -2899,6 +3047,13 @@ export function App() {
     dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     dispatchWorkbench({ type: "close-tool-panel" });
   }, [activeSessionId]);
+
+  const selectSession = useCallback((sessionId: string) => {
+    suppressSessionAutoSelectRef.current = false;
+    setActiveSessionId(sessionId);
+    dispatchWorkbench({ type: "set-chat-panel" });
+    dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
+  }, []);
 
   const pinSession = useCallback(
     (sessionId: string) => {
@@ -4372,8 +4527,7 @@ export function App() {
           }
           break;
         case "search-workspace":
-          setCommandPaletteQuery("");
-          setIsCommandPaletteOpen(true);
+          openGlobalSearch();
           break;
         case "toggle-access":
           openSettingsSection("permissions");
@@ -4448,6 +4602,7 @@ export function App() {
       connectProvider,
       config,
       notify,
+      openGlobalSearch,
       openSettingsSection,
       openToolPanel,
       openWorkspace,
@@ -7128,6 +7283,7 @@ export function App() {
             type: "select-workspace-layout",
             layout: "code",
           });
+          dispatchWorkbench({ type: "ide-select-view", view: "search" });
           notify("terminal", "Search ready", "Workspace file tree focused");
           break;
         case "open-browser-preview":
@@ -7395,7 +7551,7 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const isCommand = event.metaKey || event.ctrlKey;
       if (event.key === "Escape") {
-        setIsCommandPaletteOpen(false);
+        closeGlobalSearch();
         setModelStandardPrompt(undefined);
         setProjectRemoveCandidate(undefined);
         return;
@@ -7422,7 +7578,7 @@ export function App() {
         event.key.toLowerCase() === "p"
       ) {
         event.preventDefault();
-        setIsCommandPaletteOpen(true);
+        openGlobalSearch();
       } else if (event.key.toLowerCase() === "n") {
         event.preventDefault();
         startNewChat();
@@ -7459,6 +7615,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     addTerminalPane,
+    closeGlobalSearch,
+    openGlobalSearch,
     openToolPanel,
     saveEditorBuffer,
     splitTerminalPane,
@@ -7526,24 +7684,9 @@ export function App() {
       setFiles([]);
       return;
     }
-    refreshIdeServices(activeSession.workspacePath);
-    const requestId = workspaceTreeRequestRef.current + 1;
-    workspaceTreeRequestRef.current = requestId;
-    void invoke<WorkspaceFile[]>("list_workspace_tree", {
-      depth: 5,
-      workspacePath: activeSession.workspacePath,
-    })
-      .then((workspaceFiles) => {
-        if (workspaceTreeRequestRef.current === requestId) {
-          setFiles(workspaceFiles);
-        }
-      })
-      .catch(() => {
-        if (workspaceTreeRequestRef.current === requestId) {
-          setFiles([]);
-        }
-      });
-  }, [activeSession, refreshIdeServices]);
+    setFiles([]);
+    void prepareWorkspace(activeSession.workspacePath);
+  }, [activeSession, prepareWorkspace, refreshIdeServices]);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -7730,10 +7873,16 @@ export function App() {
         polling = false;
       }
     };
-    const interval = window.setInterval(() => void pollWorkspace(), 2500);
+    const interval =
+      workspaceWatchMode === "polling"
+        ? window.setInterval(() => void pollWorkspace(), 2500)
+        : undefined;
+    if (workspaceWatchMode === "event") {
+      void pollWorkspace();
+    }
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (interval !== undefined) window.clearInterval(interval);
     };
   }, [
     activeSession?.workspacePath,
@@ -7741,7 +7890,9 @@ export function App() {
     selectedFile,
     selectedFile ? workbench.ide.buffers[selectedFile]?.contentHash : undefined,
     selectedFile ? workbench.ide.buffers[selectedFile]?.status : undefined,
+    workspaceChangeGeneration,
     workspacePath,
+    workspaceWatchMode,
   ]);
 
   useEffect(() => {
@@ -8310,7 +8461,7 @@ export function App() {
           layout: "code",
         });
       }}
-      onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+      onOpenCommandPalette={openGlobalSearch}
       onPaneTabChange={(tab) =>
         dispatchWorkbench({ type: "set-pane-tab", tab })
       }
@@ -8452,6 +8603,7 @@ export function App() {
       activeWorkspaceLayout={activeWorkspaceLayout}
       commandProfiles={commandProfiles}
       updateState={updater.state}
+      workspacePreparation={workspacePreparation}
       files={files}
       ide={workbench.ide}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
@@ -8464,7 +8616,7 @@ export function App() {
       onDismissNotification={(id) =>
         dispatchWorkbench({ type: "dismiss-notification", id })
       }
-      onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+      onOpenCommandPalette={openGlobalSearch}
       onOpenSettings={() =>
         dispatchWorkbench({
           type: "select-destination",
@@ -8474,6 +8626,10 @@ export function App() {
       onOpenSettingsSection={openSettingsSection}
       onOpenWorkspace={openWorkspace}
       onUpdateAction={runUpdateAction}
+      onRetryWorkspacePreparation={() => {
+        const root = activeSession?.workspacePath ?? workspacePath;
+        if (root) void prepareWorkspace(root);
+      }}
       onOpenWorkspaceFile={openEditorLocation}
       onPinEditorTab={pinEditorTab}
       onRefreshWorkspace={refreshWorkspaceTree}
@@ -8500,15 +8656,7 @@ export function App() {
       onRenameSession={renameSession}
       onRemoveProject={requestRemoveProject}
       onSelectDestination={selectDestination}
-      onSelectSession={(sessionId) => {
-        suppressSessionAutoSelectRef.current = false;
-        setActiveSessionId(sessionId);
-        dispatchWorkbench({ type: "set-chat-panel" });
-        dispatchWorkbench({
-          type: "select-workspace-layout",
-          layout: "thread",
-        });
-      }}
+      onSelectSession={selectSession}
       onSelectSessions={() => dispatchWorkbench({ type: "select-sessions" })}
       onSelectTerminalPane={(paneId) => {
         dispatchWorkbench({ type: "select-terminal-pane", paneId });
@@ -8573,7 +8721,7 @@ export function App() {
                 onStopChat={stopActiveChat}
                 onContinueChat={() => void sendDraft("Continue")}
                 onOpenToolPanel={openToolPanel}
-                onToggleToolPanel={toggleChatTerminalPanel}
+                onToggleToolPanel={toggleChatToolPanel}
                 onPlanItemStatusChange={changePlanItemStatus}
                 onPlanAction={changePlan}
                 onPlanDecision={handlePlanDecision}
@@ -8634,7 +8782,7 @@ export function App() {
             : null}
 
           {activeWorkspaceLayout === "code" ? (
-            <section className="gyro-workspace-primary" aria-label="Code">
+            <section className="gyro-workspace-primary" aria-label="Workspace">
               <IdeSurface
                 activePaneTab={workbench.activePaneTab}
                 browserPreview={workbench.browserPreview}
@@ -8981,7 +9129,7 @@ export function App() {
           onStopChat={stopActiveChat}
           onContinueChat={() => void sendDraft("Continue")}
           onOpenToolPanel={openToolPanel}
-          onToggleToolPanel={toggleChatTerminalPanel}
+          onToggleToolPanel={toggleChatToolPanel}
           onPlanItemStatusChange={changePlanItemStatus}
           onPlanAction={changePlan}
           onPlanDecision={handlePlanDecision}
@@ -9061,14 +9209,32 @@ export function App() {
       ) : null}
       {isCommandPaletteOpen ? (
         <CommandPaletteOverlay
-          onClose={() => setIsCommandPaletteOpen(false)}
+          onClose={closeGlobalSearch}
           onCommand={runCommandPaletteCommand}
           onQueryChange={setCommandPaletteQuery}
           onSelectDestination={selectDestination}
           onOpenToolPanel={openToolPanel}
+          onSelectProject={(path) => {
+            void activateWorkspacePath(path, "Project selected")
+              .then(() => startNewChat())
+              .catch((error) =>
+                notify("command-failed", "Project unavailable", String(error)),
+              );
+          }}
+          onSelectSession={selectSession}
           onSelectWorkspaceLayout={selectWorkspaceLayout}
+          pinnedSessionIds={pinnedSessionIds}
+          projects={searchableProjects.map((project) => ({
+            ...project,
+            current:
+              normalizeProjectPath(project.path) ===
+              normalizeProjectPath(
+                activeSession?.workspacePath ?? workspacePath,
+              ),
+          }))}
           query={commandPaletteQuery}
           recents={workbench.preferences.commandPaletteRecents}
+          sessions={visibleSessions}
         />
       ) : null}
     </AppChrome>
@@ -10942,7 +11108,6 @@ function savedProjectsFromSessions(
       }
       return second.lastUsedAt - first.lastUsedAt;
     })
-    .slice(0, 6)
     .map((project) => ({
       path: project.path,
       label: project.label,

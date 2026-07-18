@@ -24,6 +24,9 @@ use gyro_core::{
     ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
     SessionOrigin, SessionStore, SessionWorkspaceMode,
 };
+use notify::{
+    Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -91,6 +94,8 @@ const DESKTOP_IPC_WORKER_COUNT: usize = 16;
 const DESKTOP_IPC_QUEUE_CAPACITY: usize = 64;
 const DESKTOP_IPC_IO_TIMEOUT: Duration = Duration::from_secs(5);
 const WORKSPACE_TREE_MAX_CACHE_AGE: Duration = Duration::from_secs(30);
+const WORKSPACE_CHANGE_DEBOUNCE: Duration = Duration::from_millis(250);
+const WORKSPACE_PREPARATION_CACHE_AGE: Duration = Duration::from_secs(2);
 const MAX_WORKSPACE_WATCH_CACHES: usize = 8;
 const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
@@ -103,6 +108,8 @@ const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
 const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
+const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
+const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -192,6 +199,9 @@ impl Drop for HiddenWebviewGuard {
 #[derive(Clone, Default)]
 struct WorkspaceWatchManager {
     snapshots: Arc<Mutex<HashMap<PathBuf, WorkspaceTreeSnapshot>>>,
+    watchers: Arc<Mutex<HashMap<PathBuf, RecommendedWatcher>>>,
+    debounce_serials: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    next_generation: Arc<AtomicU64>,
 }
 
 #[derive(Clone)]
@@ -199,6 +209,18 @@ struct WorkspaceTreeSnapshot {
     files: Vec<WorkspaceFile>,
     directories: Vec<WorkspaceDirectoryStamp>,
     scanned_at: Instant,
+    generation: u64,
+}
+
+#[derive(Clone, Default)]
+struct WorkspacePreparationManager {
+    state: Arc<(Mutex<WorkspacePreparationState>, Condvar)>,
+}
+
+#[derive(Default)]
+struct WorkspacePreparationState {
+    in_flight: HashSet<PathBuf>,
+    completed: HashMap<PathBuf, (Instant, WorkspacePreparationSnapshot)>,
 }
 
 #[derive(Clone)]
@@ -643,6 +665,55 @@ struct TestTreeItemResult {
     path: Option<String>,
     status: String,
     children: Vec<TestTreeItemResult>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePreparationRequest {
+    workspace_path: String,
+    run_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePreparationError {
+    phase: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePreparationProgress {
+    run_id: String,
+    workspace_path: String,
+    phase: Option<String>,
+    status: String,
+    completed_steps: usize,
+    total_steps: usize,
+    message: String,
+    errors: Vec<WorkspacePreparationError>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePreparationSnapshot {
+    #[serde(flatten)]
+    progress: WorkspacePreparationProgress,
+    files: Vec<WorkspaceFile>,
+    source_control: Option<SourceControlStatus>,
+    branches: Option<GitBranchCatalog>,
+    tasks: Vec<TaskDefinitionResult>,
+    tests: Vec<TestTreeItemResult>,
+    watcher_mode: String,
+    generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceChangedEvent {
+    workspace_path: String,
+    generation: u64,
+    files: Vec<WorkspaceFile>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3662,6 +3733,7 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
         files: entries,
         directories,
         scanned_at: Instant::now(),
+        generation: 0,
     })
 }
 
@@ -3699,6 +3771,49 @@ impl WorkspaceDirectoryStamp {
 }
 
 impl WorkspaceWatchManager {
+    fn cache_snapshot(
+        &self,
+        root: PathBuf,
+        mut snapshot: WorkspaceTreeSnapshot,
+    ) -> Result<WorkspaceTreeSnapshot, String> {
+        snapshot.generation = self.next_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let mut snapshots = self
+            .snapshots
+            .lock()
+            .map_err(|_| "workspace watch cache is unavailable".to_string())?;
+        let evicted =
+            if !snapshots.contains_key(&root) && snapshots.len() >= MAX_WORKSPACE_WATCH_CACHES {
+                snapshots
+                    .iter()
+                    .min_by_key(|(_, cached)| cached.scanned_at)
+                    .map(|(path, _)| path.clone())
+            } else {
+                None
+            };
+        if let Some(path) = evicted.as_ref() {
+            snapshots.remove(path);
+        }
+        snapshots.insert(root, snapshot.clone());
+        drop(snapshots);
+        if let Some(path) = evicted {
+            if let Ok(mut watchers) = self.watchers.lock() {
+                watchers.remove(&path);
+            }
+            if let Ok(mut serials) = self.debounce_serials.lock() {
+                serials.remove(&path);
+            }
+        }
+        Ok(snapshot)
+    }
+
+    fn prime(&self, workspace_path: &str) -> Result<WorkspaceTreeSnapshot, String> {
+        let root = PathBuf::from(workspace_path)
+            .canonicalize()
+            .map_err(to_string)?;
+        let snapshot = scan_workspace_tree(&root, 5)?;
+        self.cache_snapshot(root, snapshot)
+    }
+
     fn snapshot(&self, workspace_path: &str) -> Result<Vec<WorkspaceFile>, String> {
         let root = PathBuf::from(workspace_path)
             .canonicalize()
@@ -3710,34 +3825,344 @@ impl WorkspaceWatchManager {
             .get(&root)
             .cloned();
         if let Some(cached) = cached {
-            if cached.scanned_at.elapsed() < WORKSPACE_TREE_MAX_CACHE_AGE
-                && cached
-                    .directories
-                    .iter()
-                    .all(WorkspaceDirectoryStamp::is_current)
+            let watcher_active = self
+                .watchers
+                .lock()
+                .map_err(|_| "workspace watcher registry is unavailable".to_string())?
+                .contains_key(&root);
+            if watcher_active
+                || (cached.scanned_at.elapsed() < WORKSPACE_TREE_MAX_CACHE_AGE
+                    && cached
+                        .directories
+                        .iter()
+                        .all(WorkspaceDirectoryStamp::is_current))
             {
                 return Ok(cached.files);
             }
         }
 
         let snapshot = scan_workspace_tree(&root, 5)?;
-        let files = snapshot.files.clone();
-        let mut snapshots = self
-            .snapshots
-            .lock()
-            .map_err(|_| "workspace watch cache is unavailable".to_string())?;
-        if !snapshots.contains_key(&root) && snapshots.len() >= MAX_WORKSPACE_WATCH_CACHES {
-            if let Some(oldest) = snapshots
-                .iter()
-                .min_by_key(|(_, cached)| cached.scanned_at)
-                .map(|(path, _)| path.clone())
-            {
-                snapshots.remove(&oldest);
-            }
-        }
-        snapshots.insert(root, snapshot);
-        Ok(files)
+        self.cache_snapshot(root, snapshot)
+            .map(|snapshot| snapshot.files)
     }
+
+    fn ensure_watcher(&self, root: &Path, app: tauri::AppHandle) -> Result<(), String> {
+        if self
+            .watchers
+            .lock()
+            .map_err(|_| "workspace watcher registry is unavailable".to_string())?
+            .contains_key(root)
+        {
+            return Ok(());
+        }
+        let watched_root = root.to_path_buf();
+        let event_root = watched_root.clone();
+        let manager = self.clone();
+        let mut watcher = RecommendedWatcher::new(
+            move |result: notify::Result<NotifyEvent>| {
+                if let Ok(event) = result {
+                    manager.schedule_rescan(event_root.clone(), event, app.clone());
+                }
+            },
+            NotifyConfig::default(),
+        )
+        .map_err(to_string)?;
+        watcher
+            .watch(&watched_root, RecursiveMode::Recursive)
+            .map_err(to_string)?;
+        self.watchers
+            .lock()
+            .map_err(|_| "workspace watcher registry is unavailable".to_string())?
+            .insert(watched_root, watcher);
+        Ok(())
+    }
+
+    fn schedule_rescan(&self, root: PathBuf, event: NotifyEvent, app: tauri::AppHandle) {
+        if !workspace_watch_event_is_relevant(&root, &event) {
+            return;
+        }
+        let serial = {
+            let Ok(mut serials) = self.debounce_serials.lock() else {
+                return;
+            };
+            let serial = serials.entry(root.clone()).or_default();
+            *serial = serial.saturating_add(1);
+            *serial
+        };
+        let manager = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(WORKSPACE_CHANGE_DEBOUNCE);
+            let is_latest = manager
+                .debounce_serials
+                .lock()
+                .ok()
+                .and_then(|serials| serials.get(&root).copied())
+                == Some(serial);
+            if !is_latest {
+                return;
+            }
+            let Ok(snapshot) = scan_workspace_tree(&root, 5)
+                .and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
+            else {
+                return;
+            };
+            let _ = app.emit(
+                WORKSPACE_CHANGED_EVENT,
+                WorkspaceChangedEvent {
+                    workspace_path: root.display().to_string(),
+                    generation: snapshot.generation,
+                    files: snapshot.files,
+                },
+            );
+        });
+    }
+}
+
+fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
+    event.paths.is_empty()
+        || event.paths.iter().any(|path| {
+            let Ok(relative) = path.strip_prefix(root) else {
+                return false;
+            };
+            !relative.components().any(|component| {
+                matches!(
+                    component.as_os_str().to_string_lossy().as_ref(),
+                    ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
+                )
+            })
+        })
+}
+
+impl WorkspacePreparationManager {
+    fn prepare(
+        &self,
+        request: WorkspacePreparationRequest,
+        watcher: WorkspaceWatchManager,
+        app: tauri::AppHandle,
+    ) -> Result<WorkspacePreparationSnapshot, String> {
+        let root = PathBuf::from(&request.workspace_path)
+            .canonicalize()
+            .map_err(to_string)?;
+        let (state_lock, state_changed) = &*self.state;
+        let mut state = state_lock
+            .lock()
+            .map_err(|_| "workspace preparation state is unavailable".to_string())?;
+        loop {
+            if let Some((completed_at, cached)) = state.completed.get(&root) {
+                if completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE {
+                    let mut cached = cached.clone();
+                    cached.progress.run_id = request.run_id.clone();
+                    let _ = app.emit(WORKSPACE_PREPARATION_EVENT, cached.progress.clone());
+                    return Ok(cached);
+                }
+            }
+            if state.in_flight.insert(root.clone()) {
+                break;
+            }
+            state = state_changed
+                .wait(state)
+                .map_err(|_| "workspace preparation state is unavailable".to_string())?;
+        }
+        drop(state);
+
+        let result = prepare_workspace_impl(&request, &root, &watcher, &app);
+        let mut state = state_lock
+            .lock()
+            .map_err(|_| "workspace preparation state is unavailable".to_string())?;
+        state.in_flight.remove(&root);
+        if let Ok(snapshot) = result.as_ref() {
+            state
+                .completed
+                .insert(root, (Instant::now(), snapshot.clone()));
+        }
+        state_changed.notify_all();
+        result
+    }
+}
+
+fn emit_workspace_preparation(
+    app: &tauri::AppHandle,
+    request: &WorkspacePreparationRequest,
+    phase: Option<&str>,
+    status: &str,
+    completed_steps: usize,
+    message: impl Into<String>,
+    errors: &[WorkspacePreparationError],
+) -> WorkspacePreparationProgress {
+    let progress = WorkspacePreparationProgress {
+        run_id: request.run_id.clone(),
+        workspace_path: request.workspace_path.clone(),
+        phase: phase.map(str::to_string),
+        status: status.to_string(),
+        completed_steps,
+        total_steps: 5,
+        message: message.into(),
+        errors: errors.to_vec(),
+    };
+    let _ = app.emit(WORKSPACE_PREPARATION_EVENT, progress.clone());
+    progress
+}
+
+fn prepare_workspace_impl(
+    request: &WorkspacePreparationRequest,
+    root: &Path,
+    watcher: &WorkspaceWatchManager,
+    app: &tauri::AppHandle,
+) -> Result<WorkspacePreparationSnapshot, String> {
+    let root_text = root.display().to_string();
+    let mut errors = Vec::new();
+    emit_workspace_preparation(
+        app,
+        request,
+        Some("catalog"),
+        "preparing",
+        0,
+        "Cataloging workspace",
+        &errors,
+    );
+    let tree = match watcher.prime(&root_text) {
+        Ok(tree) => tree,
+        Err(error) => {
+            errors.push(WorkspacePreparationError {
+                phase: "catalog".into(),
+                message: error.clone(),
+            });
+            emit_workspace_preparation(
+                app,
+                request,
+                Some("catalog"),
+                "failed",
+                1,
+                "Workspace catalog failed",
+                &errors,
+            );
+            return Err(error);
+        }
+    };
+    emit_workspace_preparation(
+        app,
+        request,
+        Some("watcher"),
+        "preparing",
+        1,
+        "Starting workspace watcher",
+        &errors,
+    );
+
+    let watcher_mode = match watcher.ensure_watcher(root, app.clone()) {
+        Ok(()) => "event",
+        Err(error) => {
+            errors.push(WorkspacePreparationError {
+                phase: "watcher".into(),
+                message: error,
+            });
+            "polling"
+        }
+    };
+    emit_workspace_preparation(
+        app,
+        request,
+        Some("git"),
+        "preparing",
+        2,
+        "Inspecting Git",
+        &errors,
+    );
+
+    let source_control = match git_status_impl(&root_text) {
+        Ok(status) => Some(status),
+        Err(error) => {
+            errors.push(WorkspacePreparationError {
+                phase: "git".into(),
+                message: error.to_string(),
+            });
+            None
+        }
+    };
+    let branches = match git_branch_catalog_impl(&root_text) {
+        Ok(catalog) => Some(catalog),
+        Err(error) => {
+            if git_repo_root(root).is_some() {
+                errors.push(WorkspacePreparationError {
+                    phase: "git".into(),
+                    message: error.to_string(),
+                });
+            }
+            None
+        }
+    };
+    emit_workspace_preparation(
+        app,
+        request,
+        Some("tasks"),
+        "preparing",
+        3,
+        "Discovering tasks",
+        &errors,
+    );
+
+    let tasks = match task_discover_impl(&root_text) {
+        Ok(tasks) => tasks,
+        Err(error) => {
+            errors.push(WorkspacePreparationError {
+                phase: "tasks".into(),
+                message: error.to_string(),
+            });
+            Vec::new()
+        }
+    };
+    emit_workspace_preparation(
+        app,
+        request,
+        Some("tests"),
+        "preparing",
+        4,
+        "Discovering tests",
+        &errors,
+    );
+    let tests = test_tree_from_tasks(&tasks);
+    let status = if errors.is_empty() {
+        "ready"
+    } else {
+        "degraded"
+    };
+    let progress = emit_workspace_preparation(
+        app,
+        request,
+        Some("tests"),
+        status,
+        5,
+        if status == "ready" {
+            "Workspace ready"
+        } else {
+            "Workspace ready with warnings"
+        },
+        &errors,
+    );
+    Ok(WorkspacePreparationSnapshot {
+        progress,
+        files: tree.files,
+        source_control,
+        branches,
+        tasks,
+        tests,
+        watcher_mode: watcher_mode.into(),
+        generation: tree.generation,
+    })
+}
+
+#[tauri::command]
+async fn prepare_workspace(
+    request: WorkspacePreparationRequest,
+    app: tauri::AppHandle,
+    watcher: tauri::State<'_, WorkspaceWatchManager>,
+    preparation: tauri::State<'_, WorkspacePreparationManager>,
+) -> Result<WorkspacePreparationSnapshot, String> {
+    let watcher = watcher.inner().clone();
+    let preparation = preparation.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || preparation.prepare(request, watcher, app))
+        .await
+        .map_err(|error| format!("workspace preparation worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -6160,24 +6585,28 @@ fn task_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TaskDefinition
 
 fn test_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TestTreeItemResult>> {
     let tasks = task_discover_impl(workspace_path)?;
+    Ok(test_tree_from_tasks(&tasks))
+}
+
+fn test_tree_from_tasks(tasks: &[TaskDefinitionResult]) -> Vec<TestTreeItemResult> {
     let children = tasks
-        .into_iter()
+        .iter()
         .filter(|task| task.group == "test")
         .map(|task| TestTreeItemResult {
-            id: task.id,
-            label: task.label,
+            id: task.id.clone(),
+            label: task.label.clone(),
             path: None,
             status: "unknown".into(),
             children: Vec::new(),
         })
         .collect::<Vec<_>>();
-    Ok(vec![TestTreeItemResult {
+    vec![TestTreeItemResult {
         id: "workspace-tests".into(),
         label: "Workspace tests".into(),
         path: None,
         status: "unknown".into(),
         children,
-    }])
+    }]
 }
 
 fn run_command_output(command: Command) -> anyhow::Result<IdeCommandOutput> {
@@ -10970,6 +11399,7 @@ pub fn run() {
         .manage(ProviderCancellationManager::default())
         .manage(ProviderApprovalManager::default())
         .manage(WorkspaceWatchManager::default())
+        .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -11040,6 +11470,7 @@ pub fn run() {
             read_terminal_output,
             read_session_events,
             prepare_chat_attachment,
+            prepare_workspace,
             restart_app,
             recover_automation_leases,
             rename_session,
@@ -12089,6 +12520,69 @@ while True:
             .snapshot(workspace.path().to_str().unwrap())
             .unwrap();
         assert!(changed.iter().any(|file| file.path == "second.txt"));
+    }
+
+    #[test]
+    fn workspace_snapshot_generations_advance_only_when_a_scan_is_stored() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("first.txt"), "one\n").unwrap();
+        let manager = WorkspaceWatchManager::default();
+
+        let first = manager.prime(workspace.path().to_str().unwrap()).unwrap();
+        let cached = manager
+            .snapshots
+            .lock()
+            .unwrap()
+            .get(&workspace.path().canonicalize().unwrap())
+            .unwrap()
+            .generation;
+        assert_eq!(first.generation, cached);
+
+        fs::write(workspace.path().join("second.txt"), "two\n").unwrap();
+        let second = manager.prime(workspace.path().to_str().unwrap()).unwrap();
+        assert!(second.generation > first.generation);
+    }
+
+    #[test]
+    fn workspace_watcher_ignores_generated_and_git_paths() {
+        let root = PathBuf::from("/tmp/gyro-workspace");
+        let ignored = NotifyEvent::new(notify::EventKind::Any)
+            .add_path(root.join("node_modules/package/index.js"));
+        let source = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("src/app.ts"));
+
+        assert!(!workspace_watch_event_is_relevant(&root, &ignored));
+        assert!(workspace_watch_event_is_relevant(&root, &source));
+    }
+
+    #[test]
+    fn test_catalog_is_derived_from_the_discovered_task_catalog() {
+        let tasks = vec![
+            TaskDefinitionResult {
+                id: "package:test".into(),
+                label: "pnpm test".into(),
+                command: "pnpm".into(),
+                args: vec!["run".into(), "test".into()],
+                group: "test".into(),
+                cwd: None,
+                status: "idle".into(),
+                output_channel_id: None,
+            },
+            TaskDefinitionResult {
+                id: "package:build".into(),
+                label: "pnpm build".into(),
+                command: "pnpm".into(),
+                args: vec!["run".into(), "build".into()],
+                group: "build".into(),
+                cwd: None,
+                status: "idle".into(),
+                output_channel_id: None,
+            },
+        ];
+
+        let tests = test_tree_from_tasks(&tasks);
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].children.len(), 1);
+        assert_eq!(tests[0].children[0].id, "package:test");
     }
 
     #[test]

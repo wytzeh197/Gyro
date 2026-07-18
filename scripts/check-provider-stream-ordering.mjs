@@ -134,6 +134,49 @@ assert.equal(
 );
 assert.equal(latestMergedStatus?.payload?.durationMs, 22_500);
 
+const openingCommentary = {
+  id: "optimistic-commentary",
+  sessionId: "session-1",
+  turnId: "turn-ordered-activity",
+  createdAt: "2026-07-13T09:46:00.000Z",
+  kind: "system-event",
+  message: "I’ll inspect the menu first.",
+  payload: {
+    kind: "provider-activity",
+    activityId: "commentary-1",
+    activityKind: "commentary",
+    label: "I’ll inspect the menu first.",
+    status: "done",
+  },
+};
+const completedCommentary = {
+  ...openingCommentary,
+  id: "persisted-commentary",
+  createdAt: "2026-07-13T09:46:30.000Z",
+};
+const laterCommand = {
+  id: "optimistic-command",
+  sessionId: "session-1",
+  turnId: "turn-ordered-activity",
+  createdAt: "2026-07-13T09:46:05.000Z",
+  kind: "system-event",
+  message: "Ran command",
+  payload: {
+    kind: "provider-activity",
+    activityId: "command-1",
+    activityKind: "command",
+    label: "Ran command",
+    status: "done",
+  },
+};
+const mergedActivities = mergeProviderResponseEvents(
+  [openingCommentary, laterCommand],
+  [completedCommentary],
+);
+assert.equal(mergedActivities[0]?.message, "I’ll inspect the menu first.");
+assert.equal(mergedActivities[0]?.createdAt, "2026-07-13T09:46:00.000Z");
+assert.equal(mergedActivities[1]?.message, "Ran command");
+
 console.log(
-  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing).",
+  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, activity chronology).",
 );
