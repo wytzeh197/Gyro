@@ -17,6 +17,9 @@ export type {
   ChatAttachment,
   ChatAttachmentKind,
   ChatMode,
+  ChatGridState,
+  ChatPaneRef,
+  ChatProjectLayout,
   CliLaunchPreset,
   CliLaunchPresetEntry,
   CliLaunchPresetFocus,
@@ -144,6 +147,14 @@ export {
   sanitizeStoredIdeState,
   workbenchReducer,
   CLI_LAUNCH_PRESET_MAX_PANES,
+  CHAT_GRID_MAX_SLOTS,
+  chatGridReducer,
+  chatPaneIdentity,
+  createChatProjectLayout,
+  createInitialChatGridState,
+  normalizedChatProjectKey,
+  persistableChatGridState,
+  sanitizeStoredChatGridState,
 } from "./workbench-state";
 export {
   getProviderCatalogEntry,
@@ -161,7 +172,7 @@ export {
   selectedModelLabel,
   selectedReasoningEffort,
 } from "./provider-catalog";
-export type { WorkbenchAction } from "./workbench-state";
+export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
 export {
   globalSearchMatchScore,
   normalizedGlobalSearchText,
@@ -177,6 +188,7 @@ export {
   AutomationsSurface,
   BrowserPreviewSurface,
   ChatThread,
+  ChatGridSurface,
   ChatSurface,
   ChatUtilityBar,
   CliWorkspaceSurface,

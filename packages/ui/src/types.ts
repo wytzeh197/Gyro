@@ -28,6 +28,32 @@ export type ChatSidePanelId = "environment" | "plan";
 
 export type ChatMode = "normal" | "plan";
 
+export type ChatPaneRef =
+  | {
+      paneId: string;
+      kind: "session";
+      sessionId: string;
+      workspacePath: string;
+    }
+  | {
+      paneId: string;
+      kind: "draft";
+      draftKey: string;
+      workspacePath: string;
+    };
+
+export type ChatProjectLayout = {
+  projectKey: string;
+  slots: Array<ChatPaneRef | null>;
+  focusedPaneId?: string;
+};
+
+export type ChatGridState = {
+  activeProjectKey?: string;
+  layouts: Record<string, ChatProjectLayout>;
+  maximizedPaneId?: string;
+};
+
 export type SessionGoalStatus = "active" | "complete";
 
 export type SessionGoal = {
