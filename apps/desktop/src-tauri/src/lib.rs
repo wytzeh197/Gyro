@@ -107,6 +107,8 @@ const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
+const PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT: &str =
+    "gyro://provider-approval-notification-open";
 const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
 const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
@@ -245,6 +247,13 @@ struct ProviderApprovalContext {
     turn_id: Option<String>,
     provider_id: String,
     provider_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderApprovalNotificationOpen {
+    session_id: String,
+    approval_id: String,
 }
 
 impl From<&ProviderChatRequest> for ProviderApprovalContext {
@@ -1957,6 +1966,85 @@ fn notification_permission_allows_delivery(permission: PermissionState) -> bool 
     permission == PermissionState::Granted
 }
 
+fn provider_approval_notification_body(
+    approval_type: &str,
+    provider_label: Option<&str>,
+) -> String {
+    let provider = provider_label
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or("Your model");
+    let action = match approval_type {
+        "command" => "run a command",
+        "file-change" => "change files",
+        _ => "use a protected capability",
+    };
+    format!("{provider} wants to {action}. Open this chat to review it.")
+}
+
+fn notify_provider_approval_question(
+    app: &tauri::AppHandle,
+    context: &ProviderApprovalContext,
+    approval_id: Uuid,
+    approval_type: &str,
+) {
+    let Ok(permission) = app.notification().permission_state() else {
+        return;
+    };
+    if !notification_permission_allows_delivery(permission) {
+        return;
+    }
+    let body =
+        provider_approval_notification_body(approval_type, context.provider_label.as_deref());
+
+    #[cfg(target_os = "macos")]
+    {
+        let app = app.clone();
+        let payload = ProviderApprovalNotificationOpen {
+            session_id: context.session_id.clone(),
+            approval_id: approval_id.to_string(),
+        };
+        std::thread::spawn(move || {
+            let application = if tauri::is_dev() {
+                "com.apple.Terminal".to_string()
+            } else {
+                app.config().identifier.clone()
+            };
+            if let Err(error) = notify_rust::set_application(&application) {
+                eprintln!("could not configure approval notification: {error}");
+            }
+            let mut notification = notify_rust::Notification::new();
+            notification.summary("Gyro has a question").body(&body);
+            match notification.show() {
+                Ok(handle) => handle.wait_for_action(move |action| {
+                    if action == "__closed" {
+                        return;
+                    }
+                    if let Err(error) = restore_main_window(&app) {
+                        eprintln!("could not focus Gyro from approval notification: {error}");
+                    }
+                    if let Err(error) = app.emit(PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT, payload)
+                    {
+                        eprintln!("could not open approval chat from notification: {error}");
+                    }
+                }),
+                Err(error) => eprintln!("could not show approval notification: {error}"),
+            }
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title("Gyro has a question")
+        .body(body)
+        .show()
+    {
+        eprintln!("could not show approval notification: {error}");
+    }
+}
+
 #[tauri::command]
 async fn get_notification_permission(app: tauri::AppHandle) -> Result<String, String> {
     app.notification()
@@ -2996,7 +3084,11 @@ fn bind_provider_chat_request(
     request.workspace_path = Some(workspace.display().to_string());
     request.require_command_approval = config.require_command_approval;
     request.require_file_edit_approval = config.require_file_edit_approval;
-    request.full_access = config.full_access;
+    // Approval requirements are the stronger authority. A stale or manually
+    // edited config must not let a provider's full-access flag bypass them.
+    request.full_access = config.full_access
+        && !request.require_command_approval
+        && !request.require_file_edit_approval;
     Ok(())
 }
 
@@ -3109,6 +3201,20 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
     Ok(())
 }
 
+fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static str> {
+    if request.mode == ChatMode::Plan {
+        return Vec::new();
+    }
+    let mut instructions = Vec::new();
+    if request.require_command_approval {
+        instructions.push("Gyro requires a fresh, explicit user approval before every command or executable tool action, including commands that appear read-only or trusted. Use the provider's approval request mechanism before execution; never infer approval from the user's message or an earlier action.");
+    }
+    if request.require_file_edit_approval {
+        instructions.push("Gyro requires a fresh, explicit user approval before every file change. Use the provider's approval request mechanism before applying it; never infer approval from the user's message or an earlier change.");
+    }
+    instructions
+}
+
 fn provider_context_message(request: &ProviderChatRequest) -> String {
     let mut context = Vec::new();
     context.push(format!(
@@ -3124,6 +3230,11 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
         context.push("When the plan is ready for implementation, present the complete plan as polished Markdown with a descriptive heading and clear sections. Gyro displays that response as the Plan document.".into());
     }
+    context.extend(
+        provider_approval_instructions(request)
+            .into_iter()
+            .map(str::to_string),
+    );
     if let Some(goal) = request.goal.as_ref().filter(|goal| goal.status == "active") {
         context.push(format!("Active Gyro session goal: {}", goal.text.trim()));
     }
@@ -8313,6 +8424,9 @@ fn run_openai_codex_app_server_chat(
             (cursor.kind == "codex-session").then_some(cursor.session_id.as_str())
         });
         let model = codex_model_arg(request.model_id.as_deref());
+        let approval_instructions = provider_approval_instructions(request).join("\n");
+        let approval_instructions =
+            (!approval_instructions.is_empty()).then_some(approval_instructions);
         let (approval_policy, sandbox_mode, sandbox_policy) = codex_app_server_policy(
             &request.mode,
             request.require_command_approval,
@@ -8331,6 +8445,7 @@ fn run_openai_codex_app_server_chat(
                     "approvalPolicy": approval_policy,
                     "approvalsReviewer": "user",
                     "sandbox": sandbox_mode,
+                    "developerInstructions": approval_instructions,
                 },
             })
         } else {
@@ -8343,6 +8458,7 @@ fn run_openai_codex_app_server_chat(
                     "approvalPolicy": approval_policy,
                     "approvalsReviewer": "user",
                     "sandbox": sandbox_mode,
+                    "developerInstructions": approval_instructions,
                     "ephemeral": false,
                 },
             })
@@ -8401,6 +8517,7 @@ fn run_openai_codex_app_server_chat(
         let mut last_delta_emit = Instant::now();
         let mut completed_message = String::new();
         let mut activities = Vec::new();
+        let mut completed_activity_ids = HashSet::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
         let mut context_usage = None;
         let mut turn_started = false;
@@ -8469,6 +8586,16 @@ fn run_openai_codex_app_server_chat(
                         context_usage = Some(usage);
                     }
                 }
+                "thread/compacted" => {
+                    let activity = codex_context_compaction_activity(&params, "done");
+                    record_codex_app_server_activity(
+                        app,
+                        request,
+                        &mut activities,
+                        &mut completed_activity_ids,
+                        activity,
+                    );
+                }
                 "item/agentMessage/delta" => {
                     if let Some(delta) = params.get("delta").and_then(serde_json::Value::as_str) {
                         if !response_text_truncated {
@@ -8506,21 +8633,27 @@ fn run_openai_codex_app_server_chat(
                 }
                 "item/started" => {
                     if let Some(item) = params.get("item") {
-                        if item.get("type").and_then(serde_json::Value::as_str)
-                            == Some("fileChange")
-                        {
-                            if let Some(item_id) =
-                                item.get("id").and_then(serde_json::Value::as_str)
-                            {
-                                insert_codex_app_server_patch(
-                                    &mut patches,
-                                    item_id,
-                                    serde_json::json!({
-                                        "itemId": item_id,
-                                        "changes": item.get("changes").cloned().unwrap_or_default(),
-                                    }),
-                                )?;
+                        match item.get("type").and_then(serde_json::Value::as_str) {
+                            Some("fileChange") => {
+                                if let Some(item_id) =
+                                    item.get("id").and_then(serde_json::Value::as_str)
+                                {
+                                    insert_codex_app_server_patch(
+                                        &mut patches,
+                                        item_id,
+                                        serde_json::json!({
+                                            "itemId": item_id,
+                                            "changes": item.get("changes").cloned().unwrap_or_default(),
+                                        }),
+                                    )?;
+                                }
                             }
+                            Some("contextCompaction") => emit_provider_activity_event(
+                                app,
+                                request,
+                                &codex_context_compaction_activity(&params, "running"),
+                            ),
+                            _ => {}
                         }
                     }
                 }
@@ -8537,17 +8670,33 @@ fn run_openai_codex_app_server_chat(
                             }
                             Some("commandExecution") => {
                                 let activity = codex_item_activity(item, "command", "Ran command");
-                                if activities.len() < MAX_CODEX_APP_SERVER_ACTIVITIES {
-                                    emit_provider_activity_event(app, request, &activity);
-                                    activities.push(activity);
-                                }
+                                record_codex_app_server_activity(
+                                    app,
+                                    request,
+                                    &mut activities,
+                                    &mut completed_activity_ids,
+                                    activity,
+                                );
                             }
                             Some("fileChange") => {
                                 let activity = codex_item_activity(item, "file", "Updated files");
-                                if activities.len() < MAX_CODEX_APP_SERVER_ACTIVITIES {
-                                    emit_provider_activity_event(app, request, &activity);
-                                    activities.push(activity);
-                                }
+                                record_codex_app_server_activity(
+                                    app,
+                                    request,
+                                    &mut activities,
+                                    &mut completed_activity_ids,
+                                    activity,
+                                );
+                            }
+                            Some("contextCompaction") => {
+                                let activity = codex_context_compaction_activity(&params, "done");
+                                record_codex_app_server_activity(
+                                    app,
+                                    request,
+                                    &mut activities,
+                                    &mut completed_activity_ids,
+                                    activity,
+                                );
                             }
                             _ => {}
                         }
@@ -8717,6 +8866,44 @@ fn codex_item_activity(
         detail: None,
         status,
     }
+}
+
+fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -> ProviderActivity {
+    let identity = params
+        .get("turnId")
+        .or_else(|| params.pointer("/item/id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("turn");
+    ProviderActivity {
+        id: format!("context-compaction-{identity}"),
+        kind: "context".into(),
+        label: if status == "running" {
+            "Compacting context".into()
+        } else {
+            "Compacted context".into()
+        },
+        detail: Some(
+            "Summarized earlier conversation to keep the thread within the model context window."
+                .into(),
+        ),
+        status: status.into(),
+    }
+}
+
+fn record_codex_app_server_activity(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    activities: &mut Vec<ProviderActivity>,
+    completed_activity_ids: &mut HashSet<String>,
+    activity: ProviderActivity,
+) {
+    if activities.len() >= MAX_CODEX_APP_SERVER_ACTIVITIES
+        || !completed_activity_ids.insert(activity.id.clone())
+    {
+        return;
+    }
+    emit_provider_activity_event(app, request, &activity);
+    activities.push(activity);
 }
 
 fn handle_codex_app_server_request(
@@ -8898,6 +9085,7 @@ fn wait_for_provider_approval_with_transaction(
             },
         );
     let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    notify_provider_approval_question(app, context, approval_id, approval_type);
     let approval_key = approval_id.to_string();
     let started_at = Instant::now();
     loop {
@@ -10672,6 +10860,18 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
         "web_search" | "web_search_call" => {
             ("search".to_string(), "Searched the web".to_string(), None)
         }
+        "context_compaction" | "contextCompaction" | "compaction" => (
+            "context".to_string(),
+            if status == "running" {
+                "Compacting context".to_string()
+            } else {
+                "Compacted context".to_string()
+            },
+            Some(
+                "Summarized earlier conversation to keep the thread within the model context window."
+                    .to_string(),
+            ),
+        ),
         _ => return None,
     };
 
@@ -10830,7 +11030,7 @@ fn next_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> u64
         .lock()
         .ok()
         .and_then(|flags| flags.get(session_id).cloned())
-        .map(|control| control.next_event_sequence.fetch_add(1, Ordering::SeqCst))
+        .map(|control| control.next_event_sequence.fetch_add(1, Ordering::Relaxed))
         .unwrap_or_default()
 }
 
@@ -11909,6 +12109,21 @@ mod tests {
         let plan = claude_chat_prompt("plan it", Some("/tmp/project"), false, false);
         assert!(plan.contains("Stay in planning mode"));
         assert!(plan.contains("Do not edit files"));
+    }
+
+    #[test]
+    fn gated_provider_context_requires_a_question_for_each_action() {
+        let mut request = anthropic_provider_request();
+        request.provider_id = "openai".into();
+        request.require_command_approval = true;
+        request.require_file_edit_approval = true;
+
+        let context = provider_context_message(&request);
+
+        assert!(context.contains("before every command or executable tool action"));
+        assert!(context.contains("including commands that appear read-only or trusted"));
+        assert!(context.contains("before every file change"));
+        assert!(context.contains("never infer approval"));
     }
 
     #[test]
@@ -13199,6 +13414,34 @@ while True:
         assert_eq!(command.label, "Listed files");
         assert_eq!(command.status, "done");
 
+        let compaction = extract_provider_activity(&serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "compact_1",
+                "type": "context_compaction"
+            }
+        }))
+        .expect("context compaction activity");
+        assert_eq!(compaction.id, "compact_1");
+        assert_eq!(compaction.kind, "context");
+        assert_eq!(compaction.label, "Compacted context");
+        assert_eq!(compaction.status, "done");
+
+        let started_compaction = codex_context_compaction_activity(
+            &serde_json::json!({
+                "turnId": "turn_1",
+                "item": { "id": "compact_1", "type": "contextCompaction" }
+            }),
+            "running",
+        );
+        let completed_compaction = codex_context_compaction_activity(
+            &serde_json::json!({ "threadId": "thread_1", "turnId": "turn_1" }),
+            "done",
+        );
+        assert_eq!(started_compaction.id, completed_compaction.id);
+        assert_eq!(started_compaction.label, "Compacting context");
+        assert_eq!(completed_compaction.label, "Compacted context");
+
         let commentary = extract_provider_commentary_activity(&serde_json::json!({
             "type": "item.completed",
             "item": {
@@ -13592,6 +13835,7 @@ while True:
         let mut config = GyroConfig {
             require_command_approval: true,
             require_file_edit_approval: true,
+            full_access: true,
             ..GyroConfig::default()
         };
         config
@@ -13624,6 +13868,7 @@ while True:
 
         assert!(request.require_command_approval);
         assert!(request.require_file_edit_approval);
+        assert!(!request.full_access);
         assert_eq!(request.provider_label.as_deref(), Some("OpenAI"));
         assert_eq!(request.model_label.as_deref(), Some("GPT-5.6 Sol"));
         assert_eq!(
@@ -14721,6 +14966,20 @@ while True:
         assert!(!notification_permission_allows_delivery(
             PermissionState::PromptWithRationale
         ));
+    }
+
+    #[test]
+    fn provider_approval_notifications_are_actionable_and_private() {
+        let command = provider_approval_notification_body("command", Some("Claude"));
+        assert_eq!(
+            command,
+            "Claude wants to run a command. Open this chat to review it."
+        );
+        assert_eq!(
+            provider_approval_notification_body("file-change", Some("OpenAI")),
+            "OpenAI wants to change files. Open this chat to review it."
+        );
+        assert!(!command.contains("/private/workspace"));
     }
 
     fn create_due_stop_condition_automation(paths: &GyroPaths) -> Automation {

@@ -9,8 +9,10 @@ import type { Terminal as XTermInstance } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   AppChrome,
+  CHAT_GRID_MAX_SLOTS,
   CLI_LAUNCH_PRESET_MAX_PANES,
   AutomationsSurface,
+  ChatGridSurface,
   ChatSurface,
   CommandPaletteOverlay,
   IdeStatusBar,
@@ -23,6 +25,8 @@ import {
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
+  chatGridReducer,
+  createInitialChatGridState,
   createInitialWorkbenchState,
   createNotification,
   createTerminalPane,
@@ -33,13 +37,16 @@ import {
   isProviderExecutable,
   isProviderRuntimeUsable,
   normalizeCliLaunchPreset,
+  normalizedChatProjectKey,
   normalizedConfig,
   parseProviderHealthOutput,
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
   providerSupportsUsage,
   providersForConfig,
+  persistableChatGridState,
   sanitizeStoredIdeState,
+  sanitizeStoredChatGridState,
   selectedReasoningEffort,
   workbenchReducer,
   type AppDestination,
@@ -47,7 +54,9 @@ import {
   type BrowserPreviewCapture,
   type BrowserPreviewDiagnostic,
   type ChatAttachment,
+  type ChatGridState,
   type ChatMode,
+  type ChatPaneRef,
   type ChatSidePanelId,
   type CliLaunchPreset,
   type CommandProfile,
@@ -140,6 +149,11 @@ type AppNotification = {
   workspaceMode?: WorkbenchState["workspaceMode"];
   branch?: string;
   worktreeName?: string;
+};
+
+type ProviderApprovalNotificationOpen = {
+  sessionId: string;
+  approvalId: string;
 };
 
 type TerminalPaneSnapshot = {
@@ -325,6 +339,7 @@ const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
+const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
 const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
@@ -530,7 +545,37 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
-  const [events, setEvents] = useState<SessionEvent[]>([]);
+  const [sessionEventsById, setSessionEventsById] = useState<
+    Record<string, SessionEvent[]>
+  >({});
+  const [chatGrid, dispatchChatGrid] = useReducer(
+    chatGridReducer,
+    undefined,
+    loadChatGridState,
+  );
+  const events = activeSessionId
+    ? (sessionEventsById[activeSessionId] ?? [])
+    : [];
+  const setEventsForSession = useCallback(
+    (
+      sessionId: string,
+      value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
+    ) => {
+      setSessionEventsById((current) => {
+        const previous = current[sessionId] ?? [];
+        const next = typeof value === "function" ? value(previous) : value;
+        return previous === next ? current : { ...current, [sessionId]: next };
+      });
+    },
+    [],
+  );
+  const setEvents = useCallback(
+    (value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[])) => {
+      const sessionId = activeSessionIdRef.current;
+      if (sessionId) setEventsForSession(sessionId, value);
+    },
+    [setEventsForSession],
+  );
   const eventsRef = useRef<SessionEvent[]>([]);
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
   const [workspacePath, setWorkspacePath] = useState<string>();
@@ -624,6 +669,13 @@ export function App() {
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
+  const pendingPaneSendRef = useRef<{
+    paneId: string;
+    message: string;
+  }>();
+  const [chatPanelByPaneId, setChatPanelByPaneId] = useState<
+    Record<string, ChatSidePanelId | undefined>
+  >({});
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [workspacePreparation, setWorkspacePreparation] =
@@ -684,6 +736,15 @@ export function App() {
     () => sessions.find((session) => session.id === activeSessionId),
     [activeSessionId, sessions],
   );
+  const currentChatProjectKey =
+    chatGrid.activeProjectKey ??
+    normalizedChatProjectKey(activeSession?.workspacePath ?? workspacePath);
+  const activeChatLayout = currentChatProjectKey
+    ? chatGrid.layouts[currentChatProjectKey]
+    : undefined;
+  const activeChatPane = activeChatLayout?.slots.find(
+    (pane) => pane?.paneId === activeChatLayout.focusedPaneId,
+  );
   const persistableWorkbench = useMemo(
     () => persistableWorkbenchState(workbench),
     [
@@ -739,7 +800,10 @@ export function App() {
   const activeChatMode = activeSessionId
     ? persistedActiveChatMode
     : pendingNewChatMode;
-  const activeDraftKey = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
+  const activeDraftKey =
+    activeChatPane?.kind === "draft"
+      ? activeChatPane.draftKey
+      : (activeSessionId ?? NEW_CHAT_DRAFT_KEY);
   const activeChatDraft = chatDrafts[activeDraftKey] ?? "";
   const activeChatAttachments = chatAttachments[activeDraftKey] ?? [];
   const activeQueuedChatMessages = activeSessionId
@@ -773,6 +837,81 @@ export function App() {
       },
     );
   }, [pinnedSessionIds, removedProjectPaths, sessions]);
+  useEffect(() => {
+    const sessionById = new Map(
+      sessions.map((session) => [session.id, session]),
+    );
+    for (const layout of Object.values(chatGrid.layouts)) {
+      if (
+        removedProjectPaths.some(
+          (path) => normalizedChatProjectKey(path) === layout.projectKey,
+        )
+      ) {
+        dispatchChatGrid({
+          type: "clear-project-layout",
+          projectKey: layout.projectKey,
+        });
+        continue;
+      }
+      for (const pane of layout.slots) {
+        const session =
+          pane?.kind === "session"
+            ? sessionById.get(pane.sessionId)
+            : undefined;
+        if (
+          pane?.kind === "session" &&
+          (!session ||
+            normalizedChatProjectKey(session.workspacePath) !==
+              layout.projectKey)
+        ) {
+          dispatchChatGrid({
+            type: "remove-session-pane",
+            sessionId: pane.sessionId,
+          });
+        }
+      }
+    }
+    const layout = chatGrid.activeProjectKey
+      ? chatGrid.layouts[chatGrid.activeProjectKey]
+      : undefined;
+    if (activeSessionId) {
+      const requestedSession = sessionById.get(activeSessionId);
+      const requestedPane = layout?.slots.find(
+        (pane) =>
+          pane?.kind === "session" && pane.sessionId === activeSessionId,
+      );
+      if (requestedSession && !requestedPane) {
+        dispatchChatGrid({
+          type: "select-pane",
+          projectKey: normalizedChatProjectKey(requestedSession.workspacePath),
+          mode: "replace",
+          pane: chatPaneForSession(requestedSession),
+        });
+        return;
+      }
+    }
+    const focusedPane = layout?.slots.find(
+      (pane) => pane?.paneId === layout.focusedPaneId,
+    );
+    if (focusedPane?.kind === "session") {
+      const session = sessionById.get(focusedPane.sessionId);
+      if (session && activeSessionId !== session.id) {
+        activeSessionIdRef.current = session.id;
+        setActiveSessionId(session.id);
+        setWorkspacePath(session.workspacePath);
+      }
+    } else if (focusedPane?.kind === "draft" && activeSessionId) {
+      activeSessionIdRef.current = undefined;
+      setActiveSessionId(undefined);
+      setWorkspacePath(focusedPane.workspacePath);
+    }
+  }, [
+    activeSessionId,
+    chatGrid.activeProjectKey,
+    chatGrid.layouts,
+    removedProjectPaths,
+    sessions,
+  ]);
   const searchableProjects = useMemo(
     () =>
       savedProjectsFromSessions(
@@ -1032,6 +1171,12 @@ export function App() {
       JSON.stringify(chatAttachments),
     );
   }, [chatAttachments]);
+  useEffect(() => {
+    safeSetLocalStorage(
+      CHAT_GRID_STORAGE_KEY,
+      JSON.stringify(persistableChatGridState(chatGrid)),
+    );
+  }, [chatGrid]);
 
   const resetChatDraft = useCallback(() => {
     const key = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
@@ -1260,53 +1405,62 @@ export function App() {
     }
   }, [removedProjectPaths]);
 
-  const refreshEvents = useCallback(async (sessionId: string) => {
-    const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
-    sessionEventsRequestRef.current[sessionId] = requestId;
-    if (!isTauriRuntime()) {
-      if (activeSessionIdRef.current === sessionId) {
-        setEvents(
+  const refreshEvents = useCallback(
+    async (sessionId: string) => {
+      const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
+      sessionEventsRequestRef.current[sessionId] = requestId;
+      if (!isTauriRuntime()) {
+        setEventsForSession(
+          sessionId,
           limitSessionEventsForUi(
             optimisticEventsRef.current.get(sessionId) ?? [],
           ),
         );
+        return;
       }
-      return;
-    }
-    try {
-      const nextEvents = await invoke<SessionEvent[]>("read_session_events", {
-        sessionId,
-      });
-      if (
-        activeSessionIdRef.current === sessionId &&
-        sessionEventsRequestRef.current[sessionId] === requestId
-      ) {
-        // Streaming can continue while the persisted transcript is loading.
-        // Read the buffer after the await so late chunks are never overwritten
-        // by the older transcript snapshot.
-        const latestOptimisticEvents =
-          optimisticEventsRef.current.get(sessionId);
-        setEvents(
-          limitSessionEventsForUi(
-            mergePersistedAndOptimisticEvents(
-              nextEvents,
-              latestOptimisticEvents,
+      try {
+        const nextEvents = await invoke<SessionEvent[]>("read_session_events", {
+          sessionId,
+        });
+        if (sessionEventsRequestRef.current[sessionId] === requestId) {
+          // Streaming can continue while the persisted transcript is loading.
+          // Read the buffer after the await so late chunks are never overwritten
+          // by the older transcript snapshot.
+          const latestOptimisticEvents =
+            optimisticEventsRef.current.get(sessionId);
+          setEventsForSession(
+            sessionId,
+            limitSessionEventsForUi(
+              mergePersistedAndOptimisticEvents(
+                nextEvents,
+                latestOptimisticEvents,
+              ),
             ),
-          ),
-        );
-      }
-    } catch {
-      if (
-        activeSessionIdRef.current === sessionId &&
-        sessionEventsRequestRef.current[sessionId] === requestId
-      ) {
-        const optimisticEvents = optimisticEventsRef.current.get(sessionId);
-        if (optimisticEvents && optimisticEvents.length > 0) {
-          setEvents(limitSessionEventsForUi(optimisticEvents));
+          );
+        }
+      } catch {
+        if (sessionEventsRequestRef.current[sessionId] === requestId) {
+          const optimisticEvents = optimisticEventsRef.current.get(sessionId);
+          if (optimisticEvents && optimisticEvents.length > 0) {
+            setEventsForSession(
+              sessionId,
+              limitSessionEventsForUi(optimisticEvents),
+            );
+          }
         }
       }
+    },
+    [setEventsForSession],
+  );
+
+  useEffect(() => {
+    const layout = chatGrid.activeProjectKey
+      ? chatGrid.layouts[chatGrid.activeProjectKey]
+      : undefined;
+    for (const pane of layout?.slots ?? []) {
+      if (pane?.kind === "session") void refreshEvents(pane.sessionId);
     }
-  }, []);
+  }, [chatGrid.activeProjectKey, chatGrid.layouts, refreshEvents]);
 
   const flushProviderStreamBatches = useCallback(() => {
     if (providerStreamFlushTimerRef.current !== undefined) {
@@ -1316,16 +1470,24 @@ export function App() {
     const batches = Array.from(providerStreamBatchRef.current.values());
     providerStreamBatchRef.current.clear();
     startTransition(() => {
-      applyProviderChatStreamDeltas(
-        optimisticEventsRef,
-        setEvents,
-        batches.map((batch) => ({
-          ...batch.streamEvent,
-          textDelta: batch.textDelta,
-        })),
-      );
+      const bySession = new Map<string, ProviderStreamBatch[]>();
+      for (const batch of batches) {
+        const group = bySession.get(batch.streamEvent.sessionId) ?? [];
+        group.push(batch);
+        bySession.set(batch.streamEvent.sessionId, group);
+      }
+      for (const [sessionId, sessionBatches] of bySession) {
+        applyProviderChatStreamDeltas(
+          optimisticEventsRef,
+          (value) => setEventsForSession(sessionId, value),
+          sessionBatches.map((batch) => ({
+            ...batch.streamEvent,
+            textDelta: batch.textDelta,
+          })),
+        );
+      }
     });
-  }, []);
+  }, [setEventsForSession]);
 
   const scheduleProviderStreamFlush = useCallback(() => {
     if (providerStreamFlushTimerRef.current !== undefined) {
@@ -1342,12 +1504,13 @@ export function App() {
       if (
         streamEvent.phase === "started" ||
         streamEvent.phase === "completed" ||
-        streamEvent.phase === "failed"
+        streamEvent.phase === "failed" ||
+        streamEvent.phase === "cancelled"
       ) {
         flushProviderStreamBatches();
         applyProviderChatStreamEvent(
           optimisticEventsRef,
-          setEvents,
+          (value) => setEventsForSession(streamEvent.sessionId, value),
           streamEvent,
         );
         return;
@@ -1356,7 +1519,7 @@ export function App() {
         flushProviderStreamBatches();
         applyProviderChatStreamActivity(
           optimisticEventsRef,
-          setEvents,
+          (value) => setEventsForSession(streamEvent.sessionId, value),
           streamEvent,
         );
         return;
@@ -1379,7 +1542,11 @@ export function App() {
       });
       scheduleProviderStreamFlush();
     },
-    [flushProviderStreamBatches, scheduleProviderStreamFlush],
+    [
+      flushProviderStreamBatches,
+      scheduleProviderStreamFlush,
+      setEventsForSession,
+    ],
   );
 
   const queueProviderChatStreamEvent = useCallback(
@@ -1446,9 +1613,7 @@ export function App() {
         sessionId,
         mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
       );
-      if (sessionId === activeSessionId) {
-        setEvents((current) => mergeEvent(current));
-      }
+      setEventsForSession(sessionId, (current) => mergeEvent(current));
     }).then((unlisten) => {
       if (!isMounted) {
         unlisten();
@@ -1460,7 +1625,7 @@ export function App() {
       isMounted = false;
       unlistenProviderApproval?.();
     };
-  }, [activeSessionId]);
+  }, [setEventsForSession]);
 
   const applyProviderChatResponse = useCallback(
     (sessionId: string, response?: ProviderChatResponse) => {
@@ -1491,17 +1656,14 @@ export function App() {
         ),
       );
       startTransition(() => {
-        setEvents((current) => {
-          if (!current.some((event) => event.sessionId === sessionId)) {
-            return current;
-          }
+        setEventsForSession(sessionId, (current) => {
           return limitSessionEventsForUi(
             mergeProviderResponseEvents(current, responseEvents),
           );
         });
       });
     },
-    [],
+    [setEventsForSession],
   );
 
   const updateSessionTitle = useCallback(
@@ -2971,8 +3133,9 @@ export function App() {
       setWorkspacePath(session.workspacePath);
       setFiles([]);
       setSessions((current) => [session, ...current]);
+      activeSessionIdRef.current = session.id;
       setActiveSessionId(session.id);
-      setEvents([]);
+      setEventsForSession(session.id, []);
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "first-session",
@@ -3021,39 +3184,168 @@ export function App() {
       setWorkspacePath(session.workspacePath);
       setFiles([]);
       setSessions((current) => [session, ...current]);
+      activeSessionIdRef.current = session.id;
       setActiveSessionId(session.id);
-      setEvents([]);
+      setEventsForSession(session.id, []);
       notify("command-failed", "Session fallback", "Created preview session");
     }
-  }, [config, notify, refreshSessions, workbench.workspaceMode, workspacePath]);
+  }, [
+    config,
+    notify,
+    refreshSessions,
+    setEventsForSession,
+    workbench.workspaceMode,
+    workspacePath,
+  ]);
 
   const startNewChat = useCallback(() => {
     suppressSessionAutoSelectRef.current = true;
+    const projectPath = activeSession?.workspacePath ?? workspacePath;
+    const projectKey = normalizedChatProjectKey(projectPath);
+    const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY;
+    const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
+      layout.slots.some(
+        (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
+      ),
+    );
+    if (projectKey && projectPath) {
+      dispatchChatGrid({
+        type: "select-pane",
+        projectKey,
+        mode: "replace",
+        pane: {
+          paneId: `draft:${projectKey}`,
+          kind: "draft",
+          draftKey,
+          workspacePath: projectPath,
+        },
+      });
+    }
     setIsStartingFirstTurn(false);
+    activeSessionIdRef.current = undefined;
     setActiveSessionId(undefined);
-    setEvents([]);
     setChatDrafts((current) => ({
       ...current,
       ...(activeSessionId ? { [activeSessionId]: "" } : {}),
-      [NEW_CHAT_DRAFT_KEY]: "",
+      ...(hasExistingDraft ? {} : { [draftKey]: "" }),
     }));
     setChatAttachments((current) => ({
       ...current,
       ...(activeSessionId ? { [activeSessionId]: [] } : {}),
-      [NEW_CHAT_DRAFT_KEY]: [],
+      ...(hasExistingDraft ? {} : { [draftKey]: [] }),
     }));
     setDraftResetToken((token) => token + 1);
     dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
     dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     dispatchWorkbench({ type: "close-tool-panel" });
-  }, [activeSessionId]);
+  }, [
+    activeSession?.workspacePath,
+    activeSessionId,
+    chatGrid.layouts,
+    workspacePath,
+  ]);
 
-  const selectSession = useCallback((sessionId: string) => {
-    suppressSessionAutoSelectRef.current = false;
-    setActiveSessionId(sessionId);
-    dispatchWorkbench({ type: "set-chat-panel" });
-    dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
-  }, []);
+  const selectSession = useCallback(
+    (sessionId: string) => {
+      suppressSessionAutoSelectRef.current = false;
+      const session = sessions.find((item) => item.id === sessionId);
+      if (session) {
+        dispatchChatGrid({
+          type: "select-pane",
+          projectKey: normalizedChatProjectKey(session.workspacePath),
+          mode: "replace",
+          pane: chatPaneForSession(session),
+        });
+        setWorkspacePath(session.workspacePath);
+      }
+      setActiveSessionId(sessionId);
+      dispatchWorkbench({ type: "set-chat-panel" });
+      dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
+    },
+    [sessions],
+  );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let isMounted = true;
+    let unlistenApprovalNotification: (() => void) | undefined;
+    void listen<ProviderApprovalNotificationOpen>(
+      "gyro://provider-approval-notification-open",
+      (event) => {
+        if (!isMounted || !event.payload.sessionId) return;
+        selectSession(event.payload.sessionId);
+        void refreshEvents(event.payload.sessionId);
+      },
+    ).then((unlisten) => {
+      if (!isMounted) {
+        unlisten();
+        return;
+      }
+      unlistenApprovalNotification = unlisten;
+    });
+    return () => {
+      isMounted = false;
+      unlistenApprovalNotification?.();
+    };
+  }, [refreshEvents, selectSession]);
+
+  const focusChatPane = useCallback(
+    (pane: ChatPaneRef) => {
+      const projectKey = normalizedChatProjectKey(pane.workspacePath);
+      dispatchChatGrid({ type: "focus-pane", projectKey, paneId: pane.paneId });
+      setWorkspacePath(pane.workspacePath);
+      if (pane.kind === "session") {
+        suppressSessionAutoSelectRef.current = false;
+        activeSessionIdRef.current = pane.sessionId;
+        setActiveSessionId(pane.sessionId);
+        void refreshEvents(pane.sessionId);
+      } else {
+        suppressSessionAutoSelectRef.current = true;
+        activeSessionIdRef.current = undefined;
+        setActiveSessionId(undefined);
+      }
+    },
+    [refreshEvents],
+  );
+
+  const addSessionToChatGrid = useCallback(
+    (sessionId: string) => {
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session) return;
+      const projectKey = normalizedChatProjectKey(session.workspacePath);
+      const layout = chatGrid.layouts[projectKey];
+      const existingPane = layout?.slots.find(
+        (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
+      );
+      if (existingPane) {
+        focusChatPane(existingPane);
+        return;
+      }
+      const targetSlot = layout?.slots.findIndex((pane) => pane === null) ?? 0;
+      if (targetSlot < 0) {
+        notify(
+          "command-failed",
+          "Chat grid is full",
+          "Close or replace a pane before adding a fifth chat.",
+        );
+        return;
+      }
+      dispatchChatGrid({
+        type: "select-pane",
+        projectKey,
+        mode: "replace",
+        slotIndex: targetSlot,
+        pane: chatPaneForSession(session),
+      });
+      setWorkspacePath(session.workspacePath);
+      setActiveSessionId(sessionId);
+      dispatchWorkbench({ type: "set-chat-panel" });
+      dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
+    },
+    [chatGrid.layouts, focusChatPane, notify, sessions],
+  );
 
   const pinSession = useCallback(
     (sessionId: string) => {
@@ -3109,6 +3401,13 @@ export function App() {
       }
 
       setSessions(nextSessions);
+      dispatchChatGrid({ type: "remove-session-pane", sessionId });
+      setSessionEventsById((current) => {
+        if (!current[sessionId]) return current;
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
       );
@@ -3121,8 +3420,8 @@ export function App() {
         return next;
       });
       if (activeSessionId === sessionId) {
-        setActiveSessionId(nextSessions[0]?.id);
-        setEvents([]);
+        activeSessionIdRef.current = undefined;
+        setActiveSessionId(undefined);
       }
       notify("terminal", "Chat deleted", session?.title ?? sessionId);
     },
@@ -3179,6 +3478,10 @@ export function App() {
     );
 
     setRemovedProjectPaths(nextRemovedProjectPaths);
+    dispatchChatGrid({
+      type: "clear-project-layout",
+      projectKey: normalizedChatProjectKey(projectPath),
+    });
     setRecentProjectPaths((current) =>
       current.filter((path) => normalizeProjectPath(path) !== projectPath),
     );
@@ -3188,6 +3491,13 @@ export function App() {
     for (const sessionId of projectSessionIds) {
       optimisticEventsRef.current.delete(sessionId);
     }
+    setSessionEventsById((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(
+          ([sessionId]) => !projectSessionIds.has(sessionId),
+        ),
+      ),
+    );
 
     if (
       activeProjectPath === projectPath ||
@@ -3199,7 +3509,6 @@ export function App() {
       setFiles([]);
       setSelectedFile(undefined);
       setSelectedFileContent(undefined);
-      setEvents([]);
       dispatchWorkbench({
         type: "select-workspace-layout",
         layout: "thread",
@@ -4051,8 +4360,18 @@ export function App() {
   );
 
   const attachDroppedImages = useCallback(
-    async (files: File[]) => {
-      const existing = chatAttachments[activeDraftKey] ?? [];
+    async (
+      files: File[],
+      target?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
+      const attachmentDraftKey = target?.draftKey ?? activeDraftKey;
+      const attachmentSessionId = target?.sessionId ?? activeSessionId;
+      const attachmentWorkspacePath = target?.workspacePath ?? workspacePath;
+      const existing = chatAttachments[attachmentDraftKey] ?? [];
       const slots = Math.max(
         0,
         4 - existing.filter((item) => item.kind === "image").length,
@@ -4065,9 +4384,9 @@ export function App() {
             "prepare_chat_attachment",
             {
               request: {
-                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                sessionId: attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
                 path: "",
-                workspacePath,
+                workspacePath: attachmentWorkspacePath,
                 kind: "image",
                 name: file.name || `pasted-image-${Date.now()}.png`,
                 bytes: Array.from(new Uint8Array(await file.arrayBuffer())),
@@ -4085,7 +4404,10 @@ export function App() {
       if (prepared.length) {
         setChatAttachments((current) => ({
           ...current,
-          [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
+          [attachmentDraftKey]: [
+            ...(current[attachmentDraftKey] ?? []),
+            ...prepared,
+          ],
         }));
       }
       if (files.length > slots) {
@@ -4836,8 +5158,18 @@ export function App() {
         setWorkspacePath(session.workspacePath);
         setFiles(previewFiles);
         setSessions((current) => [session, ...current]);
+        dispatchChatGrid({
+          type: "migrate-draft-pane",
+          draftKey: activeDraftKey,
+          sessionId: session.id,
+          workspacePath: session.workspacePath,
+        });
+        activeSessionIdRef.current = session.id;
         setActiveSessionId(session.id);
-        setEvents(limitSessionEventsForUi(optimisticEvents));
+        setEventsForSession(
+          session.id,
+          limitSessionEventsForUi(optimisticEvents),
+        );
         if (!overrideContext?.preserveDraft) {
           resetChatDraft();
         }
@@ -4846,7 +5178,7 @@ export function App() {
         if (!isTauriRuntime()) {
           updateOptimisticProviderStatus(
             optimisticEventsRef,
-            setEvents,
+            (value) => setEventsForSession(session.id, value),
             session.id,
             turnId,
             "done",
@@ -4873,6 +5205,18 @@ export function App() {
           );
           optimisticEventsRef.current.delete(session.id);
           optimisticEventsRef.current.set(persistedSession.id, migratedEvents);
+          setSessionEventsById((current) => {
+            const next = { ...current };
+            delete next[session.id];
+            next[persistedSession.id] = migratedEvents;
+            return next;
+          });
+          dispatchChatGrid({
+            type: "rekey-session-pane",
+            fromSessionId: session.id,
+            toSessionId: persistedSession.id,
+            workspacePath: persistedSession.workspacePath,
+          });
           replaceSendingSessionId(session.id, persistedSession.id);
           setChatMessageQueues((current) => {
             const queued = current[session.id];
@@ -4898,7 +5242,10 @@ export function App() {
           if (activeSessionIdRef.current === session.id) {
             activeSessionIdRef.current = persistedSession.id;
             setWorkspacePath(persistedSession.workspacePath);
-            setEvents(limitSessionEventsForUi(migratedEvents));
+            setEventsForSession(
+              persistedSession.id,
+              limitSessionEventsForUi(migratedEvents),
+            );
           }
 
           const persistedTurnAttachments = await Promise.all(
@@ -5031,7 +5378,7 @@ export function App() {
             });
           updateOptimisticProviderStatus(
             optimisticEventsRef,
-            setEvents,
+            (value) => setEventsForSession(optimisticSessionId, value),
             optimisticSessionId,
             turnId,
             wasCancelled ? "cancelled" : "failed",
@@ -5197,6 +5544,7 @@ export function App() {
       activeSession,
       activeSession?.workspacePath,
       activeSessionHasTranscriptEvents,
+      activeDraftKey,
       activeChatAttachments,
       activeChatDraft,
       activeChatMode,
@@ -5214,12 +5562,20 @@ export function App() {
       resetChatDraft,
       saveSessionModel,
       setSessionSending,
+      setEventsForSession,
       updateSessionTitle,
       workbench.ide.sourceControl,
       workbench.workspaceMode,
       workspacePath,
     ],
   );
+
+  useEffect(() => {
+    const pending = pendingPaneSendRef.current;
+    if (!pending || activeChatPane?.paneId !== pending.paneId) return;
+    pendingPaneSendRef.current = undefined;
+    void sendDraft(pending.message);
+  }, [activeChatPane?.paneId, sendDraft]);
 
   const handlePlanDecision = useCallback(
     async (decision: "approve" | "reject") => {
@@ -7452,6 +7808,21 @@ export function App() {
   }, [workbench.preferences.density, workbench.preferences.theme]);
 
   useEffect(() => {
+    const syncWindowFocus = () => {
+      document.documentElement.dataset.windowActive = document.hasFocus()
+        ? "true"
+        : "false";
+    };
+    syncWindowFocus();
+    window.addEventListener("focus", syncWindowFocus);
+    window.addEventListener("blur", syncWindowFocus);
+    return () => {
+      window.removeEventListener("focus", syncWindowFocus);
+      window.removeEventListener("blur", syncWindowFocus);
+    };
+  }, []);
+
+  useEffect(() => {
     pendingWorkbenchPersistRef.current = persistableWorkbench;
     if (
       workbenchPersistTimerRef.current !== undefined ||
@@ -8570,16 +8941,208 @@ export function App() {
         void updater.downloadUpdate();
       } else if (state.status === "ready") {
         void updater.restartAndInstallUpdate();
-      } else if (
-        state.status === "failed" ||
-        state.status === "current" ||
-        state.status === "checking"
-      ) {
+      } else if (state.status === "failed") {
+        void updater.downloadUpdate();
+      } else if (state.status === "current" || state.status === "checking") {
         void updater.checkForUpdate(true);
       }
     },
     [updater],
   );
+
+  const renderChatPane = (
+    pane: ChatPaneRef,
+    options: { isMaximized: boolean; isTiled: boolean },
+  ) => {
+    const paneSession =
+      pane.kind === "session"
+        ? sessions.find((session) => session.id === pane.sessionId)
+        : undefined;
+    const paneEvents =
+      pane.kind === "session" ? (sessionEventsById[pane.sessionId] ?? []) : [];
+    const paneDraftKey =
+      pane.kind === "session" ? pane.sessionId : pane.draftKey;
+    const panePlan =
+      pane.kind === "session"
+        ? deriveSessionPlan(paneEvents, pane.sessionId)
+        : pendingNewChatPlan;
+    const paneGoal =
+      pane.kind === "session"
+        ? deriveSessionGoal(paneEvents, pane.sessionId)
+        : pendingNewChatGoal;
+    const paneMode =
+      pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
+    const panePanel = chatPanelByPaneId[pane.paneId];
+    const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
+    const queue =
+      pane.kind === "session" ? (chatMessageQueues[pane.sessionId] ?? []) : [];
+    const requestSend = (message: string) => {
+      if (isFocused) {
+        void sendDraft(message);
+        return;
+      }
+      pendingPaneSendRef.current = { paneId: pane.paneId, message };
+      focusChatPane(pane);
+    };
+    const togglePanePanel = (panel: ChatSidePanelId) => {
+      focusChatPane(pane);
+      setChatPanelByPaneId((current) => ({
+        ...current,
+        [pane.paneId]: current[pane.paneId] === panel ? undefined : panel,
+      }));
+    };
+    return (
+      <ChatSurface
+        activeChatPanel={panePanel}
+        browserPreview={workbench.browserPreview}
+        config={config}
+        attachments={chatAttachments[paneDraftKey] ?? []}
+        chatMode={paneMode}
+        diffReview={workbench.diffReview}
+        draftResetToken={draftResetToken}
+        draft={chatDrafts[paneDraftKey] ?? ""}
+        events={paneEvents}
+        branchName={
+          workbench.workspaceMode === "local"
+            ? (branchCatalog?.current ?? paneSession?.branch)
+            : paneSession?.branch
+        }
+        branchCatalog={branchCatalog}
+        isEnvironmentRailOpen={panePanel === "environment"}
+        isGoalComposerActive={isFocused && isGoalComposerActive}
+        isComposerSending={
+          pane.kind === "session"
+            ? sendingSessionIds.includes(pane.sessionId)
+            : isFocused && isStartingFirstTurn
+        }
+        isBranchLoading={isBranchLoading}
+        isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
+        isTiled={options.isTiled}
+        maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
+        onboarding={workbench.onboarding}
+        onAgentAction={(action) => notify("terminal", "Agent action", action)}
+        onCompleteOnboardingStep={(step) =>
+          dispatchWorkbench({ type: "complete-onboarding-step", step })
+        }
+        onAttachImageFiles={(files) => {
+          focusChatPane(pane);
+          void attachDroppedImages(files, {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          });
+        }}
+        onComposerAction={(action) => {
+          focusChatPane(pane);
+          handleComposerAction(action);
+        }}
+        onDraftChange={(value) =>
+          setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
+        }
+        onRemoveAttachment={(attachmentId) =>
+          setChatAttachments((current) => ({
+            ...current,
+            [paneDraftKey]: (current[paneDraftKey] ?? []).filter(
+              (attachment) => attachment.id !== attachmentId,
+            ),
+          }))
+        }
+        onReusePrompt={(message) =>
+          setChatDrafts((current) => ({ ...current, [paneDraftKey]: message }))
+        }
+        onStopChat={() => {
+          focusChatPane(pane);
+          if (pane.kind === "session" && isTauriRuntime()) {
+            void invoke("stop_provider_chat", { sessionId: pane.sessionId });
+          }
+        }}
+        onContinueChat={() => requestSend("Continue")}
+        onOpenToolPanel={(tab) => {
+          focusChatPane(pane);
+          openToolPanel(tab);
+        }}
+        onToggleToolPanel={() => {
+          focusChatPane(pane);
+          toggleChatToolPanel();
+        }}
+        onPlanItemStatusChange={(itemId, status) => {
+          focusChatPane(pane);
+          changePlanItemStatus(itemId, status);
+        }}
+        onPlanAction={(action, itemId, value) => {
+          focusChatPane(pane);
+          changePlan(action, itemId, value);
+        }}
+        onPlanDecision={async (decision) => {
+          focusChatPane(pane);
+          return handlePlanDecision(decision);
+        }}
+        planEditorRequest={isFocused ? planEditorRequest : undefined}
+        onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
+        onGoalAction={(action, value) => {
+          focusChatPane(pane);
+          changeGoal(action, value);
+        }}
+        onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+        onLoadChangeDiff={loadInlineChangeDiff}
+        onEditQueuedMessage={(messageId) => {
+          focusChatPane(pane);
+          editQueuedChatMessage(messageId);
+        }}
+        onRemoveQueuedMessage={(messageId) => {
+          focusChatPane(pane);
+          removeQueuedChatMessage(messageId);
+        }}
+        onSteerQueuedMessage={(messageId) => {
+          focusChatPane(pane);
+          steerQueuedChatMessage(messageId);
+        }}
+        onMutationApprovalAction={(proposalId, decision) => {
+          focusChatPane(pane);
+          handleMutationApprovalAction(proposalId, decision);
+        }}
+        onProviderApprovalAction={(approvalId, decision) => {
+          focusChatPane(pane);
+          handleProviderApprovalAction(approvalId, decision);
+        }}
+        onProviderStatusAction={(action, event) => {
+          focusChatPane(pane);
+          handleProviderStatusAction(action, event);
+        }}
+        onSend={requestSend}
+        onSetOnboardingStep={(step) =>
+          dispatchWorkbench({ type: "set-onboarding-step", step })
+        }
+        onToggleEnvironmentRail={() => togglePanePanel("environment")}
+        onTogglePlanPanel={() => togglePanePanel("plan")}
+        providerReadiness={workbench.providerReadiness}
+        queuedMessages={queue.map((item) => ({
+          attachmentCount: item.context.attachments?.length ?? 0,
+          hasFailed: item.status === "failed",
+          id: item.id,
+          isDispatching: item.status === "sending",
+          message: item.message,
+        }))}
+        savedProjects={savedProjects}
+        sessionModel={{
+          modelLabel: paneSession?.modelLabel,
+          providerId: paneSession?.providerId,
+          providerLabel: paneSession?.providerLabel,
+          reasoningEffort: paneSession?.reasoningEffort,
+        }}
+        sessionPlan={panePlan}
+        sessionGoal={paneGoal}
+        sessionSummary={paneSession?.summary}
+        sessionTitle={paneSession?.title}
+        sourceControl={workbench.ide.sourceControl}
+        terminalPanes={workbench.terminalPanes}
+        turnSourceControlBaselines={turnSourceControlBaselines}
+        worktreeName={paneSession?.worktreeName}
+        workspaceMode={workbench.workspaceMode}
+        workspacePath={pane.workspacePath}
+      />
+    );
+  };
 
   if (!accountSession.signedIn) {
     return (
@@ -8656,6 +9219,7 @@ export function App() {
       onRenameSession={renameSession}
       onRemoveProject={requestRemoveProject}
       onSelectDestination={selectDestination}
+      onAddSessionToGrid={addSessionToChatGrid}
       onSelectSession={selectSession}
       onSelectSessions={() => dispatchWorkbench({ type: "select-sessions" })}
       onSelectTerminalPane={(paneId) => {
@@ -8674,6 +9238,9 @@ export function App() {
         dispatchWorkbench({ type: "toggle-sidebar-chats" })
       }
       pinnedSessionIds={pinnedSessionIds}
+      openChatSessionIds={(activeChatLayout?.slots ?? []).flatMap((pane) =>
+        pane?.kind === "session" ? [pane.sessionId] : [],
+      )}
       savedProjects={savedProjects}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
       sessions={visibleSessions}
@@ -8684,96 +9251,174 @@ export function App() {
         <div className={`gyro-workspace-route is-${activeWorkspaceLayout}`}>
           {activeWorkspaceLayout === "thread" ? (
             <section className="gyro-workspace-primary" aria-label="Thread">
-              <ChatSurface
-                activeChatPanel={activeChatPanel}
-                browserPreview={workbench.browserPreview}
-                config={config}
-                attachments={activeChatAttachments}
-                chatMode={activeChatMode}
-                diffReview={workbench.diffReview}
-                draftResetToken={draftResetToken}
-                draft={activeChatDraft}
-                events={events}
-                branchName={
-                  workbench.workspaceMode === "local"
-                    ? (branchCatalog?.current ?? activeSession?.branch)
-                    : activeSession?.branch
-                }
-                branchCatalog={branchCatalog}
-                isEnvironmentRailOpen={activeChatPanel === "environment"}
-                isGoalComposerActive={isGoalComposerActive}
-                isComposerSending={isActiveSessionSending}
-                isBranchLoading={isBranchLoading}
-                isToolPanelOpen={workbench.isToolPanelOpen}
-                maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-                onboarding={workbench.onboarding}
-                onAgentAction={(action) =>
-                  notify("terminal", "Agent action", action)
-                }
-                onCompleteOnboardingStep={(step) =>
-                  dispatchWorkbench({ type: "complete-onboarding-step", step })
-                }
-                onAttachImageFiles={attachDroppedImages}
-                onComposerAction={handleComposerAction}
-                onDraftChange={updateActiveChatDraft}
-                onRemoveAttachment={removeChatAttachment}
-                onReusePrompt={updateActiveChatDraft}
-                onStopChat={stopActiveChat}
-                onContinueChat={() => void sendDraft("Continue")}
-                onOpenToolPanel={openToolPanel}
-                onToggleToolPanel={toggleChatToolPanel}
-                onPlanItemStatusChange={changePlanItemStatus}
-                onPlanAction={changePlan}
-                onPlanDecision={handlePlanDecision}
-                planEditorRequest={planEditorRequest}
-                onPlanEditorRequestHandled={() =>
-                  setPlanEditorRequest(undefined)
-                }
-                onGoalAction={changeGoal}
-                onCancelGoalComposer={() => setIsGoalComposerActive(false)}
-                onLoadChangeDiff={loadInlineChangeDiff}
-                onEditQueuedMessage={editQueuedChatMessage}
-                onRemoveQueuedMessage={removeQueuedChatMessage}
-                onSteerQueuedMessage={steerQueuedChatMessage}
-                onMutationApprovalAction={handleMutationApprovalAction}
-                onProviderApprovalAction={handleProviderApprovalAction}
-                onProviderStatusAction={handleProviderStatusAction}
-                onSend={sendDraft}
-                onSetOnboardingStep={(step) =>
-                  dispatchWorkbench({ type: "set-onboarding-step", step })
-                }
-                onToggleEnvironmentRail={() =>
-                  dispatchWorkbench({ type: "toggle-chat-environment-rail" })
-                }
-                onTogglePlanPanel={() =>
-                  dispatchWorkbench({ type: "toggle-chat-plan" })
-                }
-                providerReadiness={workbench.providerReadiness}
-                queuedMessages={activeQueuedChatMessages.map((item) => ({
-                  attachmentCount: item.context.attachments?.length ?? 0,
-                  hasFailed: item.status === "failed",
-                  id: item.id,
-                  isDispatching: item.status === "sending",
-                  message: item.message,
-                }))}
-                savedProjects={savedProjects}
-                sessionModel={{
-                  modelLabel: activeSession?.modelLabel,
-                  providerId: activeSession?.providerId,
-                  providerLabel: activeSession?.providerLabel,
-                  reasoningEffort: activeSession?.reasoningEffort,
-                }}
-                sessionPlan={activeSessionPlan}
-                sessionGoal={activeSessionGoal}
-                sessionSummary={activeSession?.summary}
-                sessionTitle={activeSession?.title}
-                sourceControl={workbench.ide.sourceControl}
-                terminalPanes={workbench.terminalPanes}
-                turnSourceControlBaselines={turnSourceControlBaselines}
-                worktreeName={activeSession?.worktreeName}
-                workspaceMode={workbench.workspaceMode}
-                workspacePath={activeSession?.workspacePath ?? workspacePath}
-              />
+              {activeChatLayout?.slots.some(Boolean) ? (
+                <ChatGridSurface
+                  layout={activeChatLayout}
+                  maximizedPaneId={chatGrid.maximizedPaneId}
+                  onClosePane={(pane) => {
+                    const nextPane = activeChatLayout.slots.find(
+                      (candidate) =>
+                        candidate && candidate.paneId !== pane.paneId,
+                    );
+                    dispatchChatGrid({
+                      type: "close-pane",
+                      projectKey: activeChatLayout.projectKey,
+                      paneId: pane.paneId,
+                    });
+                    setChatPanelByPaneId((current) => ({
+                      ...current,
+                      [pane.paneId]: undefined,
+                    }));
+                    if (activeChatLayout.focusedPaneId === pane.paneId) {
+                      activeSessionIdRef.current =
+                        nextPane?.kind === "session"
+                          ? nextPane.sessionId
+                          : undefined;
+                      setActiveSessionId(activeSessionIdRef.current);
+                    }
+                  }}
+                  onDropSession={(sessionId, sourceProjectKey, slotIndex) => {
+                    const session = sessions.find(
+                      (item) => item.id === sessionId,
+                    );
+                    if (!session) return;
+                    const projectKey = normalizedChatProjectKey(
+                      session.workspacePath,
+                    );
+                    if (
+                      sourceProjectKey &&
+                      sourceProjectKey !== activeChatLayout.projectKey
+                    ) {
+                      notify(
+                        "terminal",
+                        "Chat project switched",
+                        workspaceName(session.workspacePath),
+                      );
+                    }
+                    dispatchChatGrid({
+                      type: "select-pane",
+                      projectKey,
+                      mode: "drop",
+                      slotIndex,
+                      pane: chatPaneForSession(session),
+                    });
+                    activeSessionIdRef.current = session.id;
+                    setActiveSessionId(session.id);
+                    setWorkspacePath(session.workspacePath);
+                    void refreshEvents(session.id);
+                  }}
+                  onFocusPane={focusChatPane}
+                  onMovePane={(paneId, slotIndex) =>
+                    dispatchChatGrid({
+                      type: "move-pane",
+                      projectKey: activeChatLayout.projectKey,
+                      paneId,
+                      slotIndex,
+                    })
+                  }
+                  onToggleMaximize={(paneId) =>
+                    dispatchChatGrid({
+                      type: "toggle-maximize-pane",
+                      paneId,
+                    })
+                  }
+                  renderPane={renderChatPane}
+                />
+              ) : (
+                <ChatSurface
+                  activeChatPanel={activeChatPanel}
+                  browserPreview={workbench.browserPreview}
+                  config={config}
+                  attachments={activeChatAttachments}
+                  chatMode={activeChatMode}
+                  diffReview={workbench.diffReview}
+                  draftResetToken={draftResetToken}
+                  draft={activeChatDraft}
+                  events={events}
+                  branchName={
+                    workbench.workspaceMode === "local"
+                      ? (branchCatalog?.current ?? activeSession?.branch)
+                      : activeSession?.branch
+                  }
+                  branchCatalog={branchCatalog}
+                  isEnvironmentRailOpen={activeChatPanel === "environment"}
+                  isGoalComposerActive={isGoalComposerActive}
+                  isComposerSending={isActiveSessionSending}
+                  isBranchLoading={isBranchLoading}
+                  isToolPanelOpen={workbench.isToolPanelOpen}
+                  maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
+                  onboarding={workbench.onboarding}
+                  onAgentAction={(action) =>
+                    notify("terminal", "Agent action", action)
+                  }
+                  onCompleteOnboardingStep={(step) =>
+                    dispatchWorkbench({
+                      type: "complete-onboarding-step",
+                      step,
+                    })
+                  }
+                  onAttachImageFiles={attachDroppedImages}
+                  onComposerAction={handleComposerAction}
+                  onDraftChange={updateActiveChatDraft}
+                  onRemoveAttachment={removeChatAttachment}
+                  onReusePrompt={updateActiveChatDraft}
+                  onStopChat={stopActiveChat}
+                  onContinueChat={() => void sendDraft("Continue")}
+                  onOpenToolPanel={openToolPanel}
+                  onToggleToolPanel={toggleChatToolPanel}
+                  onPlanItemStatusChange={changePlanItemStatus}
+                  onPlanAction={changePlan}
+                  onPlanDecision={handlePlanDecision}
+                  planEditorRequest={planEditorRequest}
+                  onPlanEditorRequestHandled={() =>
+                    setPlanEditorRequest(undefined)
+                  }
+                  onGoalAction={changeGoal}
+                  onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                  onLoadChangeDiff={loadInlineChangeDiff}
+                  onEditQueuedMessage={editQueuedChatMessage}
+                  onRemoveQueuedMessage={removeQueuedChatMessage}
+                  onSteerQueuedMessage={steerQueuedChatMessage}
+                  onMutationApprovalAction={handleMutationApprovalAction}
+                  onProviderApprovalAction={handleProviderApprovalAction}
+                  onProviderStatusAction={handleProviderStatusAction}
+                  onSend={sendDraft}
+                  onSetOnboardingStep={(step) =>
+                    dispatchWorkbench({ type: "set-onboarding-step", step })
+                  }
+                  onToggleEnvironmentRail={() =>
+                    dispatchWorkbench({ type: "toggle-chat-environment-rail" })
+                  }
+                  onTogglePlanPanel={() =>
+                    dispatchWorkbench({ type: "toggle-chat-plan" })
+                  }
+                  providerReadiness={workbench.providerReadiness}
+                  queuedMessages={activeQueuedChatMessages.map((item) => ({
+                    attachmentCount: item.context.attachments?.length ?? 0,
+                    hasFailed: item.status === "failed",
+                    id: item.id,
+                    isDispatching: item.status === "sending",
+                    message: item.message,
+                  }))}
+                  savedProjects={savedProjects}
+                  sessionModel={{
+                    modelLabel: activeSession?.modelLabel,
+                    providerId: activeSession?.providerId,
+                    providerLabel: activeSession?.providerLabel,
+                    reasoningEffort: activeSession?.reasoningEffort,
+                  }}
+                  sessionPlan={activeSessionPlan}
+                  sessionGoal={activeSessionGoal}
+                  sessionSummary={activeSession?.summary}
+                  sessionTitle={activeSession?.title}
+                  sourceControl={workbench.ide.sourceControl}
+                  terminalPanes={workbench.terminalPanes}
+                  turnSourceControlBaselines={turnSourceControlBaselines}
+                  worktreeName={activeSession?.worktreeName}
+                  workspaceMode={workbench.workspaceMode}
+                  workspacePath={activeSession?.workspacePath ?? workspacePath}
+                />
+              )}
             </section>
           ) : null}
 
@@ -9988,6 +10633,16 @@ function loadChatAttachments(): Record<string, ChatAttachment[]> {
   }
 }
 
+function loadChatGridState(): ChatGridState {
+  const stored = readBoundedLocalStorage(CHAT_GRID_STORAGE_KEY, 512_000);
+  if (!stored) return createInitialChatGridState();
+  try {
+    return sanitizeStoredChatGridState(JSON.parse(stored));
+  } catch {
+    return createInitialChatGridState();
+  }
+}
+
 function isSupportedChatImagePath(path: string) {
   return /\.(?:png|jpe?g|webp)$/i.test(path.trim());
 }
@@ -10041,6 +10696,15 @@ function loadRecentProjectPaths(): string[] {
 
 function normalizeProjectPath(path?: string) {
   return path?.trim().replace(/\/+$/, "") ?? "";
+}
+
+function chatPaneForSession(session: Session): ChatPaneRef {
+  return {
+    paneId: `session:${session.id}`,
+    kind: "session",
+    sessionId: session.id,
+    workspacePath: session.workspacePath,
+  };
 }
 
 function visibleSessionsForProjects(
@@ -11928,13 +12592,14 @@ function applyProviderChatStreamEvent(
     );
     return;
   }
-  if (streamEvent.phase === "failed") {
+  if (streamEvent.phase === "failed" || streamEvent.phase === "cancelled") {
     updateOptimisticProviderStatus(
       optimisticEventsRef,
       setEvents,
       streamEvent.sessionId,
       turnId,
-      streamEvent.status ?? "failed",
+      streamEvent.status ??
+        (streamEvent.phase === "cancelled" ? "cancelled" : "failed"),
       streamEvent.error ?? undefined,
     );
     return;
