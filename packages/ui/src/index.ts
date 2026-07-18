@@ -121,6 +121,14 @@ export type {
   WorkspaceFileContent,
   WorkspaceFileStat,
   WorkspaceLayoutId,
+  GlobalSearchProject,
+  GlobalSearchSelection,
+  WorkspaceChangedEvent,
+  WorkspacePreparationError,
+  WorkspacePreparationPhase,
+  WorkspacePreparationProgress,
+  WorkspacePreparationSnapshot,
+  WorkspacePreparationStatus,
 } from "./types";
 export {
   createInitialWorkbenchState,
@@ -154,6 +162,10 @@ export {
   selectedReasoningEffort,
 } from "./provider-catalog";
 export type { WorkbenchAction } from "./workbench-state";
+export {
+  globalSearchMatchScore,
+  normalizedGlobalSearchText,
+} from "./global-search";
 export {
   shouldShowSidebarUpdate,
   updatePrimaryActionLabel,
