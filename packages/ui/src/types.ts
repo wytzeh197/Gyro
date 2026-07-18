@@ -976,6 +976,57 @@ export type WorkspaceFile = {
   depth?: number;
 };
 
+export type GlobalSearchProject = {
+  path: string;
+  label: string;
+  detail?: string;
+  sessionCount?: number;
+  current?: boolean;
+};
+
+export type GlobalSearchSelection =
+  | { kind: "action"; id: string }
+  | { kind: "project"; path: string }
+  | { kind: "session"; sessionId: string };
+
+export type WorkspacePreparationPhase =
+  "catalog" | "watcher" | "git" | "tasks" | "tests";
+
+export type WorkspacePreparationStatus =
+  "idle" | "preparing" | "ready" | "degraded" | "failed";
+
+export type WorkspacePreparationError = {
+  phase: WorkspacePreparationPhase;
+  message: string;
+};
+
+export type WorkspacePreparationProgress = {
+  runId: string;
+  workspacePath: string;
+  phase?: WorkspacePreparationPhase;
+  status: WorkspacePreparationStatus;
+  completedSteps: number;
+  totalSteps: number;
+  message: string;
+  errors: WorkspacePreparationError[];
+};
+
+export type WorkspacePreparationSnapshot = WorkspacePreparationProgress & {
+  files: WorkspaceFile[];
+  sourceControl?: SourceControlState;
+  branches?: GitBranchCatalog;
+  tasks: TaskDefinition[];
+  tests: TestTreeItem[];
+  watcherMode: "event" | "polling";
+  generation: number;
+};
+
+export type WorkspaceChangedEvent = {
+  workspacePath: string;
+  generation: number;
+  files: WorkspaceFile[];
+};
+
 export type WorkspaceFileContent = {
   path: string;
   content: string;

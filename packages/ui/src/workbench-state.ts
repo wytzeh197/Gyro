@@ -933,7 +933,7 @@ export function createInitialWorkbenchState(
     activeDestination: "workspace",
     activeWorkspaceLayout: "thread",
     lastSessionsLayout: "thread",
-    activePaneTab: "terminal",
+    activePaneTab: "diff",
     isToolPanelOpen: false,
     workspaceMode: "local",
     terminalTemplate: 4,
