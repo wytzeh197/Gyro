@@ -8782,7 +8782,7 @@ export function App() {
             : null}
 
           {activeWorkspaceLayout === "code" ? (
-            <section className="gyro-workspace-primary" aria-label="Code">
+            <section className="gyro-workspace-primary" aria-label="Workspace">
               <IdeSurface
                 activePaneTab={workbench.activePaneTab}
                 browserPreview={workbench.browserPreview}
