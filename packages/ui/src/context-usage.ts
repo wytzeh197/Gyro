@@ -119,12 +119,17 @@ export function estimateComposerContextUsage(
     PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"] ??
     128_000;
 
-  const estimatedCharacters = events
-    .slice(reportedEventIndex >= 0 ? reportedEventIndex + 1 : 0)
-    .reduce(
-      (total, event) => total + estimatedEventCharacters(event),
-      draft.length,
-    );
+  let estimatedCharacters = draft.length;
+  for (
+    let index = reportedEventIndex >= 0 ? reportedEventIndex + 1 : 0;
+    index < events.length;
+    index += 1
+  ) {
+    const event = events[index];
+    if (event) {
+      estimatedCharacters += estimatedEventCharacters(event);
+    }
+  }
   const liveEstimatedTokens = estimateTokens(estimatedCharacters);
   const reportedTokens =
     reportedInputTokens === undefined

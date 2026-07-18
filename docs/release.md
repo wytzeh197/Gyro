@@ -119,11 +119,29 @@ https://github.com/wytzeh197/Gyro/releases/download/v<version>/Gyro_<version>_x6
 https://github.com/wytzeh197/Gyro/releases/download/v<version>/SHA256SUMS
 ```
 
+## Release branch policy
+
+Prepare each product release on a short-lived `release/v<version>` branch cut
+from `main`. Update every version surface, lockfile, and the matching versioned
+release notes on that branch. Release preparation may include stabilization
+fixes, but unrelated feature work should continue separately.
+
+Open a pull request for the release branch and require CI to pass. Merge it into
+`main`, then create the immutable `v<version>` tag on the exact merged commit.
+Never tag or publish directly from an unmerged release branch. Pushing the tag
+starts the draft release workflow described below.
+
+Delete the release branch after it is merged. These branches are temporary
+coordination points, not permanent branches for historic versions. Ordinary
+feature and dependency changes continue to use normal short-lived branches and
+do not require a product release by themselves.
+
 ## Draft, accept, and publish
 
-1. Update every version surface and add matching `docs/releases/v<version>.md`
-   notes. Do not reuse a published tag.
-2. Run the preflight checks below, then push the `v<version>` tag.
+1. On the release branch, update every version surface and add matching
+   `docs/releases/v<version>.md` notes. Do not reuse a published tag.
+2. Run the preflight checks below, merge the passing release pull request into
+   `main`, then tag that exact merged commit and push the `v<version>` tag.
 3. Let `.github/workflows/release.yml` build both native architectures, verify
    them, assemble `latest.json`, checksums and `gyro.rb`, and create one draft.
 4. Download the draft assets exactly as a user would. Match every digest to

@@ -7,6 +7,9 @@ import type {
   BrowserPreviewDevice,
   BrowserPreviewStatus,
   ChatSidePanelId,
+  ChatGridState,
+  ChatPaneRef,
+  ChatProjectLayout,
   CliLaunchPreset,
   CommandProfile,
   DiffApprovalState,
@@ -64,8 +67,334 @@ import type {
 import { defaultProviderStatuses as catalogDefaultProviderStatuses } from "./provider-catalog.ts";
 
 export const CLI_LAUNCH_PRESET_MAX_PANES = 8;
+export const CHAT_GRID_MAX_SLOTS = 4;
 const MAX_RESTORED_EDITOR_TABS = 100;
 const MAX_RESTORED_EDITOR_GROUPS = 8;
+
+export type ChatGridAction =
+  | { type: "activate-project"; projectKey: string }
+  | {
+      type: "select-pane";
+      projectKey: string;
+      pane: ChatPaneRef;
+      mode: "replace" | "drop";
+      slotIndex?: number;
+    }
+  | { type: "focus-pane"; projectKey: string; paneId: string }
+  | { type: "close-pane"; projectKey: string; paneId: string }
+  | {
+      type: "move-pane";
+      projectKey: string;
+      paneId: string;
+      slotIndex: number;
+    }
+  | { type: "toggle-maximize-pane"; paneId: string }
+  | {
+      type: "migrate-draft-pane";
+      draftKey: string;
+      sessionId: string;
+      workspacePath: string;
+    }
+  | {
+      type: "rekey-session-pane";
+      fromSessionId: string;
+      toSessionId: string;
+      workspacePath: string;
+    }
+  | { type: "remove-session-pane"; sessionId: string }
+  | { type: "clear-project-layout"; projectKey: string };
+
+export function normalizedChatProjectKey(path?: string) {
+  return path?.trim().replaceAll("\\", "/").replace(/\/+$/, "") ?? "";
+}
+
+export function chatPaneIdentity(pane: ChatPaneRef) {
+  return pane.kind === "session"
+    ? `session:${pane.sessionId}`
+    : `draft:${pane.draftKey}`;
+}
+
+export function createInitialChatGridState(): ChatGridState {
+  return { layouts: {} };
+}
+
+export function createChatProjectLayout(
+  projectKey: string,
+  pane?: ChatPaneRef,
+): ChatProjectLayout {
+  return {
+    projectKey,
+    slots: [pane ?? null, null, null, null],
+    focusedPaneId: pane?.paneId,
+  };
+}
+
+export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
+  const stored = storedRecord(value);
+  const rawLayouts = storedRecord(stored?.layouts);
+  const layouts: Record<string, ChatProjectLayout> = {};
+  if (rawLayouts) {
+    for (const [rawKey, rawLayout] of Object.entries(rawLayouts)) {
+      const projectKey = normalizedChatProjectKey(rawKey);
+      const layout = storedRecord(rawLayout);
+      if (!projectKey || !layout || !Array.isArray(layout.slots)) continue;
+      const seen = new Set<string>();
+      const seenPaneIds = new Set<string>();
+      const slots = layout.slots.slice(0, CHAT_GRID_MAX_SLOTS).map((raw) => {
+        const pane = storedRecord(raw);
+        const paneId = storedChatGridText(pane?.paneId, 160);
+        const workspacePath = normalizedChatProjectKey(
+          storedChatGridText(pane?.workspacePath, 4096),
+        );
+        if (!paneId || !workspacePath || seenPaneIds.has(paneId)) return null;
+        let result: ChatPaneRef | null = null;
+        if (pane?.kind === "session") {
+          const sessionId = storedChatGridText(pane.sessionId, 160);
+          if (sessionId) {
+            result = { paneId, kind: "session", sessionId, workspacePath };
+          }
+        } else if (pane?.kind === "draft") {
+          const draftKey = storedChatGridText(pane.draftKey, 240);
+          if (draftKey) {
+            result = { paneId, kind: "draft", draftKey, workspacePath };
+          }
+        }
+        if (!result) return null;
+        if (normalizedChatProjectKey(result.workspacePath) !== projectKey) {
+          return null;
+        }
+        const identity = chatPaneIdentity(result);
+        if (seen.has(identity)) return null;
+        seen.add(identity);
+        seenPaneIds.add(paneId);
+        return result;
+      });
+      while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+      const focusedPaneId = storedChatGridText(layout.focusedPaneId, 160);
+      const fallbackFocus = slots.find(Boolean)?.paneId;
+      layouts[projectKey] = {
+        projectKey,
+        slots,
+        focusedPaneId: slots.some((pane) => pane?.paneId === focusedPaneId)
+          ? focusedPaneId
+          : fallbackFocus,
+      };
+    }
+  }
+  const requestedProjectKey = normalizedChatProjectKey(
+    storedChatGridText(stored?.activeProjectKey, 4096),
+  );
+  return {
+    layouts,
+    activeProjectKey:
+      requestedProjectKey in layouts ? requestedProjectKey : undefined,
+  };
+}
+
+export function persistableChatGridState(state: ChatGridState): ChatGridState {
+  return sanitizeStoredChatGridState({
+    activeProjectKey: state.activeProjectKey,
+    layouts: state.layouts,
+  });
+}
+
+export function chatGridReducer(
+  state: ChatGridState,
+  action: ChatGridAction,
+): ChatGridState {
+  if (action.type === "toggle-maximize-pane") {
+    return {
+      ...state,
+      maximizedPaneId:
+        state.maximizedPaneId === action.paneId ? undefined : action.paneId,
+    };
+  }
+  if (action.type === "migrate-draft-pane") {
+    const layouts = Object.fromEntries(
+      Object.entries(state.layouts).map(([key, layout]) => [
+        key,
+        {
+          ...layout,
+          slots: layout.slots.map((pane) => {
+            if (pane?.kind !== "draft" || pane.draftKey !== action.draftKey) {
+              return pane;
+            }
+            return {
+              paneId: pane.paneId,
+              kind: "session" as const,
+              sessionId: action.sessionId,
+              workspacePath: action.workspacePath,
+            };
+          }),
+        },
+      ]),
+    );
+    return {
+      ...state,
+      layouts,
+    };
+  }
+  if (action.type === "rekey-session-pane") {
+    const layouts = Object.fromEntries(
+      Object.entries(state.layouts).map(([key, layout]) => [
+        key,
+        {
+          ...layout,
+          slots: layout.slots.map((pane) =>
+            pane?.kind === "session" && pane.sessionId === action.fromSessionId
+              ? {
+                  ...pane,
+                  sessionId: action.toSessionId,
+                  workspacePath: action.workspacePath,
+                }
+              : pane,
+          ),
+        },
+      ]),
+    );
+    return {
+      ...state,
+      layouts,
+    };
+  }
+  if (action.type === "remove-session-pane") {
+    const layouts = Object.fromEntries(
+      Object.entries(state.layouts).map(([key, layout]) => {
+        const slots = layout.slots.map((pane) =>
+          pane?.kind === "session" && pane.sessionId === action.sessionId
+            ? null
+            : pane,
+        );
+        return [key, chatLayoutWithValidFocus({ ...layout, slots })];
+      }),
+    );
+    const maximizedStillExists = Object.values(layouts).some((layout) =>
+      layout.slots.some((pane) => pane?.paneId === state.maximizedPaneId),
+    );
+    return {
+      ...state,
+      layouts,
+      maximizedPaneId: maximizedStillExists ? state.maximizedPaneId : undefined,
+    };
+  }
+  if (action.type === "clear-project-layout") {
+    const layouts = { ...state.layouts };
+    const removed = layouts[action.projectKey];
+    delete layouts[action.projectKey];
+    return {
+      layouts,
+      activeProjectKey:
+        state.activeProjectKey === action.projectKey
+          ? Object.keys(layouts)[0]
+          : state.activeProjectKey,
+      maximizedPaneId: removed?.slots.some(
+        (pane) => pane?.paneId === state.maximizedPaneId,
+      )
+        ? undefined
+        : state.maximizedPaneId,
+    };
+  }
+
+  const projectKey = normalizedChatProjectKey(action.projectKey);
+  if (!projectKey) return state;
+  if (action.type === "activate-project") {
+    return {
+      ...state,
+      activeProjectKey: projectKey,
+      maximizedPaneId: undefined,
+    };
+  }
+  const current =
+    state.layouts[projectKey] ?? createChatProjectLayout(projectKey);
+  let next = current;
+  if (action.type === "select-pane") {
+    const existingIndex = current.slots.findIndex(
+      (pane) =>
+        pane && chatPaneIdentity(pane) === chatPaneIdentity(action.pane),
+    );
+    if (existingIndex >= 0) {
+      const existing = current.slots[existingIndex];
+      next = { ...current, focusedPaneId: existing?.paneId };
+    } else {
+      const focusedIndex = current.slots.findIndex(
+        (pane) => pane?.paneId === current.focusedPaneId,
+      );
+      const emptyIndex = current.slots.findIndex((pane) => pane === null);
+      const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
+      const targetIndex =
+        requestedIndex ??
+        (action.mode === "drop" && emptyIndex >= 0
+          ? emptyIndex
+          : focusedIndex >= 0
+            ? focusedIndex
+            : 0);
+      const slots = current.slots.slice(0, CHAT_GRID_MAX_SLOTS);
+      while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+      slots[targetIndex] = action.pane;
+      next = { ...current, slots, focusedPaneId: action.pane.paneId };
+    }
+  } else if (action.type === "focus-pane") {
+    if (current.slots.some((pane) => pane?.paneId === action.paneId)) {
+      next = { ...current, focusedPaneId: action.paneId };
+    }
+  } else if (action.type === "close-pane") {
+    next = chatLayoutWithValidFocus({
+      ...current,
+      slots: current.slots.map((pane) =>
+        pane?.paneId === action.paneId ? null : pane,
+      ),
+    });
+  } else if (action.type === "move-pane") {
+    const fromIndex = current.slots.findIndex(
+      (pane) => pane?.paneId === action.paneId,
+    );
+    const toIndex = normalizedChatSlotIndex(action.slotIndex);
+    if (fromIndex >= 0 && toIndex !== undefined && fromIndex !== toIndex) {
+      const slots = current.slots.slice();
+      const fromPane = slots[fromIndex] ?? null;
+      slots[fromIndex] = slots[toIndex] ?? null;
+      slots[toIndex] = fromPane;
+      next = { ...current, slots, focusedPaneId: action.paneId };
+    }
+  }
+  return {
+    ...state,
+    activeProjectKey: projectKey,
+    layouts: { ...state.layouts, [projectKey]: next },
+    maximizedPaneId:
+      action.type === "close-pane" && state.maximizedPaneId === action.paneId
+        ? undefined
+        : state.maximizedPaneId,
+  };
+}
+
+function normalizedChatSlotIndex(value?: number) {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value < CHAT_GRID_MAX_SLOTS
+    ? value
+    : undefined;
+}
+
+function chatLayoutWithValidFocus(
+  layout: ChatProjectLayout,
+): ChatProjectLayout {
+  return {
+    ...layout,
+    focusedPaneId: layout.slots.some(
+      (pane) => pane?.paneId === layout.focusedPaneId,
+    )
+      ? layout.focusedPaneId
+      : layout.slots.find(Boolean)?.paneId,
+  };
+}
+
+function storedChatGridText(value: unknown, maxLength: number) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, maxLength)
+    : undefined;
+}
 
 function createEditorGroup(
   id: string,

@@ -147,10 +147,16 @@ export function useGyroUpdater({
   }, [state]);
 
   const downloadUpdate = useCallback(async () => {
-    const update = updateRef.current;
+    let update = updateRef.current;
     if (!update) {
-      await checkForUpdate(true);
-      return;
+      const result = await checkForUpdate(true);
+      if (result.status !== "available") {
+        return;
+      }
+      update = updateRef.current;
+      if (!update) {
+        return;
+      }
     }
     let downloadedBytes = 0;
     let totalBytes: number | undefined;

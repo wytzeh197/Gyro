@@ -41,6 +41,31 @@ assert.deepEqual(
 assert.deepEqual(orderProviderChatStreamEvent(orderState, streamEvent(4)), []);
 assert.equal(orderState.size, 1);
 
+assert.deepEqual(
+  orderProviderChatStreamEvent(orderState, streamEvent(0, "started", "")),
+  [streamEvent(0, "started", "")],
+);
+assert.deepEqual(orderProviderChatStreamEvent(orderState, streamEvent(1)), [
+  streamEvent(1),
+]);
+
+const gappedOrderState = new Map();
+assert.deepEqual(
+  orderProviderChatStreamEvent(gappedOrderState, streamEvent(0, "started", "")),
+  [streamEvent(0, "started", "")],
+);
+assert.deepEqual(
+  orderProviderChatStreamEvent(gappedOrderState, streamEvent(2)),
+  [],
+);
+assert.deepEqual(
+  orderProviderChatStreamEvent(
+    gappedOrderState,
+    streamEvent(4, "cancelled", ""),
+  ),
+  [streamEvent(2), streamEvent(4, "cancelled", "")],
+);
+
 const optimisticEventsRef = { current: new Map([["session-1", []]]) };
 let renderedEvents = [];
 applyProviderChatStreamDeltas(
