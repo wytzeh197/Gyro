@@ -26,6 +26,7 @@ dirs = "5.0"
 diffy = "0.4"
 keyring = { version = "3.6", features = ["apple-native"] }
 libc = "0.2"
+notify = "7.0"
 rand = "0.8"
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }

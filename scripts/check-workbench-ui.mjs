@@ -18,6 +18,10 @@ import {
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
 import {
+  globalSearchMatchScore,
+  normalizedGlobalSearchText,
+} from "../packages/ui/src/global-search.ts";
+import {
   isProviderExecutable,
   isProviderRuntimeUsable,
   normalizedConfig,
@@ -54,6 +58,18 @@ function expect(condition, message) {
 function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
+
+expect(
+  globalSearchMatchScore("gyro", "Gyro", "Gyro desktop") <
+    globalSearchMatchScore("gyro", "Gyro workspace", "Gyro workspace") &&
+    globalSearchMatchScore("work", "Open workspace", "Open workspace") <
+      globalSearchMatchScore("space", "Open workspace", "Open workspace") &&
+    !Number.isFinite(
+      globalSearchMatchScore("missing", "Gyro", "Gyro desktop"),
+    ) &&
+    normalizedGlobalSearchText("SésSïon") === "session",
+  "Global search should rank exact, prefix, word, and substring matches deterministically.",
+);
 
 function cssRules(source, selector) {
   const rules = [];
@@ -93,6 +109,29 @@ const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
 const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+expect(
+  surfaceSource.includes('label: "Suggested"') &&
+    surfaceSource.includes('label: "Recent sessions"') &&
+    surfaceSource.includes('role="combobox"') &&
+    surfaceSource.includes('role="listbox"') &&
+    surfaceSource.includes('event.key === "ArrowDown"') &&
+    surfaceSource.includes("onSelectProject?.(entry.selection.path)") &&
+    appSource.includes("const openGlobalSearch = useCallback") &&
+    appSource.includes('{ type: "ide-select-view", view: "search" }'),
+  "Global search should group navigation metadata, support keyboard selection, reset on open, and route file search to the IDE search view.",
+);
+expect(
+  desktopRustSource.includes(
+    'WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation"',
+  ) &&
+    desktopRustSource.includes(
+      'WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed"',
+    ) &&
+    desktopRustSource.includes("WORKSPACE_CHANGE_DEBOUNCE") &&
+    desktopRustSource.includes("fn test_tree_from_tasks") &&
+    appSource.includes('workspaceWatchMode === "polling"'),
+  "Workspace preparation should expose honest native stages and disable steady polling when the event watcher is healthy.",
+);
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
 const composerSourceEnd = surfaceSource.indexOf(
   "\nfunction ",
@@ -2244,6 +2283,9 @@ expect(
     appSource.includes("const editQueuedChatMessage") &&
     appSource.includes("onEditQueuedMessage={editQueuedChatMessage}") &&
     styleSource.includes(".gyro-chat-message-queue-menu") &&
+    styleSource.includes(
+      ".gyro-chat-message-queue:has(.gyro-chat-message-queue-menu)",
+    ) &&
     appSource.includes('"Message queued"') &&
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
     appSource.includes("MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
@@ -2271,6 +2313,8 @@ expect(
     surfaceSource.includes("providerActivityFilePath") &&
     surfaceSource.includes("sourceControlFileForActivityPath") &&
     surfaceSource.includes("chatTurnChangeSummary") &&
+    surfaceSource.includes("hasGenericFileActivity") &&
+    surfaceSource.includes("sourceControlFileChangedSinceBaseline") &&
     surfaceSource.includes("sourceControlFileDelta") &&
     surfaceSource.includes("sourceControlStatsForActivityPath") &&
     surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
@@ -3267,7 +3311,8 @@ expect(
     surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
     surfaceSource.includes('"Close bottom drawer"') &&
     surfaceSource.includes('"Open bottom drawer"') &&
-    appSource.includes("const toggleChatTerminalPanel = useCallback") &&
+    appSource.includes("const toggleChatToolPanel = useCallback") &&
+    appSource.includes("openToolPanel(workbench.activePaneTab)") &&
     appSource.includes('openToolPanel("terminal")') &&
     !surfaceSource.includes('"Open last used panel"') &&
     surfaceSource.includes("onClick={onToggleToolPanel}") &&
@@ -3733,7 +3778,6 @@ expect(
       "refresh-provider-models:${modelPickerProvider.id}",
     ) &&
     !surfaceSource.includes("connect-provider:${modelPickerProvider.id}") &&
-    !surfaceSource.includes('kind: "action"') &&
     surfaceSource.includes(
       "(provider) => provider.id === config.selectedProviderId",
     ) &&
@@ -3878,10 +3922,10 @@ expect(
 );
 expect(
   styleSource.includes(".gyro-composer-context-wheel") &&
-    /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*20px;[\s\S]*?width:\s*20px;/.test(
+    /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
     ) &&
-    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*14px;[\s\S]*?width:\s*14px;/.test(
+    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(
       styleSource,
     ),
   "Composer context wheel should stay compact while remaining legible.",
