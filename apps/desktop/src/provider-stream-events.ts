@@ -23,6 +23,10 @@ export function orderProviderChatStreamEvent(
   }
   const key = `${event.sessionId}:${event.turnId ?? "turn"}`;
   let sequence = state.get(key);
+  if (sequence?.terminal && event.phase === "started" && event.sequence === 0) {
+    state.delete(key);
+    sequence = undefined;
+  }
   if (!sequence) {
     if (state.size >= MAX_STREAM_TURN_ORDER_STATES) {
       const oldestKey = state.keys().next().value;
@@ -46,17 +50,45 @@ export function orderProviderChatStreamEvent(
   if (!sequence.pending.has(event.sequence)) {
     sequence.pending.set(event.sequence, event);
   }
-  if (sequence.pending.size > MAX_PENDING_STREAM_EVENTS_PER_TURN) {
+  const receivedTerminalEvent =
+    event.phase === "completed" ||
+    event.phase === "failed" ||
+    event.phase === "cancelled";
+  const recoverFromTerminalGap =
+    receivedTerminalEvent && event.sequence > sequence.nextSequence;
+  if (
+    sequence.pending.size > MAX_PENDING_STREAM_EVENTS_PER_TURN &&
+    !recoverFromTerminalGap
+  ) {
+    // Keep a permanently missing sequence from growing this buffer without
+    // bound during a long-running provider turn.
     sequence.nextSequence = Math.min(...sequence.pending.keys());
   }
 
   const ordered: ProviderChatStreamEvent[] = [];
-  while (sequence.pending.has(sequence.nextSequence)) {
-    const next = sequence.pending.get(sequence.nextSequence);
-    sequence.pending.delete(sequence.nextSequence);
-    sequence.nextSequence += 1;
-    if (next) {
-      ordered.push(next);
+  if (recoverFromTerminalGap) {
+    // A terminal event is the last chance to drain a turn. If an IPC message
+    // was lost, preserve every event that did arrive and advance past gaps
+    // instead of leaving the UI permanently stuck in a running state.
+    const availableSequences = Array.from(sequence.pending.keys()).sort(
+      (first, second) => first - second,
+    );
+    for (const availableSequence of availableSequences) {
+      const next = sequence.pending.get(availableSequence);
+      sequence.pending.delete(availableSequence);
+      sequence.nextSequence = availableSequence + 1;
+      if (next) {
+        ordered.push(next);
+      }
+    }
+  } else {
+    while (sequence.pending.has(sequence.nextSequence)) {
+      const next = sequence.pending.get(sequence.nextSequence);
+      sequence.pending.delete(sequence.nextSequence);
+      sequence.nextSequence += 1;
+      if (next) {
+        ordered.push(next);
+      }
     }
   }
   if (
