@@ -100,6 +100,32 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
+let directionalGridState = createInitialChatGridState();
+directionalGridState = chatGridReducer(directionalGridState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("one"),
+  mode: "replace",
+});
+directionalGridState = chatGridReducer(directionalGridState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("above"),
+  mode: "drop",
+  slotIndex: 0,
+  insertPosition: "before",
+  splitDirection: "vertical",
+});
+const directionalGridLayout =
+  directionalGridState.layouts["/Users/example/Gyro"];
+expect(
+  directionalGridLayout?.splitDirection === "vertical" &&
+    directionalGridLayout.slots[0]?.kind === "session" &&
+    directionalGridLayout.slots[0].sessionId === "above" &&
+    directionalGridLayout.slots[1]?.kind === "session" &&
+    directionalGridLayout.slots[1].sessionId === "one",
+  "Directional chat drops should preserve above/below ordering and split orientation.",
+);
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
   layouts: {
@@ -172,6 +198,116 @@ const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
 const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+expect(
+  !surfaceSource.includes("gyro-chat-pane-frame-actions") &&
+    !surfaceSource.includes('isFocused ? "is-focused"') &&
+    !styleSource.includes("gyro-chat-pane-frame-actions") &&
+    !styleSource.includes("gyro-chat-grid-slot.is-focused"),
+  "Chat panes should omit floating controls and focused-pane outlines.",
+);
+expect(
+  surfaceSource.includes('className="gyro-chat-grid-drop-overlay"') &&
+    surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
+    surfaceSource.includes('label: "Above"') &&
+    surfaceSource.includes('label: "Next"') &&
+    surfaceSource.includes('label: "Below"') &&
+    surfaceSource.includes("chatGridDropZones(slots)") &&
+    surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
+    surfaceSource.includes("didDrop && maximizedPaneId") &&
+    !surfaceSource.includes("Drag another chat here") &&
+    !surfaceSource.includes("Choose one of four chat slots") &&
+    styleSource.includes(".gyro-chat-grid-drop-overlay") &&
+    styleSource.includes(
+      ".gyro-chat-grid-drop-zone.is-drop-target .gyro-chat-grid-drop-tile",
+    ) &&
+    !styleSource.includes(
+      ".gyro-chat-grid.is-count-4,\n.gyro-chat-grid.is-dragging",
+    ),
+  "Chat dragging should keep the live layout still and reveal adaptive placement tiles.",
+);
+expect(
+  surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
+    surfaceSource.includes('className="gyro-sidebar-scm-directory"') &&
+    surfaceSource.includes('className="gyro-sidebar-scm-state"') &&
+    surfaceSource.includes('className="gyro-sidebar-scm-stage"') &&
+    surfaceSource.includes('className="gyro-sidebar-scm-discard"') &&
+    surfaceSource.includes("function workspaceParentFolder") &&
+    cssRules(styleSource, ".gyro-sidebar-scm-row").some(
+      (rule) =>
+        rule.includes("grid-template-columns: minmax(0, 1fr) auto 24px 24px") &&
+        rule.includes("min-height: 30px"),
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-scm-discard").some((rule) =>
+      rule.includes("opacity: 0"),
+    ) &&
+    !cssRules(styleSource, ".gyro-sidebar-scm-row > button").some((rule) =>
+      rule.includes("grid-template-columns"),
+    ),
+  "Workspace Source Control files should use compact single-line rows with stable actions.",
+);
+expect(
+  cssRules(styleSource, ".gyro-settings-topbar").some((rule) =>
+    rule.includes("background: var(--gyro-sidebar)"),
+  ) &&
+    cssRules(styleSource, ".gyro-sidebar-persistent-header.is-settings").some(
+      (rule) => rule.includes("background: transparent"),
+    ),
+  "Settings should share one sidebar-colored titlebar across the whole window.",
+);
+expect(
+  cssRules(styleSource, ".gyro-chat-message-queue").some(
+    (rule) =>
+      rule.includes("max-width: 734px") &&
+      rule.includes("width: min(734px, 95%)"),
+  ),
+  "The chat message queue should span roughly 95% of the composer width.",
+);
+expect(
+  styleSource.includes(
+    ':root[data-theme="light"] .gyro-chat-run-change-summary',
+  ) &&
+    styleSource.includes(
+      ':root[data-theme="light"] .gyro-change-summary-diff',
+    ) &&
+    styleSource.includes("background: #f8fafc") &&
+    styleSource.includes("background: #e7f3eb") &&
+    styleSource.includes("background: #f9e8ea"),
+  "Light-mode change summaries should use a clean code canvas and readable diff colors.",
+);
+expect(
+  surfaceSource.includes('className={[\n        "gyro-session-row"') &&
+    surfaceSource.includes("draggable={Boolean(onDragStart)}") &&
+    surfaceSource.includes("onDragStart={onDragStart}") &&
+    !surfaceSource.includes("gyro-session-drag-handle") &&
+    !styleSource.includes(".gyro-session-drag-handle"),
+  "The full chat row should remain directly draggable without a separate dotted grip.",
+);
+expect(
+  surfaceSource.includes(
+    "title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}",
+  ) &&
+    styleSource.includes(
+      ".gyro-composer-shell:has(> .gyro-composer-attachments .is-image)",
+    ) &&
+    styleSource.includes("bottom: calc(100% + 10px)") &&
+    styleSource.includes("object-fit: contain"),
+  "Linked screenshots should use a contained floating preview tray above the composer.",
+);
+expect(
+  surfaceSource.includes("interleavedChatTimelineItems(turn.timelineEvents)") &&
+    surfaceSource.includes('kind: "activity-group"') &&
+    surfaceSource.includes('className="gyro-chat-run-sequence"') &&
+    surfaceSource.includes("function ProviderActivityGroup") &&
+    surfaceSource.includes('"collapsed" | "preview" | "expanded"') &&
+    surfaceSource.includes("events.slice(0, 3)") &&
+    surfaceSource.includes("click again to show") &&
+    surfaceSource.includes("function LiveFileActivity") &&
+    surfaceSource.includes('className="gyro-change-summary-files is-live"') &&
+    surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
+    styleSource.includes(".gyro-chat-run-activity-group-toggle") &&
+    styleSource.includes(".gyro-chat-run-live-files-toggle"),
+  "Chat turns should interleave text with progressively expandable actions and live file diffs.",
+);
 expect(
   surfaceSource.includes('label: "Suggested"') &&
     surfaceSource.includes('label: "Recent sessions"') &&
@@ -2304,25 +2440,26 @@ expect(
     surfaceSource.includes("function ProviderActivityRow") &&
     surfaceSource.includes("timelineEvents: SessionEvent[]") &&
     surfaceSource.includes("turn.timelineEvents.push(event)") &&
-    surfaceSource.includes(
-      'className="gyro-chat-run-timeline is-thought-process"',
-    ) &&
+    surfaceSource.includes('className="gyro-chat-run-sequence"') &&
     surfaceSource.includes(
       'className="gyro-chat-run-timeline is-final-response"',
     ) &&
-    surfaceSource.includes('aria-label="AI thought process"') &&
-    surfaceSource.includes('aria-label="Final response"') &&
-    surfaceSource.includes('isRunning ? "Working" : "Thought"') &&
+    surfaceSource.includes('aria-label="Work timeline"') &&
+    surfaceSource.includes("interleavedChatTimelineItems") &&
+    surfaceSource.includes(
+      'isRunning ? "Assistant update" : "Final response"',
+    ) &&
+    surfaceSource.includes('isRunning ? "Working" : "Worked"') &&
     surfaceSource.includes("formatThoughtDuration") &&
     surfaceSource.includes("formatMessageTime(event.createdAt)") &&
     surfaceSource.includes('aria-label="Copy message"') &&
     surfaceSource.includes("`${hours}h`") &&
     surfaceSource.includes("`${minutes % 60}m`") &&
     surfaceSource.includes("`${seconds}s`") &&
-    surfaceSource.includes("compactThoughtTimelineEvents") &&
+    surfaceSource.includes("interleavedChatTimelineItems") &&
     surfaceSource.includes("providerActivityPathsMatch") &&
-    surfaceSource.includes("existingFileIndex") &&
-    surfaceSource.includes("compacted[existingFileIndex]") &&
+    surfaceSource.includes("existingFileItem") &&
+    surfaceSource.includes("existingFileItem.event =") &&
     surfaceSource.includes("`Ran ${count} commands`") &&
     surfaceSource.includes('activity.kind === "context"') &&
     surfaceSource.includes("<Minimize2") &&
@@ -2416,7 +2553,7 @@ expect(
     surfaceSource.includes("isStreamingAssistantEvent") &&
     surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
     surfaceSource.includes('{ kind: "ordered-list"; items: string[] }') &&
-    surfaceSource.includes("renderAssistantInlineContent(activity.label)") &&
+    surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
     surfaceSource.includes("stripHiddenSessionTitleMarker") &&
     surfaceSource.includes("isHiddenSessionTitleActivity") &&
     surfaceSource.includes("const shouldUsePlainText") &&
@@ -2818,10 +2955,12 @@ expect(
     appSource.includes("@xterm/addon-fit") &&
     appSource.includes("selectedTerminalPaneIdRef") &&
     appSource.includes("TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS") &&
-    appSource.includes("const terminalPaneIdsToPoll = useMemo") &&
+    appSource.includes(
+      "const terminalPanePollKey = liveTerminalPaneIds.join",
+    ) &&
     appSource.includes("isActiveSessionSending") &&
-    appSource.includes("liveTerminalPaneIds.includes(selectedPaneId)") &&
     appSource.includes("const pollInterval = isActiveSessionSending") &&
+    appSource.includes('document.addEventListener("visibilitychange"') &&
     appSource.includes("selectedPaneId === snapshot.paneId") &&
     appSource.includes("knownOutputRevision") &&
     appSource.includes("terminalOutputRevisionRef") &&
@@ -2840,6 +2979,7 @@ expect(
     tauriSource.includes("known_output_revision") &&
     tauriSource.includes("output_revision") &&
     tauriSource.includes("snapshot_terminal_output") &&
+    tauriSource.includes("has_foreground_job") &&
     tauriSource.includes("terminal read worker failed") &&
     tauriSource.includes("async fn resize_terminal_pane") &&
     tauriSource.includes("terminal resize worker failed") &&
@@ -2913,22 +3053,20 @@ expect(
     reducerSource.includes('"account"') &&
     surfaceSource.includes("Allow this device") &&
     surfaceSource.includes("Gyro local access stays separate") &&
-    appSource.includes("GyroAccountGate") &&
-    appSource.includes("gyro-account-context") &&
-    appSource.includes("Use this device") &&
-    appSource.includes("refresh_account_session") &&
-    appSource.includes("start_account_login") &&
-    appSource.includes("logout_account") &&
+    !appSource.includes("GyroAccountGate") &&
+    !appSource.includes("gyro-account-gate") &&
+    !appSource.includes("Use Gyro on this Mac") &&
+    !appSource.includes("if (!accountSession.signedIn)") &&
     !appSource.includes("External Claude/OpenAI logins") &&
     !appSource.includes('className="gyro-account-provider"') &&
-    styleSource.includes(".gyro-account-panel::before") &&
-    styleSource.includes(".gyro-account-context") &&
+    !styleSource.includes(".gyro-account-gate") &&
+    !styleSource.includes(".gyro-account-panel") &&
     !styleSource.includes(".gyro-account-provider") &&
     tauriSource.includes("get_account_session") &&
     tauriSource.includes("start_account_login") &&
     tauriSource.includes("refresh_account_session") &&
     tauriSource.includes("logout_account"),
-  "Gyro local access gate and Tauri commands are missing.",
+  "First-install access gate removal or native account compatibility is missing.",
 );
 expect(
   readRepoFile("crates/gyro-core/src/account.rs").includes(
@@ -3143,9 +3281,23 @@ const chatSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("function SidebarSection"),
 );
 expect(
+  cssRules(styleSource, ".gyro-sidebar-new-session-menu").some(
+    (rule) =>
+      rule.includes("border: 1px solid var(--gyro-premium-hairline-soft)") &&
+      rule.includes("box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft)") &&
+      rule.includes("padding: 4px"),
+  ) &&
+    cssRules(styleSource, ".gyro-sidebar-cli-location select").some((rule) =>
+      rule.includes("min-height: 28px"),
+    ),
+  "The New menu should keep a compact, low-emphasis surface and project picker.",
+);
+expect(
   chatSidebarSource.includes("New Chat") &&
-    chatSidebarSource.includes("Run CLI in") &&
+    chatSidebarSource.includes("<span>CLI</span>") &&
     chatSidebarSource.includes("CLI session location") &&
+    !chatSidebarSource.includes("Start in the focused project") &&
+    !chatSidebarSource.includes(": profile.command") &&
     chatSidebarSource.includes("commandProfiles.map") &&
     chatSidebarSource.includes("Search") &&
     chatSidebarSource.includes("gyro-sidebar-project-chat-list") &&
@@ -3243,10 +3395,18 @@ expect(
     surfaceSource.includes("settingsSidebarItems") &&
     surfaceSource.includes('aria-label="Settings navigation"') &&
     surfaceSource.includes('aria-label="Search settings"') &&
+    surfaceSource.includes("settingsSearchEntries") &&
+    surfaceSource.includes("settingsSearchResults(settingsQuery)") &&
+    surfaceSource.includes('role="combobox"') &&
+    surfaceSource.includes('role="listbox"') &&
+    surfaceSource.includes("data-setting-key={settingsSearchKey(label)}") &&
     surfaceSource.includes('className="gyro-settings-topbar"') &&
     surfaceSource.includes('aria-label="Clear settings search"') &&
     !surfaceSource.includes("gyro-settings-sidebar-search") &&
+    !surfaceSource.includes("query={settingsQuery}") &&
     styleSource.includes(".gyro-settings-topbar-search:focus-within") &&
+    styleSource.includes(".gyro-settings-search-results") &&
+    styleSource.includes(".gyro-settings-row.is-search-target") &&
     cssRules(styleSource, ".gyro-settings-topbar").some(
       (rule) =>
         rule.includes("position: fixed") &&
@@ -3256,7 +3416,6 @@ expect(
       ".gyro-main:has(> .gyro-settings-topbar) > .gyro-settings-surface",
     ) &&
     surfaceSource.includes("gyro-settings-sidebar-group") &&
-    surfaceSource.includes("No settings found") &&
     surfaceSource.includes('aria-label="Back from settings"') &&
     surfaceSource.includes("gyro-settings-back-button") &&
     surfaceSource.includes("<h2>{label}</h2>") &&
@@ -3283,7 +3442,7 @@ expect(
     styleSource.includes(".gyro-settings-section > header h1") &&
     appSource.includes("lastNonSettingsDestinationRef") &&
     appSource.includes("returnFromSettings"),
-  "Settings should move section navigation to the sidebar and keep exactly one active subpage in content.",
+  "Settings should keep a stable grouped sidebar and use a centered result dropdown that targets individual settings.",
 );
 expect(
   !appSource.includes("WorkspaceToolPanelPeek") &&
@@ -3361,7 +3520,9 @@ expect(
     surfaceSource.includes('aria-label="Plan harness"') &&
     surfaceSource.includes('role="progressbar"') &&
     surfaceSource.includes("model-managed checklist") &&
-    !surfaceSource.includes('activeRailPanel === "plan" ? "has-plan"') &&
+    surfaceSource.includes(
+      'activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : ""',
+    ) &&
     styleSource.includes(".gyro-chat-surface.is-empty.has-environment") &&
     styleSource.includes(".gyro-chat-start\n  .gyro-composer-shell") &&
     styleSource.includes("padding-top: 60px;") &&
@@ -3445,6 +3606,12 @@ expect(
     surfaceSource.includes("gyro-chat-run") &&
     styleSource.includes(".gyro-thread-topbar-actions") &&
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
+    surfaceSource.includes('aria-label="Jump to latest message"') &&
+    surfaceSource.includes("isTranscriptAwayFromBottom") &&
+    surfaceSource.includes("distanceFromBottom > 72") &&
+    surfaceSource.includes('behavior: "smooth"') &&
+    styleSource.includes(".gyro-chat-jump-to-bottom") &&
+    styleSource.includes("bottom: calc(100% + 10px)") &&
     surfaceSource.includes('popoverPlacement="up"') &&
     surfaceSource.includes('variant="hero"') &&
     surfaceSource.includes("constrainToParent={Boolean(activeRailPanel)}") &&
@@ -4027,13 +4194,15 @@ expect(
   "Composer context wheel should stay compact while remaining legible.",
 );
 expect(
-  surfaceSource.includes("function PlanDecisionCard") &&
-    surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes("Implement this plan?") &&
-    surfaceSource.includes("No, keep planning") &&
+  !surfaceSource.includes("function PlanDecisionCard") &&
+    surfaceSource.includes('className="gyro-plan-artifact-actions"') &&
+    surfaceSource.includes('className="gyro-plan-artifact-preview"') &&
     surfaceSource.includes("Yes, implement") &&
-    surfaceSource.includes('onDecision("reject")') &&
-    surfaceSource.includes('onDecision("approve")') &&
+    surfaceSource.includes('onPlanDecision?.("approve")') &&
+    surfaceSource.includes('activePanel === "plan" && sessionPlan?.content') &&
+    surfaceSource.includes(
+      "<PlanDocument content={sessionPlan.content} title={sessionPlan.title}",
+    ) &&
     surfaceSource.includes('chatMode === "plan"') &&
     surfaceSource.includes("latestPlanModeEnabledAt") &&
     surfaceSource.includes(
@@ -4046,17 +4215,17 @@ expect(
     appSource.includes('mode: "normal"') &&
     appSource.includes("plan: activeSessionPlan") &&
     appSource.includes("preserveDraft: true") &&
-    styleSource.includes(".gyro-plan-decision-card") &&
-    styleSource.includes(".gyro-plan-decision-actions") &&
-    styleSource.includes("max-height: min(420px") &&
-    styleSource.includes(':root[data-theme="light"] .gyro-plan-decision-card'),
-  "Completed Plan-mode output should surface an above-composer approval card whose Yes path exits read-only mode before implementation.",
+    styleSource.includes(".gyro-plan-artifact-actions") &&
+    styleSource.includes(".gyro-plan-artifact-preview") &&
+    styleSource.includes(".gyro-plan-rail.is-document") &&
+    styleSource.includes(".gyro-chat-surface.is-thread.has-plan"),
+  "Completed Plan-mode output should render a plan artifact with an inline implementation action and an expandable full document.",
 );
 expect(
   !surfaceSource.includes("const fileActivityIndexes = new Map") &&
-    surfaceSource.includes("const existingFileIndex = compacted.findIndex") &&
-    surfaceSource.includes("compacted[existingFileIndex]") &&
-    surfaceSource.includes("createdAt: existing.event.createdAt") &&
+    surfaceSource.includes("const existingFileItem = items.find") &&
+    surfaceSource.includes("existingFileItem.event =") &&
+    surfaceSource.includes("createdAt: existingFileItem.event.createdAt") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
@@ -4088,6 +4257,16 @@ expect(
     styleSource.lastIndexOf("z-index: 120") >
       styleSource.lastIndexOf("/* Ordered chat activity"),
   "Composer menus should stay above the composer and hidden-sidebar chat titles should clear native window controls.",
+);
+expect(
+  styleSource.includes("/* Readable composer popovers in Light mode. */") &&
+    styleSource.includes(
+      ".gyro-context-picker .gyro-composer-menu-item strong",
+    ) &&
+    styleSource.includes("color: #252a32") &&
+    styleSource.includes("color: #687383") &&
+    styleSource.includes("background: #edf2f8"),
+  "Light-mode composer popovers should keep labels, icons, details, and hover states comfortably readable.",
 );
 expect(
   surfaceSource.includes("OpenAI permissions") &&
@@ -4129,6 +4308,15 @@ expect(
     ) &&
     styleSource.includes(
       ".gyro-sidebar-persistent-header > .gyro-sidebar-windowbar",
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-persistent-header").some((rule) =>
+      rule.includes("background: transparent"),
+    ) &&
+    styleSource.includes(
+      ".gyro-ide-sidebar-resizer:focus-visible:not(:hover)::after",
+    ) &&
+    !styleSource.includes(
+      ".gyro-ide-sidebar-resizer:hover::after,\n.gyro-ide-sidebar-resizer:focus-visible::after",
     ) &&
     surfaceSource.includes(
       'className="gyro-sidebar-persistent-header is-settings"',
@@ -4319,8 +4507,6 @@ for (const className of [
   "gyro-code-empty",
   "gyro-browser-console-pill",
   "gyro-account-button",
-  "gyro-account-gate",
-  "gyro-account-panel",
   "gyro-sidebar-windowbar",
   "gyro-sidebar-mode-group",
   "gyro-diff-tree-directory",

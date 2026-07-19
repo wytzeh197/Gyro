@@ -53,6 +53,12 @@ import {
   type Automation,
   type BrowserPreviewCapture,
   type BrowserPreviewDiagnostic,
+  type CapabilityActivity,
+  type CapabilityApprovalDecision,
+  type CapabilityApprovalEvent,
+  type CapabilityCallEvent,
+  type CapabilityResourceRef,
+  type ChatBrowserResource,
   type ChatAttachment,
   type ChatGridState,
   type ChatMode,
@@ -64,8 +70,6 @@ import {
   type EditorBuffer,
   type EditorRevealTarget,
   type EditorSelection,
-  type GyroAccountSession,
-  type GyroAccountStatus,
   type GyroConfig,
   type GitBranchCatalog,
   type HarnessRunStatus,
@@ -76,6 +80,7 @@ import {
   type ModelProviderConfig,
   type NotificationPermissionState,
   type ProviderHealthDetails,
+  type ProjectCapabilityPolicy,
   type ProviderId,
   type ProviderUsageState,
   type ProviderHandoff,
@@ -156,6 +161,14 @@ type ProviderApprovalNotificationOpen = {
   approvalId: string;
 };
 
+type ProviderCapabilityResourceEvent = {
+  sessionId: string;
+  turnId?: string;
+  callId: string;
+  resource: CapabilityResourceRef;
+  data: unknown;
+};
+
 type TerminalPaneSnapshot = {
   paneId: string;
   title: string;
@@ -164,6 +177,7 @@ type TerminalPaneSnapshot = {
   output?: string | null;
   outputRevision: number;
   status: "running" | "done" | "failed";
+  hasForegroundJob?: boolean | null;
   exitCode?: number | null;
   workspacePath?: string;
   workingDirectory?: string;
@@ -548,6 +562,15 @@ export function App() {
   const [sessionEventsById, setSessionEventsById] = useState<
     Record<string, SessionEvent[]>
   >({});
+  const [capabilityRunsBySessionId, setCapabilityRunsBySessionId] = useState<
+    Record<string, Record<string, CapabilityActivity>>
+  >({});
+  const [capabilityPoliciesByProject, setCapabilityPoliciesByProject] =
+    useState<Record<string, ProjectCapabilityPolicy>>({});
+  const [browserResourcesBySessionId, setBrowserResourcesBySessionId] =
+    useState<Record<string, ChatBrowserResource>>({});
+  const [capabilityResourceDataByCallId, setCapabilityResourceDataByCallId] =
+    useState<Record<string, unknown>>({});
   const [chatGrid, dispatchChatGrid] = useReducer(
     chatGridReducer,
     undefined,
@@ -632,6 +655,7 @@ export function App() {
   const providerStreamOrderRef = useRef<ProviderStreamOrderState>(new Map());
   const providerStreamFlushTimerRef = useRef<number>();
   const sessionEventsRequestRef = useRef<Record<string, number>>({});
+  const liveCapabilityResourceIdsRef = useRef(new Set<string>());
   const pendingWorkbenchPersistRef = useRef<WorkbenchState>();
   const workbenchPersistTimerRef = useRef<number>();
   const workbenchPersistIdleRef = useRef<number>();
@@ -645,12 +669,6 @@ export function App() {
   const ideServicesRequestRef = useRef(0);
   const workspaceSearchRequestRef = useRef(0);
   const workspaceTreeRequestRef = useRef(0);
-  const [accountStatus, setAccountStatus] =
-    useState<GyroAccountStatus>("checking");
-  const [accountSession, setAccountSession] = useState<GyroAccountSession>({
-    signedIn: false,
-  });
-  const [accountError, setAccountError] = useState("");
   const [activeProfileId, setActiveProfileId] = useState("shell");
   const [isLaunchingCliPreset, setIsLaunchingCliPreset] = useState(false);
   const [pinnedSessionIds, setPinnedSessionIds] =
@@ -736,6 +754,10 @@ export function App() {
     () => sessions.find((session) => session.id === activeSessionId),
     [activeSessionId, sessions],
   );
+  const activeCapabilityPolicy =
+    capabilityPoliciesByProject[
+      normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
+    ];
   const currentChatProjectKey =
     chatGrid.activeProjectKey ??
     normalizedChatProjectKey(activeSession?.workspacePath ?? workspacePath);
@@ -1139,19 +1161,7 @@ export function App() {
   const isActiveSessionSending = activeSessionId
     ? sendingSessionIds.includes(activeSessionId)
     : isStartingFirstTurn;
-  const terminalPaneIdsToPoll = useMemo(() => {
-    if (!isActiveSessionSending) {
-      return liveTerminalPaneIds;
-    }
-    const selectedPaneId = workbench.selectedTerminalPaneId;
-    return selectedPaneId && liveTerminalPaneIds.includes(selectedPaneId)
-      ? [selectedPaneId]
-      : [];
-  }, [
-    isActiveSessionSending,
-    liveTerminalPaneIds,
-    workbench.selectedTerminalPaneId,
-  ]);
+  const terminalPanePollKey = liveTerminalPaneIds.join("\n");
   const selectedTerminalPane = useMemo(
     () =>
       workbench.terminalPanes.find(
@@ -1296,89 +1306,6 @@ export function App() {
     [notify],
   );
 
-  const applyAccountSession = useCallback((session: GyroAccountSession) => {
-    setAccountSession(session);
-    setAccountStatus(session.signedIn ? "signed-in" : "signed-out");
-    setAccountError("");
-    setConfig((current) =>
-      normalizedConfig({
-        ...current,
-        accountSession: session,
-      }),
-    );
-    if (session.signedIn) {
-      dispatchWorkbench({
-        type: "complete-onboarding-step",
-        step: "account",
-      });
-    }
-  }, []);
-
-  const refreshAccount = useCallback(async () => {
-    if (!isTauriRuntime()) {
-      applyAccountSession({ signedIn: true, name: "Preview user" });
-      return;
-    }
-
-    setAccountStatus("checking");
-    try {
-      const session = await invoke<GyroAccountSession>(
-        "refresh_account_session",
-      );
-      applyAccountSession(session);
-    } catch (error) {
-      try {
-        const session = await invoke<GyroAccountSession>("get_account_session");
-        applyAccountSession(session);
-      } catch {
-        setAccountSession({ signedIn: false });
-        setAccountStatus("signed-out");
-        setAccountError(String(error));
-      }
-    }
-  }, [applyAccountSession]);
-
-  const startAccountLogin = useCallback(async () => {
-    setAccountStatus("signing-in");
-    setAccountError("");
-
-    if (!isTauriRuntime()) {
-      applyAccountSession({
-        signedIn: true,
-        name: "Preview user",
-        email: "preview@gyro.dev",
-      });
-      return;
-    }
-
-    try {
-      const session = await invoke<GyroAccountSession>("start_account_login");
-      applyAccountSession(session);
-      notify("provider", "Gyro access ready", session.name ?? "This device");
-    } catch (error) {
-      setAccountStatus("failed");
-      setAccountError(String(error));
-      notify("command-failed", "Gyro sign-in failed", String(error));
-    }
-  }, [applyAccountSession, notify]);
-
-  const logoutAccount = useCallback(async () => {
-    if (isTauriRuntime()) {
-      try {
-        await invoke<GyroAccountSession>("logout_account");
-      } catch (error) {
-        notify("command-failed", "Sign out failed", String(error));
-        return;
-      }
-    }
-    applyAccountSession({ signedIn: false });
-    notify(
-      "provider",
-      "Device access cleared",
-      "Local sessions stayed on this Mac",
-    );
-  }, [applyAccountSession, notify]);
-
   const refreshSessions = useCallback(async () => {
     if (!isTauriRuntime()) {
       setSessions([]);
@@ -1431,9 +1358,12 @@ export function App() {
           setEventsForSession(
             sessionId,
             limitSessionEventsForUi(
-              mergePersistedAndOptimisticEvents(
-                nextEvents,
-                latestOptimisticEvents,
+              markInactiveCapabilityResources(
+                mergePersistedAndOptimisticEvents(
+                  nextEvents,
+                  latestOptimisticEvents,
+                ),
+                liveCapabilityResourceIdsRef.current,
               ),
             ),
           );
@@ -1488,6 +1418,135 @@ export function App() {
       }
     });
   }, [setEventsForSession]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let isMounted = true;
+    let unlistenCapability: (() => void) | undefined;
+    let unlistenResource: (() => void) | undefined;
+    void listen<SessionEvent>("gyro://provider-capability-event", (event) => {
+      if (!isMounted) return;
+      const capabilityEvent = event.payload;
+      const mergeEvent = (items: SessionEvent[]) =>
+        limitSessionEventsForUi(
+          mergePersistedAndOptimisticEvents(items, [capabilityEvent]),
+        );
+      optimisticEventsRef.current.set(
+        capabilityEvent.sessionId,
+        mergeEvent(
+          optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+        ),
+      );
+      setEventsForSession(capabilityEvent.sessionId, (current) =>
+        mergeEvent(current),
+      );
+      const activity = capabilityActivityFromSessionEvent(capabilityEvent);
+      if (activity) {
+        setCapabilityRunsBySessionId((current) => ({
+          ...current,
+          [activity.sessionId]: {
+            ...(current[activity.sessionId] ?? {}),
+            [activity.callId]: activity,
+          },
+        }));
+      }
+    }).then((unlisten) => {
+      if (!isMounted) unlisten();
+      else unlistenCapability = unlisten;
+    });
+    void listen<ProviderCapabilityResourceEvent>(
+      "gyro://provider-capability-resource",
+      (event) => {
+        if (!isMounted) return;
+        const payload = event.payload;
+        liveCapabilityResourceIdsRef.current.add(payload.resource.id);
+        setCapabilityResourceDataByCallId((current) => ({
+          ...current,
+          [payload.callId]: payload.data,
+        }));
+        if (payload.resource.kind === "terminal") {
+          const snapshot = terminalSnapshotFromCapabilityData(payload.data);
+          if (snapshot) {
+            const pane = terminalPaneFromSnapshot(snapshot, "local");
+            dispatchWorkbench({
+              type: "upsert-background-terminal-pane",
+              pane: {
+                ...pane,
+                owner: {
+                  kind: "model",
+                  sessionId: payload.sessionId,
+                  turnId: payload.turnId,
+                  callId: payload.callId,
+                },
+              },
+            });
+            terminalOutputRevisionRef.current[snapshot.paneId] =
+              snapshot.outputRevision;
+          }
+        }
+        if (payload.resource.kind === "browser") {
+          const data = recordFromUnknown(payload.data);
+          const capture = recordFromUnknown(data?.capture);
+          const session = sessions.find(
+            (item) => item.id === payload.sessionId,
+          );
+          const url = stringFromRecord(data, "url") ?? payload.resource.label;
+          if (session && url) {
+            setBrowserResourcesBySessionId((current) => ({
+              ...current,
+              [payload.sessionId]: {
+                id: payload.resource.id,
+                sessionId: payload.sessionId,
+                projectPath: session.workspacePath,
+                url,
+                status: "completed",
+                label: payload.resource.label,
+                latestCapturePath: stringFromRecord(capture, "path"),
+              },
+            }));
+          }
+        }
+      },
+    ).then((unlisten) => {
+      if (!isMounted) unlisten();
+      else unlistenResource = unlisten;
+    });
+    return () => {
+      isMounted = false;
+      unlistenCapability?.();
+      unlistenResource?.();
+    };
+  }, [sessions, setEventsForSession]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const browser = browserResourcesBySessionId[activeSessionId];
+    if (browser && workbench.browserPreview.url !== browser.url) {
+      dispatchWorkbench({ type: "set-browser-url", url: browser.url });
+    }
+    const modelTerminal = workbench.terminalPanes.find(
+      (pane) =>
+        pane.owner?.kind === "model" &&
+        pane.owner.sessionId === activeSessionId,
+    );
+    if (
+      modelTerminal &&
+      workbench.activePaneTab === "terminal" &&
+      workbench.selectedTerminalPaneId !== modelTerminal.id
+    ) {
+      dispatchWorkbench({
+        type: "select-terminal-pane",
+        paneId: modelTerminal.id,
+      });
+    }
+  }, [
+    activeSessionId,
+    browserResourcesBySessionId,
+    workbench.activePaneTab,
+    workbench.browserPreview.url,
+    workbench.selectedTerminalPaneId,
+    workbench.terminalPanes,
+  ]);
 
   const scheduleProviderStreamFlush = useCallback(() => {
     if (providerStreamFlushTimerRef.current !== undefined) {
@@ -2245,6 +2304,30 @@ export function App() {
   const refreshSourceControl = useCallback(() => {
     refreshIdeServices(activeSession?.workspacePath ?? workspacePath);
   }, [activeSession?.workspacePath, refreshIdeServices, workspacePath]);
+
+  useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root || !isTauriRuntime()) return;
+    void invoke<ProjectCapabilityPolicy>("get_project_capability_policy", {
+      workspacePath: root,
+    }).then((policy) => {
+      setCapabilityPoliciesByProject((current) => ({
+        ...current,
+        [normalizeProjectPath(root)]: policy,
+      }));
+    });
+  }, [activeSession?.workspacePath, workspacePath]);
+
+  useEffect(() => {
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root || !isTauriRuntime()) return;
+    void invoke("update_capability_ide_evidence", {
+      request: {
+        workspacePath: root,
+        diagnostics: workbench.ide.diagnostics,
+      },
+    });
+  }, [activeSession?.workspacePath, workbench.ide.diagnostics, workspacePath]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -3402,6 +3485,33 @@ export function App() {
 
       setSessions(nextSessions);
       dispatchChatGrid({ type: "remove-session-pane", sessionId });
+      for (const pane of workbench.terminalPanes) {
+        if (
+          pane.owner?.kind === "model" &&
+          pane.owner.sessionId === sessionId
+        ) {
+          dispatchWorkbench({ type: "remove-terminal-pane", paneId: pane.id });
+        }
+      }
+      for (const activity of Object.values(
+        capabilityRunsBySessionId[sessionId] ?? {},
+      )) {
+        if (activity.resource) {
+          liveCapabilityResourceIdsRef.current.delete(activity.resource.id);
+        }
+      }
+      setCapabilityRunsBySessionId((current) => {
+        if (!current[sessionId]) return current;
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
+      setBrowserResourcesBySessionId((current) => {
+        if (!current[sessionId]) return current;
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
       setSessionEventsById((current) => {
         if (!current[sessionId]) return current;
         const next = { ...current };
@@ -3425,7 +3535,13 @@ export function App() {
       }
       notify("terminal", "Chat deleted", session?.title ?? sessionId);
     },
-    [activeSessionId, notify, sessions],
+    [
+      activeSessionId,
+      capabilityRunsBySessionId,
+      notify,
+      sessions,
+      workbench.terminalPanes,
+    ],
   );
 
   const requestRemoveProject = useCallback(
@@ -3635,6 +3751,7 @@ export function App() {
               : `${snapshot.status} (${snapshot.exitCode})`,
           output: snapshot.output ?? "",
           status,
+          hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
         });
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
@@ -3981,6 +4098,7 @@ export function App() {
               : `${snapshot.status} (${snapshot.exitCode})`,
           output: snapshot.output ?? "",
           status: terminalStatusFromSnapshot(snapshot.status),
+          hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
         });
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
@@ -4358,6 +4476,66 @@ export function App() {
     },
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
   );
+
+  const attachEditorSnapshot = useCallback(async () => {
+    if (!isTauriRuntime() || !workspacePath || !selectedFile) {
+      notify(
+        "command-failed",
+        "No editor to capture",
+        "Open a project file in Workspace first",
+      );
+      return;
+    }
+    const buffer = workbench.ide.buffers[selectedFile];
+    const content =
+      buffer?.content ??
+      (selectedFileContent?.path === selectedFile
+        ? selectedFileContent.content
+        : undefined);
+    if (content === undefined || content.length === 0) {
+      notify(
+        "command-failed",
+        "Editor snapshot is empty",
+        "Open a text file with content before adding this context",
+      );
+      return;
+    }
+    try {
+      const attachment = await invoke<ChatAttachment>(
+        "prepare_chat_attachment",
+        {
+          request: {
+            sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+            path: "",
+            workspacePath,
+            kind: "ide-snapshot",
+            name: `${workspaceName(selectedFile)}.snapshot.txt`,
+            relativePath: selectedFile,
+            bytes: Array.from(new TextEncoder().encode(content)),
+          },
+        },
+      );
+      setChatAttachments((current) => ({
+        ...current,
+        [activeDraftKey]: [...(current[activeDraftKey] ?? []), attachment],
+      }));
+      notify(
+        "terminal",
+        "Editor snapshot attached",
+        `${selectedFile}${buffer?.status === "dirty" ? " · unsaved changes included" : ""}`,
+      );
+    } catch (error) {
+      notify("command-failed", "Editor snapshot rejected", String(error));
+    }
+  }, [
+    activeDraftKey,
+    activeSessionId,
+    notify,
+    selectedFile,
+    selectedFileContent,
+    workbench.ide.buffers,
+    workspacePath,
+  ]);
 
   const attachDroppedImages = useCallback(
     async (
@@ -4818,6 +4996,9 @@ export function App() {
         case "select-image":
           void selectChatAttachment("image");
           break;
+        case "attach-editor-snapshot":
+          void attachEditorSnapshot();
+          break;
         case "select-project":
         case "select-workspace":
         case "select-folder":
@@ -4916,6 +5097,7 @@ export function App() {
       }
     },
     [
+      attachEditorSnapshot,
       activeChatMode,
       activeSession?.workspacePath,
       activateWorkspacePath,
@@ -5259,6 +5441,7 @@ export function App() {
                     workspacePath: persistedSession.workspacePath,
                     kind: attachment.kind,
                     name: attachment.name,
+                    relativePath: attachment.relativePath,
                   },
                 },
               );
@@ -5802,6 +5985,112 @@ export function App() {
         stringFromRecord(payload, "userMessage") ??
         stringFromRecord(payload, "messagePreview");
 
+      if (action === "show-capability") {
+        const activity = capabilityActivityFromSessionEvent(event);
+        if (!activity?.resource) return;
+        selectSession(event.sessionId);
+        const session = sessions.find((item) => item.id === event.sessionId);
+        if (session) setWorkspacePath(session.workspacePath);
+        if (activity.resource.kind === "terminal") {
+          const terminalData = capabilityResourceDataByCallId[activity.callId];
+          const snapshot = terminalSnapshotFromCapabilityData(terminalData);
+          if (snapshot) {
+            dispatchWorkbench({
+              type: "select-terminal-pane",
+              paneId: snapshot.paneId,
+            });
+            dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+          }
+        } else if (activity.resource.kind === "browser") {
+          const browser = browserResourcesBySessionId[event.sessionId];
+          if (browser) {
+            dispatchWorkbench({ type: "browser-navigate", url: browser.url });
+            dispatchWorkbench({ type: "open-tool-panel", tab: "browser" });
+          }
+        } else {
+          const path = activity.resource.label;
+          if (path && activity.resource.kind === "ide") {
+            const ideData = recordFromUnknown(
+              capabilityResourceDataByCallId[activity.callId],
+            );
+            const filePath = stringFromRecord(ideData, "path") ?? path;
+            const line = typeof ideData?.line === "number" ? ideData.line : 1;
+            const column =
+              typeof ideData?.column === "number" ? ideData.column : 1;
+            setSelectedFile(filePath);
+            dispatchWorkbench({
+              type: "ide-open-tab",
+              tab: {
+                path: filePath,
+                title: workspaceName(filePath),
+                dirty: false,
+                preview: true,
+              },
+            });
+            setEditorRevealTarget({
+              path: filePath,
+              lineNumber: Math.max(1, line),
+              column: Math.max(1, column),
+              nonce: Date.now(),
+            });
+            dispatchWorkbench({
+              type: "select-workspace-layout",
+              layout: "code",
+            });
+          } else if (path && activity.resource.kind === "workspace") {
+            setSelectedFile(path);
+            dispatchWorkbench({
+              type: "ide-open-tab",
+              tab: {
+                path,
+                title: workspaceName(path),
+                dirty: false,
+                preview: true,
+              },
+            });
+            dispatchWorkbench({
+              type: "select-workspace-layout",
+              layout: "code",
+            });
+          }
+        }
+        return;
+      }
+
+      if (action === "stop-capability") {
+        const activity = capabilityActivityFromSessionEvent(event);
+        if (!activity?.resource || !isTauriRuntime()) return;
+        const resourceLabel = activity.resource.label;
+        const resourceId = activity.resource.id;
+        void invoke("stop_model_terminal_resource", {
+          sessionId: event.sessionId,
+          resourceId,
+        })
+          .then(() => {
+            liveCapabilityResourceIdsRef.current.delete(resourceId);
+            const terminalData =
+              capabilityResourceDataByCallId[activity.callId];
+            const snapshot = terminalSnapshotFromCapabilityData(terminalData);
+            if (snapshot) {
+              dispatchWorkbench({
+                type: "set-terminal-pane-status",
+                paneId: snapshot.paneId,
+                status: "done",
+                event: "Stopped by user",
+              });
+            }
+            notify("terminal", "Model process stopped", resourceLabel);
+          })
+          .catch((error) =>
+            notify(
+              "command-failed",
+              "Could not stop model process",
+              String(error),
+            ),
+          );
+        return;
+      }
+
       if (action === "open-providers") {
         dispatchWorkbench({
           type: "select-destination",
@@ -5863,7 +6152,15 @@ export function App() {
         });
       }
     },
-    [connectProvider, sendDraft],
+    [
+      browserResourcesBySessionId,
+      capabilityResourceDataByCallId,
+      connectProvider,
+      notify,
+      selectSession,
+      sendDraft,
+      sessions,
+    ],
   );
 
   const handleMutationApprovalAction = useCallback(
@@ -5914,16 +6211,60 @@ export function App() {
   );
 
   const handleProviderApprovalAction = useCallback(
-    async (approvalId: string, decision: "approve" | "reject") => {
-      if (!activeSessionId || !isTauriRuntime()) return;
+    async (
+      approvalId: string,
+      decision: "approve" | "reject" | "allow-project",
+    ) => {
+      if (!isTauriRuntime()) return;
+      const approvalEvent = Object.values(sessionEventsById)
+        .flat()
+        .find((event) => {
+          const payload = recordFromUnknown(event.payload);
+          return stringFromRecord(payload, "approvalId") === approvalId;
+        });
+      const capabilityApproval = approvalEvent
+        ? capabilityApprovalFromSessionEvent(approvalEvent)
+        : undefined;
+      const ownerSessionId = approvalEvent?.sessionId ?? activeSessionId;
+      if (!ownerSessionId) return;
       try {
+        if (capabilityApproval && approvalEvent) {
+          const capabilityDecision: CapabilityApprovalDecision =
+            decision === "reject"
+              ? "deny"
+              : decision === "allow-project"
+                ? "allow-project"
+                : "allow-once";
+          await invoke("resolve_capability_approval", {
+            request: {
+              approvalId,
+              sessionId: approvalEvent.sessionId,
+              turnId: approvalEvent.turnId,
+              decision: capabilityDecision,
+            },
+          });
+          notify(
+            "approval",
+            capabilityDecision === "deny"
+              ? "Capability denied"
+              : capabilityDecision === "allow-project"
+                ? "Capability allowed for project"
+                : "Capability allowed once",
+            capabilityApproval.capabilityId.replaceAll("-", " "),
+          );
+          await refreshEvents(ownerSessionId);
+          return;
+        }
         const event = await invoke<SessionEvent>("resolve_provider_approval", {
-          request: { approvalId, decision },
+          request: {
+            approvalId,
+            decision: decision === "reject" ? "reject" : "approve",
+          },
         });
         const changedPaths = (
           event.payload as { changedPaths?: unknown } | undefined
         )?.changedPaths;
-        if (decision === "approve" && Array.isArray(changedPaths)) {
+        if (decision !== "reject" && Array.isArray(changedPaths)) {
           await refreshWorkspaceTree();
           refreshIdeSourceControl(
             activeSession?.workspacePath ?? workspacePath ?? undefined,
@@ -5931,10 +6272,10 @@ export function App() {
         }
         notify(
           "approval",
-          decision === "approve"
+          decision !== "reject"
             ? "Provider action approved"
             : "Provider action rejected",
-          decision === "approve"
+          decision !== "reject"
             ? "The turn is continuing"
             : "The provider will continue without it",
         );
@@ -5944,7 +6285,7 @@ export function App() {
           "Could not resolve provider action",
           error instanceof Error ? error.message : String(error),
         );
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
       }
     },
     [
@@ -5954,6 +6295,7 @@ export function App() {
       refreshEvents,
       refreshIdeSourceControl,
       refreshWorkspaceTree,
+      sessionEventsById,
       workspacePath,
     ],
   );
@@ -6623,6 +6965,7 @@ export function App() {
           : `${snapshot.status} (${snapshot.exitCode})`,
       output,
       status,
+      hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
     });
     if (
       snapshot.output !== undefined &&
@@ -6651,8 +6994,17 @@ export function App() {
           },
         );
         syncTerminalSnapshot(snapshot);
-      } catch {
-        notify("command-failed", "Terminal read failed", paneId);
+      } catch (error) {
+        if (terminalPaneProcessIsMissing(error)) {
+          dispatchWorkbench({
+            type: "set-terminal-pane-status",
+            paneId,
+            status: "restored",
+            event: "not running",
+          });
+        } else {
+          notify("command-failed", "Terminal read failed", paneId);
+        }
       } finally {
         terminalReadInFlightRef.current.delete(paneId);
       }
@@ -7714,9 +8066,8 @@ export function App() {
   );
 
   useEffect(() => {
-    void refreshAccount();
     void refreshConfig();
-  }, [refreshAccount, refreshConfig]);
+  }, [refreshConfig]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -7742,12 +8093,9 @@ export function App() {
   }, [config.modelProviders, recordProviderHealthOutput]);
 
   useEffect(() => {
-    if (!accountSession.signedIn) {
-      return;
-    }
     void refreshSessions();
     void refreshAutomations();
-  }, [accountSession.signedIn, refreshAutomations, refreshSessions]);
+  }, [refreshAutomations, refreshSessions]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -8509,21 +8857,41 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!isTauriRuntime() || terminalPaneIdsToPoll.length === 0) {
+    if (!isTauriRuntime() || !terminalPanePollKey) {
       return;
     }
+    const paneIds = terminalPanePollKey.split("\n");
     const pollInterval = isActiveSessionSending
       ? TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS
       : TERMINAL_POLL_INTERVAL_MS;
 
+    for (const paneId of paneIds) {
+      void refreshTerminalPane(paneId);
+    }
+
     const interval = window.setInterval(() => {
-      for (const paneId of terminalPaneIdsToPoll) {
+      for (const paneId of paneIds) {
         void refreshTerminalPane(paneId);
       }
     }, pollInterval);
 
-    return () => window.clearInterval(interval);
-  }, [isActiveSessionSending, refreshTerminalPane, terminalPaneIdsToPoll]);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      for (const paneId of paneIds) {
+        void refreshTerminalPane(paneId);
+      }
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [isActiveSessionSending, refreshTerminalPane, terminalPanePollKey]);
 
   useEffect(() => {
     const pane = selectedTerminalPane;
@@ -8995,6 +9363,14 @@ export function App() {
       <ChatSurface
         activeChatPanel={panePanel}
         browserPreview={workbench.browserPreview}
+        capabilityActivities={
+          pane.kind === "session"
+            ? Object.values(capabilityRunsBySessionId[pane.sessionId] ?? {})
+            : []
+        }
+        capabilityPolicy={
+          capabilityPoliciesByProject[normalizeProjectPath(pane.workspacePath)]
+        }
         config={config}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
@@ -9144,18 +9520,6 @@ export function App() {
     );
   };
 
-  if (!accountSession.signedIn) {
-    return (
-      <GyroAccountGate
-        error={accountError}
-        oidc={config.accountOidc}
-        onRefresh={refreshAccount}
-        onSignIn={startAccountLogin}
-        status={accountStatus}
-      />
-    );
-  }
-
   return (
     <AppChrome
       activePaneTab={workbench.activePaneTab}
@@ -9255,29 +9619,12 @@ export function App() {
                 <ChatGridSurface
                   layout={activeChatLayout}
                   maximizedPaneId={chatGrid.maximizedPaneId}
-                  onClosePane={(pane) => {
-                    const nextPane = activeChatLayout.slots.find(
-                      (candidate) =>
-                        candidate && candidate.paneId !== pane.paneId,
-                    );
-                    dispatchChatGrid({
-                      type: "close-pane",
-                      projectKey: activeChatLayout.projectKey,
-                      paneId: pane.paneId,
-                    });
-                    setChatPanelByPaneId((current) => ({
-                      ...current,
-                      [pane.paneId]: undefined,
-                    }));
-                    if (activeChatLayout.focusedPaneId === pane.paneId) {
-                      activeSessionIdRef.current =
-                        nextPane?.kind === "session"
-                          ? nextPane.sessionId
-                          : undefined;
-                      setActiveSessionId(activeSessionIdRef.current);
-                    }
-                  }}
-                  onDropSession={(sessionId, sourceProjectKey, slotIndex) => {
+                  onDropSession={(
+                    sessionId,
+                    sourceProjectKey,
+                    slotIndex,
+                    placement,
+                  ) => {
                     const session = sessions.find(
                       (item) => item.id === sessionId,
                     );
@@ -9300,6 +9647,8 @@ export function App() {
                       projectKey,
                       mode: "drop",
                       slotIndex,
+                      insertPosition: placement?.insertPosition,
+                      splitDirection: placement?.splitDirection,
                       pane: chatPaneForSession(session),
                     });
                     activeSessionIdRef.current = session.id;
@@ -9328,7 +9677,15 @@ export function App() {
                 <ChatSurface
                   activeChatPanel={activeChatPanel}
                   browserPreview={workbench.browserPreview}
+                  capabilityPolicy={activeCapabilityPolicy}
                   config={config}
+                  capabilityActivities={
+                    activeSessionId
+                      ? Object.values(
+                          capabilityRunsBySessionId[activeSessionId] ?? {},
+                        )
+                      : []
+                  }
                   attachments={activeChatAttachments}
                   chatMode={activeChatMode}
                   diffReview={workbench.diffReview}
@@ -9744,6 +10101,12 @@ export function App() {
       {activeDestination === "onboarding" ? (
         <ChatSurface
           activeChatPanel={activeChatPanel}
+          capabilityActivities={
+            activeSessionId
+              ? Object.values(capabilityRunsBySessionId[activeSessionId] ?? {})
+              : []
+          }
+          capabilityPolicy={activeCapabilityPolicy}
           config={config}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
@@ -10210,76 +10573,6 @@ function sanitizeStoredBrowserPreview(
   };
 }
 
-function GyroAccountGate({
-  error,
-  oidc,
-  onRefresh,
-  onSignIn,
-  status,
-}: {
-  error: string;
-  oidc?: GyroConfig["accountOidc"];
-  onRefresh: () => void;
-  onSignIn: () => void;
-  status: GyroAccountStatus;
-}) {
-  const isBusy = status === "checking" || status === "signing-in";
-  const isLocalDevice =
-    oidc?.issuerUrl?.replace(/\/$/, "") === "local-device://gyro" &&
-    oidc?.clientId === "gyro-local-device";
-  const detail =
-    status === "checking"
-      ? "Checking local access..."
-      : status === "signing-in"
-        ? "Authorizing this device..."
-        : isLocalDevice
-          ? "Enable Gyro locally. Provider accounts stay in their own CLIs and apps."
-          : "Authorize Gyro access. Provider accounts stay separate.";
-  const accessModeLabel = isLocalDevice
-    ? "This Mac"
-    : (oidc?.issuerUrl ?? "Not configured");
-
-  return (
-    <main className="gyro-account-gate" aria-label="Gyro local access">
-      <section className="gyro-account-panel">
-        <div className="gyro-account-heading">
-          <div className="gyro-account-panel-mark" aria-hidden="true">
-            G
-          </div>
-          <div>
-            <span className="gyro-account-kicker">Local access</span>
-            <h1>Use Gyro on this Mac</h1>
-          </div>
-        </div>
-        <p className="gyro-account-copy">{detail}</p>
-        <div className="gyro-account-context" aria-label="Access details">
-          <span title={accessModeLabel}>
-            <i aria-hidden="true" />
-            {accessModeLabel}
-          </span>
-          <span>
-            <i aria-hidden="true" />
-            Provider logins stay external
-          </span>
-        </div>
-        {error ? <p className="gyro-account-error">{error}</p> : null}
-        <div className="gyro-account-actions">
-          <button disabled={isBusy} onClick={onSignIn} type="button">
-            {status === "signing-in"
-              ? "Authorizing..."
-              : isLocalDevice
-                ? "Use this device"
-                : "Authorize access"}
-          </button>
-          <button disabled={isBusy} onClick={onRefresh} type="button">
-            Check again
-          </button>
-        </div>
-      </section>
-    </main>
-  );
-}
-
 function LiveTerminalPaneBody({
   isActive,
   onBell,
@@ -10463,6 +10756,12 @@ function LiveTerminalPaneBody({
 
   return (
     <div className="gyro-xterm-frame">
+      {pane.owner?.kind === "model" ? (
+        <div className="gyro-model-terminal-notice" role="note">
+          Model-owned process · your typed input and echoed output may be
+          visible to this Chat
+        </div>
+      ) : null}
       <div
         aria-label="Terminal input"
         className="gyro-xterm-host"
@@ -10794,14 +11093,16 @@ function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
   return {
     ...workbench,
     activeTurn: undefined,
-    terminalPanes: workbench.terminalPanes.map((pane) => ({
-      ...pane,
-      attention: undefined,
-      output: truncatePersistedText(
-        pane.output,
-        MAX_PERSISTED_TERMINAL_OUTPUT_CHARS,
-      ),
-    })),
+    terminalPanes: workbench.terminalPanes
+      .filter((pane) => pane.owner?.kind !== "model")
+      .map((pane) => ({
+        ...pane,
+        attention: undefined,
+        output: truncatePersistedText(
+          pane.output,
+          MAX_PERSISTED_TERMINAL_OUTPUT_CHARS,
+        ),
+      })),
     providerReadiness: {
       status: "idle",
       message: "",
@@ -11133,6 +11434,181 @@ function terminalPaneFromSnapshot(
         ? snapshot.status
         : `${snapshot.status} (${snapshot.exitCode})`,
     output: snapshot.output ?? "",
+    hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+  };
+}
+
+function terminalSnapshotFromCapabilityData(
+  value: unknown,
+): TerminalPaneSnapshot | undefined {
+  const data = recordFromUnknown(value);
+  const pane = recordFromUnknown(data?.pane);
+  const paneId = stringFromRecord(pane, "paneId");
+  const title = stringFromRecord(pane, "title");
+  const command = stringFromRecord(pane, "command");
+  const status = stringFromRecord(pane, "status");
+  const outputRevision = pane?.outputRevision;
+  if (
+    !paneId ||
+    !title ||
+    !command ||
+    !["running", "done", "failed"].includes(status ?? "") ||
+    typeof outputRevision !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    paneId,
+    title,
+    profileId: stringFromRecord(pane, "profileId"),
+    command,
+    output: stringFromRecord(pane, "output"),
+    outputRevision,
+    status: status as TerminalPaneSnapshot["status"],
+    hasForegroundJob:
+      typeof pane?.hasForegroundJob === "boolean"
+        ? pane.hasForegroundJob
+        : undefined,
+    exitCode: typeof pane?.exitCode === "number" ? pane.exitCode : undefined,
+    workspacePath: stringFromRecord(pane, "workspacePath"),
+    workingDirectory: stringFromRecord(pane, "workingDirectory"),
+    cols: typeof pane?.cols === "number" ? pane.cols : 120,
+    rows: typeof pane?.rows === "number" ? pane.rows : 32,
+  };
+}
+
+function capabilityActivityFromSessionEvent(
+  event: SessionEvent,
+): CapabilityActivity | undefined {
+  const payload = recordFromUnknown(event.payload);
+  if (
+    stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
+    stringFromRecord(payload, "kind") !== "capability-call"
+  ) {
+    return undefined;
+  }
+  const callId = stringFromRecord(payload, "callId");
+  const capabilityId = stringFromRecord(payload, "capabilityId");
+  const status = stringFromRecord(payload, "status");
+  const providerId = stringFromRecord(payload, "providerId");
+  const summary = stringFromRecord(payload, "summary");
+  const policyRevision = payload?.policyRevision;
+  if (
+    !callId ||
+    !capabilityId ||
+    !status ||
+    !providerId ||
+    !summary ||
+    typeof policyRevision !== "number"
+  ) {
+    return undefined;
+  }
+  const resourceRecord = recordFromUnknown(payload?.resource);
+  const resourceId = stringFromRecord(resourceRecord, "id");
+  const resourceKind = stringFromRecord(resourceRecord, "kind");
+  const resourceLabel = stringFromRecord(resourceRecord, "label");
+  const resource =
+    resourceId &&
+    resourceLabel &&
+    ["workspace", "ide", "terminal", "browser"].includes(resourceKind ?? "")
+      ? {
+          id: resourceId,
+          kind: resourceKind as CapabilityResourceRef["kind"],
+          label: resourceLabel,
+        }
+      : undefined;
+  return {
+    schema: "gyro.capability.v1",
+    kind: "capability-call",
+    callId,
+    capabilityId: capabilityId as CapabilityCallEvent["capabilityId"],
+    status: status as CapabilityCallEvent["status"],
+    providerId,
+    policyRevision,
+    summary,
+    resource,
+    sessionId: event.sessionId,
+    turnId: event.turnId,
+    createdAt: event.createdAt,
+  };
+}
+
+function markInactiveCapabilityResources(
+  events: SessionEvent[],
+  liveResourceIds: ReadonlySet<string>,
+) {
+  return events.map((event) => {
+    const payload = recordFromUnknown(event.payload);
+    if (
+      stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
+      stringFromRecord(payload, "kind") !== "capability-call" ||
+      stringFromRecord(payload, "status") !== "completed"
+    ) {
+      return event;
+    }
+    const resource = recordFromUnknown(payload?.resource);
+    const resourceId = stringFromRecord(resource, "id");
+    const resourceKind = stringFromRecord(resource, "kind");
+    if (
+      !resourceId ||
+      !["terminal", "browser"].includes(resourceKind ?? "") ||
+      liveResourceIds.has(resourceId)
+    ) {
+      return event;
+    }
+    return {
+      ...event,
+      payload: {
+        ...payload,
+        status: "inactive",
+        summary: `${stringFromRecord(payload, "summary") ?? event.message} · inactive after restart`,
+      },
+    };
+  });
+}
+
+function capabilityApprovalFromSessionEvent(
+  event: SessionEvent,
+): CapabilityApprovalEvent | undefined {
+  const payload = recordFromUnknown(event.payload);
+  if (
+    event.kind !== "approval-requested" ||
+    stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
+    stringFromRecord(payload, "kind") !== "capability-approval"
+  ) {
+    return undefined;
+  }
+  const approvalId = stringFromRecord(payload, "approvalId");
+  const callId = stringFromRecord(payload, "callId");
+  const capabilityId = stringFromRecord(payload, "capabilityId");
+  const capabilityClass = stringFromRecord(payload, "capabilityClass");
+  const providerId = stringFromRecord(payload, "providerId");
+  const scopeKind = stringFromRecord(payload, "scopeKind");
+  const scopeValue = stringFromRecord(payload, "scopeValue");
+  if (
+    !approvalId ||
+    !callId ||
+    !capabilityId ||
+    !capabilityClass ||
+    !providerId ||
+    !scopeKind ||
+    !scopeValue
+  ) {
+    return undefined;
+  }
+  return {
+    schema: "gyro.capability.v1",
+    kind: "capability-approval",
+    approvalId,
+    callId,
+    capabilityId: capabilityId as CapabilityApprovalEvent["capabilityId"],
+    capabilityClass:
+      capabilityClass as CapabilityApprovalEvent["capabilityClass"],
+    providerId,
+    status: "waiting",
+    scopeKind,
+    scopeValue,
+    choices: ["deny", "allow-once", "allow-project"],
   };
 }
 

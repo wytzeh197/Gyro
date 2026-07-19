@@ -46,12 +46,165 @@ export type ChatProjectLayout = {
   projectKey: string;
   slots: Array<ChatPaneRef | null>;
   focusedPaneId?: string;
+  splitDirection?: "horizontal" | "vertical";
 };
 
 export type ChatGridState = {
   activeProjectKey?: string;
   layouts: Record<string, ChatProjectLayout>;
   maximizedPaneId?: string;
+};
+
+export type CapabilityId =
+  | "workspace-list"
+  | "workspace-search"
+  | "workspace-read"
+  | "workspace-diagnostics"
+  | "workspace-git-status"
+  | "workspace-diff"
+  | "ide-reveal"
+  | "terminal-open"
+  | "terminal-read"
+  | "terminal-stop"
+  | "browser-open"
+  | "browser-inspect"
+  | "browser-reload"
+  | "browser-screenshot";
+
+export type CapabilityClass =
+  | "workspace-inspect"
+  | "workspace-sensitive-read"
+  | "ide-reveal"
+  | "terminal-execute"
+  | "terminal-observe"
+  | "browser-inspect"
+  | "browser-navigate";
+
+export type CapabilityAccess = "deny" | "ask" | "allow";
+export type CapabilityStatus =
+  | "requested"
+  | "waiting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "denied"
+  | "cancelled"
+  | "inactive";
+
+export type CapabilityApprovalDecision =
+  "deny" | "allow-once" | "allow-project";
+
+export type CapabilityRunMode = "normal" | "plan";
+
+export type CapabilityInvocationContext = {
+  sessionId: string;
+  turnId?: string;
+  providerId: string;
+  runNonce: string;
+  callId: string;
+  workspaceKey: string;
+  mode: CapabilityRunMode;
+  policyRevision: number;
+};
+
+export type CapabilityRequest = {
+  schema: "gyro.provider-capability-ipc.v1";
+  senderVersion: string;
+  context: CapabilityInvocationContext;
+  capabilityId: CapabilityId;
+  arguments: Record<string, unknown>;
+};
+
+export type ProjectCapabilityGrant = {
+  id: string;
+  class: CapabilityClass;
+  scopeKind: string;
+  scopeValue: string;
+  createdAt: string;
+};
+
+export type ProjectCapabilityPolicy = {
+  schema: "gyro.capability.v1";
+  workspaceKey: string;
+  revision: number;
+  classes: Record<CapabilityClass, CapabilityAccess>;
+  grants: ProjectCapabilityGrant[];
+  updatedAt: string;
+};
+
+export type CapabilityResourceRef = {
+  id: string;
+  kind: "workspace" | "ide" | "terminal" | "browser";
+  label: string;
+};
+
+export type CapabilityResult = {
+  callId: string;
+  capabilityId: CapabilityId;
+  summary: string;
+  data: unknown;
+  resource?: CapabilityResourceRef;
+};
+
+export type CapabilityError = {
+  code: string;
+  message: string;
+};
+
+export type CapabilityCallEvent = {
+  schema: "gyro.capability.v1";
+  kind: "capability-call";
+  callId: string;
+  capabilityId: CapabilityId;
+  status: CapabilityStatus;
+  providerId: string;
+  policyRevision: number;
+  summary: string;
+  resource?: CapabilityResourceRef;
+};
+
+export type CapabilityApprovalEvent = {
+  schema: "gyro.capability.v1";
+  kind: "capability-approval";
+  approvalId: string;
+  callId: string;
+  capabilityId: CapabilityId;
+  capabilityClass: CapabilityClass;
+  providerId: string;
+  status: "waiting";
+  scopeKind: string;
+  scopeValue: string;
+  choices: CapabilityApprovalDecision[];
+};
+
+export type CapabilityActivity = CapabilityCallEvent & {
+  sessionId: string;
+  turnId?: string;
+  createdAt: string;
+};
+
+export type ProviderCapabilitySupport = {
+  providerId: string;
+  available: boolean;
+  capabilities: CapabilityId[];
+  reason?: string;
+};
+
+export type ModelResourceOwner = {
+  kind: "model";
+  sessionId: string;
+  turnId?: string;
+  callId: string;
+};
+
+export type ChatBrowserResource = {
+  id: string;
+  sessionId: string;
+  projectPath: string;
+  url: string;
+  status: CapabilityStatus;
+  label: string;
+  latestCapturePath?: string;
 };
 
 export type SessionGoalStatus = "active" | "complete";
@@ -65,7 +218,7 @@ export type SessionGoal = {
   updatedAt?: string;
 };
 
-export type ChatAttachmentKind = "image" | "workspace-file";
+export type ChatAttachmentKind = "ide-snapshot" | "image" | "workspace-file";
 
 export type ChatAttachment = {
   id: string;
@@ -108,6 +261,7 @@ export type TerminalPane = {
   command: string;
   output: string;
   status: TerminalPaneStatus;
+  hasForegroundJob?: boolean;
   lastEvent: string;
   workspaceMode: WorkbenchMode;
   branch: string;
@@ -117,6 +271,7 @@ export type TerminalPane = {
   attention?: TerminalPaneAttention;
   layout?: TerminalPaneLayout;
   createdAt: string;
+  owner?: ModelResourceOwner;
 };
 
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
