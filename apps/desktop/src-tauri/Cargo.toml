@@ -27,7 +27,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 portable-pty = "0.9"
-tauri = { version = "2.5", features = ["protocol-asset"] }
+tauri = { version = "2.5", features = ["image-png", "macos-private-api", "protocol-asset", "tray-icon"] }
 tauri-plugin-dialog = "2.2"
 tauri-plugin-notification = "2.3"
 tauri-plugin-opener = "2.2"

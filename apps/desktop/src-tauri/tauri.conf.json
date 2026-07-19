@@ -33,7 +33,7 @@
         "scope": ["$DATA/Gyro/sessions/attachments/**"]
       }
     },
-    "macOSPrivateApi": false
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

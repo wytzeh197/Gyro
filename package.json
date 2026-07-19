@@ -29,7 +29,7 @@
     "site:check": "node scripts/check-download-site.mjs",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs",
     "test": "pnpm test:reliability && pnpm -r test",
-    "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs",
+    "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs && node --experimental-strip-types scripts/check-menu-bar-state.mjs",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

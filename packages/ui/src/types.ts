@@ -218,7 +218,8 @@ export type SessionGoal = {
   updatedAt?: string;
 };
 
-export type ChatAttachmentKind = "ide-snapshot" | "image" | "workspace-file";
+export type ChatAttachmentKind =
+  "ide-snapshot" | "image" | "video" | "workspace-file";
 
 export type ChatAttachment = {
   id: string;
@@ -344,6 +345,43 @@ export type Automation = {
   runHistory: AutomationRun[];
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type MenuBarJobKind = "chat" | "automation";
+
+export type MenuBarJobStatus = "queued" | "running" | "waiting";
+
+export type MenuBarJob = {
+  id: string;
+  kind: MenuBarJobKind;
+  targetId: string;
+  title: string;
+  detail: string;
+  status: MenuBarJobStatus;
+  startedAt: string;
+  canStop: boolean;
+};
+
+export type MenuBarOutcome = {
+  id: string;
+  kind: MenuBarJobKind;
+  targetId: string;
+  title: string;
+  detail: string;
+  status: "succeeded" | "failed" | "stopped";
+  finishedAt: string;
+};
+
+export type MenuBarSnapshotState =
+  "idle" | "working" | "attention" | "complete";
+
+export type MenuBarSnapshot = {
+  state: MenuBarSnapshotState;
+  jobs: MenuBarJob[];
+  totalActive: number;
+  recentOutcome?: MenuBarOutcome;
+  theme: ThemeMode;
+  reduceMotion: boolean;
 };
 
 export type DiffSource = "agent-generated" | "user-edited" | "mixed" | "stale";
@@ -681,6 +719,7 @@ export type WorkbenchPreferences = {
   cliLaunchPreset: CliLaunchPreset;
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
+  showMenuBarIcon: boolean;
 };
 
 export type ProviderUsageWindow = {
