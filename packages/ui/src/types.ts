@@ -218,7 +218,8 @@ export type SessionGoal = {
   updatedAt?: string;
 };
 
-export type ChatAttachmentKind = "ide-snapshot" | "image" | "workspace-file";
+export type ChatAttachmentKind =
+  "ide-snapshot" | "image" | "video" | "workspace-file";
 
 export type ChatAttachment = {
   id: string;
