@@ -1,3 +1,4 @@
+use crate::capabilities::ProjectCapabilityPolicy;
 use crate::paths::{reject_unsafe_private_file, secure_private_file, GyroPaths};
 use crate::worktrees::validate_branch_name;
 use anyhow::{anyhow, Context, Result};
@@ -852,6 +853,68 @@ impl SessionStore {
         Ok(changed > 0)
     }
 
+    pub fn get_project_capability_policy(
+        &self,
+        workspace_key: &str,
+    ) -> Result<ProjectCapabilityPolicy> {
+        let workspace_key = normalize_workspace_key(workspace_key)?;
+        let stored = self
+            .conn
+            .query_row(
+                "select policy_json, revision from project_capability_policies where workspace_key = ?1",
+                params![workspace_key],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
+            )
+            .optional()?;
+        let Some((stored, stored_revision)) = stored else {
+            return Ok(ProjectCapabilityPolicy::defaults(workspace_key));
+        };
+        let policy = serde_json::from_str::<ProjectCapabilityPolicy>(&stored)
+            .ok()
+            .filter(|policy| policy.validate().is_ok())
+            .filter(|policy| policy.workspace_key == workspace_key);
+        Ok(policy
+            .unwrap_or_else(|| ProjectCapabilityPolicy::deny_all(workspace_key, stored_revision)))
+    }
+
+    pub fn save_project_capability_policy(
+        &self,
+        mut policy: ProjectCapabilityPolicy,
+        expected_revision: Option<u64>,
+    ) -> Result<ProjectCapabilityPolicy> {
+        policy.workspace_key = normalize_workspace_key(&policy.workspace_key)?;
+        policy.validate()?;
+        let current = self.get_project_capability_policy(&policy.workspace_key)?;
+        if let Some(expected_revision) = expected_revision {
+            if current.revision != expected_revision {
+                return Err(anyhow!(
+                    "capability policy changed; expected revision {expected_revision}, found {}",
+                    current.revision
+                ));
+            }
+        }
+        policy.revision = current.revision.saturating_add(1);
+        policy.updated_at = Utc::now();
+        policy.validate()?;
+        let encoded = serde_json::to_string(&policy)?;
+        self.conn.execute(
+            "insert into project_capability_policies
+             (workspace_key, policy_json, revision, updated_at)
+             values (?1, ?2, ?3, ?4)
+             on conflict(workspace_key) do update set
+               policy_json = excluded.policy_json,
+               revision = excluded.revision,
+               updated_at = excluded.updated_at",
+            params![
+                policy.workspace_key,
+                encoded,
+                policy.revision,
+                policy.updated_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(policy)
+    }
+
     pub fn append_event(
         &self,
         session_id: Uuid,
@@ -1142,7 +1205,14 @@ impl SessionStore {
              );
 
              create index if not exists idx_mutation_proposals_session_status
-             on mutation_proposals(session_id, status, created_at asc);",
+             on mutation_proposals(session_id, status, created_at asc);
+
+             create table if not exists project_capability_policies (
+               workspace_key text primary key not null,
+               policy_json text not null,
+               revision integer not null,
+               updated_at text not null
+             );",
         )?;
         self.ensure_column(
             "workspace_mode",
@@ -1642,6 +1712,15 @@ fn normalize_provider_binding_text(label: &str, value: String) -> Result<String>
         return Err(anyhow!("{label} cannot be empty"));
     }
     Ok(value)
+}
+
+fn normalize_workspace_key(value: &str) -> Result<String> {
+    let cleaned = value.replace('\0', "");
+    let value = cleaned.trim().trim_end_matches('/');
+    if value.is_empty() || !Path::new(value).is_absolute() {
+        return Err(anyhow!("capability workspace key must be an absolute path"));
+    }
+    Ok(value.to_string())
 }
 
 fn validate_provider_resume_cursor(cursor: Value) -> Result<Value> {
@@ -2319,6 +2398,52 @@ mod tests {
             .get_provider_session_binding(session.id, "openai")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn stores_versioned_project_capability_policies() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let workspace_key = temp.path().display().to_string();
+        let policy = store.get_project_capability_policy(&workspace_key).unwrap();
+        assert_eq!(policy.revision, 0);
+
+        let stored = store
+            .save_project_capability_policy(policy.clone(), Some(0))
+            .unwrap();
+        assert_eq!(stored.revision, 1);
+        assert_eq!(
+            store.get_project_capability_policy(&workspace_key).unwrap(),
+            stored
+        );
+        assert!(store
+            .save_project_capability_policy(policy, Some(0))
+            .unwrap_err()
+            .to_string()
+            .contains("expected revision"));
+    }
+
+    #[test]
+    fn malformed_capability_policy_fails_closed_without_breaking_chat_storage() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let workspace_key = temp.path().display().to_string();
+        store
+            .conn
+            .execute(
+                "insert into project_capability_policies
+                 (workspace_key, policy_json, revision, updated_at)
+                 values (?1, ?2, ?3, ?4)",
+                params![workspace_key, "{not-json", 7_u64, Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+
+        let recovered = store.get_project_capability_policy(&workspace_key).unwrap();
+        assert_eq!(recovered.revision, 7);
+        assert!(recovered
+            .classes
+            .values()
+            .all(|access| *access == crate::capabilities::CapabilityAccess::Deny));
     }
 
     #[test]
