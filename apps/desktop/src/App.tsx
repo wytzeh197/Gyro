@@ -76,6 +76,8 @@ import {
   type IdeAssistantAction,
   type IdeAssistantRequest,
   type LanguageServerState,
+  type MenuBarOutcome,
+  type MenuBarSnapshot,
   type OutputChannel,
   type ModelProviderConfig,
   type NotificationPermissionState,
@@ -144,6 +146,11 @@ import {
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
 import { useGyroUpdater } from "./update-controller";
+import {
+  deriveLatestMenuBarOutcome,
+  deriveMenuBarJobs,
+  deriveMenuBarSnapshot,
+} from "./menu-bar-state";
 
 const MonacoEditor = lazy(() => import("./monaco-editor"));
 
@@ -159,6 +166,11 @@ type AppNotification = {
 type ProviderApprovalNotificationOpen = {
   sessionId: string;
   approvalId: string;
+};
+
+type MenuBarNavigationTarget = {
+  kind: "chat" | "automation" | "settings";
+  id: string;
 };
 
 type ProviderCapabilityResourceEvent = {
@@ -683,6 +695,10 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const [menuBarOutcome, setMenuBarOutcome] = useState<MenuBarOutcome>();
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const menuBarOutcomeInitializedRef = useRef(false);
+  const latestMenuBarOutcomeIdRef = useRef<string>();
   const queuedChatDispatchesRef = useRef(new Set<string>());
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
@@ -1161,6 +1177,106 @@ export function App() {
   const isActiveSessionSending = activeSessionId
     ? sendingSessionIds.includes(activeSessionId)
     : isStartingFirstTurn;
+  const latestMenuBarOutcome = useMemo(
+    () =>
+      deriveLatestMenuBarOutcome(
+        sessions,
+        sessionEventsById,
+        workbench.automations,
+      ),
+    [sessionEventsById, sessions, workbench.automations],
+  );
+  const menuBarJobs = useMemo(
+    () =>
+      deriveMenuBarJobs({
+        automations: workbench.automations,
+        sendingSessionIds,
+        sessionEventsById,
+        sessions,
+      }),
+    [
+      sendingSessionIds,
+      sessionEventsById,
+      sessions,
+      workbench.automations,
+    ],
+  );
+  const menuBarSnapshot = useMemo<MenuBarSnapshot>(
+    () =>
+      deriveMenuBarSnapshot({
+        automations: workbench.automations,
+        outcome: menuBarOutcome,
+        reduceMotion,
+        sendingSessionIds,
+        sessionEventsById,
+        sessions,
+        theme: workbench.preferences.theme,
+      }),
+    [
+      menuBarOutcome,
+      reduceMotion,
+      sendingSessionIds,
+      sessionEventsById,
+      sessions,
+      workbench.automations,
+      workbench.preferences.theme,
+    ],
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReduceMotion(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!menuBarOutcomeInitializedRef.current) {
+      menuBarOutcomeInitializedRef.current = true;
+      latestMenuBarOutcomeIdRef.current = latestMenuBarOutcome?.id;
+      return;
+    }
+    if (
+      !latestMenuBarOutcome ||
+      latestMenuBarOutcomeIdRef.current === latestMenuBarOutcome.id
+    ) {
+      return;
+    }
+    latestMenuBarOutcomeIdRef.current = latestMenuBarOutcome.id;
+    setMenuBarOutcome(
+      latestMenuBarOutcome.status === "stopped"
+        ? undefined
+        : latestMenuBarOutcome,
+    );
+  }, [latestMenuBarOutcome]);
+
+  useEffect(() => {
+    if (menuBarOutcome?.status !== "succeeded" || menuBarJobs.length > 0) {
+      return undefined;
+    }
+    const outcomeId = menuBarOutcome.id;
+    const timeout = window.setTimeout(() => {
+      setMenuBarOutcome((current) =>
+        current?.id === outcomeId ? undefined : current,
+      );
+    }, 3_000);
+    return () => window.clearTimeout(timeout);
+  }, [menuBarJobs.length, menuBarOutcome]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void invoke("set_menu_bar_snapshot", { snapshot: menuBarSnapshot }).catch(
+      () => undefined,
+    );
+  }, [menuBarSnapshot]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void invoke("set_menu_bar_visible", {
+      visible: workbench.preferences.showMenuBarIcon,
+    }).catch(() => undefined);
+  }, [workbench.preferences.showMenuBarIcon]);
   const terminalPanePollKey = liveTerminalPaneIds.join("\n");
   const selectedTerminalPane = useMemo(
     () =>
@@ -3347,6 +3463,44 @@ export function App() {
     },
     [sessions],
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let mounted = true;
+    let unlistenNavigation: (() => void) | undefined;
+    void listen<MenuBarNavigationTarget>(
+      "gyro://menu-bar-navigation",
+      (event) => {
+        if (!mounted) return;
+        const target = event.payload;
+        if (target.kind === "chat") {
+          dispatchWorkbench({ type: "select-destination", destination: "workspace" });
+          selectSession(target.id);
+          void refreshEvents(target.id);
+          return;
+        }
+        if (target.kind === "automation") {
+          dispatchWorkbench({
+            type: "select-automation",
+            automationId: target.id,
+          });
+          return;
+        }
+        dispatchWorkbench({ type: "select-destination", destination: "settings" });
+        dispatchWorkbench({
+          type: "set-settings-section",
+          section: "general",
+        });
+      },
+    ).then((unlisten) => {
+      if (!mounted) unlisten();
+      else unlistenNavigation = unlisten;
+    });
+    return () => {
+      mounted = false;
+      unlistenNavigation?.();
+    };
+  }, [refreshEvents, selectSession]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -9972,6 +10126,7 @@ export function App() {
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
+          showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onCliLaunchPresetChange={(preset: CliLaunchPreset) =>
@@ -9979,6 +10134,9 @@ export function App() {
           }
           onDensityChange={(density) =>
             dispatchWorkbench({ type: "set-density", density })
+          }
+          onMenuBarVisibilityChange={(visible) =>
+            dispatchWorkbench({ type: "set-menu-bar-visible", visible })
           }
           onExportDiagnostics={() =>
             isTauriRuntime()
