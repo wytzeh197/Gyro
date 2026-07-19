@@ -3486,7 +3486,10 @@ export function App() {
       setSessions(nextSessions);
       dispatchChatGrid({ type: "remove-session-pane", sessionId });
       for (const pane of workbench.terminalPanes) {
-        if (pane.owner?.kind === "model" && pane.owner.sessionId === sessionId) {
+        if (
+          pane.owner?.kind === "model" &&
+          pane.owner.sessionId === sessionId
+        ) {
           dispatchWorkbench({ type: "remove-terminal-pane", paneId: pane.id });
         }
       }
@@ -6011,8 +6014,7 @@ export function App() {
               capabilityResourceDataByCallId[activity.callId],
             );
             const filePath = stringFromRecord(ideData, "path") ?? path;
-            const line =
-              typeof ideData?.line === "number" ? ideData.line : 1;
+            const line = typeof ideData?.line === "number" ? ideData.line : 1;
             const column =
               typeof ideData?.column === "number" ? ideData.column : 1;
             setSelectedFile(filePath);
@@ -6066,7 +6068,8 @@ export function App() {
         })
           .then(() => {
             liveCapabilityResourceIdsRef.current.delete(resourceId);
-            const terminalData = capabilityResourceDataByCallId[activity.callId];
+            const terminalData =
+              capabilityResourceDataByCallId[activity.callId];
             const snapshot = terminalSnapshotFromCapabilityData(terminalData);
             if (snapshot) {
               dispatchWorkbench({
@@ -6079,7 +6082,11 @@ export function App() {
             notify("terminal", "Model process stopped", resourceLabel);
           })
           .catch((error) =>
-            notify("command-failed", "Could not stop model process", String(error)),
+            notify(
+              "command-failed",
+              "Could not stop model process",
+              String(error),
+            ),
           );
         return;
       }
@@ -9612,29 +9619,12 @@ export function App() {
                 <ChatGridSurface
                   layout={activeChatLayout}
                   maximizedPaneId={chatGrid.maximizedPaneId}
-                  onClosePane={(pane) => {
-                    const nextPane = activeChatLayout.slots.find(
-                      (candidate) =>
-                        candidate && candidate.paneId !== pane.paneId,
-                    );
-                    dispatchChatGrid({
-                      type: "close-pane",
-                      projectKey: activeChatLayout.projectKey,
-                      paneId: pane.paneId,
-                    });
-                    setChatPanelByPaneId((current) => ({
-                      ...current,
-                      [pane.paneId]: undefined,
-                    }));
-                    if (activeChatLayout.focusedPaneId === pane.paneId) {
-                      activeSessionIdRef.current =
-                        nextPane?.kind === "session"
-                          ? nextPane.sessionId
-                          : undefined;
-                      setActiveSessionId(activeSessionIdRef.current);
-                    }
-                  }}
-                  onDropSession={(sessionId, sourceProjectKey, slotIndex) => {
+                  onDropSession={(
+                    sessionId,
+                    sourceProjectKey,
+                    slotIndex,
+                    placement,
+                  ) => {
                     const session = sessions.find(
                       (item) => item.id === sessionId,
                     );
@@ -9657,6 +9647,8 @@ export function App() {
                       projectKey,
                       mode: "drop",
                       slotIndex,
+                      insertPosition: placement?.insertPosition,
+                      splitDirection: placement?.splitDirection,
                       pane: chatPaneForSession(session),
                     });
                     activeSessionIdRef.current = session.id;
@@ -10766,8 +10758,8 @@ function LiveTerminalPaneBody({
     <div className="gyro-xterm-frame">
       {pane.owner?.kind === "model" ? (
         <div className="gyro-model-terminal-notice" role="note">
-          Model-owned process · your typed input and echoed output may be visible
-          to this Chat
+          Model-owned process · your typed input and echoed output may be
+          visible to this Chat
         </div>
       ) : null}
       <div
@@ -11518,9 +11510,7 @@ function capabilityActivityFromSessionEvent(
   const resource =
     resourceId &&
     resourceLabel &&
-    ["workspace", "ide", "terminal", "browser"].includes(
-      resourceKind ?? "",
-    )
+    ["workspace", "ide", "terminal", "browser"].includes(resourceKind ?? "")
       ? {
           id: resourceId,
           kind: resourceKind as CapabilityResourceRef["kind"],

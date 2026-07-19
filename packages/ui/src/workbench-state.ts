@@ -79,6 +79,8 @@ export type ChatGridAction =
       pane: ChatPaneRef;
       mode: "replace" | "drop";
       slotIndex?: number;
+      insertPosition?: "before" | "after";
+      splitDirection?: "horizontal" | "vertical";
     }
   | { type: "focus-pane"; projectKey: string; paneId: string }
   | { type: "close-pane"; projectKey: string; paneId: string }
@@ -178,6 +180,8 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
         focusedPaneId: slots.some((pane) => pane?.paneId === focusedPaneId)
           ? focusedPaneId
           : fallbackFocus,
+        splitDirection:
+          layout.splitDirection === "vertical" ? "vertical" : "horizontal",
       };
     }
   }
@@ -321,17 +325,52 @@ export function chatGridReducer(
       );
       const emptyIndex = current.slots.findIndex((pane) => pane === null);
       const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
-      const targetIndex =
-        requestedIndex ??
-        (action.mode === "drop" && emptyIndex >= 0
-          ? emptyIndex
-          : focusedIndex >= 0
-            ? focusedIndex
-            : 0);
-      const slots = current.slots.slice(0, CHAT_GRID_MAX_SLOTS);
-      while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
-      slots[targetIndex] = action.pane;
-      next = { ...current, slots, focusedPaneId: action.pane.paneId };
+      if (action.mode === "drop" && action.insertPosition) {
+        const occupied = current.slots.filter((pane): pane is ChatPaneRef =>
+          Boolean(pane),
+        );
+        const targetPane =
+          requestedIndex === undefined
+            ? undefined
+            : current.slots[requestedIndex];
+        const targetPosition = targetPane
+          ? occupied.findIndex((pane) => pane.paneId === targetPane.paneId)
+          : occupied.length - 1;
+        const insertionIndex = Math.max(
+          0,
+          Math.min(
+            occupied.length,
+            targetPosition + (action.insertPosition === "after" ? 1 : 0),
+          ),
+        );
+        occupied.splice(insertionIndex, 0, action.pane);
+        const slots: Array<ChatPaneRef | null> = occupied.slice(
+          0,
+          CHAT_GRID_MAX_SLOTS,
+        );
+        while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+        next = {
+          ...current,
+          slots,
+          focusedPaneId: action.pane.paneId,
+          splitDirection:
+            occupied.length === 2
+              ? (action.splitDirection ?? "horizontal")
+              : undefined,
+        };
+      } else {
+        const targetIndex =
+          requestedIndex ??
+          (action.mode === "drop" && emptyIndex >= 0
+            ? emptyIndex
+            : focusedIndex >= 0
+              ? focusedIndex
+              : 0);
+        const slots = current.slots.slice(0, CHAT_GRID_MAX_SLOTS);
+        while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+        slots[targetIndex] = action.pane;
+        next = { ...current, slots, focusedPaneId: action.pane.paneId };
+      }
     }
   } else if (action.type === "focus-pane") {
     if (current.slots.some((pane) => pane?.paneId === action.paneId)) {
@@ -2284,7 +2323,9 @@ export function workbenchReducer(
         terminalPanes: [...state.terminalPanes, action.pane],
       };
     case "upsert-background-terminal-pane": {
-      const exists = state.terminalPanes.some((pane) => pane.id === action.pane.id);
+      const exists = state.terminalPanes.some(
+        (pane) => pane.id === action.pane.id,
+      );
       return {
         ...state,
         terminalPanes: exists
