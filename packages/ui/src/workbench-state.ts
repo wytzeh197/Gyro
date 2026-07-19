@@ -1046,6 +1046,7 @@ export type WorkbenchAction =
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "set-density"; density: WorkbenchDensity }
+  | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-settings-section"; section: SettingsSectionId }
   | { type: "set-usage-provider"; providerId?: ProviderId }
   | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
@@ -1432,6 +1433,14 @@ export function workbenchReducer(
       return {
         ...state,
         preferences: { ...state.preferences, density: action.density },
+      };
+    case "set-menu-bar-visible":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          showMenuBarIcon: action.visible,
+        },
       };
     case "set-settings-section":
       return {
@@ -3286,6 +3295,7 @@ function normalizeWorkbenchPreferences(
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
+    showMenuBarIcon: preferences?.showMenuBarIcon !== false,
   };
 }
 

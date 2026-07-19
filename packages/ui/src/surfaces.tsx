@@ -10954,9 +10954,11 @@ type SettingsSurfaceProps = {
   cliLaunchPreset?: CliLaunchPreset;
   themeMode: ThemeMode;
   density?: WorkbenchDensity;
+  showMenuBarIcon?: boolean;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onDensityChange?: (density: WorkbenchDensity) => void;
+  onMenuBarVisibilityChange?: (visible: boolean) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
   onCheckForUpdates?: () => void;
@@ -11120,9 +11122,11 @@ export function SettingsSurface({
   cliLaunchPreset = defaultCliLaunchPreset(),
   themeMode,
   density = "compact",
+  showMenuBarIcon = true,
   activeSection = "general",
   onThemeChange,
   onDensityChange,
+  onMenuBarVisibilityChange,
   onSectionChange,
   onConfigChange,
   onCheckForUpdates,
@@ -11187,6 +11191,16 @@ export function SettingsSurface({
                 value="Sessions"
                 detail="Chat and CLI sessions share one destination; Workspace remains one click away."
               />
+              <SettingsRow
+                label="Menu bar"
+                detail="Keep Gyro's logo visible while chats and automations work in the background."
+              >
+                <SettingsSwitch
+                  checked={showMenuBarIcon}
+                  label="Show Gyro in menu bar"
+                  onChange={onMenuBarVisibilityChange}
+                />
+              </SettingsRow>
             </SettingsGroup>
             <SettingsGroup label="Session behavior">
               <SettingsRow
