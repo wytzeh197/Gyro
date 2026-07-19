@@ -1194,12 +1194,7 @@ export function App() {
         sessionEventsById,
         sessions,
       }),
-    [
-      sendingSessionIds,
-      sessionEventsById,
-      sessions,
-      workbench.automations,
-    ],
+    [sendingSessionIds, sessionEventsById, sessions, workbench.automations],
   );
   const menuBarSnapshot = useMemo<MenuBarSnapshot>(
     () =>
@@ -3474,7 +3469,10 @@ export function App() {
         if (!mounted) return;
         const target = event.payload;
         if (target.kind === "chat") {
-          dispatchWorkbench({ type: "select-destination", destination: "workspace" });
+          dispatchWorkbench({
+            type: "select-destination",
+            destination: "workspace",
+          });
           selectSession(target.id);
           void refreshEvents(target.id);
           return;
@@ -3486,7 +3484,10 @@ export function App() {
           });
           return;
         }
-        dispatchWorkbench({ type: "select-destination", destination: "settings" });
+        dispatchWorkbench({
+          type: "select-destination",
+          destination: "settings",
+        });
         dispatchWorkbench({
           type: "set-settings-section",
           section: "general",
@@ -4553,7 +4554,7 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: "image" | "workspace-file") => {
+    async (kind: "image" | "video" | "workspace-file") => {
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -4573,28 +4574,45 @@ export function App() {
       try {
         const selected = await open({
           directory: false,
-          multiple: kind === "image",
-          title: kind === "image" ? "Attach images" : "Attach workspace file",
+          multiple: kind === "image" || kind === "video",
+          title:
+            kind === "image"
+              ? "Attach images"
+              : kind === "video"
+                ? "Attach videos"
+                : "Attach workspace file",
           filters:
             kind === "image"
               ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
-              : undefined,
+              : kind === "video"
+                ? [
+                    {
+                      name: "Videos",
+                      extensions: ["mp4", "m4v", "mov", "webm"],
+                    },
+                  ]
+                : undefined,
         });
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
         const existing = chatAttachments[activeDraftKey] ?? [];
+        const mediaLimit = kind === "image" ? 4 : kind === "video" ? 2 : 0;
         const availableSlots =
-          kind === "image"
+          kind === "image" || kind === "video"
             ? Math.max(
                 0,
-                4 - existing.filter((item) => item.kind === "image").length,
+                mediaLimit -
+                  existing.filter((item) => item.kind === kind).length,
               )
             : paths.length;
-        if (kind === "image" && paths.length > availableSlots) {
+        if (
+          (kind === "image" || kind === "video") &&
+          paths.length > availableSlots
+        ) {
           notify(
             "command-failed",
-            "Four-image limit",
-            `Only ${availableSlots} more image${availableSlots === 1 ? "" : "s"} can be attached`,
+            kind === "video" ? "Two-video limit" : "Four-image limit",
+            `Only ${availableSlots} more ${kind}${availableSlots === 1 ? "" : "s"} can be attached`,
           );
         }
         const prepared: ChatAttachment[] = [];
@@ -4613,7 +4631,7 @@ export function App() {
           prepared.push({
             ...attachment,
             previewUrl:
-              attachment.kind === "image"
+              attachment.kind === "image" || attachment.kind === "video"
                 ? convertFileSrc(attachment.path)
                 : undefined,
           });
@@ -4691,7 +4709,7 @@ export function App() {
     workspacePath,
   ]);
 
-  const attachDroppedImages = useCallback(
+  const attachDroppedMedia = useCallback(
     async (
       files: File[],
       target?: {
@@ -4704,13 +4722,29 @@ export function App() {
       const attachmentSessionId = target?.sessionId ?? activeSessionId;
       const attachmentWorkspacePath = target?.workspacePath ?? workspacePath;
       const existing = chatAttachments[attachmentDraftKey] ?? [];
-      const slots = Math.max(
-        0,
-        4 - existing.filter((item) => item.kind === "image").length,
-      );
+      const remaining = {
+        image: Math.max(
+          0,
+          4 - existing.filter((item) => item.kind === "image").length,
+        ),
+        video: Math.max(
+          0,
+          2 - existing.filter((item) => item.kind === "video").length,
+        ),
+      };
       const prepared: ChatAttachment[] = [];
       let rejectedCount = 0;
-      for (const file of files.slice(0, slots)) {
+      let limitExceeded = false;
+      for (const file of files) {
+        const kind =
+          file.type.startsWith("video/") || isSupportedChatVideoPath(file.name)
+            ? "video"
+            : "image";
+        if (remaining[kind] <= 0) {
+          limitExceeded = true;
+          continue;
+        }
+        remaining[kind] -= 1;
         try {
           const attachment = await invoke<ChatAttachment>(
             "prepare_chat_attachment",
@@ -4719,8 +4753,10 @@ export function App() {
                 sessionId: attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
                 path: "",
                 workspacePath: attachmentWorkspacePath,
-                kind: "image",
-                name: file.name || `pasted-image-${Date.now()}.png`,
+                kind,
+                name:
+                  file.name ||
+                  `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`,
                 bytes: Array.from(new Uint8Array(await file.arrayBuffer())),
               },
             },
@@ -4742,43 +4778,59 @@ export function App() {
           ],
         }));
       }
-      if (files.length > slots) {
+      if (limitExceeded) {
         notify(
           "command-failed",
-          "Four-image limit",
-          "Extra pasted or dropped images were not attached",
+          "Media limit reached",
+          "Attach up to four images and two videos per message",
         );
       } else if (rejectedCount > 0) {
         notify(
           "command-failed",
-          "Image rejected",
-          `${rejectedCount} image${rejectedCount === 1 ? " was" : "s were"} not accepted`,
+          "Media rejected",
+          `${rejectedCount} file${rejectedCount === 1 ? " was" : "s were"} not accepted`,
         );
       }
     },
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
   );
 
-  const attachDroppedImagePaths = useCallback(
+  const attachDroppedMediaPaths = useCallback(
     async (paths: string[]) => {
-      const imagePaths = paths.filter(isSupportedChatImagePath);
-      const unsupportedCount = paths.length - imagePaths.length;
-      if (!imagePaths.length) {
+      const mediaPaths = paths.filter(
+        (path) =>
+          isSupportedChatImagePath(path) || isSupportedChatVideoPath(path),
+      );
+      const unsupportedCount = paths.length - mediaPaths.length;
+      if (!mediaPaths.length) {
         notify(
           "command-failed",
           "Unsupported attachment",
-          "Drop PNG, JPEG, or WebP images onto the chat",
+          "Drop PNG, JPEG, WebP, MP4, MOV, or WebM media onto the chat",
         );
         return;
       }
       const existing = chatAttachments[activeDraftKey] ?? [];
-      const slots = Math.max(
-        0,
-        4 - existing.filter((item) => item.kind === "image").length,
-      );
+      const remaining = {
+        image: Math.max(
+          0,
+          4 - existing.filter((item) => item.kind === "image").length,
+        ),
+        video: Math.max(
+          0,
+          2 - existing.filter((item) => item.kind === "video").length,
+        ),
+      };
       const prepared: ChatAttachment[] = [];
       let rejectedCount = unsupportedCount;
-      for (const path of imagePaths.slice(0, slots)) {
+      let limitExceeded = false;
+      for (const path of mediaPaths) {
+        const kind = isSupportedChatVideoPath(path) ? "video" : "image";
+        if (remaining[kind] <= 0) {
+          limitExceeded = true;
+          continue;
+        }
+        remaining[kind] -= 1;
         try {
           const attachment = await invoke<ChatAttachment>(
             "prepare_chat_attachment",
@@ -4787,7 +4839,7 @@ export function App() {
                 sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
                 path,
                 workspacePath,
-                kind: "image",
+                kind,
               },
             },
           );
@@ -4805,16 +4857,16 @@ export function App() {
           [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
         }));
       }
-      if (imagePaths.length > slots) {
+      if (limitExceeded) {
         notify(
           "command-failed",
-          "Four-image limit",
-          "Extra dropped images were not attached",
+          "Media limit reached",
+          "Attach up to four images and two videos per message",
         );
       } else if (rejectedCount > 0) {
         notify(
           "command-failed",
-          "Image rejected",
+          "Media rejected",
           `${rejectedCount} dropped item${rejectedCount === 1 ? " was" : "s were"} not accepted`,
         );
       }
@@ -4844,7 +4896,7 @@ export function App() {
         if (!target?.closest(".gyro-chat-surface")) {
           return;
         }
-        void attachDroppedImagePaths(event.payload.paths);
+        void attachDroppedMediaPaths(event.payload.paths);
       })
       .then((dispose) => {
         if (disposed) {
@@ -4858,7 +4910,7 @@ export function App() {
       disposed = true;
       unlisten?.();
     };
-  }, [activeDestination, activeWorkspaceLayout, attachDroppedImagePaths]);
+  }, [activeDestination, activeWorkspaceLayout, attachDroppedMediaPaths]);
 
   const changeChatMode = useCallback(
     async (mode: ChatMode) => {
@@ -5149,6 +5201,9 @@ export function App() {
           break;
         case "select-image":
           void selectChatAttachment("image");
+          break;
+        case "select-video":
+          void selectChatAttachment("video");
           break;
         case "attach-editor-snapshot":
           void attachEditorSnapshot();
@@ -5602,7 +5657,7 @@ export function App() {
               return {
                 ...prepared,
                 previewUrl:
-                  prepared.kind === "image"
+                  prepared.kind === "image" || prepared.kind === "video"
                     ? convertFileSrc(prepared.path)
                     : undefined,
               };
@@ -9554,9 +9609,9 @@ export function App() {
         onCompleteOnboardingStep={(step) =>
           dispatchWorkbench({ type: "complete-onboarding-step", step })
         }
-        onAttachImageFiles={(files) => {
+        onAttachMediaFiles={(files) => {
           focusChatPane(pane);
-          void attachDroppedImages(files, {
+          void attachDroppedMedia(files, {
             draftKey: paneDraftKey,
             sessionId: pane.kind === "session" ? pane.sessionId : undefined,
             workspacePath: pane.workspacePath,
@@ -9587,6 +9642,20 @@ export function App() {
           }
         }}
         onContinueChat={() => requestSend("Continue")}
+        onCloseChat={() => {
+          setChatPanelByPaneId((current) => {
+            const next = { ...current };
+            delete next[pane.paneId];
+            return next;
+          });
+          dispatchChatGrid({
+            type: "close-pane",
+            projectKey:
+              activeChatLayout?.projectKey ??
+              normalizedChatProjectKey(pane.workspacePath),
+            paneId: pane.paneId,
+          });
+        }}
         onOpenToolPanel={(tab) => {
           focusChatPane(pane);
           openToolPanel(tab);
@@ -9868,7 +9937,7 @@ export function App() {
                       step,
                     })
                   }
-                  onAttachImageFiles={attachDroppedImages}
+                  onAttachMediaFiles={attachDroppedMedia}
                   onComposerAction={handleComposerAction}
                   onDraftChange={updateActiveChatDraft}
                   onRemoveAttachment={removeChatAttachment}
@@ -10287,7 +10356,7 @@ export function App() {
           onCompleteOnboardingStep={(step) =>
             dispatchWorkbench({ type: "complete-onboarding-step", step })
           }
-          onAttachImageFiles={attachDroppedImages}
+          onAttachMediaFiles={attachDroppedMedia}
           onComposerAction={handleComposerAction}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}
@@ -11102,6 +11171,10 @@ function loadChatGridState(): ChatGridState {
 
 function isSupportedChatImagePath(path: string) {
   return /\.(?:png|jpe?g|webp)$/i.test(path.trim());
+}
+
+function isSupportedChatVideoPath(path: string) {
+  return /\.(?:mp4|m4v|mov|webm)$/i.test(path.trim());
 }
 
 function loadRemovedProjectPaths(): string[] {

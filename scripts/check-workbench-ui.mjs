@@ -206,6 +206,13 @@ expect(
   "Chat panes should omit floating controls and focused-pane outlines.",
 );
 expect(
+  surfaceSource.includes('aria-label="Close chat"') &&
+    surfaceSource.includes("onCloseChat={onCloseChat}") &&
+    appSource.includes('type: "close-pane"') &&
+    appSource.includes("paneId: pane.paneId"),
+  "Grid chats should always expose a same-size close control in the chat header.",
+);
+expect(
   surfaceSource.includes('className="gyro-chat-grid-drop-overlay"') &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
     surfaceSource.includes('label: "Above"') &&
@@ -257,10 +264,10 @@ expect(
 expect(
   cssRules(styleSource, ".gyro-chat-message-queue").some(
     (rule) =>
-      rule.includes("max-width: 734px") &&
-      rule.includes("width: min(734px, 95%)"),
+      rule.includes("max-width: 820px") &&
+      rule.includes("width: min(820px, 100%)"),
   ),
-  "The chat message queue should span roughly 95% of the composer width.",
+  "The chat message queue should match the composer width.",
 );
 expect(
   styleSource.includes(
@@ -301,12 +308,13 @@ expect(
     surfaceSource.includes('"collapsed" | "preview" | "expanded"') &&
     surfaceSource.includes("events.slice(0, 3)") &&
     surfaceSource.includes("click again to show") &&
-    surfaceSource.includes("function LiveFileActivity") &&
-    surfaceSource.includes('className="gyro-change-summary-files is-live"') &&
+    surfaceSource.includes("function ChatTurnChangeSummary") &&
+    surfaceSource.includes('aria-live="polite"') &&
+    surfaceSource.includes("changeSummary={changeSummary}") &&
     surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
     styleSource.includes(".gyro-chat-run-activity-group-toggle") &&
-    styleSource.includes(".gyro-chat-run-live-files-toggle"),
-  "Chat turns should interleave text with progressively expandable actions and live file diffs.",
+    styleSource.includes(".gyro-change-summary-actions"),
+  "Chat turns should interleave text with expandable actions and one aggregate live change summary.",
 );
 expect(
   surfaceSource.includes('label: "Suggested"') &&
@@ -2458,8 +2466,9 @@ expect(
     surfaceSource.includes("`${seconds}s`") &&
     surfaceSource.includes("interleavedChatTimelineItems") &&
     surfaceSource.includes("providerActivityPathsMatch") &&
-    surfaceSource.includes("existingFileItem") &&
-    surfaceSource.includes("existingFileItem.event =") &&
+    surfaceSource.includes(
+      'if (providerActivityFromEvent(event)?.kind === "file")',
+    ) &&
     surfaceSource.includes("`Ran ${count} commands`") &&
     surfaceSource.includes('activity.kind === "context"') &&
     surfaceSource.includes("<Minimize2") &&
@@ -2528,10 +2537,11 @@ expect(
     surfaceSource.includes("gyro-chat-run-change-summary") &&
     surfaceSource.includes('activity.kind === "file"') &&
     surfaceSource.includes('activity.status === "running"') &&
+    surfaceSource.includes("hasFileActivity ?") &&
     surfaceSource.includes(
-      "!isRunning && hasResponse && changeSummary.paths.length > 0",
+      'const actionLabel = isRunning ? "Editing" : "Edited"',
     ) &&
-    surfaceSource.includes("showAllChangeFiles ? undefined : 5") &&
+    surfaceSource.includes("showAllFiles ? undefined : 5") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
     appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
@@ -3583,10 +3593,10 @@ expect(
     surfaceSource.includes("sourceControl?.deletions") &&
     surfaceSource.includes("sourceControl?.files.length") &&
     !surfaceSource.includes("gyro-thread-diff-pill") &&
+    surfaceSource.includes("hasFileActivity ?") &&
     surfaceSource.includes(
-      "!isRunning && hasResponse && changeSummary.paths.length > 0",
+      'const actionLabel = isRunning ? "Editing" : "Edited"',
     ) &&
-    surfaceSource.includes("Edited {changeSummary.paths.length}") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
@@ -3889,12 +3899,16 @@ expect(
     appSource.includes("deriveSessionGoal") &&
     appSource.includes("deriveChatMode") &&
     surfaceSource.includes('action: "select-image"') &&
+    surfaceSource.includes('action: "select-video"') &&
+    surfaceSource.includes('command: "/video"') &&
     surfaceSource.includes('action: "add-goal"') &&
     appSource.includes('case "add-plan"') &&
     surfaceSource.includes('"set-chat-mode-plan"') &&
     surfaceSource.includes("gyro-composer-attachments") &&
     surfaceSource.includes("gyro-session-goal") &&
     tauriSource.includes("MAX_CHAT_IMAGE_BYTES") &&
+    tauriSource.includes("MAX_CHAT_VIDEO_BYTES") &&
+    tauriSource.includes('attachment.kind == "video"') &&
     tauriSource.includes('args.push("--image".into())') &&
     tauriSource.includes('args.push("plan".into())') &&
     tauriSource.includes("ProviderCancellationManager") &&
@@ -4223,9 +4237,13 @@ expect(
 );
 expect(
   !surfaceSource.includes("const fileActivityIndexes = new Map") &&
-    surfaceSource.includes("const existingFileItem = items.find") &&
-    surfaceSource.includes("existingFileItem.event =") &&
-    surfaceSource.includes("createdAt: existingFileItem.event.createdAt") &&
+    surfaceSource.includes(
+      'if (providerActivityFromEvent(event)?.kind === "file")',
+    ) &&
+    surfaceSource.includes(
+      "const hasFileActivity = turn.timelineEvents.some",
+    ) &&
+    surfaceSource.includes("changeSummary={changeSummary}") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
@@ -4338,6 +4356,12 @@ expect(
       ':root[data-theme="light"][data-window-active="false"]',
     ) &&
     styleSource.includes("rgba(82, 92, 104, 0.2)") &&
+    cssRules(
+      styleSource,
+      ':root[data-theme="light"][data-window-active="false"]\n  .gyro-sidebar-persistent-header::after',
+    ).some(
+      (rule) => rule.includes("left: 8px") && rule.includes("top: 18px"),
+    ) &&
     surfaceSource.includes('className="gyro-composer-branch-picker"') &&
     cssRules(styleSource, ".gyro-composer-branch-picker").some(
       (rule) =>
@@ -4982,8 +5006,8 @@ expect(
     styleSource.includes(".gyro-change-summary-file > button") &&
     surfaceSource.includes("function ChangeSummaryFile") &&
     surfaceSource.includes("aria-label={`Changes in ${path}`}") &&
-    surfaceSource.includes("showAllChangeFiles") &&
-    surfaceSource.includes("aria-expanded={showAllChangeFiles}") &&
+    surfaceSource.includes("showAllFiles") &&
+    surfaceSource.includes("aria-expanded={showAllFiles}") &&
     styleSource.includes(".gyro-change-summary-diff-scroll") &&
     styleSource.includes("max-height: min(420px, 48vh)"),
   "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
