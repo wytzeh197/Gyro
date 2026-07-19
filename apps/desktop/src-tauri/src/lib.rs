@@ -4,8 +4,9 @@ use gyro_core::{
     apply_provider_mutation_transaction_with_cancellation, begin_provider_mutation_transaction,
     create_worktree, decide_mutation_proposal,
     ipc::{
-        acknowledgement_for, request_desktop_provider_approval, versions_compatible,
-        AppNotification, DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
+        acknowledgement_for, request_desktop_provider_approval,
+        request_desktop_provider_capability, versions_compatible, AppNotification,
+        DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
     logout_account as account_logout, mutation_approval_payload,
@@ -15,14 +16,19 @@ use gyro_core::{
     run_kimi_acp, start_account_login as account_start_login,
     stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
     Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
-    CancellationToken, CreateAutomationRequest, CreateSessionContext, ExecutionRequest,
-    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
-    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest, MutationDecision,
-    MutationProposal, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
-    ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
-    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
-    SessionOrigin, SessionStore, SessionWorkspaceMode,
+    CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
+    CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
+    CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
+    CapabilityRunMode, CapabilityStatus, CreateAutomationRequest, CreateSessionContext,
+    ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths,
+    HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest,
+    MutationDecision, MutationProposal, PendingProviderMutationCommit,
+    PreparedProviderMutationTransaction, ProjectCapabilityGrant, ProjectCapabilityPolicy,
+    ProviderCapabilitySupport, ProviderDiagnosticsPayload, ProviderExecutionKind,
+    ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
+    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
+    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
+    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -66,6 +72,7 @@ const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 4;
 const MAX_CHAT_ATTACHMENTS: usize = 16;
 const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
 const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 16;
 const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
@@ -107,6 +114,8 @@ const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
 const PROVIDER_APPROVAL_EVENT: &str = "gyro://provider-approval-event";
+const PROVIDER_CAPABILITY_EVENT: &str = "gyro://provider-capability-event";
+const PROVIDER_CAPABILITY_RESOURCE_EVENT: &str = "gyro://provider-capability-resource";
 const PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT: &str =
     "gyro://provider-approval-notification-open";
 const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
@@ -114,6 +123,7 @@ const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
 const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
 const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const AUTOMATION_LEASE_SECONDS: i64 = 45 * 60;
 const AUTOMATION_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
@@ -137,6 +147,31 @@ struct ProviderCancellationManager {
 #[derive(Default)]
 struct ProviderApprovalManager {
     pending: Mutex<HashMap<String, PendingProviderApproval>>,
+}
+
+#[derive(Default)]
+struct ProviderCapabilityApprovalManager {
+    pending: Mutex<HashMap<String, PendingCapabilityApproval>>,
+}
+
+#[derive(Default)]
+struct ProviderCapabilityBroker;
+
+impl ProviderCapabilityBroker {
+    fn invoke(&self, app: &tauri::AppHandle, request: CapabilityRequest) -> CapabilityResponse {
+        handle_desktop_provider_capability_request(app, request)
+    }
+}
+
+#[derive(Default)]
+struct ProviderCapabilityResourceManager {
+    terminals: Mutex<HashMap<String, ModelTerminalResource>>,
+    browsers: Mutex<HashMap<String, ModelBrowserResource>>,
+}
+
+#[derive(Default)]
+struct CapabilityIdeEvidenceManager {
+    by_workspace: Mutex<HashMap<String, serde_json::Value>>,
 }
 
 static ATTACHMENT_SESSION_LOCKS: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
@@ -241,6 +276,42 @@ struct PendingProviderApproval {
     file_transaction: Option<PreparedProviderMutationTransaction>,
 }
 
+struct PendingCapabilityApproval {
+    sender: mpsc::Sender<CapabilityApprovalDecision>,
+    session_id: Uuid,
+    turn_id: Option<Uuid>,
+}
+
+#[derive(Clone)]
+struct BoundProviderCapabilityContext {
+    session_id: String,
+    turn_id: Option<String>,
+    provider_id: String,
+    workspace: PathBuf,
+    workspace_key: String,
+    policy: CapabilityPolicySnapshot,
+}
+
+#[derive(Clone)]
+struct ModelTerminalResource {
+    resource_id: String,
+    pane_id: String,
+    session_id: String,
+    turn_id: Option<String>,
+    call_id: Uuid,
+    workspace_key: String,
+}
+
+#[derive(Clone)]
+struct ModelBrowserResource {
+    resource_id: String,
+    session_id: String,
+    turn_id: Option<String>,
+    call_id: Uuid,
+    workspace_key: String,
+    url: String,
+}
+
 #[derive(Clone, Debug)]
 struct ProviderApprovalContext {
     session_id: String,
@@ -254,6 +325,16 @@ struct ProviderApprovalContext {
 struct ProviderApprovalNotificationOpen {
     session_id: String,
     approval_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderCapabilityResourceEvent {
+    session_id: String,
+    turn_id: Option<String>,
+    call_id: Uuid,
+    resource: CapabilityResourceRef,
+    data: serde_json::Value,
 }
 
 impl From<&ProviderChatRequest> for ProviderApprovalContext {
@@ -278,6 +359,8 @@ struct ProviderRunControl {
     cancellation: CancellationToken,
     next_event_sequence: AtomicU64,
     approval_nonce: String,
+    capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
+    capability_calls: Mutex<HashSet<Uuid>>,
 }
 
 impl Default for ProviderRunControl {
@@ -286,6 +369,8 @@ impl Default for ProviderRunControl {
             cancellation: CancellationToken::default(),
             next_event_sequence: AtomicU64::new(0),
             approval_nonce: Uuid::new_v4().to_string(),
+            capability_context: Mutex::new(None),
+            capability_calls: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -518,6 +603,30 @@ struct FileMutationDecisionResult {
 struct ProviderApprovalDecisionRequest {
     approval_id: String,
     decision: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilityApprovalDecisionRequest {
+    approval_id: String,
+    session_id: String,
+    turn_id: Option<String>,
+    decision: CapabilityApprovalDecision,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveProjectCapabilityPolicyRequest {
+    workspace_path: String,
+    expected_revision: Option<u64>,
+    policy: ProjectCapabilityPolicy,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilityIdeEvidenceUpdate {
+    workspace_path: String,
+    diagnostics: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -860,6 +969,7 @@ struct TerminalPaneSnapshot {
     output: Option<String>,
     output_revision: u64,
     status: String,
+    has_foreground_job: Option<bool>,
     exit_code: Option<i32>,
     workspace_path: Option<String>,
     working_directory: Option<String>,
@@ -939,6 +1049,7 @@ struct PrepareChatAttachmentRequest {
     #[serde(default, deserialize_with = "deserialize_optional_attachment_bytes")]
     bytes: Option<Vec<u8>>,
     name: Option<String>,
+    relative_path: Option<String>,
 }
 
 fn deserialize_optional_attachment_bytes<'de, D>(
@@ -1342,19 +1453,7 @@ impl TerminalProcessManager {
         if snapshot.status != "running" {
             return Ok(false);
         }
-
-        #[cfg(unix)]
-        {
-            let shell_pid = process.child.process_id().map(|pid| pid as i32);
-            let foreground_pid = process.master.process_group_leader();
-            Ok(match (shell_pid, foreground_pid) {
-                (Some(shell_pid), Some(foreground_pid)) => foreground_pid != shell_pid,
-                _ => true,
-            })
-        }
-
-        #[cfg(not(unix))]
-        Ok(true)
+        Ok(snapshot.has_foreground_job.unwrap_or(true))
     }
 
     fn stop(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
@@ -1642,7 +1741,27 @@ async fn delete_session(app: tauri::AppHandle, session_id: String) -> Result<boo
             flags.remove(&session_id);
         }
     }
-    result?
+    let deleted = result??;
+    if deleted {
+        let owned_terminal = app
+            .state::<ProviderCapabilityResourceManager>()
+            .terminals
+            .lock()
+            .ok()
+            .and_then(|mut terminals| terminals.remove(&session_id));
+        if let Some(owned) = owned_terminal {
+            let _ = app.state::<TerminalProcessManager>().stop(&owned.pane_id);
+            let _ = app.state::<TerminalProcessManager>().close(&owned.pane_id);
+        }
+        if let Ok(mut browsers) = app
+            .state::<ProviderCapabilityResourceManager>()
+            .browsers
+            .lock()
+        {
+            browsers.remove(&session_id);
+        }
+    }
+    Ok(deleted)
 }
 
 fn delete_session_blocking(session_id: String) -> Result<bool, String> {
@@ -2709,6 +2828,7 @@ fn run_provider_chat_blocking(
     validate_chat_context(&request)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
     let run_id = turn_id.unwrap_or_else(Uuid::new_v4);
+    bind_provider_capability_context(&app, &store, &request, run_id)?;
     if provider_turn_has_unfinished_attempt(&store, session_id, run_id).map_err(to_string)? {
         return Err(
             "this turn has an unfinished provider attempt; start a new turn to avoid replaying tools"
@@ -3092,6 +3212,51 @@ fn bind_provider_chat_request(
     Ok(())
 }
 
+fn bind_provider_capability_context(
+    app: &tauri::AppHandle,
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+    run_id: Uuid,
+) -> Result<(), String> {
+    let workspace_path = request
+        .workspace_path
+        .as_deref()
+        .ok_or_else(|| "provider capability context requires a workspace".to_string())?;
+    let workspace = PathBuf::from(workspace_path)
+        .canonicalize()
+        .map_err(to_string)?;
+    let workspace_key = workspace.display().to_string();
+    let policy = store
+        .get_project_capability_policy(&workspace_key)
+        .map_err(to_string)?;
+    let mode = if request.mode == ChatMode::Plan {
+        CapabilityRunMode::Plan
+    } else {
+        CapabilityRunMode::Normal
+    };
+    let context = BoundProviderCapabilityContext {
+        session_id: request.session_id.clone(),
+        turn_id: Some(run_id.to_string()),
+        provider_id: request.provider_id.clone(),
+        workspace,
+        workspace_key,
+        policy: CapabilityPolicySnapshot::from_policy(&policy, mode),
+    };
+    let manager = app.state::<ProviderCancellationManager>();
+    let control = manager
+        .flags
+        .lock()
+        .map_err(|_| "provider run state is unavailable".to_string())?
+        .get(&request.session_id)
+        .cloned()
+        .ok_or_else(|| "provider run is no longer active".to_string())?;
+    *control
+        .capability_context
+        .lock()
+        .map_err(|_| "provider capability context is unavailable".to_string())? = Some(context);
+    Ok(())
+}
+
 fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
     if request.attachments.len() > MAX_CHAT_ATTACHMENTS {
         return Err(format!(
@@ -3191,6 +3356,39 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
                     attachment.name
                 ));
             }
+        } else if attachment.kind == "ide-snapshot" {
+            if metadata.len() > MAX_CHAT_IDE_SNAPSHOT_BYTES {
+                return Err(format!(
+                    "{} exceeds the 128 KB editor snapshot limit",
+                    attachment.name
+                ));
+            }
+            let canonical = path.canonicalize().map_err(to_string)?;
+            let paths = GyroPaths::for_current_user().map_err(to_string)?;
+            let attachment_dir = paths
+                .sessions_dir
+                .join("attachments")
+                .join(&request.session_id)
+                .canonicalize()
+                .map_err(|_| "session attachment storage is unavailable".to_string())?;
+            if !canonical.starts_with(&attachment_dir) {
+                return Err(format!(
+                    "{} is outside this session's private snapshot storage",
+                    attachment.name
+                ));
+            }
+            let expected = attachment
+                .content_hash
+                .as_deref()
+                .ok_or_else(|| format!("{} is missing its integrity hash", attachment.name))?;
+            let (current, current_size) =
+                hash_file_streaming(&canonical, Some(MAX_CHAT_IDE_SNAPSHOT_BYTES))?;
+            if current_size != attachment.size || current != expected {
+                return Err(format!(
+                    "{} changed after it was captured; remove it and capture it again",
+                    attachment.name
+                ));
+            }
         } else {
             return Err(format!(
                 "{} has an unsupported attachment kind",
@@ -3245,9 +3443,23 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
         .attachments
         .iter()
         .filter(|attachment| {
-            attachment.kind == "workspace-file" || request.provider_id == "anthropic"
+            matches!(attachment.kind.as_str(), "workspace-file" | "ide-snapshot")
+                || request.provider_id == "anthropic"
         })
-        .map(|attachment| format!("- {} ({})", attachment.name, attachment.path))
+        .map(|attachment| {
+            if attachment.kind == "ide-snapshot" {
+                let content = fs::read_to_string(&attachment.path)
+                    .unwrap_or_else(|_| "[snapshot unavailable]".into());
+                format!(
+                    "- {} (immutable editor snapshot of {})\n<gyro-editor-snapshot>\n{}\n</gyro-editor-snapshot>",
+                    attachment.name,
+                    attachment.relative_path.as_deref().unwrap_or("workspace file"),
+                    content,
+                )
+            } else {
+                format!("- {} ({})", attachment.name, attachment.path)
+            }
+        })
         .collect::<Vec<_>>();
     if !references.is_empty() {
         context.push(format!(
@@ -3481,6 +3693,69 @@ fn prepare_chat_attachment_blocking(
             Some(relative),
             None,
             size,
+            content_hash,
+        )
+    } else if request.kind == "ide-snapshot" {
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        paths.ensure().map_err(to_string)?;
+        let attachments_root = paths.sessions_dir.join("attachments");
+        let bytes = match request.bytes {
+            Some(bytes) => bytes,
+            None => {
+                let source = source
+                    .as_ref()
+                    .ok_or_else(|| "editor snapshots require immutable text content".to_string())?;
+                let draft_dir = attachments_root
+                    .join("new")
+                    .canonicalize()
+                    .map_err(|_| "draft editor snapshot storage is unavailable".to_string())?;
+                if !source.starts_with(&draft_dir) {
+                    return Err(
+                        "editor snapshots can only migrate from private draft storage".into(),
+                    );
+                }
+                read_bounded_regular_file(
+                    source,
+                    MAX_CHAT_IDE_SNAPSHOT_BYTES as usize,
+                    "editor snapshot",
+                )
+                .map(|(bytes, _)| bytes)
+                .map_err(to_string)?
+            }
+        };
+        if bytes.is_empty() || bytes.len() as u64 > MAX_CHAT_IDE_SNAPSHOT_BYTES {
+            return Err("editor snapshots must contain 1 byte to 128 KB of text".into());
+        }
+        if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
+            return Err("editor snapshots must be UTF-8 text".into());
+        }
+        let relative = gyro_core::normalize_capability_relative_path(
+            request
+                .relative_path
+                .as_deref()
+                .ok_or_else(|| "editor snapshots require a workspace path".to_string())?,
+        )
+        .map_err(to_string)?;
+        let content_hash = format!("{:x}", Sha256::digest(&bytes));
+        ensure_private_attachment_directory(&attachments_root)?;
+        let attachment_dir = attachments_root.join(&safe_session);
+        ensure_private_attachment_directory(&attachment_dir)?;
+        let destination = attachment_dir.join(format!("{content_hash}.snapshot.txt"));
+        ensure_attachment_storage_quota(&attachment_dir, &destination, bytes.len() as u64)?;
+        write_private_attachment(&destination, &bytes, &content_hash)?;
+        if safe_session != "new" {
+            if let Some(source) = source.as_ref() {
+                let draft_dir = attachments_root.join("new");
+                if source.starts_with(&draft_dir) && source != &destination {
+                    let _ = fs::remove_file(source);
+                }
+            }
+        }
+        (
+            destination.display().to_string(),
+            Some(relative),
+            Some("text/plain".into()),
+            bytes.len() as u64,
             content_hash,
         )
     } else {
@@ -3760,6 +4035,62 @@ fn merge_renderer_config(mut incoming: GyroConfig, persisted: &GyroConfig) -> Gy
     incoming.account_oidc = persisted.account_oidc.clone();
     incoming.account_session = persisted.account_session.clone();
     incoming
+}
+
+#[tauri::command]
+async fn get_project_capability_policy(
+    workspace_path: String,
+) -> Result<ProjectCapabilityPolicy, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workspace = workspace_root(&workspace_path).map_err(to_string)?;
+        open_store()?
+            .get_project_capability_policy(&workspace.display().to_string())
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("capability policy worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn save_project_capability_policy(
+    request: SaveProjectCapabilityPolicyRequest,
+) -> Result<ProjectCapabilityPolicy, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workspace = workspace_root(&request.workspace_path).map_err(to_string)?;
+        let workspace_key = workspace.display().to_string();
+        if request.policy.workspace_key != workspace_key {
+            return Err("capability policy workspace changed; reload and try again".into());
+        }
+        open_store()?
+            .save_project_capability_policy(request.policy, request.expected_revision)
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("capability policy save worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn get_provider_capability_support(
+    provider_id: String,
+) -> Result<ProviderCapabilitySupport, String> {
+    Ok(gyro_core::provider_capability_support(provider_id.trim()))
+}
+
+#[tauri::command]
+async fn update_capability_ide_evidence(
+    request: CapabilityIdeEvidenceUpdate,
+    manager: tauri::State<'_, CapabilityIdeEvidenceManager>,
+) -> Result<(), String> {
+    let workspace = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let diagnostics =
+        gyro_core::validate_capability_result_data(redact_json_strings(request.diagnostics))
+            .map_err(to_string)?;
+    manager
+        .by_workspace
+        .lock()
+        .map_err(|_| "IDE evidence state is unavailable".to_string())?
+        .insert(workspace.display().to_string(), diagnostics);
+    Ok(())
 }
 
 #[tauri::command]
@@ -6875,6 +7206,82 @@ async fn stop_terminal_pane(
 }
 
 #[tauri::command]
+async fn stop_model_terminal_resource(
+    manager: tauri::State<'_, TerminalProcessManager>,
+    resources: tauri::State<'_, ProviderCapabilityResourceManager>,
+    session_id: String,
+    resource_id: String,
+) -> Result<TerminalPaneSnapshot, String> {
+    let owned = resources
+        .terminals
+        .lock()
+        .map_err(|_| "terminal capability state is unavailable".to_string())?
+        .get(&session_id)
+        .cloned()
+        .ok_or_else(|| "this chat has no model-owned terminal".to_string())?;
+    if owned.session_id != session_id || owned.resource_id != resource_id {
+        return Err("terminal resource did not belong to this chat".into());
+    }
+    let pane_id = owned.pane_id.clone();
+    let terminal_manager = manager.inner().clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        terminal_manager.stop(&pane_id).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("model terminal stop worker failed: {error}"))??;
+    if let Ok(mut terminals) = resources.terminals.lock() {
+        if terminals
+            .get(&session_id)
+            .is_some_and(|current| current.resource_id == resource_id)
+        {
+            terminals.remove(&session_id);
+        }
+    }
+    Ok(snapshot)
+}
+
+#[tauri::command]
+async fn list_active_capability_resources(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<Vec<CapabilityResourceRef>, String> {
+    parse_uuid(&session_id)?;
+    let resources = app.state::<ProviderCapabilityResourceManager>();
+    let terminal = resources
+        .terminals
+        .lock()
+        .map_err(|_| "terminal capability state is unavailable".to_string())?
+        .get(&session_id)
+        .cloned();
+    let browser = resources
+        .browsers
+        .lock()
+        .map_err(|_| "browser capability state is unavailable".to_string())?
+        .get(&session_id)
+        .cloned();
+    let mut active = Vec::new();
+    if let Some(terminal) = terminal {
+        let snapshot = app
+            .state::<TerminalProcessManager>()
+            .read(&terminal.pane_id, None)
+            .map_err(to_string)?;
+        active.push(CapabilityResourceRef {
+            id: terminal.resource_id,
+            kind: "terminal".into(),
+            label: snapshot.title,
+        });
+    }
+    if let Some(browser) = browser {
+        active.push(CapabilityResourceRef {
+            id: browser.resource_id,
+            kind: "browser".into(),
+            label: browser.url,
+        });
+    }
+    Ok(active)
+}
+
+#[tauri::command]
 async fn close_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
@@ -6946,19 +7353,21 @@ async fn check_browser_preview(
 fn check_browser_preview_blocking(
     request: BrowserPreviewCheckRequest,
 ) -> Result<BrowserPreviewCheck, String> {
-    let url = url::Url::parse(request.url.trim()).map_err(|_| "invalid preview URL".to_string())?;
-    if !matches!(url.scheme(), "http" | "https") {
+    let mut current =
+        url::Url::parse(request.url.trim()).map_err(|_| "invalid preview URL".to_string())?;
+    if !matches!(current.scheme(), "http" | "https") {
         return Err("preview URLs must use http or https".into());
     }
-    if url.host_str().is_none() {
+    if current.host_str().is_none() {
         return Err("preview URL must include a host".into());
     }
-    if !url.username().is_empty() || url.password().is_some() {
+    if !current.username().is_empty() || current.password().is_some() {
         return Err("preview URLs cannot include credentials".into());
     }
-    if !browser_preview_diagnostics_supported(&url) {
+    if !browser_preview_diagnostics_supported(&current) {
         return Err("preview URLs must use localhost or a loopback IP address".into());
     }
+    let approved_origin = current.origin().ascii_serialization();
     let diagnostics_supported = true;
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(2))
@@ -6966,32 +7375,58 @@ fn check_browser_preview_blocking(
         .timeout_write(Duration::from_secs(2))
         .redirects(0)
         .build();
-    match agent.get(url.as_str()).call() {
-        Ok(response) => Ok(BrowserPreviewCheck {
-            reachable: true,
-            status_code: Some(response.status()),
-            message: format!("Local preview reachable (HTTP {})", response.status()),
-            diagnostics: Vec::new(),
-            diagnostics_supported,
-            diagnostics_captured: false,
-        }),
-        Err(ureq::Error::Status(status, _)) => Ok(BrowserPreviewCheck {
-            reachable: true,
-            status_code: Some(status),
-            message: format!("Preview server reachable (HTTP {status})"),
-            diagnostics: Vec::new(),
-            diagnostics_supported,
-            diagnostics_captured: false,
-        }),
-        Err(ureq::Error::Transport(_)) => Ok(BrowserPreviewCheck {
-            reachable: false,
-            status_code: None,
-            message: "Preview unavailable: connection refused, timed out, or offline".into(),
-            diagnostics: Vec::new(),
-            diagnostics_supported,
-            diagnostics_captured: false,
-        }),
+    for _ in 0..=5 {
+        match agent.get(current.as_str()).call() {
+            Ok(response) if (300..400).contains(&response.status()) => {
+                let location = response
+                    .header("location")
+                    .ok_or_else(|| "preview redirect did not include a location".to_string())?;
+                let next = current
+                    .join(location)
+                    .map_err(|_| "preview redirect URL is invalid".to_string())?;
+                if !browser_preview_diagnostics_supported(&next)
+                    || next.origin().ascii_serialization() != approved_origin
+                {
+                    return Err(
+                        "preview redirects must stay on the approved loopback origin".into(),
+                    );
+                }
+                current = next;
+            }
+            Ok(response) => {
+                return Ok(BrowserPreviewCheck {
+                    reachable: true,
+                    status_code: Some(response.status()),
+                    message: format!("Local preview reachable (HTTP {})", response.status()),
+                    diagnostics: Vec::new(),
+                    diagnostics_supported,
+                    diagnostics_captured: false,
+                })
+            }
+            Err(ureq::Error::Status(status, _)) => {
+                return Ok(BrowserPreviewCheck {
+                    reachable: true,
+                    status_code: Some(status),
+                    message: format!("Preview server reachable (HTTP {status})"),
+                    diagnostics: Vec::new(),
+                    diagnostics_supported,
+                    diagnostics_captured: false,
+                })
+            }
+            Err(ureq::Error::Transport(_)) => {
+                return Ok(BrowserPreviewCheck {
+                    reachable: false,
+                    status_code: None,
+                    message: "Preview unavailable: connection refused, timed out, or offline"
+                        .into(),
+                    diagnostics: Vec::new(),
+                    diagnostics_supported,
+                    diagnostics_captured: false,
+                })
+            }
+        }
     }
+    Err("preview redirected too many times".into())
 }
 
 fn browser_preview_diagnostics_supported(url: &url::Url) -> bool {
@@ -8227,7 +8662,8 @@ fn run_openai_codex_chat(
             request.reasoning_effort.as_deref().unwrap_or("unknown")
         );
     }
-    if request.require_command_approval
+    if gyro_core::provider_capability_support("openai").available
+        || request.require_command_approval
         || request.require_file_edit_approval
         || !request.full_access
     {
@@ -8375,8 +8811,10 @@ fn run_openai_codex_app_server_chat(
         request.mode == ChatMode::Normal,
     );
     let mut process = command_with_gui_path("codex");
+    let capability_args = codex_capability_mcp_config_args(app, request)?;
     process
         .current_dir(&cwd)
+        .args(capability_args)
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -9399,12 +9837,6 @@ fn handle_desktop_provider_approval_request(
         "file-change" => config.require_file_edit_approval,
         _ => config.require_command_approval || config.require_file_edit_approval,
     };
-    if !required {
-        return DesktopProviderApprovalResponse::allow(
-            request.input,
-            "Gyro allowed this action under the current permissions.",
-        );
-    }
     let details = desktop_claude_approval_details(&request, &session.workspace_path);
     let context = ProviderApprovalContext {
         session_id: request.session_id.clone(),
@@ -9436,6 +9868,34 @@ fn handle_desktop_provider_approval_request(
     } else {
         None
     };
+    if !required {
+        if let Some(transaction) = file_transaction.as_ref() {
+            let cancellation = app
+                .state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .ok()
+                .and_then(|flags| flags.get(&request.session_id).cloned())
+                .map(|control| control.cancellation.clone())
+                .unwrap_or_default();
+            return match apply_provider_mutation_transaction_with_cancellation(transaction, || {
+                cancellation.is_cancelled()
+            }) {
+                Ok(_) => desktop_claude_approval_response(
+                    ProviderApprovalDecision::AppliedByGyro,
+                    request.input,
+                ),
+                Err(error) => DesktopProviderApprovalResponse::deny(format!(
+                    "Gyro could not safely apply this file change: {}",
+                    gyro_core::sanitize_harness_text(&error.to_string())
+                )),
+            };
+        }
+        return DesktopProviderApprovalResponse::allow(
+            request.input,
+            "Gyro allowed this action under the current permissions.",
+        );
+    }
     match wait_for_provider_approval_with_transaction(
         app,
         &context,
@@ -9482,15 +9942,13 @@ fn run_anthropic_claude_chat(
         request.suggest_title,
         request.mode != ChatMode::Plan,
     );
-    let permission_mcp_config = if request.mode != ChatMode::Plan && !request.full_access {
-        let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
-        Some(desktop_claude_permission_mcp_config(
-            request,
-            &approval_nonce,
-        )?)
-    } else {
-        None
-    };
+    let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
+    let capability_context = active_provider_capability_context(app, &request.session_id)?;
+    let permission_mcp_config = Some(desktop_claude_permission_mcp_config(
+        request,
+        &approval_nonce,
+        &capability_context,
+    )?);
     let session_id = resume_cursor
         .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -9660,25 +10118,45 @@ fn claude_chat_args(
         args.push("--model".into());
         args.push(model.into());
     }
-    if *mode == ChatMode::Plan {
-        args.push("--permission-mode".into());
-        args.push("plan".into());
-    } else if let Some(permission_mcp_config) = permission_mcp_config {
+    let capability_tools = CAPABILITY_DESCRIPTORS
+        .iter()
+        .map(|descriptor| {
+            format!(
+                "mcp__gyro_capabilities__{}",
+                descriptor.id.provider_tool_name()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    if let Some(permission_mcp_config) = permission_mcp_config {
         args.extend([
             "--setting-sources".into(),
             "".into(),
             "--mcp-config".into(),
             permission_mcp_config.into(),
             "--strict-mcp-config".into(),
+        ]);
+    }
+    if *mode == ChatMode::Plan {
+        args.push("--permission-mode".into());
+        args.push("plan".into());
+        args.push("--allowedTools".into());
+        args.push(capability_tools);
+    } else if permission_mcp_config.is_some()
+        && (!full_access || require_command_approval || require_file_edit_approval)
+    {
+        args.extend([
             "--permission-prompt-tool".into(),
             "mcp__gyro_approval__approve".into(),
             "--allowedTools".into(),
-            "mcp__gyro_approval__approve".into(),
+            format!("mcp__gyro_approval__approve,{capability_tools}"),
             "--permission-mode".into(),
             "default".into(),
         ]);
     } else if full_access && !require_command_approval && !require_file_edit_approval {
         args.push("--dangerously-skip-permissions".into());
+        args.push("--allowedTools".into());
+        args.push(capability_tools);
     }
     args.push(prompt.into());
     args
@@ -9697,6 +10175,79 @@ fn active_provider_approval_nonce(
         .ok_or_else(|| anyhow::anyhow!("provider approval has no active run"))
 }
 
+fn active_provider_capability_context(
+    app: &tauri::AppHandle,
+    session_id: &str,
+) -> anyhow::Result<BoundProviderCapabilityContext> {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
+        .get(session_id)
+        .ok_or_else(|| anyhow::anyhow!("provider capability has no active run"))?
+        .capability_context
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider capability context is unavailable"))?
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("provider capability context is not bound"))
+}
+
+fn capability_mcp_env(
+    bound: &BoundProviderCapabilityContext,
+    approval_nonce: &str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("GYRO_CAPABILITY_SESSION_ID", bound.session_id.clone()),
+        (
+            "GYRO_CAPABILITY_TURN_ID",
+            bound.turn_id.clone().unwrap_or_default(),
+        ),
+        ("GYRO_CAPABILITY_RUN_NONCE", approval_nonce.into()),
+        ("GYRO_CAPABILITY_PROVIDER_ID", bound.provider_id.clone()),
+        ("GYRO_CAPABILITY_WORKSPACE_KEY", bound.workspace_key.clone()),
+        (
+            "GYRO_CAPABILITY_MODE",
+            match bound.policy.mode {
+                CapabilityRunMode::Normal => "normal",
+                CapabilityRunMode::Plan => "plan",
+            }
+            .into(),
+        ),
+        (
+            "GYRO_CAPABILITY_POLICY_REVISION",
+            bound.policy.revision.to_string(),
+        ),
+    ]
+}
+
+fn codex_capability_mcp_config_args(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<Vec<String>> {
+    let executable = std::env::current_exe().context("resolve Gyro capability bridge")?;
+    let bound = active_provider_capability_context(app, &request.session_id)?;
+    let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
+    let mut args = vec![
+        "-c".into(),
+        format!(
+            "mcp_servers.gyro_capabilities.command={}",
+            serde_json::to_string(&executable.display().to_string())?
+        ),
+        "-c".into(),
+        "mcp_servers.gyro_capabilities.args=[\"provider-capability-server\"]".into(),
+        "-c".into(),
+        "mcp_servers.gyro_capabilities.required=true".into(),
+    ];
+    for (name, value) in capability_mcp_env(&bound, &approval_nonce) {
+        args.push("-c".into());
+        args.push(format!(
+            "mcp_servers.gyro_capabilities.env.{name}={}",
+            serde_json::to_string(&value)?
+        ));
+    }
+    Ok(args)
+}
+
 fn provider_run_approval_matches(
     flags: &HashMap<String, Arc<ProviderRunControl>>,
     session_id: &str,
@@ -9711,6 +10262,7 @@ fn provider_run_approval_matches(
 fn desktop_claude_permission_mcp_config(
     request: &ProviderChatRequest,
     approval_nonce: &str,
+    bound: &BoundProviderCapabilityContext,
 ) -> anyhow::Result<String> {
     let executable = std::env::current_exe().context("resolve Gyro desktop permission bridge")?;
     serde_json::to_string(&serde_json::json!({
@@ -9728,7 +10280,15 @@ fn desktop_claude_permission_mcp_config(
                     "GYRO_DESKTOP_PERMISSION_REQUIRE_COMMAND": request.require_command_approval.to_string(),
                     "GYRO_DESKTOP_PERMISSION_REQUIRE_FILE": request.require_file_edit_approval.to_string(),
                 }
-            }
+            },
+            "gyro_capabilities": {
+                "type": "stdio",
+                "command": executable,
+                "args": ["provider-capability-server"],
+                "env": capability_mcp_env(bound, approval_nonce)
+                    .into_iter()
+                    .collect::<HashMap<_, _>>()
+            },
         }
     }))
     .context("encode Gyro desktop permission bridge config")
@@ -11332,6 +11892,7 @@ fn snapshot_terminal_process(
         .lock()
         .map(|value| snapshot_terminal_output(&value, known_output_revision))
         .unwrap_or((None, 0));
+    let has_foreground_job = terminal_process_has_foreground_job(process);
     TerminalPaneSnapshot {
         pane_id: process.request.pane_id.clone(),
         title: process.request.title.clone(),
@@ -11343,6 +11904,7 @@ fn snapshot_terminal_process(
         output,
         output_revision,
         status: process.status.clone(),
+        has_foreground_job,
         exit_code: process.exit_code,
         workspace_path: process.request.workspace_path.clone(),
         working_directory: process
@@ -11352,6 +11914,25 @@ fn snapshot_terminal_process(
         cols: process.cols,
         rows: process.rows,
     }
+}
+
+fn terminal_process_has_foreground_job(process: &TerminalProcess) -> Option<bool> {
+    if process.status != "running" {
+        return Some(false);
+    }
+
+    #[cfg(unix)]
+    {
+        let shell_pid = process.child.process_id().map(|pid| pid as i32);
+        let foreground_pid = process.master.process_group_leader();
+        match (shell_pid, foreground_pid) {
+            (Some(shell_pid), Some(foreground_pid)) => Some(foreground_pid != shell_pid),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(unix))]
+    Some(true)
 }
 
 fn snapshot_terminal_output(
@@ -11374,6 +11955,1031 @@ fn terminal_output_text(output: &VecDeque<u8>) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+fn capability_argument_string<'a>(
+    arguments: &'a serde_json::Value,
+    name: &str,
+) -> anyhow::Result<&'a str> {
+    arguments
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("capability argument `{name}` is required"))
+}
+
+fn capability_argument_strings(
+    arguments: &serde_json::Value,
+    name: &str,
+) -> anyhow::Result<Vec<String>> {
+    let values = arguments
+        .get(name)
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if values.len() > 64 {
+        anyhow::bail!("capability argument `{name}` has too many values");
+    }
+    values
+        .into_iter()
+        .map(|value| {
+            let value = value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("capability argument `{name}` must be text"))?;
+            if value.contains('\0') || value.chars().count() > 4_096 {
+                anyhow::bail!("capability argument `{name}` is invalid");
+            }
+            Ok(value.to_string())
+        })
+        .collect()
+}
+
+fn capability_positive_position(
+    arguments: &serde_json::Value,
+    name: &str,
+) -> anyhow::Result<Option<u64>> {
+    let Some(value) = arguments.get(name) else {
+        return Ok(None);
+    };
+    let value = value
+        .as_u64()
+        .filter(|value| (1..=10_000_000).contains(value))
+        .ok_or_else(|| {
+            anyhow::anyhow!("capability argument `{name}` must be a positive integer")
+        })?;
+    Ok(Some(value))
+}
+
+fn effective_capability_class(
+    capability_id: CapabilityId,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<CapabilityClass> {
+    if capability_id == CapabilityId::WorkspaceRead {
+        let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
+            arguments, "path",
+        )?)?;
+        if gyro_core::capability_path_is_sensitive(&path) {
+            return Ok(CapabilityClass::WorkspaceSensitiveRead);
+        }
+    }
+    if capability_id == CapabilityId::WorkspaceDiff {
+        let path = capability_git_diff_path(arguments)?;
+        if path
+            .as_deref()
+            .map(gyro_core::capability_path_is_sensitive)
+            .unwrap_or(true)
+        {
+            return Ok(CapabilityClass::WorkspaceSensitiveRead);
+        }
+    }
+    Ok(gyro_core::capability_descriptor(capability_id).class)
+}
+
+fn capability_git_diff_path(arguments: &serde_json::Value) -> anyhow::Result<Option<String>> {
+    let path = arguments
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .map(gyro_core::normalize_capability_relative_path)
+        .transpose()?;
+    if path.as_deref().is_some_and(|path| {
+        path.starts_with(':') || path.chars().any(|character| "*?[]".contains(character))
+    }) {
+        anyhow::bail!("workspace diff requires one exact relative path");
+    }
+    Ok(path)
+}
+
+fn capability_grant_scope(
+    capability_id: CapabilityId,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<(String, String)> {
+    match capability_id {
+        CapabilityId::WorkspaceRead => Ok((
+            "path".into(),
+            gyro_core::normalize_capability_relative_path(capability_argument_string(
+                arguments, "path",
+            )?)?,
+        )),
+        CapabilityId::BrowserOpen => {
+            let url = capability_argument_string(arguments, "url")?;
+            let url = url::Url::parse(url)?;
+            if !browser_preview_diagnostics_supported(&url) {
+                anyhow::bail!("browser capabilities only accept credential-free loopback URLs");
+            }
+            let origin = url.origin().ascii_serialization();
+            Ok(("origin".into(), origin))
+        }
+        CapabilityId::TerminalOpen => {
+            let value = serde_json::json!({
+                "program": capability_argument_string(arguments, "program")?,
+                "args": capability_argument_strings(arguments, "args")?,
+                "cwd": arguments.get("cwd").and_then(serde_json::Value::as_str).unwrap_or("."),
+            });
+            Ok(("command".into(), serde_json::to_string(&value)?))
+        }
+        _ => {
+            let mut digest = Sha256::new();
+            digest.update(serde_json::to_vec(arguments)?);
+            Ok((
+                "call".into(),
+                format!("{}:{:x}", capability_id, digest.finalize()),
+            ))
+        }
+    }
+}
+
+fn capability_access_rank(access: CapabilityAccess) -> u8 {
+    match access {
+        CapabilityAccess::Deny => 0,
+        CapabilityAccess::Ask => 1,
+        CapabilityAccess::Allow => 2,
+    }
+}
+
+fn narrower_capability_access(
+    first: CapabilityAccess,
+    second: CapabilityAccess,
+) -> CapabilityAccess {
+    if capability_access_rank(first) <= capability_access_rank(second) {
+        first
+    } else {
+        second
+    }
+}
+
+fn capability_access_for_call(
+    bound: &BoundProviderCapabilityContext,
+    current: &ProjectCapabilityPolicy,
+    class: CapabilityClass,
+    scope_kind: &str,
+    scope_value: &str,
+) -> CapabilityAccess {
+    let snapshot_access = bound.policy.access_for(class);
+    let current_access = if bound.policy.mode == CapabilityRunMode::Plan
+        && !matches!(
+            class,
+            CapabilityClass::WorkspaceInspect
+                | CapabilityClass::WorkspaceSensitiveRead
+                | CapabilityClass::IdeReveal
+                | CapabilityClass::BrowserInspect
+        ) {
+        CapabilityAccess::Deny
+    } else {
+        current.access_for(class)
+    };
+    let access = narrower_capability_access(snapshot_access, current_access);
+    if access != CapabilityAccess::Ask {
+        return access;
+    }
+    let snapshotted_grant = bound.policy.grants.iter().any(|grant| {
+        grant.class == class && grant.scope_kind == scope_kind && grant.scope_value == scope_value
+    });
+    let grant_still_active = current.grants.iter().any(|grant| {
+        grant.class == class && grant.scope_kind == scope_kind && grant.scope_value == scope_value
+    });
+    if snapshotted_grant && grant_still_active {
+        CapabilityAccess::Allow
+    } else {
+        CapabilityAccess::Ask
+    }
+}
+
+fn capability_event(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    call_id: Uuid,
+    capability_id: CapabilityId,
+    status: CapabilityStatus,
+    summary: &str,
+    resource: Option<CapabilityResourceRef>,
+) -> anyhow::Result<SessionEvent> {
+    let event = CapabilityCallEvent {
+        schema: CAPABILITY_SCHEMA_V1.into(),
+        kind: "capability-call".into(),
+        call_id,
+        capability_id,
+        status,
+        provider_id: bound.provider_id.clone(),
+        policy_revision: bound.policy.revision,
+        summary: gyro_core::sanitize_capability_summary(summary),
+        resource,
+    };
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let session_id = Uuid::parse_str(&bound.session_id)?;
+    let payload = serde_json::to_value(event)?;
+    let stored = if let Some(turn_id) = bound.turn_id.as_deref() {
+        store.append_event_with_turn_id(
+            session_id,
+            SessionEventKind::SystemEvent,
+            summary,
+            payload,
+            Some(Uuid::parse_str(turn_id)?),
+        )?
+    } else {
+        store.append_event(session_id, SessionEventKind::SystemEvent, summary, payload)?
+    };
+    let _ = app.emit(PROVIDER_CAPABILITY_EVENT, stored.clone());
+    Ok(stored)
+}
+
+fn wait_for_capability_approval(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    call_id: Uuid,
+    capability_id: CapabilityId,
+    class: CapabilityClass,
+    scope_kind: &str,
+    scope_value: &str,
+) -> anyhow::Result<CapabilityApprovalDecision> {
+    let approval_id = Uuid::new_v4();
+    let session_id = Uuid::parse_str(&bound.session_id)?;
+    let turn_id = bound.turn_id.as_deref().map(Uuid::parse_str).transpose()?;
+    let (sender, receiver) = mpsc::channel();
+    app.state::<ProviderCapabilityApprovalManager>()
+        .pending
+        .lock()
+        .map_err(|_| anyhow::anyhow!("capability approval state is unavailable"))?
+        .insert(
+            approval_id.to_string(),
+            PendingCapabilityApproval {
+                sender,
+                session_id,
+                turn_id,
+            },
+        );
+    let payload = serde_json::json!({
+        "schema": CAPABILITY_SCHEMA_V1,
+        "kind": "capability-approval",
+        "approvalId": approval_id,
+        "callId": call_id,
+        "capabilityId": capability_id,
+        "capabilityClass": class,
+        "providerId": bound.provider_id,
+        "status": "waiting",
+        "scopeKind": scope_kind,
+        "scopeValue": gyro_core::sanitize_capability_summary(scope_value),
+        "choices": ["deny", "allow-once", "allow-project"],
+    });
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let event = if let Some(turn_id) = turn_id {
+        store.append_event_with_turn_id(
+            session_id,
+            SessionEventKind::ApprovalRequested,
+            format!("Approve {}", capability_id.as_str()),
+            payload,
+            Some(turn_id),
+        )?
+    } else {
+        store.append_event(
+            session_id,
+            SessionEventKind::ApprovalRequested,
+            format!("Approve {}", capability_id.as_str()),
+            payload,
+        )?
+    };
+    let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    let started_at = Instant::now();
+    let decision = loop {
+        match receiver.recv_timeout(Duration::from_millis(250)) {
+            Ok(decision) => break Ok(decision),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                break Err("capability approval was cancelled".to_string())
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let active = app
+            .state::<ProviderCancellationManager>()
+            .flags
+            .lock()
+            .ok()
+            .and_then(|flags| flags.get(&bound.session_id).cloned());
+        if active
+            .as_ref()
+            .is_none_or(|control| control.cancellation.is_cancelled())
+        {
+            break Err("capability approval was cancelled".to_string());
+        }
+        if started_at.elapsed() >= PROVIDER_APPROVAL_TIMEOUT {
+            break Err("capability approval timed out".to_string());
+        }
+    };
+    app.state::<ProviderCapabilityApprovalManager>()
+        .pending
+        .lock()
+        .ok()
+        .map(|mut pending| pending.remove(&approval_id.to_string()));
+    decision.map_err(anyhow::Error::msg)
+}
+
+fn persist_capability_grant(
+    bound: &BoundProviderCapabilityContext,
+    class: CapabilityClass,
+    scope_kind: String,
+    scope_value: String,
+) -> anyhow::Result<()> {
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let mut policy = store.get_project_capability_policy(&bound.workspace_key)?;
+    if !policy.grants.iter().any(|grant| {
+        grant.class == class && grant.scope_kind == scope_kind && grant.scope_value == scope_value
+    }) {
+        policy.grants.push(ProjectCapabilityGrant {
+            id: Uuid::new_v4(),
+            class,
+            scope_kind,
+            scope_value,
+            created_at: chrono::Utc::now(),
+        });
+        store.save_project_capability_policy(policy.clone(), Some(policy.revision))?;
+    }
+    Ok(())
+}
+
+fn execute_provider_capability(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    request: &CapabilityRequest,
+) -> anyhow::Result<CapabilityResult> {
+    let workspace = bound.workspace.display().to_string();
+    let arguments = &request.arguments;
+    let (summary, data, resource) = match request.capability_id {
+        CapabilityId::WorkspaceList => {
+            let depth = arguments
+                .get("depth")
+                .and_then(serde_json::Value::as_u64)
+                .map(|value| value as usize);
+            let entries = list_workspace_tree_blocking(workspace.clone(), depth)
+                .map_err(anyhow::Error::msg)?;
+            (
+                format!("Listed {} workspace entries", entries.len()),
+                serde_json::to_value(entries)?,
+                None,
+            )
+        }
+        CapabilityId::WorkspaceSearch => {
+            let query = capability_argument_string(arguments, "query")?.to_string();
+            let globs = arguments
+                .get("globs")
+                .and_then(|value| serde_json::from_value::<Vec<String>>(value.clone()).ok());
+            let max_results = arguments
+                .get("maxResults")
+                .and_then(serde_json::Value::as_u64)
+                .map(|value| value as usize);
+            let mut results = search_workspace_impl(&WorkspaceSearchRequest {
+                workspace_path: workspace,
+                query,
+                globs,
+                max_results,
+            })?;
+            results.retain(|result| !gyro_core::capability_path_is_sensitive(&result.path));
+            for result in &mut results {
+                result.line = gyro_core::sanitize_capability_summary(&result.line);
+            }
+            (
+                format!("Found {} workspace matches", results.len()),
+                serde_json::to_value(results)?,
+                None,
+            )
+        }
+        CapabilityId::WorkspaceRead => {
+            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
+                arguments, "path",
+            )?)?;
+            let file = read_workspace_file_impl(&workspace, &path)?;
+            let candidate = gyro_core::security::assert_path_inside_workspace(
+                &bound.workspace,
+                Path::new(&path),
+            )?;
+            let modified_at = candidate
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .map(chrono::DateTime::<chrono::Utc>::from)
+                .map(|value| value.to_rfc3339());
+            let data = serde_json::json!({
+                "path": file.path,
+                "content": file.content,
+                "truncated": file.truncated,
+                "sizeBytes": file.size_bytes,
+                "contentHash": file.content_hash,
+                "modifiedAt": modified_at,
+            });
+            let resource = CapabilityResourceRef {
+                id: format!("workspace:{}:{}", request.context.session_id, path),
+                kind: "workspace".into(),
+                label: path.clone(),
+            };
+            (format!("Read {path}"), data, Some(resource))
+        }
+        CapabilityId::WorkspaceDiagnostics => {
+            let diagnostics = app
+                .state::<CapabilityIdeEvidenceManager>()
+                .by_workspace
+                .lock()
+                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+                .get(&bound.workspace_key)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            let count = diagnostics.as_array().map(Vec::len).unwrap_or(0);
+            (
+                format!("Inspected {count} workspace diagnostics"),
+                diagnostics,
+                None,
+            )
+        }
+        CapabilityId::WorkspaceGitStatus => {
+            let status = git_status_impl(&workspace)?;
+            (
+                "Inspected workspace Git status".into(),
+                serde_json::to_value(status)?,
+                None,
+            )
+        }
+        CapabilityId::WorkspaceDiff => {
+            let path = capability_git_diff_path(arguments)?;
+            let staged = arguments.get("staged").and_then(serde_json::Value::as_bool);
+            let mut output = git_diff_blocking(GitPathRequest {
+                workspace_path: workspace,
+                path,
+                staged,
+            })
+            .map_err(anyhow::Error::msg)?;
+            output.stdout = gyro_core::sanitize_capability_summary(&output.stdout);
+            output.stderr = gyro_core::sanitize_capability_summary(&output.stderr);
+            (
+                "Inspected workspace diff".into(),
+                serde_json::to_value(output)?,
+                None,
+            )
+        }
+        CapabilityId::IdeReveal => {
+            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
+                arguments, "path",
+            )?)?;
+            gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(&path))?;
+            let line = capability_positive_position(arguments, "line")?.unwrap_or(1);
+            let column = capability_positive_position(arguments, "column")?.unwrap_or(1);
+            let end_line = capability_positive_position(arguments, "endLine")?;
+            let end_column = capability_positive_position(arguments, "endColumn")?;
+            if end_line.is_some_and(|end| end < line)
+                || (end_line == Some(line) && end_column.is_some_and(|end| end < column))
+            {
+                anyhow::bail!("IDE reveal range ends before it starts");
+            }
+            let resource = CapabilityResourceRef {
+                id: format!("ide:{}:{}", request.context.session_id, path),
+                kind: "ide".into(),
+                label: path.clone(),
+            };
+            (
+                format!("Linked {path} in Workspace"),
+                serde_json::json!({
+                    "path": path,
+                    "line": line,
+                    "column": column,
+                    "endLine": end_line,
+                    "endColumn": end_column,
+                }),
+                Some(resource),
+            )
+        }
+        CapabilityId::TerminalOpen => {
+            let program = capability_argument_string(arguments, "program")?.to_string();
+            if program.contains('\0') || program.chars().count() > 512 {
+                anyhow::bail!("terminal program is invalid");
+            }
+            let args = capability_argument_strings(arguments, "args")?;
+            let relative_cwd = arguments
+                .get("cwd")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(".");
+            let cwd = if relative_cwd == "." {
+                bound.workspace.clone()
+            } else {
+                gyro_core::security::assert_path_inside_workspace(
+                    &bound.workspace,
+                    Path::new(relative_cwd),
+                )?
+            };
+            if !cwd.is_dir() {
+                anyhow::bail!("terminal working directory is not a directory");
+            }
+            let resources = app.state::<ProviderCapabilityResourceManager>();
+            let mut terminals = resources
+                .terminals
+                .lock()
+                .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?;
+            terminals.retain(|_, owned| {
+                app.state::<TerminalProcessManager>()
+                    .read(&owned.pane_id, None)
+                    .is_ok_and(|snapshot| snapshot.status == "running")
+            });
+            if terminals.contains_key(&bound.session_id) {
+                anyhow::bail!("this chat already owns a live model terminal");
+            }
+            if terminals.len() >= MAX_MODEL_TERMINAL_PROCESSES {
+                anyhow::bail!("model terminal limit reached");
+            }
+            let resource_id = Uuid::new_v4().to_string();
+            let pane_id = format!("model:{}", bound.session_id);
+            let snapshot = app
+                .state::<TerminalProcessManager>()
+                .create(TerminalPaneRequest {
+                    pane_id: pane_id.clone(),
+                    title: format!("Model · {}", program),
+                    profile_id: None,
+                    command: program,
+                    args,
+                    workspace_path: Some(bound.workspace_key.clone()),
+                    workspace_mode: Some("local".into()),
+                    working_directory: Some(cwd.display().to_string()),
+                    cols: Some(120),
+                    rows: Some(32),
+                })?;
+            terminals.insert(
+                bound.session_id.clone(),
+                ModelTerminalResource {
+                    resource_id: resource_id.clone(),
+                    pane_id,
+                    session_id: bound.session_id.clone(),
+                    turn_id: bound.turn_id.clone(),
+                    call_id: request.context.call_id,
+                    workspace_key: bound.workspace_key.clone(),
+                },
+            );
+            let resource = CapabilityResourceRef {
+                id: resource_id,
+                kind: "terminal".into(),
+                label: snapshot.title.clone(),
+            };
+            (
+                format!("Opened {}", snapshot.title),
+                serde_json::json!({
+                    "pane": snapshot,
+                    "owner": {
+                        "kind": "model",
+                        "sessionId": bound.session_id,
+                        "turnId": bound.turn_id,
+                        "callId": request.context.call_id,
+                    }
+                }),
+                Some(resource),
+            )
+        }
+        CapabilityId::TerminalRead | CapabilityId::TerminalStop => {
+            let resources = app.state::<ProviderCapabilityResourceManager>();
+            let owned = resources
+                .terminals
+                .lock()
+                .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?
+                .get(&bound.session_id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("this chat has no model-owned terminal"))?;
+            if owned.workspace_key != bound.workspace_key || owned.session_id != bound.session_id {
+                anyhow::bail!("terminal resource ownership changed");
+            }
+            let snapshot = if request.capability_id == CapabilityId::TerminalRead {
+                app.state::<TerminalProcessManager>()
+                    .read(&owned.pane_id, None)?
+            } else {
+                let snapshot = app.state::<TerminalProcessManager>().stop(&owned.pane_id)?;
+                resources
+                    .terminals
+                    .lock()
+                    .ok()
+                    .map(|mut terminals| terminals.remove(&bound.session_id));
+                snapshot
+            };
+            let resource = CapabilityResourceRef {
+                id: owned.resource_id,
+                kind: "terminal".into(),
+                label: snapshot.title.clone(),
+            };
+            (
+                if request.capability_id == CapabilityId::TerminalRead {
+                    "Read model terminal output".into()
+                } else {
+                    "Stopped model terminal".into()
+                },
+                serde_json::json!({
+                    "pane": snapshot,
+                    "owner": {
+                        "kind": "model",
+                        "sessionId": owned.session_id,
+                        "turnId": owned.turn_id,
+                        "callId": owned.call_id,
+                    }
+                }),
+                Some(resource),
+            )
+        }
+        CapabilityId::BrowserOpen => {
+            let url = capability_argument_string(arguments, "url")?.to_string();
+            let check =
+                check_browser_preview_blocking(BrowserPreviewCheckRequest { url: url.clone() })
+                    .map_err(anyhow::Error::msg)?;
+            let resources = app.state::<ProviderCapabilityResourceManager>();
+            let mut browsers = resources
+                .browsers
+                .lock()
+                .map_err(|_| anyhow::anyhow!("browser capability state is unavailable"))?;
+            let resource_id = browsers
+                .get(&bound.session_id)
+                .filter(|resource| resource.workspace_key == bound.workspace_key)
+                .map(|resource| resource.resource_id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            browsers.insert(
+                bound.session_id.clone(),
+                ModelBrowserResource {
+                    resource_id: resource_id.clone(),
+                    session_id: bound.session_id.clone(),
+                    turn_id: bound.turn_id.clone(),
+                    call_id: request.context.call_id,
+                    workspace_key: bound.workspace_key.clone(),
+                    url: url.clone(),
+                },
+            );
+            let resource = CapabilityResourceRef {
+                id: resource_id,
+                kind: "browser".into(),
+                label: url.clone(),
+            };
+            (
+                format!("Opened local preview {url}"),
+                serde_json::json!({ "url": url, "check": check }),
+                Some(resource),
+            )
+        }
+        CapabilityId::BrowserInspect
+        | CapabilityId::BrowserReload
+        | CapabilityId::BrowserScreenshot => {
+            let resources = app.state::<ProviderCapabilityResourceManager>();
+            let owned = resources
+                .browsers
+                .lock()
+                .map_err(|_| anyhow::anyhow!("browser capability state is unavailable"))?
+                .get(&bound.session_id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("this chat has no local preview"))?;
+            if owned.workspace_key != bound.workspace_key || owned.session_id != bound.session_id {
+                anyhow::bail!("browser resource ownership changed");
+            }
+            let resource = CapabilityResourceRef {
+                id: owned.resource_id,
+                kind: "browser".into(),
+                label: owned.url.clone(),
+            };
+            if request.capability_id == CapabilityId::BrowserScreenshot {
+                let capture = tauri::async_runtime::block_on(capture_browser_preview(
+                    app.clone(),
+                    BrowserPreviewCaptureRequest {
+                        url: owned.url.clone(),
+                        device: arguments
+                            .get("device")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("responsive")
+                            .to_string(),
+                    },
+                ))
+                .map_err(anyhow::Error::msg)?;
+                (
+                    "Captured local preview".into(),
+                    serde_json::json!({
+                        "url": owned.url,
+                        "capture": capture,
+                        "owner": { "turnId": owned.turn_id, "callId": owned.call_id }
+                    }),
+                    Some(resource),
+                )
+            } else {
+                let check = check_browser_preview_blocking(BrowserPreviewCheckRequest {
+                    url: owned.url.clone(),
+                })
+                .map_err(anyhow::Error::msg)?;
+                (
+                    if request.capability_id == CapabilityId::BrowserReload {
+                        "Reloaded local preview".into()
+                    } else {
+                        "Inspected local preview".into()
+                    },
+                    serde_json::json!({
+                        "url": owned.url,
+                        "check": check,
+                        "owner": { "turnId": owned.turn_id, "callId": owned.call_id }
+                    }),
+                    Some(resource),
+                )
+            }
+        }
+    };
+    let data = gyro_core::validate_capability_result_data(redact_json_strings(data))?;
+    Ok(CapabilityResult {
+        call_id: request.context.call_id,
+        capability_id: request.capability_id,
+        summary: gyro_core::sanitize_capability_summary(&summary),
+        data,
+        resource,
+    })
+}
+
+fn handle_desktop_provider_capability_request(
+    app: &tauri::AppHandle,
+    request: CapabilityRequest,
+) -> CapabilityResponse {
+    let fail = |code: &str, message: String| {
+        CapabilityResponse::failed(
+            env!("CARGO_PKG_VERSION"),
+            request.context.call_id,
+            code,
+            message,
+        )
+    };
+    if request.schema != PROVIDER_CAPABILITY_IPC_SCHEMA_V1
+        || !versions_compatible(&request.sender_version, env!("CARGO_PKG_VERSION"))
+    {
+        let mut response = fail(
+            "incompatible-version",
+            "The provider capability helper does not match Gyro.app.".into(),
+        );
+        response.compatible = false;
+        return response;
+    }
+    let support = gyro_core::provider_capability_support(&request.context.provider_id);
+    if !support.available || !support.capabilities.contains(&request.capability_id) {
+        return fail(
+            "unsupported-provider",
+            support
+                .reason
+                .unwrap_or_else(|| "Gyro tools are unavailable for this provider.".into()),
+        );
+    }
+    let control = match app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.context.session_id).cloned())
+    {
+        Some(control) => control,
+        None => return fail("stale-run", "The provider run is no longer active.".into()),
+    };
+    if control.approval_nonce != request.context.run_nonce {
+        return fail(
+            "invalid-run",
+            "The capability request did not belong to the active provider run.".into(),
+        );
+    }
+    let bound = match control
+        .capability_context
+        .lock()
+        .ok()
+        .and_then(|context| context.clone())
+    {
+        Some(bound) => bound,
+        None => {
+            return fail(
+                "unbound-run",
+                "Gyro tools are not ready for this run.".into(),
+            )
+        }
+    };
+    if bound.session_id != request.context.session_id
+        || bound.turn_id != request.context.turn_id
+        || bound.provider_id != request.context.provider_id
+        || bound.workspace_key != request.context.workspace_key
+        || bound.policy.revision != request.context.policy_revision
+        || bound.policy.mode != request.context.mode
+    {
+        return fail(
+            "forged-context",
+            "Gyro rejected capability context that did not match the active run.".into(),
+        );
+    }
+    let fresh_call = control
+        .capability_calls
+        .lock()
+        .map(|mut calls| calls.insert(request.context.call_id))
+        .unwrap_or(false);
+    if !fresh_call {
+        return fail(
+            "duplicate-call",
+            "Gyro rejected a repeated capability call.".into(),
+        );
+    }
+    if control.cancellation.is_cancelled() {
+        return fail("cancelled", "The provider run was cancelled.".into());
+    }
+    let store = match open_store() {
+        Ok(store) => store,
+        Err(error) => return fail("storage-unavailable", error),
+    };
+    let session_id = match Uuid::parse_str(&bound.session_id) {
+        Ok(session_id) => session_id,
+        Err(error) => return fail("invalid-session", error.to_string()),
+    };
+    let session = match store.get_session(session_id) {
+        Ok(Some(session)) => session,
+        Ok(None) => return fail("missing-session", "The owning chat was deleted.".into()),
+        Err(error) => return fail("storage-unavailable", error.to_string()),
+    };
+    let workspace = match session.workspace_path.canonicalize() {
+        Ok(workspace) => workspace,
+        Err(error) => return fail("missing-workspace", error.to_string()),
+    };
+    if workspace != bound.workspace {
+        return fail(
+            "workspace-changed",
+            "The owning chat workspace changed during the run.".into(),
+        );
+    }
+    let class = match effective_capability_class(request.capability_id, &request.arguments) {
+        Ok(class) => class,
+        Err(error) => return fail("invalid-arguments", error.to_string()),
+    };
+    let scope = if request.capability_id == CapabilityId::BrowserReload {
+        app.state::<ProviderCapabilityResourceManager>()
+            .browsers
+            .lock()
+            .map_err(|_| anyhow::anyhow!("browser capability state is unavailable"))
+            .and_then(|browsers| {
+                let owned = browsers
+                    .get(&bound.session_id)
+                    .ok_or_else(|| anyhow::anyhow!("this chat has no local Browser preview"))?;
+                if owned.workspace_key != bound.workspace_key
+                    || owned.session_id != bound.session_id
+                {
+                    anyhow::bail!("browser resource ownership changed");
+                }
+                Ok((
+                    "origin".into(),
+                    url::Url::parse(&owned.url)?.origin().ascii_serialization(),
+                ))
+            })
+    } else {
+        capability_grant_scope(request.capability_id, &request.arguments)
+    };
+    let (scope_kind, scope_value) = match scope {
+        Ok(scope) => scope,
+        Err(error) => return fail("invalid-arguments", error.to_string()),
+    };
+    let current_policy = match store.get_project_capability_policy(&bound.workspace_key) {
+        Ok(policy) => policy,
+        Err(error) => return fail("policy-unavailable", error.to_string()),
+    };
+    let access =
+        capability_access_for_call(&bound, &current_policy, class, &scope_kind, &scope_value);
+    if access == CapabilityAccess::Deny {
+        let _ = capability_event(
+            app,
+            &bound,
+            request.context.call_id,
+            request.capability_id,
+            CapabilityStatus::Denied,
+            "Gyro denied this capability under the current run policy.",
+            None,
+        );
+        return fail(
+            "policy-denied",
+            "Gyro denied this capability under the current run policy.".into(),
+        );
+    }
+    if let Err(error) = capability_event(
+        app,
+        &bound,
+        request.context.call_id,
+        request.capability_id,
+        CapabilityStatus::Requested,
+        &format!("Requested {}", request.capability_id),
+        None,
+    ) {
+        return fail("audit-unavailable", error.to_string());
+    }
+    if access == CapabilityAccess::Ask {
+        match wait_for_capability_approval(
+            app,
+            &bound,
+            request.context.call_id,
+            request.capability_id,
+            class,
+            &scope_kind,
+            &scope_value,
+        ) {
+            Ok(CapabilityApprovalDecision::Deny) => {
+                let _ = capability_event(
+                    app,
+                    &bound,
+                    request.context.call_id,
+                    request.capability_id,
+                    CapabilityStatus::Denied,
+                    "The user denied this capability.",
+                    None,
+                );
+                return fail("user-denied", "The user denied this capability.".into());
+            }
+            Ok(CapabilityApprovalDecision::AllowProject) => {
+                if let Err(error) =
+                    persist_capability_grant(&bound, class, scope_kind.clone(), scope_value.clone())
+                {
+                    return fail("grant-save-failed", error.to_string());
+                }
+            }
+            Ok(CapabilityApprovalDecision::AllowOnce) => {}
+            Err(error) => {
+                let cancelled = error.to_string().contains("cancelled");
+                let _ = capability_event(
+                    app,
+                    &bound,
+                    request.context.call_id,
+                    request.capability_id,
+                    if cancelled {
+                        CapabilityStatus::Cancelled
+                    } else {
+                        CapabilityStatus::Failed
+                    },
+                    &error.to_string(),
+                    None,
+                );
+                return fail("approval-failed", error.to_string());
+            }
+        }
+    }
+    let _ = capability_event(
+        app,
+        &bound,
+        request.context.call_id,
+        request.capability_id,
+        CapabilityStatus::Running,
+        &format!("Running {}", request.capability_id),
+        None,
+    );
+    match execute_provider_capability(app, &bound, &request) {
+        Ok(result) => {
+            let _ = capability_event(
+                app,
+                &bound,
+                request.context.call_id,
+                request.capability_id,
+                CapabilityStatus::Completed,
+                &result.summary,
+                result.resource.clone(),
+            );
+            if let Some(resource) = result.resource.clone() {
+                let live_data = match resource.kind.as_str() {
+                    "terminal" => result.data.clone(),
+                    "browser" => result.data.clone(),
+                    "ide" => result.data.clone(),
+                    _ => serde_json::json!({ "label": resource.label }),
+                };
+                let _ = app.emit(
+                    PROVIDER_CAPABILITY_RESOURCE_EVENT,
+                    ProviderCapabilityResourceEvent {
+                        session_id: bound.session_id.clone(),
+                        turn_id: bound.turn_id.clone(),
+                        call_id: request.context.call_id,
+                        resource,
+                        data: live_data,
+                    },
+                );
+            }
+            CapabilityResponse::completed(env!("CARGO_PKG_VERSION"), result)
+        }
+        Err(error) => {
+            let message = gyro_core::sanitize_capability_summary(&error.to_string());
+            let _ = capability_event(
+                app,
+                &bound,
+                request.context.call_id,
+                request.capability_id,
+                CapabilityStatus::Failed,
+                &message,
+                None,
+            );
+            fail("execution-failed", message)
+        }
+    }
+}
+
+#[tauri::command]
+async fn resolve_capability_approval(
+    request: CapabilityApprovalDecisionRequest,
+    manager: tauri::State<'_, ProviderCapabilityApprovalManager>,
+) -> Result<(), String> {
+    let approval_id = parse_uuid(&request.approval_id)?;
+    let session_id = parse_uuid(&request.session_id)?;
+    let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
+    let pending = manager
+        .pending
+        .lock()
+        .map_err(|_| "capability approval state is unavailable".to_string())?
+        .remove(&approval_id.to_string())
+        .ok_or_else(|| "capability approval is no longer pending".to_string())?;
+    if pending.session_id != session_id || pending.turn_id != turn_id {
+        return Err("capability approval did not belong to this chat turn".into());
+    }
+    pending
+        .sender
+        .send(request.decision)
+        .map_err(|_| "capability request is no longer waiting".to_string())
+}
+
 struct DesktopProviderPermissionContext {
     session_id: String,
     turn_id: Option<String>,
@@ -11382,6 +12988,39 @@ struct DesktopProviderPermissionContext {
     provider_label: Option<String>,
     require_command_approval: bool,
     require_file_edit_approval: bool,
+}
+
+struct DesktopProviderCapabilityContext {
+    session_id: String,
+    turn_id: Option<String>,
+    run_nonce: String,
+    provider_id: String,
+    workspace_key: String,
+    mode: CapabilityRunMode,
+    policy_revision: u64,
+}
+
+impl DesktopProviderCapabilityContext {
+    fn from_env() -> anyhow::Result<Self> {
+        let mode = match desktop_permission_env("GYRO_CAPABILITY_MODE")?.as_str() {
+            "normal" => CapabilityRunMode::Normal,
+            "plan" => CapabilityRunMode::Plan,
+            _ => anyhow::bail!("invalid provider capability mode"),
+        };
+        Ok(Self {
+            session_id: desktop_permission_env("GYRO_CAPABILITY_SESSION_ID")?,
+            turn_id: std::env::var("GYRO_CAPABILITY_TURN_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+            run_nonce: desktop_permission_env("GYRO_CAPABILITY_RUN_NONCE")?,
+            provider_id: desktop_permission_env("GYRO_CAPABILITY_PROVIDER_ID")?,
+            workspace_key: desktop_permission_env("GYRO_CAPABILITY_WORKSPACE_KEY")?,
+            mode,
+            policy_revision: desktop_permission_env("GYRO_CAPABILITY_POLICY_REVISION")?
+                .parse()
+                .context("invalid provider capability policy revision")?,
+        })
+    }
 }
 
 impl DesktopProviderPermissionContext {
@@ -11482,6 +13121,118 @@ fn desktop_permission_tool_call(
     }))
 }
 
+fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
+    let properties = match id {
+        CapabilityId::WorkspaceList => serde_json::json!({
+            "depth": { "type": "integer", "minimum": 1, "maximum": 8 }
+        }),
+        CapabilityId::WorkspaceSearch => serde_json::json!({
+            "query": { "type": "string" },
+            "globs": { "type": "array", "items": { "type": "string" } },
+            "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        }),
+        CapabilityId::WorkspaceRead | CapabilityId::IdeReveal => serde_json::json!({
+            "path": { "type": "string" },
+            "line": { "type": "integer", "minimum": 1 },
+            "column": { "type": "integer", "minimum": 1 },
+            "endLine": { "type": "integer", "minimum": 1 },
+            "endColumn": { "type": "integer", "minimum": 1 }
+        }),
+        CapabilityId::WorkspaceDiff => serde_json::json!({
+            "path": { "type": "string" },
+            "staged": { "type": "boolean" }
+        }),
+        CapabilityId::TerminalOpen => serde_json::json!({
+            "program": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "cwd": { "type": "string" }
+        }),
+        CapabilityId::BrowserOpen => serde_json::json!({
+            "url": { "type": "string" }
+        }),
+        CapabilityId::BrowserScreenshot => serde_json::json!({
+            "device": { "type": "string", "enum": ["responsive", "desktop", "tablet", "mobile"] }
+        }),
+        _ => serde_json::json!({}),
+    };
+    let required = match id {
+        CapabilityId::WorkspaceSearch => vec!["query"],
+        CapabilityId::WorkspaceRead | CapabilityId::IdeReveal => vec!["path"],
+        CapabilityId::TerminalOpen => vec!["program"],
+        CapabilityId::BrowserOpen => vec!["url"],
+        _ => Vec::new(),
+    };
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
+fn desktop_capability_tool_call(
+    paths: &GyroPaths,
+    context: &DesktopProviderCapabilityContext,
+    params: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let name = params
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("capability tool name is required"))?;
+    let capability_id = CapabilityId::from_provider_tool_name(name)
+        .ok_or_else(|| anyhow::anyhow!("unknown Gyro capability tool"))?;
+    let call_id = Uuid::new_v4();
+    let request = CapabilityRequest {
+        schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
+        sender_version: env!("CARGO_PKG_VERSION").into(),
+        context: CapabilityInvocationContext {
+            session_id: context.session_id.clone(),
+            turn_id: context.turn_id.clone(),
+            provider_id: context.provider_id.clone(),
+            run_nonce: context.run_nonce.clone(),
+            call_id,
+            workspace_key: context.workspace_key.clone(),
+            mode: context.mode,
+            policy_revision: context.policy_revision,
+        },
+        capability_id,
+        arguments: params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+    };
+    let response = request_desktop_provider_capability(paths, &request).unwrap_or_else(|error| {
+        CapabilityResponse::failed(
+            env!("CARGO_PKG_VERSION"),
+            call_id,
+            "tools-unavailable",
+            format!(
+                "Gyro tools unavailable: {}",
+                gyro_core::sanitize_capability_summary(&error.to_string())
+            ),
+        )
+    });
+    let is_error = response.status != CapabilityStatus::Completed;
+    let text = if let Some(result) = response.result {
+        serde_json::to_string(&serde_json::json!({
+            "callId": result.call_id,
+            "capabilityId": result.capability_id,
+            "summary": result.summary,
+            "data": result.data,
+            "resource": result.resource,
+        }))?
+    } else {
+        serde_json::to_string(&serde_json::json!({
+            "callId": response.call_id,
+            "error": response.error,
+        }))?
+    };
+    Ok(serde_json::json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": is_error,
+    }))
+}
+
 fn write_desktop_mcp_message(
     output: &mut impl Write,
     message: &serde_json::Value,
@@ -11573,12 +13324,102 @@ pub fn run_provider_permission_server() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn run_provider_capability_server() -> anyhow::Result<()> {
+    let context = DesktopProviderCapabilityContext::from_env()?;
+    let paths = GyroPaths::for_current_user()?;
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().lock();
+    let mut stdin = stdin.lock();
+    while let Some(line) = read_bounded_protocol_line(&mut stdin, MAX_PERMISSION_MCP_MESSAGE_BYTES)
+        .map_err(anyhow::Error::msg)?
+    {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let request: serde_json::Value = match serde_json::from_slice(&line) {
+            Ok(request) => request,
+            Err(error) => {
+                write_desktop_mcp_message(
+                    &mut stdout,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": { "code": -32700, "message": error.to_string() },
+                    }),
+                )?;
+                continue;
+            }
+        };
+        let Some(method) = request.get("method").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(id) = request.get("id").cloned() else {
+            continue;
+        };
+        let result = match method {
+            "initialize" => Ok(serde_json::json!({
+                "protocolVersion": request
+                    .pointer("/params/protocolVersion")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("2024-11-05"),
+                "capabilities": { "tools": {} },
+                "serverInfo": {
+                    "name": "gyro-provider-capabilities",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+            })),
+            "ping" => Ok(serde_json::json!({})),
+            "tools/list" => Ok(serde_json::json!({
+                "tools": CAPABILITY_DESCRIPTORS.iter().map(|descriptor| serde_json::json!({
+                    "name": descriptor.id.provider_tool_name(),
+                    "description": descriptor.description,
+                    "inputSchema": desktop_capability_tool_schema(descriptor.id),
+                })).collect::<Vec<_>>()
+            })),
+            "tools/call" => desktop_capability_tool_call(
+                &paths,
+                &context,
+                request.get("params").cloned().unwrap_or_default(),
+            ),
+            _ => Err(anyhow::anyhow!("unsupported MCP method `{method}`")),
+        };
+        match result {
+            Ok(result) => write_desktop_mcp_message(
+                &mut stdout,
+                &serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+            )?,
+            Err(error) => write_desktop_mcp_message(
+                &mut stdout,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32603,
+                        "message": gyro_core::sanitize_capability_summary(&error.to_string()),
+                    },
+                }),
+            )?,
+        }
+    }
+    Ok(())
+}
+
 pub fn run_entrypoint() {
     if std::env::args().nth(1).as_deref() == Some("provider-permission-server") {
         if let Err(error) = run_provider_permission_server() {
             eprintln!(
                 "Gyro desktop permission bridge failed: {}",
                 gyro_core::sanitize_harness_text(&error.to_string())
+            );
+            std::process::exit(1);
+        }
+        return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("provider-capability-server") {
+        if let Err(error) = run_provider_capability_server() {
+            eprintln!(
+                "Gyro provider capability bridge failed: {}",
+                gyro_core::sanitize_capability_summary(&error.to_string())
             );
             std::process::exit(1);
         }
@@ -11598,6 +13439,10 @@ pub fn run() {
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
         .manage(ProviderApprovalManager::default())
+        .manage(ProviderCapabilityApprovalManager::default())
+        .manage(ProviderCapabilityBroker)
+        .manage(ProviderCapabilityResourceManager::default())
+        .manage(CapabilityIdeEvidenceManager::default())
         .manage(WorkspaceWatchManager::default())
         .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
@@ -11646,6 +13491,8 @@ pub fn run() {
             export_diagnostics,
             get_account_session,
             get_notification_permission,
+            get_project_capability_policy,
+            get_provider_capability_support,
             get_provider_usage,
             git_commit,
             git_branches,
@@ -11656,6 +13503,7 @@ pub fn run() {
             git_status,
             git_unstage,
             list_automations,
+            list_active_capability_resources,
             list_due_automations,
             list_sessions,
             list_workspace_files,
@@ -11679,11 +13527,13 @@ pub fn run() {
             resize_terminal_pane,
             resolve_file_mutation_proposal,
             resolve_provider_approval,
+            resolve_capability_approval,
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
             run_provider_chat,
             save_config,
+            save_project_capability_policy,
             search_workspace,
             set_session_model,
             set_session_branch,
@@ -11691,6 +13541,7 @@ pub fn run() {
             stat_workspace_file,
             start_account_login,
             stop_terminal_pane,
+            stop_model_terminal_resource,
             stop_provider_chat,
             terminal_pane_has_foreground_job,
             task_discover,
@@ -11699,6 +13550,7 @@ pub fn run() {
             test_notification,
             test_run,
             triage_automation,
+            update_capability_ide_evidence,
             watch_workspace,
             write_workspace_file,
             write_terminal_input
@@ -11893,6 +13745,21 @@ fn handle_cli_ipc_connection(app: &tauri::AppHandle, stream: std::os::unix::net:
         let _ = write_bounded_json_line(reader.get_mut(), &response, MAX_DESKTOP_IPC_MESSAGE_BYTES);
         return;
     }
+    if value.get("schema").and_then(serde_json::Value::as_str)
+        == Some(PROVIDER_CAPABILITY_IPC_SCHEMA_V1)
+    {
+        let response = match serde_json::from_value::<CapabilityRequest>(value) {
+            Ok(request) => app.state::<ProviderCapabilityBroker>().invoke(app, request),
+            Err(error) => CapabilityResponse::failed(
+                env!("CARGO_PKG_VERSION"),
+                Uuid::nil(),
+                "invalid-request",
+                error.to_string(),
+            ),
+        };
+        let _ = write_bounded_json_line(reader.get_mut(), &response, MAX_DESKTOP_IPC_MESSAGE_BYTES);
+        return;
+    }
     let Ok(notification) = serde_json::from_value::<AppNotification>(value) else {
         return;
     };
@@ -12020,6 +13887,19 @@ mod tests {
         }
     }
 
+    fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapabilityContext {
+        let workspace_key = request.workspace_path.clone().unwrap();
+        let policy = ProjectCapabilityPolicy::defaults(workspace_key.clone());
+        BoundProviderCapabilityContext {
+            session_id: request.session_id.clone(),
+            turn_id: request.turn_id.clone(),
+            provider_id: request.provider_id.clone(),
+            workspace: PathBuf::from(&workspace_key),
+            workspace_key,
+            policy: CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Normal),
+        }
+    }
+
     #[test]
     fn gyro_applied_file_changes_are_not_applied_again_by_codex() {
         assert_eq!(
@@ -12047,8 +13927,9 @@ mod tests {
     #[test]
     fn desktop_claude_mcp_config_uses_the_installed_binary_and_gated_context() {
         let request = anthropic_provider_request();
+        let bound = bound_capability_context(&request);
         let config: serde_json::Value = serde_json::from_str(
-            &desktop_claude_permission_mcp_config(&request, "test-run-nonce").unwrap(),
+            &desktop_claude_permission_mcp_config(&request, "test-run-nonce", &bound).unwrap(),
         )
         .unwrap();
         let server = &config["mcpServers"]["gyro_approval"];
@@ -12070,6 +13951,19 @@ mod tests {
         );
         assert_eq!(
             server["env"]["GYRO_DESKTOP_PERMISSION_RUN_NONCE"],
+            "test-run-nonce"
+        );
+        let capabilities = &config["mcpServers"]["gyro_capabilities"];
+        assert_eq!(
+            capabilities["args"],
+            serde_json::json!(["provider-capability-server"])
+        );
+        assert_eq!(
+            capabilities["env"]["GYRO_CAPABILITY_SESSION_ID"],
+            request.session_id
+        );
+        assert_eq!(
+            capabilities["env"]["GYRO_CAPABILITY_RUN_NONCE"],
             "test-run-nonce"
         );
     }
@@ -12097,6 +13991,119 @@ mod tests {
             "another-session",
             &expected_nonce
         ));
+    }
+
+    #[test]
+    fn capability_policy_snapshot_never_outlives_revocation() {
+        let request = anthropic_provider_request();
+        let mut bound = bound_capability_context(&request);
+        let grant = ProjectCapabilityGrant {
+            id: Uuid::new_v4(),
+            class: CapabilityClass::WorkspaceSensitiveRead,
+            scope_kind: "path".into(),
+            scope_value: ".env".into(),
+            created_at: chrono::Utc::now(),
+        };
+        bound.policy.grants.push(grant.clone());
+        let mut current = ProjectCapabilityPolicy::defaults(bound.workspace_key.clone());
+        current.grants.push(grant);
+        assert_eq!(
+            capability_access_for_call(
+                &bound,
+                &current,
+                CapabilityClass::WorkspaceSensitiveRead,
+                "path",
+                ".env",
+            ),
+            CapabilityAccess::Allow
+        );
+
+        current.grants.clear();
+        assert_eq!(
+            capability_access_for_call(
+                &bound,
+                &current,
+                CapabilityClass::WorkspaceSensitiveRead,
+                "path",
+                ".env",
+            ),
+            CapabilityAccess::Ask
+        );
+        current.classes.insert(
+            CapabilityClass::WorkspaceSensitiveRead,
+            CapabilityAccess::Deny,
+        );
+        assert_eq!(
+            capability_access_for_call(
+                &bound,
+                &current,
+                CapabilityClass::WorkspaceSensitiveRead,
+                "path",
+                ".env",
+            ),
+            CapabilityAccess::Deny
+        );
+    }
+
+    #[test]
+    fn capability_diff_and_reload_scopes_are_conservative() {
+        assert_eq!(
+            effective_capability_class(CapabilityId::WorkspaceDiff, &serde_json::json!({}))
+                .unwrap(),
+            CapabilityClass::WorkspaceSensitiveRead
+        );
+        assert_eq!(
+            effective_capability_class(
+                CapabilityId::WorkspaceDiff,
+                &serde_json::json!({ "path": "src/main.rs" }),
+            )
+            .unwrap(),
+            CapabilityClass::WorkspaceInspect
+        );
+        assert_eq!(
+            effective_capability_class(
+                CapabilityId::WorkspaceDiff,
+                &serde_json::json!({ "path": ".env.local" }),
+            )
+            .unwrap(),
+            CapabilityClass::WorkspaceSensitiveRead
+        );
+        assert!(effective_capability_class(
+            CapabilityId::WorkspaceDiff,
+            &serde_json::json!({ "path": "*.env" }),
+        )
+        .is_err());
+        let reload_schema = desktop_capability_tool_schema(CapabilityId::BrowserReload);
+        assert!(reload_schema["properties"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn capability_child_fails_closed_without_the_desktop_host() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let context = DesktopProviderCapabilityContext {
+            session_id: Uuid::new_v4().to_string(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            run_nonce: "test-run-nonce".into(),
+            provider_id: "openai".into(),
+            workspace_key: temp.path().display().to_string(),
+            mode: CapabilityRunMode::Normal,
+            policy_revision: 0,
+        };
+        let result = desktop_capability_tool_call(
+            &paths,
+            &context,
+            serde_json::json!({
+                "name": "gyro_workspace_list",
+                "arguments": { "depth": 2 },
+            }),
+        )
+        .unwrap();
+        assert_eq!(result["isError"], true);
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Gyro tools unavailable"));
     }
 
     #[test]
@@ -12940,6 +14947,7 @@ while True:
             kind: "workspace-file".into(),
             bytes: None,
             name: None,
+            relative_path: None,
         })
         .unwrap();
         assert_eq!(prepared.relative_path.as_deref(), Some("context.txt"));
@@ -13230,7 +15238,8 @@ while True:
         );
         assert!(resumed_claude.contains(&"--resume".to_string()));
         assert!(resumed_claude.contains(&"plan".to_string()));
-        assert!(!resumed_claude.contains(&"--mcp-config".to_string()));
+        assert!(resumed_claude.contains(&"--mcp-config".to_string()));
+        assert!(resumed_claude.contains(&"--strict-mcp-config".to_string()));
         assert_eq!(resumed_claude.last(), Some(&"again".to_string()));
     }
 
@@ -14273,6 +16282,13 @@ while True:
             idle
         });
         assert!(idle, "interactive shell should settle at an idle prompt");
+        assert_eq!(
+            manager
+                .read("pane-activity", None)
+                .unwrap()
+                .has_foreground_job,
+            Some(false)
+        );
 
         manager.write("pane-activity", "sleep 5\n").unwrap();
         let busy = (0..20).any(|_| {
@@ -14283,6 +16299,13 @@ while True:
             busy
         });
         assert!(busy, "foreground shell command should require confirmation");
+        assert_eq!(
+            manager
+                .read("pane-activity", None)
+                .unwrap()
+                .has_foreground_job,
+            Some(true)
+        );
         manager.stop("pane-activity").unwrap();
     }
 

@@ -1,6 +1,7 @@
 import {
   Activity,
   Archive,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -96,6 +97,8 @@ import type {
   Automation,
   BrowserPreview,
   BrowserPreviewDevice,
+  CapabilityActivity,
+  CapabilityCallEvent,
   ChatAttachment,
   ChatPaneRef,
   ChatProjectLayout,
@@ -128,6 +131,7 @@ import type {
   ProviderHandoff,
   ProviderSession,
   ProviderStatus,
+  ProjectCapabilityPolicy,
   ReasoningEffort,
   SettingsSectionId,
   Session,
@@ -347,6 +351,285 @@ const settingsSidebarItems: Array<{
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
 ];
 
+type SettingsSearchEntry = {
+  detail: string;
+  keywords?: string;
+  label: string;
+  section: SettingsSectionId;
+};
+
+const settingsSearchEntries: SettingsSearchEntry[] = [
+  {
+    section: "general",
+    label: "General",
+    detail: "Startup, sessions, workspace, and default surface",
+  },
+  {
+    section: "general",
+    label: "Startup behavior",
+    detail: "Open the last workspace on launch",
+    keywords: "restore reopen boot",
+  },
+  {
+    section: "general",
+    label: "Default workspace",
+    detail: "Choose which folder opens for sessions",
+    keywords: "project path launch",
+  },
+  {
+    section: "general",
+    label: "Default surface",
+    detail: "Start in Sessions or Workspace",
+    keywords: "chat destination",
+  },
+  {
+    section: "general",
+    label: "Session restore",
+    detail: "Restore app and terminal layouts after restart",
+    keywords: "resume reopen",
+  },
+  {
+    section: "general",
+    label: "Continue sessions from CLI",
+    detail: "Attach CLI-origin sessions to the desktop app",
+    keywords: "terminal resume",
+  },
+  {
+    section: "appearance",
+    label: "Appearance",
+    detail: "Theme, density, font, and motion",
+  },
+  {
+    section: "appearance",
+    label: "Theme",
+    detail: "Switch between Light and Dark mode",
+    keywords: "color appearance",
+  },
+  {
+    section: "appearance",
+    label: "Density",
+    detail: "Use Compact or Comfortable interface spacing",
+    keywords: "layout spacing",
+  },
+  {
+    section: "appearance",
+    label: "Terminal font",
+    detail: "Font used by CLI panes, logs, and command blocks",
+    keywords: "sf mono typography",
+  },
+  {
+    section: "appearance",
+    label: "Reduce motion",
+    detail: "Follow macOS animation preferences",
+    keywords: "animation accessibility transitions",
+  },
+  {
+    section: "usage-limits",
+    label: "Usage Limits",
+    detail: "Provider allowance, spend, and local guardrails",
+  },
+  {
+    section: "usage-limits",
+    label: "Provider spend",
+    detail: "Provider-owned billing and allowance controls",
+    keywords: "cost budget billing usage",
+  },
+  {
+    section: "usage-limits",
+    label: "Parallel agents",
+    detail: "Control multiple simultaneous CLI agents",
+    keywords: "concurrency",
+  },
+  {
+    section: "usage-limits",
+    label: "Command output",
+    detail: "Bound and summarize large terminal output",
+    keywords: "limit logs truncation",
+  },
+  {
+    section: "usage-limits",
+    label: "Approval budget",
+    detail: "Guard file edits and command escalation",
+    keywords: "permissions strict",
+  },
+  {
+    section: "providers",
+    label: "Providers",
+    detail: "Connect OpenAI, Anthropic, Gemini, and xAI",
+    keywords: "model api key authentication credentials",
+  },
+  {
+    section: "cli-profiles",
+    label: "CLI Profiles",
+    detail: "Configure launch presets and saved terminal commands",
+    keywords: "shell command agent",
+  },
+  {
+    section: "cli-profiles",
+    label: "Hook notifications",
+    detail: "Show done, waiting, failed, and approval states",
+    keywords: "alerts",
+  },
+  {
+    section: "permissions",
+    label: "Permissions",
+    detail: "Agent approvals and workspace protection",
+  },
+  {
+    section: "permissions",
+    label: "Command policy",
+    detail: "Require approval before executing commands",
+    keywords: "ask auto approve shell",
+  },
+  {
+    section: "permissions",
+    label: "File edit policy",
+    detail: "Require approval before changing files",
+    keywords: "writes mutations auto approve",
+  },
+  {
+    section: "permissions",
+    label: "Workspace boundary",
+    detail: "Protect files outside the current folder",
+    keywords: "sandbox path access",
+  },
+  {
+    section: "permissions",
+    label: "Network access",
+    detail: "Gate external calls by provider or profile",
+    keywords: "internet permissions",
+  },
+  {
+    section: "permissions",
+    label: "Secrets redaction",
+    detail: "Mask secrets in prompts, logs, and diagnostics",
+    keywords: "privacy api keys tokens",
+  },
+  {
+    section: "permissions",
+    label: "Automation outcomes",
+    detail: "Test system notifications",
+    keywords: "alerts notification",
+  },
+  {
+    section: "updates",
+    label: "Updates",
+    detail: "Automatic checks, release channel, and version status",
+  },
+  {
+    section: "updates",
+    label: "Automatic checks",
+    detail: "Check for updates after launch and focus",
+    keywords: "updater download",
+  },
+  {
+    section: "updates",
+    label: "Last checked",
+    detail: "Check for updates now",
+    keywords: "refresh version",
+  },
+  {
+    section: "keyboard",
+    label: "Keyboard",
+    detail: "Shortcuts for navigation, sessions, terminal, and search",
+    keywords: "hotkeys keybindings cmd command palette",
+  },
+  {
+    section: "advanced",
+    label: "Advanced",
+    detail: "Local runtime, storage, diagnostics, and reset",
+  },
+  {
+    section: "advanced",
+    label: "Local socket",
+    detail: "Desktop bridge used by CLI agents",
+    keywords: "runtime connection",
+  },
+  {
+    section: "advanced",
+    label: "Session store",
+    detail: "Location of saved sessions and terminal layouts",
+    keywords: "application support storage files",
+  },
+  {
+    section: "advanced",
+    label: "Logs path",
+    detail: "Location of local diagnostic logs",
+    keywords: "debug diagnostics folder",
+  },
+  {
+    section: "advanced",
+    label: "Export diagnostics",
+    detail: "Create a redacted issue-report bundle",
+    keywords: "support logs",
+  },
+  {
+    section: "advanced",
+    label: "Reset UI state",
+    detail: "Clear layout preferences without touching project files",
+    keywords: "restore defaults",
+  },
+  {
+    section: "about",
+    label: "Help",
+    detail: "Version, license, release notes, and security resources",
+  },
+  {
+    section: "about",
+    label: "Version and build",
+    detail: "Installed Gyro version",
+    keywords: "about release",
+  },
+  {
+    section: "about",
+    label: "License",
+    detail: "Apache 2.0 open-source license",
+  },
+  {
+    section: "about",
+    label: "Security policy",
+    detail: "Open the project security documentation",
+    keywords: "vulnerability",
+  },
+];
+
+function settingsSearchKey(label: string) {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function settingsSearchResults(query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  return settingsSearchEntries
+    .flatMap((entry) => {
+      const label = entry.label.toLowerCase();
+      const searchable = `${label} ${entry.detail.toLowerCase()} ${entry.keywords ?? ""}`;
+      if (!tokens.every((token) => searchable.includes(token))) return [];
+      const score =
+        label === normalized
+          ? 120
+          : label.startsWith(normalized)
+            ? 100
+            : label.includes(normalized)
+              ? 80
+              : searchable.includes(normalized)
+                ? 60
+                : 40;
+      return [{ entry, score }];
+    })
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.entry.label.localeCompare(right.entry.label),
+    )
+    .slice(0, 8)
+    .map(({ entry }) => entry);
+}
+
 export function AppChrome({
   sessions,
   commandProfiles,
@@ -414,6 +697,13 @@ export function AppChrome({
 }: AppChromeProps) {
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   const [settingsQuery, setSettingsQuery] = useState("");
+  const [isSettingsSearchFocused, setIsSettingsSearchFocused] = useState(false);
+  const [selectedSettingsResultIndex, setSelectedSettingsResultIndex] =
+    useState(0);
+  const matchingSettings = useMemo(
+    () => settingsSearchResults(settingsQuery),
+    [settingsQuery],
+  );
   const [isWorkspacePreparationOpen, setIsWorkspacePreparationOpen] =
     useState(false);
   const workspacePreparationRef = useOutsidePointerDismiss<HTMLDivElement>(
@@ -446,6 +736,39 @@ export function AppChrome({
   const showSidebarUpdate = updateState
     ? shouldShowSidebarUpdate(updateState)
     : false;
+
+  useEffect(() => {
+    setSelectedSettingsResultIndex(0);
+  }, [settingsQuery]);
+
+  const openSettingsSearchResult = (entry: SettingsSearchEntry) => {
+    onSettingsSectionChange?.(entry.section);
+    setSettingsQuery("");
+    setIsSettingsSearchFocused(false);
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => {
+        const sectionLabel = settingsSidebarItems.find(
+          (item) => item.id === entry.section,
+        )?.label;
+        const target =
+          document.querySelector<HTMLElement>(
+            `[data-setting-key="${settingsSearchKey(entry.label)}"]`,
+          ) ??
+          (sectionLabel
+            ? document.querySelector<HTMLElement>(
+                `[data-setting-key="${settingsSearchKey(sectionLabel)}"]`,
+              )
+            : null);
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+        target?.classList.add("is-search-target");
+        window.setTimeout(
+          () => target?.classList.remove("is-search-target"),
+          1_400,
+        );
+      }),
+    );
+  };
 
   useEffect(() => {
     if (!isIdeSurface) {
@@ -637,7 +960,6 @@ export function AppChrome({
               }}
               onSectionChange={onSettingsSectionChange}
               onToggleSidebar={() => setIsSidebarHidden(true)}
-              query={settingsQuery}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -771,12 +1093,61 @@ export function AppChrome({
               className="gyro-settings-topbar-drag-region"
               data-tauri-drag-region
             />
-            <div className="gyro-settings-topbar-search">
+            <div
+              className="gyro-settings-topbar-search"
+              onBlurCapture={(event) => {
+                if (
+                  !event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                ) {
+                  setIsSettingsSearchFocused(false);
+                }
+              }}
+            >
               <Search aria-hidden="true" size={14} />
               <input
+                aria-activedescendant={
+                  matchingSettings.length > 0
+                    ? `settings-result-${selectedSettingsResultIndex}`
+                    : undefined
+                }
+                aria-autocomplete="list"
+                aria-controls="settings-search-results"
+                aria-expanded={
+                  isSettingsSearchFocused && Boolean(settingsQuery.trim())
+                }
                 aria-label="Search settings"
                 onChange={(event) => setSettingsQuery(event.target.value)}
+                onFocus={() => setIsSettingsSearchFocused(true)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" && matchingSettings.length) {
+                    event.preventDefault();
+                    setSelectedSettingsResultIndex((current) =>
+                      Math.min(current + 1, matchingSettings.length - 1),
+                    );
+                  } else if (
+                    event.key === "ArrowUp" &&
+                    matchingSettings.length
+                  ) {
+                    event.preventDefault();
+                    setSelectedSettingsResultIndex((current) =>
+                      Math.max(0, current - 1),
+                    );
+                  } else if (event.key === "Enter") {
+                    const result =
+                      matchingSettings[selectedSettingsResultIndex];
+                    if (result) {
+                      event.preventDefault();
+                      openSettingsSearchResult(result);
+                    }
+                  } else if (event.key === "Escape") {
+                    setSettingsQuery("");
+                    setIsSettingsSearchFocused(false);
+                  }
+                }}
                 placeholder="Search settings"
+                role="combobox"
                 type="search"
                 value={settingsQuery}
               />
@@ -791,6 +1162,55 @@ export function AppChrome({
               ) : (
                 <span aria-hidden="true" />
               )}
+              {isSettingsSearchFocused && settingsQuery.trim() ? (
+                <div
+                  className="gyro-settings-search-results"
+                  id="settings-search-results"
+                  role="listbox"
+                >
+                  {matchingSettings.length > 0 ? (
+                    matchingSettings.map((entry, index) => {
+                      const section = settingsSidebarItems.find(
+                        (item) => item.id === entry.section,
+                      );
+                      const Icon = section?.icon ?? Settings;
+                      return (
+                        <button
+                          aria-selected={selectedSettingsResultIndex === index}
+                          className={
+                            selectedSettingsResultIndex === index
+                              ? "is-selected"
+                              : undefined
+                          }
+                          id={`settings-result-${index}`}
+                          key={`${entry.section}-${entry.label}`}
+                          onClick={() => openSettingsSearchResult(entry)}
+                          onMouseEnter={() =>
+                            setSelectedSettingsResultIndex(index)
+                          }
+                          role="option"
+                          type="button"
+                        >
+                          <Icon size={15} />
+                          <span>
+                            <strong>{entry.label}</strong>
+                            <small>{entry.detail}</small>
+                          </span>
+                          <em>{section?.label}</em>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="gyro-settings-search-empty">
+                      <Search size={16} />
+                      <span>
+                        <strong>No matching settings</strong>
+                        <small>Try a control, feature, or related term.</small>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         ) : activeDestination === "workspace" &&
@@ -954,7 +1374,6 @@ function WorkspacePreparationControl({
 function SettingsSidebarContent({
   activeSection,
   onBack,
-  query,
   onSectionChange,
   onToggleSidebar,
   workspacePreparation,
@@ -966,7 +1385,6 @@ function SettingsSidebarContent({
 }: {
   activeSection: SettingsSectionId;
   onBack: () => void;
-  query: string;
   onSectionChange?: (section: SettingsSectionId) => void;
   onToggleSidebar: () => void;
   workspacePreparation?: WorkspacePreparationProgress;
@@ -976,11 +1394,6 @@ function SettingsSidebarContent({
   onRetryWorkspacePreparation?: () => void;
   workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleItems = settingsSidebarItems.filter(({ label }) =>
-    label.toLowerCase().includes(normalizedQuery),
-  );
-
   return (
     <>
       <div className="gyro-sidebar-persistent-header is-settings">
@@ -1024,7 +1437,9 @@ function SettingsSidebarContent({
 
       <div className="gyro-sidebar-actions is-settings-pages">
         {(["Workspace", "System"] as const).map((group) => {
-          const items = visibleItems.filter((item) => item.group === group);
+          const items = settingsSidebarItems.filter(
+            (item) => item.group === group,
+          );
           if (items.length === 0) return null;
           return (
             <div className="gyro-settings-sidebar-group" key={group}>
@@ -1048,9 +1463,6 @@ function SettingsSidebarContent({
             </div>
           );
         })}
-        {visibleItems.length === 0 ? (
-          <p className="gyro-settings-sidebar-empty">No settings found</p>
-        ) : null}
       </div>
     </>
   );
@@ -1195,6 +1607,7 @@ function WorkspaceSidebarContent({
     (session) => !pinnedSessionIds.includes(session.id),
   );
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
+  const [draggedSessionId, setDraggedSessionId] = useState<string>();
   const [newSessionMenuView, setNewSessionMenuView] = useState<
     "closed" | "root"
   >("closed");
@@ -1455,6 +1868,7 @@ function WorkspaceSidebarContent({
       isMenuOpen={openSessionMenuId === session.id}
       isPinned={pinnedSessionIds.includes(session.id)}
       isOpen={openChatSessionIds.includes(session.id)}
+      isDragging={draggedSessionId === session.id}
       key={session.id}
       onDelete={() => {
         onDeleteSession?.(session.id);
@@ -1489,14 +1903,14 @@ function WorkspaceSidebarContent({
           }),
         );
         event.dataTransfer.setData("text/plain", session.id);
+        setDraggedSessionId(session.id);
       }}
+      onDragEnd={() => setDraggedSessionId(undefined)}
       session={session}
     />
   );
   const renderCliPaneRow = (pane: TerminalPane, isNested = false) => {
-    const profileLabel =
-      commandProfiles.find((profile) => profile.id === pane.profileId)
-        ?.displayName ?? pane.profileId;
+    const activity = sidebarTerminalActivity(pane);
     return (
       <SidebarThreadRow
         icon={Terminal}
@@ -1507,9 +1921,10 @@ function WorkspaceSidebarContent({
         }
         key={pane.id}
         label={pane.title}
-        meta={`${profileLabel} · ${pane.status}`}
+        meta={sidebarTerminalActivityLabel(activity)}
         onClick={() => onSelectTerminalPane?.(pane.id)}
         onClose={() => onCloseTerminalPane?.(pane.id)}
+        state={activity}
       />
     );
   };
@@ -1925,49 +2340,73 @@ function WorkspaceSidebarContent({
                       first.path.localeCompare(second.path),
                   )
                   .slice(0, 60)
-                  .map((file) => (
-                    <div
-                      className="gyro-sidebar-scm-row"
-                      key={`${file.path}:${file.staged}`}
-                    >
-                      <button
-                        onClick={() =>
-                          onOpenSourceControlDiff?.(file.path, file.staged)
-                        }
-                        title={`Open diff for ${file.path}`}
-                        type="button"
+                  .map((file) => {
+                    const parentFolder = workspaceParentFolder(file.path);
+                    const stateLabel = file.staged ? "staged" : file.state;
+                    return (
+                      <div
+                        className="gyro-sidebar-scm-row"
+                        key={`${file.path}:${file.staged}`}
                       >
-                        <span>{workspaceName(file.path)}</span>
-                        <small>{file.staged ? "staged" : file.state}</small>
-                      </button>
-                      <button
-                        aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
-                        onClick={() =>
-                          onToggleSourceControlFile?.(file.path, file.staged)
-                        }
-                        title={file.staged ? "Unstage" : "Stage"}
-                        type="button"
-                      >
-                        {file.staged ? <Minus size={13} /> : <Plus size={13} />}
-                      </button>
-                      <button
-                        aria-label={`Discard changes in ${file.path}`}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Discard all local changes in ${file.path}? This cannot be undone.`,
-                            )
-                          ) {
-                            onDiscardSourceControlFile?.(file.path);
+                        <button
+                          aria-label={`Open diff for ${file.path}`}
+                          className="gyro-sidebar-scm-identity"
+                          onClick={() =>
+                            onOpenSourceControlDiff?.(file.path, file.staged)
                           }
-                        }}
-                        title="Discard changes"
-                        type="button"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))
+                          title={file.path}
+                          type="button"
+                        >
+                          <span className="gyro-sidebar-scm-filename">
+                            {workspaceName(file.path)}
+                          </span>
+                          {parentFolder ? (
+                            <small className="gyro-sidebar-scm-directory">
+                              {parentFolder}
+                            </small>
+                          ) : null}
+                        </button>
+                        <small
+                          className="gyro-sidebar-scm-state"
+                          title={stateLabel}
+                        >
+                          {stateLabel}
+                        </small>
+                        <button
+                          aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
+                          className="gyro-sidebar-scm-stage"
+                          onClick={() =>
+                            onToggleSourceControlFile?.(file.path, file.staged)
+                          }
+                          title={file.staged ? "Unstage" : "Stage"}
+                          type="button"
+                        >
+                          {file.staged ? (
+                            <Minus size={13} />
+                          ) : (
+                            <Plus size={13} />
+                          )}
+                        </button>
+                        <button
+                          aria-label={`Discard changes in ${file.path}`}
+                          className="gyro-sidebar-scm-discard"
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Discard all local changes in ${file.path}? This cannot be undone.`,
+                              )
+                            ) {
+                              onDiscardSourceControlFile?.(file.path);
+                            }
+                          }}
+                          title="Discard changes"
+                          type="button"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    );
+                  })
               ) : (
                 <div className="gyro-sidebar-mini-copy">
                   No local Git changes detected.
@@ -2259,14 +2698,11 @@ function WorkspaceSidebarContent({
                     type="button"
                   >
                     <MessageSquare size={15} />
-                    <span>
-                      <strong>New Chat</strong>
-                      <small>Start in the focused project</small>
-                    </span>
+                    <strong>New Chat</strong>
                   </button>
                   <div className="gyro-sidebar-new-session-divider" />
                   <label className="gyro-sidebar-cli-location">
-                    <span>Run CLI in</span>
+                    <span>CLI</span>
                     <select
                       aria-label="CLI session location"
                       onChange={(event) =>
@@ -2323,11 +2759,9 @@ function WorkspaceSidebarContent({
                         )}
                         <span>
                           <strong>{profile.displayName}</strong>
-                          <small>
-                            {profile.readiness === "blocked"
-                              ? "Setup required"
-                              : profile.command}
-                          </small>
+                          {profile.readiness === "blocked" ? (
+                            <small>Setup required</small>
+                          ) : null}
                         </span>
                       </button>
                     ))}
@@ -2619,16 +3053,12 @@ function SidebarProjectRow({
       onDragEnd={onDragEnd}
       onDragStart={onDragStart}
       onKeyDown={onKeyDown}
+      title={
+        draggable
+          ? "Drag to reorder. Alt+Arrow keys also move this project."
+          : undefined
+      }
     >
-      {draggable ? (
-        <span
-          aria-hidden="true"
-          className="gyro-sidebar-project-drag-handle"
-          title="Drag to reorder. Alt+Arrow keys also move this project."
-        >
-          <GripVertical size={13} />
-        </span>
-      ) : null}
       <button
         aria-expanded={isCollapsed === undefined ? undefined : !isCollapsed}
         className="gyro-sidebar-project-toggle"
@@ -2669,6 +3099,7 @@ function SessionSidebarRow({
   isNested,
   isPinned,
   isOpen,
+  isDragging,
   isMenuOpen,
   onSelect,
   onPin,
@@ -2678,6 +3109,7 @@ function SessionSidebarRow({
   onOpenInGrid,
   onDelete,
   onDragStart,
+  onDragEnd,
 }: {
   session: Session;
   isActive: boolean;
@@ -2685,6 +3117,7 @@ function SessionSidebarRow({
   isNested?: boolean;
   isPinned: boolean;
   isOpen?: boolean;
+  isDragging?: boolean;
   isMenuOpen: boolean;
   onSelect: () => void;
   onPin: () => void;
@@ -2693,7 +3126,8 @@ function SessionSidebarRow({
   onRename: () => void;
   onOpenInGrid?: () => void;
   onDelete: () => void;
-  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
 }) {
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
     isMenuOpen,
@@ -2716,21 +3150,15 @@ function SessionSidebarRow({
         isNested ? "is-nested" : "",
         isPinned ? "is-pinned" : "",
         isOpen ? "is-open" : "",
+        isDragging ? "is-dragging" : "",
         isMenuOpen ? "is-menu-open" : "",
       ].join(" ")}
+      aria-grabbed={onDragStart ? Boolean(isDragging) : undefined}
+      draggable={Boolean(onDragStart)}
+      onDragEnd={onDragEnd}
+      onDragStart={onDragStart}
       ref={menuRef}
     >
-      <button
-        aria-label={`Drag ${session.title} into the chat grid`}
-        className="gyro-session-drag-handle"
-        draggable
-        onClick={onSelect}
-        onDragStart={onDragStart}
-        title="Drag into the chat grid"
-        type="button"
-      >
-        <GripVertical size={12} />
-      </button>
       <button
         aria-label={
           session.summary
@@ -3002,6 +3430,7 @@ function SidebarThreadRow({
   isActive,
   onClick,
   onClose,
+  state,
 }: {
   icon?: IconComponent;
   label: string;
@@ -3010,6 +3439,7 @@ function SidebarThreadRow({
   isActive?: boolean;
   onClick: () => void;
   onClose?: () => void;
+  state?: SidebarTerminalActivity;
 }) {
   return (
     <div className="gyro-sidebar-terminal-row">
@@ -3020,12 +3450,21 @@ function SidebarThreadRow({
           indent ? "is-indent" : "",
           isActive ? "is-active" : "",
         ].join(" ")}
+        data-state={state}
         onClick={onClick}
+        title={`${label} · ${meta}`}
         type="button"
       >
-        {Icon ? <Icon size={13} /> : null}
-        <span>{label}</span>
-        <small>{meta}</small>
+        {Icon ? (
+          <span className="gyro-sidebar-terminal-icon" aria-hidden="true">
+            <Icon size={13} />
+          </span>
+        ) : null}
+        <span className="gyro-sidebar-terminal-label">{label}</span>
+        <small className="gyro-sidebar-terminal-state">
+          <i aria-hidden="true" />
+          {meta}
+        </small>
       </button>
       {onClose ? (
         <button
@@ -3040,6 +3479,73 @@ function SidebarThreadRow({
       ) : null}
     </div>
   );
+}
+
+type SidebarTerminalActivity =
+  "checking" | "idle" | "running" | "waiting" | "done" | "failed" | "offline";
+
+function sidebarTerminalActivity(pane: TerminalPane): SidebarTerminalActivity {
+  if (pane.status === "waiting") {
+    return "waiting";
+  }
+  if (pane.status === "done") {
+    return "done";
+  }
+  if (pane.status === "failed") {
+    return "failed";
+  }
+  if (pane.status === "restored") {
+    return "offline";
+  }
+  if (!isInteractiveShellPane(pane)) {
+    return "running";
+  }
+  if (pane.hasForegroundJob === undefined) {
+    return "checking";
+  }
+  return pane.hasForegroundJob ? "running" : "idle";
+}
+
+function sidebarTerminalActivityLabel(activity: SidebarTerminalActivity) {
+  switch (activity) {
+    case "checking":
+      return "Checking";
+    case "idle":
+      return "Idle";
+    case "running":
+      return "Running";
+    case "waiting":
+      return "Waiting";
+    case "done":
+      return "Exited";
+    case "failed":
+      return "Failed";
+    case "offline":
+      return "Offline";
+  }
+}
+
+function isInteractiveShellPane(pane: TerminalPane) {
+  if (pane.profileId === "shell") {
+    return true;
+  }
+  const command = pane.command.trim().split(/\s+/, 1)[0] ?? "";
+  const executable = command.split("/").pop()?.toLowerCase();
+  return (
+    pane.title.trim().toLowerCase() === "shell" &&
+    executable !== undefined &&
+    ["sh", "bash", "zsh", "fish"].includes(executable)
+  );
+}
+
+function terminalPaneHasActiveWork(pane: TerminalPane) {
+  if (pane.status === "waiting") {
+    return true;
+  }
+  if (pane.status !== "running") {
+    return false;
+  }
+  return !isInteractiveShellPane(pane) || pane.hasForegroundJob !== false;
 }
 
 function SidebarDestinationRow({
@@ -3315,9 +3821,7 @@ export function ChatUtilityBar({
   const waitingPanes = terminalPanes.filter(
     (pane) => pane.status === "waiting",
   ).length;
-  const runningPanes = terminalPanes.filter(
-    (pane) => pane.status === "running",
-  ).length;
+  const runningPanes = terminalPanes.filter(terminalPaneHasActiveWork).length;
   const pendingDiffs =
     diffReview?.files.filter((file) => file.state === "pending").length ?? 0;
   const previewState = browserPreview?.status ?? "idle";
@@ -3413,7 +3917,6 @@ export function ChatUtilityBar({
 export function ChatGridSurface({
   layout,
   maximizedPaneId,
-  onClosePane,
   onDropSession,
   onFocusPane,
   onMovePane,
@@ -3422,11 +3925,11 @@ export function ChatGridSurface({
 }: {
   layout: ChatProjectLayout;
   maximizedPaneId?: string;
-  onClosePane: (pane: ChatPaneRef) => void;
   onDropSession: (
     sessionId: string,
     sourceProjectKey: string,
     slotIndex: number,
+    placement?: ChatGridDropPlacement,
   ) => void;
   onFocusPane: (pane: ChatPaneRef) => void;
   onMovePane: (paneId: string, slotIndex: number) => void;
@@ -3436,16 +3939,67 @@ export function ChatGridSurface({
     options: { isMaximized: boolean; isTiled: boolean },
   ) => ReactNode;
 }) {
-  const [isChatDragging, setIsChatDragging] = useState(false);
-  const [dropTargetIndex, setDropTargetIndex] = useState<number>();
+  const [dragSource, setDragSource] = useState<"session" | "pane">();
+  const [dropTargetId, setDropTargetId] = useState<string>();
+  const isChatDragging = dragSource !== undefined;
   const occupiedCount = layout.slots.filter(Boolean).length;
   const isMaximized = Boolean(maximizedPaneId);
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
+  const dropZones = chatGridDropZones(slots);
 
-  const finishDrag = () => {
-    setIsChatDragging(false);
-    setDropTargetIndex(undefined);
+  const finishDrag = useCallback(() => {
+    setDragSource(undefined);
+    setDropTargetId(undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!isChatDragging) return;
+    window.addEventListener("blur", finishDrag);
+    window.addEventListener("dragend", finishDrag);
+    return () => {
+      window.removeEventListener("blur", finishDrag);
+      window.removeEventListener("dragend", finishDrag);
+    };
+  }, [finishDrag, isChatDragging]);
+
+  const handleDrop = (
+    event: ReactDragEvent<HTMLDivElement>,
+    zone: ChatGridDropZone,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    let didDrop = false;
+    const paneId = event.dataTransfer.getData(CHAT_PANE_DRAG_MIME);
+    if (paneId) {
+      onMovePane(paneId, zone.slotIndex);
+      didDrop = true;
+    } else {
+      const raw = event.dataTransfer.getData(CHAT_SESSION_DRAG_MIME);
+      if (raw) {
+        try {
+          const payload = JSON.parse(raw) as {
+            sessionId?: string;
+            projectKey?: string;
+          };
+          if (payload.sessionId) {
+            onDropSession(
+              payload.sessionId,
+              payload.projectKey ?? "",
+              zone.slotIndex,
+              zone.placement,
+            );
+            didDrop = true;
+          }
+        } catch {
+          // Ignore external or malformed drag payloads.
+        }
+      }
+    }
+    if (didDrop && maximizedPaneId) {
+      onToggleMaximize(maximizedPaneId);
+    }
+    finishDrag();
   };
 
   return (
@@ -3453,6 +4007,9 @@ export function ChatGridSurface({
       className={[
         "gyro-chat-grid",
         `is-count-${occupiedCount}`,
+        occupiedCount === 2
+          ? `is-split-${layout.splitDirection ?? "horizontal"}`
+          : "",
         isChatDragging ? "is-dragging" : "",
         isMaximized ? "is-maximized" : "",
       ]
@@ -3465,160 +4022,184 @@ export function ChatGridSurface({
         }
       }}
       onDragOver={(event) => {
-        if (
-          event.dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME) ||
-          event.dataTransfer.types.includes(CHAT_PANE_DRAG_MIME)
-        ) {
+        const source = chatDragSource(event.dataTransfer);
+        if (source) {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
-          setIsChatDragging(true);
+          setDragSource(source);
         }
       }}
     >
       {slots.map((pane, slotIndex) => {
         const paneMaximized = pane?.paneId === maximizedPaneId;
         const hiddenByMaximize = isMaximized && !paneMaximized;
-        const isFocused = pane?.paneId === layout.focusedPaneId;
         return (
           <section
             aria-label={pane ? `Chat pane ${slotIndex + 1}` : "Empty chat pane"}
             className={[
               "gyro-chat-grid-slot",
               pane ? "is-occupied" : "is-empty",
-              isFocused ? "is-focused" : "",
               paneMaximized ? "is-pane-maximized" : "",
               hiddenByMaximize ? "is-hidden-by-maximize" : "",
-              dropTargetIndex === slotIndex ? "is-drop-target" : "",
             ]
               .filter(Boolean)
               .join(" ")}
             key={pane?.paneId ?? `empty-${slotIndex}`}
-            onDragOver={(event) => {
-              if (
-                event.dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME) ||
-                event.dataTransfer.types.includes(CHAT_PANE_DRAG_MIME)
-              ) {
-                event.preventDefault();
-                event.stopPropagation();
-                setIsChatDragging(true);
-                setDropTargetIndex(slotIndex);
-              }
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const paneId = event.dataTransfer.getData(CHAT_PANE_DRAG_MIME);
-              if (paneId) {
-                onMovePane(paneId, slotIndex);
-                finishDrag();
-                return;
-              }
-              const raw = event.dataTransfer.getData(CHAT_SESSION_DRAG_MIME);
-              if (raw) {
-                try {
-                  const payload = JSON.parse(raw) as {
-                    sessionId?: string;
-                    projectKey?: string;
-                  };
-                  if (payload.sessionId) {
-                    onDropSession(
-                      payload.sessionId,
-                      payload.projectKey ?? "",
-                      slotIndex,
-                    );
-                  }
-                } catch {
-                  // Ignore external or malformed drag payloads.
-                }
-              }
-              finishDrag();
-            }}
             onFocusCapture={() => pane && onFocusPane(pane)}
             onPointerDown={() => pane && onFocusPane(pane)}
           >
-            {pane ? (
-              <>
-                <div className="gyro-chat-pane-frame-actions">
-                  <button
-                    aria-label={`Move chat pane ${slotIndex + 1}`}
-                    className="gyro-chat-pane-drag-handle"
-                    draggable
-                    onClick={() => onFocusPane(pane)}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData(
-                        CHAT_PANE_DRAG_MIME,
-                        pane.paneId,
-                      );
-                      setIsChatDragging(true);
-                    }}
-                    onKeyDown={(event) => {
-                      if (!event.altKey) return;
-                      if (
-                        event.key === "ArrowLeft" ||
-                        event.key === "ArrowUp"
-                      ) {
-                        event.preventDefault();
-                        onMovePane(pane.paneId, Math.max(0, slotIndex - 1));
-                      } else if (
-                        event.key === "ArrowRight" ||
-                        event.key === "ArrowDown"
-                      ) {
-                        event.preventDefault();
-                        onMovePane(pane.paneId, Math.min(3, slotIndex + 1));
-                      }
-                    }}
-                    title="Drag to move. Alt+Arrow also moves this pane."
-                    type="button"
-                  >
-                    <GripVertical size={12} />
-                    <span>{slotIndex + 1}</span>
-                  </button>
-                  <button
-                    aria-label={
-                      paneMaximized ? "Restore chat grid" : "Maximize chat"
-                    }
-                    onClick={() => onToggleMaximize(pane.paneId)}
-                    title={paneMaximized ? "Restore grid" : "Maximize chat"}
-                    type="button"
-                  >
-                    {paneMaximized ? (
-                      <Minimize2 size={12} />
-                    ) : (
-                      <Maximize2 size={12} />
-                    )}
-                  </button>
-                  <button
-                    aria-label="Close chat pane"
-                    onClick={() => onClosePane(pane)}
-                    title="Close pane"
-                    type="button"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-                {renderPane(pane, {
+            {pane
+              ? renderPane(pane, {
                   isMaximized: paneMaximized,
                   isTiled: occupiedCount > 1 && !paneMaximized,
-                })}
-              </>
-            ) : occupiedCount >= 3 || isChatDragging ? (
-              <div className="gyro-chat-grid-empty-target">
-                <MessageSquare size={18} />
-                <strong>Slot {slotIndex + 1}</strong>
-                <span>Drag another chat here</span>
-              </div>
-            ) : null}
+                })
+              : null}
           </section>
         );
       })}
       {isChatDragging ? (
-        <span aria-live="polite" className="gyro-sr-only">
-          Choose one of four chat slots.
-        </span>
+        <>
+          <div
+            aria-hidden="true"
+            className="gyro-chat-grid-drop-overlay"
+            data-drag-source={dragSource}
+            data-layout={occupiedCount === 1 ? "directional" : "positions"}
+            data-zone-count={dropZones.length}
+          >
+            {dropZones.map((zone) => (
+              <div
+                className={[
+                  "gyro-chat-grid-drop-zone",
+                  dropTargetId === zone.id ? "is-drop-target" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                data-position={zone.position}
+                key={zone.id}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDropTargetId(zone.id);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = "move";
+                  if (dropTargetId !== zone.id) {
+                    setDropTargetId(zone.id);
+                  }
+                }}
+                onDrop={(event) => handleDrop(event, zone)}
+              >
+                <span className="gyro-chat-grid-drop-tile">{zone.label}</span>
+              </div>
+            ))}
+          </div>
+          <span aria-live="polite" className="gyro-sr-only">
+            Choose where to place the chat: above, beside, or below another
+            chat.
+          </span>
+        </>
       ) : null}
     </div>
   );
+}
+
+type ChatGridDropPlacement = {
+  insertPosition: "before" | "after";
+  splitDirection?: "horizontal" | "vertical";
+};
+
+type ChatGridDropZone = {
+  id: string;
+  label: string;
+  placement?: ChatGridDropPlacement;
+  position: string;
+  slotIndex: number;
+};
+
+function chatGridDropZones(
+  slots: Array<ChatPaneRef | null>,
+): ChatGridDropZone[] {
+  const occupiedSlots = slots.flatMap((pane, slotIndex) =>
+    pane ? [slotIndex] : [],
+  );
+  if (occupiedSlots.length === 1) {
+    const slotIndex = occupiedSlots[0] ?? 0;
+    return [
+      {
+        id: "above",
+        label: "Above",
+        placement: { insertPosition: "before", splitDirection: "vertical" },
+        position: "above",
+        slotIndex,
+      },
+      {
+        id: "left",
+        label: "Left",
+        placement: {
+          insertPosition: "before",
+          splitDirection: "horizontal",
+        },
+        position: "left",
+        slotIndex,
+      },
+      {
+        id: "right",
+        label: "Next",
+        placement: {
+          insertPosition: "after",
+          splitDirection: "horizontal",
+        },
+        position: "right",
+        slotIndex,
+      },
+      {
+        id: "below",
+        label: "Below",
+        placement: { insertPosition: "after", splitDirection: "vertical" },
+        position: "below",
+        slotIndex,
+      },
+    ];
+  }
+
+  if (occupiedSlots.length < 4) {
+    const labels =
+      occupiedSlots.length === 2
+        ? ["Top left", "Next", "Below"]
+        : ["Top left", "Top right", "Bottom left", "Bottom right"];
+    return labels.map((label, index) => {
+      const insertBefore = index === 0;
+      const targetPosition = insertBefore ? 0 : index - 1;
+      return {
+        id: `insert-${index}`,
+        label,
+        placement: {
+          insertPosition: insertBefore ? "before" : "after",
+        },
+        position: `position-${index + 1}`,
+        slotIndex: occupiedSlots[targetPosition] ?? occupiedSlots.at(-1) ?? 0,
+      };
+    });
+  }
+
+  return occupiedSlots.map((slotIndex, index) => ({
+    id: `replace-${slotIndex}`,
+    label: `Replace ${index + 1}`,
+    position: `position-${index + 1}`,
+    slotIndex,
+  }));
+}
+
+function chatDragSource(dataTransfer: DataTransfer) {
+  if (dataTransfer.types.includes(CHAT_PANE_DRAG_MIME)) {
+    return "pane" as const;
+  }
+  if (dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME)) {
+    return "session" as const;
+  }
+  return undefined;
 }
 
 type ChatSurfaceProps = {
@@ -3645,6 +4226,8 @@ type ChatSurfaceProps = {
     Record<string, { additions: number; deletions: number }>
   >;
   browserPreview?: BrowserPreview;
+  capabilityActivities?: CapabilityActivity[];
+  capabilityPolicy?: ProjectCapabilityPolicy;
   onboarding?: OnboardingState;
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
@@ -3698,7 +4281,7 @@ type ChatSurfaceProps = {
   ) => void;
   onProviderApprovalAction?: (
     approvalId: string,
-    decision: "approve" | "reject",
+    decision: "approve" | "reject" | "allow-project",
   ) => void;
   onProviderStatusAction?: (action: string, event: SessionEvent) => void;
   onToggleEnvironmentRail?: () => void;
@@ -3744,6 +4327,8 @@ export function ChatSurface({
   sourceControl,
   turnSourceControlBaselines,
   browserPreview,
+  capabilityActivities = [],
+  capabilityPolicy,
   onboarding,
   sessionPlan,
   sessionGoal,
@@ -3799,6 +4384,9 @@ export function ChatSurface({
     string | undefined
   >();
   const [isPlanDecisionPending, setIsPlanDecisionPending] = useState(false);
+  const [isTranscriptAwayFromBottom, setIsTranscriptAwayFromBottom] =
+    useState(false);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const [activeThreadContextMenu, setActiveThreadContextMenu] = useState<
     "project" | "workspace-mode" | "branch" | null
@@ -3916,6 +4504,29 @@ export function ChatSurface({
       ? workspaceName(workspacePath)
       : undefined;
   const deferredEvents = useDeferredValue(events);
+  const updateTranscriptScrollPosition = useCallback(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript) {
+      setIsTranscriptAwayFromBottom(false);
+      return;
+    }
+    const distanceFromBottom =
+      transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
+    setIsTranscriptAwayFromBottom(distanceFromBottom > 72);
+  }, []);
+  const scrollTranscriptToBottom = useCallback(() => {
+    const transcript = transcriptRef.current;
+    transcript?.scrollTo({
+      behavior: "smooth",
+      top: transcript.scrollHeight,
+    });
+  }, []);
+  useEffect(() => {
+    const animationFrame = window.requestAnimationFrame(
+      updateTranscriptScrollPosition,
+    );
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [deferredEvents, updateTranscriptScrollPosition]);
   const contextModel = useMemo(() => {
     const providers = providersForConfig(config);
     const providerId = config.selectedProviderId ?? sessionModel?.providerId;
@@ -3997,8 +4608,11 @@ export function ChatSurface({
             onReusePrompt={onReusePrompt}
             onContinueChat={onContinueChat}
             onOpenPlan={onTogglePlanPanel}
+            onPlanDecision={handlePlanDecision}
             plan={sessionPlan}
+            isPlanDecisionPending={isPlanDecisionPending}
             isPlanPanelOpen={activeRailPanel === "plan"}
+            isPlanReadyForDecision={isPlanReadyForDecision}
             sourceControl={sourceControl}
             sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
             turn={turn}
@@ -4015,10 +4629,13 @@ export function ChatSurface({
       onOpenToolPanel,
       onProviderApprovalAction,
       onProviderStatusAction,
+      handlePlanDecision,
       sourceControl,
       turnSourceControlBaselines,
       activeTurnId,
       isComposerSending,
+      isPlanDecisionPending,
+      isPlanReadyForDecision,
       activeRailPanel,
       looseEvents,
       onTogglePlanPanel,
@@ -4031,6 +4648,8 @@ export function ChatSurface({
       activePanel={activeRailPanel}
       branchName={branchName}
       browserPreview={browserPreview}
+      capabilityActivities={capabilityActivities}
+      capabilityPolicy={capabilityPolicy}
       diffReview={diffReview}
       sourceControl={sourceControl}
       onPlanItemStatusChange={onPlanItemStatusChange}
@@ -4199,6 +4818,7 @@ export function ChatSurface({
         "is-thread",
         isTiled ? "is-tiled" : "",
         activeRailPanel ? "has-environment" : "",
+        activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -4341,24 +4961,31 @@ export function ChatSurface({
           aria-live="polite"
           aria-relevant="additions text"
           className="gyro-thread-body gyro-chat-transcript"
+          onScroll={updateTranscriptScrollPosition}
+          ref={transcriptRef}
           role="log"
         >
           {transcriptContent}
         </div>
 
         <div className="gyro-chat-composer-dock">
+          {isTranscriptAwayFromBottom ? (
+            <button
+              aria-label="Jump to latest message"
+              className="gyro-chat-jump-to-bottom"
+              onClick={scrollTranscriptToBottom}
+              title="Jump to latest message"
+              type="button"
+            >
+              <ArrowDown aria-hidden="true" size={20} strokeWidth={1.8} />
+            </button>
+          ) : null}
           {queuedMessages.length > 0 ? (
             <ChatMessageQueue
               messages={queuedMessages}
               onEditMessage={onEditQueuedMessage}
               onRemoveMessage={onRemoveQueuedMessage}
               onSteerMessage={onSteerQueuedMessage}
-            />
-          ) : null}
-          {isPlanReadyForDecision && sessionPlan ? (
-            <PlanDecisionCard
-              isPending={isPlanDecisionPending}
-              onDecision={handlePlanDecision}
             />
           ) : null}
           <Composer
@@ -4397,59 +5024,6 @@ export function ChatSurface({
       </section>
       {sidePanel}
     </div>
-  );
-}
-
-function PlanDecisionCard({
-  isPending,
-  onDecision,
-}: {
-  isPending: boolean;
-  onDecision: (decision: "approve" | "reject") => void;
-}) {
-  return (
-    <section
-      aria-label="Plan ready for approval"
-      className="gyro-plan-decision-card"
-    >
-      <header>
-        <strong>Implement this plan?</strong>
-        <button
-          aria-label="Keep planning"
-          disabled={isPending}
-          onClick={() => onDecision("reject")}
-          type="button"
-        >
-          <X size={14} />
-        </button>
-      </header>
-      <div className="gyro-plan-decision-actions">
-        <button
-          className="is-primary"
-          disabled={isPending}
-          onClick={() => onDecision("approve")}
-          type="button"
-        >
-          <span aria-hidden="true">1</span>
-          <strong>
-            {isPending
-              ? "Starting implementation…"
-              : "Yes, implement this plan"}
-          </strong>
-        </button>
-        <button
-          className="is-secondary"
-          disabled={isPending}
-          onClick={() => onDecision("reject")}
-          type="button"
-        >
-          <span aria-hidden="true">
-            <Edit3 size={13} />
-          </span>
-          <strong>No, keep planning</strong>
-        </button>
-      </div>
-    </section>
   );
 }
 
@@ -4492,26 +5066,56 @@ function PlanDocument({ content, title }: { content: string; title: string }) {
 }
 
 function PlanArtifactCard({
+  content,
   isOpen,
+  isPending,
   onOpen,
+  onPlanDecision,
+  showDecision,
+  title,
 }: {
+  content: string;
   isOpen: boolean;
+  isPending: boolean;
   onOpen?: () => void;
+  onPlanDecision?: (decision: "approve" | "reject") => void;
+  showDecision: boolean;
+  title: string;
 }) {
   return (
-    <button
-      aria-expanded={isOpen}
-      aria-label={isOpen ? "Close plan" : "Open plan"}
-      className="gyro-plan-artifact-card"
-      onClick={onOpen}
-      type="button"
-    >
-      <span>
-        <Lightbulb size={16} />
-        <strong>Plan</strong>
-      </span>
-      {isOpen ? <PanelLeftClose size={15} /> : <Maximize2 size={15} />}
-    </button>
+    <div className="gyro-plan-artifact">
+      <section className="gyro-plan-artifact-card" aria-label="Plan">
+        <button
+          aria-expanded={isOpen}
+          aria-label={isOpen ? "Close plan document" : "Open plan document"}
+          className="gyro-plan-artifact-header"
+          onClick={onOpen}
+          type="button"
+        >
+          <span>
+            <Lightbulb size={15} />
+            <strong>Plan</strong>
+          </span>
+          {isOpen ? <PanelLeftClose size={14} /> : <Maximize2 size={14} />}
+        </button>
+        <div className="gyro-plan-artifact-preview">
+          <PlanDocument content={content} title={title} />
+        </div>
+      </section>
+      {showDecision ? (
+        <div className="gyro-plan-artifact-actions">
+          <button
+            disabled={isPending}
+            onClick={() => onPlanDecision?.("approve")}
+            type="button"
+          >
+            {isPending
+              ? "Starting implementation…"
+              : "Yes, implement this plan"}
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -4720,6 +5324,8 @@ function ChatSurfaceControls({
 function ChatSidePanel({
   activePanel,
   browserPreview,
+  capabilityActivities = [],
+  capabilityPolicy,
   diffReview,
   sourceControl,
   onPlanItemStatusChange,
@@ -4739,6 +5345,8 @@ function ChatSidePanel({
   activePanel: ChatSidePanelId;
   branchName?: string;
   browserPreview?: BrowserPreview;
+  capabilityActivities?: CapabilityActivity[];
+  capabilityPolicy?: ProjectCapabilityPolicy;
   diffReview?: DiffReview;
   sourceControl?: SourceControlState;
   onPlanItemStatusChange?: (
@@ -4813,9 +5421,7 @@ function ChatSidePanel({
     diffReview?.files.filter((file) => file.state === "pending").length ?? 0;
   const changedFiles =
     sourceControl?.files.length ?? diffReview?.files.length ?? 0;
-  const runningPanes = terminalPanes.filter(
-    (pane) => pane.status === "running" || pane.status === "waiting",
-  ).length;
+  const runningPanes = terminalPanes.filter(terminalPaneHasActiveWork).length;
   const planItemCount = sessionPlan?.items.length ?? 0;
   const changesLabel =
     pendingDiffs > 0
@@ -4844,6 +5450,28 @@ function ChatSidePanel({
     onClose?.();
     onOpenToolPanel?.(tab);
   };
+
+  if (activePanel === "plan" && sessionPlan?.content) {
+    return (
+      <aside className="gyro-plan-rail is-document" aria-label="Plan document">
+        <header>
+          <div>
+            <Lightbulb aria-hidden="true" size={15} />
+            <strong>Plan</strong>
+          </div>
+          <button
+            aria-label="Close plan document"
+            className="gyro-chat-tool-close"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={14} />
+          </button>
+        </header>
+        <PlanDocument content={sessionPlan.content} title={sessionPlan.title} />
+      </aside>
+    );
+  }
 
   if (activePanel === "plan") {
     return (
@@ -5233,6 +5861,36 @@ function ChatSidePanel({
         terminalLabel={terminalLabel}
         workspacePath={workspacePath}
       />
+      {capabilityPolicy ? (
+        <section
+          className="gyro-capability-policy-summary"
+          aria-label="Model capabilities"
+        >
+          <header>
+            <ShieldCheck size={14} />
+            <strong>Model capabilities</strong>
+            <small>
+              {capabilityActivities.filter((item) =>
+                ["requested", "waiting", "running"].includes(item.status),
+              ).length
+                ? `${capabilityActivities.filter((item) => ["requested", "waiting", "running"].includes(item.status)).length} active`
+                : `Policy ${capabilityPolicy.revision}`}
+            </small>
+          </header>
+          <div>
+            <span>Workspace</span>
+            <strong>{capabilityPolicy.classes["workspace-inspect"]}</strong>
+          </div>
+          <div>
+            <span>Terminal</span>
+            <strong>{capabilityPolicy.classes["terminal-execute"]}</strong>
+          </div>
+          <div>
+            <span>Local browser</span>
+            <strong>{capabilityPolicy.classes["browser-navigate"]}</strong>
+          </div>
+        </section>
+      ) : null}
     </aside>
   );
 }
@@ -5494,9 +6152,7 @@ export function CliWorkspaceSurface({
   const terminalProfiles = commandProfilesWithDefaults(profiles);
   const visibleTasks = tasks.length > 0 ? tasks : [];
   const panes = terminalPanes ?? [];
-  const activePanes = panes.filter((pane) =>
-    ["running", "waiting"].includes(pane.status),
-  );
+  const activePanes = panes.filter(terminalPaneHasActiveWork);
 
   return (
     <div className="gyro-cli-surface">
@@ -10556,8 +11212,10 @@ export function SettingsSurface({
             <SettingsGroup label="Interface">
               <div
                 className="gyro-theme-picker"
+                data-setting-key="theme"
                 role="group"
                 aria-label="Theme"
+                tabIndex={-1}
               >
                 <button
                   aria-pressed={themeMode === "dark"}
@@ -10791,7 +11449,10 @@ export function SettingsSurface({
                     <div className="gyro-provider-capability">
                       <strong>
                         {capabilities?.executable
-                          ? "Runs in Gyro"
+                          ? provider.id === "openai" ||
+                            provider.id === "anthropic"
+                            ? "Runs + Gyro tools"
+                            : "Runs · tools unavailable"
                           : "Readiness only"}
                       </strong>
                       <span>{providerAuthSummary(provider.id)}</span>
@@ -11355,7 +12016,11 @@ function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section className="gyro-settings-section">
+    <section
+      className="gyro-settings-section"
+      data-setting-key={settingsSearchKey(title)}
+      tabIndex={-1}
+    >
       <header>
         <div>
           <h1>
@@ -11401,6 +12066,7 @@ function SettingsRow({
     return (
       <button
         className={`gyro-settings-row${tone ? ` is-${tone}` : ""}`}
+        data-setting-key={settingsSearchKey(label)}
         onClick={onClick}
         type="button"
       >
@@ -11409,7 +12075,15 @@ function SettingsRow({
     );
   }
 
-  return <div className="gyro-settings-row">{content}</div>;
+  return (
+    <div
+      className="gyro-settings-row"
+      data-setting-key={settingsSearchKey(label)}
+      tabIndex={-1}
+    >
+      {content}
+    </div>
+  );
 }
 
 function SettingsGroup({
@@ -12407,6 +13081,12 @@ function Composer({
     : [];
   const contextItems: ComposerPopoverItem[] = [
     {
+      action: "attach-editor-snapshot",
+      detail: "Capture the current saved or unsaved editor text",
+      icon: FileCode2,
+      label: "Editor snapshot",
+    },
+    {
       action: "select-image",
       icon: ImagePlus,
       label: "Image",
@@ -12462,6 +13142,13 @@ function Composer({
           icon: LockKeyhole,
           label: "Plan mode",
         },
+    {
+      action: "attach-editor-snapshot",
+      command: "/editor",
+      detail: "Capture an immutable snapshot of the current editor",
+      icon: FileCode2,
+      label: "Attach editor snapshot",
+    },
     {
       action: "select-image",
       command: "/image",
@@ -12654,6 +13341,7 @@ function Composer({
             <div
               className={`gyro-composer-attachment is-${attachment.kind}`}
               key={attachment.id}
+              title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}
             >
               {attachment.kind === "image" ? (
                 <ComposerImagePreview attachment={attachment} />
@@ -13285,7 +13973,7 @@ const ChatEvent = memo(function ChatEvent({
   ) => void;
   onProviderApprovalAction?: (
     approvalId: string,
-    decision: "approve" | "reject",
+    decision: "approve" | "reject" | "allow-project",
   ) => void;
   onProviderStatusAction?: (action: string, event: SessionEvent) => void;
   onReusePrompt?: (message: string) => void;
@@ -13380,6 +14068,16 @@ const ChatEvent = memo(function ChatEvent({
       <ProviderToolApprovalCard
         approval={providerApproval}
         onAction={onProviderApprovalAction}
+      />
+    );
+  }
+  const capabilityCall = capabilityCallFromEvent(event);
+  if (capabilityCall) {
+    return (
+      <CapabilityActivityCard
+        activity={capabilityCall}
+        event={event}
+        onAction={onProviderStatusAction}
       />
     );
   }
@@ -13509,8 +14207,10 @@ type MutationApproval = {
 
 type ProviderToolApproval = {
   approvalId: string;
-  approvalType: "command" | "file-change" | "permissions";
+  approvalType: "command" | "file-change" | "permissions" | "capability";
   providerLabel: string;
+  capabilityId?: string;
+  scope?: string;
   command?: string;
   cwd?: string;
   reason?: string;
@@ -13600,7 +14300,10 @@ function ProviderToolApprovalCard({
   onAction,
 }: {
   approval: ProviderToolApproval;
-  onAction?: (approvalId: string, decision: "approve" | "reject") => void;
+  onAction?: (
+    approvalId: string,
+    decision: "approve" | "reject" | "allow-project",
+  ) => void;
 }) {
   const isPending = approval.status === "pending";
   const title =
@@ -13608,7 +14311,9 @@ function ProviderToolApprovalCard({
       ? "Run command"
       : approval.approvalType === "file-change"
         ? "Apply file changes"
-        : "Expand permissions";
+        : approval.approvalType === "capability"
+          ? `Allow ${approval.capabilityId?.replaceAll("-", " ") ?? "model capability"}`
+          : "Expand permissions";
   const statusLabel =
     approval.status === "applied"
       ? "Applied"
@@ -13632,6 +14337,8 @@ function ProviderToolApprovalCard({
             <Terminal size={15} />
           ) : approval.approvalType === "file-change" ? (
             <FileCode2 size={15} />
+          ) : approval.approvalType === "capability" ? (
+            <Sparkles size={15} />
           ) : (
             <ShieldCheck size={15} />
           )}
@@ -13658,6 +14365,7 @@ function ProviderToolApprovalCard({
         </div>
       ) : null}
       <p>{approval.error ?? approval.reason ?? approval.risk}</p>
+      {approval.scope ? <small>Scope: {approval.scope}</small> : null}
       {approval.cwd ? <small>In {approval.cwd}</small> : null}
       {isPending ? (
         <div className="gyro-provider-tool-approval-actions">
@@ -13668,15 +14376,88 @@ function ProviderToolApprovalCard({
           >
             Reject
           </button>
-          <button
-            className="is-primary"
-            onClick={() => onAction?.(approval.approvalId, "approve")}
-            type="button"
-          >
-            {approval.approvalType === "command" ? "Run command" : "Approve"}
-          </button>
+          {approval.approvalType === "capability" ? (
+            <>
+              <button
+                onClick={() => onAction?.(approval.approvalId, "allow-project")}
+                type="button"
+              >
+                Allow for project
+              </button>
+              <button
+                className="is-primary"
+                onClick={() => onAction?.(approval.approvalId, "approve")}
+                type="button"
+              >
+                Allow once
+              </button>
+            </>
+          ) : (
+            <button
+              className="is-primary"
+              onClick={() => onAction?.(approval.approvalId, "approve")}
+              type="button"
+            >
+              {approval.approvalType === "command" ? "Run command" : "Approve"}
+            </button>
+          )}
         </div>
       ) : null}
+    </article>
+  );
+}
+
+function CapabilityActivityCard({
+  activity,
+  event,
+  onAction,
+}: {
+  activity: CapabilityCallEvent;
+  event: SessionEvent;
+  onAction?: (action: string, event: SessionEvent) => void;
+}) {
+  const isBusy = ["requested", "waiting", "running"].includes(activity.status);
+  const icon =
+    activity.resource?.kind === "terminal" ? (
+      <Terminal size={15} />
+    ) : activity.resource?.kind === "browser" ? (
+      <Globe2 size={15} />
+    ) : activity.resource?.kind === "ide" ? (
+      <FileCode2 size={15} />
+    ) : (
+      <Search size={15} />
+    );
+  return (
+    <article
+      className={`gyro-capability-activity is-${activity.status}`}
+      aria-label={`${activity.capabilityId.replaceAll("-", " ")} ${activity.status}`}
+    >
+      <span className="gyro-capability-activity-icon">{icon}</span>
+      <div>
+        <strong>{activity.capabilityId.replaceAll("-", " ")}</strong>
+        <span>{activity.summary}</span>
+        {activity.resource ? <small>{activity.resource.label}</small> : null}
+      </div>
+      <div className="gyro-capability-activity-actions">
+        <small>{isBusy ? "Working" : activity.status}</small>
+        {activity.resource && activity.status !== "inactive" ? (
+          <button
+            onClick={() => onAction?.("show-capability", event)}
+            type="button"
+          >
+            Show
+          </button>
+        ) : null}
+        {activity.resource?.kind === "terminal" &&
+        activity.status === "completed" ? (
+          <button
+            onClick={() => onAction?.("stop-capability", event)}
+            type="button"
+          >
+            Stop
+          </button>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -13959,8 +14740,11 @@ function ChatTurn({
   onReusePrompt,
   onContinueChat,
   onOpenPlan,
+  onPlanDecision,
   plan,
+  isPlanDecisionPending,
   isPlanPanelOpen,
+  isPlanReadyForDecision,
   sourceControl,
   sourceControlBaseline,
   turn,
@@ -13974,14 +14758,17 @@ function ChatTurn({
   ) => void;
   onProviderApprovalAction?: (
     approvalId: string,
-    decision: "approve" | "reject",
+    decision: "approve" | "reject" | "allow-project",
   ) => void;
   onProviderStatusAction?: (action: string, event: SessionEvent) => void;
   onReusePrompt?: (message: string) => void;
   onContinueChat?: () => void;
   onOpenPlan?: () => void;
+  onPlanDecision?: (decision: "approve" | "reject") => void;
   plan?: SessionPlan;
+  isPlanDecisionPending: boolean;
   isPlanPanelOpen?: boolean;
+  isPlanReadyForDecision: boolean;
   sourceControl?: SourceControlState;
   sourceControlBaseline?: Record<
     string,
@@ -14010,23 +14797,25 @@ function ChatTurn({
     (event) =>
       event.kind === "assistant-message" && event.message.trim().length > 0,
   );
-  const responseEvents = turn.timelineEvents.filter(
-    (event) => event.kind === "assistant-message",
-  );
   const isPlanResponseTurn = Boolean(
     plan?.content && plan.sourceTurnId === turn.id,
   );
-  const thoughtEvents = turn.timelineEvents.filter(
-    (event) => event.kind !== "assistant-message",
+  const timelineItems = interleavedChatTimelineItems(turn.timelineEvents);
+  const hasWorkActivity = timelineItems.some(
+    (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
   );
-  const compactedThoughtEvents = compactThoughtTimelineEvents(thoughtEvents);
-  const canCollapseThought = !isRunning && thoughtEvents.length > 0;
+  const canCollapseThought = !isRunning && hasWorkActivity;
+  const visibleTimelineItems = isThoughtCollapsed
+    ? timelineItems.filter(
+        (item) =>
+          item.kind === "event" && item.event.kind === "assistant-message",
+      )
+    : timelineItems;
   const changeSummary = chatTurnChangeSummary(
     turn.timelineEvents,
     sourceControl,
     sourceControlBaseline,
   );
-
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
       {turn.user ? (
@@ -14057,14 +14846,59 @@ function ChatTurn({
             Thinking
           </div>
         ) : null}
-        {thoughtEvents.length > 0 && !isThoughtCollapsed ? (
-          <div
-            className="gyro-chat-run-timeline is-thought-process"
-            aria-label="AI thought process"
-          >
-            {compactedThoughtEvents.map(({ count, event }) =>
-              mutationApprovalFromEvent(event) ||
-              providerApprovalFromEvent(event) ? (
+        {visibleTimelineItems.length > 0 ? (
+          <div className="gyro-chat-run-sequence" aria-label="Work timeline">
+            {visibleTimelineItems.map((item) => {
+              if (item.kind === "activity-group") {
+                return (
+                  <ProviderActivityGroup events={item.events} key={item.id} />
+                );
+              }
+              const event = item.event;
+              if (event.kind === "assistant-message") {
+                return (
+                  <div
+                    aria-label={
+                      isRunning ? "Assistant update" : "Final response"
+                    }
+                    className="gyro-chat-run-timeline is-final-response"
+                    key={event.id}
+                  >
+                    <article className="gyro-message is-assistant">
+                      <div>
+                        {isPlanResponseTurn ? (
+                          <PlanArtifactCard
+                            content={plan?.content ?? event.message}
+                            isOpen={Boolean(isPlanPanelOpen)}
+                            isPending={isPlanDecisionPending}
+                            onOpen={onOpenPlan}
+                            onPlanDecision={onPlanDecision}
+                            showDecision={isPlanReadyForDecision}
+                            title={plan?.title ?? "Implementation plan"}
+                          />
+                        ) : (
+                          <AssistantResponse event={event} />
+                        )}
+                      </div>
+                    </article>
+                  </div>
+                );
+              }
+              if (providerActivityFromEvent(event)?.kind === "file") {
+                return (
+                  <LiveFileActivity
+                    event={event}
+                    key={event.id}
+                    onLoadChangeDiff={onLoadChangeDiff}
+                    onOpenChanges={onOpenChanges}
+                    sourceControl={sourceControl}
+                    sourceControlBaseline={sourceControlBaseline}
+                  />
+                );
+              }
+              return mutationApprovalFromEvent(event) ||
+                providerApprovalFromEvent(event) ||
+                capabilityCallFromEvent(event) ? (
                 <ChatEvent
                   event={event}
                   key={event.id}
@@ -14073,36 +14907,14 @@ function ChatTurn({
                 />
               ) : (
                 <ProviderActivityRow
-                  count={count}
                   event={event}
                   key={event.id}
                   onOpenChanges={onOpenChanges}
                   sourceControl={sourceControl}
                   sourceControlBaseline={sourceControlBaseline}
                 />
-              ),
-            )}
-          </div>
-        ) : null}
-        {responseEvents.length > 0 ? (
-          <div
-            className="gyro-chat-run-timeline is-final-response"
-            aria-label="Final response"
-          >
-            {responseEvents.map((event) => (
-              <article className="gyro-message is-assistant" key={event.id}>
-                <div>
-                  {isPlanResponseTurn ? (
-                    <PlanArtifactCard
-                      isOpen={Boolean(isPlanPanelOpen)}
-                      onOpen={onOpenPlan}
-                    />
-                  ) : (
-                    <AssistantResponse event={event} />
-                  )}
-                </div>
-              </article>
-            ))}
+              );
+            })}
           </div>
         ) : null}
         {!isRunning && hasResponse && changeSummary.paths.length > 0 ? (
@@ -14369,7 +15181,7 @@ function ChatRunHeader({
       : Number.isFinite(start)
         ? Math.max(0, Math.round((end - start) / 1_000))
         : 0;
-  const label = `${isRunning ? "Working" : "Thought"} for ${formatThoughtDuration(elapsedSeconds)}`;
+  const label = `${isRunning ? "Working" : "Worked"} for ${formatThoughtDuration(elapsedSeconds)}`;
   return (
     <div className="gyro-chat-run-header">
       {isCollapsible ? (
@@ -14416,46 +15228,66 @@ function formatMessageTime(value: string) {
   });
 }
 
-type CompactedThoughtTimelineEvent = {
-  count: number;
-  event: SessionEvent;
-};
+type InterleavedChatTimelineItem =
+  | { kind: "event"; event: SessionEvent }
+  | {
+      kind: "activity-group";
+      id: string;
+      activityKind: "command" | "search" | "tool";
+      events: SessionEvent[];
+    };
 
-function compactThoughtTimelineEvents(events: SessionEvent[]) {
-  const compacted: CompactedThoughtTimelineEvent[] = [];
+function interleavedChatTimelineItems(events: SessionEvent[]) {
+  const items: InterleavedChatTimelineItem[] = [];
   for (const event of events) {
     const filePath = providerActivityFilePath(event);
     if (filePath) {
-      const existingFileIndex = compacted.findIndex((item) => {
-        const existingPath = providerActivityFilePath(item.event);
-        return Boolean(
-          existingPath && providerActivityPathsMatch(filePath, existingPath),
-        );
-      });
-      if (existingFileIndex >= 0) {
-        const existing = compacted[existingFileIndex];
-        if (existing) {
-          compacted[existingFileIndex] = {
-            count: 1,
-            event: {
-              ...event,
-              createdAt: existing.event.createdAt,
-              id: existing.event.id,
-            },
-          };
-        }
+      const existingFileItem = items.find(
+        (item) =>
+          item.kind === "event" &&
+          Boolean(
+            providerActivityFilePath(item.event) &&
+            providerActivityPathsMatch(
+              filePath,
+              providerActivityFilePath(item.event) as string,
+            ),
+          ),
+      );
+      if (existingFileItem?.kind === "event") {
+        existingFileItem.event = {
+          ...event,
+          createdAt: existingFileItem.event.createdAt,
+          id: existingFileItem.event.id,
+        };
         continue;
       }
     }
-    const previous = compacted.at(-1);
-    const key = compactableActivityKey(event);
-    if (key && previous && compactableActivityKey(previous.event) === key) {
-      previous.count += 1;
-      continue;
+    const activity = providerActivityFromEvent(event);
+    const activityKind =
+      activity?.kind === "command" ||
+      activity?.kind === "search" ||
+      activity?.kind === "tool"
+        ? activity.kind
+        : undefined;
+    const previous = items.at(-1);
+    if (
+      activityKind &&
+      previous?.kind === "activity-group" &&
+      previous.activityKind === activityKind
+    ) {
+      previous.events.push(event);
+    } else if (activityKind) {
+      items.push({
+        kind: "activity-group",
+        id: `activity-group-${event.id}`,
+        activityKind,
+        events: [event],
+      });
+    } else {
+      items.push({ kind: "event", event });
     }
-    compacted.push({ count: 1, event });
   }
-  return compacted;
+  return items;
 }
 
 function providerActivityPathsMatch(first: string, second: string) {
@@ -14468,18 +15300,6 @@ function providerActivityPathsMatch(first: string, second: string) {
     firstPath.endsWith(`/${secondPath}`) ||
     secondPath.endsWith(`/${firstPath}`)
   );
-}
-
-function compactableActivityKey(event: SessionEvent) {
-  const activity = providerActivityFromEvent(event);
-  if (
-    !activity ||
-    activity.status === "running" ||
-    !["command", "search", "tool"].includes(activity.kind)
-  ) {
-    return undefined;
-  }
-  return activity.kind;
 }
 
 function ProviderActivityRow({
@@ -14504,9 +15324,15 @@ function ProviderActivityRow({
   }
   if (activity.kind === "commentary") {
     return (
-      <p className="gyro-chat-run-commentary">
-        {renderAssistantInlineContent(activity.label)}
-      </p>
+      <article className="gyro-chat-run-commentary">
+        <div>
+          {structuredCommentaryBlocks(activity.label).map((block, index) => (
+            <p key={`${block}-${index}`}>
+              {renderAssistantInlineContent(block)}
+            </p>
+          ))}
+        </div>
+      </article>
     );
   }
   const compactedLabel =
@@ -14589,6 +15415,149 @@ function ProviderActivityRow({
       )}
     </div>
   );
+}
+
+function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
+  const activity = providerActivityFromEvent(events[0] as SessionEvent);
+  const [visibility, setVisibility] = useState<
+    "collapsed" | "preview" | "expanded"
+  >("collapsed");
+  if (!activity) return null;
+  const isOpen = visibility !== "collapsed";
+  const visibleEvents =
+    visibility === "expanded"
+      ? events
+      : visibility === "preview"
+        ? events.slice(0, 3)
+        : [];
+  const label =
+    activity.kind === "command"
+      ? events.length === 1
+        ? "Ran command"
+        : `Ran ${events.length} commands`
+      : activity.kind === "search"
+        ? events.length === 1
+          ? "Searched"
+          : `Searched ${events.length} times`
+        : events.length === 1
+          ? "Used tool"
+          : `Used ${events.length} tools`;
+  const Icon =
+    activity.kind === "command"
+      ? Terminal
+      : activity.kind === "search"
+        ? Search
+        : Sparkles;
+  return (
+    <section className="gyro-chat-run-activity-group">
+      <button
+        aria-expanded={isOpen}
+        className="gyro-chat-run-activity-group-toggle"
+        onClick={() =>
+          setVisibility((current) =>
+            current === "collapsed"
+              ? events.length > 3
+                ? "preview"
+                : "expanded"
+              : current === "preview"
+                ? "expanded"
+                : "collapsed",
+          )
+        }
+        type="button"
+      >
+        <Icon size={14} />
+        <span>{label}</span>
+        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </button>
+      {isOpen ? (
+        <div className="gyro-chat-run-activity-group-items">
+          {visibleEvents.map((event) => (
+            <ProviderActivityRow event={event} key={event.id} />
+          ))}
+          {visibility === "preview" ? (
+            <span className="gyro-chat-run-activity-group-more">
+              {events.length - visibleEvents.length} more — click again to show
+              all
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function LiveFileActivity({
+  event,
+  onLoadChangeDiff,
+  onOpenChanges,
+  sourceControl,
+  sourceControlBaseline,
+}: {
+  event: SessionEvent;
+  onLoadChangeDiff?: (path: string) => Promise<string>;
+  onOpenChanges?: () => void;
+  sourceControl?: SourceControlState;
+  sourceControlBaseline?: Record<
+    string,
+    { additions: number; deletions: number }
+  >;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const summary = chatTurnChangeSummary(
+    [event],
+    sourceControl,
+    sourceControlBaseline,
+  );
+  const label =
+    summary.paths.length > 0
+      ? `Edited ${summary.paths.length} ${summary.paths.length === 1 ? "file" : "files"}`
+      : (providerActivityFromEvent(event)?.label ?? "Edited files");
+  return (
+    <section className="gyro-chat-run-live-files">
+      <button
+        aria-expanded={isOpen}
+        className="gyro-chat-run-live-files-toggle"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+      >
+        <FileCode2 size={14} />
+        <span>{label}</span>
+        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </button>
+      {isOpen ? (
+        summary.fileChanges.length > 0 ? (
+          <div className="gyro-change-summary-files is-live">
+            {summary.fileChanges.map((file) => (
+              <ChangeSummaryFile
+                additions={file.additions}
+                deletions={file.deletions}
+                key={file.path}
+                onLoadDiff={onLoadChangeDiff}
+                path={file.path}
+              />
+            ))}
+          </div>
+        ) : (
+          <button
+            className="gyro-chat-run-live-files-review"
+            onClick={onOpenChanges}
+            type="button"
+          >
+            Changes are still syncing. Open Source Control
+          </button>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+function structuredCommentaryBlocks(value: string) {
+  return value
+    .replace(/([.!?])(?=[A-Z][a-z])/g, "$1\n\n")
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean);
 }
 
 function providerActivityFilePath(event: SessionEvent) {
@@ -15134,7 +16103,27 @@ function providerApprovalFromEvent(
 ): ProviderToolApproval | undefined {
   if (event.kind !== "approval-requested") return undefined;
   const payload = eventPayloadRecord(event);
-  if (stringFromEventPayload(payload, "kind") !== "provider-tool-approval") {
+  const payloadKind = stringFromEventPayload(payload, "kind");
+  if (payloadKind === "capability-approval") {
+    const approvalId = stringFromEventPayload(payload, "approvalId");
+    const capabilityId = stringFromEventPayload(payload, "capabilityId");
+    if (!approvalId || !capabilityId) return undefined;
+    const scopeKind = stringFromEventPayload(payload, "scopeKind");
+    const scopeValue = stringFromEventPayload(payload, "scopeValue");
+    return {
+      approvalId,
+      approvalType: "capability",
+      providerLabel:
+        stringFromEventPayload(payload, "providerId") ?? "Model capability",
+      capabilityId,
+      scope: [scopeKind, scopeValue].filter(Boolean).join(" · "),
+      reason: `The model requested ${capabilityId.replaceAll("-", " ")}.`,
+      risk: "This capability is restricted to the owning Chat and project.",
+      changes: [],
+      status: "pending",
+    };
+  }
+  if (payloadKind !== "provider-tool-approval") {
     return undefined;
   }
   const approvalId = stringFromEventPayload(payload, "approvalId");
@@ -15176,6 +16165,59 @@ function providerApprovalFromEvent(
       status === "failed"
         ? status
         : "pending",
+  };
+}
+
+function capabilityCallFromEvent(
+  event: SessionEvent,
+): CapabilityCallEvent | undefined {
+  const payload = eventPayloadRecord(event);
+  if (
+    stringFromEventPayload(payload, "schema") !== "gyro.capability.v1" ||
+    stringFromEventPayload(payload, "kind") !== "capability-call"
+  ) {
+    return undefined;
+  }
+  const callId = stringFromEventPayload(payload, "callId");
+  const capabilityId = stringFromEventPayload(payload, "capabilityId");
+  const status = stringFromEventPayload(payload, "status");
+  const providerId = stringFromEventPayload(payload, "providerId");
+  const summary = stringFromEventPayload(payload, "summary");
+  const policyRevision = numberFromEventPayload(payload, "policyRevision");
+  if (
+    !callId ||
+    !capabilityId ||
+    !status ||
+    !providerId ||
+    !summary ||
+    policyRevision === undefined
+  ) {
+    return undefined;
+  }
+  const resourceRecord = recordFromUnknown(payload?.resource);
+  const resourceId = stringFromRecord(resourceRecord, "id");
+  const resourceKind = stringFromRecord(resourceRecord, "kind");
+  const resourceLabel = stringFromRecord(resourceRecord, "label");
+  const resource =
+    resourceId &&
+    resourceLabel &&
+    ["workspace", "ide", "terminal", "browser"].includes(resourceKind ?? "")
+      ? {
+          id: resourceId,
+          kind: resourceKind as "workspace" | "ide" | "terminal" | "browser",
+          label: resourceLabel,
+        }
+      : undefined;
+  return {
+    schema: "gyro.capability.v1",
+    kind: "capability-call",
+    callId,
+    capabilityId: capabilityId as CapabilityCallEvent["capabilityId"],
+    status: status as CapabilityCallEvent["status"],
+    providerId,
+    policyRevision,
+    summary,
+    resource,
   };
 }
 
@@ -15627,6 +16669,12 @@ function workspaceName(path?: string) {
     return "No workspace";
   }
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function workspaceParentFolder(path?: string) {
+  if (!path) return "";
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
 }
 
 function isGeneratedGyroWorkspace(path?: string) {

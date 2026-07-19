@@ -1,5 +1,6 @@
 pub mod account;
 pub mod automations;
+pub mod capabilities;
 pub mod config;
 pub mod diff;
 pub mod doctor;
@@ -26,6 +27,16 @@ pub use automations::{
     Automation, AutomationExecutionContext, AutomationRun, AutomationRunStatus, AutomationSchedule,
     AutomationStatus, AutomationStore, AutomationTriageState, CreateAutomationRequest,
 };
+pub use capabilities::{
+    capability_descriptor, capability_path_is_sensitive, normalize_capability_relative_path,
+    provider_capability_support, sanitize_capability_summary, validate_capability_result_data,
+    CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass,
+    CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInvocationContext,
+    CapabilityPolicySnapshot, CapabilityRequest, CapabilityResourceRef, CapabilityResponse,
+    CapabilityResult, CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant,
+    ProjectCapabilityPolicy, ProviderCapabilitySupport, CAPABILITY_DESCRIPTORS,
+    CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+};
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
     ModelProviderConfig,
@@ -43,9 +54,9 @@ pub use harness::{
     ProviderResumeCursorPayload, ProviderRunPayload, TerminalRequestPayload, HARNESS_SCHEMA_V1,
 };
 pub use ipc::{
-    AppNotification, AppNotificationKind, DesktopProviderApprovalBehavior,
-    DesktopProviderApprovalRequest, DesktopProviderApprovalResponse,
-    DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+    request_desktop_provider_capability, AppNotification, AppNotificationKind,
+    DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
+    DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
 };
 pub use kimi_acp::{
     check_kimi_acp_health, run_kimi_acp, KimiAcpActivity, KimiAcpApprovalDecision,
