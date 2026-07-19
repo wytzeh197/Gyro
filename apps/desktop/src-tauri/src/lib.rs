@@ -51,6 +51,8 @@ use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+mod menu_bar;
+
 #[cfg(test)]
 use gyro_core::{
     provider_account_label, provider_runtime_status_from_output, provider_subscription_label,
@@ -13446,7 +13448,9 @@ pub fn run() {
         .manage(WorkspaceWatchManager::default())
         .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
+        .manage(menu_bar::MenuBarController::default())
         .setup(|app| {
+            menu_bar::setup(app)?;
             #[cfg(target_os = "macos")]
             restore_main_window(app.handle())?;
             let paths = GyroPaths::for_current_user()?;
@@ -13491,6 +13495,7 @@ pub fn run() {
             export_diagnostics,
             get_account_session,
             get_notification_permission,
+            menu_bar::get_menu_bar_snapshot,
             get_project_capability_policy,
             get_provider_capability_support,
             get_provider_usage,
@@ -13520,6 +13525,7 @@ pub fn run() {
             prepare_chat_attachment,
             prepare_workspace,
             restart_app,
+            menu_bar::hide_menu_bar_popover,
             recover_automation_leases,
             rename_session,
             rename_workspace_path,
@@ -13536,6 +13542,8 @@ pub fn run() {
             save_project_capability_policy,
             search_workspace,
             set_session_model,
+            menu_bar::set_menu_bar_snapshot,
+            menu_bar::set_menu_bar_visible,
             set_session_branch,
             set_automation_status,
             stat_workspace_file,
@@ -13543,6 +13551,8 @@ pub fn run() {
             stop_terminal_pane,
             stop_model_terminal_resource,
             stop_provider_chat,
+            menu_bar::open_menu_bar_target,
+            menu_bar::show_main_window,
             terminal_pane_has_foreground_job,
             task_discover,
             task_run,
@@ -13582,7 +13592,7 @@ fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
+pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.unminimize()?;
         window.show()?;
