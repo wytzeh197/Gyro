@@ -46,6 +46,7 @@ export type ChatProjectLayout = {
   projectKey: string;
   slots: Array<ChatPaneRef | null>;
   focusedPaneId?: string;
+  splitDirection?: "horizontal" | "vertical";
 };
 
 export type ChatGridState = {
@@ -91,9 +92,7 @@ export type CapabilityStatus =
   | "inactive";
 
 export type CapabilityApprovalDecision =
-  | "deny"
-  | "allow-once"
-  | "allow-project";
+  "deny" | "allow-once" | "allow-project";
 
 export type CapabilityRunMode = "normal" | "plan";
 
