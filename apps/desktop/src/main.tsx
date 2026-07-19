@@ -2,7 +2,15 @@ import "@gyro-dev/ui/styles.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { MenuBarPopover } from "./MenuBarPopover";
 import "./theme.css";
+import "./menu-bar.css";
+
+const isMenuBarSurface =
+  new URLSearchParams(window.location.search).get("surface") === "menu-bar";
+document.documentElement.dataset.surface = isMenuBarSurface
+  ? "menu-bar"
+  : "main";
 
 const initialTheme = (() => {
   try {
@@ -47,7 +55,7 @@ class AppErrorBoundary extends React.Component<
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <App />
+      {isMenuBarSurface ? <MenuBarPopover /> : <App />}
     </AppErrorBoundary>
   </React.StrictMode>,
 );
