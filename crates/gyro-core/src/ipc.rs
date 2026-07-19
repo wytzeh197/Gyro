@@ -1,3 +1,6 @@
+use crate::capabilities::{
+    CapabilityRequest, CapabilityResponse, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+};
 use crate::paths::GyroPaths;
 use crate::sessions::SessionWorkspaceMode;
 use anyhow::{anyhow, Context, Result};
@@ -395,6 +398,49 @@ pub fn request_desktop_provider_approval(
         let _ = request;
         Err(anyhow!(
             "desktop provider approval IPC is not supported on this platform"
+        ))
+    }
+}
+
+pub fn request_desktop_provider_capability(
+    paths: &GyroPaths,
+    request: &CapabilityRequest,
+) -> Result<CapabilityResponse> {
+    #[cfg(unix)]
+    {
+        let Some(mut stream) = connect_running_app(paths)? else {
+            return Err(anyhow!("Gyro.app is not running; capability unavailable"));
+        };
+        stream.set_write_timeout(Some(DESKTOP_PROVIDER_APPROVAL_WRITE_TIMEOUT))?;
+        stream.set_read_timeout(Some(DESKTOP_PROVIDER_APPROVAL_READ_TIMEOUT))?;
+        write_json_frame(
+            &mut stream,
+            request,
+            DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES,
+            "desktop provider capability request",
+        )?;
+        let response = read_bounded_frame(
+            &mut BufReader::new(stream),
+            DESKTOP_PROVIDER_APPROVAL_MAX_FRAME_BYTES,
+        )
+        .context("read provider capability response from Gyro.app")?
+        .ok_or_else(|| anyhow!("Gyro.app closed the capability request"))?;
+        let response: CapabilityResponse = serde_json::from_slice(&response)
+            .context("decode provider capability response from Gyro.app")?;
+        if response.schema != PROVIDER_CAPABILITY_IPC_SCHEMA_V1 {
+            return Err(anyhow!(
+                "Gyro.app returned an incompatible capability schema"
+            ));
+        }
+        Ok(response)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = paths;
+        let _ = request;
+        Err(anyhow!(
+            "desktop provider capability IPC is not supported on this platform"
         ))
     }
 }

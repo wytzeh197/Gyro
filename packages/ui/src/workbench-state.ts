@@ -1071,6 +1071,7 @@ export type WorkbenchAction =
   | { type: "clear-notifications" }
   | { type: "select-terminal-pane"; paneId: string }
   | { type: "add-terminal-pane"; pane: TerminalPane }
+  | { type: "upsert-background-terminal-pane"; pane: TerminalPane }
   | {
       type: "split-terminal-pane";
       pane: TerminalPane;
@@ -1089,6 +1090,7 @@ export type WorkbenchAction =
       output: string;
       status: TerminalPaneStatus;
       event: string;
+      hasForegroundJob?: boolean;
       command?: string;
       projectPath?: string;
       workingDirectory?: string;
@@ -2281,6 +2283,17 @@ export function workbenchReducer(
         selectedTerminalPaneId: action.pane.id,
         terminalPanes: [...state.terminalPanes, action.pane],
       };
+    case "upsert-background-terminal-pane": {
+      const exists = state.terminalPanes.some((pane) => pane.id === action.pane.id);
+      return {
+        ...state,
+        terminalPanes: exists
+          ? state.terminalPanes.map((pane) =>
+              pane.id === action.pane.id ? action.pane : pane,
+            )
+          : [...state.terminalPanes, action.pane],
+      };
+    }
     case "split-terminal-pane":
       return {
         ...state,
@@ -2321,6 +2334,12 @@ export function workbenchReducer(
             ? {
                 ...pane,
                 status: action.status,
+                hasForegroundJob:
+                  action.status === "running" || action.status === "waiting"
+                    ? pane.status === action.status
+                      ? pane.hasForegroundJob
+                      : undefined
+                    : false,
                 lastEvent: action.event,
                 attention:
                   action.status === "failed" ? "failed" : pane.attention,
@@ -2337,6 +2356,11 @@ export function workbenchReducer(
       const nextProjectPath = action.projectPath ?? existingPane?.projectPath;
       const nextWorkingDirectory =
         action.workingDirectory ?? existingPane?.workingDirectory;
+      const nextHasForegroundJob =
+        action.hasForegroundJob ??
+        (action.status === "running" || action.status === "waiting"
+          ? existingPane?.hasForegroundJob
+          : false);
       const nextActivePaneTab =
         (state.isToolPanelOpen ||
           state.activeWorkspaceLayout === "terminal-grid") &&
@@ -2351,6 +2375,7 @@ export function workbenchReducer(
         existingPane.command === nextCommand &&
         existingPane.projectPath === nextProjectPath &&
         existingPane.workingDirectory === nextWorkingDirectory &&
+        existingPane.hasForegroundJob === nextHasForegroundJob &&
         existingPane.lastEvent === action.event &&
         existingPane.output === action.output &&
         existingPane.status === action.status
@@ -2368,6 +2393,7 @@ export function workbenchReducer(
                 lastEvent: action.event,
                 output: action.output,
                 status: action.status,
+                hasForegroundJob: nextHasForegroundJob,
                 attention:
                   action.status === "failed" ? "failed" : pane.attention,
                 projectPath: nextProjectPath,
@@ -2447,6 +2473,7 @@ export function workbenchReducer(
                 output: action.output,
                 profileId: action.profileId,
                 status: "waiting",
+                hasForegroundJob: undefined,
                 attention: undefined,
               }
             : pane,
@@ -3133,6 +3160,10 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     worktreeName: pane.worktreeName,
     projectPath: pane.projectPath,
     workingDirectory: pane.workingDirectory,
+    hasForegroundJob:
+      typeof pane.hasForegroundJob === "boolean"
+        ? pane.hasForegroundJob
+        : undefined,
     attention:
       pane.attention === "waiting" || pane.attention === "failed"
         ? pane.attention
