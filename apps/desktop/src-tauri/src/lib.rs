@@ -51,6 +51,8 @@ use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+mod menu_bar;
+
 #[cfg(test)]
 use gyro_core::{
     provider_account_label, provider_runtime_status_from_output, provider_subscription_label,
@@ -70,11 +72,14 @@ const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 4;
+const MAX_CHAT_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_CHAT_VIDEOS: usize = 2;
 const MAX_CHAT_ATTACHMENTS: usize = 16;
 const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
 const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 16;
+const MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION: u64 = 256 * 1024 * 1024;
 const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS: usize = 400;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS: usize = 8_000;
@@ -1089,19 +1094,19 @@ where
         type Value = Vec<u8>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(formatter, "at most {MAX_CHAT_IMAGE_BYTES} image bytes")
+            write!(formatter, "at most {MAX_CHAT_VIDEO_BYTES} media bytes")
         }
 
         fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
         where
             A: serde::de::SeqAccess<'de>,
         {
-            let limit = MAX_CHAT_IMAGE_BYTES as usize;
+            let limit = MAX_CHAT_VIDEO_BYTES as usize;
             let mut bytes = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(limit));
             while let Some(byte) = sequence.next_element::<u8>()? {
                 if bytes.len() >= limit {
                     return Err(serde::de::Error::custom(
-                        "image attachment exceeds the 10 MB limit",
+                        "media attachment exceeds the 50 MB limit",
                     ));
                 }
                 bytes.push(byte);
@@ -3271,6 +3276,14 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
     if images > MAX_CHAT_IMAGES {
         return Err(format!("attach at most {MAX_CHAT_IMAGES} images per turn"));
     }
+    let videos = request
+        .attachments
+        .iter()
+        .filter(|attachment| attachment.kind == "video")
+        .count();
+    if videos > MAX_CHAT_VIDEOS {
+        return Err(format!("attach at most {MAX_CHAT_VIDEOS} videos per turn"));
+    }
     let mut total_bytes = 0_u64;
     for attachment in &request.attachments {
         validate_attachment_name(&attachment.name)?;
@@ -3298,7 +3311,10 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
         if attachment.kind == "image" && metadata.len() > MAX_CHAT_IMAGE_BYTES {
             return Err(format!("{} exceeds the 10 MB image limit", attachment.name));
         }
-        if attachment.kind == "image" {
+        if attachment.kind == "video" && metadata.len() > MAX_CHAT_VIDEO_BYTES {
+            return Err(format!("{} exceeds the 50 MB video limit", attachment.name));
+        }
+        if attachment.kind == "image" || attachment.kind == "video" {
             let expected_hash = attachment
                 .content_hash
                 .as_deref()
@@ -3317,8 +3333,12 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
                     attachment.name
                 ));
             }
-            let (current, current_size) =
-                hash_file_streaming(&canonical, Some(MAX_CHAT_IMAGE_BYTES))?;
+            let media_limit = if attachment.kind == "video" {
+                MAX_CHAT_VIDEO_BYTES
+            } else {
+                MAX_CHAT_IMAGE_BYTES
+            };
+            let (current, current_size) = hash_file_streaming(&canonical, Some(media_limit))?;
             if current_size != attachment.size || current != expected_hash {
                 return Err(format!(
                     "{} changed after it was attached; remove it and attach the current file",
@@ -3443,7 +3463,10 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
         .attachments
         .iter()
         .filter(|attachment| {
-            matches!(attachment.kind.as_str(), "workspace-file" | "ide-snapshot")
+            matches!(
+                attachment.kind.as_str(),
+                "workspace-file" | "ide-snapshot" | "video"
+            )
                 || request.provider_id == "anthropic"
         })
         .map(|attachment| {
@@ -3550,6 +3573,40 @@ async fn prepare_chat_attachment(
         .map_err(|error| format!("attachment worker failed: {error}"))?
 }
 
+fn validated_chat_media_type(
+    name: &str,
+    is_video: bool,
+    bytes: &[u8],
+) -> Result<(&'static str, &'static str), String> {
+    let extension = Path::new(name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" if !is_video && bytes.starts_with(b"\x89PNG\r\n\x1a\n") => Ok(("image/png", "png")),
+        "jpg" | "jpeg" if !is_video && bytes.starts_with(&[0xff, 0xd8, 0xff]) => {
+            Ok(("image/jpeg", "jpg"))
+        }
+        "webp" if !is_video && bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => {
+            Ok(("image/webp", "webp"))
+        }
+        "mp4" | "m4v" if is_video && bytes.get(4..8) == Some(b"ftyp") => Ok(("video/mp4", "mp4")),
+        "mov" if is_video && bytes.get(4..8) == Some(b"ftyp") => Ok(("video/quicktime", "mov")),
+        "webm" if is_video && bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) => {
+            Ok(("video/webm", "webm"))
+        }
+        "png" | "jpg" | "jpeg" | "webp" if !is_video => {
+            Err("image contents do not match the selected file type".into())
+        }
+        "mp4" | "m4v" | "mov" | "webm" if is_video => {
+            Err("video contents do not match the selected file type".into())
+        }
+        _ if is_video => Err("only MP4, M4V, MOV, and WebM videos are supported".into()),
+        _ => Err("only PNG, JPEG, and WebP images are supported".into()),
+    }
+}
+
 fn prepare_chat_attachment_blocking(
     request: PrepareChatAttachmentRequest,
 ) -> Result<PreparedChatAttachment, String> {
@@ -3593,21 +3650,33 @@ fn prepare_chat_attachment_blocking(
         .map(chrono::DateTime::<chrono::Utc>::from)
         .map(|value| value.to_rfc3339());
 
-    let (path, relative_path, mime_type, size, content_hash) = if request.kind == "image" {
+    let (path, relative_path, mime_type, size, content_hash) = if request.kind == "image"
+        || request.kind == "video"
+    {
+        let is_video = request.kind == "video";
+        let media_limit = if is_video {
+            MAX_CHAT_VIDEO_BYTES
+        } else {
+            MAX_CHAT_IMAGE_BYTES
+        };
+        let media_label = if is_video { "videos" } else { "images" };
         if metadata
             .as_ref()
-            .is_some_and(|metadata| metadata.len() > MAX_CHAT_IMAGE_BYTES)
+            .is_some_and(|metadata| metadata.len() > media_limit)
         {
-            return Err("images must be 10 MB or smaller".into());
+            return Err(format!(
+                "{media_label} must be {} MB or smaller",
+                media_limit / (1024 * 1024)
+            ));
         }
         let bytes = match request.bytes {
             Some(bytes) => bytes,
             None => read_bounded_regular_file(
                 source
                     .as_ref()
-                    .ok_or_else(|| "image attachment has no source data".to_string())?,
-                MAX_CHAT_IMAGE_BYTES as usize,
-                "image attachment",
+                    .ok_or_else(|| "media attachment has no source data".to_string())?,
+                media_limit as usize,
+                "media attachment",
             )
             .map(|(bytes, _)| bytes)
             .map_err(|_| "attachment file is empty or unreadable".to_string())?,
@@ -3615,31 +3684,13 @@ fn prepare_chat_attachment_blocking(
         if bytes.is_empty() {
             return Err("attachment file is empty or unreadable".into());
         }
-        if bytes.len() as u64 > MAX_CHAT_IMAGE_BYTES {
-            return Err("images must be 10 MB or smaller".into());
+        if bytes.len() as u64 > media_limit {
+            return Err(format!(
+                "{media_label} must be {} MB or smaller",
+                media_limit / (1024 * 1024)
+            ));
         }
-        let extension = Path::new(&name)
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let mime = match extension.as_str() {
-            "png" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "image/png",
-            "jpg" | "jpeg" if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "image/jpeg",
-            "webp" if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => {
-                "image/webp"
-            }
-            "png" | "jpg" | "jpeg" | "webp" => {
-                return Err("image contents do not match the selected file type".into())
-            }
-            _ => return Err("only PNG, JPEG, and WebP images are supported".into()),
-        };
-        let safe_extension = match mime {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/webp" => "webp",
-            _ => unreachable!("validated image MIME"),
-        };
+        let (mime, safe_extension) = validated_chat_media_type(&name, is_video, &bytes)?;
         let content_hash = format!("{:x}", Sha256::digest(&bytes));
         let paths = GyroPaths::for_current_user().map_err(to_string)?;
         paths.ensure().map_err(to_string)?;
@@ -3834,9 +3885,9 @@ fn ensure_attachment_storage_quota(
             .ok_or_else(|| "attachment storage size overflow".to_string())?;
     }
     if files >= MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION
-        || bytes
-            .checked_add(incoming_bytes)
-            .map_or(true, |total| total > MAX_CHAT_ATTACHMENT_TOTAL_BYTES)
+        || bytes.checked_add(incoming_bytes).map_or(true, |total| {
+            total > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+        })
     {
         return Err("session attachment storage limit reached".into());
     }
@@ -3887,7 +3938,7 @@ fn validate_private_attachment(path: &Path, expected_hash: &str) -> Result<(), S
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err("attachment destination is not a regular file".into());
     }
-    let (actual_hash, _) = hash_file_streaming(path, Some(MAX_CHAT_IMAGE_BYTES))?;
+    let (actual_hash, _) = hash_file_streaming(path, Some(MAX_CHAT_VIDEO_BYTES))?;
     if actual_hash != expected_hash {
         return Err("attachment destination already contains different data".into());
     }
@@ -4863,6 +4914,15 @@ async fn git_checkout_branch(
     .map_err(|error| format!("git branch checkout worker failed: {error}"))?
 }
 
+fn sort_branch_catalog_entries(branches: &mut [(i64, String)]) {
+    branches.sort_by(|(date_a, branch_a), (date_b, branch_b)| {
+        let main_order = (branch_b == "main").cmp(&(branch_a == "main"));
+        main_order
+            .then_with(|| date_b.cmp(date_a))
+            .then_with(|| branch_a.cmp(branch_b))
+    });
+}
+
 fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCatalog> {
     let root = workspace_root(workspace_path)?;
     let Some(repo_root) = git_repo_root(&root) else {
@@ -4876,7 +4936,7 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
     let mut command = command_with_gui_path("git");
     command.arg("-C").arg(&repo_root).args([
         "for-each-ref",
-        "--format=%(refname:short)",
+        "--format=%(committerdate:unix)%09%(refname:short)",
         "refs/heads/",
     ]);
     let output = run_bounded_command(
@@ -4895,12 +4955,22 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
     let mut branches = output
         .stdout
         .lines()
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-        .map(ToOwned::to_owned)
+        .filter_map(|line| {
+            let (committer_date, branch) = line.split_once('\t')?;
+            let branch = branch.trim();
+            (!branch.is_empty()).then(|| {
+                (
+                    committer_date.parse::<i64>().unwrap_or(i64::MIN),
+                    branch.to_owned(),
+                )
+            })
+        })
         .collect::<Vec<_>>();
-    branches.sort();
-    branches.dedup();
+    sort_branch_catalog_entries(&mut branches);
+    let branches = branches
+        .into_iter()
+        .map(|(_, branch)| branch)
+        .collect::<Vec<_>>();
     let mut current_command = command_with_gui_path("git");
     current_command
         .arg("-C")
@@ -10993,23 +11063,59 @@ impl StreamingCommandState {
         }
     }
 
-    fn push_activity(&mut self, activity: ProviderActivity) -> bool {
+    fn push_activity(&mut self, mut activity: ProviderActivity) -> Option<ProviderActivity> {
+        if activity.kind == "commentary" {
+            let root_id = activity.id.clone();
+            let continuation_prefix = format!("{root_id}::continuation::");
+            let segment_indices = self
+                .activities
+                .iter()
+                .enumerate()
+                .filter_map(|(index, existing)| {
+                    (existing.id == root_id || existing.id.starts_with(&continuation_prefix))
+                        .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            if let Some(last_index) = segment_indices.last().copied() {
+                let previous_text = segment_indices
+                    .iter()
+                    .map(|index| self.activities[*index].label.as_str())
+                    .collect::<String>();
+                if let Some(suffix) = activity.label.strip_prefix(&previous_text) {
+                    if suffix.is_empty() {
+                        return None;
+                    }
+                    if last_index + 1 == self.activities.len() {
+                        let existing = &mut self.activities[last_index];
+                        existing.label.push_str(suffix);
+                        existing.status = activity.status;
+                        return Some(existing.clone());
+                    }
+                    activity.label = suffix.to_string();
+                } else if last_index + 1 == self.activities.len() {
+                    activity.id = self.activities[last_index].id.clone();
+                    self.activities[last_index] = activity.clone();
+                    return Some(activity);
+                }
+                activity.id = format!("{root_id}::continuation::{}", self.activities.len());
+            }
+        }
         if let Some(existing) = self
             .activities
             .iter_mut()
             .find(|existing| existing.id == activity.id)
         {
             if *existing == activity {
-                return false;
+                return None;
             }
-            *existing = activity;
-            return true;
+            *existing = activity.clone();
+            return Some(activity);
         }
         if self.activities.len() >= MAX_CODEX_APP_SERVER_ACTIVITIES {
-            return false;
+            return None;
         }
-        self.activities.push(activity);
-        true
+        self.activities.push(activity.clone());
+        Some(activity)
     }
 
     fn push_stdout(&mut self, line: &str) {
@@ -11233,13 +11339,13 @@ fn handle_provider_stdout_line(
         stream_state.context_usage = Some(context_usage);
     }
     if let Some(commentary) = extract_provider_commentary_activity(&value) {
-        if stream_state.push_activity(commentary.clone()) {
-            emit_provider_activity_event(app, request, &commentary);
+        if let Some(activity) = stream_state.push_activity(commentary) {
+            emit_provider_activity_event(app, request, &activity);
         }
         return;
     }
     if let Some(activity) = extract_provider_activity(&value) {
-        if stream_state.push_activity(activity.clone()) {
+        if let Some(activity) = stream_state.push_activity(activity) {
             emit_provider_activity_event(app, request, &activity);
         }
     }
@@ -13446,7 +13552,9 @@ pub fn run() {
         .manage(WorkspaceWatchManager::default())
         .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
+        .manage(menu_bar::MenuBarController::default())
         .setup(|app| {
+            menu_bar::setup(app)?;
             #[cfg(target_os = "macos")]
             restore_main_window(app.handle())?;
             let paths = GyroPaths::for_current_user()?;
@@ -13491,6 +13599,7 @@ pub fn run() {
             export_diagnostics,
             get_account_session,
             get_notification_permission,
+            menu_bar::get_menu_bar_snapshot,
             get_project_capability_policy,
             get_provider_capability_support,
             get_provider_usage,
@@ -13520,6 +13629,7 @@ pub fn run() {
             prepare_chat_attachment,
             prepare_workspace,
             restart_app,
+            menu_bar::hide_menu_bar_popover,
             recover_automation_leases,
             rename_session,
             rename_workspace_path,
@@ -13536,6 +13646,8 @@ pub fn run() {
             save_project_capability_policy,
             search_workspace,
             set_session_model,
+            menu_bar::set_menu_bar_snapshot,
+            menu_bar::set_menu_bar_visible,
             set_session_branch,
             set_automation_status,
             stat_workspace_file,
@@ -13543,6 +13655,8 @@ pub fn run() {
             stop_terminal_pane,
             stop_model_terminal_resource,
             stop_provider_chat,
+            menu_bar::open_menu_bar_target,
+            menu_bar::show_main_window,
             terminal_pane_has_foreground_job,
             task_discover,
             task_run,
@@ -13582,7 +13696,7 @@ fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
+pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.unminimize()?;
         window.show()?;
@@ -14991,6 +15105,25 @@ while True:
     }
 
     #[test]
+    fn validates_supported_chat_video_containers() {
+        let mp4 = b"\0\0\0\x18ftypisom\0\0\0\0isom";
+        let webm = [0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81];
+
+        assert_eq!(
+            validated_chat_media_type("clip.mp4", true, mp4).unwrap(),
+            ("video/mp4", "mp4")
+        );
+        assert_eq!(
+            validated_chat_media_type("clip.webm", true, &webm).unwrap(),
+            ("video/webm", "webm")
+        );
+        assert!(validated_chat_media_type("clip.mp4", true, b"not a video")
+            .unwrap_err()
+            .contains("do not match"));
+        assert!(validated_chat_media_type("image.png", true, b"\x89PNG\r\n\x1a\n").is_err());
+    }
+
+    #[test]
     fn provider_health_skips_codex_login_for_external_env_auth() {
         assert!(should_skip_codex_login_for_external_env(
             Some("https://gateway.example.test/v1"),
@@ -15511,6 +15644,35 @@ while True:
             });
         }
         assert_eq!(state.activities.len(), MAX_CODEX_APP_SERVER_ACTIVITIES);
+    }
+
+    #[test]
+    fn streaming_state_places_new_commentary_after_intervening_activity() {
+        let commentary = |label: &str| ProviderActivity {
+            id: "commentary-1".into(),
+            kind: "commentary".into(),
+            label: label.into(),
+            detail: None,
+            status: "done".into(),
+        };
+        let mut state = StreamingCommandState::new();
+
+        state.push_activity(commentary("I’ll inspect first."));
+        state.push_activity(ProviderActivity {
+            id: "command-1".into(),
+            kind: "command".into(),
+            label: "Ran command".into(),
+            detail: None,
+            status: "done".into(),
+        });
+        let continuation = state
+            .push_activity(commentary("I’ll inspect first.Now I’ll edit it."))
+            .expect("new commentary suffix");
+
+        assert_eq!(continuation.label, "Now I’ll edit it.");
+        assert_eq!(state.activities[0].label, "I’ll inspect first.");
+        assert_eq!(state.activities[1].kind, "command");
+        assert_eq!(state.activities[2], continuation);
     }
 
     #[test]
@@ -16499,6 +16661,26 @@ while True:
     }
 
     #[test]
+    fn branch_catalog_order_pins_main_then_sorts_newest_first() {
+        let mut branches = vec![
+            (300, "feature/newest".to_string()),
+            (100, "feature/oldest".to_string()),
+            (50, "main".to_string()),
+            (200, "feature/middle".to_string()),
+        ];
+
+        sort_branch_catalog_entries(&mut branches);
+
+        assert_eq!(
+            branches
+                .into_iter()
+                .map(|(_, branch)| branch)
+                .collect::<Vec<_>>(),
+            vec!["main", "feature/newest", "feature/middle", "feature/oldest"]
+        );
+    }
+
+    #[test]
     fn git_branch_catalog_switches_clean_branches_and_refuses_dirty_workspaces() {
         let repo = tempfile::tempdir().unwrap();
         init_git_repo(repo.path());
@@ -16510,7 +16692,7 @@ while True:
         let workspace_path = repo.path().to_str().unwrap().to_string();
         let catalog = git_branch_catalog_impl(&workspace_path).unwrap();
         assert_eq!(catalog.current.as_deref(), Some("main"));
-        assert_eq!(catalog.branches, vec!["feature/picker", "main"]);
+        assert_eq!(catalog.branches, vec!["main", "feature/picker"]);
 
         let switched = git_checkout_branch_impl(&GitCheckoutBranchRequest {
             workspace_path: workspace_path.clone(),

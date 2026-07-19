@@ -63,6 +63,7 @@ import {
   TriangleAlert,
   Trash2,
   UserCircle,
+  Video,
   X,
 } from "lucide-react";
 import {
@@ -2281,19 +2282,27 @@ function WorkspaceSidebarContent({
           ) : null}
 
           {activeIdeView === "source-control" ? (
-            <SidebarSection
-              grow
-              meta={String(ide?.sourceControl.files.length ?? 0)}
-              title="Source Control"
-            >
-              <button
-                className="gyro-sidebar-action is-tight"
-                onClick={onRefreshSourceControl}
-                type="button"
-              >
-                <RefreshCw size={14} />
-                {ide?.sourceControl.branch ?? "Refresh"}
-              </button>
+            <SidebarSection grow title="Source Control">
+              <div className="gyro-sidebar-scm-group-label">
+                <ChevronDown size={13} />
+                <span>Repositories</span>
+              </div>
+              <div className="gyro-sidebar-scm-repository">
+                <HardDrive size={13} />
+                <strong>{workspaceName(workspacePath)}</strong>
+                <span>
+                  <GitBranch size={12} />
+                  {ide?.sourceControl.branch ?? "No branch"}
+                </span>
+                <button
+                  aria-label="Refresh source control"
+                  onClick={onRefreshSourceControl}
+                  title="Refresh"
+                  type="button"
+                >
+                  <RefreshCw size={13} />
+                </button>
+              </div>
               <form
                 className="gyro-sidebar-commit-form"
                 onSubmit={(event) => {
@@ -2327,6 +2336,11 @@ function WorkspaceSidebarContent({
                   Commit
                 </button>
               </form>
+              <div className="gyro-sidebar-scm-group-label is-changes">
+                <ChevronDown size={13} />
+                <span>Changes</span>
+                <small>{ide?.sourceControl.files.length ?? 0}</small>
+              </div>
               {ide?.sourceControl.available === false ? (
                 <div className="gyro-sidebar-mini-copy">
                   Git is not ready for this workspace.
@@ -2343,6 +2357,19 @@ function WorkspaceSidebarContent({
                   .map((file) => {
                     const parentFolder = workspaceParentFolder(file.path);
                     const stateLabel = file.staged ? "staged" : file.state;
+                    const stateDecoration = file.staged
+                      ? "S"
+                      : file.state === "untracked"
+                        ? "U"
+                        : file.state === "deleted"
+                          ? "D"
+                          : file.state === "added"
+                            ? "A"
+                            : file.state === "renamed"
+                              ? "R"
+                              : file.state === "conflicted"
+                                ? "!"
+                                : "M";
                     return (
                       <div
                         className="gyro-sidebar-scm-row"
@@ -2357,6 +2384,11 @@ function WorkspaceSidebarContent({
                           title={file.path}
                           type="button"
                         >
+                          <FileCode2
+                            aria-hidden="true"
+                            className="gyro-sidebar-scm-file-icon"
+                            size={13}
+                          />
                           <span className="gyro-sidebar-scm-filename">
                             {workspaceName(file.path)}
                           </span>
@@ -2370,7 +2402,7 @@ function WorkspaceSidebarContent({
                           className="gyro-sidebar-scm-state"
                           title={stateLabel}
                         >
-                          {stateLabel}
+                          {stateDecoration}
                         </small>
                         <button
                           aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
@@ -3943,6 +3975,9 @@ export function ChatGridSurface({
   const [dropTargetId, setDropTargetId] = useState<string>();
   const isChatDragging = dragSource !== undefined;
   const occupiedCount = layout.slots.filter(Boolean).length;
+  const hasMultiplePanes = occupiedCount > 1;
+  const focusedPaneId =
+    layout.focusedPaneId ?? layout.slots.find(Boolean)?.paneId;
   const isMaximized = Boolean(maximizedPaneId);
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
@@ -4010,6 +4045,7 @@ export function ChatGridSurface({
         occupiedCount === 2
           ? `is-split-${layout.splitDirection ?? "horizontal"}`
           : "",
+        hasMultiplePanes ? "has-multiple-panes" : "",
         isChatDragging ? "is-dragging" : "",
         isMaximized ? "is-maximized" : "",
       ]
@@ -4032,6 +4068,7 @@ export function ChatGridSurface({
     >
       {slots.map((pane, slotIndex) => {
         const paneMaximized = pane?.paneId === maximizedPaneId;
+        const paneFocused = pane?.paneId === focusedPaneId;
         const hiddenByMaximize = isMaximized && !paneMaximized;
         return (
           <section
@@ -4039,6 +4076,7 @@ export function ChatGridSurface({
             className={[
               "gyro-chat-grid-slot",
               pane ? "is-occupied" : "is-empty",
+              paneFocused ? "is-current-pane" : "is-subdued-pane",
               paneMaximized ? "is-pane-maximized" : "",
               hiddenByMaximize ? "is-hidden-by-maximize" : "",
             ]
@@ -4269,9 +4307,10 @@ type ChatSurfaceProps = {
   onEditQueuedMessage?: (messageId: string) => void;
   onRemoveQueuedMessage?: (messageId: string) => void;
   onSteerQueuedMessage?: (messageId: string) => void;
-  onAttachImageFiles?: (files: File[]) => void;
+  onAttachMediaFiles?: (files: File[]) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
+  onCloseChat?: () => void;
   onContinueChat?: () => void;
   onSend: (message: string) => void;
   onComposerAction?: (action: string) => void;
@@ -4356,9 +4395,10 @@ export function ChatSurface({
   onEditQueuedMessage,
   onRemoveQueuedMessage,
   onSteerQueuedMessage,
-  onAttachImageFiles,
+  onAttachMediaFiles,
   onReusePrompt,
   onStopChat,
+  onCloseChat,
   onContinueChat,
   onSend,
   onComposerAction,
@@ -4425,7 +4465,7 @@ export function ChatSurface({
     onSend,
     sessionGoal?.text,
   ]);
-  const handleImageDragOver = useCallback(
+  const handleMediaDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
       if (
         Array.from(event.dataTransfer.items).some(
@@ -4438,18 +4478,20 @@ export function ChatSurface({
     },
     [],
   );
-  const handleImageDrop = useCallback(
+  const handleMediaDrop = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
-      const files = Array.from(event.dataTransfer.files).filter((file) =>
-        file.type.startsWith("image/"),
+      const files = Array.from(event.dataTransfer.files).filter(
+        (file) =>
+          /^(?:image|video)\//.test(file.type) ||
+          /\.(?:png|jpe?g|webp|mp4|m4v|mov|webm)$/i.test(file.name),
       );
       if (!files.length) {
         return;
       }
       event.preventDefault();
-      onAttachImageFiles?.(files);
+      onAttachMediaFiles?.(files);
     },
-    [onAttachImageFiles],
+    [onAttachMediaFiles],
   );
   const latestPlanModeEnabledAt = useMemo(() => {
     for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -4680,8 +4722,8 @@ export function ChatSurface({
         ]
           .filter(Boolean)
           .join(" ")}
-        onDragOver={handleImageDragOver}
-        onDrop={handleImageDrop}
+        onDragOver={handleMediaDragOver}
+        onDrop={handleMediaDrop}
       >
         <div
           aria-hidden="true"
@@ -4728,7 +4770,7 @@ export function ChatSurface({
             branchCatalog={branchCatalog}
             onDraftChange={handleDraftChange}
             onRemoveAttachment={onRemoveAttachment}
-            onAttachImageFiles={onAttachImageFiles}
+            onAttachMediaFiles={onAttachMediaFiles}
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
@@ -4822,8 +4864,8 @@ export function ChatSurface({
       ]
         .filter(Boolean)
         .join(" ")}
-      onDragOver={handleImageDragOver}
-      onDrop={handleImageDrop}
+      onDragOver={handleMediaDragOver}
+      onDrop={handleMediaDrop}
     >
       <div className="gyro-chat-thread-topbar">
         <div>
@@ -4947,6 +4989,7 @@ export function ChatSurface({
           <ChatSurfaceControls
             activePanel={activeRailPanel}
             isToolPanelOpen={Boolean(isToolPanelOpen)}
+            onCloseChat={onCloseChat}
             onToggleToolPanel={onToggleToolPanel}
             onToggleEnvironmentRail={onToggleEnvironmentRail}
             onTogglePlanPanel={onTogglePlanPanel}
@@ -4997,7 +5040,7 @@ export function ChatSurface({
             branchName={branchName}
             onDraftChange={handleDraftChange}
             onRemoveAttachment={onRemoveAttachment}
-            onAttachImageFiles={onAttachImageFiles}
+            onAttachMediaFiles={onAttachMediaFiles}
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
@@ -5250,6 +5293,7 @@ function ChatMessageQueue({
 function ChatSurfaceControls({
   activePanel,
   isToolPanelOpen,
+  onCloseChat,
   onToggleToolPanel,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
@@ -5257,6 +5301,7 @@ function ChatSurfaceControls({
 }: {
   activePanel?: ChatSidePanelId;
   isToolPanelOpen: boolean;
+  onCloseChat?: () => void;
   onToggleToolPanel?: () => void;
   onToggleEnvironmentRail?: () => void;
   onTogglePlanPanel?: () => void;
@@ -5317,6 +5362,17 @@ function ChatSurfaceControls({
           <span className="gyro-chat-surface-count">{planItemCount}</span>
         ) : null}
       </button>
+      {onCloseChat ? (
+        <button
+          aria-label="Close chat"
+          className="gyro-chat-surface-button"
+          onClick={onCloseChat}
+          title="Close chat"
+          type="button"
+        >
+          <X size={15} />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -10954,9 +11010,11 @@ type SettingsSurfaceProps = {
   cliLaunchPreset?: CliLaunchPreset;
   themeMode: ThemeMode;
   density?: WorkbenchDensity;
+  showMenuBarIcon?: boolean;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onDensityChange?: (density: WorkbenchDensity) => void;
+  onMenuBarVisibilityChange?: (visible: boolean) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onConfigChange?: (config: GyroConfig) => void;
   onCheckForUpdates?: () => void;
@@ -11120,9 +11178,11 @@ export function SettingsSurface({
   cliLaunchPreset = defaultCliLaunchPreset(),
   themeMode,
   density = "compact",
+  showMenuBarIcon = true,
   activeSection = "general",
   onThemeChange,
   onDensityChange,
+  onMenuBarVisibilityChange,
   onSectionChange,
   onConfigChange,
   onCheckForUpdates,
@@ -11187,6 +11247,16 @@ export function SettingsSurface({
                 value="Sessions"
                 detail="Chat and CLI sessions share one destination; Workspace remains one click away."
               />
+              <SettingsRow
+                label="Menu bar"
+                detail="Keep Gyro's logo visible while chats and automations work in the background."
+              >
+                <SettingsSwitch
+                  checked={showMenuBarIcon}
+                  label="Show Gyro in menu bar"
+                  onChange={(visible) => onMenuBarVisibilityChange?.(visible)}
+                />
+              </SettingsRow>
             </SettingsGroup>
             <SettingsGroup label="Session behavior">
               <SettingsRow
@@ -12847,7 +12917,7 @@ function Composer({
   branchCatalog,
   onDraftChange,
   onRemoveAttachment,
-  onAttachImageFiles,
+  onAttachMediaFiles,
   onSend,
   onStop,
   worktreeName,
@@ -12879,7 +12949,7 @@ function Composer({
   branchCatalog?: GitBranchCatalog;
   onDraftChange: (value: string) => void;
   onRemoveAttachment?: (attachmentId: string) => void;
-  onAttachImageFiles?: (files: File[]) => void;
+  onAttachMediaFiles?: (files: File[]) => void;
   onSend: () => void;
   onStop?: () => void;
   worktreeName?: string;
@@ -12945,6 +13015,15 @@ function Composer({
       composerTextareaRef.current?.focus();
     }
   }, [isGoalComposerActive]);
+  useEffect(() => {
+    const textarea = composerTextareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 52), 148);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 148 ? "auto" : "hidden";
+  }, [draft]);
   const providerConfigs = providersForConfig(config);
   const selectedProvider = providerConfigs.find(
     (provider) => provider.id === config.selectedProviderId,
@@ -13092,6 +13171,11 @@ function Composer({
       label: "Image",
     },
     {
+      action: "select-video",
+      icon: Video,
+      label: "Video",
+    },
+    {
       action: "select-file",
       icon: Paperclip,
       label: "File",
@@ -13155,6 +13239,13 @@ function Composer({
       detail: "Attach an image to your next message",
       icon: ImagePlus,
       label: "Attach image",
+    },
+    {
+      action: "select-video",
+      command: "/video",
+      detail: "Attach a video to your next message",
+      icon: Video,
+      label: "Attach video",
     },
     {
       action: "select-file",
@@ -13339,12 +13430,12 @@ function Composer({
         <div className="gyro-composer-attachments" aria-label="Attachments">
           {attachments.map((attachment) => (
             <div
-              className={`gyro-composer-attachment is-${attachment.kind}`}
+              className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}`}
               key={attachment.id}
               title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}
             >
-              {attachment.kind === "image" ? (
-                <ComposerImagePreview attachment={attachment} />
+              {attachment.kind === "image" || attachment.kind === "video" ? (
+                <ComposerMediaPreview attachment={attachment} />
               ) : (
                 <FileText size={15} />
               )}
@@ -13428,12 +13519,14 @@ function Composer({
         aria-expanded={isSlashMenuOpen}
         aria-haspopup="menu"
         onPaste={(event) => {
-          const files = Array.from(event.clipboardData.files).filter((file) =>
-            file.type.startsWith("image/"),
+          const files = Array.from(event.clipboardData.files).filter(
+            (file) =>
+              /^(?:image|video)\//.test(file.type) ||
+              /\.(?:png|jpe?g|webp|mp4|m4v|mov|webm)$/i.test(file.name),
           );
           if (files.length) {
             event.preventDefault();
-            onAttachImageFiles?.(files);
+            onAttachMediaFiles?.(files);
           }
         }}
         onFocus={() => {
@@ -13939,14 +14032,32 @@ function Composer({
   );
 }
 
-function ComposerImagePreview({ attachment }: { attachment: ChatAttachment }) {
+function ComposerMediaPreview({ attachment }: { attachment: ChatAttachment }) {
   const [hasFailed, setHasFailed] = useState(false);
   if (!attachment.previewUrl || hasFailed) {
-    return (
+    return attachment.kind === "video" ? (
+      <Video
+        aria-hidden="true"
+        className="gyro-composer-image-fallback"
+        size={20}
+      />
+    ) : (
       <ImagePlus
         aria-hidden="true"
         className="gyro-composer-image-fallback"
         size={20}
+      />
+    );
+  }
+  if (attachment.kind === "video") {
+    return (
+      <video
+        aria-hidden="true"
+        muted
+        onError={() => setHasFailed(true)}
+        playsInline
+        preload="metadata"
+        src={attachment.previewUrl}
       />
     );
   }
@@ -14502,6 +14613,8 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
             <img alt="" src={attachment.previewUrl} />
           ) : attachment.kind === "image" ? (
             <ImagePlus size={14} />
+          ) : attachment.kind === "video" ? (
+            <Video size={14} />
           ) : (
             <FileText size={14} />
           )}
@@ -14786,7 +14899,6 @@ function ChatTurn({
   );
   const isRunning = isActive;
   const [isThoughtCollapsed, setIsThoughtCollapsed] = useState(!isRunning);
-  const [showAllChangeFiles, setShowAllChangeFiles] = useState(false);
   useEffect(() => {
     setIsThoughtCollapsed(!isRunning);
   }, [isRunning]);
@@ -14801,10 +14913,13 @@ function ChatTurn({
     plan?.content && plan.sourceTurnId === turn.id,
   );
   const timelineItems = interleavedChatTimelineItems(turn.timelineEvents);
+  const hasFileActivity = turn.timelineEvents.some(
+    (event) => providerActivityFromEvent(event)?.kind === "file",
+  );
   const hasWorkActivity = timelineItems.some(
     (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
   );
-  const canCollapseThought = !isRunning && hasWorkActivity;
+  const canCollapseThought = !isRunning && (hasWorkActivity || hasFileActivity);
   const visibleTimelineItems = isThoughtCollapsed
     ? timelineItems.filter(
         (item) =>
@@ -14884,18 +14999,6 @@ function ChatTurn({
                   </div>
                 );
               }
-              if (providerActivityFromEvent(event)?.kind === "file") {
-                return (
-                  <LiveFileActivity
-                    event={event}
-                    key={event.id}
-                    onLoadChangeDiff={onLoadChangeDiff}
-                    onOpenChanges={onOpenChanges}
-                    sourceControl={sourceControl}
-                    sourceControlBaseline={sourceControlBaseline}
-                  />
-                );
-              }
               return mutationApprovalFromEvent(event) ||
                 providerApprovalFromEvent(event) ||
                 capabilityCallFromEvent(event) ? (
@@ -14917,63 +15020,13 @@ function ChatTurn({
             })}
           </div>
         ) : null}
-        {!isRunning && hasResponse && changeSummary.paths.length > 0 ? (
-          <section
-            aria-label={`${changeSummary.paths.length} changed ${changeSummary.paths.length === 1 ? "file" : "files"}`}
-            className="gyro-chat-run-change-summary"
-          >
-            <header>
-              <span className="gyro-change-summary-icon">
-                <FileCode2 size={15} />
-              </span>
-              <div>
-                <strong>
-                  Edited {changeSummary.paths.length}{" "}
-                  {changeSummary.paths.length === 1 ? "file" : "files"}
-                </strong>
-                {changeSummary.hasStats ? (
-                  <small>
-                    <em className="is-added">+{changeSummary.additions}</em>
-                    <em className="is-removed">-{changeSummary.deletions}</em>
-                  </small>
-                ) : (
-                  <small>Stats unavailable</small>
-                )}
-              </div>
-              <button onClick={onOpenChanges} type="button">
-                Review
-              </button>
-            </header>
-            <div className="gyro-change-summary-files">
-              {changeSummary.fileChanges
-                .slice(0, showAllChangeFiles ? undefined : 5)
-                .map((file) => (
-                  <ChangeSummaryFile
-                    additions={file.additions}
-                    deletions={file.deletions}
-                    key={file.path}
-                    onLoadDiff={onLoadChangeDiff}
-                    path={file.path}
-                  />
-                ))}
-            </div>
-            {changeSummary.paths.length > 5 ? (
-              <button
-                aria-expanded={showAllChangeFiles}
-                className="gyro-change-summary-more"
-                onClick={() => setShowAllChangeFiles((current) => !current)}
-                type="button"
-              >
-                {showAllChangeFiles
-                  ? "Show fewer files"
-                  : `Show ${changeSummary.paths.length - 5} more files`}
-                <ChevronDown
-                  className={showAllChangeFiles ? "is-expanded" : undefined}
-                  size={12}
-                />
-              </button>
-            ) : null}
-          </section>
+        {hasFileActivity ? (
+          <ChatTurnChangeSummary
+            changeSummary={changeSummary}
+            isRunning={isRunning}
+            onLoadChangeDiff={onLoadChangeDiff}
+            onOpenChanges={onOpenChanges}
+          />
         ) : null}
         {providerStatus &&
         (["failed", "blocked", "cancelled"].includes(providerStatus.status) ||
@@ -15240,27 +15293,8 @@ type InterleavedChatTimelineItem =
 function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
   for (const event of events) {
-    const filePath = providerActivityFilePath(event);
-    if (filePath) {
-      const existingFileItem = items.find(
-        (item) =>
-          item.kind === "event" &&
-          Boolean(
-            providerActivityFilePath(item.event) &&
-            providerActivityPathsMatch(
-              filePath,
-              providerActivityFilePath(item.event) as string,
-            ),
-          ),
-      );
-      if (existingFileItem?.kind === "event") {
-        existingFileItem.event = {
-          ...event,
-          createdAt: existingFileItem.event.createdAt,
-          id: existingFileItem.event.id,
-        };
-        continue;
-      }
+    if (providerActivityFromEvent(event)?.kind === "file") {
+      continue;
     }
     const activity = providerActivityFromEvent(event);
     const activityKind =
@@ -15487,57 +15521,96 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
   );
 }
 
-function LiveFileActivity({
-  event,
+function ChatTurnChangeSummary({
+  changeSummary,
+  isRunning,
   onLoadChangeDiff,
   onOpenChanges,
-  sourceControl,
-  sourceControlBaseline,
 }: {
-  event: SessionEvent;
+  changeSummary: ReturnType<typeof chatTurnChangeSummary>;
+  isRunning: boolean;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: () => void;
-  sourceControl?: SourceControlState;
-  sourceControlBaseline?: Record<
-    string,
-    { additions: number; deletions: number }
-  >;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const summary = chatTurnChangeSummary(
-    [event],
-    sourceControl,
-    sourceControlBaseline,
-  );
-  const label =
-    summary.paths.length > 0
-      ? `Edited ${summary.paths.length} ${summary.paths.length === 1 ? "file" : "files"}`
-      : (providerActivityFromEvent(event)?.label ?? "Edited files");
+  const [showAllFiles, setShowAllFiles] = useState(false);
+  const fileCount = changeSummary.paths.length;
+  const actionLabel = isRunning ? "Editing" : "Edited";
+  const label = fileCount
+    ? `${actionLabel} ${fileCount} ${fileCount === 1 ? "file" : "files"}`
+    : `${actionLabel} files`;
   return (
-    <section className="gyro-chat-run-live-files">
-      <button
-        aria-expanded={isOpen}
-        className="gyro-chat-run-live-files-toggle"
-        onClick={() => setIsOpen((current) => !current)}
-        type="button"
-      >
-        <FileCode2 size={14} />
-        <span>{label}</span>
-        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-      </button>
+    <section
+      aria-label={label}
+      aria-live="polite"
+      className={`gyro-chat-run-change-summary ${isRunning ? "is-running" : "is-complete"}`}
+    >
+      <header>
+        <span className="gyro-change-summary-icon">
+          <FileCode2 size={15} />
+        </span>
+        <div>
+          <strong>{label}</strong>
+          {changeSummary.hasStats ? (
+            <small>
+              <em className="is-added">+{changeSummary.additions}</em>
+              <em className="is-removed">-{changeSummary.deletions}</em>
+            </small>
+          ) : (
+            <small>
+              {isRunning ? "Tracking changes" : "Stats unavailable"}
+            </small>
+          )}
+        </div>
+        <div className="gyro-change-summary-actions">
+          <button
+            aria-expanded={isOpen}
+            aria-label={isOpen ? "Hide changed files" : "Show changed files"}
+            onClick={() => setIsOpen((current) => !current)}
+            type="button"
+          >
+            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
+          {!isRunning ? (
+            <button onClick={onOpenChanges} type="button">
+              Review
+            </button>
+          ) : null}
+        </div>
+      </header>
       {isOpen ? (
-        summary.fileChanges.length > 0 ? (
-          <div className="gyro-change-summary-files is-live">
-            {summary.fileChanges.map((file) => (
-              <ChangeSummaryFile
-                additions={file.additions}
-                deletions={file.deletions}
-                key={file.path}
-                onLoadDiff={onLoadChangeDiff}
-                path={file.path}
-              />
-            ))}
-          </div>
+        changeSummary.fileChanges.length > 0 ? (
+          <>
+            <div className="gyro-change-summary-files">
+              {changeSummary.fileChanges
+                .slice(0, showAllFiles ? undefined : 5)
+                .map((file) => (
+                  <ChangeSummaryFile
+                    additions={file.additions}
+                    deletions={file.deletions}
+                    key={file.path}
+                    onLoadDiff={onLoadChangeDiff}
+                    path={file.path}
+                  />
+                ))}
+            </div>
+            {fileCount > 5 ? (
+              <button
+                aria-expanded={showAllFiles}
+                className="gyro-change-summary-more"
+                onClick={() => setShowAllFiles((current) => !current)}
+                type="button"
+              >
+                {showAllFiles
+                  ? "Show fewer files"
+                  : `Show ${fileCount - 5} more files`}
+                <ChevronDown
+                  className={showAllFiles ? "is-expanded" : undefined}
+                  size={12}
+                />
+              </button>
+            ) : null}
+          </>
         ) : (
           <button
             className="gyro-chat-run-live-files-review"
