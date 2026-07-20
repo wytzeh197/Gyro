@@ -147,7 +147,28 @@ export function mergePersistedAndOptimisticEvents(
   if (!optimisticEvents || optimisticEvents.length === 0) {
     return persistedEvents;
   }
-  const merged = limitSessionEventsForUi(persistedEvents);
+  const segmentedActivityTurnIds = new Set(
+    optimisticEvents
+      .filter((event) => {
+        const payload = recordFromUnknown(event.payload);
+        return (
+          isProviderActivityEvent(event) &&
+          payload?.activityKind === "commentary" &&
+          typeof payload.activityId === "string" &&
+          payload.activityId.includes("::continuation::") &&
+          Boolean(event.turnId)
+        );
+      })
+      .map((event) => event.turnId as string),
+  );
+  const merged = limitSessionEventsForUi(persistedEvents).filter(
+    (event) =>
+      !(
+        event.turnId &&
+        segmentedActivityTurnIds.has(event.turnId) &&
+        isProviderActivityEvent(event)
+      ),
+  );
   const seenEventIds = new Set<string>();
   const userTurnIds = new Set<string>();
   const userMessages = new Set<string>();
@@ -247,6 +268,41 @@ export function mergeProviderResponseEvents(
     );
   });
   for (const responseEvent of responseEvents) {
+    if (isProviderActivityEvent(responseEvent)) {
+      const responsePayload = recordFromUnknown(responseEvent.payload);
+      const responseActivityId = responsePayload?.activityId;
+      const responseLabel = responsePayload?.label;
+      if (
+        responsePayload?.activityKind === "commentary" &&
+        typeof responseActivityId === "string" &&
+        typeof responseLabel === "string"
+      ) {
+        const commentarySegments = merged.filter((event) => {
+          const payload = recordFromUnknown(event.payload);
+          return (
+            event.turnId === responseEvent.turnId &&
+            isProviderActivityEvent(event) &&
+            payload?.activityKind === "commentary" &&
+            typeof payload.activityId === "string" &&
+            (payload.activityId === responseActivityId ||
+              payload.activityId.startsWith(
+                `${responseActivityId}::continuation::`,
+              ))
+          );
+        });
+        const segmentedLabel = commentarySegments
+          .map((event) => {
+            const payload = recordFromUnknown(event.payload);
+            return typeof payload?.label === "string"
+              ? payload.label
+              : event.message;
+          })
+          .join("");
+        if (commentarySegments.length > 1 && segmentedLabel === responseLabel) {
+          continue;
+        }
+      }
+    }
     const findMatchingEvent = (event: SessionEvent) => {
       if (event.id === responseEvent.id) {
         return true;
@@ -363,28 +419,75 @@ export function applyProviderChatStreamActivity(
   const activityId = streamEvent.activityId ?? streamEvent.eventId;
   const eventId = `${streamEvent.sessionId}-activity-${turnId}-${activityId}`;
   const updateEvents = (items: SessionEvent[]) => {
-    const nextEvent: SessionEvent = {
-      id: eventId,
+    const createEvent = (
+      id: string,
+      nextActivityId: string,
+      nextLabel: string,
+    ): SessionEvent => ({
+      id,
       sessionId: streamEvent.sessionId,
       turnId,
       createdAt: new Date().toISOString(),
       kind: "system-event",
-      message: label,
+      message: nextLabel,
       payload: {
         kind: "provider-activity",
-        activityId,
+        activityId: nextActivityId,
         activityKind: streamEvent.activityKind ?? "tool",
-        label,
+        label: nextLabel,
         detail: streamEvent.activityDetail,
         status: streamEvent.activityStatus ?? "done",
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
+        providerSequence: streamEvent.sequence,
         turnId,
       },
-    };
+    });
+    const nextEvent = createEvent(eventId, activityId, label);
     const existingIndex = items.findIndex((event) => event.id === eventId);
     if (existingIndex < 0) {
       return [...items, nextEvent];
+    }
+    if (streamEvent.activityKind === "commentary") {
+      const continuationPrefix = `${eventId}-continuation-`;
+      const segmentIndices = items.reduce<number[]>((indices, event, index) => {
+        if (event.id === eventId || event.id.startsWith(continuationPrefix)) {
+          indices.push(index);
+        }
+        return indices;
+      }, []);
+      const previousText = segmentIndices
+        .map((index) => {
+          const event = items[index];
+          const payload = event ? recordFromUnknown(event.payload) : undefined;
+          return typeof payload?.label === "string"
+            ? payload.label
+            : (event?.message ?? "");
+        })
+        .join("");
+      const suffix = label.startsWith(previousText)
+        ? label.slice(previousText.length)
+        : "";
+      const lastSegmentIndex = segmentIndices.at(-1) ?? existingIndex;
+      const hasInterveningActivity = items
+        .slice(lastSegmentIndex + 1)
+        .some(
+          (event) => event.turnId === turnId && isProviderActivityEvent(event),
+        );
+      if (suffix && hasInterveningActivity) {
+        const continuationId = `${eventId}-continuation-${streamEvent.sequence}`;
+        if (items.some((event) => event.id === continuationId)) {
+          return items;
+        }
+        return [
+          ...items,
+          createEvent(
+            continuationId,
+            `${activityId}::continuation::${streamEvent.sequence}`,
+            suffix,
+          ),
+        ];
+      }
     }
     const next = items.slice();
     next[existingIndex] = {

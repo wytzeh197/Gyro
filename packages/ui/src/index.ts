@@ -157,6 +157,7 @@ export type {
   WorkspacePreparationSnapshot,
   WorkspacePreparationStatus,
 } from "./types";
+export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
   createInitialWorkbenchState,
   createNotification,
