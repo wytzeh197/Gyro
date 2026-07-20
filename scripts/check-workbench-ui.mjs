@@ -3536,6 +3536,15 @@ expect(
     appSource.includes("returnFromSettings"),
   "Settings should keep a stable grouped sidebar and use a centered result dropdown that targets individual settings.",
 );
+const settingsSidebarSource = surfaceSource.slice(
+  surfaceSource.indexOf("function SettingsSidebarContent"),
+  surfaceSource.indexOf("function WorkspaceSidebarContent"),
+);
+expect(
+  !settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
+    !settingsSidebarSource.includes("onToggleSidebar"),
+  "Settings should keep its sidebar visible and omit the hide-sidebar control.",
+);
 expect(
   !appSource.includes("WorkspaceToolPanelPeek") &&
     appSource.includes("toolPanelHeight") &&
@@ -4298,12 +4307,19 @@ expect(
 );
 expect(
   styleSource.includes(
-    ".gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n  padding-inline: clamp(28px, 7vw, 112px);",
+    ".gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n  padding-inline: clamp(12px, 3vw, 32px);",
   ) &&
     styleSource.includes(
       ".gyro-chat-surface.is-tiled .gyro-thread-body,\n  .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n    padding-inline: 10px;",
     ),
-  "Grid composers should align to the chat transcript width at wide and compact viewport sizes.",
+  "Grid composers should use the available pane width and retain compact viewport gutters.",
+);
+expect(
+  styleSource.includes("container-type: inline-size;") &&
+    styleSource.includes("@container (max-width: 620px)") &&
+    styleSource.includes(".gyro-composer-control-approval") &&
+    styleSource.includes("@container (max-width: 470px)"),
+  "Composer controls should compact before they can overflow a narrow shell.",
 );
 expect(
   surfaceSource.includes("function PlanDecisionCard") &&
