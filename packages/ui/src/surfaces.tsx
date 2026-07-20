@@ -87,6 +87,15 @@ import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import { structuredCommentaryBlocks } from "./chat-commentary";
 import {
+  ChatArtifacts,
+  chatArtifactsFromEvent,
+  type ChatArtifactActions,
+} from "./chat-artifacts";
+import {
+  interleavedChatTimelineItems,
+  orderedChatTimelineEvents,
+} from "./chat-timeline";
+import {
   estimateComposerContextUsage,
   type ComposerContextUsage,
 } from "./context-usage";
@@ -102,6 +111,7 @@ import type {
   CapabilityActivity,
   CapabilityCallEvent,
   ChatAttachment,
+  ChatArtifact,
   ChatPaneRef,
   ChatProjectLayout,
   ChatMode,
@@ -4432,7 +4442,7 @@ export function ChatSurface({
   const transcriptRef = useRef<HTMLDivElement>(null);
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const [activeThreadContextMenu, setActiveThreadContextMenu] = useState<
-    "project" | "workspace-mode" | "branch" | null
+    "workspace" | null
   >(null);
   const threadContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
     activeThreadContextMenu !== null,
@@ -4468,6 +4478,10 @@ export function ChatSurface({
     onSend,
     sessionGoal?.text,
   ]);
+  const handleArtifactPrompt = useCallback(
+    (prompt: string) => onSend(prompt),
+    [onSend],
+  );
   const handleMediaDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
       if (
@@ -4646,6 +4660,11 @@ export function ChatSurface({
         ))}
         {turns.map((turn) => (
           <ChatTurn
+            artifactActions={{
+              onOpenFiles: () => onComposerAction?.("open-files"),
+              onOpenTool: onOpenToolPanel,
+              onSendPrompt: handleArtifactPrompt,
+            }}
             isActive={turn.id === activeTurnId}
             key={turn.id}
             onLoadChangeDiff={onLoadChangeDiff}
@@ -4673,11 +4692,13 @@ export function ChatSurface({
     ),
     [
       onMutationApprovalAction,
+      onComposerAction,
       onLoadChangeDiff,
       onOpenToolPanel,
       onProviderApprovalAction,
       onProviderStatusAction,
       handlePlanDecision,
+      handleArtifactPrompt,
       sourceControl,
       turnSourceControlBaselines,
       activeTurnId,
@@ -4859,6 +4880,22 @@ export function ChatSurface({
       label: workspaceMode === "local" ? "New worktree chat" : "New local chat",
     },
   ];
+  const threadWorkspaceItems: ComposerPopoverItem[] = [
+    ...threadProjectItems.map((item, index) => ({
+      ...item,
+      sectionLabel: index === 0 ? "Project" : undefined,
+    })),
+    ...threadWorkspaceModeItems.map((item, index) => ({
+      ...item,
+      sectionLabel: index === 0 ? "Mode" : undefined,
+    })),
+    ...threadBranchItems.map((item, index) => ({
+      ...item,
+      sectionLabel: index === 0 ? "Branch" : undefined,
+    })),
+  ];
+  const workspaceModeLabel =
+    workspaceMode === "worktree" ? "Worktree" : "Local";
 
   return (
     <div
@@ -4877,119 +4914,48 @@ export function ChatSurface({
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
           <strong>{sessionTitle ?? "Gyro session"}</strong>
-          <span title={sessionSummary ?? workspaceName(workspacePath)}>
-            {sessionSummary ?? workspaceName(workspacePath)}
-          </span>
-          <small
-            aria-label={`Current branch: ${branchLabel}`}
-            className="gyro-chat-thread-branch"
-            title={`Current branch: ${branchLabel}`}
-          >
-            <GitBranch aria-hidden="true" size={11} />
-            {branchLabel}
-          </small>
         </div>
         <div className="gyro-thread-topbar-actions">
           <div className="gyro-thread-pills" ref={threadContextMenuRef}>
-            <div className="gyro-thread-context-control">
+            <div className="gyro-thread-context-control is-workspace-context">
               <button
+                aria-label={`Workspace: ${workspaceName(workspacePath)}, branch ${branchLabel}, ${workspaceModeLabel}`}
                 aria-controls={
-                  activeThreadContextMenu === "project"
-                    ? "gyro-thread-project-menu"
+                  activeThreadContextMenu === "workspace"
+                    ? "gyro-thread-workspace-menu"
                     : undefined
                 }
-                aria-expanded={activeThreadContextMenu === "project"}
+                aria-expanded={activeThreadContextMenu === "workspace"}
                 aria-haspopup="menu"
-                className="gyro-thread-pill-button"
-                onClick={() =>
-                  setActiveThreadContextMenu((current) =>
-                    current === "project" ? null : "project",
-                  )
-                }
-                type="button"
-              >
-                <HardDrive size={13} />
-                {workspaceName(workspacePath)}
-                <ChevronDown size={12} />
-              </button>
-              {activeThreadContextMenu === "project" ? (
-                <ComposerPopover
-                  id="gyro-thread-project-menu"
-                  items={threadProjectItems}
-                  onAction={(action) => {
-                    setActiveThreadContextMenu(null);
-                    if (action) {
-                      onComposerAction?.(action);
-                    }
-                  }}
-                  placement="down"
-                />
-              ) : null}
-            </div>
-            <div className="gyro-thread-context-control">
-              <button
-                aria-controls={
-                  activeThreadContextMenu === "workspace-mode"
-                    ? "gyro-thread-workspace-mode-menu"
-                    : undefined
-                }
-                aria-expanded={activeThreadContextMenu === "workspace-mode"}
-                aria-haspopup="menu"
-                className="gyro-thread-pill-button"
-                onClick={() =>
-                  setActiveThreadContextMenu((current) =>
-                    current === "workspace-mode" ? null : "workspace-mode",
-                  )
-                }
-                type="button"
-              >
-                <Laptop size={13} />
-                {workspaceMode === "worktree" ? "Use worktree" : "Work locally"}
-                <ChevronDown size={12} />
-              </button>
-              {activeThreadContextMenu === "workspace-mode" ? (
-                <ComposerPopover
-                  id="gyro-thread-workspace-mode-menu"
-                  items={threadWorkspaceModeItems}
-                  onAction={(action) => {
-                    setActiveThreadContextMenu(null);
-                    if (action) {
-                      onComposerAction?.(action);
-                    }
-                  }}
-                  placement="down"
-                />
-              ) : null}
-            </div>
-            <div className="gyro-thread-context-control">
-              <button
-                aria-controls={
-                  activeThreadContextMenu === "branch"
-                    ? "gyro-thread-branch-menu"
-                    : undefined
-                }
-                aria-expanded={activeThreadContextMenu === "branch"}
-                aria-haspopup="menu"
-                className="gyro-thread-pill-button"
+                className="gyro-thread-pill-button gyro-thread-workspace-context-button"
                 onClick={() => {
-                  setActiveThreadContextMenu((current) => {
-                    if (current !== "branch") {
-                      onComposerAction?.("select-branch");
-                    }
-                    return current === "branch" ? null : "branch";
-                  });
+                  setActiveThreadContextMenu((current) =>
+                    current === "workspace" ? null : "workspace",
+                  );
+                  if (activeThreadContextMenu !== "workspace") {
+                    onComposerAction?.("select-branch");
+                  }
                 }}
                 type="button"
+                title={`${workspaceName(workspacePath)} / ${branchLabel} / ${workspaceModeLabel}`}
               >
-                <GitBranch size={13} />
-                {branchLabel}
-                <ChevronDown size={12} />
+                <HardDrive aria-hidden="true" size={13} />
+                <em className="gyro-thread-context-project">
+                  {workspaceName(workspacePath)}
+                </em>
+                <i aria-hidden="true">/</i>
+                <em className="gyro-thread-context-branch">{branchLabel}</em>
+                <i aria-hidden="true">/</i>
+                <em className="gyro-thread-context-mode">
+                  {workspaceModeLabel}
+                </em>
+                <ChevronDown aria-hidden="true" size={12} />
               </button>
-              {activeThreadContextMenu === "branch" ? (
+              {activeThreadContextMenu === "workspace" ? (
                 <ComposerPopover
                   align="end"
-                  id="gyro-thread-branch-menu"
-                  items={threadBranchItems}
+                  id="gyro-thread-workspace-menu"
+                  items={threadWorkspaceItems}
                   onAction={(action) => {
                     setActiveThreadContextMenu(null);
                     if (action) {
@@ -4997,6 +4963,7 @@ export function ChatSurface({
                     }
                   }}
                   placement="down"
+                  title="Workspace context"
                 />
               ) : null}
             </div>
@@ -5046,6 +5013,13 @@ export function ChatSurface({
               onSteerMessage={onSteerQueuedMessage}
             />
           ) : null}
+          {isPlanReadyForDecision && sessionPlan ? (
+            <PlanDecisionCard
+              isPending={isPlanDecisionPending}
+              onDecision={handlePlanDecision}
+              plan={sessionPlan}
+            />
+          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -5083,6 +5057,73 @@ export function ChatSurface({
       </section>
       {sidePanel}
     </div>
+  );
+}
+
+function PlanDecisionCard({
+  isPending,
+  onDecision,
+  plan,
+}: {
+  isPending: boolean;
+  onDecision: (decision: "approve" | "reject") => void;
+  plan: SessionPlan;
+}) {
+  return (
+    <section
+      aria-label="Plan ready for approval"
+      className="gyro-plan-decision-card"
+    >
+      <header>
+        <span className="gyro-plan-decision-icon">
+          <ListChecks size={16} />
+        </span>
+        <div>
+          <small>Plan ready</small>
+          <strong>{plan.title || "Implementation plan"}</strong>
+        </div>
+      </header>
+      <ol>
+        {plan.items.map((item) => (
+          <li key={item.id}>
+            <span aria-hidden="true">
+              {item.status === "complete" ? (
+                <Check size={12} />
+              ) : item.status === "blocked" ? (
+                <X size={12} />
+              ) : (
+                <CircleDashed size={12} />
+              )}
+            </span>
+            <div>
+              <strong>{item.title}</strong>
+              {item.detail ? <small>{item.detail}</small> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <footer>
+        <span>Implement this plan?</span>
+        <div>
+          <button
+            className="is-secondary"
+            disabled={isPending}
+            onClick={() => onDecision("reject")}
+            type="button"
+          >
+            No, keep planning
+          </button>
+          <button
+            className="is-primary"
+            disabled={isPending}
+            onClick={() => onDecision("approve")}
+            type="button"
+          >
+            {isPending ? "Starting…" : "Yes, implement"}
+          </button>
+        </div>
+      </footer>
+    </section>
   );
 }
 
@@ -12332,6 +12373,7 @@ type ComposerPopoverId =
 type ComposerPopoverItem = {
   label: string;
   detail?: string;
+  tooltip?: string;
   action?: string;
   removeAction?: string;
   icon: IconComponent;
@@ -12530,6 +12572,7 @@ function ComposerPopover({
                     }
                   }}
                   role="menuitem"
+                  title={item.tooltip}
                   type="button"
                 >
                   {itemContent}
@@ -12570,6 +12613,7 @@ function ComposerPopover({
                 }
               }}
               role="menuitem"
+              title={item.tooltip}
               type="button"
             >
               {itemContent}
@@ -13179,14 +13223,15 @@ function Composer({
   const contextItems: ComposerPopoverItem[] = [
     {
       action: "attach-editor-snapshot",
-      detail: "Capture the current saved or unsaved editor text",
       icon: FileCode2,
-      label: "Editor snapshot",
+      label: "Editor",
+      sectionLabel: "Context",
+      tooltip: "Capture saved or unsaved editor text",
     },
     {
       action: "select-media",
       icon: ImagePlus,
-      label: "Media",
+      label: "Image",
     },
     {
       action: "select-file",
@@ -13199,9 +13244,10 @@ function Composer({
       label: "Folder",
     },
     {
-      action: "add-goal",
-      icon: Goal,
-      label: "Goal",
+      action: "search-workspace",
+      icon: Search,
+      label: "Search",
+      sectionLabel: "Tools",
     },
     {
       action: "set-chat-mode-plan",
@@ -13209,9 +13255,9 @@ function Composer({
       label: "Plan",
     },
     {
-      action: "search-workspace",
-      icon: Search,
-      label: "Search",
+      action: "add-goal",
+      icon: Goal,
+      label: "Goal",
     },
   ];
   const slashCommands: ComposerSlashCommand[] = [
@@ -14830,9 +14876,11 @@ function deriveTranscriptState(events: SessionEvent[]) {
       looseEvents.push(event);
     }
   }
-  // Timeline events already arrive in provider sequence. Keep that order so
-  // coarse or rewritten persistence timestamps cannot move an early note
-  // below commands that appeared later in the run.
+  for (const turn of turns) {
+    turn.timelineEvents = orderedChatTimelineEvents(turn.timelineEvents);
+  }
+  // First-seen provider sequences survive streaming updates and persistence,
+  // so completion timing cannot move an early item below later activity.
   turns.sort((first, second) =>
     compareIsoTimestamps(first.startedAt, second.startedAt),
   );
@@ -14885,6 +14933,7 @@ function turnKeyFromEvent(event: SessionEvent) {
 }
 
 function ChatTurn({
+  artifactActions,
   isActive,
   onLoadChangeDiff,
   onOpenChanges,
@@ -14903,6 +14952,7 @@ function ChatTurn({
   sourceControlBaseline,
   turn,
 }: {
+  artifactActions?: ChatArtifactActions;
   isActive: boolean;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: () => void;
@@ -14954,9 +15004,6 @@ function ChatTurn({
     plan?.content && plan.sourceTurnId === turn.id,
   );
   const timelineItems = interleavedChatTimelineItems(turn.timelineEvents);
-  const hasFileActivity = turn.timelineEvents.some(
-    (event) => providerActivityFromEvent(event)?.kind === "file",
-  );
   const hasWorkActivity = timelineItems.some(
     (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
   );
@@ -14969,10 +15016,9 @@ function ChatTurn({
   );
   const visibleWorkTimelineItems =
     isRunning || !isThoughtCollapsed ? workTimelineItems : [];
-  const changeSummary = chatTurnChangeSummary(
-    turn.timelineEvents,
-    sourceControl,
-    sourceControlBaseline,
+  const completionArtifacts = useMemo(
+    () => derivedCompletionArtifacts(turn, isRunning),
+    [isRunning, turn],
   );
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
@@ -15008,6 +15054,21 @@ function ChatTurn({
           {visibleWorkTimelineItems.length > 0 ? (
             <div className="gyro-chat-run-sequence" aria-label="Work timeline">
               {visibleWorkTimelineItems.map((item) => {
+                if (item.kind === "file-summary") {
+                  return (
+                    <ChatTurnChangeSummary
+                      changeSummary={chatTurnChangeSummary(
+                        item.events,
+                        sourceControl,
+                        sourceControlBaseline,
+                      )}
+                      isRunning={isRunning}
+                      key={item.id}
+                      onLoadChangeDiff={onLoadChangeDiff}
+                      onOpenChanges={onOpenChanges}
+                    />
+                  );
+                }
                 if (item.kind === "activity-group") {
                   return (
                     <ProviderActivityGroup events={item.events} key={item.id} />
@@ -15039,7 +15100,7 @@ function ChatTurn({
         {responseTimelineItems.length > 0 ? (
           <div className="gyro-chat-run-sequence" aria-label="Final response">
             {responseTimelineItems.map((item) => {
-              if (item.kind === "activity-group") {
+              if (item.kind !== "event") {
                 return null;
               }
               const event = item.event;
@@ -15058,11 +15119,15 @@ function ChatTurn({
                           isPending={isPlanDecisionPending}
                           onOpen={onOpenPlan}
                           onPlanDecision={onPlanDecision}
-                          showDecision={isPlanReadyForDecision}
+                          showDecision={false}
                           title={plan?.title ?? "Implementation plan"}
                         />
                       ) : (
-                        <AssistantResponse event={event} />
+                        <AssistantResponse
+                          actions={artifactActions}
+                          additionalArtifacts={completionArtifacts}
+                          event={event}
+                        />
                       )}
                     </div>
                   </article>
@@ -15070,13 +15135,6 @@ function ChatTurn({
               );
             })}
           </div>
-        ) : null}
-        {hasFileActivity && !isRunning && hasResponse ? (
-          <ChatTurnChangeSummary
-            changeSummary={changeSummary}
-            onLoadChangeDiff={onLoadChangeDiff}
-            onOpenChanges={onOpenChanges}
-          />
         ) : null}
         {providerStatus &&
         (["failed", "blocked", "cancelled"].includes(providerStatus.status) ||
@@ -15331,46 +15389,6 @@ function formatMessageTime(value: string) {
   });
 }
 
-type InterleavedChatTimelineItem =
-  | { kind: "event"; event: SessionEvent }
-  | {
-      kind: "activity-group";
-      id: string;
-      activityKind: "command" | "search" | "tool";
-      events: SessionEvent[];
-    };
-
-function interleavedChatTimelineItems(events: SessionEvent[]) {
-  const items: InterleavedChatTimelineItem[] = [];
-  for (const event of events) {
-    const activity = providerActivityFromEvent(event);
-    const activityKind =
-      activity?.kind === "command" ||
-      activity?.kind === "search" ||
-      activity?.kind === "tool"
-        ? activity.kind
-        : undefined;
-    const previous = items.at(-1);
-    if (
-      activityKind &&
-      previous?.kind === "activity-group" &&
-      previous.activityKind === activityKind
-    ) {
-      previous.events.push(event);
-    } else if (activityKind) {
-      items.push({
-        kind: "activity-group",
-        id: `activity-group-${event.id}`,
-        activityKind,
-        events: [event],
-      });
-    } else {
-      items.push({ kind: "event", event });
-    }
-  }
-  return items;
-}
-
 function providerActivityPathsMatch(first: string, second: string) {
   const normalize = (path: string) =>
     path.replaceAll("\\", "/").replace(/\/+/g, "/").replace(/\/$/, "");
@@ -15570,22 +15588,25 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
 
 function ChatTurnChangeSummary({
   changeSummary,
+  isRunning,
   onLoadChangeDiff,
   onOpenChanges,
 }: {
   changeSummary: ReturnType<typeof chatTurnChangeSummary>;
+  isRunning: boolean;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: () => void;
 }) {
-  const fileCount = changeSummary.paths.length;
+  const fileCount = changeSummary.fileCount;
+  const action = isRunning ? "Editing" : "Edited";
   const label = fileCount
-    ? `Edited ${fileCount} ${fileCount === 1 ? "file" : "files"}`
-    : "Edited files";
+    ? `${action} ${fileCount} ${fileCount === 1 ? "file" : "files"}`
+    : `${action} files`;
   return (
     <section
       aria-label={label}
       aria-live="polite"
-      className="gyro-chat-run-change-summary is-complete"
+      className={`gyro-chat-run-change-summary ${isRunning ? "is-running" : "is-complete"}`}
     >
       <header>
         <span className="gyro-change-summary-icon">
@@ -15602,11 +15623,13 @@ function ChatTurnChangeSummary({
             <small>Stats unavailable</small>
           )}
         </div>
-        <div className="gyro-change-summary-actions">
-          <button onClick={onOpenChanges} type="button">
-            Review
-          </button>
-        </div>
+        {!isRunning ? (
+          <div className="gyro-change-summary-actions">
+            <button onClick={onOpenChanges} type="button">
+              Review
+            </button>
+          </div>
+        ) : null}
       </header>
       {changeSummary.fileChanges.length > 0 ? (
         <div className="gyro-change-summary-files">
@@ -15724,6 +15747,7 @@ function chatTurnChangeSummary(
     deletions: deltas.reduce((total, file) => total + file.deletions, 0),
     hasStats: paths.length > 0 && files.length === paths.length,
     fileChanges,
+    fileCount: Math.max(paths.length, hasGenericFileActivity ? 1 : 0),
     paths,
   };
 }
@@ -15780,8 +15804,82 @@ type AssistantResponseBlock =
 
 const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
 
-function AssistantResponse({ event }: { event: SessionEvent }) {
+function derivedCompletionArtifacts(
+  turn: ChatTranscriptTurn,
+  isRunning: boolean,
+): ChatArtifact[] {
+  if (isRunning) return [];
+  const workEvents = turn.timelineEvents.filter(
+    (event) => event.kind !== "assistant-message",
+  );
+  if (!workEvents.length) return [];
+  const changedFiles = Array.from(
+    new Set(workEvents.map(providerActivityFilePath).filter(Boolean)),
+  ) as string[];
+  const commandCount = workEvents.filter((event) => {
+    const payload = eventPayloadRecord(event);
+    return (
+      payload?.kind === "provider-activity" &&
+      payload.activityKind === "command"
+    );
+  }).length;
+  const failed = ["failed", "blocked", "cancelled"].includes(
+    turn.runStatus ?? "",
+  );
+  const items: Extract<ChatArtifact, { kind: "completion" }>["items"] = [
+    {
+      label: failed ? "Turn needs attention" : "Response completed",
+      status: failed ? "failed" : "passed",
+    },
+  ];
+  if (commandCount > 0) {
+    items.push({
+      label: `${commandCount} ${commandCount === 1 ? "command" : "commands"}`,
+      status: failed ? "failed" : "passed",
+    });
+  }
+  if (changedFiles.length > 0) {
+    items.push({
+      label: `${changedFiles.length} changed ${changedFiles.length === 1 ? "file" : "files"}`,
+      status: "changed",
+    });
+  }
+  return [
+    {
+      id: `${turn.id}-completion`,
+      kind: "completion",
+      title: failed ? "Work needs attention" : "Work completed",
+      status: failed ? "failed" : "completed",
+      summary: failed
+        ? "The turn ended before all work completed. Review the details above before continuing."
+        : changedFiles.length > 0
+          ? "The requested work finished with workspace changes ready to review."
+          : "The requested work finished successfully.",
+      items,
+      files: changedFiles,
+    },
+  ];
+}
+
+function AssistantResponse({
+  actions,
+  additionalArtifacts = [],
+  event,
+}: {
+  actions?: ChatArtifactActions;
+  additionalArtifacts?: ChatArtifact[];
+  event: SessionEvent;
+}) {
   const visibleMessage = stripHiddenSessionTitleMarker(event.message);
+  const artifacts = useMemo(() => {
+    const emitted = chatArtifactsFromEvent(event);
+    return [
+      ...emitted,
+      ...additionalArtifacts.filter(
+        (artifact) => !emitted.some((item) => item.kind === artifact.kind),
+      ),
+    ];
+  }, [additionalArtifacts, event]);
   const isStreaming = isStreamingAssistantEvent(event);
   const shouldUsePlainText =
     isStreaming ||
@@ -15803,6 +15901,7 @@ function AssistantResponse({ event }: { event: SessionEvent }) {
   return (
     <div className="gyro-response">
       <div className="gyro-response-body">{body}</div>
+      <ChatArtifacts actions={actions} artifacts={artifacts} />
       <footer className="gyro-response-actions">
         <button
           aria-label="Copy response"
@@ -16022,15 +16121,16 @@ function copyAssistantResponse(message: string) {
 
 function stripHiddenSessionTitleMarker(message: string) {
   const lines = message.replace(/\r\n/g, "\n").split("\n");
-  const markerIndex = lines.findIndex((line) => line.trim().length > 0);
-  if (
-    markerIndex < 0 ||
-    !lines[markerIndex]?.trim().startsWith("GYRO_SESSION_TITLE:")
-  ) {
-    return message;
-  }
-  lines.splice(markerIndex, 1);
-  return lines.join("\n").trim();
+  return lines
+    .filter((line) => {
+      const trimmed = line.trim();
+      return (
+        !trimmed.startsWith("GYRO_SESSION_TITLE:") &&
+        !trimmed.startsWith("GYRO_ARTIFACTS:")
+      );
+    })
+    .join("\n")
+    .trim();
 }
 
 function isStreamingAssistantEvent(event: SessionEvent) {

@@ -5,6 +5,7 @@ import {
   deriveMenuBarJobs,
   deriveMenuBarSnapshot,
 } from "../apps/desktop/src/menu-bar-state.ts";
+import { menuBarModelProvider } from "../apps/desktop/src/menu-bar-model-provider.ts";
 
 const session = {
   id: "session-1",
@@ -14,6 +15,10 @@ const session = {
   createdAt: "2026-07-19T09:00:00.000Z",
   updatedAt: "2026-07-19T09:00:05.000Z",
   eventsPath: "/tmp/events.jsonl",
+  providerId: "openai",
+  providerLabel: "OpenAI",
+  modelId: "gpt-5.6-sol",
+  modelLabel: "GPT-5.6 Sol",
 };
 
 const runningEvents = [
@@ -70,6 +75,49 @@ assert.equal(jobs.length, 2);
 assert.equal(jobs[0].kind, "automation");
 assert.equal(jobs[1].kind, "chat");
 assert.equal(jobs[1].status, "running");
+assert.equal(jobs[1].providerId, "openai");
+assert.equal(jobs[1].modelLabel, "GPT-5.6 Sol");
+assert.equal(menuBarModelProvider(jobs[1]), "openai");
+assert.equal(
+  menuBarModelProvider({
+    ...jobs[1],
+    providerId: undefined,
+    providerLabel: undefined,
+    modelId: "claude-sonnet-5",
+    modelLabel: "Claude Sonnet 5",
+  }),
+  "anthropic",
+);
+assert.equal(
+  menuBarModelProvider({
+    ...jobs[1],
+    providerId: undefined,
+    providerLabel: undefined,
+    modelId: "grok-4.3",
+    modelLabel: "Grok 4.3",
+  }),
+  "xai",
+);
+assert.equal(
+  menuBarModelProvider({
+    ...jobs[1],
+    providerId: undefined,
+    providerLabel: undefined,
+    modelId: "k3",
+    modelLabel: "Kimi K3",
+  }),
+  "kimi",
+);
+assert.equal(
+  menuBarModelProvider({
+    ...jobs[1],
+    providerId: undefined,
+    providerLabel: undefined,
+    modelId: "gemini-default",
+    modelLabel: "Gemini",
+  }),
+  "gemini",
+);
 assert.equal(
   jobs.some((job) => job.kind === "terminal"),
   false,
@@ -143,6 +191,7 @@ const outcome = deriveLatestMenuBarOutcome(
 assert.equal(outcome?.status, "succeeded");
 const complete = deriveMenuBarSnapshot({
   automations: [],
+  finishedOutcomes: [outcome],
   outcome,
   reduceMotion: true,
   sendingSessionIds: [],
@@ -151,7 +200,27 @@ const complete = deriveMenuBarSnapshot({
   theme: "light",
 });
 assert.equal(complete.state, "complete");
+assert.equal(complete.jobs.length, 1);
+assert.equal(complete.jobs[0].status, "finished");
+assert.equal(complete.jobs[0].canStop, false);
+assert.equal(complete.jobs[0].providerId, "openai");
+assert.equal(complete.jobs[0].modelLabel, "GPT-5.6 Sol");
+assert.equal(complete.totalActive, 0);
 assert.equal(complete.reduceMotion, true);
+
+const mixed = deriveMenuBarSnapshot({
+  automations: [automation],
+  finishedOutcomes: [outcome],
+  outcome,
+  reduceMotion: false,
+  sendingSessionIds: [],
+  sessionEventsById: { [session.id]: completedEvents },
+  sessions: [session],
+  theme: "dark",
+});
+assert.equal(mixed.state, "working");
+assert.equal(mixed.jobs.length, 2);
+assert.equal(mixed.totalActive, 1);
 
 const failed = deriveMenuBarSnapshot({
   automations: [],

@@ -196,6 +196,7 @@ const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
 const roadmapSource = readRepoFile("ROADMAP.md");
 const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
 const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 expect(
@@ -206,19 +207,54 @@ expect(
   "Chat panes should omit floating controls and focused-pane outlines.",
 );
 expect(
+  appSource.includes("const sidebarActiveSessionId =") &&
+    appSource.includes("activeChatPane.sessionId") &&
+    appSource.includes("activeSessionId={sidebarActiveSessionId}") &&
+    surfaceSource.includes(
+      'paneFocused ? "is-current-pane" : "is-subdued-pane"',
+    ) &&
+    styleSource.includes("rgb(0 0 0 / 9%)") &&
+    styleSource.includes(".gyro-session-row.is-open:not(.is-active)") &&
+    styleSource.includes(
+      ".gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)\n  .gyro-session-row.is-active::before",
+    ) &&
+    styleSource.includes("inset: 3px auto 3px 0;") &&
+    styleSource.includes("width: 4px;"),
+  "Grid focus should drive the selected sidebar chat, emphasize it with a substantial accent, and dim every inactive pane and row.",
+);
+expect(
   surfaceSource.includes('aria-label="Close chat"') &&
     surfaceSource.includes("onCloseChat={onCloseChat}") &&
     appSource.includes('type: "close-pane"') &&
-    appSource.includes("paneId: pane.paneId"),
-  "Grid chats should always expose a same-size close control in the chat header.",
+    appSource.includes("paneId: pane.paneId") &&
+    appSource.includes("const nextPane =") &&
+    appSource.includes("candidate.paneId !== pane.paneId") &&
+    appSource.includes("activeSessionIdRef.current = nextPane.sessionId") &&
+    appSource.includes("setActiveSessionId(undefined)"),
+  "Each Grid close control should remove its own pane and synchronize focus before session selection can restore the closed pane.",
 );
 expect(
   surfaceSource.includes('className="gyro-chat-thread-identity"') &&
-    surfaceSource.includes('className="gyro-chat-thread-branch"') &&
-    surfaceSource.includes("Current branch: ${branchLabel}") &&
-    styleSource.includes(".gyro-chat-thread-branch") &&
-    styleSource.includes("max-width: 180px"),
-  "Chat headers should show the current branch in a compact, truncating identity label.",
+    !surfaceSource.includes('className="gyro-chat-thread-branch"') &&
+    surfaceSource.includes('className="gyro-thread-context-branch"') &&
+    surfaceSource.includes('id="gyro-thread-workspace-menu"') &&
+    surfaceSource.includes("items={threadWorkspaceItems}") &&
+    surfaceSource.includes('title="Workspace context"'),
+  "Chat headers should keep the title clean and expose one combined workspace context menu.",
+);
+expect(
+  surfaceSource.includes('className="gyro-thread-context-project"') &&
+    surfaceSource.includes('className="gyro-thread-context-mode"') &&
+    surfaceSource.includes('sectionLabel: index === 0 ? "Branch"') &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-tiled .gyro-thread-pills {\n  display: flex",
+    ) &&
+    styleSource.includes(".gyro-thread-workspace-context-button") &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-tiled .gyro-thread-context-project",
+    ) &&
+    styleSource.includes("max-width: 76px"),
+  "Grid chat headers should collapse the combined workspace control to its branch label.",
 );
 expect(
   surfaceSource.includes('className="gyro-chat-grid-drop-overlay"') &&
@@ -317,10 +353,9 @@ expect(
 );
 expect(
   surfaceSource.includes("interleavedChatTimelineItems(turn.timelineEvents)") &&
-    !surfaceSource.includes(
-      'if (providerActivityFromEvent(event)?.kind === "file") {\n      continue;',
-    ) &&
-    surfaceSource.includes('kind: "activity-group"') &&
+    timelineSource.includes('kind: "file-summary"') &&
+    timelineSource.includes('kind: "activity-group"') &&
+    timelineSource.includes("orderedChatTimelineEvents(events)") &&
     surfaceSource.includes('className="gyro-chat-run-sequence"') &&
     surfaceSource.includes("function ProviderActivityGroup") &&
     surfaceSource.includes('"collapsed" | "preview" | "expanded"') &&
@@ -328,7 +363,7 @@ expect(
     surfaceSource.includes("click again to show") &&
     surfaceSource.includes("function ChatTurnChangeSummary") &&
     surfaceSource.includes('aria-live="polite"') &&
-    surfaceSource.includes("changeSummary={changeSummary}") &&
+    surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
     styleSource.includes(".gyro-chat-run-activity-group-toggle") &&
     styleSource.includes(".gyro-change-summary-actions"),
@@ -394,6 +429,7 @@ const threadRailRules = cssRules(
   ".gyro-chat-surface.is-thread.has-environment > .gyro-environment-rail",
 );
 const typeSource = readRepoFile("packages/ui/src/types.ts");
+const chatArtifactSource = readRepoFile("packages/ui/src/chat-artifacts.tsx");
 const reducerSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const coreHarnessSource = readRepoFile("crates/gyro-core/src/harness.rs");
 const coreExecutionSource = readRepoFile("crates/gyro-core/src/execution.rs");
@@ -418,6 +454,28 @@ const tauriConfigSource = readRepoFile(
 );
 const tauriConfig = JSON.parse(tauriConfigSource);
 const releaseWorkflowSource = readRepoFile(".github/workflows/release.yml");
+
+expect(
+  typeSource.includes("export type ChatArtifact =") &&
+    typeSource.includes('kind: "decision"') &&
+    typeSource.includes('kind: "completion"') &&
+    chatArtifactSource.includes("export function chatArtifactsFromEvent") &&
+    chatArtifactSource.includes("function normalizeChatArtifact") &&
+    chatArtifactSource.includes("MAX_ARTIFACTS = 8") &&
+    surfaceSource.includes("derivedCompletionArtifacts") &&
+    surfaceSource.includes("<ChatArtifacts") &&
+    tauriSource.includes("extract_chat_artifact_marker") &&
+    tauriSource.includes("valid_chat_artifact") &&
+    styleSource.includes(".gyro-chat-artifact-options"),
+  "Chat artifacts should remain typed, bounded, persisted, interactive, and integrated with completed turns.",
+);
+
+expect(
+  styleSource.includes(
+    ".gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {\n  min-height: 44px;\n  padding-right: 18px;",
+  ) && !styleSource.includes("padding-right: 96px;"),
+  "Grid chat controls should align to the right edge without a reserved titlebar gap.",
+);
 
 const emittedComposerActions = new Set([
   ...[...surfaceSource.matchAll(/onComposerAction\?\.\("([^"]+)"\)/g)].map(
@@ -2553,13 +2611,9 @@ expect(
     surfaceSource.includes("gyro-chat-run-change-summary") &&
     surfaceSource.includes('activity.kind === "file"') &&
     surfaceSource.includes('activity.status === "running"') &&
-    surfaceSource.includes("hasFileActivity && !isRunning && hasResponse ?") &&
-    surfaceSource.includes(
-      '`Edited ${fileCount} ${fileCount === 1 ? "file" : "files"}`',
-    ) &&
-    surfaceSource.includes(
-      'className="gyro-chat-run-change-summary is-complete"',
-    ) &&
+    timelineSource.includes('activityKind === "file"') &&
+    surfaceSource.includes('const action = isRunning ? "Editing" : "Edited"') &&
+    surfaceSource.includes('isRunning ? "is-running" : "is-complete"') &&
     surfaceSource.includes("changeSummary.fileChanges.map((file)") &&
     !surfaceSource.includes("Hide changed files") &&
     !surfaceSource.includes("Show changed files") &&
@@ -3617,10 +3671,8 @@ expect(
     surfaceSource.includes("sourceControl?.deletions") &&
     surfaceSource.includes("sourceControl?.files.length") &&
     !surfaceSource.includes("gyro-thread-diff-pill") &&
-    surfaceSource.includes("hasFileActivity && !isRunning && hasResponse ?") &&
-    surfaceSource.includes(
-      'className="gyro-chat-run-change-summary is-complete"',
-    ) &&
+    timelineSource.includes('kind: "file-summary"') &&
+    surfaceSource.includes("isRunning={isRunning}") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
@@ -4166,6 +4218,10 @@ expect(
 );
 expect(
   surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
+    surfaceSource.includes('sectionLabel: "Context"') &&
+    surfaceSource.includes('sectionLabel: "Tools"') &&
+    surfaceSource.includes('label: "Editor"') &&
+    surfaceSource.includes('label: "Image"') &&
     surfaceSource.includes('label: "File"') &&
     surfaceSource.includes('label: "Folder"') &&
     surfaceSource.includes('label: "Goal"') &&
@@ -4177,6 +4233,11 @@ expect(
     !surfaceSource.includes('label: "Photos"') &&
     !surfaceSource.includes('label: "Spreadsheet"') &&
     !surfaceSource.includes('label: "Slides"') &&
+    !surfaceSource.includes('label: "Editor snapshot"') &&
+    !surfaceSource.includes('label: "Media"') &&
+    !surfaceSource.includes(
+      'detail: "Capture the current saved or unsaved editor text"',
+    ) &&
     !surfaceSource.includes("Attach a folder or file") &&
     !surfaceSource.includes("Find commands and files") &&
     appSource.includes('case "select-file":') &&
@@ -4232,7 +4293,21 @@ expect(
   "Composer context wheel should stay compact while remaining legible.",
 );
 expect(
-  !surfaceSource.includes("function PlanDecisionCard") &&
+  styleSource.includes(
+    ".gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n  padding-inline: clamp(28px, 7vw, 112px);",
+  ) &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-tiled .gyro-thread-body,\n  .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n    padding-inline: 10px;",
+    ),
+  "Grid composers should align to the chat transcript width at wide and compact viewport sizes.",
+);
+expect(
+  surfaceSource.includes("function PlanDecisionCard") &&
+    surfaceSource.includes("{isPlanReadyForDecision && sessionPlan ? (") &&
+    surfaceSource.includes('aria-label="Plan ready for approval"') &&
+    surfaceSource.includes("<span>Implement this plan?</span>") &&
+    surfaceSource.includes('onDecision("reject")') &&
+    surfaceSource.includes('onDecision("approve")') &&
     surfaceSource.includes('className="gyro-plan-artifact-actions"') &&
     surfaceSource.includes('className="gyro-plan-artifact-preview"') &&
     surfaceSource.includes("Yes, implement") &&
@@ -4257,18 +4332,13 @@ expect(
     styleSource.includes(".gyro-plan-artifact-preview") &&
     styleSource.includes(".gyro-plan-rail.is-document") &&
     styleSource.includes(".gyro-chat-surface.is-thread.has-plan"),
-  "Completed Plan-mode output should render a plan artifact with an inline implementation action and an expandable full document.",
+  "Completed Plan-mode output should show a composer-attached decision prompt, switch to Normal mode on approval, and retain the expandable plan artifact.",
 );
 expect(
-  !surfaceSource.includes("const fileActivityIndexes = new Map") &&
-    !surfaceSource.includes(
-      'if (providerActivityFromEvent(event)?.kind === "file")',
-    ) &&
+  timelineSource.includes("let fileSummary:") &&
+    timelineSource.includes("fileSummary.events.push(event)") &&
     surfaceSource.includes('if (activity.kind === "file")') &&
-    surfaceSource.includes(
-      "const hasFileActivity = turn.timelineEvents.some",
-    ) &&
-    surfaceSource.includes("changeSummary={changeSummary}") &&
+    surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
@@ -4754,13 +4824,13 @@ expect(
 
 expect(
   monacoEditorSource.includes('monaco.editor.defineTheme("gyro-dark"') &&
-    monacoEditorSource.includes('"editor.background": "#1E1F22"') &&
+    monacoEditorSource.includes('"editor.background": "#101010"') &&
     monacoEditorSource.includes(
-      '"editor.lineHighlightBackground": "#25262A"',
+      '"editor.lineHighlightBackground": "#181818"',
     ) &&
     appSource.includes("stickyScroll: { enabled: true, maxLineCount: 3 }") &&
     appSource.includes('theme={theme === "light" ? "vs" : "gyro-dark"}'),
-  "The IDE editor should use a readable neutral graphite palette with built-in navigation aids.",
+  "The IDE editor should match the Sessions neutral palette and retain built-in navigation aids.",
 );
 
 expect(

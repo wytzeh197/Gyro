@@ -148,7 +148,6 @@ import {
 import { useGyroUpdater } from "./update-controller";
 import {
   deriveLatestMenuBarOutcome,
-  deriveMenuBarJobs,
   deriveMenuBarSnapshot,
 } from "./menu-bar-state";
 
@@ -700,6 +699,9 @@ export function App() {
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
   const [menuBarOutcome, setMenuBarOutcome] = useState<MenuBarOutcome>();
+  const [finishedMenuBarOutcomes, setFinishedMenuBarOutcomes] = useState<
+    MenuBarOutcome[]
+  >([]);
   const [reduceMotion, setReduceMotion] = useState(false);
   const menuBarOutcomeInitializedRef = useRef(false);
   const latestMenuBarOutcomeIdRef = useRef<string>();
@@ -798,6 +800,12 @@ export function App() {
   const activeChatPane = activeChatLayout?.slots.find(
     (pane) => pane?.paneId === activeChatLayout.focusedPaneId,
   );
+  const sidebarActiveSessionId =
+    activeWorkspaceLayout === "thread" && activeChatLayout?.slots.some(Boolean)
+      ? activeChatPane?.kind === "session"
+        ? activeChatPane.sessionId
+        : undefined
+      : activeSessionId;
   const persistableWorkbench = useMemo(
     () => persistableWorkbenchState(workbench),
     [
@@ -1234,20 +1242,11 @@ export function App() {
       ),
     [sessionEventsById, sessions, workbench.automations],
   );
-  const menuBarJobs = useMemo(
-    () =>
-      deriveMenuBarJobs({
-        automations: workbench.automations,
-        sendingSessionIds,
-        sessionEventsById,
-        sessions,
-      }),
-    [sendingSessionIds, sessionEventsById, sessions, workbench.automations],
-  );
   const menuBarSnapshot = useMemo<MenuBarSnapshot>(
     () =>
       deriveMenuBarSnapshot({
         automations: workbench.automations,
+        finishedOutcomes: finishedMenuBarOutcomes,
         outcome: menuBarOutcome,
         reduceMotion,
         sendingSessionIds,
@@ -1256,6 +1255,7 @@ export function App() {
         theme: workbench.preferences.theme,
       }),
     [
+      finishedMenuBarOutcomes,
       menuBarOutcome,
       reduceMotion,
       sendingSessionIds,
@@ -1292,20 +1292,17 @@ export function App() {
         ? undefined
         : latestMenuBarOutcome,
     );
-  }, [latestMenuBarOutcome]);
-
-  useEffect(() => {
-    if (menuBarOutcome?.status !== "succeeded" || menuBarJobs.length > 0) {
-      return undefined;
+    if (latestMenuBarOutcome.status === "succeeded") {
+      setFinishedMenuBarOutcomes((current) => [
+        latestMenuBarOutcome,
+        ...current.filter(
+          (outcome) =>
+            outcome.kind !== latestMenuBarOutcome.kind ||
+            outcome.targetId !== latestMenuBarOutcome.targetId,
+        ),
+      ]);
     }
-    const outcomeId = menuBarOutcome.id;
-    const timeout = window.setTimeout(() => {
-      setMenuBarOutcome((current) =>
-        current?.id === outcomeId ? undefined : current,
-      );
-    }, 3_000);
-    return () => window.clearTimeout(timeout);
-  }, [menuBarJobs.length, menuBarOutcome]);
+  }, [latestMenuBarOutcome]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -3487,8 +3484,23 @@ export function App() {
     workspacePath,
   ]);
 
+  const acknowledgeFinishedChat = useCallback((sessionId: string) => {
+    setFinishedMenuBarOutcomes((current) =>
+      current.filter(
+        (outcome) =>
+          outcome.kind !== "chat" || outcome.targetId !== sessionId,
+      ),
+    );
+    setMenuBarOutcome((current) =>
+      current?.kind === "chat" && current.targetId === sessionId
+        ? undefined
+        : current,
+    );
+  }, []);
+
   const selectSession = useCallback(
     (sessionId: string) => {
+      acknowledgeFinishedChat(sessionId);
       suppressSessionAutoSelectRef.current = false;
       const session = sessions.find((item) => item.id === sessionId);
       if (session) {
@@ -3504,7 +3516,7 @@ export function App() {
       dispatchWorkbench({ type: "set-chat-panel" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     },
-    [sessions],
+    [acknowledgeFinishedChat, sessions],
   );
 
   useEffect(() => {
@@ -3583,6 +3595,7 @@ export function App() {
       dispatchChatGrid({ type: "focus-pane", projectKey, paneId: pane.paneId });
       setWorkspacePath(pane.workspacePath);
       if (pane.kind === "session") {
+        acknowledgeFinishedChat(pane.sessionId);
         suppressSessionAutoSelectRef.current = false;
         activeSessionIdRef.current = pane.sessionId;
         setActiveSessionId(pane.sessionId);
@@ -3593,7 +3606,7 @@ export function App() {
         setActiveSessionId(undefined);
       }
     },
-    [refreshEvents],
+    [acknowledgeFinishedChat, refreshEvents],
   );
 
   const addSessionToChatGrid = useCallback(
@@ -9728,6 +9741,30 @@ export function App() {
         }}
         onContinueChat={() => requestSend("Continue")}
         onCloseChat={() => {
+          const projectKey = normalizedChatProjectKey(pane.workspacePath);
+          const paneLayout = chatGrid.layouts[projectKey];
+          const nextPane =
+            paneLayout?.slots.find(
+              (candidate) =>
+                candidate?.paneId === paneLayout.focusedPaneId &&
+                candidate?.paneId !== pane.paneId,
+            ) ??
+            paneLayout?.slots.find(
+              (candidate) => candidate && candidate.paneId !== pane.paneId,
+            );
+          if (nextPane?.kind === "session") {
+            suppressSessionAutoSelectRef.current = false;
+            activeSessionIdRef.current = nextPane.sessionId;
+            setActiveSessionId(nextPane.sessionId);
+            setWorkspacePath(nextPane.workspacePath);
+          } else {
+            suppressSessionAutoSelectRef.current = true;
+            activeSessionIdRef.current = undefined;
+            setActiveSessionId(undefined);
+            if (nextPane) {
+              setWorkspacePath(nextPane.workspacePath);
+            }
+          }
           setChatPanelByPaneId((current) => {
             const next = { ...current };
             delete next[pane.paneId];
@@ -9735,9 +9772,7 @@ export function App() {
           });
           dispatchChatGrid({
             type: "close-pane",
-            projectKey:
-              activeChatLayout?.projectKey ??
-              normalizedChatProjectKey(pane.workspacePath),
+            projectKey,
             paneId: pane.paneId,
           });
         }}
@@ -9832,7 +9867,7 @@ export function App() {
     <AppChrome
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
-      activeSessionId={activeSessionId}
+      activeSessionId={sidebarActiveSessionId}
       sendingSessionIds={sendingSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
