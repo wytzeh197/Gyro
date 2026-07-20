@@ -2203,6 +2203,64 @@ export function App() {
     ],
   );
 
+  const removeWorkspaceWorktree = useCallback(
+    async (branch: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      const worktree = branchCatalog?.worktrees?.find(
+        (candidate) => candidate.branch === branch,
+      );
+      if (!root || !worktree) {
+        notify(
+          "command-failed",
+          "Worktree unavailable",
+          "Refresh the branch menu and try again.",
+        );
+        return;
+      }
+      const busySession = sessions.find(
+        (session) =>
+          session.workspacePath === worktree.path &&
+          sendingSessionIdsRef.current.has(session.id),
+      );
+      if (busySession) {
+        notify(
+          "command-failed",
+          "Worktree is busy",
+          `Wait for ${busySession.title} to finish before removing it.`,
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          `Remove the worktree for ${branch}? The branch and chat history will be kept.`,
+        )
+      ) {
+        return;
+      }
+      setIsBranchLoading(true);
+      try {
+        const catalog = await invoke<GitBranchCatalog>("git_remove_worktree", {
+          request: { workspacePath: root, branch },
+        });
+        setBranchCatalog(catalog);
+        notify("terminal", "Worktree removed", branch);
+      } catch (error) {
+        notify("command-failed", "Could not remove worktree", String(error));
+        await refreshWorkspaceBranches(root);
+      } finally {
+        setIsBranchLoading(false);
+      }
+    },
+    [
+      activeSession?.workspacePath,
+      branchCatalog?.worktrees,
+      notify,
+      refreshWorkspaceBranches,
+      sessions,
+      workspacePath,
+    ],
+  );
+
   const refreshIdeServices = useCallback(
     (root?: string) => {
       const requestId = ideServicesRequestRef.current + 1;
@@ -3487,8 +3545,7 @@ export function App() {
   const acknowledgeFinishedChat = useCallback((sessionId: string) => {
     setFinishedMenuBarOutcomes((current) =>
       current.filter(
-        (outcome) =>
-          outcome.kind !== "chat" || outcome.targetId !== sessionId,
+        (outcome) => outcome.kind !== "chat" || outcome.targetId !== sessionId,
       ),
     );
     setMenuBarOutcome((current) =>
@@ -5229,6 +5286,23 @@ export function App() {
         return;
       }
 
+      if (action.startsWith("remove-worktree:")) {
+        const encodedBranch = action.replace("remove-worktree:", "");
+        try {
+          const branch = decodeURIComponent(encodedBranch);
+          if (branch) {
+            void removeWorkspaceWorktree(branch);
+          }
+        } catch {
+          notify(
+            "command-failed",
+            "Invalid worktree",
+            "The worktree branch name could not be read.",
+          );
+        }
+        return;
+      }
+
       if (action.startsWith("remove-saved-project:")) {
         const encodedPath = action.replace("remove-saved-project:", "");
         try {
@@ -5417,6 +5491,7 @@ export function App() {
       openToolPanel,
       openWorkspace,
       persistConfig,
+      removeWorkspaceWorktree,
       savedProjects,
       selectProvider,
       selectProviderModel,
