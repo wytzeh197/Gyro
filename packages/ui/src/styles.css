@@ -23177,7 +23177,7 @@ button.gyro-account-menu-row:hover,
   grid-template-columns: minmax(0, 1fr);
 }
 .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {
-  padding-inline: clamp(28px, 7vw, 112px);
+  padding-inline: clamp(12px, 3vw, 32px);
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-canvas {
   min-width: 0;
@@ -23656,6 +23656,86 @@ button.gyro-account-menu-row:hover,
   > .gyro-composer-bar {
   min-height: 38px;
   padding-bottom: 7px;
+}
+
+/* Keep every composer action inside narrow and tiled chat panes. */
+.gyro-composer-shell.is-hero.has-provider {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.gyro-composer-shell.is-hero.has-provider > .gyro-composer-bar {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-bar
+  .gyro-composer-control,
+.gyro-composer-shell.is-hero.has-provider > .gyro-composer-bar .gyro-model-chip,
+.gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-bar
+  .gyro-effort-chip {
+  min-width: 0;
+}
+
+.gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-bar
+  .gyro-composer-control-model {
+  flex: 0 1 auto;
+}
+
+.gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-bar
+  .gyro-model-chip
+  .gyro-composer-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 620px) {
+  .gyro-composer-shell.is-hero.has-provider > .gyro-composer-bar {
+    gap: 4px;
+    padding-inline: 8px;
+  }
+
+  .gyro-composer-shell.is-hero.has-provider
+    > .gyro-composer-bar
+    .gyro-composer-spacer {
+    min-width: 0;
+  }
+
+  .gyro-composer-shell.is-hero.has-provider
+    > .gyro-composer-bar
+    .gyro-composer-control-approval
+    .gyro-composer-label {
+    max-width: 0;
+    overflow: hidden;
+  }
+
+  .gyro-composer-shell.is-hero.has-provider
+    > .gyro-composer-bar
+    .gyro-model-chip {
+    max-width: 190px;
+  }
+}
+
+@container (max-width: 470px) {
+  .gyro-composer-shell.is-hero.has-provider
+    > .gyro-composer-bar
+    .gyro-effort-chip
+    .gyro-composer-label {
+    max-width: 0;
+    overflow: hidden;
+  }
+
+  .gyro-composer-shell.is-hero.has-provider
+    > .gyro-composer-bar
+    .gyro-model-chip {
+    max-width: 145px;
+  }
 }
 
 /* Grid focus keeps the active chat crisp and dims every inactive surface. */
