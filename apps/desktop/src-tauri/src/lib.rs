@@ -9275,10 +9275,12 @@ fn codex_app_server_policy(
     full_access: bool,
     cwd: &Path,
 ) -> (&'static str, &'static str, serde_json::Value) {
+    let full_access = *mode == ChatMode::Normal
+        && full_access
+        && !require_command_approval
+        && !require_file_edit_approval;
     let approval_policy = if *mode == ChatMode::Plan || require_command_approval {
         "untrusted"
-    } else if !full_access {
-        "never"
     } else {
         "on-request"
     };
@@ -9287,6 +9289,13 @@ fn codex_app_server_policy(
             approval_policy,
             "read-only",
             serde_json::json!({ "type": "readOnly", "networkAccess": false }),
+        );
+    }
+    if full_access {
+        return (
+            approval_policy,
+            "danger-full-access",
+            serde_json::json!({ "type": "dangerFullAccess" }),
         );
     }
     (
@@ -15388,10 +15397,22 @@ while True:
 
         let (approval, sandbox, policy) =
             codex_app_server_policy(&ChatMode::Normal, false, false, false, workspace);
-        assert_eq!(approval, "never");
+        assert_eq!(approval, "on-request");
         assert_eq!(sandbox, "workspace-write");
         assert_eq!(policy["type"], "workspaceWrite");
         assert_eq!(policy["writableRoots"][0], "/tmp/gyro-workspace");
+
+        let (approval, sandbox, policy) =
+            codex_app_server_policy(&ChatMode::Normal, false, false, true, workspace);
+        assert_eq!(approval, "on-request");
+        assert_eq!(sandbox, "danger-full-access");
+        assert_eq!(policy["type"], "dangerFullAccess");
+
+        let (approval, sandbox, policy) =
+            codex_app_server_policy(&ChatMode::Normal, true, false, true, workspace);
+        assert_eq!(approval, "untrusted");
+        assert_eq!(sandbox, "workspace-write");
+        assert_eq!(policy["type"], "workspaceWrite");
 
         let (approval, sandbox, policy) =
             codex_app_server_policy(&ChatMode::Plan, false, false, false, workspace);
