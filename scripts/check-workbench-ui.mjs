@@ -213,6 +213,14 @@ expect(
   "Grid chats should always expose a same-size close control in the chat header.",
 );
 expect(
+  surfaceSource.includes('className="gyro-chat-thread-identity"') &&
+    surfaceSource.includes('className="gyro-chat-thread-branch"') &&
+    surfaceSource.includes("Current branch: ${branchLabel}") &&
+    styleSource.includes(".gyro-chat-thread-branch") &&
+    styleSource.includes("max-width: 180px"),
+  "Chat headers should show the current branch in a compact, truncating identity label.",
+);
+expect(
   surfaceSource.includes('className="gyro-chat-grid-drop-overlay"') &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
     surfaceSource.includes('label: "Above"') &&
@@ -293,15 +301,25 @@ expect(
   surfaceSource.includes(
     "title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}",
   ) &&
-    styleSource.includes(
-      ".gyro-composer-shell:has(> .gyro-composer-attachments .is-image)",
+    cssRules(
+      styleSource,
+      ".gyro-composer-shell > .gyro-composer-attachments",
+    ).some(
+      (rule) =>
+        rule.includes("overflow-x: auto") &&
+        !rule.includes("position: absolute"),
     ) &&
-    styleSource.includes("bottom: calc(100% + 10px)") &&
+    !styleSource.includes(
+      ".gyro-composer-shell:has(> .gyro-composer-attachments .is-image) {\n  margin-top:",
+    ) &&
     styleSource.includes("object-fit: contain"),
-  "Linked screenshots should use a contained floating preview tray above the composer.",
+  "Linked screenshots should use a contained preview tray inside the composer.",
 );
 expect(
   surfaceSource.includes("interleavedChatTimelineItems(turn.timelineEvents)") &&
+    !surfaceSource.includes(
+      'if (providerActivityFromEvent(event)?.kind === "file") {\n      continue;',
+    ) &&
     surfaceSource.includes('kind: "activity-group"') &&
     surfaceSource.includes('className="gyro-chat-run-sequence"') &&
     surfaceSource.includes("function ProviderActivityGroup") &&
@@ -2466,9 +2484,7 @@ expect(
     surfaceSource.includes("`${seconds}s`") &&
     surfaceSource.includes("interleavedChatTimelineItems") &&
     surfaceSource.includes("providerActivityPathsMatch") &&
-    surfaceSource.includes(
-      'if (providerActivityFromEvent(event)?.kind === "file")',
-    ) &&
+    surfaceSource.includes('if (activity.kind === "file")') &&
     surfaceSource.includes("`Ran ${count} commands`") &&
     surfaceSource.includes('activity.kind === "context"') &&
     surfaceSource.includes("<Minimize2") &&
@@ -2537,11 +2553,17 @@ expect(
     surfaceSource.includes("gyro-chat-run-change-summary") &&
     surfaceSource.includes('activity.kind === "file"') &&
     surfaceSource.includes('activity.status === "running"') &&
-    surfaceSource.includes("hasFileActivity ?") &&
+    surfaceSource.includes("hasFileActivity && !isRunning && hasResponse ?") &&
     surfaceSource.includes(
-      'const actionLabel = isRunning ? "Editing" : "Edited"',
+      '`Edited ${fileCount} ${fileCount === 1 ? "file" : "files"}`',
     ) &&
-    surfaceSource.includes("showAllFiles ? undefined : 5") &&
+    surfaceSource.includes(
+      'className="gyro-chat-run-change-summary is-complete"',
+    ) &&
+    surfaceSource.includes("changeSummary.fileChanges.map((file)") &&
+    !surfaceSource.includes("Hide changed files") &&
+    !surfaceSource.includes("Show changed files") &&
+    !surfaceSource.includes("showAllFiles") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
     appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
@@ -2575,6 +2597,8 @@ expect(
     surfaceSource.includes("gyro-chat-run-thinking") &&
     surfaceSource.includes("isRunning && turn.timelineEvents.length === 0") &&
     styleSource.includes(".gyro-chat-run-header") &&
+    surfaceSource.includes("visibleWorkTimelineItems") &&
+    surfaceSource.includes("responseTimelineItems") &&
     styleSource.includes(".gyro-chat-run-activity") &&
     styleSource.includes(".gyro-chat-run-activity.is-file") &&
     styleSource.includes(".gyro-chat-run-change-summary") &&
@@ -3593,9 +3617,9 @@ expect(
     surfaceSource.includes("sourceControl?.deletions") &&
     surfaceSource.includes("sourceControl?.files.length") &&
     !surfaceSource.includes("gyro-thread-diff-pill") &&
-    surfaceSource.includes("hasFileActivity ?") &&
+    surfaceSource.includes("hasFileActivity && !isRunning && hasResponse ?") &&
     surfaceSource.includes(
-      'const actionLabel = isRunning ? "Editing" : "Edited"',
+      'className="gyro-chat-run-change-summary is-complete"',
     ) &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
@@ -4237,9 +4261,10 @@ expect(
 );
 expect(
   !surfaceSource.includes("const fileActivityIndexes = new Map") &&
-    surfaceSource.includes(
+    !surfaceSource.includes(
       'if (providerActivityFromEvent(event)?.kind === "file")',
     ) &&
+    surfaceSource.includes('if (activity.kind === "file")') &&
     surfaceSource.includes(
       "const hasFileActivity = turn.timelineEvents.some",
     ) &&
@@ -4308,7 +4333,9 @@ expect(
     appSource.includes("approvalNotificationCopy") &&
     appSource.includes("fullAccess: true") &&
     desktopRustSource.includes("request.full_access = config.full_access") &&
-    desktopRustSource.includes('"never"'),
+    desktopRustSource.includes('"danger-full-access"') &&
+    desktopRustSource.includes('"type": "dangerFullAccess"') &&
+    desktopRustSource.includes('"on-request"'),
   "Permission controls should expose ask, sandboxed auto-approval, and orange Full Access as distinct backend modes.",
 );
 expect(
@@ -4675,13 +4702,13 @@ expect(
 expect(
   (styleSource.match(/^:root\s*\{/gm) ?? []).length === 1 &&
     styleSource.includes(
-      "--gyro-premium-hairline: rgba(225, 233, 244, 0.09)",
+      "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 7px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
-    styleSource.includes("--gyro-app: #0c0f13") &&
-    styleSource.includes("--gyro-pane: #0f1217") &&
-    styleSource.includes("--gyro-hero-composer: #161a21") &&
+    styleSource.includes("--gyro-app: #101010") &&
+    styleSource.includes("--gyro-pane: #121212") &&
+    styleSource.includes("--gyro-hero-composer: #1a1a1a") &&
     styleSource.includes("--gyro-accent: #7aa7ff") &&
     styleSource.includes(':root[data-theme="light"]') &&
     styleSource.includes("--gyro-premium-hairline: rgba(23, 27, 34, 0.13)") &&
@@ -4719,7 +4746,7 @@ expect(
     appSource.includes("function terminalThemeFor") &&
     appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
     appSource.includes('background: "#ffffff"') &&
-    appSource.includes('background: "#020304"') &&
+    appSource.includes('background: "#0b0b0b"') &&
     appSource.includes('brightMagenta: "#f08cff"') &&
     appSource.includes('brightYellow: "#ffd166"'),
   "Live terminals should update their xterm palette in place for dark and light themes.",
@@ -4870,7 +4897,11 @@ expect(
     surfaceSource.includes("Usage unavailable from this provider") &&
     surfaceSource.includes(
       "Gyro does not estimate allowance from local activity",
-    ),
+    ) &&
+    surfaceSource.includes('aria-label="Provider usage limits"') &&
+    surfaceSource.includes('className="gyro-composer-limit-summary"') &&
+    surfaceSource.includes("providerUsage.windows.map((window)") &&
+    styleSource.includes(".gyro-composer-limit-summary"),
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
 );
 
@@ -4879,12 +4910,18 @@ expect(
     'invoke<ProviderUsageSnapshot>(\n          "get_provider_usage"',
   ) &&
     appSource.includes("refreshProviderUsage(selectedUsageProviderId)") &&
-    appSource.includes('status: "loading"') &&
+    appSource.includes("PROVIDER_USAGE_REFRESH_INTERVAL_MS") &&
+    appSource.includes("refreshInBackground") &&
+    appSource.includes('window.addEventListener("focus"') &&
+    appSource.includes('document.addEventListener("visibilitychange"') &&
+    appSource.includes("providerUsageInFlightRef") &&
+    appSource.includes('status: hasCachedWindows ? "available" : "error"') &&
+    appSource.includes("providerUsageByProvider={providerUsageByProvider}") &&
     tauriSource.includes('"account/rateLimits/read"') &&
     tauriSource.includes("CODEX_USAGE_TIMEOUT") &&
     tauriSource.includes("provider_usage_windows_from_codex") &&
     tauriSource.includes("get_provider_usage,"),
-  "Usage settings should fetch bounded live Codex account limits, load automatically, and expose refresh state.",
+  "Usage limits should refresh in the background, retain cached data, and surface in Settings and the composer.",
 );
 
 expect(
@@ -5006,8 +5043,8 @@ expect(
     styleSource.includes(".gyro-change-summary-file > button") &&
     surfaceSource.includes("function ChangeSummaryFile") &&
     surfaceSource.includes("aria-label={`Changes in ${path}`}") &&
-    surfaceSource.includes("showAllFiles") &&
-    surfaceSource.includes("aria-expanded={showAllFiles}") &&
+    surfaceSource.includes("changeSummary.fileChanges.map((file)") &&
+    !styleSource.includes(".gyro-change-summary-more") &&
     styleSource.includes(".gyro-change-summary-diff-scroll") &&
     styleSource.includes("max-height: min(420px, 48vh)"),
   "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
