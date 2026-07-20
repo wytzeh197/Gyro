@@ -39,23 +39,11 @@ export function orderedChatTimelineEvents(events: SessionEvent[]) {
 
 export function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
-  let fileSummary: Extract<
-    InterleavedChatTimelineItem,
-    { kind: "file-summary" }
-  > | null = null;
+  const fileEvents: SessionEvent[] = [];
   for (const event of orderedChatTimelineEvents(events)) {
     const activityKind = providerActivityKind(event);
     if (activityKind === "file") {
-      if (fileSummary) {
-        fileSummary.events.push(event);
-      } else {
-        fileSummary = {
-          kind: "file-summary",
-          id: `file-summary-${event.id}`,
-          events: [event],
-        };
-        items.push(fileSummary);
-      }
+      fileEvents.push(event);
       continue;
     }
     const groupedKind =
@@ -81,6 +69,14 @@ export function interleavedChatTimelineItems(events: SessionEvent[]) {
     } else {
       items.push({ kind: "event", event });
     }
+  }
+  const firstFileEvent = fileEvents[0];
+  if (firstFileEvent) {
+    items.push({
+      kind: "file-summary",
+      id: `file-summary-${firstFileEvent.id}`,
+      events: fileEvents,
+    });
   }
   return items;
 }
