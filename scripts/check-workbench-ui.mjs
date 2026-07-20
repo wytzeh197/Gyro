@@ -355,6 +355,8 @@ expect(
   surfaceSource.includes("interleavedChatTimelineItems(turn.timelineEvents)") &&
     timelineSource.includes('kind: "file-summary"') &&
     timelineSource.includes('kind: "activity-group"') &&
+    timelineSource.includes("const fileEvents: SessionEvent[] = []") &&
+    timelineSource.includes("id: `file-summary-${firstFileEvent.id}`") &&
     timelineSource.includes("orderedChatTimelineEvents(events)") &&
     surfaceSource.includes('className="gyro-chat-run-sequence"') &&
     surfaceSource.includes("function ProviderActivityGroup") &&
@@ -362,12 +364,13 @@ expect(
     surfaceSource.includes("events.slice(0, 3)") &&
     surfaceSource.includes("click again to show") &&
     surfaceSource.includes("function ChatTurnChangeSummary") &&
+    surfaceSource.includes("return !isRunning ? (") &&
     surfaceSource.includes('aria-live="polite"') &&
     surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
     styleSource.includes(".gyro-chat-run-activity-group-toggle") &&
     styleSource.includes(".gyro-change-summary-actions"),
-  "Chat turns should interleave text with expandable actions and one aggregate live change summary.",
+  "Chat turns should preserve activity order and show one aggregate change summary only after completion.",
 );
 expect(
   surfaceSource.includes('label: "Suggested"') &&
@@ -462,12 +465,13 @@ expect(
     chatArtifactSource.includes("export function chatArtifactsFromEvent") &&
     chatArtifactSource.includes("function normalizeChatArtifact") &&
     chatArtifactSource.includes("MAX_ARTIFACTS = 8") &&
-    surfaceSource.includes("derivedCompletionArtifacts") &&
+    !surfaceSource.includes("derivedCompletionArtifacts") &&
+    surfaceSource.includes('artifact.kind !== "completion"') &&
     surfaceSource.includes("<ChatArtifacts") &&
     tauriSource.includes("extract_chat_artifact_marker") &&
     tauriSource.includes("valid_chat_artifact") &&
     styleSource.includes(".gyro-chat-artifact-options"),
-  "Chat artifacts should remain typed, bounded, persisted, interactive, and integrated with completed turns.",
+  "Chat artifacts should remain typed, bounded, persisted, and interactive without rendering completion receipts.",
 );
 
 expect(
@@ -4335,9 +4339,11 @@ expect(
   "Completed Plan-mode output should show a composer-attached decision prompt, switch to Normal mode on approval, and retain the expandable plan artifact.",
 );
 expect(
-  timelineSource.includes("let fileSummary:") &&
-    timelineSource.includes("fileSummary.events.push(event)") &&
+  timelineSource.includes("const fileEvents: SessionEvent[] = []") &&
+    timelineSource.includes("fileEvents.push(event)") &&
+    timelineSource.includes("const firstFileEvent = fileEvents[0]") &&
     surfaceSource.includes('if (activity.kind === "file")') &&
+    surfaceSource.includes("return !isRunning ? (") &&
     surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
@@ -4354,7 +4360,7 @@ expect(
     ) &&
     appSource.includes('const modeChanged = await changeChatMode("normal")') &&
     appSource.includes("if (!modeChanged)"),
-  "Live file edits, composer overlays, light context pills, and Goal/Plan exclusivity should remain enforced.",
+  "Completion-only edit summaries, composer overlays, light context pills, and Goal/Plan exclusivity should remain enforced.",
 );
 expect(
   styleSource.includes(

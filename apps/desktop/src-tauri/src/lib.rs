@@ -718,12 +718,27 @@ struct GitBranchCatalog {
     available: bool,
     current: Option<String>,
     branches: Vec<String>,
+    worktrees: Vec<GitLinkedWorktree>,
     error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitLinkedWorktree {
+    branch: String,
+    path: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GitCheckoutBranchRequest {
+    workspace_path: String,
+    branch: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitRemoveWorktreeRequest {
     workspace_path: String,
     branch: String,
 }
@@ -1212,6 +1227,7 @@ struct ProviderChatStreamEvent {
     model_id: Option<String>,
     event_id: String,
     sequence: u64,
+    activity_sequence: Option<u64>,
     phase: String,
     status: Option<String>,
     text_delta: Option<String>,
@@ -4928,6 +4944,17 @@ async fn git_checkout_branch(
     .map_err(|error| format!("git branch checkout worker failed: {error}"))?
 }
 
+#[tauri::command]
+async fn git_remove_worktree(
+    request: GitRemoveWorktreeRequest,
+) -> Result<GitBranchCatalog, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_remove_worktree_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("git worktree removal worker failed: {error}"))?
+}
+
 fn sort_branch_catalog_entries(branches: &mut [(i64, String)]) {
     branches.sort_by(|(date_a, branch_a), (date_b, branch_b)| {
         let main_order = (branch_b == "main").cmp(&(branch_a == "main"));
@@ -4944,6 +4971,7 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
             available: false,
             current: None,
             branches: Vec::new(),
+            worktrees: Vec::new(),
             error: Some("The selected folder is not a Git repository.".into()),
         });
     };
@@ -5001,12 +5029,92 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
         .succeeded()
         .then(|| current_output.stdout.trim().to_string());
     let current = current.filter(|branch| !branch.is_empty());
+    let worktrees = git_linked_worktrees(&repo_root)?;
     Ok(GitBranchCatalog {
         available: true,
         current,
         branches,
+        worktrees,
         error: None,
     })
+}
+
+fn git_linked_worktrees(repo_root: &Path) -> anyhow::Result<Vec<GitLinkedWorktree>> {
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["worktree", "list", "--porcelain"]);
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(10),
+        None,
+        2 * 1024 * 1024,
+        64 * 1024,
+    )?;
+    if !output.succeeded() {
+        return Err(bounded_command_error(
+            "could not list linked worktrees",
+            &output,
+        ));
+    }
+
+    let mut records = Vec::<(String, Option<String>)>::new();
+    let mut path: Option<String> = None;
+    let mut branch: Option<String> = None;
+    for line in output.stdout.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(path) = path.take() {
+                records.push((path, branch.take()));
+            }
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("worktree ") {
+            path = Some(value.to_owned());
+        } else if let Some(value) = line.strip_prefix("branch refs/heads/") {
+            branch = Some(value.to_owned());
+        }
+    }
+
+    Ok(records
+        .into_iter()
+        .skip(1)
+        .filter_map(|(path, branch)| branch.map(|branch| GitLinkedWorktree { branch, path }))
+        .collect())
+}
+
+fn git_remove_worktree_impl(
+    request: &GitRemoveWorktreeRequest,
+) -> anyhow::Result<GitBranchCatalog> {
+    gyro_core::validate_branch_name(&request.branch)?;
+    let root = workspace_root(&request.workspace_path)?;
+    let repo_root = git_repo_root(&root)
+        .ok_or_else(|| anyhow::anyhow!("the selected folder is not a Git repository"))?;
+    let worktree = git_linked_worktrees(&repo_root)?
+        .into_iter()
+        .find(|worktree| worktree.branch == request.branch)
+        .ok_or_else(|| anyhow::anyhow!("linked worktree not found"))?;
+    if root.canonicalize().ok() == Path::new(&worktree.path).canonicalize().ok() {
+        return Err(anyhow::anyhow!("cannot remove the active workspace"));
+    }
+
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["worktree", "remove"])
+        .arg(&worktree.path);
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(60),
+        Some(Duration::from_secs(30)),
+        2 * 1024 * 1024,
+        64 * 1024,
+    )?;
+    if !output.succeeded() {
+        return Err(bounded_command_error("could not remove worktree", &output));
+    }
+    git_branch_catalog_impl(&request.workspace_path)
 }
 
 fn git_checkout_branch_impl(
@@ -8634,7 +8742,7 @@ fn run_kimi_acp_chat(
                 detail: activity.detail.clone(),
                 status: activity.status.clone(),
             };
-            emit_provider_activity_event(app, request, &activity);
+            emit_provider_activity_event(app, request, &activity, None);
             if let Ok(mut sink) = activity_sink.lock() {
                 sink.push(activity);
             }
@@ -9174,6 +9282,7 @@ fn run_openai_codex_app_server_chat(
                                 app,
                                 request,
                                 &codex_context_compaction_activity(&params, "running"),
+                                None,
                             ),
                             _ => {}
                         }
@@ -9433,7 +9542,7 @@ fn record_codex_app_server_activity(
     {
         return;
     }
-    emit_provider_activity_event(app, request, &activity);
+    emit_provider_activity_event(app, request, &activity, Some(activities.len() as u64));
     activities.push(activity);
 }
 
@@ -11259,6 +11368,13 @@ impl StreamingCommandState {
         Some(activity)
     }
 
+    fn activity_sequence(&self, activity: &ProviderActivity) -> u64 {
+        self.activities
+            .iter()
+            .position(|candidate| candidate.id == activity.id)
+            .unwrap_or(self.activities.len().saturating_sub(1)) as u64
+    }
+
     fn push_stdout(&mut self, line: &str) {
         if self.stdout_text_truncated {
             return;
@@ -11481,13 +11597,15 @@ fn handle_provider_stdout_line(
     }
     if let Some(commentary) = extract_provider_commentary_activity(&value) {
         if let Some(activity) = stream_state.push_activity(commentary) {
-            emit_provider_activity_event(app, request, &activity);
+            let activity_sequence = stream_state.activity_sequence(&activity);
+            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
         }
         return;
     }
     if let Some(activity) = extract_provider_activity(&value) {
         if let Some(activity) = stream_state.push_activity(activity) {
-            emit_provider_activity_event(app, request, &activity);
+            let activity_sequence = stream_state.activity_sequence(&activity);
+            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
         }
     }
     if let Some(chunk) = extract_provider_text_chunk(&value) {
@@ -11791,6 +11909,7 @@ fn emit_provider_chat_event(
         model_id: request.model_id.clone(),
         event_id: Uuid::new_v4().to_string(),
         sequence: next_provider_event_sequence(app, &request.session_id),
+        activity_sequence: None,
         phase: phase.into(),
         status: status.map(|status| status.as_str().to_string()),
         text_delta,
@@ -11809,6 +11928,7 @@ fn emit_provider_activity_event(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     activity: &ProviderActivity,
+    activity_sequence: Option<u64>,
 ) {
     let payload = ProviderChatStreamEvent {
         session_id: request.session_id.clone(),
@@ -11817,6 +11937,7 @@ fn emit_provider_activity_event(
         model_id: request.model_id.clone(),
         event_id: Uuid::new_v4().to_string(),
         sequence: next_provider_event_sequence(app, &request.session_id),
+        activity_sequence,
         phase: "activity".into(),
         status: Some(HarnessRunStatus::Running.as_str().to_string()),
         text_delta: None,
@@ -13747,6 +13868,7 @@ pub fn run() {
             git_commit,
             git_branches,
             git_checkout_branch,
+            git_remove_worktree,
             git_diff,
             git_discard,
             git_stage,
@@ -15828,6 +15950,9 @@ while True:
         assert_eq!(state.activities[0].label, "I’ll inspect first.");
         assert_eq!(state.activities[1].kind, "command");
         assert_eq!(state.activities[2], continuation);
+        assert_eq!(state.activity_sequence(&state.activities[0]), 0);
+        assert_eq!(state.activity_sequence(&state.activities[1]), 1);
+        assert_eq!(state.activity_sequence(&continuation), 2);
     }
 
     #[test]
@@ -16895,6 +17020,60 @@ while True:
         })
         .unwrap_err();
         assert!(error.to_string().contains("commit or stash"));
+    }
+
+    #[test]
+    fn branch_catalog_lists_and_safely_removes_linked_worktrees() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("tracked.txt"), "main\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+
+        let worktree_parent = tempfile::tempdir().unwrap();
+        let linked_path = worktree_parent.path().join("linked");
+        let linked_path_string = linked_path.to_string_lossy().into_owned();
+        run_git(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature/linked",
+                &linked_path_string,
+            ],
+        );
+
+        let workspace_path = repo.path().to_string_lossy().into_owned();
+        let catalog = git_branch_catalog_impl(&workspace_path).unwrap();
+        assert!(catalog
+            .worktrees
+            .iter()
+            .any(|worktree| worktree.branch == "feature/linked"));
+
+        let updated = git_remove_worktree_impl(&GitRemoveWorktreeRequest {
+            workspace_path: workspace_path.clone(),
+            branch: "feature/linked".into(),
+        })
+        .unwrap();
+        assert!(!linked_path.exists());
+        assert!(updated.worktrees.is_empty());
+        assert!(updated.branches.contains(&"feature/linked".to_string()));
+
+        let dirty_path = worktree_parent.path().join("dirty");
+        let dirty_path_string = dirty_path.to_string_lossy().into_owned();
+        run_git(
+            repo.path(),
+            &["worktree", "add", "-b", "feature/dirty", &dirty_path_string],
+        );
+        fs::write(dirty_path.join("untracked.txt"), "keep me\n").unwrap();
+        let error = git_remove_worktree_impl(&GitRemoveWorktreeRequest {
+            workspace_path,
+            branch: "feature/dirty".into(),
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("could not remove worktree"));
+        assert!(dirty_path.exists());
     }
 
     #[test]

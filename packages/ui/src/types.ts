@@ -626,6 +626,7 @@ export type ProviderChatStreamEvent = {
   modelId?: string | null;
   eventId: string;
   sequence: number;
+  activitySequence?: number | null;
   phase: ProviderChatStreamPhase;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;
@@ -1037,6 +1038,10 @@ export type GitBranchCatalog = {
   available: boolean;
   current?: string;
   branches: string[];
+  worktrees?: Array<{
+    branch: string;
+    path: string;
+  }>;
   error?: string;
 };
 

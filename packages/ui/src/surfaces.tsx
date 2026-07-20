@@ -111,7 +111,6 @@ import type {
   CapabilityActivity,
   CapabilityCallEvent,
   ChatAttachment,
-  ChatArtifact,
   ChatPaneRef,
   ChatProjectLayout,
   ChatMode,
@@ -12472,11 +12471,20 @@ function branchPopoverItems({
     action: `select-branch:${encodeURIComponent(branch)}`,
     active: branch === branchCatalog.current,
     disabled: isDisabled,
+    removeAction:
+      branch !== branchCatalog.current &&
+      branchCatalog.worktrees?.some((worktree) => worktree.branch === branch)
+        ? `remove-worktree:${encodeURIComponent(branch)}`
+        : undefined,
     detail: isDisabled
       ? "Wait for the active turn to finish"
       : branch === branchCatalog.current
         ? "Current workspace branch"
-        : "Switch this clean workspace",
+        : branchCatalog.worktrees?.some(
+              (worktree) => worktree.branch === branch,
+            )
+          ? "Checked out in a linked worktree"
+          : "Switch this clean workspace",
     icon: GitBranch,
     label: branch,
   }));
@@ -15016,10 +15024,6 @@ function ChatTurn({
   );
   const visibleWorkTimelineItems =
     isRunning || !isThoughtCollapsed ? workTimelineItems : [];
-  const completionArtifacts = useMemo(
-    () => derivedCompletionArtifacts(turn, isRunning),
-    [isRunning, turn],
-  );
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
       {turn.user ? (
@@ -15055,7 +15059,7 @@ function ChatTurn({
             <div className="gyro-chat-run-sequence" aria-label="Work timeline">
               {visibleWorkTimelineItems.map((item) => {
                 if (item.kind === "file-summary") {
-                  return (
+                  return !isRunning ? (
                     <ChatTurnChangeSummary
                       changeSummary={chatTurnChangeSummary(
                         item.events,
@@ -15067,7 +15071,7 @@ function ChatTurn({
                       onLoadChangeDiff={onLoadChangeDiff}
                       onOpenChanges={onOpenChanges}
                     />
-                  );
+                  ) : null;
                 }
                 if (item.kind === "activity-group") {
                   return (
@@ -15125,7 +15129,6 @@ function ChatTurn({
                       ) : (
                         <AssistantResponse
                           actions={artifactActions}
-                          additionalArtifacts={completionArtifacts}
                           event={event}
                         />
                       )}
@@ -15804,82 +15807,21 @@ type AssistantResponseBlock =
 
 const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
 
-function derivedCompletionArtifacts(
-  turn: ChatTranscriptTurn,
-  isRunning: boolean,
-): ChatArtifact[] {
-  if (isRunning) return [];
-  const workEvents = turn.timelineEvents.filter(
-    (event) => event.kind !== "assistant-message",
-  );
-  if (!workEvents.length) return [];
-  const changedFiles = Array.from(
-    new Set(workEvents.map(providerActivityFilePath).filter(Boolean)),
-  ) as string[];
-  const commandCount = workEvents.filter((event) => {
-    const payload = eventPayloadRecord(event);
-    return (
-      payload?.kind === "provider-activity" &&
-      payload.activityKind === "command"
-    );
-  }).length;
-  const failed = ["failed", "blocked", "cancelled"].includes(
-    turn.runStatus ?? "",
-  );
-  const items: Extract<ChatArtifact, { kind: "completion" }>["items"] = [
-    {
-      label: failed ? "Turn needs attention" : "Response completed",
-      status: failed ? "failed" : "passed",
-    },
-  ];
-  if (commandCount > 0) {
-    items.push({
-      label: `${commandCount} ${commandCount === 1 ? "command" : "commands"}`,
-      status: failed ? "failed" : "passed",
-    });
-  }
-  if (changedFiles.length > 0) {
-    items.push({
-      label: `${changedFiles.length} changed ${changedFiles.length === 1 ? "file" : "files"}`,
-      status: "changed",
-    });
-  }
-  return [
-    {
-      id: `${turn.id}-completion`,
-      kind: "completion",
-      title: failed ? "Work needs attention" : "Work completed",
-      status: failed ? "failed" : "completed",
-      summary: failed
-        ? "The turn ended before all work completed. Review the details above before continuing."
-        : changedFiles.length > 0
-          ? "The requested work finished with workspace changes ready to review."
-          : "The requested work finished successfully.",
-      items,
-      files: changedFiles,
-    },
-  ];
-}
-
 function AssistantResponse({
   actions,
-  additionalArtifacts = [],
   event,
 }: {
   actions?: ChatArtifactActions;
-  additionalArtifacts?: ChatArtifact[];
   event: SessionEvent;
 }) {
   const visibleMessage = stripHiddenSessionTitleMarker(event.message);
-  const artifacts = useMemo(() => {
-    const emitted = chatArtifactsFromEvent(event);
-    return [
-      ...emitted,
-      ...additionalArtifacts.filter(
-        (artifact) => !emitted.some((item) => item.kind === artifact.kind),
+  const artifacts = useMemo(
+    () =>
+      chatArtifactsFromEvent(event).filter(
+        (artifact) => artifact.kind !== "completion",
       ),
-    ];
-  }, [additionalArtifacts, event]);
+    [event],
+  );
   const isStreaming = isStreamingAssistantEvent(event);
   const shouldUsePlainText =
     isStreaming ||
