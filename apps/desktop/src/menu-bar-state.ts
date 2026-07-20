@@ -10,6 +10,7 @@ import type {
 
 type MenuBarStateInput = {
   automations: Automation[];
+  finishedOutcomes?: MenuBarOutcome[];
   outcome?: MenuBarOutcome;
   reduceMotion: boolean;
   sendingSessionIds: string[];
@@ -77,14 +78,20 @@ function chatJobStart(events: SessionEvent[], session: Session) {
 
 export function deriveMenuBarJobs({
   automations,
+  finishedOutcomes = [],
   sendingSessionIds,
   sessionEventsById,
   sessions,
 }: Pick<
   MenuBarStateInput,
-  "automations" | "sendingSessionIds" | "sessionEventsById" | "sessions"
+  | "automations"
+  | "finishedOutcomes"
+  | "sendingSessionIds"
+  | "sessionEventsById"
+  | "sessions"
 >): MenuBarJob[] {
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const activeSessionIds = new Set(sendingSessionIds);
   const jobs: MenuBarJob[] = [];
 
   for (const sessionId of sendingSessionIds) {
@@ -101,6 +108,35 @@ export function deriveMenuBarJobs({
       status,
       startedAt: chatJobStart(events, session),
       canStop: true,
+      providerId: session.providerId,
+      providerLabel: session.providerLabel,
+      modelId: session.modelId,
+      modelLabel: session.modelLabel,
+    });
+  }
+
+  for (const outcome of finishedOutcomes) {
+    if (
+      outcome.kind !== "chat" ||
+      outcome.status !== "succeeded" ||
+      activeSessionIds.has(outcome.targetId)
+    ) {
+      continue;
+    }
+    const session = sessionById.get(outcome.targetId);
+    jobs.push({
+      id: outcome.id,
+      kind: "chat",
+      targetId: outcome.targetId,
+      title: outcome.title,
+      detail: outcome.detail,
+      status: "finished",
+      startedAt: outcome.finishedAt,
+      canStop: false,
+      providerId: session?.providerId,
+      providerLabel: session?.providerLabel,
+      modelId: session?.modelId,
+      modelLabel: session?.modelLabel,
     });
   }
 
@@ -230,20 +266,22 @@ export function deriveMenuBarSnapshot(
   input: MenuBarStateInput,
 ): MenuBarSnapshot {
   const jobs = deriveMenuBarJobs(input);
+  const activeJobs = jobs.filter((job) => job.status !== "finished");
   const hasWaitingJob = jobs.some((job) => job.status === "waiting");
   const hasFailedOutcome = input.outcome?.status === "failed";
   const state =
     hasWaitingJob || hasFailedOutcome
       ? "attention"
-      : jobs.length > 0
+      : activeJobs.length > 0
         ? "working"
-        : input.outcome?.status === "succeeded"
+        : jobs.some((job) => job.status === "finished") ||
+            input.outcome?.status === "succeeded"
           ? "complete"
           : "idle";
   return {
     state,
     jobs,
-    totalActive: jobs.length,
+    totalActive: activeJobs.length,
     recentOutcome: input.outcome,
     theme: input.theme,
     reduceMotion: input.reduceMotion,

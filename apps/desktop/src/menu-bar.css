@@ -105,6 +105,64 @@
   width: 43px;
 }
 
+.gyro-menu-bar-model-mark {
+  align-items: center;
+  background: var(--menu-hover);
+  border: 1px solid var(--menu-border);
+  border-radius: 8px;
+  color: var(--menu-copy);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  overflow: hidden;
+  width: 28px;
+}
+
+.gyro-menu-bar-model-mark svg {
+  fill: currentColor;
+  height: 18px;
+  width: 18px;
+}
+
+.gyro-menu-bar-model-mark strong {
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.gyro-menu-bar-model-mark.is-openai {
+  background: #f4f4f4;
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #111;
+}
+
+.gyro-menu-bar-model-mark.is-anthropic {
+  background: #f4eee8;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #d97757;
+}
+
+.gyro-menu-bar-model-mark.is-kimi {
+  background: #080808;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.gyro-menu-bar-model-mark.is-kimi .kimi-dot {
+  fill: #3d7eff;
+}
+
+.gyro-menu-bar-model-mark.is-xai {
+  background: #f2f2f2;
+  color: #0d0d0d;
+}
+
+.gyro-menu-bar-model-mark.is-gemini {
+  background: #eef3ff;
+  color: #3267d6;
+}
+
 .gyro-menu-bar-header-copy,
 .gyro-menu-bar-outcome span:last-child,
 .gyro-menu-bar-idle p {
@@ -265,6 +323,10 @@
 
 .gyro-menu-bar-job-meta em[data-status="waiting"] {
   color: #e4aa52;
+}
+
+.gyro-menu-bar-job-meta em[data-status="finished"] {
+  color: #62c991;
 }
 
 .gyro-menu-bar-job-meta small {
