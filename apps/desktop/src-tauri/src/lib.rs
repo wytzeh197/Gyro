@@ -2920,6 +2920,7 @@ fn run_provider_chat_blocking(
     let title_extraction =
         extract_session_title_marker(&runner_output.response, request.suggest_title);
     let plan_extraction = extract_plan_update_marker(&title_extraction.message);
+    let artifact_extraction = extract_chat_artifact_marker(&plan_extraction.message);
     let resume_cursor_value = runner_output
         .resume_cursor
         .as_ref()
@@ -2987,6 +2988,16 @@ fn run_provider_chat_blocking(
                 .map(|title| serde_json::Value::String(title.clone()))
                 .unwrap_or(serde_json::Value::Null),
         );
+        object.insert(
+            "timelineSequence".into(),
+            serde_json::Value::from(runner_output.activities.len() as u64),
+        );
+        if !artifact_extraction.items.is_empty() {
+            object.insert(
+                "artifacts".into(),
+                serde_json::Value::Array(artifact_extraction.items.clone()),
+            );
+        }
         if let Some(context_usage) = runner_output.context_usage.as_ref() {
             object.insert(
                 "contextUsage".into(),
@@ -2998,7 +3009,7 @@ fn run_provider_chat_blocking(
         .append_event_with_turn_id(
             session_id,
             SessionEventKind::AssistantMessage,
-            plan_extraction.message,
+            artifact_extraction.message,
             assistant_payload,
             Some(run_id),
         )
@@ -3061,7 +3072,10 @@ fn run_provider_chat_blocking(
     let activity_entries = runner_output
         .activities
         .iter()
-        .map(|activity| provider_activity_event_entry(&request, run_id, activity))
+        .enumerate()
+        .map(|(sequence, activity)| {
+            provider_activity_event_entry(&request, run_id, sequence as u64, activity)
+        })
         .collect();
     let mut activity_events =
         match store.append_system_events_with_turn_id(session_id, activity_entries) {
@@ -10414,6 +10428,7 @@ fn openai_codex_chat_prompt(
     } else {
         "Do not edit files, start servers, commit, push, or make destructive changes in this chat run."
     };
+    let artifact_instruction = r#"When a decision, command, completion receipt, workspace file set, preview, table, diagram, or memory proposal would be materially more useful as an interactive card, put one hidden line before the visible answer: GYRO_ARTIFACTS: {"items":[{"id":"stable-id","kind":"decision","title":"Choose an option","options":[{"id":"one","label":"Option one"}]}]}. Supported kinds are decision, command, completion, workspace, preview, table, diagram, and memory. Keep it valid JSON on one line, use at most 8 items, and omit it for ordinary prose."#;
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -10424,6 +10439,7 @@ fn openai_codex_chat_prompt(
          Your selected model label is: {model_label}.\n\
          If the user asks what model you are, answer with exactly that selected model label only.\n\
          {title_instruction}\
+         {artifact_instruction}\n\
          Use the selected workspace only as optional context.\n\
          {mutation_instruction}\n\
          Selected workspace: {workspace}\n\n\
@@ -10451,6 +10467,7 @@ fn claude_chat_prompt(
     } else {
         "Stay in planning mode. Do not edit files, run mutating commands, start servers, commit, push, or make destructive changes.\n"
     };
+    let artifact_instruction = r#"When a decision, command, completion receipt, workspace file set, preview, table, diagram, or memory proposal would be materially more useful as an interactive card, put one hidden line before the visible answer: GYRO_ARTIFACTS: {"items":[{"id":"stable-id","kind":"decision","title":"Choose an option","options":[{"id":"one","label":"Option one"}]}]}. Supported kinds are decision, command, completion, workspace, preview, table, diagram, and memory. Keep it valid JSON on one line, use at most 8 items, and omit it for ordinary prose."#;
     format!(
         "Answer as Gyro's chat model.\n\
          Keep replies concise, but structure informational answers as polished, scannable Markdown.\n\
@@ -10460,6 +10477,7 @@ fn claude_chat_prompt(
          Do not describe the local Claude Code runner, authentication, system prompts, or implementation details unless asked.\n\
          If the user asks what model you are, answer with the model label only.\n\
          {title_instruction}\
+         {artifact_instruction}\n\
          Use the selected workspace only as optional context.\n\
          {action_instruction}\
          Selected workspace: {workspace}\n\n\
@@ -10474,6 +10492,11 @@ struct SessionTitleExtraction {
 
 struct PlanUpdateExtraction {
     payload: Option<serde_json::Value>,
+    message: String,
+}
+
+struct ChatArtifactExtraction {
+    items: Vec<serde_json::Value>,
     message: String,
 }
 
@@ -10494,6 +10517,113 @@ fn extract_plan_update_marker(response: &str) -> PlanUpdateExtraction {
     PlanUpdateExtraction {
         payload,
         message: lines.join("\n").trim().to_string(),
+    }
+}
+
+fn extract_chat_artifact_marker(response: &str) -> ChatArtifactExtraction {
+    const MAX_ARTIFACTS: usize = 8;
+    const MAX_MARKER_BYTES: usize = 64 * 1024;
+    let mut items = Vec::new();
+    let mut lines = Vec::new();
+    for line in response.lines() {
+        let Some(encoded) = line.trim().strip_prefix("GYRO_ARTIFACTS:") else {
+            lines.push(line);
+            continue;
+        };
+        if encoded.len() > MAX_MARKER_BYTES || items.len() >= MAX_ARTIFACTS {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(encoded.trim()) else {
+            continue;
+        };
+        let candidates = value
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .or_else(|| value.as_array().cloned())
+            .unwrap_or_default();
+        for candidate in candidates {
+            if items.len() >= MAX_ARTIFACTS {
+                break;
+            }
+            if valid_chat_artifact(&candidate) {
+                items.push(candidate);
+            }
+        }
+    }
+    ChatArtifactExtraction {
+        items,
+        message: lines.join("\n").trim().to_string(),
+    }
+}
+
+fn valid_chat_artifact(value: &serde_json::Value) -> bool {
+    const ALLOWED_KINDS: &[&str] = &[
+        "decision",
+        "command",
+        "completion",
+        "workspace",
+        "preview",
+        "table",
+        "diagram",
+        "memory",
+    ];
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    let bounded_string = |key: &str, max: usize| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && text.chars().count() <= max)
+    };
+    let Some(kind) = bounded_string("kind", 24) else {
+        return false;
+    };
+    if !ALLOWED_KINDS.contains(&kind)
+        || bounded_string("id", 120).is_none()
+        || bounded_string("title", 200).is_none()
+    {
+        return false;
+    }
+    if serde_json::to_vec(value).map_or(true, |encoded| encoded.len() > 16 * 1024) {
+        return false;
+    }
+    match kind {
+        "decision" => value
+            .get("options")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|options| !options.is_empty() && options.len() <= 5),
+        "command" => bounded_string("command", 4_000).is_some(),
+        "completion" => bounded_string("summary", 4_000).is_some(),
+        "workspace" => value
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|files| !files.is_empty() && files.len() <= 30),
+        "preview" => object.contains_key("url") || object.contains_key("description"),
+        "table" => {
+            value
+                .get("columns")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|columns| !columns.is_empty() && columns.len() <= 12)
+                && value
+                    .get("rows")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|rows| rows.len() <= 100)
+        }
+        "diagram" => value
+            .get("nodes")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|nodes| !nodes.is_empty() && nodes.len() <= 40),
+        "memory" => {
+            bounded_string("content", 4_000).is_some()
+                && matches!(
+                    bounded_string("operation", 12),
+                    Some("save" | "edit" | "forget")
+                )
+        }
+        _ => false,
     }
 }
 
@@ -10815,6 +10945,7 @@ fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
 fn provider_activity_event_entry(
     request: &ProviderChatRequest,
     turn_id: Uuid,
+    timeline_sequence: u64,
     activity: &ProviderActivity,
 ) -> (String, serde_json::Value, Option<Uuid>) {
     let payload = serde_json::json!({
@@ -10826,6 +10957,7 @@ fn provider_activity_event_entry(
         "status": activity.status,
         "providerId": request.provider_id,
         "modelId": request.model_id,
+        "timelineSequence": timeline_sequence,
         "turnId": turn_id,
     });
     (activity.label.clone(), payload, Some(turn_id))
@@ -11449,7 +11581,7 @@ fn provider_context_usage_from_codex_exec(
 
 fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
     let text = extract_codex_agent_message_text(value)?;
-    if text.contains("GYRO_SESSION_TITLE:") {
+    if text.contains("GYRO_SESSION_TITLE:") || text.contains("GYRO_ARTIFACTS:") {
         return None;
     }
     let item = value.get("item")?;
@@ -14234,6 +14366,7 @@ mod tests {
         let actionable = claude_chat_prompt("edit it", Some("/tmp/project"), false, true);
         assert!(actionable.contains("must follow Gyro's permission decisions"));
         assert!(actionable.contains("do not retry the write"));
+        assert!(actionable.contains("GYRO_ARTIFACTS:"));
         assert!(!actionable.contains("Stay in planning mode"));
 
         let plan = claude_chat_prompt("plan it", Some("/tmp/project"), false, false);
@@ -15191,6 +15324,7 @@ while True:
         assert!(prompt.contains("exactly that selected model label only"));
         assert!(prompt.contains("Do not describe the local Codex runner"));
         assert!(prompt.contains("GYRO_SESSION_TITLE:"));
+        assert!(prompt.contains("GYRO_ARTIFACTS:"));
         assert!(prompt.contains("Selected workspace: /workspace"));
         assert!(prompt.contains("Do not edit files"));
 
@@ -15934,6 +16068,25 @@ while True:
         );
         assert_eq!(extracted.payload.as_ref().unwrap()["action"], "replace");
         assert_eq!(extracted.message, "Here is the plan.");
+    }
+
+    #[test]
+    fn extracts_bounded_chat_artifacts_and_hides_the_marker() {
+        let extracted = extract_chat_artifact_marker(
+            "GYRO_ARTIFACTS: {\"items\":[{\"id\":\"choice\",\"kind\":\"decision\",\"title\":\"Choose\",\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}]}\n\nPick the best option.",
+        );
+        assert_eq!(extracted.items.len(), 1);
+        assert_eq!(extracted.items[0]["kind"], "decision");
+        assert_eq!(extracted.message, "Pick the best option.");
+    }
+
+    #[test]
+    fn rejects_unknown_or_incomplete_chat_artifacts() {
+        let extracted = extract_chat_artifact_marker(
+            "GYRO_ARTIFACTS: {\"items\":[{\"id\":\"bad\",\"kind\":\"html\",\"title\":\"Unsafe\"},{\"id\":\"empty\",\"kind\":\"decision\",\"title\":\"Empty\",\"options\":[]}]}\nVisible response.",
+        );
+        assert!(extracted.items.is_empty());
+        assert_eq!(extracted.message, "Visible response.");
     }
 
     #[test]
