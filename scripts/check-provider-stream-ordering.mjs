@@ -8,6 +8,10 @@ import {
   orderProviderChatStreamEvent,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import { structuredCommentaryBlocks } from "../packages/ui/src/chat-commentary.ts";
+import {
+  interleavedChatTimelineItems,
+  orderedChatTimelineEvents,
+} from "../packages/ui/src/chat-timeline.ts";
 
 assert.deepEqual(
   structuredCommentaryBlocks(
@@ -231,7 +235,14 @@ let renderedActivityEvents = [
     payload: {},
   },
 ];
-const applyActivity = (sequence, activityId, activityKind, activityLabel) =>
+const applyActivity = (
+  sequence,
+  activityId,
+  activityKind,
+  activityLabel,
+  activityStatus = "done",
+  activityDetail,
+) =>
   applyProviderChatStreamActivity(
     activityEventsRef,
     (update) => {
@@ -248,7 +259,8 @@ const applyActivity = (sequence, activityId, activityKind, activityLabel) =>
       activityId,
       activityKind,
       activityLabel,
-      activityStatus: "done",
+      activityStatus,
+      activityDetail,
     },
   );
 
@@ -305,6 +317,135 @@ assert.deepEqual(
   ["I’ll inspect first.", "Searched project", "Now I’ll update it."],
 );
 
+const liveEditEventsRef = { current: new Map([["session-1", []]]) };
+let liveEditEvents = [renderedActivityEvents[0]];
+const applyLiveEditActivity = (
+  sequence,
+  activityId,
+  activityKind,
+  activityLabel,
+  activityStatus,
+  activityDetail,
+) =>
+  applyProviderChatStreamActivity(
+    liveEditEventsRef,
+    (update) => {
+      liveEditEvents =
+        typeof update === "function" ? update(liveEditEvents) : update;
+    },
+    {
+      sessionId: "session-1",
+      turnId: "turn-natural-order",
+      providerId: "openai",
+      eventId: `live-edit-${sequence}`,
+      sequence,
+      phase: "activity",
+      activityId,
+      activityKind,
+      activityLabel,
+      activityStatus,
+      activityDetail,
+    },
+  );
+applyLiveEditActivity(
+  1,
+  "edit-a",
+  "file",
+  "Updated src/a.ts",
+  "running",
+  "src/a.ts",
+);
+applyLiveEditActivity(
+  2,
+  "command-after-edit",
+  "command",
+  "Ran tests",
+  "running",
+);
+applyLiveEditActivity(
+  3,
+  "edit-a",
+  "file",
+  "Updated src/a.ts",
+  "done",
+  "src/a.ts",
+);
+assert.deepEqual(
+  liveEditEvents.slice(1).map((event) => event.payload.activityId),
+  ["edit-a", "command-after-edit"],
+);
+assert.equal(liveEditEvents[1].payload.status, "done");
+assert.equal(liveEditEvents[1].payload.timelineSequence, 1);
+
+const timelineActivity = (id, kind, sequence, status = "done") => ({
+  id,
+  sessionId: "session-1",
+  turnId: "turn-stable-timeline",
+  createdAt: `2026-07-13T09:48:0${sequence}.000Z`,
+  kind: "system-event",
+  message: id,
+  payload: {
+    kind: "provider-activity",
+    activityId: id,
+    activityKind: kind,
+    label: id,
+    status,
+    timelineSequence: sequence,
+  },
+});
+const firstCommentary = timelineActivity("commentary-before", "commentary", 1);
+const firstFile = timelineActivity("src/a.ts", "file", 2, "running");
+const timelineCommand = timelineActivity("command-after-edit", "command", 3);
+const secondFile = timelineActivity("src/b.ts", "file", 4);
+const laterCommentary = timelineActivity("commentary-after", "commentary", 5);
+const unorderedTimeline = [
+  laterCommentary,
+  secondFile,
+  timelineCommand,
+  firstFile,
+  firstCommentary,
+];
+assert.deepEqual(
+  orderedChatTimelineEvents(unorderedTimeline).map((event) => event.id),
+  [
+    "commentary-before",
+    "src/a.ts",
+    "command-after-edit",
+    "src/b.ts",
+    "commentary-after",
+  ],
+);
+const interleavedTimeline = interleavedChatTimelineItems(unorderedTimeline);
+assert.deepEqual(
+  interleavedTimeline.map((item) => item.kind),
+  ["event", "file-summary", "activity-group", "event"],
+);
+assert.deepEqual(
+  interleavedTimeline[1].events.map((event) => event.id),
+  ["src/a.ts", "src/b.ts"],
+);
+
+const completedFirstFile = {
+  ...firstFile,
+  createdAt: "2026-07-13T09:49:30.000Z",
+  payload: {
+    ...firstFile.payload,
+    status: "done",
+    timelineSequence: 0,
+  },
+};
+const completionMergedTimeline = mergeProviderResponseEvents(
+  [firstCommentary, firstFile, timelineCommand, laterCommentary],
+  [laterCommentary, completedFirstFile],
+);
+assert.deepEqual(
+  orderedChatTimelineEvents(completionMergedTimeline).map((event) => event.id),
+  ["commentary-before", "src/a.ts", "command-after-edit", "commentary-after"],
+);
+assert.equal(completionMergedTimeline[1].payload.status, "done");
+assert.equal(completionMergedTimeline[1].payload.timelineSequence, 2);
+assert.equal(completionMergedTimeline[1].createdAt, "2026-07-13T09:48:02.000Z");
+
 console.log(
-  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, activity chronology).",
+  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits).",
 );
