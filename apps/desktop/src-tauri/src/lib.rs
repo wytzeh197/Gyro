@@ -16148,8 +16148,21 @@ while True:
             live_inode
         );
 
+        // Drain the liveness probe before closing the listener. On macOS, a
+        // queued connection can briefly keep the socket connectable after the
+        // listener is dropped.
+        let (probe, _) = live.accept().unwrap();
+        drop(probe);
         drop(live);
-        let rebound = bind_cli_ipc_listener(&paths).unwrap().unwrap();
+        let rebound = (0..50)
+            .find_map(|_| match bind_cli_ipc_listener(&paths).unwrap() {
+                Some(listener) => Some(listener),
+                None => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    None
+                }
+            })
+            .expect("closed IPC socket should eventually be detected as stale");
         assert!(fs::symlink_metadata(&paths.socket_path)
             .unwrap()
             .file_type()
