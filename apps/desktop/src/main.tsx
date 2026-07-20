@@ -23,7 +23,7 @@ const initialTheme = (() => {
 document.documentElement.dataset.theme = initialTheme;
 document
   .querySelector('meta[name="theme-color"]')
-  ?.setAttribute("content", initialTheme === "light" ? "#f6f7f8" : "#07080a");
+  ?.setAttribute("content", initialTheme === "light" ? "#f6f7f8" : "#101010");
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
