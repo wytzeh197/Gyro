@@ -349,7 +349,7 @@ export type Automation = {
 
 export type MenuBarJobKind = "chat" | "automation";
 
-export type MenuBarJobStatus = "queued" | "running" | "waiting";
+export type MenuBarJobStatus = "queued" | "running" | "waiting" | "finished";
 
 export type MenuBarJob = {
   id: string;
@@ -360,6 +360,10 @@ export type MenuBarJob = {
   status: MenuBarJobStatus;
   startedAt: string;
   canStop: boolean;
+  providerId?: string;
+  providerLabel?: string;
+  modelId?: string;
+  modelLabel?: string;
 };
 
 export type MenuBarOutcome = {
@@ -693,6 +697,108 @@ export type SessionPlan = {
   createdAt?: string;
   updatedAt?: string;
 };
+
+export type ChatArtifactStatus =
+  "streaming" | "ready" | "stale" | "failed" | "completed";
+
+export type ChatArtifactKind =
+  | "decision"
+  | "command"
+  | "completion"
+  | "workspace"
+  | "preview"
+  | "table"
+  | "diagram"
+  | "memory";
+
+export type ChatArtifactBase = {
+  id: string;
+  kind: ChatArtifactKind;
+  title: string;
+  status?: ChatArtifactStatus;
+  sourceTurnId?: string;
+  createdAt?: string;
+};
+
+export type ChatArtifactDecisionOption = {
+  id: string;
+  label: string;
+  description?: string;
+  prompt?: string;
+  recommended?: boolean;
+};
+
+export type ChatArtifact =
+  | {
+      id: string;
+      kind: "decision";
+      title: string;
+      status?: ChatArtifactStatus;
+      summary?: string;
+      options: ChatArtifactDecisionOption[];
+    }
+  | {
+      id: string;
+      kind: "command";
+      title: string;
+      status?: ChatArtifactStatus;
+      command: string;
+      purpose?: string;
+      workingDirectory?: string;
+      risk?: "low" | "review" | "high";
+    }
+  | {
+      id: string;
+      kind: "completion";
+      title: string;
+      status?: ChatArtifactStatus;
+      summary: string;
+      items?: Array<{
+        label: string;
+        status: "passed" | "failed" | "skipped" | "changed";
+        detail?: string;
+      }>;
+      files?: string[];
+    }
+  | {
+      id: string;
+      kind: "workspace";
+      title: string;
+      status?: ChatArtifactStatus;
+      files: Array<{ path: string; description?: string }>;
+    }
+  | {
+      id: string;
+      kind: "preview";
+      title: string;
+      status?: ChatArtifactStatus;
+      url?: string;
+      description?: string;
+    }
+  | {
+      id: string;
+      kind: "table";
+      title: string;
+      status?: ChatArtifactStatus;
+      columns: string[];
+      rows: string[][];
+    }
+  | {
+      id: string;
+      kind: "diagram";
+      title: string;
+      status?: ChatArtifactStatus;
+      nodes: Array<{ id: string; label: string }>;
+      edges: Array<{ from: string; to: string; label?: string }>;
+    }
+  | {
+      id: string;
+      kind: "memory";
+      title: string;
+      status?: ChatArtifactStatus;
+      operation: "save" | "edit" | "forget";
+      content: string;
+    };
 
 export type OnboardingStepId =
   | "account"

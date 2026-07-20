@@ -233,7 +233,16 @@ export function mergePersistedAndOptimisticEvents(
       }
     }
   }
-  return limitSessionEventsForUi(merged);
+  return limitSessionEventsForUi(
+    merged.map((event) => {
+      const optimistic = optimisticEvents.find((candidate) =>
+        sameTimelineEvent(candidate, event),
+      );
+      return optimistic
+        ? preserveFirstSeenTimelineMetadata(optimistic, event)
+        : event;
+    }),
+  );
 }
 
 export function resetStreamingAssistantForRetry(
@@ -329,23 +338,17 @@ export function mergeProviderResponseEvents(
       : merged.findIndex(findMatchingEvent);
     if (existingIndex >= 0) {
       const existing = merged[existingIndex];
+      if (!existing) {
+        continue;
+      }
       if (existing === responseEvent) {
         continue;
       }
       const next = merged.slice();
       next[existingIndex] =
-        existing &&
-        isProviderStatusEvent(existing) &&
-        isProviderStatusEvent(responseEvent)
+        isProviderStatusEvent(existing) && isProviderStatusEvent(responseEvent)
           ? mergeProviderStatusAttemptTiming(existing, responseEvent)
-          : existing &&
-              isProviderActivityEvent(existing) &&
-              isProviderActivityEvent(responseEvent)
-            ? {
-                ...responseEvent,
-                createdAt: existing.createdAt,
-              }
-            : responseEvent;
+          : preserveFirstSeenTimelineMetadata(existing, responseEvent);
       merged = next;
       continue;
     }
@@ -406,6 +409,48 @@ function providerActivityKey(event: SessionEvent) {
   return `${event.turnId ?? "turn"}:${String(payload?.activityId ?? payload?.label ?? event.id)}`;
 }
 
+function sameTimelineEvent(first: SessionEvent, second: SessionEvent) {
+  if (first.id === second.id) {
+    return true;
+  }
+  if (!first.turnId || first.turnId !== second.turnId) {
+    return false;
+  }
+  if (
+    first.kind === "assistant-message" &&
+    second.kind === "assistant-message"
+  ) {
+    return true;
+  }
+  return (
+    isProviderActivityEvent(first) &&
+    isProviderActivityEvent(second) &&
+    providerActivityKey(first) === providerActivityKey(second)
+  );
+}
+
+function preserveFirstSeenTimelineMetadata(
+  firstSeen: SessionEvent,
+  updated: SessionEvent,
+): SessionEvent {
+  const firstPayload = recordFromUnknown(firstSeen.payload) ?? {};
+  const updatedPayload = recordFromUnknown(updated.payload) ?? {};
+  const timelineSequence =
+    typeof firstPayload.timelineSequence === "number"
+      ? firstPayload.timelineSequence
+      : typeof firstPayload.providerSequence === "number"
+        ? firstPayload.providerSequence
+        : undefined;
+  return {
+    ...updated,
+    createdAt: firstSeen.createdAt,
+    payload: {
+      ...updatedPayload,
+      ...(timelineSequence === undefined ? {} : { timelineSequence }),
+    },
+  };
+}
+
 export function applyProviderChatStreamActivity(
   optimisticEventsRef: { current: Map<string, SessionEvent[]> },
   setEvents: SessionEventsSetter,
@@ -440,6 +485,7 @@ export function applyProviderChatStreamActivity(
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         providerSequence: streamEvent.sequence,
+        timelineSequence: streamEvent.sequence,
         turnId,
       },
     });
@@ -490,10 +536,10 @@ export function applyProviderChatStreamActivity(
       }
     }
     const next = items.slice();
-    next[existingIndex] = {
-      ...nextEvent,
-      createdAt: items[existingIndex]?.createdAt ?? nextEvent.createdAt,
-    };
+    const existing = items[existingIndex];
+    next[existingIndex] = existing
+      ? preserveFirstSeenTimelineMetadata(existing, nextEvent)
+      : nextEvent;
     return next;
   };
   optimisticEventsRef.current.set(
@@ -631,6 +677,7 @@ export function upsertStreamingAssistantEvent(
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         streaming: true,
+        timelineSequence: streamEvent.sequence,
       },
     },
   ];

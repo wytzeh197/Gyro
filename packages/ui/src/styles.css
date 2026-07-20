@@ -7756,7 +7756,7 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) {
-  --gyro-ide-sidebar-bg: #181a1e;
+  --gyro-ide-sidebar-bg: var(--gyro-sidebar);
   --gyro-ide-region-border: rgba(232, 238, 247, 0.09);
   --gyro-ide-region-border-soft: rgba(232, 238, 247, 0.055);
   --gyro-ide-foreground: #e2e6eb;
@@ -9685,26 +9685,36 @@ textarea:focus-visible {
 }
 
 .gyro-context-picker {
-  border-color: #363a40;
-  border-radius: 10px;
-  gap: 1px;
-  min-width: 208px;
-  padding: 5px;
+  background: var(--gyro-topbar);
+  border-color: var(--gyro-topbar-border);
+  border-radius: 7px;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 24%);
+  gap: 0;
+  min-width: 190px;
+  padding: 4px;
 }
 
-.gyro-context-picker .gyro-composer-popover-title {
-  color: #9298a1;
+.gyro-context-picker .gyro-composer-popover-section-title {
+  border: 0;
+  color: var(--gyro-faint);
   font-size: 10px;
-  letter-spacing: 0.01em;
-  padding: 3px 7px 4px;
+  font-weight: 550;
+  letter-spacing: 0;
+  margin: 5px 0 1px;
+  padding: 3px 7px;
+  text-transform: none;
+}
+
+.gyro-context-picker .gyro-composer-popover-section-title:first-child {
+  margin-top: 0;
 }
 
 .gyro-context-picker .gyro-composer-menu-item {
-  border-radius: 6px;
+  border-radius: 5px;
   gap: 8px;
   grid-template-columns: 16px minmax(0, 1fr);
-  min-height: 32px;
-  padding: 4px 7px;
+  min-height: 30px;
+  padding: 3px 7px;
 }
 
 .gyro-context-picker .gyro-composer-menu-item > svg {
@@ -9718,14 +9728,9 @@ textarea:focus-visible {
 }
 
 .gyro-context-picker .gyro-composer-menu-item strong {
-  color: #e4e6e9;
+  color: var(--gyro-text);
   font-size: 12px;
-  font-weight: 590;
-}
-
-.gyro-context-picker .gyro-composer-menu-item small {
-  color: #858b94;
-  font-size: 11.5px;
+  font-weight: 560;
 }
 
 .gyro-slash-command-menu {
@@ -11971,6 +11976,281 @@ body {
 .gyro-plan-artifact-actions button:disabled {
   cursor: wait;
   opacity: 0.55;
+}
+
+.gyro-chat-artifacts {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.gyro-chat-artifact {
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.gyro-chat-artifact-header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-text);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-chat-artifact-header:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-chat-artifact-heading,
+.gyro-chat-artifact-heading > span {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.gyro-chat-artifact-heading > span {
+  align-items: baseline;
+  gap: 7px;
+}
+
+.gyro-chat-artifact-heading svg {
+  color: var(--gyro-muted);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-artifact-heading strong {
+  font-size: 12px;
+  font-weight: 620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-artifact-heading small,
+.gyro-chat-artifact-meta,
+.gyro-chat-artifact-files small,
+.gyro-chat-artifact-checks small {
+  color: var(--gyro-muted);
+  font-size: 10px;
+}
+
+.gyro-chat-artifact-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.gyro-chat-artifact-body > p {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.gyro-chat-artifact-options {
+  display: grid;
+  gap: 7px;
+}
+
+.gyro-chat-artifact-options > button {
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: 8px;
+  color: var(--gyro-text);
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.gyro-chat-artifact-options > button:hover,
+.gyro-chat-artifact-options > button.is-recommended {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-premium-hairline-soft)
+  );
+}
+
+.gyro-chat-artifact-options span {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.gyro-chat-artifact-options small {
+  color: var(--gyro-accent);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gyro-chat-artifact-options em {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.gyro-chat-artifact-command {
+  align-items: flex-start;
+  background: var(
+    --gyro-code-bg,
+    color-mix(in srgb, var(--gyro-text) 5%, transparent)
+  );
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 9px 10px;
+}
+
+.gyro-chat-artifact-command code {
+  color: var(--gyro-text);
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.gyro-chat-artifact-command button {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  display: grid;
+  flex: 0 0 auto;
+  padding: 3px;
+  place-items: center;
+}
+
+.gyro-chat-artifact-meta,
+.gyro-chat-artifact-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+}
+
+.gyro-chat-artifact-checks,
+.gyro-chat-artifact-files {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gyro-chat-artifact-checks li,
+.gyro-chat-artifact-files li {
+  align-items: flex-start;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+}
+
+.gyro-chat-artifact-checks li > span,
+.gyro-chat-artifact-files li > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-chat-artifact-checks li svg,
+.gyro-chat-artifact-files li svg {
+  color: var(--gyro-success, #4f9f72);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.gyro-chat-artifact-checks li.is-failed svg {
+  color: var(--gyro-danger, #cf6868);
+}
+
+.gyro-chat-artifact-footer-actions button {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: 7px;
+  color: var(--gyro-muted);
+  font-size: 10px;
+  padding: 6px 9px;
+}
+
+.gyro-chat-artifact-footer-actions button:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-chat-artifact-url {
+  color: var(--gyro-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-artifact-table-wrap {
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.gyro-chat-artifact-table-wrap table {
+  border-collapse: collapse;
+  font-size: 10px;
+  width: 100%;
+}
+
+.gyro-chat-artifact-table-wrap th,
+.gyro-chat-artifact-table-wrap td {
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted);
+  padding: 7px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gyro-chat-artifact-table-wrap th {
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+  font-weight: 620;
+  position: sticky;
+  top: 0;
+}
+
+.gyro-chat-artifact-diagram {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-chat-artifact-diagram > div {
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+  border-left: 2px solid var(--gyro-premium-hairline-strong);
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 10px;
+  gap: 8px;
+  padding: 7px 8px;
+}
+
+.gyro-chat-artifact-diagram strong {
+  color: var(--gyro-text);
+}
+
+@media (max-width: 720px) {
+  .gyro-chat-artifact-heading > span {
+    align-items: flex-start;
+    display: grid;
+    gap: 2px;
+  }
 }
 
 .gyro-plan-decision-card {
@@ -22329,15 +22609,15 @@ button.gyro-account-menu-row:hover,
 
 /* Workspace: crisper regions, active-group focus, and a purposeful entry state. */
 .gyro-workspace-route.is-code {
-  --gyro-ide-editor-bg: #17191d;
-  --gyro-ide-header-bg: #15171a;
-  --gyro-ide-panel-bg: #131518;
-  --gyro-ide-sidebar-bg: #181a1e;
-  --gyro-ide-status-bg: #111316;
-  --gyro-ide-region-border: rgba(232, 238, 247, 0.09);
-  --gyro-ide-region-border-soft: rgba(232, 238, 247, 0.055);
-  --gyro-ide-foreground: #e2e6eb;
-  --gyro-ide-secondary-foreground: #969da8;
+  --gyro-ide-editor-bg: var(--gyro-app);
+  --gyro-ide-header-bg: var(--gyro-surface);
+  --gyro-ide-panel-bg: var(--gyro-surface);
+  --gyro-ide-sidebar-bg: var(--gyro-sidebar);
+  --gyro-ide-status-bg: var(--gyro-app);
+  --gyro-ide-region-border: var(--gyro-premium-hairline);
+  --gyro-ide-region-border-soft: var(--gyro-premium-hairline-soft);
+  --gyro-ide-foreground: var(--gyro-text);
+  --gyro-ide-secondary-foreground: var(--gyro-muted);
   background: var(--gyro-ide-editor-bg);
 }
 
@@ -22828,9 +23108,47 @@ button.gyro-account-menu-row:hover,
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
   min-height: 44px;
-  padding-right: 96px;
+  padding-right: 18px;
 }
 .gyro-chat-surface.is-tiled .gyro-thread-pills {
+  display: flex;
+  gap: 2px;
+}
+.gyro-thread-pill-label {
+  font-style: normal;
+}
+.gyro-chat-surface.is-tiled .gyro-thread-pill-button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 5px;
+  gap: 3px;
+  min-height: 26px;
+  padding: 0 4px;
+}
+.gyro-chat-surface.is-tiled
+  .gyro-thread-context-control:not(:last-child)
+  .gyro-thread-pill-label {
+  display: none;
+}
+.gyro-chat-surface.is-tiled
+  .gyro-thread-context-control:last-child
+  .gyro-thread-pill-label {
+  display: block;
+  font-style: normal;
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-chat-surface.is-tiled .gyro-chat-thread-branch {
+  display: none;
+}
+.gyro-chat-grid.is-count-3
+  .gyro-thread-context-control:last-child
+  .gyro-thread-pill-label,
+.gyro-chat-grid.is-count-4
+  .gyro-thread-context-control:last-child
+  .gyro-thread-pill-label {
   display: none;
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar > div:first-child span {
@@ -22852,7 +23170,7 @@ button.gyro-account-menu-row:hover,
   grid-template-columns: minmax(0, 1fr);
 }
 .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {
-  padding-inline: 10px;
+  padding-inline: clamp(28px, 7vw, 112px);
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-canvas {
   min-width: 0;
@@ -22862,7 +23180,8 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-surface.is-tiled .gyro-chat-surface-controls span {
     display: none;
   }
-  .gyro-chat-surface.is-tiled .gyro-thread-body {
+  .gyro-chat-surface.is-tiled .gyro-thread-body,
+  .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {
     padding-inline: 10px;
   }
 }
@@ -23332,7 +23651,7 @@ button.gyro-account-menu-row:hover,
   padding-bottom: 7px;
 }
 
-/* Grid focus is communicated by a nearly imperceptible inactive-pane dim. */
+/* Grid focus keeps the active chat crisp and dims every inactive surface. */
 .gyro-chat-grid.has-multiple-panes {
   background: color-mix(in srgb, var(--gyro-text) 13%, var(--gyro-app));
   gap: 1px;
@@ -23340,7 +23659,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-chat-grid.has-multiple-panes
   .gyro-chat-grid-slot.is-occupied.is-subdued-pane::after {
-  background: rgb(0 0 0 / 2.5%);
+  background: rgb(0 0 0 / 9%);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -23353,6 +23672,45 @@ button.gyro-account-menu-row:hover,
   background: transparent;
 }
 
+/* Open grid chats stay subdued in the sidebar; focus owns the selection cue. */
+.gyro-session-row.is-open:not(.is-active) {
+  background: color-mix(in srgb, var(--gyro-premium-control) 24%, transparent);
+  box-shadow: none;
+  opacity: 0.68;
+}
+
+.gyro-session-row.is-open:not(.is-active):hover,
+.gyro-session-row.is-open:not(.is-active):focus-within {
+  opacity: 0.9;
+}
+
+.gyro-session-row.is-active {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 12%,
+    var(--gyro-sidebar-soft) 88%
+  );
+  box-shadow: inset 2px 0 0 var(--gyro-accent);
+  opacity: 1;
+}
+
+.gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
+  .gyro-session-row.is-active {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 18%,
+    var(--gyro-sidebar-soft) 82%
+  );
+  box-shadow: none;
+}
+
+.gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
+  .gyro-session-row.is-active::before {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--gyro-accent) 54%, transparent);
+  inset: 3px auto 3px 0;
+  width: 4px;
+}
+
 .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
   .gyro-workspace-preparation-button[data-status="ready"] {
   display: none;
@@ -23363,4 +23721,78 @@ button.gyro-account-menu-row:hover,
     .gyro-chat-grid-slot.is-occupied.is-subdued-pane::after {
     transition: none;
   }
+}
+
+/* Thread header: one quiet workspace context control, with branch shown once. */
+.gyro-chat-thread-identity {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.gyro-thread-context-control.is-workspace-context {
+  min-width: 0;
+}
+
+.gyro-thread-workspace-context-button,
+.gyro-chat-thread-topbar .gyro-thread-workspace-context-button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 6px;
+  gap: 5px;
+  height: 28px;
+  max-width: min(420px, 42vw);
+  padding: 0 7px;
+}
+
+.gyro-thread-workspace-context-button:hover,
+.gyro-thread-workspace-context-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border-color: transparent;
+}
+
+.gyro-thread-workspace-context-button > em {
+  display: block;
+  font-style: normal;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-thread-context-project {
+  max-width: 112px;
+}
+
+.gyro-thread-context-branch {
+  color: var(--gyro-text);
+  max-width: 190px;
+}
+
+.gyro-thread-context-mode {
+  max-width: 72px;
+}
+
+.gyro-thread-workspace-context-button > i {
+  color: var(--gyro-faint);
+  font-size: 10px;
+  font-style: normal;
+  opacity: 0.62;
+}
+
+.gyro-thread-workspace-context-button > svg {
+  flex: 0 0 auto;
+}
+
+.gyro-chat-surface.is-tiled .gyro-thread-workspace-context-button {
+  max-width: 126px;
+}
+
+.gyro-chat-surface.is-tiled .gyro-thread-context-project,
+.gyro-chat-surface.is-tiled .gyro-thread-context-mode,
+.gyro-chat-surface.is-tiled .gyro-thread-workspace-context-button > i {
+  display: none;
+}
+
+.gyro-chat-surface.is-tiled .gyro-thread-context-branch {
+  max-width: 76px;
 }
