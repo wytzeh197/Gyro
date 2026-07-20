@@ -1,18 +1,18 @@
 :root {
   color-scheme: dark;
-  --gyro-app: #0c0f13;
-  --gyro-sidebar: #171a20;
-  --gyro-sidebar-soft: #20252d;
-  --gyro-pane: #0f1217;
-  --gyro-surface: #12161c;
-  --gyro-surface-raised: #171c23;
-  --gyro-surface-soft: #1e252e;
-  --gyro-border: #2b333e;
-  --gyro-border-soft: #20262f;
-  --gyro-border-strong: #3b4654;
-  --gyro-text: #eef2f7;
-  --gyro-muted: #abb4c0;
-  --gyro-faint: #7c8795;
+  --gyro-app: #101010;
+  --gyro-sidebar: #181818;
+  --gyro-sidebar-soft: #242424;
+  --gyro-pane: #121212;
+  --gyro-surface: #151515;
+  --gyro-surface-raised: #1b1b1b;
+  --gyro-surface-soft: #232323;
+  --gyro-border: #303030;
+  --gyro-border-soft: #262626;
+  --gyro-border-strong: #444444;
+  --gyro-text: #f0f0f0;
+  --gyro-muted: #b3b3b3;
+  --gyro-faint: #858585;
   --gyro-accent: #7aa7ff;
   --gyro-accent-strong: #a8c4ff;
   --gyro-update-blue: #356fd6;
@@ -20,21 +20,21 @@
   --gyro-warn: #e8b45f;
   --gyro-danger: #ef7d7d;
   --gyro-success: #70d39f;
-  --gyro-sidebar-text: #d7dde5;
-  --gyro-hover-text: #f7f9fb;
-  --gyro-topbar: rgba(12, 15, 19, 0.97);
-  --gyro-topbar-border: #252c35;
+  --gyro-sidebar-text: #d9d9d9;
+  --gyro-hover-text: #fafafa;
+  --gyro-topbar: rgba(16, 16, 16, 0.97);
+  --gyro-topbar-border: #2b2b2b;
   --gyro-brand-text: #111210;
   --gyro-primary-bg: #dce7ff;
   --gyro-primary-text: #101724;
   --gyro-primary-hover: #eef4ff;
-  --gyro-user-bubble: #1b2028;
-  --gyro-user-bubble-text: #eef1f5;
-  --gyro-code-bg: #090b0f;
-  --gyro-code-text: #e2e7ed;
-  --gyro-segment-bg: #141920;
-  --gyro-segment-active: #242b34;
-  --gyro-segment-active-text: #f1f4f7;
+  --gyro-user-bubble: #202124;
+  --gyro-user-bubble-text: #f1f3f5;
+  --gyro-code-bg: #0c0c0c;
+  --gyro-code-text: #e6e6e6;
+  --gyro-segment-bg: #1a1a1a;
+  --gyro-segment-active: #2a2a2a;
+  --gyro-segment-active-text: #f3f3f3;
   --gyro-shadow: rgba(0, 0, 0, 0.34);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
   --gyro-focus-ring: rgba(122, 167, 255, 0.34);
@@ -43,17 +43,17 @@
   --gyro-danger-soft: rgba(255, 105, 97, 0.13);
   --gyro-blue: #7aa7ff;
   --gyro-blue-soft: rgba(122, 167, 255, 0.12);
-  --gyro-canvas-subtle: #0c0f13;
-  --gyro-window: #11151a;
-  --gyro-workbench-line: rgba(225, 233, 244, 0.07);
-  --gyro-control-bg: #171c23;
-  --gyro-control-hover: #202731;
+  --gyro-canvas-subtle: #101010;
+  --gyro-window: #141414;
+  --gyro-workbench-line: rgba(255, 255, 255, 0.07);
+  --gyro-control-bg: #1b1b1b;
+  --gyro-control-hover: #272727;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
   --gyro-premium-panel-strong: var(--gyro-surface-raised);
   --gyro-premium-control: var(--gyro-surface-soft);
-  --gyro-premium-control-hover: #262e38;
+  --gyro-premium-control-hover: #2d2d2d;
   --gyro-premium-line: var(--gyro-border);
   --gyro-premium-line-soft: var(--gyro-border-soft);
   --gyro-premium-text: var(--gyro-text);
@@ -63,9 +63,9 @@
   --gyro-premium-shadow: rgba(0, 0, 0, 0.44);
   --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.24);
   --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.34);
-  --gyro-premium-hairline: rgba(225, 233, 244, 0.09);
-  --gyro-premium-hairline-soft: rgba(225, 233, 244, 0.055);
-  --gyro-premium-hairline-strong: rgba(225, 233, 244, 0.15);
+  --gyro-premium-hairline: rgba(255, 255, 255, 0.09);
+  --gyro-premium-hairline-soft: rgba(255, 255, 255, 0.055);
+  --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.15);
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.04);
   --gyro-premium-focus: rgba(122, 167, 255, 0.34);
   --gyro-premium-radius-xs: 3px;
@@ -84,13 +84,13 @@
   --gyro-provider-xai: #f6f2ea;
   --gyro-provider-gemini: #8bb8ff;
   --gyro-hero-heading: #f4f4f1;
-  --gyro-hero-brand: #98a2ae;
-  --gyro-hero-composer: #161a21;
-  --gyro-hero-context: #11151b;
+  --gyro-hero-brand: #a0a0a0;
+  --gyro-hero-composer: #1a1a1a;
+  --gyro-hero-context: #151515;
   --gyro-hero-border: rgba(255, 255, 255, 0.14);
   --gyro-hero-text: #f0f1f2;
-  --gyro-hero-muted: #a9b2be;
-  --gyro-hero-placeholder: #8a95a3;
+  --gyro-hero-muted: #b0b0b0;
+  --gyro-hero-placeholder: #929292;
   --gyro-hero-hover: rgba(255, 255, 255, 0.065);
   --gyro-hero-hover-text: #e5e7eb;
   --gyro-hero-send: #8d9098;
@@ -105,11 +105,7 @@
     color-mix(in srgb, var(--gyro-surface-raised) 82%, transparent),
     color-mix(in srgb, var(--gyro-app) 94%, transparent)
   );
-  --gyro-page-canvas: color-mix(
-    in srgb,
-    var(--gyro-app) 97%,
-    var(--gyro-accent) 3%
-  );
+  --gyro-page-canvas: color-mix(in srgb, var(--gyro-app) 97%, white 3%);
   --gyro-page-card: color-mix(
     in srgb,
     var(--gyro-surface) 94%,
@@ -118,7 +114,7 @@
   --gyro-page-card-hover: color-mix(
     in srgb,
     var(--gyro-surface-raised) 90%,
-    var(--gyro-accent) 10%
+    white 10%
   );
   --gyro-ide-sidebar-width: 224px;
   --gyro-ide-tab-height: 32px;
@@ -11494,6 +11490,37 @@ body {
   font-weight: 650;
 }
 
+.gyro-chat-thread-identity {
+  min-width: 0;
+}
+
+.gyro-chat-thread-identity > strong {
+  flex: 0 1 auto;
+}
+
+.gyro-chat-thread-branch {
+  align-items: center;
+  border-left: 1px solid var(--gyro-premium-hairline-strong);
+  color: var(--gyro-faint);
+  display: inline-flex;
+  flex: 0 1 auto;
+  font-size: 11px;
+  font-weight: 520;
+  gap: 4px;
+  line-height: 16px;
+  max-width: 180px;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-thread-branch svg {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
 .gyro-chat-transcript {
   background: transparent;
   padding: 18px clamp(24px, 9vw, 124px) 22px;
@@ -12308,7 +12335,7 @@ body {
 .gyro-session-row.is-nested:focus-within .gyro-sidebar-thread-main,
 .gyro-session-row.is-nested.is-menu-open .gyro-sidebar-thread-main,
 .gyro-session-row.is-nested.is-pinned .gyro-sidebar-thread-main {
-  padding-left: 31px;
+  padding-left: 23px;
 }
 
 .gyro-sidebar-mode-group,
@@ -18650,10 +18677,13 @@ button.gyro-settings-row em::after {
   width: 100%;
 }
 
+.gyro-chat-run-work {
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+}
+
 .gyro-chat-run-header {
   animation: gyro-chat-content-reveal 220ms ease 160ms both;
   align-items: center;
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   color: var(--gyro-faint);
   display: flex;
   font-size: 12px;
@@ -19471,11 +19501,6 @@ button.gyro-settings-row em::after {
   padding: 0 10px;
 }
 
-.gyro-change-summary-actions > button:first-child {
-  padding: 0;
-  width: 28px;
-}
-
 .gyro-change-summary-actions > button:hover {
   background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
 }
@@ -19505,8 +19530,7 @@ button.gyro-settings-row em::after {
   border-bottom: 0;
 }
 
-.gyro-change-summary-file > button:hover,
-.gyro-change-summary-more:hover {
+.gyro-change-summary-file > button:hover {
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
 }
 
@@ -19593,28 +19617,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-danger);
 }
 
-.gyro-change-summary-more {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-text) 2%, transparent);
-  border: 0;
-  border-top: 1px solid var(--gyro-premium-hairline-soft);
-  color: var(--gyro-muted);
-  display: flex;
-  font-size: 11.5px;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 12px;
-  width: 100%;
-}
-
-.gyro-change-summary-more svg {
-  transition: transform 140ms ease;
-}
-
-.gyro-change-summary-more svg.is-expanded {
-  transform: rotate(180deg);
-}
-
 :root[data-theme="light"] .gyro-chat-run-change-summary {
   background: #ffffff;
   border-color: rgba(31, 41, 55, 0.16);
@@ -19655,8 +19657,7 @@ button.gyro-settings-row em::after {
   border-bottom-color: #e1e6ed;
 }
 
-:root[data-theme="light"] .gyro-change-summary-file > button:hover,
-:root[data-theme="light"] .gyro-change-summary-more:hover {
+:root[data-theme="light"] .gyro-change-summary-file > button:hover {
   background: #f3f6f9;
 }
 
@@ -20579,8 +20580,11 @@ button.gyro-account-menu-row:hover,
   pointer-events: auto;
 }
 
-.gyro-chat-run-header {
+.gyro-chat-run-work {
   border-bottom-color: #303030;
+}
+
+.gyro-chat-run-header {
   color: #a1a1a1;
   font-size: 14px;
   min-height: 36px;
@@ -20604,7 +20608,7 @@ button.gyro-account-menu-row:hover,
   color: #777777;
 }
 
-:root[data-theme="light"] .gyro-chat-run-header {
+:root[data-theme="light"] .gyro-chat-run-work {
   border-bottom-color: #d8d8d8;
 }
 
@@ -21340,6 +21344,35 @@ button.gyro-account-menu-row:hover,
   min-width: 2px;
 }
 
+.gyro-composer-limit-summary {
+  align-items: center;
+  border-top: 1px solid #2c3036;
+  display: flex;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 11px;
+}
+
+.gyro-composer-limit-summary > span:not(.gyro-composer-limit-title) {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.gyro-composer-limit-title,
+.gyro-composer-limit-summary small {
+  color: #969da8;
+  font-size: 10.5px;
+}
+
+.gyro-composer-limit-summary strong {
+  color: #d9dde3;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  white-space: nowrap;
+}
+
 .gyro-composer-context-tooltip::after {
   background: #15171a;
   border-bottom: 1px solid #3a3f47;
@@ -21419,10 +21452,6 @@ button.gyro-account-menu-row:hover,
 .gyro-change-summary-actions > button,
 .gyro-change-summary-file > button {
   font-size: 13px;
-}
-
-.gyro-change-summary-more {
-  font-size: 12px;
 }
 
 .gyro-transcript-attachment strong {
@@ -22928,6 +22957,19 @@ button.gyro-account-menu-row:hover,
   border-bottom-color: var(--gyro-border-soft);
 }
 
+:root[data-theme="light"] .gyro-composer-limit-summary {
+  border-top-color: var(--gyro-border-soft);
+}
+
+:root[data-theme="light"] .gyro-composer-limit-title,
+:root[data-theme="light"] .gyro-composer-limit-summary small {
+  color: var(--gyro-muted);
+}
+
+:root[data-theme="light"] .gyro-composer-limit-summary strong {
+  color: var(--gyro-text);
+}
+
 :root[data-theme="light"] .gyro-composer-context-tooltip > header strong,
 :root[data-theme="light"] .gyro-composer-context-value strong {
   color: var(--gyro-text);
@@ -23013,26 +23055,17 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-hero-muted);
 }
 
-/* Linked media floats above the composer instead of creating an empty row. */
-.gyro-composer-shell:has(> .gyro-composer-attachments .is-image) {
-  margin-top: 102px;
-}
-
-.gyro-composer-shell:has(> .gyro-composer-attachments .is-image)
-  > .gyro-composer-attachments {
-  bottom: calc(100% + 10px);
+/* Keep linked media in the composer so its border contains all draft context. */
+.gyro-composer-shell > .gyro-composer-attachments {
   flex-wrap: nowrap;
-  left: 0;
   max-width: 100%;
   overflow-x: auto;
-  padding: 2px;
-  position: absolute;
+  padding: 10px 12px 4px;
   scrollbar-width: none;
-  width: max-content;
+  width: 100%;
 }
 
-.gyro-composer-shell:has(> .gyro-composer-attachments .is-image)
-  > .gyro-composer-attachments::-webkit-scrollbar {
+.gyro-composer-shell > .gyro-composer-attachments::-webkit-scrollbar {
   display: none;
 }
 
@@ -23046,15 +23079,15 @@ button.gyro-account-menu-row:hover,
       0 / 12px 12px,
     var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 11px;
-  box-shadow: 0 10px 24px var(--gyro-premium-shadow-soft);
-  flex: 0 0 156px;
-  height: 90px;
+  border-radius: 9px;
+  box-shadow: none;
+  flex: 0 0 88px;
+  height: 68px;
   transition:
     border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     box-shadow var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     transform var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-  width: 156px;
+  width: 88px;
 }
 
 .gyro-composer-shell
@@ -23065,7 +23098,7 @@ button.gyro-account-menu-row:hover,
     var(--gyro-accent) 32%,
     var(--gyro-premium-hairline-strong)
   );
-  box-shadow: 0 14px 30px var(--gyro-premium-shadow);
+  box-shadow: 0 5px 14px var(--gyro-premium-shadow-soft);
   transform: translateY(-1px);
 }
 
@@ -23127,20 +23160,6 @@ button.gyro-account-menu-row:hover,
   .gyro-composer-attachment.is-image
   button:hover {
   background: rgba(20, 22, 27, 0.92);
-}
-
-@media (max-width: 620px) {
-  .gyro-composer-shell:has(> .gyro-composer-attachments .is-image) {
-    margin-top: 88px;
-  }
-
-  .gyro-composer-shell
-    > .gyro-composer-attachments
-    .gyro-composer-attachment.is-image {
-    flex-basis: 132px;
-    height: 76px;
-    width: 132px;
-  }
 }
 
 /* Alpha 28: compact SCM hierarchy and a composer that follows its content. */
