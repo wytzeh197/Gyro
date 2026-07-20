@@ -1,11 +1,28 @@
 import assert from "node:assert/strict";
 
 import {
+  applyProviderChatStreamActivity,
   applyProviderChatStreamDeltas,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
 } from "../apps/desktop/src/provider-stream-events.ts";
+import { structuredCommentaryBlocks } from "../packages/ui/src/chat-commentary.ts";
+
+assert.deepEqual(
+  structuredCommentaryBlocks(
+    "I’ll inspect first.I’ll update it.The checks pass.Alpha 28.2 stays intact.",
+  ),
+  [
+    "I’ll inspect first.",
+    "I’ll update it.",
+    "The checks pass.",
+    "Alpha 28.2 stays intact.",
+  ],
+);
+assert.deepEqual(structuredCommentaryBlocks("Use v0.1.0-alpha.28.2 here."), [
+  "Use v0.1.0-alpha.28.2 here.",
+]);
 
 function streamEvent(sequence, phase = "delta", textDelta = `${sequence}`) {
   return {
@@ -201,6 +218,92 @@ const mergedActivities = mergeProviderResponseEvents(
 assert.equal(mergedActivities[0]?.message, "I’ll inspect the menu first.");
 assert.equal(mergedActivities[0]?.createdAt, "2026-07-13T09:46:00.000Z");
 assert.equal(mergedActivities[1]?.message, "Ran command");
+
+const activityEventsRef = { current: new Map([["session-1", []]]) };
+let renderedActivityEvents = [
+  {
+    id: "activity-user-message",
+    sessionId: "session-1",
+    turnId: "turn-natural-order",
+    createdAt: "2026-07-13T09:47:00.000Z",
+    kind: "user-message",
+    message: "Make the timeline natural",
+    payload: {},
+  },
+];
+const applyActivity = (sequence, activityId, activityKind, activityLabel) =>
+  applyProviderChatStreamActivity(
+    activityEventsRef,
+    (update) => {
+      renderedActivityEvents =
+        typeof update === "function" ? update(renderedActivityEvents) : update;
+    },
+    {
+      sessionId: "session-1",
+      turnId: "turn-natural-order",
+      providerId: "openai",
+      eventId: `activity-${sequence}`,
+      sequence,
+      phase: "activity",
+      activityId,
+      activityKind,
+      activityLabel,
+      activityStatus: "done",
+    },
+  );
+
+applyActivity(1, "commentary-1", "commentary", "I’ll inspect first.");
+applyActivity(2, "command-1", "command", "Searched project");
+applyActivity(
+  3,
+  "commentary-1",
+  "commentary",
+  "I’ll inspect first.Now I’ll update it.",
+);
+assert.deepEqual(
+  renderedActivityEvents.slice(1).map((event) => event.message),
+  ["I’ll inspect first.", "Searched project", "Now I’ll update it."],
+);
+const persistedCumulativeCommentary = {
+  ...openingCommentary,
+  id: "persisted-cumulative-commentary",
+  turnId: "turn-natural-order",
+  message: "I’ll inspect first.Now I’ll update it.",
+  payload: {
+    ...openingCommentary.payload,
+    label: "I’ll inspect first.Now I’ll update it.",
+  },
+};
+const persistedNaturalOrderCommand = {
+  ...laterCommand,
+  id: "persisted-natural-order-command",
+  turnId: "turn-natural-order",
+  message: "Searched project",
+  payload: {
+    ...laterCommand.payload,
+    label: "Searched project",
+  },
+};
+const completedActivityEvents = mergeProviderResponseEvents(
+  renderedActivityEvents,
+  [persistedCumulativeCommentary, persistedNaturalOrderCommand],
+);
+assert.deepEqual(
+  completedActivityEvents.slice(1).map((event) => event.message),
+  ["I’ll inspect first.", "Searched project", "Now I’ll update it."],
+);
+const refreshedActivityEvents = mergePersistedAndOptimisticEvents(
+  [
+    renderedActivityEvents[0],
+    persistedCumulativeCommentary,
+    persistedNaturalOrderCommand,
+  ],
+  renderedActivityEvents,
+);
+assert.deepEqual(
+  refreshedActivityEvents.slice(1).map((event) => event.message),
+  ["I’ll inspect first.", "Searched project", "Now I’ll update it."],
+);
 
 console.log(
   "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, activity chronology).",

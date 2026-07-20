@@ -376,6 +376,7 @@ const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
 const PROVIDER_STREAM_FLUSH_MS = 80;
+const PROVIDER_USAGE_REFRESH_INTERVAL_MS = 60_000;
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
@@ -662,7 +663,10 @@ export function App() {
     Partial<Record<ProviderId, ProviderUsageState>>
   >({});
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const providerUsageRequestRef = useRef(0);
+  const providerUsageRequestRef = useRef<Partial<Record<ProviderId, number>>>(
+    {},
+  );
+  const providerUsageInFlightRef = useRef(new Set<ProviderId>());
   const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
   const providerStreamOrderRef = useRef<ProviderStreamOrderState>(new Map());
   const providerStreamFlushTimerRef = useRef<number>();
@@ -759,6 +763,17 @@ export function App() {
       providers[0]?.id
     );
   }, [config, workbench.preferences.usageProviderId]);
+  const backgroundUsageProviderIds = useMemo(
+    () =>
+      providersForConfig(config)
+        .filter(
+          (provider) =>
+            provider.authStatus === "connected" &&
+            providerSupportsUsage(provider.id),
+        )
+        .map((provider) => provider.id),
+    [config],
+  );
   const activeChatPanel: ChatSidePanelId | undefined =
     workbench.preferences.activeChatPanel ??
     (workbench.preferences.chatEnvironmentRailOpen ? "environment" : undefined);
@@ -1046,14 +1061,17 @@ export function App() {
   }, [isTestingNotification, notify]);
   const refreshProviderUsage = useCallback(
     async (providerId: ProviderId, showFailureNotification = false) => {
-      const request = ++providerUsageRequestRef.current;
+      if (providerUsageInFlightRef.current.has(providerId)) return;
+      const request = (providerUsageRequestRef.current[providerId] ?? 0) + 1;
+      providerUsageRequestRef.current[providerId] = request;
       setProviderUsageByProvider((current) => ({
         ...current,
         [providerId]: {
           providerId,
-          status: "loading",
+          status: current[providerId]?.windows.length ? "available" : "loading",
           windows: current[providerId]?.windows ?? [],
           fetchedAt: current[providerId]?.fetchedAt,
+          stale: current[providerId]?.stale,
         },
       }));
 
@@ -1083,12 +1101,13 @@ export function App() {
         return;
       }
 
+      providerUsageInFlightRef.current.add(providerId);
       try {
         const snapshot = await invoke<ProviderUsageSnapshot>(
           "get_provider_usage",
           { providerId },
         );
-        if (request !== providerUsageRequestRef.current) return;
+        if (request !== providerUsageRequestRef.current[providerId]) return;
         setProviderUsageByProvider((current) => ({
           ...current,
           [providerId]: {
@@ -1103,18 +1122,19 @@ export function App() {
           },
         }));
       } catch (error) {
-        if (request !== providerUsageRequestRef.current) return;
+        if (request !== providerUsageRequestRef.current[providerId]) return;
         const detail = String(error);
         setProviderUsageByProvider((current) => {
           const previous = current[providerId];
+          const hasCachedWindows = Boolean(previous?.windows.length);
           return {
             ...current,
             [providerId]: {
               providerId,
-              status: "error",
+              status: hasCachedWindows ? "available" : "error",
               windows: previous?.windows ?? [],
               fetchedAt: previous?.fetchedAt,
-              stale: Boolean(previous?.windows.length),
+              stale: hasCachedWindows,
               error: detail,
             },
           };
@@ -1126,10 +1146,38 @@ export function App() {
             detail,
           );
         }
+      } finally {
+        providerUsageInFlightRef.current.delete(providerId);
       }
     },
     [notify],
   );
+
+  useEffect(() => {
+    if (backgroundUsageProviderIds.length === 0) return undefined;
+    const refreshInBackground = () => {
+      for (const providerId of backgroundUsageProviderIds) {
+        void refreshProviderUsage(providerId);
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        refreshInBackground();
+      }
+    };
+    refreshInBackground();
+    const interval = window.setInterval(
+      refreshInBackground,
+      PROVIDER_USAGE_REFRESH_INTERVAL_MS,
+    );
+    window.addEventListener("focus", refreshInBackground);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshInBackground);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [backgroundUsageProviderIds, refreshProviderUsage]);
 
   useEffect(() => {
     if (
@@ -4554,7 +4602,7 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: "image" | "video" | "workspace-file") => {
+    async (kind: "image" | "video" | "media" | "workspace-file") => {
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -4574,13 +4622,15 @@ export function App() {
       try {
         const selected = await open({
           directory: false,
-          multiple: kind === "image" || kind === "video",
+          multiple: kind !== "workspace-file",
           title:
             kind === "image"
               ? "Attach images"
               : kind === "video"
                 ? "Attach videos"
-                : "Attach workspace file",
+                : kind === "media"
+                  ? "Attach media"
+                  : "Attach workspace file",
           filters:
             kind === "image"
               ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
@@ -4591,32 +4641,56 @@ export function App() {
                       extensions: ["mp4", "m4v", "mov", "webm"],
                     },
                   ]
-                : undefined,
+                : kind === "media"
+                  ? [
+                      {
+                        name: "Media",
+                        extensions: [
+                          "png",
+                          "jpg",
+                          "jpeg",
+                          "webp",
+                          "mp4",
+                          "m4v",
+                          "mov",
+                          "webm",
+                        ],
+                      },
+                    ]
+                  : undefined,
         });
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
         const existing = chatAttachments[activeDraftKey] ?? [];
-        const mediaLimit = kind === "image" ? 4 : kind === "video" ? 2 : 0;
-        const availableSlots =
-          kind === "image" || kind === "video"
-            ? Math.max(
-                0,
-                mediaLimit -
-                  existing.filter((item) => item.kind === kind).length,
-              )
-            : paths.length;
-        if (
-          (kind === "image" || kind === "video") &&
-          paths.length > availableSlots
-        ) {
-          notify(
-            "command-failed",
-            kind === "video" ? "Two-video limit" : "Four-image limit",
-            `Only ${availableSlots} more ${kind}${availableSlots === 1 ? "" : "s"} can be attached`,
-          );
-        }
+        const remaining = {
+          image: Math.max(
+            0,
+            4 - existing.filter((item) => item.kind === "image").length,
+          ),
+          video: Math.max(
+            0,
+            2 - existing.filter((item) => item.kind === "video").length,
+          ),
+        };
         const prepared: ChatAttachment[] = [];
-        for (const path of paths.slice(0, availableSlots)) {
+        let limitExceeded = false;
+        for (const path of paths) {
+          const attachmentKind =
+            kind === "media"
+              ? isSupportedChatVideoPath(path)
+                ? "video"
+                : "image"
+              : kind;
+          if (
+            attachmentKind !== "workspace-file" &&
+            remaining[attachmentKind] <= 0
+          ) {
+            limitExceeded = true;
+            continue;
+          }
+          if (attachmentKind !== "workspace-file") {
+            remaining[attachmentKind] -= 1;
+          }
           const attachment = await invoke<ChatAttachment>(
             "prepare_chat_attachment",
             {
@@ -4624,7 +4698,7 @@ export function App() {
                 sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
                 path,
                 workspacePath,
-                kind,
+                kind: attachmentKind,
               },
             },
           );
@@ -4641,6 +4715,13 @@ export function App() {
             ...current,
             [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
           }));
+        }
+        if (limitExceeded) {
+          notify(
+            "command-failed",
+            "Media limit reached",
+            "Attach up to four images and two videos per message",
+          );
         }
       } catch (error) {
         notify("command-failed", "Attachment rejected", String(error));
@@ -5204,6 +5285,9 @@ export function App() {
           break;
         case "select-video":
           void selectChatAttachment("video");
+          break;
+        case "select-media":
+          void selectChatAttachment("media");
           break;
         case "attach-editor-snapshot":
           void attachEditorSnapshot();
@@ -8359,7 +8443,7 @@ export function App() {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        workbench.preferences.theme === "light" ? "#f6f7f8" : "#07080a",
+        workbench.preferences.theme === "light" ? "#f6f7f8" : "#101010",
       );
     safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
   }, [workbench.preferences.density, workbench.preferences.theme]);
@@ -9581,6 +9665,7 @@ export function App() {
           capabilityPoliciesByProject[normalizeProjectPath(pane.workspacePath)]
         }
         config={config}
+        providerUsageByProvider={providerUsageByProvider}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
         diffReview={workbench.diffReview}
@@ -9902,6 +9987,7 @@ export function App() {
                   browserPreview={workbench.browserPreview}
                   capabilityPolicy={activeCapabilityPolicy}
                   config={config}
+                  providerUsageByProvider={providerUsageByProvider}
                   capabilityActivities={
                     activeSessionId
                       ? Object.values(
@@ -10335,6 +10421,7 @@ export function App() {
           }
           capabilityPolicy={activeCapabilityPolicy}
           config={config}
+          providerUsageByProvider={providerUsageByProvider}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
           draftResetToken={draftResetToken}
@@ -11045,26 +11132,26 @@ function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
   }
 
   return {
-    background: "#020304",
-    black: "#05070a",
+    background: "#0b0b0b",
+    black: "#080808",
     blue: "#6ea8ff",
-    brightBlack: "#7b8491",
+    brightBlack: "#858585",
     brightBlue: "#99c2ff",
     brightCyan: "#7ce7e1",
     brightGreen: "#7ee2a8",
     brightMagenta: "#f08cff",
     brightRed: "#ff8a88",
-    brightWhite: "#f5f7fa",
+    brightWhite: "#f7f7f7",
     brightYellow: "#ffd166",
-    cursor: "#e7edf6",
-    cursorAccent: "#020304",
+    cursor: "#ededed",
+    cursorAccent: "#0b0b0b",
     cyan: "#51d7d0",
-    foreground: "#e2e8f0",
+    foreground: "#e6e6e6",
     green: "#52d985",
     magenta: "#d86cff",
     red: "#ff6f6f",
-    selectionBackground: "#1d3048",
-    white: "#d9e0ea",
+    selectionBackground: "#343434",
+    white: "#dddddd",
     yellow: "#f2c94c",
   };
 }

@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { MenuBarJob, MenuBarOutcome, MenuBarSnapshot } from "@gyro-dev/ui";
+import {
+  gyroLogoMark,
+  type MenuBarJob,
+  type MenuBarOutcome,
+  type MenuBarSnapshot,
+} from "@gyro-dev/ui";
 import { useEffect, useMemo, useState } from "react";
 
 const EMPTY_SNAPSHOT: MenuBarSnapshot = {
@@ -59,6 +64,21 @@ function jobStatusLabel(job: MenuBarJob) {
   if (job.status === "waiting") return "Waiting";
   if (job.status === "queued") return "Queued";
   return "Working";
+}
+
+function GyroMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={
+        compact
+          ? "gyro-menu-bar-brand-mark is-compact"
+          : "gyro-menu-bar-brand-mark"
+      }
+    >
+      <img alt="" src={gyroLogoMark} />
+    </span>
+  );
 }
 
 export function MenuBarPopover() {
@@ -140,13 +160,8 @@ export function MenuBarPopover() {
         className="gyro-menu-bar-popover"
       >
         <header className="gyro-menu-bar-header">
-          <span aria-hidden="true" className="gyro-menu-bar-brand-mark">
-            <svg viewBox="0 0 36 36">
-              <path d="M27.8 9.2A13 13 0 1 0 30.4 22H20.5" />
-              <path className="needle" d="M16.2 17.3 26.8 10.9 19.3 20.5Z" />
-            </svg>
-          </span>
-          <div>
+          <GyroMark />
+          <div className="gyro-menu-bar-header-copy">
             <strong>{header.title}</strong>
             <span>{header.detail}</span>
           </div>
@@ -163,9 +178,19 @@ export function MenuBarPopover() {
                   onClick={() => openTarget(job)}
                   type="button"
                 >
-                  <span aria-hidden="true" className="gyro-menu-bar-job-icon">
-                    {job.kind === "chat" ? "G" : "↻"}
-                  </span>
+                  {job.kind === "chat" ? (
+                    <GyroMark compact />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="gyro-menu-bar-job-icon is-automation"
+                    >
+                      <svg viewBox="0 0 24 24">
+                        <path d="M20 11a8 8 0 1 0-2.34 5.66" />
+                        <path d="M20 4v7h-7" />
+                      </svg>
+                    </span>
+                  )}
                   <span className="gyro-menu-bar-job-copy">
                     <strong>{job.title}</strong>
                     <small title={job.detail}>{job.detail}</small>
@@ -184,7 +209,14 @@ export function MenuBarPopover() {
                     title="Stop chat"
                     type="button"
                   >
-                    {stoppingIds.includes(job.id) ? "…" : "■"}
+                    {stoppingIds.includes(job.id) ? (
+                      <span className="gyro-menu-bar-stop-progress">•••</span>
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="gyro-menu-bar-stop-icon"
+                      />
+                    )}
                   </button>
                 ) : null}
               </article>

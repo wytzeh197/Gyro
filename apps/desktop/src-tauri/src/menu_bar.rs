@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
 };
 use std::time::Duration;
@@ -14,7 +14,7 @@ const MENU_BAR_TRAY_ID: &str = "gyro-menu-bar";
 #[cfg(target_os = "macos")]
 const MENU_BAR_POPOVER_LABEL: &str = "menu-bar-popover";
 #[cfg(target_os = "macos")]
-const MENU_BAR_POPOVER_WIDTH: f64 = 340.0;
+const MENU_BAR_POPOVER_WIDTH: f64 = 388.0;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -83,7 +83,7 @@ pub struct MenuBarTarget {
 #[cfg(target_os = "macos")]
 struct MenuBarIcons {
     idle: tauri::image::Image<'static>,
-    working: Vec<tauri::image::Image<'static>>,
+    working: tauri::image::Image<'static>,
     attention: tauri::image::Image<'static>,
     complete: tauri::image::Image<'static>,
 }
@@ -98,14 +98,7 @@ impl MenuBarIcons {
         }
         Self {
             idle: png(include_bytes!("../icons/menubar/gyro-idle.png")),
-            working: vec![
-                png(include_bytes!("../icons/menubar/gyro-working-0.png")),
-                png(include_bytes!("../icons/menubar/gyro-working-1.png")),
-                png(include_bytes!("../icons/menubar/gyro-working-2.png")),
-                png(include_bytes!("../icons/menubar/gyro-working-3.png")),
-                png(include_bytes!("../icons/menubar/gyro-working-4.png")),
-                png(include_bytes!("../icons/menubar/gyro-working-5.png")),
-            ],
+            working: png(include_bytes!("../icons/menubar/gyro-working-0.png")),
             attention: png(include_bytes!("../icons/menubar/gyro-attention.png")),
             complete: png(include_bytes!("../icons/menubar/gyro-complete.png")),
         }
@@ -117,7 +110,6 @@ pub struct MenuBarController {
     display_state: Mutex<MenuBarSnapshotState>,
     acknowledged_outcome_id: Mutex<Option<String>>,
     completion_generation: AtomicU64,
-    animation_frame: AtomicUsize,
     visible: AtomicBool,
     #[cfg(target_os = "macos")]
     icons: MenuBarIcons,
@@ -130,7 +122,6 @@ impl Default for MenuBarController {
             display_state: Mutex::new(MenuBarSnapshotState::Idle),
             acknowledged_outcome_id: Mutex::new(None),
             completion_generation: AtomicU64::new(0),
-            animation_frame: AtomicUsize::new(0),
             visible: AtomicBool::new(true),
             #[cfg(target_os = "macos")]
             icons: MenuBarIcons::load(),
@@ -239,11 +230,11 @@ fn emit_snapshot(app: &AppHandle) {
 fn popover_height(snapshot: &MenuBarSnapshot) -> f64 {
     let visible_jobs = snapshot.jobs.len().min(3) as f64;
     let content = if visible_jobs > 0.0 {
-        visible_jobs * 58.0 + if snapshot.jobs.len() > 3 { 29.0 } else { 0.0 }
+        visible_jobs * 66.0 + if snapshot.jobs.len() > 3 { 32.0 } else { 0.0 }
     } else {
-        62.0
+        68.0
     };
-    16.0 + 62.0 + content + 36.0
+    16.0 + 72.0 + content + 44.0
 }
 
 #[cfg(target_os = "macos")]
@@ -265,12 +256,8 @@ fn update_native_presentation(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(MENU_BAR_TRAY_ID) else {
         return;
     };
-    let frame = controller.animation_frame.load(Ordering::Relaxed);
     let icon = match snapshot.state {
-        MenuBarSnapshotState::Working if !snapshot.reduce_motion => {
-            &controller.icons.working[frame % controller.icons.working.len()]
-        }
-        MenuBarSnapshotState::Working => &controller.icons.working[2],
+        MenuBarSnapshotState::Working => &controller.icons.working,
         MenuBarSnapshotState::Attention => &controller.icons.attention,
         MenuBarSnapshotState::Complete => &controller.icons.complete,
         MenuBarSnapshotState::Idle => &controller.icons.idle,
@@ -383,7 +370,7 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         tauri::WebviewUrl::App("index.html?surface=menu-bar".into()),
     )
     .title("Gyro Status")
-    .inner_size(MENU_BAR_POPOVER_WIDTH, 176.0)
+    .inner_size(MENU_BAR_POPOVER_WIDTH, 200.0)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -440,16 +427,6 @@ pub fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    let app_handle = app.handle().clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_millis(160));
-        let controller = app_handle.state::<MenuBarController>();
-        let snapshot = controller.public_snapshot();
-        if snapshot.state == MenuBarSnapshotState::Working && !snapshot.reduce_motion {
-            controller.animation_frame.fetch_add(1, Ordering::Relaxed);
-            update_native_presentation(&app_handle);
-        }
-    });
     Ok(())
 }
 
@@ -575,13 +552,13 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn popover_height_caps_visible_jobs_at_three() {
-        assert_eq!(popover_height(&snapshot_with_jobs(&[])), 176.0);
-        assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 172.0);
+        assert_eq!(popover_height(&snapshot_with_jobs(&[])), 200.0);
+        assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 198.0);
         assert_eq!(
             popover_height(&snapshot_with_jobs(&[
                 "running", "running", "running", "running"
             ])),
-            317.0
+            362.0
         );
     }
 }

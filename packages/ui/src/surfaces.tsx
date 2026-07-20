@@ -85,6 +85,7 @@ import {
 } from "react";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
+import { structuredCommentaryBlocks } from "./chat-commentary";
 import {
   estimateComposerContextUsage,
   type ComposerContextUsage,
@@ -4256,6 +4257,7 @@ type ChatSurfaceProps = {
   workspacePath?: string;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
+  providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
   terminalPanes?: TerminalPane[];
   diffReview?: DiffReview;
   sourceControl?: SourceControlState;
@@ -4361,6 +4363,7 @@ export function ChatSurface({
   workspacePath,
   config,
   providerReadiness,
+  providerUsageByProvider,
   terminalPanes,
   diffReview,
   sourceControl,
@@ -4593,6 +4596,9 @@ export function ChatSurface({
       estimateComposerContextUsage(deferredEvents, localDraft, contextModel),
     [contextModel, deferredEvents, localDraft],
   );
+  const composerProviderUsage = contextModel.providerId
+    ? providerUsageByProvider?.[contextModel.providerId]
+    : undefined;
   const transcriptState = useMemo(
     () => deriveTranscriptState(deferredEvents),
     [deferredEvents],
@@ -4777,6 +4783,7 @@ export function ChatSurface({
             isBranchLoading={isBranchLoading}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
+            providerUsage={composerProviderUsage}
             savedProjects={savedProjects}
             variant="hero"
             workspaceMode={workspaceMode}
@@ -4868,11 +4875,19 @@ export function ChatSurface({
       onDrop={handleMediaDrop}
     >
       <div className="gyro-chat-thread-topbar">
-        <div>
+        <div className="gyro-chat-thread-identity">
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           <span title={sessionSummary ?? workspaceName(workspacePath)}>
             {sessionSummary ?? workspaceName(workspacePath)}
           </span>
+          <small
+            aria-label={`Current branch: ${branchLabel}`}
+            className="gyro-chat-thread-branch"
+            title={`Current branch: ${branchLabel}`}
+          >
+            <GitBranch aria-hidden="true" size={11} />
+            {branchLabel}
+          </small>
         </div>
         <div className="gyro-thread-topbar-actions">
           <div className="gyro-thread-pills" ref={threadContextMenuRef}>
@@ -5046,6 +5061,7 @@ export function ChatSurface({
             isSending={isComposerSending}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
+            providerUsage={composerProviderUsage}
             savedProjects={savedProjects}
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
@@ -12876,7 +12892,7 @@ function providerApprovalCopy(
         autoLabel: "Auto Approve",
         autoDetail: "Claude can work without prompts inside its boundary",
         directLabel: "Full Access",
-        directDetail: "Claude can use tools and edits",
+        directDetail: "Claude can use Git, network, and user tools directly",
         commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
         commandDetail: "Claude tool calls use the backend command policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-accept",
@@ -12889,7 +12905,7 @@ function providerApprovalCopy(
         autoLabel: "Auto Approve",
         autoDetail: `${agentName} works without prompts inside its provider boundary`,
         directLabel: "Full Access",
-        directDetail: `${agentName} can run commands and edits directly`,
+        directDetail: `${agentName} can use Git, network, and user tools directly`,
         commandValue: config.requireCommandApproval ? "Ask" : "Allow",
         commandDetail: "Codex command execution uses the backend policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-apply",
@@ -12925,6 +12941,7 @@ function Composer({
   workspaceMode = "local",
   config,
   providerReadiness,
+  providerUsage,
   onComposerAction,
   onCancelGoalComposer,
   sessionModel,
@@ -12957,6 +12974,7 @@ function Composer({
   workspaceMode?: WorkbenchMode;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
+  providerUsage?: ProviderUsageState;
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
   sessionModel?: {
@@ -13166,14 +13184,9 @@ function Composer({
       label: "Editor snapshot",
     },
     {
-      action: "select-image",
+      action: "select-media",
       icon: ImagePlus,
-      label: "Image",
-    },
-    {
-      action: "select-video",
-      icon: Video,
-      label: "Video",
+      label: "Media",
     },
     {
       action: "select-file",
@@ -13781,6 +13794,34 @@ function Composer({
               >
                 <span style={{ width: `${contextUsage.percent}%` }} />
               </div>
+              {providerUsage ? (
+                <div
+                  aria-label="Provider usage limits"
+                  className="gyro-composer-limit-summary"
+                >
+                  <span className="gyro-composer-limit-title">Limits</span>
+                  {providerUsage.windows.length > 0 ? (
+                    providerUsage.windows.map((window) => {
+                      const remaining = Math.max(
+                        0,
+                        Math.min(100, 100 - window.usedPercent),
+                      );
+                      return (
+                        <span key={window.id}>
+                          <small>{window.label}</small>
+                          <strong>{remaining}% left</strong>
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <small>
+                      {providerUsage.status === "loading"
+                        ? "Updating…"
+                        : "Unavailable"}
+                    </small>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -14919,13 +14960,15 @@ function ChatTurn({
   const hasWorkActivity = timelineItems.some(
     (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
   );
-  const canCollapseThought = !isRunning && (hasWorkActivity || hasFileActivity);
-  const visibleTimelineItems = isThoughtCollapsed
-    ? timelineItems.filter(
-        (item) =>
-          item.kind === "event" && item.event.kind === "assistant-message",
-      )
-    : timelineItems;
+  const canCollapseThought = !isRunning && hasWorkActivity;
+  const workTimelineItems = timelineItems.filter(
+    (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
+  );
+  const responseTimelineItems = timelineItems.filter(
+    (item) => item.kind === "event" && item.event.kind === "assistant-message",
+  );
+  const visibleWorkTimelineItems =
+    isRunning || !isThoughtCollapsed ? workTimelineItems : [];
   const changeSummary = chatTurnChangeSummary(
     turn.timelineEvents,
     sourceControl,
@@ -14941,89 +14984,96 @@ function ChatTurn({
         />
       ) : null}
       <div className="gyro-chat-run">
-        <ChatRunHeader
-          completedAt={completedAt}
-          durationMs={turn.durationMs}
-          isCollapsed={isThoughtCollapsed}
-          isCollapsible={canCollapseThought}
-          isRunning={isRunning}
-          onToggle={() => setIsThoughtCollapsed((current) => !current)}
-          startedAt={turn.runStartedAt ?? turn.startedAt}
-        >
-          {!isRunning && hasResponse && onContinueChat ? (
-            <button onClick={onContinueChat} type="button">
-              Continue
-            </button>
+        <div className="gyro-chat-run-work">
+          <ChatRunHeader
+            completedAt={completedAt}
+            durationMs={turn.durationMs}
+            isCollapsed={isThoughtCollapsed}
+            isCollapsible={canCollapseThought}
+            isRunning={isRunning}
+            onToggle={() => setIsThoughtCollapsed((current) => !current)}
+            startedAt={turn.runStartedAt ?? turn.startedAt}
+          >
+            {!isRunning && hasResponse && onContinueChat ? (
+              <button onClick={onContinueChat} type="button">
+                Continue
+              </button>
+            ) : null}
+          </ChatRunHeader>
+          {isRunning && turn.timelineEvents.length === 0 ? (
+            <div className="gyro-chat-run-thinking" role="status">
+              Thinking
+            </div>
           ) : null}
-        </ChatRunHeader>
-        {isRunning && turn.timelineEvents.length === 0 ? (
-          <div className="gyro-chat-run-thinking" role="status">
-            Thinking
-          </div>
-        ) : null}
-        {visibleTimelineItems.length > 0 ? (
-          <div className="gyro-chat-run-sequence" aria-label="Work timeline">
-            {visibleTimelineItems.map((item) => {
-              if (item.kind === "activity-group") {
-                return (
-                  <ProviderActivityGroup events={item.events} key={item.id} />
+          {visibleWorkTimelineItems.length > 0 ? (
+            <div className="gyro-chat-run-sequence" aria-label="Work timeline">
+              {visibleWorkTimelineItems.map((item) => {
+                if (item.kind === "activity-group") {
+                  return (
+                    <ProviderActivityGroup events={item.events} key={item.id} />
+                  );
+                }
+                const event = item.event;
+                return mutationApprovalFromEvent(event) ||
+                  providerApprovalFromEvent(event) ||
+                  capabilityCallFromEvent(event) ? (
+                  <ChatEvent
+                    event={event}
+                    key={event.id}
+                    onMutationApprovalAction={onMutationApprovalAction}
+                    onProviderApprovalAction={onProviderApprovalAction}
+                  />
+                ) : (
+                  <ProviderActivityRow
+                    event={event}
+                    key={event.id}
+                    onOpenChanges={onOpenChanges}
+                    sourceControl={sourceControl}
+                    sourceControlBaseline={sourceControlBaseline}
+                  />
                 );
+              })}
+            </div>
+          ) : null}
+        </div>
+        {responseTimelineItems.length > 0 ? (
+          <div className="gyro-chat-run-sequence" aria-label="Final response">
+            {responseTimelineItems.map((item) => {
+              if (item.kind === "activity-group") {
+                return null;
               }
               const event = item.event;
-              if (event.kind === "assistant-message") {
-                return (
-                  <div
-                    aria-label={
-                      isRunning ? "Assistant update" : "Final response"
-                    }
-                    className="gyro-chat-run-timeline is-final-response"
-                    key={event.id}
-                  >
-                    <article className="gyro-message is-assistant">
-                      <div>
-                        {isPlanResponseTurn ? (
-                          <PlanArtifactCard
-                            content={plan?.content ?? event.message}
-                            isOpen={Boolean(isPlanPanelOpen)}
-                            isPending={isPlanDecisionPending}
-                            onOpen={onOpenPlan}
-                            onPlanDecision={onPlanDecision}
-                            showDecision={isPlanReadyForDecision}
-                            title={plan?.title ?? "Implementation plan"}
-                          />
-                        ) : (
-                          <AssistantResponse event={event} />
-                        )}
-                      </div>
-                    </article>
-                  </div>
-                );
-              }
-              return mutationApprovalFromEvent(event) ||
-                providerApprovalFromEvent(event) ||
-                capabilityCallFromEvent(event) ? (
-                <ChatEvent
-                  event={event}
+              return (
+                <div
+                  aria-label={isRunning ? "Assistant update" : "Final response"}
+                  className="gyro-chat-run-timeline is-final-response"
                   key={event.id}
-                  onMutationApprovalAction={onMutationApprovalAction}
-                  onProviderApprovalAction={onProviderApprovalAction}
-                />
-              ) : (
-                <ProviderActivityRow
-                  event={event}
-                  key={event.id}
-                  onOpenChanges={onOpenChanges}
-                  sourceControl={sourceControl}
-                  sourceControlBaseline={sourceControlBaseline}
-                />
+                >
+                  <article className="gyro-message is-assistant">
+                    <div>
+                      {isPlanResponseTurn ? (
+                        <PlanArtifactCard
+                          content={plan?.content ?? event.message}
+                          isOpen={Boolean(isPlanPanelOpen)}
+                          isPending={isPlanDecisionPending}
+                          onOpen={onOpenPlan}
+                          onPlanDecision={onPlanDecision}
+                          showDecision={isPlanReadyForDecision}
+                          title={plan?.title ?? "Implementation plan"}
+                        />
+                      ) : (
+                        <AssistantResponse event={event} />
+                      )}
+                    </div>
+                  </article>
+                </div>
               );
             })}
           </div>
         ) : null}
-        {hasFileActivity ? (
+        {hasFileActivity && !isRunning && hasResponse ? (
           <ChatTurnChangeSummary
             changeSummary={changeSummary}
-            isRunning={isRunning}
             onLoadChangeDiff={onLoadChangeDiff}
             onOpenChanges={onOpenChanges}
           />
@@ -15293,9 +15343,6 @@ type InterleavedChatTimelineItem =
 function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
   for (const event of events) {
-    if (providerActivityFromEvent(event)?.kind === "file") {
-      continue;
-    }
     const activity = providerActivityFromEvent(event);
     const activityKind =
       activity?.kind === "command" ||
@@ -15523,27 +15570,22 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
 
 function ChatTurnChangeSummary({
   changeSummary,
-  isRunning,
   onLoadChangeDiff,
   onOpenChanges,
 }: {
   changeSummary: ReturnType<typeof chatTurnChangeSummary>;
-  isRunning: boolean;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: () => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [showAllFiles, setShowAllFiles] = useState(false);
   const fileCount = changeSummary.paths.length;
-  const actionLabel = isRunning ? "Editing" : "Edited";
   const label = fileCount
-    ? `${actionLabel} ${fileCount} ${fileCount === 1 ? "file" : "files"}`
-    : `${actionLabel} files`;
+    ? `Edited ${fileCount} ${fileCount === 1 ? "file" : "files"}`
+    : "Edited files";
   return (
     <section
       aria-label={label}
       aria-live="polite"
-      className={`gyro-chat-run-change-summary ${isRunning ? "is-running" : "is-complete"}`}
+      className="gyro-chat-run-change-summary is-complete"
     >
       <header>
         <span className="gyro-change-summary-icon">
@@ -15557,80 +15599,38 @@ function ChatTurnChangeSummary({
               <em className="is-removed">-{changeSummary.deletions}</em>
             </small>
           ) : (
-            <small>
-              {isRunning ? "Tracking changes" : "Stats unavailable"}
-            </small>
+            <small>Stats unavailable</small>
           )}
         </div>
         <div className="gyro-change-summary-actions">
-          <button
-            aria-expanded={isOpen}
-            aria-label={isOpen ? "Hide changed files" : "Show changed files"}
-            onClick={() => setIsOpen((current) => !current)}
-            type="button"
-          >
-            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <button onClick={onOpenChanges} type="button">
+            Review
           </button>
-          {!isRunning ? (
-            <button onClick={onOpenChanges} type="button">
-              Review
-            </button>
-          ) : null}
         </div>
       </header>
-      {isOpen ? (
-        changeSummary.fileChanges.length > 0 ? (
-          <>
-            <div className="gyro-change-summary-files">
-              {changeSummary.fileChanges
-                .slice(0, showAllFiles ? undefined : 5)
-                .map((file) => (
-                  <ChangeSummaryFile
-                    additions={file.additions}
-                    deletions={file.deletions}
-                    key={file.path}
-                    onLoadDiff={onLoadChangeDiff}
-                    path={file.path}
-                  />
-                ))}
-            </div>
-            {fileCount > 5 ? (
-              <button
-                aria-expanded={showAllFiles}
-                className="gyro-change-summary-more"
-                onClick={() => setShowAllFiles((current) => !current)}
-                type="button"
-              >
-                {showAllFiles
-                  ? "Show fewer files"
-                  : `Show ${fileCount - 5} more files`}
-                <ChevronDown
-                  className={showAllFiles ? "is-expanded" : undefined}
-                  size={12}
-                />
-              </button>
-            ) : null}
-          </>
-        ) : (
-          <button
-            className="gyro-chat-run-live-files-review"
-            onClick={onOpenChanges}
-            type="button"
-          >
-            Changes are still syncing. Open Source Control
-          </button>
-        )
-      ) : null}
+      {changeSummary.fileChanges.length > 0 ? (
+        <div className="gyro-change-summary-files">
+          {changeSummary.fileChanges.map((file) => (
+            <ChangeSummaryFile
+              additions={file.additions}
+              deletions={file.deletions}
+              key={file.path}
+              onLoadDiff={onLoadChangeDiff}
+              path={file.path}
+            />
+          ))}
+        </div>
+      ) : (
+        <button
+          className="gyro-chat-run-live-files-review"
+          onClick={onOpenChanges}
+          type="button"
+        >
+          Changes are still syncing. Open Source Control
+        </button>
+      )}
     </section>
   );
-}
-
-function structuredCommentaryBlocks(value: string) {
-  return value
-    .replace(/([.!?])(?=[A-Z][a-z])/g, "$1\n\n")
-    .split(/\n\s*\n/)
-    .map((block) => block.trim())
-    .filter(Boolean);
 }
 
 function providerActivityFilePath(event: SessionEvent) {
