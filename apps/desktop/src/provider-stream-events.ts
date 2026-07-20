@@ -485,7 +485,7 @@ export function applyProviderChatStreamActivity(
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         providerSequence: streamEvent.sequence,
-        timelineSequence: streamEvent.sequence,
+        timelineSequence: streamEvent.activitySequence ?? streamEvent.sequence,
         turnId,
       },
     });
