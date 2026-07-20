@@ -242,6 +242,7 @@ const applyActivity = (
   activityLabel,
   activityStatus = "done",
   activityDetail,
+  activitySequence,
 ) =>
   applyProviderChatStreamActivity(
     activityEventsRef,
@@ -255,6 +256,7 @@ const applyActivity = (
       providerId: "openai",
       eventId: `activity-${sequence}`,
       sequence,
+      activitySequence,
       phase: "activity",
       activityId,
       activityKind,
@@ -264,17 +266,42 @@ const applyActivity = (
     },
   );
 
-applyActivity(1, "commentary-1", "commentary", "I’ll inspect first.");
-applyActivity(2, "command-1", "command", "Searched project");
+applyActivity(
+  1,
+  "commentary-1",
+  "commentary",
+  "I’ll inspect first.",
+  "done",
+  undefined,
+  0,
+);
+applyActivity(
+  2,
+  "command-1",
+  "command",
+  "Searched project",
+  "done",
+  undefined,
+  1,
+);
 applyActivity(
   3,
   "commentary-1",
   "commentary",
   "I’ll inspect first.Now I’ll update it.",
+  "done",
+  undefined,
+  2,
 );
 assert.deepEqual(
   renderedActivityEvents.slice(1).map((event) => event.message),
   ["I’ll inspect first.", "Searched project", "Now I’ll update it."],
+);
+assert.deepEqual(
+  renderedActivityEvents
+    .slice(1)
+    .map((event) => event.payload.timelineSequence),
+  [0, 1, 2],
 );
 const persistedCumulativeCommentary = {
   ...openingCommentary,
@@ -418,10 +445,10 @@ assert.deepEqual(
 const interleavedTimeline = interleavedChatTimelineItems(unorderedTimeline);
 assert.deepEqual(
   interleavedTimeline.map((item) => item.kind),
-  ["event", "file-summary", "activity-group", "event"],
+  ["event", "activity-group", "event", "file-summary"],
 );
 assert.deepEqual(
-  interleavedTimeline[1].events.map((event) => event.id),
+  interleavedTimeline[3].events.map((event) => event.id),
   ["src/a.ts", "src/b.ts"],
 );
 

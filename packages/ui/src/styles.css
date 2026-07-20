@@ -9952,6 +9952,8 @@ textarea:focus-visible {
 
 .gyro-composer-menu-item {
   align-items: center;
+  -webkit-appearance: none;
+  appearance: none;
   background: transparent;
   border: 0;
   border-radius: 7px;
@@ -14541,6 +14543,8 @@ textarea,
 
 .gyro-composer-menu-primary {
   align-items: center;
+  -webkit-appearance: none;
+  appearance: none;
   background: transparent;
   border: 0;
   color: inherit;
@@ -14561,6 +14565,8 @@ textarea,
 
 .gyro-composer-menu-remove {
   align-items: center;
+  -webkit-appearance: none;
+  appearance: none;
   background: transparent;
   border: 0;
   border-radius: 6px;
@@ -15580,6 +15586,7 @@ body,
   background: var(--gyro-premium-control);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-premium-radius-sm);
+  box-sizing: border-box;
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
   content: "";
   inset: 2px auto 2px 2px;
@@ -15587,7 +15594,7 @@ body,
   position: absolute;
   transform: translateX(0);
   transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-  width: calc((100% - 8px) / 2);
+  width: calc((100% - 6px) / 2);
   z-index: 0;
 }
 
