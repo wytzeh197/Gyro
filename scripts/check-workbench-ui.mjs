@@ -26,6 +26,33 @@ import {
   normalizedGlobalSearchText,
 } from "../packages/ui/src/global-search.ts";
 import {
+  workspaceCommandForKeybinding,
+  workspaceCommandRegistry,
+  workspacePanelContributions,
+  workspaceViewContainers,
+} from "../packages/ui/src/workspace-shell.ts";
+import {
+  workspaceSearchGlobs,
+  workspaceSearchGlobText,
+} from "../packages/ui/src/workspace-search.ts";
+import {
+  isWorkspaceTrusted,
+  normalizedWorkspaceTrustPath,
+} from "../packages/ui/src/workspace-trust.ts";
+import {
+  absoluteWorkspaceFilePath,
+  mergeWorkspaceRootFiles,
+  parseGyroWorkspaceFile,
+  serializeGyroWorkspaceFile,
+  workspaceFolderPaths,
+  workspaceFilesForRoot,
+  workspaceRootForPath,
+} from "../packages/ui/src/workspace-project.ts";
+import {
+  resolvedWorkspaceSettings,
+  workspacePathExcluded,
+} from "../packages/ui/src/workspace-settings.ts";
+import {
   isProviderExecutable,
   isProviderRuntimeUsable,
   normalizedConfig,
@@ -125,6 +152,25 @@ expect(
     directionalGridLayout.slots[1]?.kind === "session" &&
     directionalGridLayout.slots[1].sessionId === "one",
   "Directional chat drops should preserve above/below ordering and split orientation.",
+);
+let emptyGridDropState = createInitialChatGridState();
+emptyGridDropState = chatGridReducer(emptyGridDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Other",
+  pane: gridPane("first", "/Users/example/Other"),
+  mode: "drop",
+  slotIndex: 0,
+  insertPosition: "after",
+});
+const emptyGridDropLayout = emptyGridDropState.layouts["/Users/example/Other"];
+expect(
+  emptyGridDropState.activeProjectKey === "/Users/example/Other" &&
+    emptyGridDropLayout?.slots.filter(Boolean).length === 1 &&
+    emptyGridDropLayout.slots[0]?.kind === "session" &&
+    emptyGridDropLayout.slots[0].sessionId === "first" &&
+    emptyGridDropLayout.focusedPaneId === "pane:first" &&
+    emptyGridDropLayout.splitDirection === undefined,
+  "Dropping onto an empty project grid should create and focus its first full-size chat pane.",
 );
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
@@ -258,15 +304,27 @@ expect(
 );
 expect(
   surfaceSource.includes('className="gyro-chat-grid-drop-overlay"') &&
+    surfaceSource.includes('className="gyro-chat-grid-empty"') &&
+    surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
     surfaceSource.includes('label: "Above"') &&
+    surfaceSource.includes('"Top left"') &&
+    surfaceSource.includes('"Top right"') &&
+    surfaceSource.includes('"Bottom left"') &&
+    surfaceSource.includes('"Bottom right"') &&
     surfaceSource.includes('label: "Next"') &&
     surfaceSource.includes('label: "Below"') &&
     surfaceSource.includes("chatGridDropZones(slots)") &&
     surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
+    surfaceSource.includes('window.addEventListener("dragend", finishDrag)') &&
     surfaceSource.includes("didDrop && maximizedPaneId") &&
+    appSource.includes("const displayedChatLayout =") &&
+    appSource.includes("createChatProjectLayout(currentChatProjectKey)") &&
+    appSource.includes("!activeChatLayout?.slots.some(Boolean)") &&
+    appSource.includes("sourceProjectKey !== displayedChatLayout.projectKey") &&
     !surfaceSource.includes("Drag another chat here") &&
     !surfaceSource.includes("Choose one of four chat slots") &&
+    styleSource.includes(".gyro-chat-grid-empty") &&
     styleSource.includes(".gyro-chat-grid-drop-overlay") &&
     styleSource.includes(
       ".gyro-chat-grid-drop-zone.is-drop-target .gyro-chat-grid-drop-tile",
@@ -274,7 +332,7 @@ expect(
     !styleSource.includes(
       ".gyro-chat-grid.is-count-4,\n.gyro-chat-grid.is-dragging",
     ),
-  "Chat dragging should keep the live layout still and reveal adaptive placement tiles.",
+  "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
 );
 expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
@@ -364,7 +422,7 @@ expect(
     surfaceSource.includes("events.slice(0, 3)") &&
     surfaceSource.includes("click again to show") &&
     surfaceSource.includes("function ChatTurnChangeSummary") &&
-    surfaceSource.includes("return !isRunning ? (") &&
+    surfaceSource.includes("changeSummaryItems.map((item)") &&
     surfaceSource.includes('aria-live="polite"') &&
     surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
@@ -952,6 +1010,14 @@ expect(
   "Sidebar chats should start expanded.",
 );
 expect(
+  initialState.preferences.workspaceSidebarHidden === false &&
+    initialState.preferences.workspaceSidebarWidth === undefined &&
+    initialState.preferences.workspacePanelHeight === 280 &&
+    Object.keys(initialState.preferences.workspaceTrust).length === 0 &&
+    Object.keys(initialState.preferences.workspaceFolders).length === 0,
+  "Workspace sidebar should start visible at its responsive default width.",
+);
+expect(
   initialState.preferences.chatEnvironmentRailOpen === false,
   "Chat environment rail should start closed for standard chat layout.",
 );
@@ -1002,6 +1068,231 @@ expect(
 expect(
   state.preferences.commandPaletteRecents[0] === "new-terminal",
   "Command palette recents did not record the latest command.",
+);
+state = workbenchReducer(state, {
+  type: "set-workspace-sidebar-hidden",
+  hidden: true,
+});
+state = workbenchReducer(state, {
+  type: "set-workspace-sidebar-width",
+  width: 900,
+});
+expect(
+  state.preferences.workspaceSidebarHidden === true &&
+    state.preferences.workspaceSidebarWidth === 520 &&
+    appSource.includes(
+      "workspaceSidebarHidden={workbench.preferences.workspaceSidebarHidden}",
+    ) &&
+    appSource.includes(
+      "workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}",
+    ),
+  "Workspace sidebar visibility and bounded custom width should persist through workbench preferences.",
+);
+state = workbenchReducer(state, {
+  type: "set-workspace-panel-height",
+  height: 90,
+});
+expect(
+  state.preferences.workspacePanelHeight === 140 &&
+    appSource.includes(
+      "const toolPanelHeight = workbench.preferences.workspacePanelHeight",
+    ) &&
+    appSource.includes('type: "set-workspace-panel-height"'),
+  "Workspace panel height should persist and remain above the usable minimum.",
+);
+state = workbenchReducer(state, {
+  type: "set-workspace-trust",
+  path: "/Users/example/Gyro/",
+  decision: "restricted",
+});
+expect(
+  normalizedWorkspaceTrustPath("/Users/example/Gyro/") ===
+    "/Users/example/Gyro" &&
+    !isWorkspaceTrusted(
+      state.preferences.workspaceTrust,
+      "/Users/example/Gyro",
+    ) &&
+    isWorkspaceTrusted(
+      state.preferences.workspaceTrust,
+      "/Users/example/Old",
+    ) &&
+    surfaceSource.includes("gyro-workspace-trust-banner") &&
+    surfaceSource.includes("Trust workspace") &&
+    appSource.includes("Terminal blocked in Restricted Mode") &&
+    appSource.includes("Debug blocked in Restricted Mode") &&
+    appSource.includes("Task blocked in Restricted Mode") &&
+    appSource.includes("!workspaceCommand.requiresTrust || workspaceTrusted"),
+  "Workspace Trust should persist restricted roots, preserve legacy workspaces as trusted, and gate executable Workspace capabilities.",
+);
+state = workbenchReducer(state, {
+  type: "add-workspace-folder",
+  workspacePath: "/Users/example/Gyro/",
+  path: "/Users/example/Shared",
+});
+const testedWorkspaceRoots = workspaceFolderPaths(
+  "/Users/example/Gyro",
+  state.preferences.workspaceFolders,
+);
+const testedRootFiles = workspaceFilesForRoot("/Users/example/Shared", [
+  { path: "src", kind: "directory", depth: 1 },
+  { path: "src/index.ts", kind: "file", depth: 2 },
+]);
+const testedMergedFiles = mergeWorkspaceRootFiles(
+  workspaceFilesForRoot("/Users/example/Gyro", [
+    { path: "README.md", kind: "file", depth: 1 },
+  ]),
+  testedWorkspaceRoots,
+  "/Users/example/Shared",
+  testedRootFiles,
+);
+const serializedWorkspaceFile = serializeGyroWorkspaceFile(
+  testedWorkspaceRoots,
+  "/Users/example/workspaces/Gyro.gyro-workspace.json",
+  {
+    workspaceSettings: { searchMaxResults: 350 },
+    folderSettingsByPath: {
+      "/Users/example/Shared": { editorMinimapEnabled: false },
+    },
+  },
+);
+const parsedWorkspaceFile = parseGyroWorkspaceFile(
+  serializedWorkspaceFile,
+  "/Users/example/workspaces/Gyro.gyro-workspace.json",
+);
+expect(
+  testedWorkspaceRoots.join("|") ===
+    "/Users/example/Gyro|/Users/example/Shared" &&
+    absoluteWorkspaceFilePath("/Users/example/Shared", "src/index.ts") ===
+      "/Users/example/Shared/src/index.ts" &&
+    workspaceRootForPath(
+      testedWorkspaceRoots,
+      "/Users/example/Shared/src/index.ts",
+    ) === "/Users/example/Shared" &&
+    testedMergedFiles.filter((file) => file.isWorkspaceRoot).length === 2 &&
+    testedMergedFiles.some(
+      (file) =>
+        file.path === "/Users/example/Shared/src/index.ts" &&
+        file.workspacePath === "/Users/example/Shared",
+    ) &&
+    parsedWorkspaceFile.folders.map((folder) => folder.path).join("|") ===
+      testedWorkspaceRoots.join("|") &&
+    parsedWorkspaceFile.settings?.searchMaxResults === 350 &&
+    parsedWorkspaceFile.folders[1]?.settings?.editorMinimapEnabled === false &&
+    appSource.includes('type: "add-workspace-folder"') &&
+    appSource.includes('case "open-workspace-file"') &&
+    appSource.includes('case "save-workspace-file"') &&
+    appSource.includes("workspaceRootForPath(workspaceRoots, selectedFile)") &&
+    surfaceSource.includes('aria-label="Add folder to workspace"') &&
+    surfaceSource.includes("selectedExplorerPaths") &&
+    surfaceSource.includes("gyro-explorer-context-menu") &&
+    surfaceSource.includes('"Remove folder from workspace"'),
+  "Multi-root workspaces should persist folder membership, expose root identity in Explorer, and resolve file actions to the owning root.",
+);
+state = workbenchReducer(state, {
+  type: "set-workspace-settings",
+  scope: "workspace",
+  path: "/Users/example/Gyro",
+  settings: { searchMaxResults: 400, editorMinimapEnabled: false },
+});
+state = workbenchReducer(state, {
+  type: "set-workspace-settings",
+  scope: "folder",
+  path: "/Users/example/Shared",
+  settings: { searchMaxResults: 75, filesExclude: ["generated/**"] },
+});
+const testedResolvedSettings = resolvedWorkspaceSettings(
+  state.preferences.workspaceUserSettings,
+  state.preferences.workspaceSettingsByWorkspace,
+  state.preferences.workspaceSettingsByFolder,
+  "/Users/example/Gyro",
+  "/Users/example/Shared",
+);
+expect(
+  testedResolvedSettings.searchMaxResults === 75 &&
+    testedResolvedSettings.editorMinimapEnabled === false &&
+    workspacePathExcluded(
+      "generated/client.ts",
+      testedResolvedSettings.filesExclude,
+    ) &&
+    surfaceSource.includes("WorkspaceSettingsEditor") &&
+    surfaceSource.includes('aria-label="Settings scope"') &&
+    appSource.includes("effectiveWorkspaceSettings.editorMinimapEnabled") &&
+    appSource.includes("settings.searchExclude.map") &&
+    appSource.includes("files={visibleWorkspaceFiles}"),
+  "Workspace settings should resolve by User, Workspace, and Folder scope and drive Explorer, Search, and editor behavior.",
+);
+expect(
+  surfaceSource.includes('aria-label="Toggle replace preview"') &&
+    surfaceSource.includes("Replace preview") &&
+    appSource.includes("const applyWorkspaceReplace = useCallback") &&
+    appSource.includes("Replace blocked by unsaved changes") &&
+    appSource.includes("Replace blocked in Restricted Mode") &&
+    surfaceSource.includes("documentOutlineSymbols(") &&
+    surfaceSource.includes('title="Outline"'),
+  "Workspace navigation should provide a document outline and guarded search-and-replace preview.",
+);
+expect(
+  surfaceSource.includes('aria-label="Select all source control changes"') &&
+    surfaceSource.includes(
+      'aria-label="Stage selected source control changes"',
+    ) &&
+    appSource.includes("Git action blocked in Restricted Mode") &&
+    surfaceSource.includes('aria-label="Test Results"') &&
+    workspacePanelContributions.some(
+      (panel) => panel.id === "test-results" && panel.label === "Test Results",
+    ) &&
+    appSource.includes('"textDocument/definition"') &&
+    appSource.includes('"textDocument/references"') &&
+    appSource.includes('"textDocument/rename"'),
+  "Developer workflows should include batch SCM, structured test results, and LSP definition, reference, and rename providers.",
+);
+state = workbenchReducer(state, {
+  type: "set-workspace-keybinding",
+  commandId: "search-files",
+  keybinding: { key: "g", primary: true, shift: true },
+});
+const overriddenSearchCommand = workspaceCommandForKeybinding(
+  {
+    key: "g",
+    altKey: false,
+    ctrlKey: false,
+    metaKey: true,
+    shiftKey: true,
+  },
+  "mac",
+  state.preferences.workspaceKeybindings,
+);
+state = workbenchReducer(state, {
+  type: "ide-register-contribution",
+  contribution: {
+    id: "example.local-tools",
+    label: "Local Tools",
+    version: "1.0.0",
+    publisher: "Example",
+    source: "local",
+    enabled: false,
+    permissions: ["commands"],
+    manifestName: "local.gyro-extension.json",
+    views: ["settings"],
+    commands: [],
+  },
+});
+state = workbenchReducer(state, {
+  type: "ide-set-contribution-enabled",
+  id: "example.local-tools",
+  enabled: true,
+});
+expect(
+  overriddenSearchCommand?.id === "search-files" &&
+    state.ide.contributions.some(
+      (contribution) =>
+        contribution.id === "example.local-tools" && contribution.enabled,
+    ) &&
+    surfaceSource.includes("Keyboard shortcuts") &&
+    surfaceSource.includes("Install from manifest") &&
+    surfaceSource.includes("parsedLocalIdeContribution") &&
+    surfaceSource.includes("Contributions stay disabled until you enable them"),
+  "Workspace customization should persist editable keybindings and expose local, permission-declared contributions with provenance and explicit enablement.",
 );
 state = workbenchReducer(state, {
   type: "set-provider-readiness",
@@ -1774,18 +2065,21 @@ expect(
   restoredIde.activePath === "src/side.ts" &&
     restoredIde.activeView === "search" &&
     restoredIde.tabs.length === 2 &&
-    restoredIde.tabs.every(
-      (tab) => tab.dirty === false && tab.preview === false,
-    ) &&
+    restoredIde.tabs.find((tab) => tab.path === "src/main.ts")?.dirty ===
+      true &&
+    restoredIde.tabs.find((tab) => tab.path === "src/side.ts")?.dirty ===
+      false &&
+    restoredIde.tabs.every((tab) => tab.preview === false) &&
     restoredIde.layout.groups.length === 2 &&
     restoredIde.layout.activeGroupId === "group-side" &&
     restoredIde.layout.splitDirection === "down" &&
     restoredIde.layout.minimapEnabled === false &&
     restoredIde.layout.rightAssistantOpen === false &&
     restoredIde.layout.groups[1]?.panes[0]?.id === "group-side-pane" &&
-    Object.keys(restoredIde.buffers).length === 0 &&
+    restoredIde.buffers["src/main.ts"]?.content === "unsaved" &&
+    restoredIde.buffers["src/main.ts"]?.status === "dirty" &&
     restoredIde.diagnostics.length === 0,
-  "IDE hydration should restore validated layout state without transient buffers.",
+  "IDE hydration should restore validated layout state and bounded dirty-buffer recovery without stale diagnostics.",
 );
 
 const rejectedStoredIde = sanitizeStoredIdeState(
@@ -1818,12 +2112,13 @@ const rejectedStoredIde = sanitizeStoredIdeState(
   ideHydrationBase,
 );
 expect(
-  rejectedStoredIde.tabs.length === 1 &&
-    rejectedStoredIde.tabs[0]?.path === "src/safe.ts" &&
+  rejectedStoredIde.tabs.length === 2 &&
+    rejectedStoredIde.tabs.some((tab) => tab.path === "/absolute.ts") &&
+    rejectedStoredIde.tabs.some((tab) => tab.path === "src/safe.ts") &&
     rejectedStoredIde.activePath === "src/safe.ts" &&
     rejectedStoredIde.layout.groups.length === 1 &&
     rejectedStoredIde.layout.activeGroupId === "group-main",
-  "IDE hydration should reject unsafe paths, duplicate tabs, and invalid groups.",
+  "IDE hydration should accept multi-root absolute paths while rejecting traversal, duplicate tabs, and invalid groups.",
 );
 
 const restoreDisabledIde = sanitizeStoredIdeState(
@@ -2357,7 +2652,6 @@ for (const shortcut of [
   'event.key.toLowerCase() === "k"',
   'event.key.toLowerCase() === "n"',
   'event.key.toLowerCase() === "t"',
-  'event.key === "\\\\"',
   'event.key === ","',
   'event.key === "1"',
   'event.key === "2"',
@@ -2368,6 +2662,13 @@ for (const shortcut of [
     `Keyboard shortcut missing: ${shortcut}`,
   );
 }
+expect(
+  workspaceCommandRegistry.some(
+    (command) =>
+      command.id === "split-terminal" && command.keybinding?.key === "\\",
+  ),
+  "Keyboard shortcut missing: split-terminal registry binding",
+);
 
 for (const readinessCall of [
   'checkProviderReadiness("chat")',
@@ -2613,6 +2914,9 @@ expect(
     surfaceSource.includes("sourceControlStatsForActivityPath") &&
     surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
     surfaceSource.includes("gyro-chat-run-change-summary") &&
+    surfaceSource.includes("const changeSummaryItems = timelineItems.filter") &&
+    surfaceSource.includes('item.kind !== "file-summary"') &&
+    surfaceSource.includes("changeSummaryItems.map((item)") &&
     surfaceSource.includes('activity.kind === "file"') &&
     surfaceSource.includes('activity.status === "running"') &&
     timelineSource.includes('activityKind === "file"') &&
@@ -3357,14 +3661,18 @@ expect(
     ) &&
     appSource.includes("onOpenWorkspace={openWorkspace}") &&
     appSource.includes('activeWorkspaceLayout !== "code" ||') &&
-    surfaceSource.includes(
-      'disabled={!workspacePath && view.id !== "settings"}',
+    appSource.includes(
+      'activeWorkspaceLayout === "code" &&\n          Boolean(activeSession?.workspacePath ?? workspacePath)',
     ) &&
+    surfaceSource.includes(
+      "isDisabled = view.requiresWorkspace && !hasWorkspace",
+    ) &&
+    surfaceSource.includes("<WorkspaceActivityRail") &&
     surfaceSource.includes(
       'workspacePath ? (\n            <nav className="gyro-ide-panel-shortcuts"',
     ) &&
     styleSource.includes(".gyro-ide-surface.is-project-empty") &&
-    styleSource.includes(".gyro-ide-sidebar-activity button:disabled") &&
+    styleSource.includes(".gyro-workspace-activity-rail button:disabled") &&
     styleSource.includes(".gyro-ide-project-empty > button:focus-visible"),
   "IDE should lead with one project-opening action and withhold inactive workbench regions until a project exists.",
 );
@@ -4343,7 +4651,7 @@ expect(
     timelineSource.includes("fileEvents.push(event)") &&
     timelineSource.includes("const firstFileEvent = fileEvents[0]") &&
     surfaceSource.includes('if (activity.kind === "file")') &&
-    surfaceSource.includes("return !isRunning ? (") &&
+    surfaceSource.includes("changeSummaryItems.map((item)") &&
     surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
@@ -4808,6 +5116,149 @@ expect(
     styleSource.includes("grid-template-rows: minmax(0, 1fr);") &&
     styleSource.includes(".gyro-code-surface .monaco-editor-background"),
   "Workspace should keep the global status bar below the editor and tool panel with compact left and right metadata groups.",
+);
+
+expect(
+  new Set(workspaceCommandRegistry.map((command) => command.id)).size ===
+    workspaceCommandRegistry.length &&
+    new Set(workspaceViewContainers.map((view) => view.id)).size ===
+      workspaceViewContainers.length &&
+    new Set(workspacePanelContributions.map((panel) => panel.id)).size ===
+      workspacePanelContributions.length &&
+    workspaceViewContainers.some(
+      (view) => view.id === "settings" && view.placement === "secondary",
+    ) &&
+    surfaceSource.includes("<WorkspaceActivityRail") &&
+    surfaceSource.includes("workspaceCommandRegistry.map") &&
+    surfaceSource.includes("workspacePanelContributions.map") &&
+    styleSource.includes(".gyro-workspace-activity-rail") &&
+    styleSource.includes("--gyro-workspace-activity-rail-width: 44px"),
+  "Workspace shell views, panels, and palette actions should share registries and render in an independent Activity Rail.",
+);
+
+const workspaceRailFoundation = styleSource.slice(
+  styleSource.indexOf(
+    "/* Workspace shell foundation: an animated Activity Rail beside shared navigation. */",
+  ),
+);
+expect(
+  surfaceSource.includes(
+    'data-workspace-activity-rail={isIdeSurface ? "visible" : "hidden"}',
+  ) &&
+    surfaceSource.includes(
+      'isIdeSurface ? "is-workspace-chrome-active" : ""',
+    ) &&
+    surfaceSource.includes("aria-hidden={!isVisible}") &&
+    surfaceSource.includes("tabIndex={isVisible ? undefined : -1}") &&
+    surfaceSource.includes('[data-sidebar-mode="sessions"]') &&
+    workspaceRailFoundation.includes(
+      "--gyro-workspace-activity-rail-width: 0px",
+    ) &&
+    workspaceRailFoundation.includes(
+      ".gyro-app-shell.is-chat-shell.is-workspace-shell",
+    ) &&
+    workspaceRailFoundation.includes(
+      ".gyro-app-shell.is-workspace-shell.is-workspace-chrome-active",
+    ) &&
+    workspaceRailFoundation.includes(
+      "--gyro-workspace-activity-rail-width: 44px",
+    ) &&
+    workspaceRailFoundation.includes(
+      ".gyro-app-shell.is-workspace-shell.is-sidebar-hidden",
+    ) &&
+    workspaceRailFoundation.includes(
+      "--gyro-workspace-sidebar-column-width: 0px",
+    ) &&
+    workspaceRailFoundation.includes(
+      "grid-template-columns:\n    var(--gyro-workspace-activity-rail-width)\n    var(--gyro-workspace-sidebar-column-width) minmax(0, 1fr)",
+    ) &&
+    workspaceRailFoundation.includes(
+      '.gyro-workspace-activity-rail[data-visible="true"]',
+    ) &&
+    workspaceRailFoundation.includes("pointer-events: none") &&
+    workspaceRailFoundation.includes("visibility 0s linear 180ms") &&
+    workspaceRailFoundation.includes(
+      "@media (prefers-reduced-motion: reduce)",
+    ) &&
+    !workspaceRailFoundation.includes(":has(.gyro-workspace-route.is-code)"),
+  "Workspace and Sessions should share a stable shell while the Workspace-only Activity Rail animates accessibly between 44px and zero.",
+);
+
+expect(
+  workspaceCommandForKeybinding(
+    {
+      key: "F",
+      altKey: false,
+      ctrlKey: false,
+      metaKey: true,
+      shiftKey: true,
+    },
+    "mac",
+  )?.id === "search-files" &&
+    workspaceCommandForKeybinding(
+      {
+        key: "m",
+        altKey: false,
+        ctrlKey: true,
+        metaKey: false,
+        shiftKey: true,
+      },
+      "other",
+    )?.id === "show-problems" &&
+    workspaceCommandForKeybinding(
+      {
+        key: "`",
+        altKey: false,
+        ctrlKey: true,
+        metaKey: false,
+        shiftKey: true,
+      },
+      "mac",
+    )?.id === "new-terminal" &&
+    workspaceCommandForKeybinding(
+      {
+        key: "f",
+        altKey: false,
+        ctrlKey: false,
+        metaKey: true,
+        shiftKey: false,
+      },
+      "mac",
+    ) === undefined &&
+    appSource.includes("workspaceCommandForKeybinding(") &&
+    appSource.includes("runCommandPaletteCommand(workspaceCommand.id)"),
+  "Workspace command keybindings should resolve from the shared registry with exact platform modifiers.",
+);
+
+expect(
+  typeSource.includes('| { kind: "file"; path: string }') &&
+    surfaceSource.includes("const fileEntries = useMemo") &&
+    surfaceSource.includes("id: `file:${file.path}`") &&
+    surfaceSource.includes('entry.selection.kind === "file"') &&
+    surfaceSource.includes('onSelectWorkspaceLayout("code")') &&
+    surfaceSource.includes("onSelectFile?.(entry.selection.path)") &&
+    appSource.includes("files={visibleWorkspaceFiles}") &&
+    appSource.includes(
+      "recentFilePaths={workbench.ide.tabs.map((tab) => tab.path)}",
+    ),
+  "Global search should provide a Workspace Quick Open path that prioritizes open files and routes selections into the code surface.",
+);
+
+const configuredSearchGlobs = workspaceSearchGlobs(
+  "src/**, *.{ts,tsx}, src/**",
+  "node_modules/**, dist/**",
+);
+expect(
+  configuredSearchGlobs.join("|") ===
+    "src/**|*.{ts,tsx}|!node_modules/**|!dist/**" &&
+    workspaceSearchGlobText(configuredSearchGlobs, "include") ===
+      "src/**, *.{ts,tsx}" &&
+    workspaceSearchGlobText(configuredSearchGlobs, "exclude") ===
+      "node_modules/**, dist/**" &&
+    surfaceSource.includes('aria-label="Files to include"') &&
+    surfaceSource.includes('aria-label="Files to exclude"') &&
+    surfaceSource.includes("workspaceSearchGlobs("),
+  "Workspace Search should preserve include and exclude glob configuration, including brace patterns.",
 );
 
 expect(

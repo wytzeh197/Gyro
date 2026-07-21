@@ -88,9 +88,9 @@
 
 .gyro-menu-bar-brand-mark img {
   display: block;
-  height: 55px;
+  height: 49px;
   max-width: none;
-  width: 55px;
+  width: 49px;
 }
 
 .gyro-menu-bar-brand-mark.is-compact {
@@ -101,8 +101,8 @@
 }
 
 .gyro-menu-bar-brand-mark.is-compact img {
-  height: 43px;
-  width: 43px;
+  height: 39px;
+  width: 39px;
 }
 
 .gyro-menu-bar-model-mark {

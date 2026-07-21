@@ -18,7 +18,7 @@ export type AppDestination =
 export type ThemeMode = "dark" | "light";
 
 export type WorkbenchPaneTab =
-  "diff" | "terminal" | "browser" | "problems" | "output";
+  "diff" | "terminal" | "browser" | "problems" | "output" | "test-results";
 
 export type WorkbenchDensity = "comfortable" | "compact";
 
@@ -827,6 +827,34 @@ export type WorkbenchPreferences = {
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
   showMenuBarIcon: boolean;
+  workspaceSidebarHidden: boolean;
+  workspaceSidebarWidth?: number;
+  workspacePanelHeight: number;
+  workspaceTrust: Record<string, WorkspaceTrustDecision>;
+  workspaceFolders: Record<string, string[]>;
+  workspaceUserSettings: WorkspaceScopedSettings;
+  workspaceSettingsByWorkspace: Record<string, WorkspaceScopedSettings>;
+  workspaceSettingsByFolder: Record<string, WorkspaceScopedSettings>;
+  workspaceKeybindings: Record<string, WorkspaceKeybinding | null>;
+};
+
+export type WorkspaceTrustDecision = "trusted" | "restricted";
+
+export type WorkspaceSettingScope = "user" | "workspace" | "folder";
+
+export type WorkspaceScopedSettings = {
+  filesExclude?: string[];
+  searchExclude?: string[];
+  searchMaxResults?: number;
+  editorMinimapEnabled?: boolean;
+};
+
+export type WorkspaceKeybinding = {
+  key: string;
+  primary?: boolean;
+  control?: boolean;
+  shift?: boolean;
+  alt?: boolean;
 };
 
 export type ProviderUsageWindow = {
@@ -1105,6 +1133,12 @@ export type IdeCommand = {
 export type IdeContribution = {
   id: string;
   label: string;
+  version: string;
+  publisher: string;
+  source: "core" | "local";
+  enabled: boolean;
+  permissions: Array<"commands" | "views" | "tasks" | "debug" | "languages">;
+  manifestName?: string;
   views: IdeViewId[];
   commands: IdeCommand[];
 };
@@ -1305,6 +1339,9 @@ export type WorkspaceFile = {
   path: string;
   kind: "file" | "directory";
   depth?: number;
+  workspacePath?: string;
+  relativePath?: string;
+  isWorkspaceRoot?: boolean;
 };
 
 export type GlobalSearchProject = {
@@ -1317,6 +1354,7 @@ export type GlobalSearchProject = {
 
 export type GlobalSearchSelection =
   | { kind: "action"; id: string }
+  | { kind: "file"; path: string }
   | { kind: "project"; path: string }
   | { kind: "session"; sessionId: string };
 
