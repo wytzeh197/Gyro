@@ -79,6 +79,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
@@ -103,6 +104,16 @@ import {
   globalSearchMatchScore,
   normalizedGlobalSearchText,
 } from "./global-search";
+import {
+  workspaceCommandRegistry,
+  workspacePanelContributions,
+  workspaceViewContainers,
+  type WorkspaceShellIcon,
+} from "./workspace-shell";
+import {
+  workspaceSearchGlobs,
+  workspaceSearchGlobText,
+} from "./workspace-search";
 import type {
   AppDestination,
   Automation,
@@ -126,6 +137,7 @@ import type {
   EditorSelection,
   EditorTab,
   IdeAssistantAction,
+  IdeContribution,
   IdeState,
   IdeViewId,
   GitReviewActionId,
@@ -168,6 +180,10 @@ import type {
   WorkspaceFileContent,
   WorkspaceLayoutId,
   WorkspacePreparationProgress,
+  WorkspaceSearchQuery,
+  WorkspaceKeybinding,
+  WorkspaceScopedSettings,
+  WorkspaceSettingScope,
 } from "./types";
 import {
   CLI_LAUNCH_PRESET_MAX_PANES,
@@ -191,6 +207,19 @@ import { shouldShowSidebarUpdate, updateSidebarLabel } from "./update-state";
 
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
+const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
+  ai: Bot,
+  browser: Globe2,
+  diff: GitPullRequest,
+  explorer: FileText,
+  output: FileText,
+  problems: CircleDashed,
+  "run-test": Play,
+  search: Search,
+  settings: Settings,
+  "source-control": GitPullRequest,
+  terminal: Terminal,
+};
 const CHAT_SESSION_DRAG_MIME = "application/x-gyro-chat-session";
 const CHAT_PANE_DRAG_MIME = "application/x-gyro-chat-pane";
 const TOOL_PANEL_DEFAULT_HEIGHT = 280;
@@ -259,6 +288,8 @@ type AppChromeProps = {
   activePaneTab?: WorkbenchPaneTab;
   activeSettingsSection?: SettingsSectionId;
   updateState?: UpdateState;
+  workspaceSidebarHidden?: boolean;
+  workspaceSidebarWidth?: number;
   workspacePreparation?: WorkspacePreparationProgress;
   onSelectSession: (sessionId: string) => void;
   onAddSessionToGrid?: (sessionId: string) => void;
@@ -274,6 +305,9 @@ type AppChromeProps = {
   onCreateCliSession: (profileId: string, workspacePath: string) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
+  onAddWorkspaceFolder?: () => void;
+  onRemoveWorkspaceFolder?: (path: string) => void;
+  onSelectWorkspaceFolder?: (path: string) => void;
   onOpenWorkspaceFile?: (
     path: string,
     lineNumber?: number,
@@ -288,10 +322,18 @@ type AppChromeProps = {
   onRenameWorkspacePath?: (path: string) => void;
   onDeleteWorkspacePath?: (path: string) => void;
   onSelectIdeView?: (view: IdeViewId) => void;
-  onRunWorkspaceSearch?: (query: string) => void;
+  onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
+  onApplyWorkspaceReplace?: (
+    query: WorkspaceSearchQuery,
+    replacement: string,
+    paths: string[],
+  ) => void | Promise<void>;
   onRefreshSourceControl?: () => void;
-  onToggleSourceControlFile?: (path: string, staged: boolean) => void;
-  onDiscardSourceControlFile?: (path: string) => void;
+  onToggleSourceControlFile?: (
+    path: string,
+    staged: boolean,
+  ) => void | Promise<void>;
+  onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
   onCommitSourceControl?: (message: string) => void;
   onRunIdeTask?: (task: TaskDefinition) => void;
@@ -308,6 +350,8 @@ type AppChromeProps = {
   onSettingsSectionChange?: (section: SettingsSectionId) => void;
   onSettingsBack?: () => void;
   onUpdateAction?: (state: UpdateState) => void;
+  onWorkspaceSidebarHiddenChange?: (hidden: boolean) => void;
+  onWorkspaceSidebarWidthChange?: (width?: number) => void;
   onRetryWorkspacePreparation?: () => void;
   children: ReactNode;
 };
@@ -316,13 +360,11 @@ const paneTabs: Array<{
   id: WorkbenchPaneTab;
   label: string;
   icon: IconComponent;
-}> = [
-  { id: "diff", label: "Diff", icon: GitPullRequest },
-  { id: "terminal", label: "Terminal", icon: Terminal },
-  { id: "browser", label: "Browser", icon: Globe2 },
-  { id: "problems", label: "Problems", icon: CircleDashed },
-  { id: "output", label: "Output", icon: FileText },
-];
+}> = workspacePanelContributions.map((panel) => ({
+  id: panel.id,
+  label: panel.label,
+  icon: workspaceShellIcons[panel.icon],
+}));
 
 const settingsSidebarItems: Array<{
   id: SettingsSectionId;
@@ -641,6 +683,75 @@ function settingsSearchResults(query: string) {
     .map(({ entry }) => entry);
 }
 
+function WorkspaceActivityRail({
+  activeView,
+  hasWorkspace,
+  isVisible,
+  isSidebarHidden,
+  onSelectView,
+  onToggleSidebar,
+}: {
+  activeView: IdeViewId;
+  hasWorkspace: boolean;
+  isVisible: boolean;
+  isSidebarHidden: boolean;
+  onSelectView?: (view: IdeViewId) => void;
+  onToggleSidebar: () => void;
+}) {
+  const renderView = (view: (typeof workspaceViewContainers)[number]) => {
+    const Icon = workspaceShellIcons[view.icon];
+    const isActive = activeView === view.id;
+    const isDisabled = view.requiresWorkspace && !hasWorkspace;
+    return (
+      <button
+        aria-label={view.label}
+        aria-pressed={isActive && !isSidebarHidden}
+        className={isActive ? "is-active" : ""}
+        disabled={isDisabled}
+        key={view.id}
+        onClick={() => {
+          if (isActive && !isSidebarHidden) {
+            onToggleSidebar();
+            return;
+          }
+          if (isSidebarHidden) {
+            onToggleSidebar();
+          }
+          onSelectView?.(view.id);
+        }}
+        title={isDisabled ? `Open a project to use ${view.label}` : view.label}
+        tabIndex={isVisible ? undefined : -1}
+        type="button"
+      >
+        <Icon size={18} />
+      </button>
+    );
+  };
+  const primaryViews = workspaceViewContainers.filter(
+    (view) => view.placement === "primary",
+  );
+  const secondaryViews = workspaceViewContainers.filter(
+    (view) => view.placement === "secondary",
+  );
+
+  return (
+    <nav
+      aria-hidden={!isVisible}
+      aria-label={isVisible ? "Workspace views" : undefined}
+      className="gyro-workspace-activity-rail"
+      data-visible={isVisible}
+    >
+      <div aria-hidden="true" className="gyro-workspace-activity-rail-drag" />
+      <div className="gyro-workspace-activity-rail-group">
+        {primaryViews.map(renderView)}
+      </div>
+      <div className="gyro-workspace-activity-rail-group is-secondary">
+        {secondaryViews.map(renderView)}
+      </div>
+    </nav>
+  );
+}
+
 export function AppChrome({
   sessions,
   commandProfiles,
@@ -661,6 +772,8 @@ export function AppChrome({
   activePaneTab = "diff",
   activeSettingsSection = "general",
   updateState,
+  workspaceSidebarHidden,
+  workspaceSidebarWidth,
   onSelectSession,
   onAddSessionToGrid,
   onSelectWorkspaceLayout,
@@ -675,6 +788,9 @@ export function AppChrome({
   onCreateCliSession,
   onSelectSessions,
   onOpenWorkspace,
+  onAddWorkspaceFolder,
+  onRemoveWorkspaceFolder,
+  onSelectWorkspaceFolder,
   onOpenWorkspaceFile,
   onPinEditorTab,
   onRefreshWorkspace,
@@ -683,6 +799,7 @@ export function AppChrome({
   onDeleteWorkspacePath,
   onSelectIdeView,
   onRunWorkspaceSearch,
+  onApplyWorkspaceReplace,
   onRefreshSourceControl,
   onToggleSourceControlFile,
   onDiscardSourceControlFile,
@@ -702,11 +819,29 @@ export function AppChrome({
   onSettingsSectionChange,
   onSettingsBack,
   onUpdateAction,
+  onWorkspaceSidebarHiddenChange,
+  onWorkspaceSidebarWidthChange,
   workspacePreparation,
   onRetryWorkspacePreparation,
   children,
 }: AppChromeProps) {
-  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
+  const isIdeSurface =
+    activeDestination === "workspace" && activeWorkspaceLayout === "code";
+  const [localSidebarHidden, setLocalSidebarHidden] = useState(false);
+  const isSidebarHidden = isIdeSurface
+    ? (workspaceSidebarHidden ?? localSidebarHidden)
+    : localSidebarHidden;
+  const setIsSidebarHidden = useCallback(
+    (next: boolean | ((current: boolean) => boolean)) => {
+      const resolved =
+        typeof next === "function" ? next(isSidebarHidden) : next;
+      setLocalSidebarHidden(resolved);
+      if (isIdeSurface) {
+        onWorkspaceSidebarHiddenChange?.(resolved);
+      }
+    },
+    [isIdeSurface, isSidebarHidden, onWorkspaceSidebarHiddenChange],
+  );
   const [settingsQuery, setSettingsQuery] = useState("");
   const [isSettingsSearchFocused, setIsSettingsSearchFocused] = useState(false);
   const [selectedSettingsResultIndex, setSelectedSettingsResultIndex] =
@@ -723,7 +858,9 @@ export function AppChrome({
   );
   const [ideSidebarMinimumWidth, setIdeSidebarMinimumWidth] =
     useState(restingSidebarWidth);
-  const [ideSidebarWidth, setIdeSidebarWidth] = useState(restingSidebarWidth);
+  const [ideSidebarWidth, setIdeSidebarWidth] = useState(
+    () => workspaceSidebarWidth ?? restingSidebarWidth(),
+  );
   const [isIdeSidebarCustomized, setIsIdeSidebarCustomized] = useState(false);
   const [isIdeSidebarResizing, setIsIdeSidebarResizing] = useState(false);
   const appShellRef = useRef<HTMLDivElement>(null);
@@ -741,12 +878,31 @@ export function AppChrome({
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId,
   );
-  const isIdeSurface =
-    activeDestination === "workspace" && activeWorkspaceLayout === "code";
   const ideSidebarMaximumWidth = ideSidebarMinimumWidth * 2;
   const showSidebarUpdate = updateState
     ? shouldShowSidebarUpdate(updateState)
     : false;
+
+  useEffect(() => {
+    if (isIdeSurface) {
+      return;
+    }
+    const shell = appShellRef.current;
+    const rail = shell?.querySelector<HTMLElement>(
+      ".gyro-workspace-activity-rail",
+    );
+    if (!rail?.contains(document.activeElement)) {
+      return;
+    }
+    const animationFrame = window.requestAnimationFrame(() => {
+      const focusTarget =
+        shell?.querySelector<HTMLButtonElement>(
+          '[data-sidebar-mode="sessions"]',
+        ) ?? shell?.querySelector<HTMLElement>(".gyro-main");
+      focusTarget?.focus();
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isIdeSurface]);
 
   useEffect(() => {
     setSelectedSettingsResultIndex(0);
@@ -782,23 +938,29 @@ export function AppChrome({
   };
 
   useEffect(() => {
-    if (!isIdeSurface) {
-      const restingWidth = restingSidebarWidth();
-      const resize = ideSidebarResizeRef.current;
-      if (resize?.animationFrame !== undefined) {
-        cancelAnimationFrame(resize.animationFrame);
-      }
-      ideSidebarResizeRef.current = undefined;
-      appShellRef.current?.style.setProperty(
-        "--gyro-ide-sidebar-width",
-        `${restingWidth}px`,
-      );
-      setIsIdeSidebarResizing(false);
-      setIsIdeSidebarCustomized(false);
-      setIdeSidebarMinimumWidth(restingWidth);
-      setIdeSidebarWidth(restingWidth);
+    const restingWidth = restingSidebarWidth();
+    const maximumWidth = restingWidth * 2;
+    const requestedWidth = isIdeSurface
+      ? (workspaceSidebarWidth ?? restingWidth)
+      : restingWidth;
+    const nextWidth = Math.min(
+      maximumWidth,
+      Math.max(restingWidth, requestedWidth),
+    );
+    const resize = ideSidebarResizeRef.current;
+    if (resize?.animationFrame !== undefined) {
+      cancelAnimationFrame(resize.animationFrame);
     }
-  }, [isIdeSurface]);
+    ideSidebarResizeRef.current = undefined;
+    appShellRef.current?.style.setProperty(
+      "--gyro-ide-sidebar-width",
+      `${nextWidth}px`,
+    );
+    setIsIdeSidebarResizing(false);
+    setIsIdeSidebarCustomized(nextWidth !== restingWidth);
+    setIdeSidebarMinimumWidth(restingWidth);
+    setIdeSidebarWidth(nextWidth);
+  }, [isIdeSurface, workspaceSidebarWidth]);
 
   useEffect(() => {
     const syncIdeSidebarBreakpoint = () => {
@@ -891,8 +1053,11 @@ export function AppChrome({
       setIdeSidebarWidth(finalWidth);
       setIsIdeSidebarCustomized(finalWidth !== ideSidebarMinimumWidth);
       setIsIdeSidebarResizing(false);
+      onWorkspaceSidebarWidthChange?.(
+        finalWidth === ideSidebarMinimumWidth ? undefined : finalWidth,
+      );
     },
-    [ideSidebarMinimumWidth],
+    [ideSidebarMinimumWidth, onWorkspaceSidebarWidthChange],
   );
 
   const resizeIdeSidebarWithKeyboard = useCallback(
@@ -914,12 +1079,16 @@ export function AppChrome({
       const clampedWidth = clampIdeSidebarWidth(nextWidth);
       setIdeSidebarWidth(clampedWidth);
       setIsIdeSidebarCustomized(clampedWidth !== ideSidebarMinimumWidth);
+      onWorkspaceSidebarWidthChange?.(
+        clampedWidth === ideSidebarMinimumWidth ? undefined : clampedWidth,
+      );
     },
     [
       clampIdeSidebarWidth,
       ideSidebarMaximumWidth,
       ideSidebarMinimumWidth,
       ideSidebarWidth,
+      onWorkspaceSidebarWidthChange,
     ],
   );
 
@@ -929,9 +1098,10 @@ export function AppChrome({
         activeDestination === "workspace" && activeWorkspaceLayout === "thread"
           ? "is-thread-layout"
           : ""
-      } ${isSidebarHidden ? "is-sidebar-hidden" : ""} ${
-        isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""
-      }`}
+      } ${isIdeSurface ? "is-workspace-chrome-active" : ""} ${
+        isSidebarHidden ? "is-sidebar-hidden" : ""
+      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""}`}
+      data-workspace-activity-rail={isIdeSurface ? "visible" : "hidden"}
       style={
         {
           "--gyro-ide-sidebar-width": `${ideSidebarWidth}px`,
@@ -939,27 +1109,37 @@ export function AppChrome({
       }
       ref={appShellRef}
     >
+      <WorkspaceActivityRail
+        activeView={ide?.activeView ?? "explorer"}
+        hasWorkspace={Boolean(workspacePath)}
+        isSidebarHidden={isSidebarHidden}
+        isVisible={isIdeSurface}
+        onSelectView={onSelectIdeView}
+        onToggleSidebar={() => setIsSidebarHidden((current) => !current)}
+      />
       {isSidebarHidden ? (
-        <div className="gyro-sidebar-restore-cluster">
-          <button
-            aria-label="Show sidebar"
-            className="gyro-sidebar-restore-button"
-            onClick={() => setIsSidebarHidden(false)}
-            type="button"
-          >
-            <PanelLeftClose size={13} />
-          </button>
-          <WorkspacePreparationControl
-            controlRef={workspacePreparationRef}
-            isOpen={isWorkspacePreparationOpen}
-            onClose={() => setIsWorkspacePreparationOpen(false)}
-            onRetry={onRetryWorkspacePreparation}
-            onToggle={() =>
-              setIsWorkspacePreparationOpen((current) => !current)
-            }
-            progress={workspacePreparation}
-          />
-        </div>
+        isIdeSurface ? null : (
+          <div className="gyro-sidebar-restore-cluster">
+            <button
+              aria-label="Show sidebar"
+              className="gyro-sidebar-restore-button"
+              onClick={() => setIsSidebarHidden(false)}
+              type="button"
+            >
+              <PanelLeftClose size={13} />
+            </button>
+            <WorkspacePreparationControl
+              controlRef={workspacePreparationRef}
+              isOpen={isWorkspacePreparationOpen}
+              onClose={() => setIsWorkspacePreparationOpen(false)}
+              onRetry={onRetryWorkspacePreparation}
+              onToggle={() =>
+                setIsWorkspacePreparationOpen((current) => !current)
+              }
+              progress={workspacePreparation}
+            />
+          </div>
+        )
       ) : (
         <aside className="gyro-sidebar">
           {activeDestination === "settings" ? (
@@ -1008,6 +1188,9 @@ export function AppChrome({
               onDeleteWorkspacePath={onDeleteWorkspacePath}
               onOpenToolPanel={onOpenToolPanel}
               onOpenWorkspace={onOpenWorkspace}
+              onAddWorkspaceFolder={onAddWorkspaceFolder}
+              onRemoveWorkspaceFolder={onRemoveWorkspaceFolder}
+              onSelectWorkspaceFolder={onSelectWorkspaceFolder}
               onPinSession={onPinSession}
               onRenameSession={onRenameSession}
               onRemoveProject={onRemoveProject}
@@ -1019,6 +1202,7 @@ export function AppChrome({
               onSendDebugCommand={onSendDebugCommand}
               onStopDebugSession={onStopDebugSession}
               onRunWorkspaceSearch={onRunWorkspaceSearch}
+              onApplyWorkspaceReplace={onApplyWorkspaceReplace}
               onSelectDestination={onSelectDestination}
               onSelectIdeView={onSelectIdeView}
               onSelectSession={onSelectSession}
@@ -1083,6 +1267,7 @@ export function AppChrome({
               onDoubleClick={() => {
                 setIdeSidebarWidth(ideSidebarMinimumWidth);
                 setIsIdeSidebarCustomized(false);
+                onWorkspaceSidebarWidthChange?.(undefined);
               }}
               onKeyDown={resizeIdeSidebarWithKeyboard}
               onPointerCancel={endIdeSidebarResize}
@@ -1096,7 +1281,7 @@ export function AppChrome({
           ) : null}
         </aside>
       )}
-      <main className="gyro-main">
+      <main className="gyro-main" tabIndex={-1}>
         {activeDestination === "settings" ? (
           <div className="gyro-settings-topbar">
             <div
@@ -1506,6 +1691,9 @@ function WorkspaceSidebarContent({
   onCreateCliSession,
   onSelectSessions,
   onOpenWorkspace,
+  onAddWorkspaceFolder,
+  onRemoveWorkspaceFolder,
+  onSelectWorkspaceFolder,
   onOpenWorkspaceFile,
   onPinEditorTab,
   onRefreshWorkspace,
@@ -1515,6 +1703,7 @@ function WorkspaceSidebarContent({
   onOpenCommandPalette,
   onSelectIdeView,
   onRunWorkspaceSearch,
+  onApplyWorkspaceReplace,
   onRefreshSourceControl,
   onToggleSourceControlFile,
   onDiscardSourceControlFile,
@@ -1568,6 +1757,9 @@ function WorkspaceSidebarContent({
   onCreateCliSession: (profileId: string, workspacePath: string) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
+  onAddWorkspaceFolder?: () => void;
+  onRemoveWorkspaceFolder?: (path: string) => void;
+  onSelectWorkspaceFolder?: (path: string) => void;
   onOpenWorkspaceFile?: (
     path: string,
     lineNumber?: number,
@@ -1583,10 +1775,18 @@ function WorkspaceSidebarContent({
   onDeleteWorkspacePath?: (path: string) => void;
   onOpenCommandPalette: () => void;
   onSelectIdeView?: (view: IdeViewId) => void;
-  onRunWorkspaceSearch?: (query: string) => void;
+  onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
+  onApplyWorkspaceReplace?: (
+    query: WorkspaceSearchQuery,
+    replacement: string,
+    paths: string[],
+  ) => void | Promise<void>;
   onRefreshSourceControl?: () => void;
-  onToggleSourceControlFile?: (path: string, staged: boolean) => void;
-  onDiscardSourceControlFile?: (path: string) => void;
+  onToggleSourceControlFile?: (
+    path: string,
+    staged: boolean,
+  ) => void | Promise<void>;
+  onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
   onCommitSourceControl?: (message: string) => void;
   onRunIdeTask?: (task: TaskDefinition) => void;
@@ -1678,13 +1878,31 @@ function WorkspaceSidebarContent({
   const [expandedWorkspaceDirectories, setExpandedWorkspaceDirectories] =
     useState<Set<string>>(() => new Set());
   const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
+  const [selectedExplorerPaths, setSelectedExplorerPaths] = useState<
+    Set<string>
+  >(() => new Set());
+  const [explorerContextMenu, setExplorerContextMenu] = useState<{
+    path: string;
+    x: number;
+    y: number;
+  }>();
+  const explorerContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
+    Boolean(explorerContextMenu),
+    () => setExplorerContextMenu(undefined),
+  );
+  const selectedExplorerFile = files.find(
+    (file) => file.path === selectedExplorerPath,
+  );
   const [sourceControlMessage, setSourceControlMessage] = useState("");
+  const [selectedSourceControlPaths, setSelectedSourceControlPaths] = useState<
+    Set<string>
+  >(() => new Set());
   const [debugAdapterCommand, setDebugAdapterCommand] = useState("lldb-dap");
   const visibleFiles = useMemo(
     () =>
       files.filter((file) =>
-        workspaceAncestorPaths(file.path).every((ancestor) =>
-          expandedWorkspaceDirectories.has(ancestor),
+        workspaceAncestorPaths(file.path, file.workspacePath).every(
+          (ancestor) => expandedWorkspaceDirectories.has(ancestor),
         ),
       ),
     [expandedWorkspaceDirectories, files],
@@ -1698,9 +1916,54 @@ function WorkspaceSidebarContent({
   const [sidebarSearchDraft, setSidebarSearchDraft] = useState(
     ide?.searchQuery.query ?? "",
   );
+  const [sidebarSearchDetailsOpen, setSidebarSearchDetailsOpen] =
+    useState(false);
+  const [sidebarReplaceOpen, setSidebarReplaceOpen] = useState(false);
+  const [sidebarReplaceDraft, setSidebarReplaceDraft] = useState("");
+  const [selectedReplacePaths, setSelectedReplacePaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [sidebarSearchIncludeDraft, setSidebarSearchIncludeDraft] = useState(
+    workspaceSearchGlobText(ide?.searchQuery.globs, "include"),
+  );
+  const [sidebarSearchExcludeDraft, setSidebarSearchExcludeDraft] = useState(
+    workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
+  );
+  const workspaceOutlineSymbols = useMemo(
+    () =>
+      documentOutlineSymbols(
+        ide?.activePath ? (ide.buffers[ide.activePath]?.content ?? "") : "",
+      ),
+    [ide?.activePath, ide?.buffers],
+  );
+  const workspaceFileRootKey = files
+    .filter((file) => file.isWorkspaceRoot)
+    .map((file) => file.path)
+    .join("\n");
   useEffect(() => {
     setSidebarSearchDraft(ide?.searchQuery.query ?? "");
-  }, [ide?.searchQuery.query]);
+    setSidebarSearchIncludeDraft(
+      workspaceSearchGlobText(ide?.searchQuery.globs, "include"),
+    );
+    setSidebarSearchExcludeDraft(
+      workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
+    );
+  }, [ide?.searchQuery.globs, ide?.searchQuery.query]);
+  useEffect(() => {
+    if (!sidebarReplaceOpen) return;
+    setSelectedReplacePaths(
+      new Set((ide?.searchResults ?? []).map((result) => result.path)),
+    );
+  }, [ide?.searchResults, sidebarReplaceOpen]);
+  useEffect(() => {
+    const available = new Set(
+      (ide?.sourceControl.files ?? []).map((file) => file.path),
+    );
+    setSelectedSourceControlPaths((current) => {
+      const next = new Set([...current].filter((path) => available.has(path)));
+      return next.size === current.size ? current : next;
+    });
+  }, [ide?.sourceControl.files]);
   useEffect(() => {
     if (newSessionMenuView === "closed") {
       setNewCliWorkspacePath(cliProjects[0]?.path ?? "");
@@ -1729,13 +1992,17 @@ function WorkspaceSidebarContent({
     }
   }, [projectOrder]);
   useEffect(() => {
-    setExpandedWorkspaceDirectories(new Set());
+    setExpandedWorkspaceDirectories(
+      new Set(
+        files.filter((file) => file.isWorkspaceRoot).map((file) => file.path),
+      ),
+    );
     setSelectedExplorerPath(
       ide?.activePath && files.some((file) => file.path === ide.activePath)
         ? ide.activePath
         : undefined,
     );
-  }, [workspacePath]);
+  }, [workspaceFileRootKey, workspacePath]);
   useEffect(() => {
     if (
       !selectedExplorerPath ||
@@ -1845,12 +2112,17 @@ function WorkspaceSidebarContent({
       } else {
         const child = visibleFiles.find(
           (candidate) =>
-            workspaceAncestorPaths(candidate.path).at(-1) === file.path,
+            workspaceAncestorPaths(candidate.path, candidate.workspacePath).at(
+              -1,
+            ) === file.path,
         );
         focusExplorerPath(child?.path);
       }
     } else if (event.key === "ArrowLeft") {
-      const parentPath = workspaceAncestorPaths(file.path).at(-1);
+      const parentPath = workspaceAncestorPaths(
+        file.path,
+        file.workspacePath,
+      ).at(-1);
       if (
         file.kind === "directory" &&
         expandedWorkspaceDirectories.has(file.path)
@@ -2053,49 +2325,21 @@ function WorkspaceSidebarContent({
             </div>
           ) : null}
 
-          <nav
-            className="gyro-ide-sidebar-activity"
-            aria-label="Workspace views"
-          >
-            {[
-              { id: "explorer" as const, label: "Explorer", icon: FileText },
-              { id: "search" as const, label: "Search", icon: Search },
-              {
-                id: "source-control" as const,
-                label: "Source Control",
-                icon: GitPullRequest,
-              },
-              { id: "run-test" as const, label: "Run/Test", icon: Play },
-              { id: "ai" as const, label: "AI", icon: Bot },
-              { id: "settings" as const, label: "Settings", icon: Settings },
-            ].map((view) => {
-              const Icon = view.icon;
-              return (
-                <button
-                  aria-label={view.label}
-                  className={activeIdeView === view.id ? "is-active" : ""}
-                  disabled={!workspacePath && view.id !== "settings"}
-                  key={view.id}
-                  onClick={() => onSelectIdeView?.(view.id)}
-                  title={
-                    !workspacePath && view.id !== "settings"
-                      ? `Open a project to use ${view.label}`
-                      : view.label
-                  }
-                  type="button"
-                >
-                  <Icon size={15} />
-                </button>
-              );
-            })}
-          </nav>
-
           {activeIdeView === "explorer" ? (
             <SidebarSection
               grow
               headerActions={
                 workspacePath ? (
                   <div className="gyro-sidebar-explorer-toolbar">
+                    <button
+                      aria-label="Add folder to workspace"
+                      onClick={onAddWorkspaceFolder}
+                      title="Add folder to workspace"
+                      type="button"
+                    >
+                      <HardDrive size={13} />
+                      <Plus size={9} />
+                    </button>
                     <button
                       aria-label="New file"
                       onClick={() => onCreateWorkspacePath?.("file")}
@@ -2128,14 +2372,28 @@ function WorkspaceSidebarContent({
                       <Edit3 size={13} />
                     </button>
                     <button
-                      aria-label="Delete selected path"
-                      disabled={!selectedExplorerPath && !ide?.activePath}
-                      onClick={() =>
-                        onDeleteWorkspacePath?.(
-                          selectedExplorerPath ?? ide?.activePath ?? "",
-                        )
+                      aria-label={
+                        selectedExplorerFile?.isWorkspaceRoot
+                          ? "Remove folder from workspace"
+                          : "Delete selected path"
                       }
-                      title="Delete selected path"
+                      disabled={!selectedExplorerPath && !ide?.activePath}
+                      onClick={() => {
+                        const path =
+                          selectedExplorerPath ?? ide?.activePath ?? "";
+                        if (selectedExplorerFile?.isWorkspaceRoot) {
+                          onRemoveWorkspaceFolder?.(
+                            selectedExplorerFile.workspacePath ?? path,
+                          );
+                          return;
+                        }
+                        onDeleteWorkspacePath?.(path);
+                      }}
+                      title={
+                        selectedExplorerFile?.isWorkspaceRoot
+                          ? "Remove folder from workspace"
+                          : "Delete selected path"
+                      }
                       type="button"
                     >
                       <Trash2 size={13} />
@@ -2155,12 +2413,14 @@ function WorkspaceSidebarContent({
             >
               {workspacePath ? (
                 <>
-                  <SidebarProjectRow
-                    icon={Folder}
-                    label={workspaceName(workspacePath)}
-                    meta="workspace"
-                    onClick={onOpenWorkspace}
-                  />
+                  {files.some((file) => file.isWorkspaceRoot) ? null : (
+                    <SidebarProjectRow
+                      icon={Folder}
+                      label={workspaceName(workspacePath)}
+                      meta="workspace"
+                      onClick={onOpenWorkspace}
+                    />
+                  )}
                   {visibleFiles.length > 0 ? (
                     <div
                       aria-label="Workspace files"
@@ -2184,6 +2444,7 @@ function WorkspaceSidebarContent({
                             }
                             bufferStatus={ide?.buffers[file.path]?.status}
                             isActive={
+                              selectedExplorerPaths.has(file.path) ||
                               selectedExplorerPath === file.path ||
                               (!selectedExplorerPath &&
                                 ide?.activePath === file.path)
@@ -2193,7 +2454,11 @@ function WorkspaceSidebarContent({
                             )}
                             key={file.path}
                             kind={file.kind}
-                            label={workspaceName(file.path)}
+                            label={
+                              file.isWorkspaceRoot
+                                ? workspaceName(file.workspacePath)
+                                : workspaceName(file.path)
+                            }
                             path={file.path}
                             rowRef={(element) => {
                               if (element)
@@ -2206,13 +2471,60 @@ function WorkspaceSidebarContent({
                                 ? 0
                                 : -1
                             }
-                            onClick={() => {
+                            onClick={(event) => {
+                              if (event.metaKey || event.ctrlKey) {
+                                setSelectedExplorerPaths((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(file.path))
+                                    next.delete(file.path);
+                                  else next.add(file.path);
+                                  return next;
+                                });
+                              } else if (
+                                event.shiftKey &&
+                                selectedExplorerPath
+                              ) {
+                                const anchor = visibleFiles.findIndex(
+                                  (item) => item.path === selectedExplorerPath,
+                                );
+                                const target = visibleFiles.findIndex(
+                                  (item) => item.path === file.path,
+                                );
+                                const [start, end] =
+                                  anchor < target
+                                    ? [anchor, target]
+                                    : [target, anchor];
+                                setSelectedExplorerPaths(
+                                  new Set(
+                                    visibleFiles
+                                      .slice(start, end + 1)
+                                      .map((item) => item.path),
+                                  ),
+                                );
+                              } else {
+                                setSelectedExplorerPaths(new Set([file.path]));
+                              }
                               setSelectedExplorerPath(file.path);
+                              if (file.workspacePath) {
+                                onSelectWorkspaceFolder?.(file.workspacePath);
+                              }
                               if (file.kind === "file") {
                                 onOpenWorkspaceFile?.(file.path);
                                 return;
                               }
                               toggleWorkspaceDirectory(file.path);
+                            }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              setSelectedExplorerPath(file.path);
+                              if (!selectedExplorerPaths.has(file.path)) {
+                                setSelectedExplorerPaths(new Set([file.path]));
+                              }
+                              setExplorerContextMenu({
+                                path: file.path,
+                                x: event.clientX,
+                                y: event.clientY,
+                              });
                             }}
                             onDoubleClick={
                               file.kind === "file"
@@ -2237,6 +2549,106 @@ function WorkspaceSidebarContent({
                   Open a folder to browse and edit its files.
                 </div>
               )}
+              {explorerContextMenu ? (
+                <div
+                  className="gyro-explorer-context-menu"
+                  ref={explorerContextMenuRef}
+                  role="menu"
+                  style={{
+                    left: explorerContextMenu.x,
+                    top: explorerContextMenu.y,
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      const file = files.find(
+                        (item) => item.path === explorerContextMenu.path,
+                      );
+                      if (file?.kind === "file") {
+                        onOpenWorkspaceFile?.(file.path);
+                      } else {
+                        onCreateWorkspacePath?.("file", file?.path);
+                      }
+                      setExplorerContextMenu(undefined);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {files.find(
+                      (item) => item.path === explorerContextMenu.path,
+                    )?.kind === "file"
+                      ? "Open"
+                      : "New File"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      onRenameWorkspacePath?.(explorerContextMenu.path);
+                      setExplorerContextMenu(undefined);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className="is-danger"
+                    onClick={() => {
+                      const file = files.find(
+                        (item) => item.path === explorerContextMenu.path,
+                      );
+                      if (file?.isWorkspaceRoot) {
+                        onRemoveWorkspaceFolder?.(
+                          file.workspacePath ?? file.path,
+                        );
+                      } else {
+                        onDeleteWorkspacePath?.(explorerContextMenu.path);
+                      }
+                      setExplorerContextMenu(undefined);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {files.find(
+                      (item) => item.path === explorerContextMenu.path,
+                    )?.isWorkspaceRoot
+                      ? "Remove Folder from Workspace"
+                      : "Delete"}
+                  </button>
+                </div>
+              ) : null}
+            </SidebarSection>
+          ) : null}
+
+          {activeIdeView === "explorer" && ide?.activePath ? (
+            <SidebarSection
+              collapsible
+              meta={String(workspaceOutlineSymbols.length)}
+              title="Outline"
+            >
+              {workspaceOutlineSymbols.length > 0 ? (
+                workspaceOutlineSymbols
+                  .slice(0, 80)
+                  .map((symbol) => (
+                    <SidebarDestinationRow
+                      icon={FileCode2}
+                      isActive={false}
+                      key={`${symbol.lineNumber}:${symbol.name}`}
+                      label={symbol.name}
+                      meta={`${symbol.kind} · ${symbol.lineNumber}`}
+                      onClick={() =>
+                        onOpenWorkspaceFile?.(
+                          ide.activePath ?? "",
+                          symbol.lineNumber,
+                          1,
+                        )
+                      }
+                    />
+                  ))
+              ) : (
+                <div className="gyro-sidebar-mini-copy">
+                  No document symbols found in the active file.
+                </div>
+              )}
             </SidebarSection>
           ) : null}
 
@@ -2250,7 +2662,14 @@ function WorkspaceSidebarContent({
                 className="gyro-sidebar-search-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  onRunWorkspaceSearch?.(sidebarSearchDraft);
+                  const globs = workspaceSearchGlobs(
+                    sidebarSearchIncludeDraft,
+                    sidebarSearchExcludeDraft,
+                  );
+                  onRunWorkspaceSearch?.({
+                    query: sidebarSearchDraft,
+                    globs: globs.length > 0 ? globs : undefined,
+                  });
                 }}
               >
                 <Search size={14} />
@@ -2262,17 +2681,130 @@ function WorkspaceSidebarContent({
                   placeholder="Search files"
                   value={sidebarSearchDraft}
                 />
+                <button
+                  aria-expanded={sidebarReplaceOpen}
+                  aria-label="Toggle replace preview"
+                  className={sidebarReplaceOpen ? "is-active" : ""}
+                  onClick={() => setSidebarReplaceOpen((current) => !current)}
+                  title="Toggle replace preview"
+                  type="button"
+                >
+                  <Edit3 size={13} />
+                </button>
+                <button
+                  aria-expanded={sidebarSearchDetailsOpen}
+                  aria-label="Toggle search details"
+                  className={sidebarSearchDetailsOpen ? "is-active" : ""}
+                  onClick={() =>
+                    setSidebarSearchDetailsOpen((current) => !current)
+                  }
+                  title="Toggle search details"
+                  type="button"
+                >
+                  <SlidersHorizontal size={13} />
+                </button>
+                {sidebarReplaceOpen ? (
+                  <div className="gyro-sidebar-replace-row">
+                    <CornerDownRight size={13} />
+                    <input
+                      aria-label="Replace workspace matches with"
+                      onChange={(event) =>
+                        setSidebarReplaceDraft(event.target.value)
+                      }
+                      placeholder="Replace with"
+                      value={sidebarReplaceDraft}
+                    />
+                  </div>
+                ) : null}
+                {sidebarSearchDetailsOpen ? (
+                  <div className="gyro-sidebar-search-details">
+                    <label>
+                      <span>Files to include</span>
+                      <input
+                        aria-label="Files to include"
+                        onChange={(event) =>
+                          setSidebarSearchIncludeDraft(event.target.value)
+                        }
+                        placeholder="src/**, *.{ts,tsx}"
+                        value={sidebarSearchIncludeDraft}
+                      />
+                    </label>
+                    <label>
+                      <span>Files to exclude</span>
+                      <input
+                        aria-label="Files to exclude"
+                        onChange={(event) =>
+                          setSidebarSearchExcludeDraft(event.target.value)
+                        }
+                        placeholder="node_modules/**, dist/**"
+                        value={sidebarSearchExcludeDraft}
+                      />
+                    </label>
+                  </div>
+                ) : null}
               </form>
+              {sidebarReplaceOpen && (ide?.searchResults.length ?? 0) > 0 ? (
+                <div className="gyro-sidebar-replace-preview">
+                  <div>
+                    <strong>Replace preview</strong>
+                    <span>
+                      {selectedReplacePaths.size} of{" "}
+                      {
+                        new Set(ide?.searchResults.map((result) => result.path))
+                          .size
+                      }{" "}
+                      files
+                    </span>
+                  </div>
+                  <button
+                    disabled={
+                      selectedReplacePaths.size === 0 ||
+                      !sidebarSearchDraft.trim()
+                    }
+                    onClick={() =>
+                      void onApplyWorkspaceReplace?.(
+                        {
+                          query: sidebarSearchDraft,
+                          globs: workspaceSearchGlobs(
+                            sidebarSearchIncludeDraft,
+                            sidebarSearchExcludeDraft,
+                          ),
+                        },
+                        sidebarReplaceDraft,
+                        [...selectedReplacePaths],
+                      )
+                    }
+                    type="button"
+                  >
+                    Replace in {selectedReplacePaths.size} files
+                  </button>
+                </div>
+              ) : null}
               {(ide?.searchResults ?? []).length > 0 ? (
-                ide?.searchResults
-                  .slice(0, 30)
-                  .map((result) => (
-                    <SidebarDestinationRow
-                      icon={FileCode2}
-                      isActive={ide?.activePath === result.path}
-                      key={`${result.path}:${result.lineNumber}:${result.line}`}
-                      label={workspaceName(result.path)}
-                      meta={`:${result.lineNumber}`}
+                ide?.searchResults.slice(0, 30).map((result) => (
+                  <div
+                    className="gyro-sidebar-search-result"
+                    key={`${result.path}:${result.lineNumber}:${result.line}`}
+                  >
+                    {sidebarReplaceOpen ? (
+                      <input
+                        aria-label={`Include ${result.path} in replace`}
+                        checked={selectedReplacePaths.has(result.path)}
+                        onChange={() =>
+                          setSelectedReplacePaths((current) => {
+                            const next = new Set(current);
+                            if (next.has(result.path)) next.delete(result.path);
+                            else next.add(result.path);
+                            return next;
+                          })
+                        }
+                        type="checkbox"
+                      />
+                    ) : null}
+                    <button
+                      className={
+                        ide?.activePath === result.path ? "is-active" : ""
+                      }
                       onClick={() =>
                         onOpenWorkspaceFile?.(
                           result.path,
@@ -2280,8 +2812,17 @@ function WorkspaceSidebarContent({
                           result.ranges?.[0]?.startColumn ?? 1,
                         )
                       }
-                    />
-                  ))
+                      type="button"
+                    >
+                      <span>
+                        <FileCode2 size={13} />
+                        <strong>{workspaceName(result.path)}</strong>
+                        <small>:{result.lineNumber}</small>
+                      </span>
+                      <code>{result.line.trim()}</code>
+                    </button>
+                  </div>
+                ))
               ) : (
                 <div className="gyro-sidebar-mini-copy">
                   Search uses the local workspace index through rg when it is
@@ -2350,6 +2891,66 @@ function WorkspaceSidebarContent({
                 <ChevronDown size={13} />
                 <span>Changes</span>
                 <small>{ide?.sourceControl.files.length ?? 0}</small>
+                <div className="gyro-sidebar-scm-batch-actions">
+                  <button
+                    aria-label="Select all source control changes"
+                    disabled={(ide?.sourceControl.files.length ?? 0) === 0}
+                    onClick={() =>
+                      setSelectedSourceControlPaths(
+                        new Set(
+                          (ide?.sourceControl.files ?? []).map(
+                            (file) => file.path,
+                          ),
+                        ),
+                      )
+                    }
+                    title="Select all changes"
+                    type="button"
+                  >
+                    <ListChecks size={12} />
+                  </button>
+                  <button
+                    aria-label="Stage selected source control changes"
+                    disabled={selectedSourceControlPaths.size === 0}
+                    onClick={async () => {
+                      const selected = (ide?.sourceControl.files ?? []).filter(
+                        (file) =>
+                          selectedSourceControlPaths.has(file.path) &&
+                          !file.staged,
+                      );
+                      for (const file of selected) {
+                        await onToggleSourceControlFile?.(file.path, false);
+                      }
+                      onRefreshSourceControl?.();
+                    }}
+                    title="Stage selected changes"
+                    type="button"
+                  >
+                    <Plus size={12} />
+                  </button>
+                  <button
+                    aria-label="Discard selected source control changes"
+                    disabled={selectedSourceControlPaths.size === 0}
+                    onClick={async () => {
+                      if (
+                        !window.confirm(
+                          `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      for (const path of selectedSourceControlPaths) {
+                        await onDiscardSourceControlFile?.(path);
+                      }
+                      setSelectedSourceControlPaths(new Set());
+                      onRefreshSourceControl?.();
+                    }}
+                    title="Discard selected changes"
+                    type="button"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
               {ide?.sourceControl.available === false ? (
                 <div className="gyro-sidebar-mini-copy">
@@ -2385,6 +2986,19 @@ function WorkspaceSidebarContent({
                         className="gyro-sidebar-scm-row"
                         key={`${file.path}:${file.staged}`}
                       >
+                        <input
+                          aria-label={`Select ${file.path}`}
+                          checked={selectedSourceControlPaths.has(file.path)}
+                          onChange={() =>
+                            setSelectedSourceControlPaths((current) => {
+                              const next = new Set(current);
+                              if (next.has(file.path)) next.delete(file.path);
+                              else next.add(file.path);
+                              return next;
+                            })
+                          }
+                          type="checkbox"
+                        />
                         <button
                           aria-label={`Open diff for ${file.path}`}
                           className="gyro-sidebar-scm-identity"
@@ -2656,22 +3270,24 @@ function WorkspaceSidebarContent({
                 />
               ))}
               {(ide?.contributions ?? []).flatMap((contribution) =>
-                contribution.commands
-                  .slice(0, 8)
-                  .map((command) => (
-                    <SidebarDestinationRow
-                      icon={Settings}
-                      isActive={false}
-                      key={command.id}
-                      label={command.label}
-                      meta={command.category}
-                      onClick={() =>
-                        command.viewId
-                          ? onSelectIdeView?.(command.viewId)
-                          : onOpenCommandPalette()
-                      }
-                    />
-                  )),
+                contribution.enabled
+                  ? contribution.commands
+                      .slice(0, 8)
+                      .map((command) => (
+                        <SidebarDestinationRow
+                          icon={Settings}
+                          isActive={false}
+                          key={command.id}
+                          label={command.label}
+                          meta={command.category}
+                          onClick={() =>
+                            command.viewId
+                              ? onSelectIdeView?.(command.viewId)
+                              : onOpenCommandPalette()
+                          }
+                        />
+                      ))
+                  : [],
               )}
               <div className="gyro-sidebar-mini-copy">
                 Language servers, debug adapters, Git, and provider CLIs are
@@ -2819,7 +3435,7 @@ function WorkspaceSidebarContent({
               <Search size={15} />
               <span>Search</span>
               <kbd className="gyro-sidebar-shortcut">
-                {primaryGlobalSearchShortcut()}
+                {primaryGlobalSearchShortcut("global")}
               </kbd>
             </button>
           </div>
@@ -3633,6 +4249,7 @@ function WorkspaceExplorerRow({
   tabIndex,
   onClick,
   onDoubleClick,
+  onContextMenu,
 }: {
   label: string;
   decoration?: IdeState["fileDecorations"][number];
@@ -3645,8 +4262,9 @@ function WorkspaceExplorerRow({
   path: string;
   rowRef: (element: HTMLButtonElement | null) => void;
   tabIndex: number;
-  onClick: () => void;
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   onDoubleClick?: () => void;
+  onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }) {
   const extension =
     kind === "file" ? label.split(".").pop()?.toLowerCase() : undefined;
@@ -3669,6 +4287,7 @@ function WorkspaceExplorerRow({
       data-file-tone={fileTone}
       data-open={isOpen || undefined}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
       ref={rowRef}
       role="treeitem"
@@ -3719,6 +4338,7 @@ function SidebarModeRow({
       className={
         isActive ? "gyro-sidebar-mode-row is-active" : "gyro-sidebar-mode-row"
       }
+      data-sidebar-mode={label.toLowerCase()}
       onClick={onClick}
       type="button"
     >
@@ -3957,6 +4577,7 @@ export function ChatUtilityBar({
 }
 
 export function ChatGridSurface({
+  children,
   layout,
   maximizedPaneId,
   onDropSession,
@@ -3965,6 +4586,7 @@ export function ChatGridSurface({
   onToggleMaximize,
   renderPane,
 }: {
+  children?: ReactNode;
   layout: ChatProjectLayout;
   maximizedPaneId?: string;
   onDropSession: (
@@ -4076,6 +4698,9 @@ export function ChatGridSurface({
         }
       }}
     >
+      {occupiedCount === 0 && children ? (
+        <div className="gyro-chat-grid-empty">{children}</div>
+      ) : null}
       {slots.map((pane, slotIndex) => {
         const paneMaximized = pane?.paneId === maximizedPaneId;
         const paneFocused = pane?.paneId === focusedPaneId;
@@ -6449,10 +7074,555 @@ export function CliWorkspaceSurface({
   );
 }
 
+function workspaceSettingsList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function WorkspaceSettingsEditor({
+  activeWorkspaceRoot,
+  folderSettings = {},
+  onChange,
+  userSettings = {},
+  workspacePath,
+  workspaceRoots,
+  workspaceSettings = {},
+  keybindings = {},
+  onKeybindingChange,
+  contributions = [],
+  onRegisterContribution,
+  onToggleContribution,
+  onRemoveContribution,
+}: {
+  activeWorkspaceRoot?: string;
+  folderSettings?: Record<string, WorkspaceScopedSettings>;
+  onChange?: (
+    scope: WorkspaceSettingScope,
+    path: string | undefined,
+    settings: WorkspaceScopedSettings,
+  ) => void;
+  userSettings?: WorkspaceScopedSettings;
+  workspacePath?: string;
+  workspaceRoots: string[];
+  workspaceSettings?: Record<string, WorkspaceScopedSettings>;
+  keybindings?: Record<string, WorkspaceKeybinding | null>;
+  onKeybindingChange?: (
+    commandId: string,
+    keybinding?: WorkspaceKeybinding | null,
+  ) => void;
+  contributions?: IdeContribution[];
+  onRegisterContribution?: (contribution: IdeContribution) => void;
+  onToggleContribution?: (id: string, enabled: boolean) => void;
+  onRemoveContribution?: (id: string) => void;
+}) {
+  const [scope, setScope] = useState<WorkspaceSettingScope>("workspace");
+  const [folderPath, setFolderPath] = useState(
+    activeWorkspaceRoot ?? workspaceRoots[0] ?? "",
+  );
+  const contributionInputRef = useRef<HTMLInputElement>(null);
+  const [contributionError, setContributionError] = useState("");
+  useEffect(() => {
+    if (activeWorkspaceRoot && workspaceRoots.includes(activeWorkspaceRoot)) {
+      setFolderPath(activeWorkspaceRoot);
+    }
+  }, [activeWorkspaceRoot, workspaceRoots]);
+  const path =
+    scope === "workspace"
+      ? workspacePath
+      : scope === "folder"
+        ? folderPath
+        : undefined;
+  const settings =
+    scope === "user"
+      ? userSettings
+      : scope === "workspace"
+        ? (workspaceSettings[workspacePath ?? ""] ?? {})
+        : (folderSettings[folderPath] ?? {});
+  const update = (next: WorkspaceScopedSettings) =>
+    onChange?.(scope, path, next);
+  const inheritedLabel = scope === "user" ? "Use default" : "Inherit";
+
+  return (
+    <section
+      aria-labelledby="gyro-workspace-settings-title"
+      className="gyro-workspace-settings-editor"
+    >
+      <header>
+        <span className="gyro-workspace-settings-eyebrow">
+          <Settings size={13} /> Workspace configuration
+        </span>
+        <h1 id="gyro-workspace-settings-title">Settings</h1>
+        <p>
+          Tune the editor and search behavior at user, workspace, or folder
+          scope. Narrower scopes override broader ones.
+        </p>
+      </header>
+      <div
+        aria-label="Settings scope"
+        className="gyro-workspace-settings-scopes"
+      >
+        {(["user", "workspace", "folder"] as WorkspaceSettingScope[]).map(
+          (item) => (
+            <button
+              aria-pressed={scope === item}
+              className={scope === item ? "is-active" : undefined}
+              key={item}
+              onClick={() => setScope(item)}
+              type="button"
+            >
+              {item[0]?.toUpperCase()}
+              {item.slice(1)}
+            </button>
+          ),
+        )}
+      </div>
+      {scope === "folder" && workspaceRoots.length > 0 ? (
+        <label className="gyro-workspace-settings-folder">
+          <span>Folder</span>
+          <select
+            onChange={(event) => setFolderPath(event.target.value)}
+            value={folderPath}
+          >
+            {workspaceRoots.map((root) => (
+              <option key={root} value={root}>
+                {root.split("/").filter(Boolean).at(-1) ?? root}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <div className="gyro-workspace-settings-list">
+        <label>
+          <span>
+            <strong>Files: Exclude</strong>
+            <small>Comma-separated globs hidden from Explorer.</small>
+          </span>
+          <input
+            onChange={(event) =>
+              update({
+                ...settings,
+                filesExclude: workspaceSettingsList(event.target.value),
+              })
+            }
+            placeholder={`${inheritedLabel}: .git/**, node_modules/**`}
+            value={(settings.filesExclude ?? []).join(", ")}
+          />
+        </label>
+        <label>
+          <span>
+            <strong>Search: Exclude</strong>
+            <small>Comma-separated globs skipped by workspace search.</small>
+          </span>
+          <input
+            onChange={(event) =>
+              update({
+                ...settings,
+                searchExclude: workspaceSettingsList(event.target.value),
+              })
+            }
+            placeholder={`${inheritedLabel}: .git/**, dist/**`}
+            value={(settings.searchExclude ?? []).join(", ")}
+          />
+        </label>
+        <label>
+          <span>
+            <strong>Search: Maximum Results</strong>
+            <small>Caps results between 10 and 1,000.</small>
+          </span>
+          <input
+            max={1000}
+            min={10}
+            onChange={(event) => {
+              const value = event.target.valueAsNumber;
+              update({
+                ...settings,
+                searchMaxResults: Number.isFinite(value) ? value : undefined,
+              });
+            }}
+            placeholder={inheritedLabel}
+            type="number"
+            value={settings.searchMaxResults ?? ""}
+          />
+        </label>
+        <label>
+          <span>
+            <strong>Editor: Minimap</strong>
+            <small>Shows a compact document overview beside the editor.</small>
+          </span>
+          <select
+            onChange={(event) =>
+              update({
+                ...settings,
+                editorMinimapEnabled:
+                  event.target.value === "inherit"
+                    ? undefined
+                    : event.target.value === "on",
+              })
+            }
+            value={
+              settings.editorMinimapEnabled === undefined
+                ? "inherit"
+                : settings.editorMinimapEnabled
+                  ? "on"
+                  : "off"
+            }
+          >
+            <option value="inherit">{inheritedLabel}</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+      </div>
+      {scope !== "user" ? (
+        <button
+          className="gyro-workspace-settings-reset"
+          disabled={Object.keys(settings).length === 0}
+          onClick={() => update({})}
+          type="button"
+        >
+          Reset {scope} overrides
+        </button>
+      ) : null}
+      <section className="gyro-workspace-keybindings">
+        <header>
+          <div>
+            <h2>Keyboard shortcuts</h2>
+            <p>
+              Focus a shortcut and press the key combination to reassign it.
+            </p>
+          </div>
+          <kbd>{isMacPlatform() ? "⌘" : "Ctrl"}</kbd>
+        </header>
+        <div>
+          {workspaceCommandRegistry.map((command) => {
+            const hasOverride = command.id in keybindings;
+            const binding = hasOverride
+              ? keybindings[command.id]
+              : command.keybinding;
+            const collision = binding
+              ? workspaceCommandRegistry.find((candidate) => {
+                  if (candidate.id === command.id) return false;
+                  const candidateBinding =
+                    candidate.id in keybindings
+                      ? keybindings[candidate.id]
+                      : candidate.keybinding;
+                  return (
+                    candidateBinding &&
+                    workspaceKeybindingSignature(candidateBinding) ===
+                      workspaceKeybindingSignature(binding)
+                  );
+                })
+              : undefined;
+            return (
+              <label key={command.id}>
+                <span>
+                  <strong>{command.label}</strong>
+                  <small>
+                    {collision
+                      ? `Conflicts with ${collision.label}`
+                      : command.description}
+                  </small>
+                </span>
+                <input
+                  aria-label={`Keybinding for ${command.label}`}
+                  className={collision ? "is-conflict" : undefined}
+                  onKeyDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.key === "Escape") {
+                      event.currentTarget.blur();
+                      return;
+                    }
+                    if (
+                      (event.key === "Backspace" || event.key === "Delete") &&
+                      !event.metaKey &&
+                      !event.ctrlKey &&
+                      !event.altKey
+                    ) {
+                      onKeybindingChange?.(command.id, undefined);
+                      return;
+                    }
+                    if (
+                      ["Meta", "Control", "Alt", "Shift"].includes(event.key)
+                    ) {
+                      return;
+                    }
+                    const mac = isMacPlatform();
+                    onKeybindingChange?.(command.id, {
+                      key: event.key.toLowerCase(),
+                      primary: mac ? event.metaKey : event.ctrlKey,
+                      control: mac ? event.ctrlKey : false,
+                      shift: event.shiftKey,
+                      alt: event.altKey,
+                    });
+                  }}
+                  placeholder="Unassigned"
+                  readOnly
+                  value={binding ? workspaceKeybindingLabel(binding) : ""}
+                />
+                {hasOverride ? (
+                  <button
+                    aria-label={`Reset keybinding for ${command.label}`}
+                    onClick={() => onKeybindingChange?.(command.id, undefined)}
+                    title="Reset to default"
+                    type="button"
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                ) : null}
+              </label>
+            );
+          })}
+        </div>
+      </section>
+      <section className="gyro-workspace-contributions">
+        <header>
+          <div>
+            <h2>Local contributions</h2>
+            <p>
+              Declarative commands and views loaded from a local manifest.
+              Contributions stay disabled until you enable them.
+            </p>
+          </div>
+          <button
+            onClick={() => contributionInputRef.current?.click()}
+            type="button"
+          >
+            <Plus size={13} /> Install from manifest
+          </button>
+          <input
+            accept=".json,.gyro-extension"
+            aria-label="Install local contribution manifest"
+            hidden
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) return;
+              try {
+                const contribution = parsedLocalIdeContribution(
+                  JSON.parse(await file.text()),
+                  file.name,
+                );
+                onRegisterContribution?.(contribution);
+                setContributionError("");
+              } catch (error) {
+                setContributionError(String(error));
+              }
+            }}
+            ref={contributionInputRef}
+            type="file"
+          />
+        </header>
+        {contributionError ? (
+          <p className="gyro-workspace-contribution-error" role="alert">
+            {contributionError}
+          </p>
+        ) : null}
+        <div className="gyro-workspace-contribution-list">
+          {contributions.map((contribution) => (
+            <article key={contribution.id}>
+              <div className="gyro-workspace-contribution-title">
+                <Settings size={14} />
+                <span>
+                  <strong>{contribution.label}</strong>
+                  <small>
+                    {contribution.publisher} · v{contribution.version} ·{" "}
+                    {contribution.source === "core"
+                      ? "bundled with Gyro"
+                      : (contribution.manifestName ?? "local manifest")}
+                  </small>
+                </span>
+                <em className={`is-${contribution.source}`}>
+                  {contribution.source}
+                </em>
+              </div>
+              <div className="gyro-workspace-contribution-permissions">
+                {contribution.permissions.map((permission) => (
+                  <span key={permission}>
+                    <ShieldCheck size={10} /> {permission}
+                  </span>
+                ))}
+              </div>
+              <div className="gyro-workspace-contribution-actions">
+                <button
+                  disabled={contribution.source === "core"}
+                  onClick={() =>
+                    onToggleContribution?.(
+                      contribution.id,
+                      !contribution.enabled,
+                    )
+                  }
+                  type="button"
+                >
+                  {contribution.enabled ? "Disable" : "Enable"}
+                </button>
+                {contribution.source === "local" ? (
+                  <button
+                    className="is-danger"
+                    onClick={() => onRemoveContribution?.(contribution.id)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function parsedLocalIdeContribution(
+  value: unknown,
+  manifestName: string,
+): IdeContribution {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Contribution manifest must contain a JSON object");
+  }
+  const manifest = value as Record<string, unknown>;
+  const id = typeof manifest.id === "string" ? manifest.id.trim() : "";
+  const label = typeof manifest.label === "string" ? manifest.label.trim() : "";
+  if (!/^[a-z0-9][a-z0-9._-]{1,99}$/i.test(id) || !label) {
+    throw new Error("Contribution manifest needs a valid id and label");
+  }
+  const viewIds: IdeViewId[] = [
+    "explorer",
+    "search",
+    "source-control",
+    "run-test",
+    "ai",
+    "settings",
+  ];
+  const views = Array.isArray(manifest.views)
+    ? manifest.views.filter(
+        (view): view is IdeViewId =>
+          typeof view === "string" && viewIds.includes(view as IdeViewId),
+      )
+    : [];
+  const categories = [
+    "file",
+    "edit",
+    "view",
+    "source-control",
+    "run",
+    "ai",
+  ] as const;
+  const commands = Array.isArray(manifest.commands)
+    ? manifest.commands.slice(0, 100).flatMap((candidate) => {
+        if (
+          !candidate ||
+          typeof candidate !== "object" ||
+          Array.isArray(candidate)
+        )
+          return [];
+        const command = candidate as Record<string, unknown>;
+        if (typeof command.id !== "string" || typeof command.label !== "string")
+          return [];
+        const category = categories.includes(
+          command.category as (typeof categories)[number],
+        )
+          ? (command.category as (typeof categories)[number])
+          : "view";
+        const viewId = viewIds.includes(command.viewId as IdeViewId)
+          ? (command.viewId as IdeViewId)
+          : undefined;
+        return [
+          {
+            id: command.id.slice(0, 200),
+            label: command.label.slice(0, 200),
+            category,
+            viewId,
+          },
+        ];
+      })
+    : [];
+  const allowedPermissions: IdeContribution["permissions"] = [
+    "commands",
+    "views",
+    "tasks",
+    "debug",
+    "languages",
+  ];
+  const permissions = Array.isArray(manifest.permissions)
+    ? manifest.permissions.filter(
+        (permission): permission is IdeContribution["permissions"][number] =>
+          typeof permission === "string" &&
+          allowedPermissions.includes(
+            permission as IdeContribution["permissions"][number],
+          ),
+      )
+    : [];
+  return {
+    id,
+    label: label.slice(0, 200),
+    version:
+      typeof manifest.version === "string"
+        ? manifest.version.slice(0, 50)
+        : "0.0.0",
+    publisher:
+      typeof manifest.publisher === "string"
+        ? manifest.publisher.slice(0, 100)
+        : "Local",
+    source: "local",
+    enabled: false,
+    permissions,
+    manifestName,
+    views,
+    commands,
+  };
+}
+
+function workspaceKeybindingSignature(binding: WorkspaceKeybinding) {
+  return [
+    binding.primary ? "primary" : "",
+    binding.control ? "control" : "",
+    binding.shift ? "shift" : "",
+    binding.alt ? "alt" : "",
+    binding.key.toLowerCase(),
+  ].join("+");
+}
+
+function workspaceKeybindingLabel(binding: WorkspaceKeybinding) {
+  const mac = isMacPlatform();
+  return [
+    binding.primary ? (mac ? "⌘" : "Ctrl") : "",
+    binding.control ? "Ctrl" : "",
+    binding.alt ? (mac ? "⌥" : "Alt") : "",
+    binding.shift ? (mac ? "⇧" : "Shift") : "",
+    binding.key.length === 1 ? binding.key.toUpperCase() : binding.key,
+  ]
+    .filter(Boolean)
+    .join(mac ? "" : "+");
+}
+
 type IdeSurfaceProps = {
   files: WorkspaceFile[];
   ide?: IdeState;
   workspacePath?: string;
+  workspaceRoots?: string[];
+  activeWorkspaceRoot?: string;
+  workspaceTrusted?: boolean;
+  effectiveMinimapEnabled?: boolean;
+  workspaceUserSettings?: WorkspaceScopedSettings;
+  workspaceSettingsByWorkspace?: Record<string, WorkspaceScopedSettings>;
+  workspaceSettingsByFolder?: Record<string, WorkspaceScopedSettings>;
+  workspaceKeybindings?: Record<string, WorkspaceKeybinding | null>;
+  onWorkspaceSettingsChange?: (
+    scope: WorkspaceSettingScope,
+    path: string | undefined,
+    settings: WorkspaceScopedSettings,
+  ) => void;
+  onWorkspaceKeybindingChange?: (
+    commandId: string,
+    keybinding?: WorkspaceKeybinding | null,
+  ) => void;
+  onRegisterWorkspaceContribution?: (contribution: IdeContribution) => void;
+  onToggleWorkspaceContribution?: (id: string, enabled: boolean) => void;
+  onRemoveWorkspaceContribution?: (id: string) => void;
   selectedPath?: string;
   fileContent?: WorkspaceFileContent;
   fileError?: string;
@@ -6462,6 +7632,7 @@ type IdeSurfaceProps = {
   editorSelection?: EditorSelection;
   editorRevealTarget?: EditorRevealTarget;
   onOpenWorkspace?: () => void;
+  onTrustWorkspace?: () => void;
   onSelectFile: (path: string) => void;
   onPinEditorTab?: (path: string) => void;
   onSelectEditorGroup?: (groupId: string) => void;
@@ -6535,6 +7706,19 @@ export function IdeSurface({
   files,
   ide,
   workspacePath,
+  workspaceRoots = workspacePath ? [workspacePath] : [],
+  activeWorkspaceRoot = workspacePath,
+  workspaceTrusted = true,
+  effectiveMinimapEnabled,
+  workspaceUserSettings,
+  workspaceSettingsByWorkspace,
+  workspaceSettingsByFolder,
+  workspaceKeybindings,
+  onWorkspaceSettingsChange,
+  onWorkspaceKeybindingChange,
+  onRegisterWorkspaceContribution,
+  onToggleWorkspaceContribution,
+  onRemoveWorkspaceContribution,
   selectedPath,
   fileContent,
   fileError = "",
@@ -6544,6 +7728,7 @@ export function IdeSurface({
   editorSelection,
   editorRevealTarget,
   onOpenWorkspace,
+  onTrustWorkspace,
   onSelectFile,
   onPinEditorTab,
   onSelectEditorGroup,
@@ -6710,73 +7895,111 @@ export function IdeSurface({
           .filter(Boolean)
           .join(" ")}
       >
-        <div
-          className={`gyro-editor-groups is-split-${ide?.layout.splitDirection ?? "right"}`}
-          data-group-count={editorGroups.length}
-        >
-          {editorGroups.map((group) => {
-            const groupPath =
-              group.activePath ??
-              (group.id === activeGroupId ? selectedPath : undefined);
-            const groupBuffer = groupPath
-              ? (ide?.buffers[groupPath] ??
-                (groupPath === activeBuffer?.path ? activeBuffer : undefined))
-              : undefined;
-            return (
-              <EditorGroupPane
-                activeBuffer={groupBuffer}
-                activePath={groupPath}
-                fileContent={
-                  fileContent?.path === groupPath ? fileContent : undefined
-                }
-                fileError={fileError}
-                fileLoadState={
-                  groupBuffer
-                    ? "ready"
-                    : groupPath === selectedPath
-                      ? fileLoadState
-                      : "idle"
-                }
-                filesAvailable={files.length > 0}
-                group={group}
-                groupCount={editorGroups.length}
-                isActive={group.id === activeGroupId}
-                key={group.id}
-                minimapEnabled={ide?.layout.minimapEnabled !== false}
-                onActivate={() => onSelectEditorGroup?.(group.id)}
-                onAssistantAction={onAssistantAction}
-                onCloseGroup={() => onCloseEditorGroup?.(group.id)}
-                onCloseTab={(path) => onCloseEditorTab?.(path, group.id)}
-                onEditorChange={onEditorChange}
-                onEditorRevert={onEditorRevert}
-                onEditorSave={onEditorSave}
-                onEditorSelectionChange={onEditorSelectionChange}
-                onMoveTab={(path, fromGroupId) =>
-                  onMoveEditorTab?.(path, group.id, fromGroupId)
-                }
-                onPinTab={onPinEditorTab}
-                onSelectFile={(path) => {
-                  onSelectEditorGroup?.(group.id);
-                  onSelectFile(path);
-                }}
-                onSplitEditorGroup={onSplitEditorGroup}
-                onToggleAssistant={onToggleAssistant}
-                onToggleMinimap={onToggleMinimap}
-                renderEditor={renderEditor}
-                revealTarget={
-                  editorRevealTarget?.path === groupPath
-                    ? editorRevealTarget
-                    : undefined
-                }
-                selection={
-                  editorSelection?.path === groupPath
-                    ? editorSelection
-                    : undefined
-                }
-              />
-            );
-          })}
-        </div>
+        {!workspaceTrusted ? (
+          <aside className="gyro-workspace-trust-banner" role="status">
+            <LockKeyhole size={14} />
+            <span>
+              <strong>Restricted Mode</strong>
+              Tasks, terminals, language servers, and debug adapters are paused
+              for this folder.
+            </span>
+            <button onClick={onTrustWorkspace} type="button">
+              Trust workspace
+            </button>
+          </aside>
+        ) : null}
+        {ide?.activeView === "settings" ? (
+          <WorkspaceSettingsEditor
+            activeWorkspaceRoot={activeWorkspaceRoot}
+            contributions={ide?.contributions}
+            folderSettings={workspaceSettingsByFolder}
+            keybindings={workspaceKeybindings}
+            onChange={onWorkspaceSettingsChange}
+            onKeybindingChange={onWorkspaceKeybindingChange}
+            onRegisterContribution={onRegisterWorkspaceContribution}
+            onRemoveContribution={onRemoveWorkspaceContribution}
+            onToggleContribution={onToggleWorkspaceContribution}
+            userSettings={workspaceUserSettings}
+            workspacePath={workspacePath}
+            workspaceRoots={workspaceRoots}
+            workspaceSettings={workspaceSettingsByWorkspace}
+          />
+        ) : (
+          <div
+            className={`gyro-editor-groups is-split-${ide?.layout.splitDirection ?? "right"}`}
+            data-group-count={editorGroups.length}
+          >
+            {editorGroups.map((group) => {
+              const groupPath =
+                group.activePath ??
+                (group.id === activeGroupId ? selectedPath : undefined);
+              const groupBuffer = groupPath
+                ? (ide?.buffers[groupPath] ??
+                  (groupPath === activeBuffer?.path ? activeBuffer : undefined))
+                : undefined;
+              return (
+                <EditorGroupPane
+                  activeBuffer={groupBuffer}
+                  activePath={groupPath}
+                  breadcrumbPath={
+                    files.find((file) => file.path === groupPath)
+                      ?.relativePath ?? groupPath
+                  }
+                  fileContent={
+                    fileContent?.path === groupPath ? fileContent : undefined
+                  }
+                  fileError={fileError}
+                  fileLoadState={
+                    groupBuffer
+                      ? "ready"
+                      : groupPath === selectedPath
+                        ? fileLoadState
+                        : "idle"
+                  }
+                  filesAvailable={files.length > 0}
+                  group={group}
+                  groupCount={editorGroups.length}
+                  isActive={group.id === activeGroupId}
+                  key={group.id}
+                  minimapEnabled={
+                    effectiveMinimapEnabled ??
+                    ide?.layout.minimapEnabled !== false
+                  }
+                  onActivate={() => onSelectEditorGroup?.(group.id)}
+                  onAssistantAction={onAssistantAction}
+                  onCloseGroup={() => onCloseEditorGroup?.(group.id)}
+                  onCloseTab={(path) => onCloseEditorTab?.(path, group.id)}
+                  onEditorChange={onEditorChange}
+                  onEditorRevert={onEditorRevert}
+                  onEditorSave={onEditorSave}
+                  onEditorSelectionChange={onEditorSelectionChange}
+                  onMoveTab={(path, fromGroupId) =>
+                    onMoveEditorTab?.(path, group.id, fromGroupId)
+                  }
+                  onPinTab={onPinEditorTab}
+                  onSelectFile={(path) => {
+                    onSelectEditorGroup?.(group.id);
+                    onSelectFile(path);
+                  }}
+                  onSplitEditorGroup={onSplitEditorGroup}
+                  onToggleAssistant={onToggleAssistant}
+                  onToggleMinimap={onToggleMinimap}
+                  renderEditor={renderEditor}
+                  revealTarget={
+                    editorRevealTarget?.path === groupPath
+                      ? editorRevealTarget
+                      : undefined
+                  }
+                  selection={
+                    editorSelection?.path === groupPath
+                      ? editorSelection
+                      : undefined
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
         {!showEmbeddedPanel && ide?.layout.rightAssistantOpen ? (
           <aside
             className="gyro-ide-assistant"
@@ -7005,6 +8228,7 @@ type EditorGroupPaneProps = {
   groupCount: number;
   isActive: boolean;
   activePath?: string;
+  breadcrumbPath?: string;
   activeBuffer?: EditorBuffer;
   selection?: EditorSelection;
   revealTarget?: EditorRevealTarget;
@@ -7035,6 +8259,7 @@ function EditorGroupPane({
   groupCount,
   isActive,
   activePath,
+  breadcrumbPath,
   activeBuffer,
   selection,
   revealTarget,
@@ -7223,10 +8448,10 @@ function EditorGroupPane({
         <div className="gyro-breadcrumb-row">
           {activePath ? (
             <>
-              {parentSegments(activePath).map((segment) => (
+              {parentSegments(breadcrumbPath ?? activePath).map((segment) => (
                 <span key={segment}>{segment}</span>
               ))}
-              {parentSegments(activePath).length > 0 ? (
+              {parentSegments(breadcrumbPath ?? activePath).length > 0 ? (
                 <ChevronRight size={13} />
               ) : null}
               <strong>{workspaceName(activePath)}</strong>
@@ -8349,6 +9574,55 @@ function WorkbenchPaneContent({
             <div className="gyro-panel-empty">
               No diagnostics yet. Language server status will appear here when
               configured.
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  if (activePaneTab === "test-results") {
+    const tests = (ide?.testTree ?? []).flatMap((item) =>
+      item.children?.length ? item.children : [item],
+    );
+    return (
+      <section className="gyro-test-results-pane" aria-label="Test Results">
+        <header>
+          <ListChecks size={15} />
+          <span>{tests.length} tests</span>
+          <small>
+            {tests.filter((test) => test.status === "passed").length} passed ·{" "}
+            {tests.filter((test) => test.status === "failed").length} failed
+          </small>
+        </header>
+        <div className="gyro-test-results-list">
+          {tests.length > 0 ? (
+            tests.map((test) => (
+              <button
+                className={`gyro-test-result is-${test.status}`}
+                disabled={!test.path}
+                key={test.id}
+                onClick={() =>
+                  test.path && onOpenDiffInEditor?.(test.path, 1, 1)
+                }
+                type="button"
+              >
+                {test.status === "passed" ? (
+                  <Check size={13} />
+                ) : test.status === "failed" ? (
+                  <X size={13} />
+                ) : test.status === "running" ? (
+                  <Activity size={13} />
+                ) : (
+                  <CircleDashed size={13} />
+                )}
+                <strong>{test.label}</strong>
+                <span>{test.status}</span>
+              </button>
+            ))
+          ) : (
+            <div className="gyro-panel-empty">
+              Run a discovered test task to populate structured results.
             </div>
           )}
         </div>
@@ -10389,6 +11663,8 @@ type GlobalSearchAction = {
   icon: IconComponent;
   keywords?: string;
   shortcut?: { mac: string; other: string };
+  requiresWorkspace?: boolean;
+  requiresTrust?: boolean;
 };
 
 type GlobalSearchEntry = {
@@ -10401,6 +11677,7 @@ type GlobalSearchEntry = {
   searchText: string;
   priority: number;
   action?: GlobalSearchAction;
+  disabledReason?: string;
 };
 
 type GlobalSearchGroup = {
@@ -10409,7 +11686,7 @@ type GlobalSearchGroup = {
   entries: GlobalSearchEntry[];
 };
 
-const globalSearchActions: GlobalSearchAction[] = [
+const legacyGlobalSearchActions: GlobalSearchAction[] = [
   {
     id: "new-chat",
     label: "New chat",
@@ -10561,6 +11838,28 @@ const globalSearchActions: GlobalSearchAction[] = [
   },
 ];
 
+const workspaceCommandIds = new Set<string>(
+  workspaceCommandRegistry.map((command) => command.id),
+);
+const globalSearchActions: GlobalSearchAction[] = [
+  ...legacyGlobalSearchActions.filter(
+    (action) => !workspaceCommandIds.has(action.id),
+  ),
+  ...workspaceCommandRegistry.map((command) => ({
+    id: command.id,
+    label: command.label,
+    meta: command.description,
+    destination: command.destination,
+    layout: command.layout,
+    toolTab: command.panel,
+    icon: workspaceShellIcons[command.icon],
+    keywords: command.keywords,
+    shortcut: command.shortcut,
+    requiresWorkspace: command.requiresWorkspace,
+    requiresTrust: command.requiresTrust,
+  })),
+];
+
 function isMacPlatform() {
   return (
     typeof navigator !== "undefined" &&
@@ -10568,7 +11867,15 @@ function isMacPlatform() {
   );
 }
 
-function primaryGlobalSearchShortcut() {
+type GlobalSearchMode = "commands" | "files" | "global";
+
+function primaryGlobalSearchShortcut(mode: GlobalSearchMode) {
+  if (mode === "commands") {
+    return isMacPlatform() ? "⇧⌘P" : "Ctrl Shift P";
+  }
+  if (mode === "files") {
+    return isMacPlatform() ? "⌘P" : "Ctrl P";
+  }
   return isMacPlatform() ? "⌘K" : "Ctrl K";
 }
 
@@ -10580,12 +11887,18 @@ export function CommandPaletteOverlay({
   recents = [],
   sessions = [],
   projects = [],
+  files = [],
+  recentFilePaths = [],
   pinnedSessionIds = [],
+  hasWorkspace = false,
+  workspaceTrusted = true,
+  mode = "global",
   query = "",
   onQueryChange,
   onCommand,
   onSelectSession,
   onSelectProject,
+  onSelectFile,
 }: {
   onClose: () => void;
   onSelectDestination: (destination: AppDestination) => void;
@@ -10594,12 +11907,18 @@ export function CommandPaletteOverlay({
   recents?: string[];
   sessions?: Session[];
   projects?: GlobalSearchProject[];
+  files?: WorkspaceFile[];
+  recentFilePaths?: string[];
   pinnedSessionIds?: string[];
+  hasWorkspace?: boolean;
+  workspaceTrusted?: boolean;
+  mode?: GlobalSearchMode;
   query?: string;
   onQueryChange?: (query: string) => void;
   onCommand?: (commandId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onSelectProject?: (path: string) => void;
+  onSelectFile?: (path: string) => void;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listboxId = useId();
@@ -10623,8 +11942,14 @@ export function CommandPaletteOverlay({
             ? recents.indexOf(action.id)
             : 100 + index,
         action,
+        disabledReason:
+          action.requiresWorkspace && !hasWorkspace
+            ? "Open a project to use this command"
+            : action.requiresTrust && !workspaceTrusted
+              ? "Trust this workspace to run commands"
+              : undefined,
       })),
-    [recents],
+    [hasWorkspace, recents, workspaceTrusted],
   );
   const sessionEntries = useMemo(() => {
     const pinned = new Set(pinnedSessionIds);
@@ -10662,13 +11987,94 @@ export function CommandPaletteOverlay({
       })),
     [projects],
   );
+  const fileEntries = useMemo(() => {
+    const recentOrder = new Map(
+      recentFilePaths.map((path, index) => [path, index]),
+    );
+    return files
+      .filter((file) => file.kind === "file")
+      .slice(0, 10_000)
+      .map<GlobalSearchEntry>((file, index) => {
+        const segments = file.path.split("/").filter(Boolean);
+        const label = segments.at(-1) ?? file.path;
+        const parent = segments.slice(0, -1).join("/") || "Workspace root";
+        const recentIndex = recentOrder.get(file.path);
+        return {
+          id: `file:${file.path}`,
+          label,
+          detail: parent,
+          icon: FileCode2,
+          selection: { kind: "file", path: file.path },
+          searchText: `${label} ${file.path}`,
+          priority: recentIndex ?? 1_000 + index,
+        };
+      })
+      .sort(
+        (first, second) =>
+          first.priority - second.priority ||
+          first.label.localeCompare(second.label),
+      );
+  }, [files, recentFilePaths]);
   const groups = useMemo<GlobalSearchGroup[]>(() => {
+    if (mode === "commands") {
+      const entries = normalizedQuery
+        ? actionEntries
+            .map((entry) => ({
+              entry,
+              score: globalSearchMatchScore(
+                query,
+                entry.label,
+                entry.searchText,
+              ),
+            }))
+            .filter(({ score }) => Number.isFinite(score))
+            .sort(
+              (first, second) =>
+                first.score - second.score ||
+                first.entry.priority - second.entry.priority,
+            )
+            .slice(0, 12)
+            .map(({ entry }) => entry)
+        : actionEntries.slice(0, 12);
+      return [{ id: "commands", label: "Commands", entries }].filter(
+        (group) => group.entries.length > 0,
+      );
+    }
+    if (mode === "files") {
+      const entries = normalizedQuery
+        ? fileEntries
+            .map((entry) => ({
+              entry,
+              score: globalSearchMatchScore(
+                query,
+                entry.label,
+                entry.searchText,
+              ),
+            }))
+            .filter(({ score }) => Number.isFinite(score))
+            .sort(
+              (first, second) =>
+                first.score - second.score ||
+                first.entry.priority - second.entry.priority,
+            )
+            .slice(0, 16)
+            .map(({ entry }) => entry)
+        : fileEntries.slice(0, 12);
+      return [{ id: "files", label: "Files", entries }].filter(
+        (group) => group.entries.length > 0,
+      );
+    }
     if (!normalizedQuery) {
       return [
         {
           id: "suggested",
           label: "Suggested",
           entries: actionEntries.slice(0, 6),
+        },
+        {
+          id: "open-files",
+          label: "Open files",
+          entries: fileEntries.slice(0, 6),
         },
         {
           id: "recent-sessions",
@@ -10698,11 +12104,20 @@ export function CommandPaletteOverlay({
         .slice(0, 8)
         .map(({ entry }) => entry);
     return [
+      { id: "files", label: "Files", entries: ranked(fileEntries) },
       { id: "projects", label: "Projects", entries: ranked(projectEntries) },
       { id: "sessions", label: "Sessions", entries: ranked(sessionEntries) },
       { id: "actions", label: "Actions", entries: ranked(actionEntries) },
     ].filter((group) => group.entries.length > 0);
-  }, [actionEntries, normalizedQuery, projectEntries, query, sessionEntries]);
+  }, [
+    actionEntries,
+    fileEntries,
+    normalizedQuery,
+    mode,
+    projectEntries,
+    query,
+    sessionEntries,
+  ]);
   const visibleEntries = groups.flatMap((group) => group.entries);
   const activeEntry = visibleEntries[selectedIndex];
 
@@ -10719,7 +12134,7 @@ export function CommandPaletteOverlay({
   }, [selectedIndex, visibleEntries.length]);
 
   const activateEntry = (entry?: GlobalSearchEntry) => {
-    if (!entry) return;
+    if (!entry || entry.disabledReason) return;
     if (entry.selection.kind === "session") {
       onSelectSession?.(entry.selection.sessionId);
       onClose();
@@ -10727,6 +12142,12 @@ export function CommandPaletteOverlay({
     }
     if (entry.selection.kind === "project") {
       onSelectProject?.(entry.selection.path);
+      onClose();
+      return;
+    }
+    if (entry.selection.kind === "file") {
+      onSelectWorkspaceLayout("code");
+      onSelectFile?.(entry.selection.path);
       onClose();
       return;
     }
@@ -10751,7 +12172,13 @@ export function CommandPaletteOverlay({
       role="dialog"
     >
       <div
-        aria-label="Search Gyro"
+        aria-label={
+          mode === "commands"
+            ? "Command Palette"
+            : mode === "files"
+              ? "Quick Open"
+              : "Search Gyro"
+        }
         className="gyro-command-palette is-global-search"
       >
         <header>
@@ -10761,7 +12188,13 @@ export function CommandPaletteOverlay({
             aria-autocomplete="list"
             aria-controls={listboxId}
             aria-expanded="true"
-            aria-label="Search projects, sessions, and actions"
+            aria-label={
+              mode === "commands"
+                ? "Search commands"
+                : mode === "files"
+                  ? "Search files"
+                  : "Search files, projects, sessions, and actions"
+            }
             onChange={(event) => onQueryChange?.(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -10787,12 +12220,18 @@ export function CommandPaletteOverlay({
                 onClose();
               }
             }}
-            placeholder="Search projects, sessions, and actions"
+            placeholder={
+              mode === "commands"
+                ? "Type a command"
+                : mode === "files"
+                  ? "Search files by name"
+                  : "Search files, projects, sessions, and actions"
+            }
             ref={inputRef}
             role="combobox"
             value={query}
           />
-          <kbd>{primaryGlobalSearchShortcut()}</kbd>
+          <kbd>{primaryGlobalSearchShortcut(mode)}</kbd>
         </header>
         <div
           aria-label="Search results"
@@ -10804,7 +12243,7 @@ export function CommandPaletteOverlay({
             <div className="gyro-global-search-empty">
               <Search size={18} />
               <strong>No results for “{query.trim()}”</strong>
-              <span>Try a project, session title, or Gyro action.</span>
+              <span>Try a file, project, session title, or Gyro action.</span>
             </div>
           ) : null}
           {groups.map((group) => (
@@ -10815,8 +12254,14 @@ export function CommandPaletteOverlay({
                 const index = visibleEntries.indexOf(entry);
                 return (
                   <button
+                    aria-disabled={Boolean(entry.disabledReason)}
                     aria-selected={index === selectedIndex}
-                    className={index === selectedIndex ? "is-active" : ""}
+                    className={[
+                      index === selectedIndex ? "is-active" : "",
+                      entry.disabledReason ? "is-disabled" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     id={entry.id}
                     key={entry.id}
                     onClick={() => activateEntry(entry)}
@@ -10830,7 +12275,7 @@ export function CommandPaletteOverlay({
                     </span>
                     <span className="gyro-global-search-copy">
                       <strong>{entry.label}</strong>
-                      <small>{entry.detail}</small>
+                      <small>{entry.disabledReason ?? entry.detail}</small>
                     </span>
                     {entry.shortcut ? <kbd>{entry.shortcut}</kbd> : null}
                   </button>
@@ -15012,13 +16457,25 @@ function ChatTurn({
     plan?.content && plan.sourceTurnId === turn.id,
   );
   const timelineItems = interleavedChatTimelineItems(turn.timelineEvents);
-  const hasWorkActivity = timelineItems.some(
-    (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
+  const changeSummaryItems = timelineItems.filter(
+    (
+      item,
+    ): item is Extract<
+      (typeof timelineItems)[number],
+      { kind: "file-summary" }
+    > => item.kind === "file-summary",
   );
-  const canCollapseThought = !isRunning && hasWorkActivity;
   const workTimelineItems = timelineItems.filter(
-    (item) => item.kind !== "event" || item.event.kind !== "assistant-message",
+    (
+      item,
+    ): item is Exclude<
+      (typeof timelineItems)[number],
+      { kind: "file-summary" }
+    > =>
+      item.kind !== "file-summary" &&
+      (item.kind !== "event" || item.event.kind !== "assistant-message"),
   );
+  const canCollapseThought = !isRunning && workTimelineItems.length > 0;
   const responseTimelineItems = timelineItems.filter(
     (item) => item.kind === "event" && item.event.kind === "assistant-message",
   );
@@ -15058,21 +16515,6 @@ function ChatTurn({
           {visibleWorkTimelineItems.length > 0 ? (
             <div className="gyro-chat-run-sequence" aria-label="Work timeline">
               {visibleWorkTimelineItems.map((item) => {
-                if (item.kind === "file-summary") {
-                  return !isRunning ? (
-                    <ChatTurnChangeSummary
-                      changeSummary={chatTurnChangeSummary(
-                        item.events,
-                        sourceControl,
-                        sourceControlBaseline,
-                      )}
-                      isRunning={isRunning}
-                      key={item.id}
-                      onLoadChangeDiff={onLoadChangeDiff}
-                      onOpenChanges={onOpenChanges}
-                    />
-                  ) : null;
-                }
                 if (item.kind === "activity-group") {
                   return (
                     <ProviderActivityGroup events={item.events} key={item.id} />
@@ -15101,6 +16543,21 @@ function ChatTurn({
             </div>
           ) : null}
         </div>
+        {!isRunning
+          ? changeSummaryItems.map((item) => (
+              <ChatTurnChangeSummary
+                changeSummary={chatTurnChangeSummary(
+                  item.events,
+                  sourceControl,
+                  sourceControlBaseline,
+                )}
+                isRunning={false}
+                key={item.id}
+                onLoadChangeDiff={onLoadChangeDiff}
+                onOpenChanges={onOpenChanges}
+              />
+            ))
+          : null}
         {responseTimelineItems.length > 0 ? (
           <div className="gyro-chat-run-sequence" aria-label="Final response">
             {responseTimelineItems.map((item) => {
@@ -16815,7 +18272,80 @@ function parentSegments(path: string) {
   return path.split(/[\\/]/).filter(Boolean).slice(0, -1);
 }
 
-function workspaceAncestorPaths(path: string) {
+function documentOutlineSymbols(content: string) {
+  const symbols: Array<{
+    name: string;
+    kind: string;
+    lineNumber: number;
+  }> = [];
+  const patterns: Array<{ kind: string; pattern: RegExp }> = [
+    {
+      kind: "class",
+      pattern: /^\s*(?:export\s+)?(?:default\s+)?class\s+([\w$]+)/,
+    },
+    {
+      kind: "interface",
+      pattern: /^\s*(?:export\s+)?interface\s+([\w$]+)/,
+    },
+    {
+      kind: "type",
+      pattern: /^\s*(?:export\s+)?type\s+([\w$]+)/,
+    },
+    {
+      kind: "enum",
+      pattern: /^\s*(?:export\s+)?enum\s+([\w$]+)/,
+    },
+    {
+      kind: "function",
+      pattern:
+        /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([\w$]+)/,
+    },
+    {
+      kind: "function",
+      pattern:
+        /^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>/,
+    },
+    { kind: "struct", pattern: /^\s*(?:pub\s+)?struct\s+([\w$]+)/ },
+    { kind: "enum", pattern: /^\s*(?:pub\s+)?enum\s+([\w$]+)/ },
+    {
+      kind: "function",
+      pattern: /^\s*(?:pub\s+)?(?:async\s+)?fn\s+([\w$]+)/,
+    },
+    {
+      kind: "function",
+      pattern: /^\s*(?:async\s+)?def\s+([\w$]+)/,
+    },
+  ];
+  for (const [index, line] of content.split(/\r?\n/).entries()) {
+    for (const { kind, pattern } of patterns) {
+      const match = line.match(pattern);
+      const name = match?.[1];
+      if (!name) continue;
+      symbols.push({ kind, lineNumber: index + 1, name });
+      break;
+    }
+  }
+  return symbols;
+}
+
+function workspaceAncestorPaths(path: string, workspacePath?: string) {
+  if (workspacePath) {
+    const root = workspacePath.replaceAll("\\", "/").replace(/\/+$/, "");
+    const normalizedPath = path.replaceAll("\\", "/");
+    if (normalizedPath === root) return [];
+    if (normalizedPath.startsWith(`${root}/`)) {
+      const parts = normalizedPath
+        .slice(root.length + 1)
+        .split("/")
+        .filter(Boolean);
+      return [
+        root,
+        ...parts
+          .slice(0, -1)
+          .map((_, index) => `${root}/${parts.slice(0, index + 1).join("/")}`),
+      ];
+    }
+  }
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts
     .slice(0, -1)

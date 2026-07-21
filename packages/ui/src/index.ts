@@ -149,6 +149,9 @@ export type {
   WorkbenchTurnStatus,
   WorkspaceSearchQuery,
   WorkspaceSearchResult,
+  WorkspaceKeybinding,
+  WorkspaceScopedSettings,
+  WorkspaceSettingScope,
   WorkspaceFile,
   WorkspaceFileContent,
   WorkspaceFileStat,
@@ -207,6 +210,46 @@ export {
   globalSearchMatchScore,
   normalizedGlobalSearchText,
 } from "./global-search";
+export {
+  workspaceCommandRegistry,
+  workspaceCommandForKeybinding,
+  workspacePanelContributions,
+  workspaceViewContainers,
+} from "./workspace-shell";
+export type {
+  WorkspaceCommandDefinition,
+  WorkspacePanelContribution,
+  WorkspaceShellIcon,
+  WorkspaceViewContainerContribution,
+} from "./workspace-shell";
+export {
+  workspaceSearchGlobs,
+  workspaceSearchGlobText,
+} from "./workspace-search";
+export {
+  isWorkspaceTrusted,
+  normalizedWorkspaceTrustPath,
+  workspaceTrustDecision,
+} from "./workspace-trust";
+export {
+  MAX_WORKSPACE_FOLDERS,
+  absoluteWorkspaceFilePath,
+  mergeWorkspaceRootFiles,
+  normalizedWorkspaceFolderPath,
+  workspaceFolderPaths,
+  workspaceFilesForRoot,
+  workspaceRootForPath,
+  parseGyroWorkspaceFile,
+  serializeGyroWorkspaceFile,
+} from "./workspace-project";
+export type { GyroWorkspaceFile } from "./workspace-project";
+export {
+  defaultWorkspaceUserSettings,
+  normalizedWorkspaceScopedSettings,
+  resolvedWorkspaceSettings,
+  workspacePathExcluded,
+  workspacePathMatchesGlob,
+} from "./workspace-settings";
 export {
   shouldShowSidebarUpdate,
   updatePrimaryActionLabel,

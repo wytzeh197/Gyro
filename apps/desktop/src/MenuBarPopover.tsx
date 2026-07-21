@@ -246,7 +246,9 @@ export function MenuBarPopover() {
                   )}
                   <span className="gyro-menu-bar-job-copy">
                     <strong>{job.title}</strong>
-                    <small title={job.detail}>{job.detail}</small>
+                    {job.status !== "finished" ? (
+                      <small title={job.detail}>{job.detail}</small>
+                    ) : null}
                   </span>
                   <span className="gyro-menu-bar-job-meta">
                     <em data-status={job.status}>{jobStatusLabel(job)}</em>
