@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
 import type { FitAddon as FitAddonInstance } from "@xterm/addon-fit";
@@ -9,6 +9,7 @@ import type { Terminal as XTermInstance } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   AppChrome,
+  absoluteWorkspaceFilePath,
   CHAT_GRID_MAX_SLOTS,
   CLI_LAUNCH_PRESET_MAX_PANES,
   AutomationsSurface,
@@ -26,6 +27,7 @@ import {
   ToolsSurface,
   WorkspaceToolPanel,
   chatGridReducer,
+  createChatProjectLayout,
   createInitialChatGridState,
   createInitialWorkbenchState,
   createNotification,
@@ -36,18 +38,29 @@ import {
   isProviderId,
   isProviderExecutable,
   isProviderRuntimeUsable,
+  isWorkspaceTrusted,
+  mergeWorkspaceRootFiles,
   normalizeCliLaunchPreset,
+  normalizedWorkspaceTrustPath,
+  workspaceFolderPaths,
+  workspaceFilesForRoot,
+  workspaceRootForPath,
+  workspacePathExcluded,
   normalizedChatProjectKey,
   normalizedConfig,
   parseProviderHealthOutput,
+  parseGyroWorkspaceFile,
+  workspaceCommandForKeybinding,
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
   providerSupportsUsage,
   providersForConfig,
+  resolvedWorkspaceSettings,
   persistableChatGridState,
   sanitizeStoredIdeState,
   sanitizeStoredChatGridState,
   selectedReasoningEffort,
+  serializeGyroWorkspaceFile,
   workbenchReducer,
   type AppDestination,
   type Automation,
@@ -119,6 +132,8 @@ import {
   type WorkspacePreparationSnapshot,
   type WorkspaceSearchQuery,
   type WorkspaceSearchResult,
+  type WorkspaceScopedSettings,
+  type WorkspaceSettingScope,
   type WorkspaceLayoutId,
 } from "@gyro-dev/ui";
 import {
@@ -397,6 +412,8 @@ type ProviderUsageSnapshot = {
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
 const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
 const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
+const MAX_PERSISTED_DIRTY_BUFFER_CHARS = 500_000;
+const MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS = 1_000_000;
 const MAX_STORED_WORKBENCH_STATE_CHARS = 2_000_000;
 const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
 const MAX_STORED_MODEL_USAGE_CHARS = 100_000;
@@ -618,6 +635,9 @@ export function App() {
   const [isBranchLoading, setIsBranchLoading] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const [selectedWorkspaceRoot, setSelectedWorkspaceRoot] = useState<string>();
+  const [workspaceConfigurationFile, setWorkspaceConfigurationFile] =
+    useState<string>();
   const [editorRevealTarget, setEditorRevealTarget] =
     useState<EditorRevealTarget>();
   const [selectedFileContent, setSelectedFileContent] =
@@ -718,6 +738,9 @@ export function App() {
   >({});
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [commandPaletteMode, setCommandPaletteMode] = useState<
+    "commands" | "files" | "global"
+  >("global");
   const [workspacePreparation, setWorkspacePreparation] =
     useState<WorkspacePreparationProgress>();
   const [workspaceWatchMode, setWorkspaceWatchMode] = useState<
@@ -726,10 +749,14 @@ export function App() {
   const [workspaceChangeGeneration, setWorkspaceChangeGeneration] = useState(0);
   const workspacePreparationRunRef = useRef("");
   const workspacePreparationReadyTimerRef = useRef<number>();
-  const openGlobalSearch = useCallback(() => {
-    setCommandPaletteQuery("");
-    setIsCommandPaletteOpen(true);
-  }, []);
+  const openGlobalSearch = useCallback(
+    (mode: "commands" | "files" | "global" = "global") => {
+      setCommandPaletteMode(mode);
+      setCommandPaletteQuery("");
+      setIsCommandPaletteOpen(true);
+    },
+    [],
+  );
   const closeGlobalSearch = useCallback(() => {
     setIsCommandPaletteOpen(false);
     setCommandPaletteQuery("");
@@ -743,9 +770,7 @@ export function App() {
     useState<ModelStandardPrompt>();
   const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
     useState<TerminalPane>();
-  const [toolPanelHeight, setToolPanelHeight] = useState(
-    DEFAULT_TOOL_PANEL_HEIGHT,
-  );
+  const toolPanelHeight = workbench.preferences.workspacePanelHeight;
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
   const suppressSessionAutoSelectRef = useRef(true);
   const ingestedSessionEventIds = useRef(new Set<string>());
@@ -787,6 +812,64 @@ export function App() {
     () => sessions.find((session) => session.id === activeSessionId),
     [activeSessionId, sessions],
   );
+  const activeWorkspaceRoot = activeSession?.workspacePath ?? workspacePath;
+  const workspaceRoots = useMemo(
+    () =>
+      workspaceFolderPaths(
+        activeWorkspaceRoot,
+        workbench.preferences.workspaceFolders,
+      ),
+    [activeWorkspaceRoot, workbench.preferences.workspaceFolders],
+  );
+  const workspaceActionRoot =
+    workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
+    workspaceRootForPath(workspaceRoots, selectedFile) ??
+    activeWorkspaceRoot;
+  const workspaceTrusted = isWorkspaceTrusted(
+    workbench.preferences.workspaceTrust,
+    workspaceActionRoot,
+  );
+  const effectiveWorkspaceSettings = useMemo(
+    () =>
+      resolvedWorkspaceSettings(
+        workbench.preferences.workspaceUserSettings,
+        workbench.preferences.workspaceSettingsByWorkspace,
+        workbench.preferences.workspaceSettingsByFolder,
+        activeWorkspaceRoot,
+        workspaceActionRoot,
+      ),
+    [
+      activeWorkspaceRoot,
+      workspaceActionRoot,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+    ],
+  );
+  const visibleWorkspaceFiles = useMemo(
+    () =>
+      files.filter((file) => {
+        if (file.isWorkspaceRoot || !file.workspacePath) return true;
+        const settings = resolvedWorkspaceSettings(
+          workbench.preferences.workspaceUserSettings,
+          workbench.preferences.workspaceSettingsByWorkspace,
+          workbench.preferences.workspaceSettingsByFolder,
+          activeWorkspaceRoot,
+          file.workspacePath,
+        );
+        return !workspacePathExcluded(
+          file.relativePath ?? relativeFilePath(file.path, file.workspacePath),
+          settings.filesExclude,
+        );
+      }),
+    [
+      activeWorkspaceRoot,
+      files,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+    ],
+  );
   const activeCapabilityPolicy =
     capabilityPoliciesByProject[
       normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
@@ -797,6 +880,8 @@ export function App() {
   const activeChatLayout = currentChatProjectKey
     ? chatGrid.layouts[currentChatProjectKey]
     : undefined;
+  const displayedChatLayout =
+    activeChatLayout ?? createChatProjectLayout(currentChatProjectKey);
   const activeChatPane = activeChatLayout?.slots.find(
     (pane) => pane?.paneId === activeChatLayout.focusedPaneId,
   );
@@ -1028,6 +1113,20 @@ export function App() {
     },
     [],
   );
+  const recoveryNoticeShownRef = useRef(false);
+  useEffect(() => {
+    if (recoveryNoticeShownRef.current) return;
+    const recovered = Object.values(workbench.ide.buffers).filter(
+      (buffer) => buffer.status === "dirty",
+    ).length;
+    if (recovered === 0) return;
+    recoveryNoticeShownRef.current = true;
+    notify(
+      "terminal",
+      "Unsaved edits recovered",
+      `${recovered} dirty buffer${recovered === 1 ? "" : "s"} restored after restart`,
+    );
+  }, [notify, workbench.ide.buffers]);
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
@@ -2011,12 +2110,20 @@ export function App() {
     dispatchWorkbench({ type: "select-workspace-layout", layout });
   }, []);
 
-  const openToolPanel = useCallback((tab: WorkbenchPaneTab) => {
-    setToolPanelHeight((current) =>
-      current < DEFAULT_TOOL_PANEL_HEIGHT ? DEFAULT_TOOL_PANEL_HEIGHT : current,
-    );
-    dispatchWorkbench({ type: "open-tool-panel", tab });
-  }, []);
+  const openToolPanel = useCallback(
+    (tab: WorkbenchPaneTab) => {
+      if (
+        workbench.preferences.workspacePanelHeight < DEFAULT_TOOL_PANEL_HEIGHT
+      ) {
+        dispatchWorkbench({
+          type: "set-workspace-panel-height",
+          height: DEFAULT_TOOL_PANEL_HEIGHT,
+        });
+      }
+      dispatchWorkbench({ type: "open-tool-panel", tab });
+    },
+    [workbench.preferences.workspacePanelHeight],
+  );
 
   const toggleChatToolPanel = useCallback(() => {
     if (workbench.isToolPanelOpen) {
@@ -2329,9 +2436,8 @@ export function App() {
     async (query: WorkspaceSearchQuery) => {
       const requestId = workspaceSearchRequestRef.current + 1;
       workspaceSearchRequestRef.current = requestId;
-      const root = activeSession?.workspacePath ?? workspacePath;
       dispatchWorkbench({ type: "ide-set-search-query", query });
-      if (!root || !query.query.trim()) {
+      if (workspaceRoots.length === 0 || !query.query.trim()) {
         dispatchWorkbench({
           type: "ide-set-search-results",
           query,
@@ -2340,11 +2446,14 @@ export function App() {
         return;
       }
       if (!isTauriRuntime()) {
-        const results = previewFiles
+        const results = visibleWorkspaceFiles
           .filter(
             (file) => file.kind === "file" && file.path.includes(query.query),
           )
-          .slice(0, query.maxResults ?? 200)
+          .slice(
+            0,
+            query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
+          )
           .map((file) => ({
             path: file.path,
             lineNumber: 1,
@@ -2359,17 +2468,48 @@ export function App() {
         return;
       }
       try {
-        const results = await invoke<WorkspaceSearchResult[]>(
-          "search_workspace",
-          {
-            request: {
-              workspacePath: root,
-              query: query.query,
-              globs: query.globs,
-              maxResults: query.maxResults ?? 200,
-            },
-          },
+        const resultsByRoot = await Promise.all(
+          workspaceRoots.map(async (root) => {
+            const settings = resolvedWorkspaceSettings(
+              workbench.preferences.workspaceUserSettings,
+              workbench.preferences.workspaceSettingsByWorkspace,
+              workbench.preferences.workspaceSettingsByFolder,
+              activeWorkspaceRoot,
+              root,
+            );
+            const globs = [
+              ...(query.globs ?? []),
+              ...settings.searchExclude.map(
+                (pattern) => `!${pattern.replace(/^!+/, "")}`,
+              ),
+            ].filter((glob, index, all) => all.indexOf(glob) === index);
+            return {
+              root,
+              results: await invoke<WorkspaceSearchResult[]>(
+                "search_workspace",
+                {
+                  request: {
+                    workspacePath: root,
+                    query: query.query,
+                    globs: globs.length > 0 ? globs : undefined,
+                    maxResults: query.maxResults ?? settings.searchMaxResults,
+                  },
+                },
+              ),
+            };
+          }),
         );
+        const results = resultsByRoot
+          .flatMap(({ root, results: rootResults }) =>
+            rootResults.map((result) => ({
+              ...result,
+              path: absoluteWorkspaceFilePath(root, result.path),
+            })),
+          )
+          .slice(
+            0,
+            query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
+          );
         if (workspaceSearchRequestRef.current === requestId) {
           dispatchWorkbench({
             type: "ide-set-search-results",
@@ -2383,7 +2523,16 @@ export function App() {
         }
       }
     },
-    [activeSession?.workspacePath, notify, workspacePath],
+    [
+      activeWorkspaceRoot,
+      effectiveWorkspaceSettings.searchMaxResults,
+      notify,
+      visibleWorkspaceFiles,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+      workspaceRoots,
+    ],
   );
 
   const settleWorkspacePreparation = useCallback(
@@ -2422,8 +2571,21 @@ export function App() {
         message: "Cataloging workspace",
         errors: [],
       });
+      const preparationRoots = workspaceRoots.some(
+        (workspaceRoot) =>
+          normalizeProjectPath(workspaceRoot) === normalizeProjectPath(root),
+      )
+        ? workspaceRoots
+        : [root];
       if (!isTauriRuntime()) {
-        setFiles(previewFiles);
+        setFiles((current) =>
+          mergeWorkspaceRootFiles(
+            current,
+            preparationRoots,
+            root,
+            previewFiles,
+          ),
+        );
         setWorkspaceWatchMode("polling");
         settleWorkspacePreparation({
           runId,
@@ -2443,7 +2605,14 @@ export function App() {
           { request: { workspacePath: root, runId } },
         );
         if (workspacePreparationRunRef.current !== runId) return;
-        setFiles(snapshot.files);
+        setFiles((current) =>
+          mergeWorkspaceRootFiles(
+            current,
+            preparationRoots,
+            root,
+            snapshot.files,
+          ),
+        );
         setWorkspaceWatchMode(snapshot.watcherMode);
         setWorkspaceChangeGeneration(snapshot.generation);
         if (snapshot.sourceControl) {
@@ -2470,7 +2639,7 @@ export function App() {
         });
       }
     },
-    [settleWorkspacePreparation],
+    [settleWorkspacePreparation, workspaceRoots],
   );
 
   useEffect(() => {
@@ -2486,14 +2655,22 @@ export function App() {
       else unlistenProgress = unlisten;
     });
     void listen<WorkspaceChangedEvent>("gyro://workspace-changed", (event) => {
-      const currentRoot = activeSession?.workspacePath ?? workspacePath;
-      if (
-        normalizeProjectPath(event.payload.workspacePath) !==
-        normalizeProjectPath(currentRoot)
-      ) {
+      const eventRoot = workspaceRoots.find(
+        (root) =>
+          normalizeProjectPath(root) ===
+          normalizeProjectPath(event.payload.workspacePath),
+      );
+      if (!eventRoot) {
         return;
       }
-      setFiles(event.payload.files);
+      setFiles((current) =>
+        mergeWorkspaceRootFiles(
+          current,
+          workspaceRoots,
+          eventRoot,
+          event.payload.files,
+        ),
+      );
       setWorkspaceChangeGeneration(event.payload.generation);
     }).then((unlisten) => {
       if (disposed) unlisten();
@@ -2504,7 +2681,7 @@ export function App() {
       unlistenProgress?.();
       unlistenWorkspace?.();
     };
-  }, [activeSession?.workspacePath, settleWorkspacePreparation, workspacePath]);
+  }, [settleWorkspacePreparation, workspaceRoots]);
 
   useEffect(
     () => () => {
@@ -2516,11 +2693,11 @@ export function App() {
   );
 
   const refreshSourceControl = useCallback(() => {
-    refreshIdeServices(activeSession?.workspacePath ?? workspacePath);
-  }, [activeSession?.workspacePath, refreshIdeServices, workspacePath]);
+    refreshIdeServices(workspaceActionRoot);
+  }, [refreshIdeServices, workspaceActionRoot]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     if (!root || !isTauriRuntime()) return;
     void invoke<ProjectCapabilityPolicy>("get_project_capability_policy", {
       workspacePath: root,
@@ -2530,10 +2707,10 @@ export function App() {
         [normalizeProjectPath(root)]: policy,
       }));
     });
-  }, [activeSession?.workspacePath, workspacePath]);
+  }, [selectedFile, workspaceRoots]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
@@ -2541,7 +2718,7 @@ export function App() {
         diagnostics: workbench.ide.diagnostics,
       },
     });
-  }, [activeSession?.workspacePath, workbench.ide.diagnostics, workspacePath]);
+  }, [selectedFile, workbench.ide.diagnostics, workspaceRoots]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -2621,8 +2798,16 @@ export function App() {
 
   const stageSourceControlFile = useCallback(
     async (path: string, staged: boolean) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceActionRoot;
       if (!root || !isTauriRuntime()) {
+        return;
+      }
+      if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+        notify(
+          "command-failed",
+          "Git action blocked in Restricted Mode",
+          workspaceName(root),
+        );
         return;
       }
       const command = staged ? "git_unstage" : "git_stage";
@@ -2635,13 +2820,21 @@ export function App() {
         notify("command-failed", "Git action failed", String(error));
       }
     },
-    [activeSession?.workspacePath, notify, workspacePath],
+    [notify, workbench.preferences.workspaceTrust, workspaceActionRoot],
   );
 
   const discardSourceControlFile = useCallback(
     async (path: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceActionRoot;
       if (!root || !isTauriRuntime()) {
+        return;
+      }
+      if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+        notify(
+          "command-failed",
+          "Discard blocked in Restricted Mode",
+          workspaceName(root),
+        );
         return;
       }
       try {
@@ -2660,17 +2853,68 @@ export function App() {
         notify("command-failed", "Discard failed", String(error));
       }
     },
-    [activeSession?.workspacePath, notify, workspacePath],
+    [notify, workbench.preferences.workspaceTrust, workspaceActionRoot],
   );
 
   const runIdeTask = useCallback(
     async (task: TaskDefinition) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceActionRoot;
       if (!root) {
         notify("command-failed", "Task blocked", "Open a workspace first");
         return;
       }
+      if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+        notify(
+          "command-failed",
+          "Task blocked in Restricted Mode",
+          "Trust this workspace before running project commands",
+        );
+        return;
+      }
       const channelId = task.outputChannelId ?? `task-${task.id}`;
+      const setTaskStatus = (
+        status: TaskDefinition["status"],
+        testStatus?: "running" | "passed" | "failed",
+      ) => {
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: workbench.ide.taskDefinitions.map((candidate) =>
+            candidate.id === task.id
+              ? {
+                  ...candidate,
+                  status,
+                  lastRunAt: new Date().toISOString(),
+                }
+              : candidate,
+          ),
+        });
+        if (task.group === "test" && testStatus) {
+          const currentChildren =
+            workbench.ide.testTree.find(
+              (item) => item.id === "workspace-test-results",
+            )?.children ?? [];
+          const result = {
+            id: task.id,
+            label: task.label,
+            status: testStatus,
+          } as const;
+          dispatchWorkbench({
+            type: "ide-set-test-tree",
+            tests: [
+              {
+                id: "workspace-test-results",
+                label: "Workspace tests",
+                status: testStatus,
+                children: [
+                  ...currentChildren.filter((item) => item.id !== task.id),
+                  result,
+                ],
+              },
+            ],
+          });
+        }
+      };
+      setTaskStatus("running", task.group === "test" ? "running" : undefined);
       dispatchWorkbench({
         type: "ide-upsert-output-channel",
         channel: {
@@ -2683,7 +2927,7 @@ export function App() {
       });
       dispatchWorkbench({
         type: "open-tool-panel",
-        tab: "output",
+        tab: task.group === "test" ? "test-results" : "output",
       });
       if (!isTauriRuntime()) {
         dispatchWorkbench({
@@ -2691,38 +2935,67 @@ export function App() {
           channelId,
           lines: ["Preview task completed."],
         });
+        setTaskStatus("done", task.group === "test" ? "passed" : undefined);
         return;
       }
       try {
-        const output = await invoke<IdeCommandOutput>("task_run", {
-          request: {
-            workspacePath: root,
-            taskId: task.id,
-            command: task.command,
-            args: task.args,
+        const output = await invoke<IdeCommandOutput>(
+          task.group === "test" ? "test_run" : "task_run",
+          {
+            request: {
+              workspacePath: root,
+              ...(task.group === "test"
+                ? { testIds: [task.id] }
+                : { taskId: task.id }),
+              command: task.command,
+              args: task.args,
+            },
           },
-        });
+        );
         dispatchWorkbench({
           type: "ide-append-output",
           channelId,
           lines: [output.stdout, output.stderr].filter(Boolean),
         });
+        setTaskStatus(
+          output.status === "done" ? "done" : "failed",
+          task.group === "test"
+            ? output.status === "done"
+              ? "passed"
+              : "failed"
+            : undefined,
+        );
       } catch (error) {
         dispatchWorkbench({
           type: "ide-append-output",
           channelId,
           lines: [String(error)],
         });
+        setTaskStatus("failed", task.group === "test" ? "failed" : undefined);
       }
     },
-    [activeSession?.workspacePath, notify, workspacePath],
+    [
+      notify,
+      workbench.ide.taskDefinitions,
+      workbench.ide.testTree,
+      workbench.preferences.workspaceTrust,
+      workspaceActionRoot,
+    ],
   );
 
   const startIdeDebugSession = useCallback(
     async (command: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceActionRoot;
       if (!root) {
         notify("command-failed", "Debug blocked", "Open a workspace first");
+        return;
+      }
+      if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+        notify(
+          "command-failed",
+          "Debug blocked in Restricted Mode",
+          "Trust this workspace before starting a debug adapter",
+        );
         return;
       }
       const adapter = command.trim().split(/\s+/)[0]?.split(/[\\/]/).pop();
@@ -2785,7 +3058,7 @@ export function App() {
         notify("command-failed", "Debug adapter unavailable", String(error));
       }
     },
-    [activeSession?.workspacePath, notify, workspacePath],
+    [notify, workbench.preferences.workspaceTrust, workspaceActionRoot],
   );
 
   const sendIdeDebugCommand = useCallback(
@@ -2881,31 +3154,48 @@ export function App() {
   const refreshWorkspaceTree = useCallback(async () => {
     const requestId = workspaceTreeRequestRef.current + 1;
     workspaceTreeRequestRef.current = requestId;
-    const root = activeSession?.workspacePath ?? workspacePath;
-    if (!root) {
+    if (workspaceRoots.length === 0) {
       return;
     }
     if (!isTauriRuntime()) {
-      setFiles(previewFiles);
+      setFiles(
+        workspaceRoots.flatMap((root, index) =>
+          workspaceFilesForRoot(root, index === 0 ? previewFiles : []),
+        ),
+      );
       return;
     }
     try {
-      const workspaceFiles = await invoke<WorkspaceFile[]>("watch_workspace", {
-        workspacePath: root,
-      });
+      const workspaceFiles = await Promise.all(
+        workspaceRoots.map(async (root) => ({
+          root,
+          files: await invoke<WorkspaceFile[]>("watch_workspace", {
+            workspacePath: root,
+          }),
+        })),
+      );
       if (workspaceTreeRequestRef.current === requestId) {
-        setFiles(workspaceFiles);
+        setFiles(
+          workspaceFiles.flatMap(({ root, files: rootFiles }) =>
+            workspaceFilesForRoot(root, rootFiles),
+          ),
+        );
       }
     } catch (error) {
       if (workspaceTreeRequestRef.current === requestId) {
         notify("command-failed", "Workspace refresh failed", String(error));
       }
     }
-  }, [activeSession?.workspacePath, notify, workspacePath]);
+  }, [notify, workspaceRoots]);
+
+  useEffect(() => {
+    if (workspaceRoots.length > 1) void refreshWorkspaceTree();
+  }, [refreshWorkspaceTree, workspaceRoots.length]);
 
   const createWorkspacePath = useCallback(
     async (kind: "file" | "directory", parentPath?: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root =
+        workspaceRootForPath(workspaceRoots, parentPath) ?? workspaceRoots[0];
       if (!root) {
         notify("command-failed", "Create blocked", "Open a workspace first");
         return;
@@ -2914,17 +3204,20 @@ export function App() {
         kind === "directory" ? "New folder path" : "New file path",
         parentPath ? `${parentPath}/` : "",
       );
-      const path = entered?.trim().replace(/^\/+/, "");
-      if (!path) {
+      const enteredPath = entered?.trim();
+      if (!enteredPath) {
         return;
       }
+      const path = absoluteWorkspaceFilePath(root, enteredPath);
       if (!isTauriRuntime()) {
         setFiles((current) => [
           ...current.filter((file) => file.path !== path),
           {
             path,
             kind,
-            depth: path.split("/").length,
+            depth: Math.max(1, path.slice(root.length).split("/").length),
+            workspacePath: root,
+            relativePath: path.slice(root.length).replace(/^\/+/, ""),
           },
         ]);
         if (kind === "file") {
@@ -2965,13 +3258,21 @@ export function App() {
         notify("command-failed", "Create failed", String(error));
       }
     },
-    [activeSession?.workspacePath, notify, refreshWorkspaceTree, workspacePath],
+    [notify, refreshWorkspaceTree, workspaceRoots],
   );
 
   const renameWorkspacePath = useCallback(
     async (fromPath: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceRootForPath(workspaceRoots, fromPath);
       if (!root || !fromPath) {
+        return;
+      }
+      if (fromPath === root) {
+        notify(
+          "command-failed",
+          "Rename blocked",
+          "Workspace folder roots cannot be renamed from Gyro",
+        );
         return;
       }
       const affectedEditorPaths = workbench.ide.tabs
@@ -2990,7 +3291,9 @@ export function App() {
         return;
       }
       const entered = window.prompt("Rename workspace path", fromPath);
-      const toPath = entered?.trim().replace(/^\/+/, "");
+      const toPath = entered?.trim()
+        ? absoluteWorkspaceFilePath(root, entered.trim())
+        : undefined;
       if (!toPath || toPath === fromPath) {
         return;
       }
@@ -3024,7 +3327,6 @@ export function App() {
       notify("tests-passed", "Path renamed", toPath);
     },
     [
-      activeSession?.workspacePath,
       activeSessionGoal,
       activeSessionId,
       activeChatMode,
@@ -3033,14 +3335,22 @@ export function App() {
       selectedFile,
       workbench.ide.buffers,
       workbench.ide.tabs,
-      workspacePath,
+      workspaceRoots,
     ],
   );
 
   const deleteWorkspacePath = useCallback(
     async (path: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceRootForPath(workspaceRoots, path);
       if (!root || !path) {
+        return;
+      }
+      if (path === root) {
+        notify(
+          "command-failed",
+          "Delete blocked",
+          "Remove workspace folders without deleting them from disk",
+        );
         return;
       }
       const affectedEditorPaths = workbench.ide.tabs
@@ -3091,13 +3401,12 @@ export function App() {
       notify("tests-passed", "Path deleted", path);
     },
     [
-      activeSession?.workspacePath,
       notify,
       refreshWorkspaceTree,
       selectedFile,
       workbench.ide.buffers,
       workbench.ide.tabs,
-      workspacePath,
+      workspaceRoots,
     ],
   );
 
@@ -3152,12 +3461,12 @@ export function App() {
 
   const openSourceControlDiff = useCallback(
     async (path: string, staged: boolean) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceActionRoot;
       if (root) {
         await openSourceControlDiffForRoot(root, path, staged);
       }
     },
-    [activeSession?.workspacePath, openSourceControlDiffForRoot, workspacePath],
+    [openSourceControlDiffForRoot, workspaceActionRoot],
   );
 
   const loadInlineChangeDiff = useCallback(
@@ -3234,8 +3543,16 @@ export function App() {
 
   const commitSourceControl = useCallback(
     async (message: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceActionRoot;
       if (!root || !message.trim()) {
+        return;
+      }
+      if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+        notify(
+          "command-failed",
+          "Commit blocked in Restricted Mode",
+          workspaceName(root),
+        );
         return;
       }
       if (!isTauriRuntime()) {
@@ -3262,7 +3579,12 @@ export function App() {
         notify("command-failed", "Commit failed", String(error));
       }
     },
-    [activeSession?.workspacePath, notify, refreshIdeServices, workspacePath],
+    [
+      notify,
+      refreshIdeServices,
+      workbench.preferences.workspaceTrust,
+      workspaceActionRoot,
+    ],
   );
 
   const activateWorkspacePath = useCallback(
@@ -3279,9 +3601,11 @@ export function App() {
           .filter(Boolean)
           .slice(0, MAX_RECENT_PROJECTS),
       );
+      setActiveSessionId(undefined);
+      setSelectedWorkspaceRoot(selected);
       if (!isTauriRuntime()) {
         setWorkspacePath(selected);
-        setFiles(previewFiles);
+        setFiles(workspaceFilesForRoot(selected, previewFiles));
         refreshIdeServices(selected);
         dispatchWorkbench({
           type: "complete-onboarding-step",
@@ -3317,6 +3641,14 @@ export function App() {
       if (typeof selected !== "string") {
         return false;
       }
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
       await activateWorkspacePath(selected);
       return true;
     } catch {
@@ -3327,13 +3659,280 @@ export function App() {
       );
       return false;
     }
-  }, [activateWorkspacePath, notify]);
+  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+
+  const addWorkspaceFolder = useCallback(async () => {
+    if (!activeWorkspaceRoot) {
+      await openWorkspace();
+      return;
+    }
+    let selected: string | null = null;
+    if (!isTauriRuntime()) {
+      selected = workspaceRoots.includes("/preview/Components")
+        ? "/preview/Documentation"
+        : "/preview/Components";
+    } else {
+      const chosen = await open({
+        directory: true,
+        multiple: false,
+        title: "Add folder to workspace",
+      });
+      selected = typeof chosen === "string" ? chosen : null;
+    }
+    if (!selected) return;
+    const normalizedSelected = normalizeProjectPath(selected);
+    if (
+      workspaceRoots.some(
+        (root) => normalizeProjectPath(root) === normalizedSelected,
+      )
+    ) {
+      notify("command-failed", "Folder already added", workspaceName(selected));
+      return;
+    }
+    dispatchWorkbench({
+      type: "add-workspace-folder",
+      workspacePath: activeWorkspaceRoot,
+      path: selected,
+    });
+    const trustPath = normalizedWorkspaceTrustPath(selected);
+    if (!(trustPath in workbench.preferences.workspaceTrust)) {
+      dispatchWorkbench({
+        type: "set-workspace-trust",
+        path: selected,
+        decision: "restricted",
+      });
+    }
+    const nextRoots = [...workspaceRoots, selected];
+    if (!isTauriRuntime()) {
+      setFiles((current) =>
+        mergeWorkspaceRootFiles(
+          current,
+          nextRoots,
+          selected,
+          previewFiles.slice(0, 2),
+        ),
+      );
+    } else {
+      try {
+        const rootFiles = await invoke<WorkspaceFile[]>("list_workspace_tree", {
+          depth: 5,
+          workspacePath: selected,
+        });
+        setFiles((current) =>
+          mergeWorkspaceRootFiles(current, nextRoots, selected, rootFiles),
+        );
+      } catch (error) {
+        dispatchWorkbench({
+          type: "remove-workspace-folder",
+          workspacePath: activeWorkspaceRoot,
+          path: selected,
+        });
+        notify("command-failed", "Folder could not be added", String(error));
+        return;
+      }
+    }
+    notify("terminal", "Workspace folder added", workspaceName(selected));
+    setSelectedWorkspaceRoot(selected);
+  }, [
+    activeWorkspaceRoot,
+    notify,
+    openWorkspace,
+    workbench.preferences.workspaceTrust,
+    workspaceRoots,
+  ]);
+
+  const removeWorkspaceFolder = useCallback(
+    (path: string) => {
+      if (!activeWorkspaceRoot) return;
+      if (
+        normalizeProjectPath(path) === normalizeProjectPath(activeWorkspaceRoot)
+      ) {
+        notify(
+          "command-failed",
+          "Primary folder cannot be removed",
+          "Open another project to replace the primary workspace folder",
+        );
+        return;
+      }
+      dispatchWorkbench({
+        type: "remove-workspace-folder",
+        workspacePath: activeWorkspaceRoot,
+        path,
+      });
+      const affectedPaths = workbench.ide.tabs
+        .map((tab) => tab.path)
+        .filter((tabPath) => editorPathMatches(tabPath, path));
+      dispatchWorkbench({ type: "ide-delete-path", path });
+      disposeEditorModels(affectedPaths);
+      setFiles((current) =>
+        current.filter(
+          (file) =>
+            !file.workspacePath ||
+            normalizeProjectPath(file.workspacePath) !==
+              normalizeProjectPath(path),
+        ),
+      );
+      if (selectedFile && editorPathMatches(selectedFile, path)) {
+        setSelectedFile(undefined);
+      }
+      if (
+        selectedWorkspaceRoot &&
+        normalizeProjectPath(selectedWorkspaceRoot) ===
+          normalizeProjectPath(path)
+      ) {
+        setSelectedWorkspaceRoot(activeWorkspaceRoot);
+      }
+      notify("terminal", "Workspace folder removed", workspaceName(path));
+    },
+    [
+      activeWorkspaceRoot,
+      notify,
+      selectedFile,
+      selectedWorkspaceRoot,
+      workbench.ide.tabs,
+    ],
+  );
+
+  const openWorkspaceConfiguration = useCallback(async () => {
+    try {
+      let filePath: string;
+      let content: string;
+      if (!isTauriRuntime()) {
+        filePath = "/preview/Gyro.gyro-workspace.json";
+        content = JSON.stringify({
+          version: 1,
+          folders: [{ path: "./Gyro" }, { path: "./Components" }],
+        });
+      } else {
+        const selected = await open({
+          directory: false,
+          multiple: false,
+          title: "Open Gyro workspace file",
+          filters: [
+            {
+              name: "Gyro Workspace",
+              extensions: ["gyro-workspace", "json"],
+            },
+          ],
+        });
+        if (typeof selected !== "string") return;
+        filePath = selected;
+        const file = await invoke<WorkspaceFileContent>(
+          "read_workspace_file_full",
+          {
+            workspacePath: parentDirectory(filePath),
+            path: filePath,
+          },
+        );
+        content = file.content;
+      }
+      const workspaceFile = parseGyroWorkspaceFile(content, filePath);
+      const primary = workspaceFile.folders[0]?.path;
+      if (!primary)
+        throw new Error("Workspace file does not contain a primary folder");
+      dispatchWorkbench({
+        type: "set-workspace-folders",
+        workspacePath: primary,
+        paths: workspaceFile.folders.slice(1).map((folder) => folder.path),
+      });
+      dispatchWorkbench({
+        type: "set-workspace-settings",
+        scope: "workspace",
+        path: primary,
+        settings: workspaceFile.settings ?? {},
+      });
+      for (const folder of workspaceFile.folders) {
+        dispatchWorkbench({
+          type: "set-workspace-settings",
+          scope: "folder",
+          path: folder.path,
+          settings: folder.settings ?? {},
+        });
+        const trustPath = normalizedWorkspaceTrustPath(folder.path);
+        if (!(trustPath in workbench.preferences.workspaceTrust)) {
+          dispatchWorkbench({
+            type: "set-workspace-trust",
+            path: folder.path,
+            decision: "restricted",
+          });
+        }
+      }
+      setWorkspaceConfigurationFile(filePath);
+      await activateWorkspacePath(primary, "Workspace file opened");
+    } catch (error) {
+      notify(
+        "command-failed",
+        "Workspace file could not be opened",
+        String(error),
+      );
+    }
+  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+
+  const saveWorkspaceConfiguration = useCallback(async () => {
+    if (workspaceRoots.length === 0) {
+      notify("command-failed", "Save blocked", "Open a workspace first");
+      return;
+    }
+    try {
+      let filePath = workspaceConfigurationFile;
+      if (!isTauriRuntime()) {
+        filePath ??= "/preview/Gyro.gyro-workspace.json";
+      } else if (!filePath) {
+        const selected = await saveDialog({
+          title: "Save Gyro workspace",
+          defaultPath: `${workspaceName(workspaceRoots[0] ?? "workspace")}.gyro-workspace.json`,
+          filters: [
+            {
+              name: "Gyro Workspace",
+              extensions: ["gyro-workspace", "json"],
+            },
+          ],
+        });
+        if (typeof selected !== "string") return;
+        filePath = selected;
+      }
+      if (!filePath) return;
+      const primary = workspaceRoots[0];
+      const content = serializeGyroWorkspaceFile(workspaceRoots, filePath, {
+        workspaceSettings: primary
+          ? workbench.preferences.workspaceSettingsByWorkspace[primary]
+          : undefined,
+        folderSettingsByPath: workbench.preferences.workspaceSettingsByFolder,
+      });
+      if (isTauriRuntime()) {
+        await invoke("write_workspace_file", {
+          request: {
+            workspacePath: parentDirectory(filePath),
+            path: filePath,
+            content,
+          },
+        });
+      }
+      setWorkspaceConfigurationFile(filePath);
+      notify("tests-passed", "Workspace file saved", filePath);
+    } catch (error) {
+      notify(
+        "command-failed",
+        "Workspace file could not be saved",
+        String(error),
+      );
+    }
+  }, [
+    notify,
+    workbench.preferences.workspaceSettingsByFolder,
+    workbench.preferences.workspaceSettingsByWorkspace,
+    workspaceConfigurationFile,
+    workspaceRoots,
+  ]);
 
   const selectContextFile = useCallback(async () => {
     if (!isTauriRuntime()) {
-      const previewFile = previewFiles[0]?.path ?? "apps/desktop/src/App.tsx";
+      const previewFile = absoluteWorkspaceFilePath(
+        PREVIEW_WORKSPACE_PATH,
+        previewFiles[0]?.path ?? "apps/desktop/src/App.tsx",
+      );
       setWorkspacePath(PREVIEW_WORKSPACE_PATH);
-      setFiles(previewFiles);
+      setFiles(workspaceFilesForRoot(PREVIEW_WORKSPACE_PATH, previewFiles));
       setSelectedFile(previewFile);
       refreshIdeServices(PREVIEW_WORKSPACE_PATH);
       dispatchWorkbench({
@@ -3364,6 +3963,14 @@ export function App() {
 
       const workspace = parentDirectory(selected);
       const relativePath = relativeFilePath(selected, workspace);
+      const trustPath = normalizedWorkspaceTrustPath(workspace);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: workspace,
+          decision: "restricted",
+        });
+      }
       setRemovedProjectPaths((current) =>
         current.filter((path) => path !== normalizeProjectPath(workspace)),
       );
@@ -3409,7 +4016,7 @@ export function App() {
     } catch {
       notify("command-failed", "File select failed", "No file was selected");
     }
-  }, [notify, refreshIdeServices]);
+  }, [notify, refreshIdeServices, workbench.preferences.workspaceTrust]);
 
   const createSession = useCallback(async () => {
     const sessionLayout: WorkspaceLayoutId = "thread";
@@ -3947,9 +4554,22 @@ export function App() {
         workspacePathOverride ??
         existingPane?.projectPath ??
         selectedPane?.projectPath ??
-        activeSession?.workspacePath ??
-        workspacePath ??
+        workspaceActionRoot ??
         savedProjects[0]?.path;
+      if (
+        launchWorkspacePath &&
+        !isWorkspaceTrusted(
+          workbench.preferences.workspaceTrust,
+          launchWorkspacePath,
+        )
+      ) {
+        notify(
+          "command-failed",
+          "Terminal blocked in Restricted Mode",
+          "Trust this workspace before running local commands",
+        );
+        return false;
+      }
       const paneExists = Boolean(existingPane);
       if (!paneExists) {
         const pane = createTerminalPane(paneId, profile, "running", {
@@ -4045,13 +4665,13 @@ export function App() {
       }
     },
     [
-      activeSession?.workspacePath,
       notify,
       savedProjects,
       workbench.selectedTerminalPaneId,
       workbench.terminalPanes,
+      workbench.preferences.workspaceTrust,
       workbench.workspaceMode,
-      workspacePath,
+      workspaceActionRoot,
     ],
   );
 
@@ -5719,7 +6339,7 @@ export function App() {
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         setWorkspacePath(session.workspacePath);
-        setFiles(previewFiles);
+        setFiles(workspaceFilesForRoot(session.workspacePath, previewFiles));
         setSessions((current) => [session, ...current]);
         dispatchChatGrid({
           type: "migrate-draft-pane",
@@ -6846,6 +7466,8 @@ export function App() {
 
   const openEditorLocation = useCallback(
     (path: string, lineNumber = 1, column = 1) => {
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (root) setSelectedWorkspaceRoot(root);
       openEditorFile(path);
       setEditorRevealTarget({
         path,
@@ -6854,7 +7476,7 @@ export function App() {
         nonce: Date.now(),
       });
     },
-    [openEditorFile],
+    [openEditorFile, workspaceRoots],
   );
 
   const closeEditorTab = useCallback(
@@ -6960,7 +7582,7 @@ export function App() {
   const saveEditorBuffer = useCallback(
     async (path: string) => {
       const buffer = workbench.ide.buffers[path];
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceRootForPath(workspaceRoots, path);
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
         return;
@@ -7029,12 +7651,111 @@ export function App() {
         );
       }
     },
+    [appendEditorEvent, notify, workbench.ide.buffers, workspaceRoots],
+  );
+
+  const applyWorkspaceReplace = useCallback(
+    async (
+      query: WorkspaceSearchQuery,
+      replacement: string,
+      paths: string[],
+    ) => {
+      const searchText = query.query;
+      const uniquePaths = [...new Set(paths)];
+      if (!searchText || uniquePaths.length === 0) return;
+      const dirtyPath = uniquePaths.find(
+        (path) => workbench.ide.buffers[path]?.status === "dirty",
+      );
+      if (dirtyPath) {
+        notify(
+          "command-failed",
+          "Replace blocked by unsaved changes",
+          workspaceName(dirtyPath),
+        );
+        return;
+      }
+      const restrictedRoot = uniquePaths
+        .map((path) => workspaceRootForPath(workspaceRoots, path))
+        .find(
+          (root) =>
+            root &&
+            !isWorkspaceTrusted(workbench.preferences.workspaceTrust, root),
+        );
+      if (restrictedRoot) {
+        notify(
+          "command-failed",
+          "Replace blocked in Restricted Mode",
+          workspaceName(restrictedRoot),
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          `Replace “${searchText}” in ${uniquePaths.length} selected file${uniquePaths.length === 1 ? "" : "s"}?`,
+        )
+      ) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        notify(
+          "tests-passed",
+          "Replace preview applied",
+          `${uniquePaths.length} preview files`,
+        );
+        return;
+      }
+      try {
+        let replacements = 0;
+        for (const path of uniquePaths) {
+          const root = workspaceRootForPath(workspaceRoots, path);
+          if (!root) continue;
+          const file = await invoke<WorkspaceFileContent>(
+            "read_workspace_file_full",
+            { workspacePath: root, path },
+          );
+          const occurrences = file.content.split(searchText).length - 1;
+          if (occurrences === 0) continue;
+          const content = file.content.split(searchText).join(replacement);
+          const saved = await invoke<WorkspaceFileContent>(
+            "write_workspace_file",
+            {
+              request: {
+                workspacePath: root,
+                path,
+                content,
+                expectedHash: file.contentHash,
+              } satisfies WorkspaceFileWriteRequest,
+            },
+          );
+          replacements += occurrences;
+          if (workbench.ide.buffers[path]) {
+            dispatchWorkbench({
+              type: "ide-mark-buffer-saved",
+              path,
+              content: saved.content,
+              contentHash: saved.contentHash,
+              sizeBytes: saved.sizeBytes,
+            });
+          }
+          if (selectedFile === path) setSelectedFileContent(saved);
+        }
+        notify(
+          "tests-passed",
+          "Workspace replace complete",
+          `${replacements} replacements across ${uniquePaths.length} files`,
+        );
+        await runWorkspaceSearch(query);
+      } catch (error) {
+        notify("command-failed", "Workspace replace failed", String(error));
+      }
+    },
     [
-      activeSession?.workspacePath,
-      appendEditorEvent,
       notify,
+      runWorkspaceSearch,
+      selectedFile,
       workbench.ide.buffers,
-      workspacePath,
+      workbench.preferences.workspaceTrust,
+      workspaceRoots,
     ],
   );
 
@@ -7974,7 +8695,7 @@ export function App() {
   );
 
   const createAutomation = useCallback(async () => {
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     if (!root) {
       notify(
         "command-failed",
@@ -8340,6 +9061,33 @@ export function App() {
         case "open-workspace":
           void openWorkspace();
           break;
+        case "add-workspace-folder":
+          void addWorkspaceFolder();
+          break;
+        case "open-workspace-file":
+          void openWorkspaceConfiguration();
+          break;
+        case "save-workspace-file":
+          void saveWorkspaceConfiguration();
+          break;
+        case "toggle-workspace-trust": {
+          if (!workspaceActionRoot) break;
+          const decision = workspaceTrusted ? "restricted" : "trusted";
+          dispatchWorkbench({
+            type: "set-workspace-trust",
+            path: workspaceActionRoot,
+            decision,
+          });
+          notify(
+            decision === "trusted" ? "terminal" : "approval",
+            decision === "trusted"
+              ? "Workspace trusted"
+              : "Restricted Mode enabled",
+            workspaceName(workspaceActionRoot),
+          );
+          if (decision === "trusted") refreshIdeServices(workspaceActionRoot);
+          break;
+        }
         case "new-terminal":
           addTerminalPane();
           break;
@@ -8374,6 +9122,27 @@ export function App() {
           });
           dispatchWorkbench({ type: "ide-select-view", view: "search" });
           notify("terminal", "Search ready", "Workspace file tree focused");
+          break;
+        case "view-explorer":
+          dispatchWorkbench({ type: "ide-select-view", view: "explorer" });
+          break;
+        case "view-source-control":
+          dispatchWorkbench({
+            type: "ide-select-view",
+            view: "source-control",
+          });
+          break;
+        case "view-run-test":
+          dispatchWorkbench({ type: "ide-select-view", view: "run-test" });
+          break;
+        case "view-ai":
+          dispatchWorkbench({ type: "ide-select-view", view: "ai" });
+          break;
+        case "show-problems":
+          dispatchWorkbench({ type: "open-tool-panel", tab: "problems" });
+          break;
+        case "show-output":
+          dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
           break;
         case "open-browser-preview":
           dispatchWorkbench({
@@ -8430,19 +9199,25 @@ export function App() {
     },
     [
       addTerminalPane,
+      addWorkspaceFolder,
       createAutomation,
       createTask,
       notify,
       openWorkspace,
+      openWorkspaceConfiguration,
+      refreshIdeServices,
       runAutomation,
       runCommandProfile,
       runProfile,
+      saveWorkspaceConfiguration,
       splitTerminalPane,
       startNewChat,
       workbench.browserPreview.url,
       workbench.preferences.theme,
       workbench.selectedAutomationId,
       workbench.selectedTaskId,
+      workspaceActionRoot,
+      workspaceTrusted,
     ],
   );
 
@@ -8582,12 +9357,12 @@ export function App() {
 
   const requestLanguageFeature = useCallback(
     async (path: string, method: string, params: Record<string, unknown>) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceRootForPath(workspaceRoots, path);
       const descriptor = languageServerDescriptorForPath(path);
       if (!root || !descriptor || !isTauriRuntime()) {
         return undefined;
       }
-      const stateId = `${descriptor.languageId}:${descriptor.command}`;
+      const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
       const serverId = languageServerIdsRef.current[stateId];
       if (!serverId) {
         return undefined;
@@ -8611,7 +9386,7 @@ export function App() {
       }
       return response.result;
     },
-    [activeSession?.workspacePath, workspacePath],
+    [workspaceRoots],
   );
 
   useEffect(() => {
@@ -8659,6 +9434,11 @@ export function App() {
       if (!isCommand) {
         return;
       }
+      const workspaceCommand = workspaceCommandForKeybinding(
+        event,
+        /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? "mac" : "other",
+        workbench.preferences.workspaceKeybindings,
+      );
       if (
         event.key.toLowerCase() === "s" &&
         workbench.activeWorkspaceLayout === "code" &&
@@ -8666,28 +9446,38 @@ export function App() {
       ) {
         event.preventDefault();
         void saveEditorBuffer(workbench.ide.activePath);
-      } else if (event.key.toLowerCase() === "f" && event.shiftKey) {
+      } else if (event.key.toLowerCase() === "p" && event.shiftKey) {
         event.preventDefault();
-        dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
-        dispatchWorkbench({ type: "ide-select-view", view: "search" });
-      } else if (event.key === "`") {
+        openGlobalSearch("commands");
+      } else if (event.key.toLowerCase() === "p") {
         event.preventDefault();
-        openToolPanel("terminal");
+        openGlobalSearch("files");
+      } else if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        openGlobalSearch("global");
       } else if (
-        event.key.toLowerCase() === "k" ||
-        event.key.toLowerCase() === "p"
+        workspaceCommand &&
+        (!workspaceCommand.requiresWorkspace ||
+          Boolean(activeSession?.workspacePath ?? workspacePath)) &&
+        (!workspaceCommand.requiresTrust || workspaceTrusted)
       ) {
         event.preventDefault();
-        openGlobalSearch();
+        runCommandPaletteCommand(workspaceCommand.id);
+        if (workspaceCommand.destination) {
+          selectDestination(workspaceCommand.destination);
+        }
+        if (workspaceCommand.layout) {
+          selectWorkspaceLayout(workspaceCommand.layout);
+        }
+        if (workspaceCommand.panel) {
+          openToolPanel(workspaceCommand.panel);
+        }
       } else if (event.key.toLowerCase() === "n") {
         event.preventDefault();
         startNewChat();
       } else if (event.key.toLowerCase() === "t") {
         event.preventDefault();
         addTerminalPane();
-      } else if (event.key === "\\") {
-        event.preventDefault();
-        splitTerminalPane(2);
       } else if (event.key === ",") {
         event.preventDefault();
         dispatchWorkbench({
@@ -8714,15 +9504,21 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    activeSession?.workspacePath,
     addTerminalPane,
     closeGlobalSearch,
     openGlobalSearch,
     openToolPanel,
+    runCommandPaletteCommand,
     saveEditorBuffer,
-    splitTerminalPane,
+    selectDestination,
+    selectWorkspaceLayout,
     startNewChat,
     workbench.activeWorkspaceLayout,
     workbench.ide.activePath,
+    workbench.preferences.workspaceKeybindings,
+    workspacePath,
+    workspaceTrusted,
   ]);
 
   useEffect(() => {
@@ -8775,7 +9571,9 @@ export function App() {
       });
     }
     if (!isTauriRuntime()) {
-      setFiles(previewFiles);
+      setFiles(
+        workspaceFilesForRoot(activeSession.workspacePath, previewFiles),
+      );
       refreshIdeServices(activeSession.workspacePath);
       return;
     }
@@ -8847,7 +9645,7 @@ export function App() {
       return;
     }
 
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     if (!root) {
       setSelectedFileContent(undefined);
       setSelectedFileError("Open a workspace before previewing files.");
@@ -8885,20 +9683,36 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [
-    activeSession?.workspacePath,
-    files,
-    selectedFile,
-    workbench.ide.buffers,
-    workspacePath,
-  ]);
+  }, [files, selectedFile, workbench.ide.buffers, workspaceRoots]);
 
   useEffect(() => {
     refreshedFileActivityKeysRef.current.clear();
   }, [activeSessionId]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const primaryRoot = workspaceRoots[0];
+    if (!primaryRoot) return;
+    const legacyPaths = workbench.ide.tabs
+      .map((tab) => tab.path)
+      .filter(
+        (path) =>
+          !workspaceRootForPath(workspaceRoots, path) &&
+          !/^(?:[a-z]:)?[/\\]/i.test(path),
+      );
+    for (const path of legacyPaths) {
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: path,
+        toPath: absoluteWorkspaceFilePath(primaryRoot, path),
+      });
+    }
+    if (selectedFile && legacyPaths.includes(selectedFile)) {
+      setSelectedFile(absoluteWorkspaceFilePath(primaryRoot, selectedFile));
+    }
+  }, [selectedFile, workbench.ide.tabs, workspaceRoots]);
+
+  useEffect(() => {
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     const buffer = selectedFile
       ? workbench.ide.buffers[selectedFile]
       : undefined;
@@ -8913,20 +9727,30 @@ export function App() {
       }
       polling = true;
       try {
-        const workspaceFiles = await invoke<WorkspaceFile[]>(
-          "watch_workspace",
-          {
-            workspacePath: root,
-          },
+        const workspaceFiles = await Promise.all(
+          workspaceRoots.map(async (workspaceRoot) => ({
+            root: workspaceRoot,
+            files: await invoke<WorkspaceFile[]>("watch_workspace", {
+              workspacePath: workspaceRoot,
+            }),
+          })),
         );
         if (cancelled) {
           return;
         }
         setFiles((current) =>
           workspaceTreeSignature(current) ===
-          workspaceTreeSignature(workspaceFiles)
+          workspaceTreeSignature(
+            workspaceFiles.flatMap(
+              ({ root: workspaceRoot, files: rootFiles }) =>
+                workspaceFilesForRoot(workspaceRoot, rootFiles),
+            ),
+          )
             ? current
-            : workspaceFiles,
+            : workspaceFiles.flatMap(
+                ({ root: workspaceRoot, files: rootFiles }) =>
+                  workspaceFilesForRoot(workspaceRoot, rootFiles),
+              ),
         );
         if (!selectedFile || !buffer?.contentHash) {
           return;
@@ -8985,18 +9809,17 @@ export function App() {
       if (interval !== undefined) window.clearInterval(interval);
     };
   }, [
-    activeSession?.workspacePath,
     notify,
     selectedFile,
     selectedFile ? workbench.ide.buffers[selectedFile]?.contentHash : undefined,
     selectedFile ? workbench.ide.buffers[selectedFile]?.status : undefined,
     workspaceChangeGeneration,
-    workspacePath,
+    workspaceRoots,
     workspaceWatchMode,
   ]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     if (!root) {
       return;
     }
@@ -9030,11 +9853,17 @@ export function App() {
     const descriptor = selectedFile
       ? languageServerDescriptorForPath(selectedFile)
       : undefined;
-    if (!root || !selectedFile || !descriptor || !isTauriRuntime()) {
+    if (
+      !root ||
+      !selectedFile ||
+      !descriptor ||
+      !isTauriRuntime() ||
+      !isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)
+    ) {
       return;
     }
     let cancelled = false;
-    const stateId = `${descriptor.languageId}:${descriptor.command}`;
+    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
     const startingState: LanguageServerState = {
       id: stateId,
       languageId: descriptor.languageId,
@@ -9150,14 +9979,14 @@ export function App() {
       cancelled = true;
     };
   }, [
-    activeSession?.workspacePath,
     selectedFile,
     selectedFileContent?.contentHash,
-    workspacePath,
+    workbench.preferences.workspaceTrust,
+    workspaceRoots,
   ]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
     const descriptor = selectedFile
       ? languageServerDescriptorForPath(selectedFile)
       : undefined;
@@ -9173,7 +10002,7 @@ export function App() {
     ) {
       return;
     }
-    const stateId = `${descriptor.languageId}:${descriptor.command}`;
+    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
     const serverId = languageServerIdsRef.current[stateId];
     if (!serverId) {
       return;
@@ -9219,10 +10048,9 @@ export function App() {
     }, 450);
     return () => window.clearTimeout(timer);
   }, [
-    activeSession?.workspacePath,
     selectedFile,
     selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
-    workspacePath,
+    workspaceRoots,
   ]);
 
   useEffect(
@@ -9558,7 +10386,9 @@ export function App() {
       onCommentDiff={(path) =>
         dispatchWorkbench({ type: "add-diff-comment", path })
       }
-      onHeightChange={setToolPanelHeight}
+      onHeightChange={(height) =>
+        dispatchWorkbench({ type: "set-workspace-panel-height", height })
+      }
       onKillTerminalPane={stopTerminalPane}
       onMoveTerminalPane={(sourcePaneId, targetPaneId) =>
         dispatchWorkbench({
@@ -9581,7 +10411,7 @@ export function App() {
           layout: "code",
         });
       }}
-      onOpenCommandPalette={openGlobalSearch}
+      onOpenCommandPalette={() => openGlobalSearch("commands")}
       onPaneTabChange={(tab) =>
         dispatchWorkbench({ type: "set-pane-tab", tab })
       }
@@ -9948,8 +10778,10 @@ export function App() {
       activeWorkspaceLayout={activeWorkspaceLayout}
       commandProfiles={commandProfiles}
       updateState={updater.state}
+      workspaceSidebarHidden={workbench.preferences.workspaceSidebarHidden}
+      workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
-      files={files}
+      files={visibleWorkspaceFiles}
       ide={workbench.ide}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
       notifications={workbench.notifications}
@@ -9961,7 +10793,7 @@ export function App() {
       onDismissNotification={(id) =>
         dispatchWorkbench({ type: "dismiss-notification", id })
       }
-      onOpenCommandPalette={openGlobalSearch}
+      onOpenCommandPalette={() => openGlobalSearch("global")}
       onOpenSettings={() =>
         dispatchWorkbench({
           type: "select-destination",
@@ -9970,7 +10802,16 @@ export function App() {
       }
       onOpenSettingsSection={openSettingsSection}
       onOpenWorkspace={openWorkspace}
+      onAddWorkspaceFolder={addWorkspaceFolder}
+      onRemoveWorkspaceFolder={removeWorkspaceFolder}
+      onSelectWorkspaceFolder={setSelectedWorkspaceRoot}
       onUpdateAction={runUpdateAction}
+      onWorkspaceSidebarHiddenChange={(hidden) =>
+        dispatchWorkbench({ type: "set-workspace-sidebar-hidden", hidden })
+      }
+      onWorkspaceSidebarWidthChange={(width) =>
+        dispatchWorkbench({ type: "set-workspace-sidebar-width", width })
+      }
       onRetryWorkspacePreparation={() => {
         const root = activeSession?.workspacePath ?? workspacePath;
         if (root) void prepareWorkspace(root);
@@ -9990,9 +10831,8 @@ export function App() {
       onStartDebugSession={startIdeDebugSession}
       onSendDebugCommand={sendIdeDebugCommand}
       onStopDebugSession={stopIdeDebugSession}
-      onRunWorkspaceSearch={(query) =>
-        void runWorkspaceSearch({ query, maxResults: 200 })
-      }
+      onRunWorkspaceSearch={(query) => void runWorkspaceSearch(query)}
+      onApplyWorkspaceReplace={applyWorkspaceReplace}
       onSelectIdeView={(view) =>
         dispatchWorkbench({ type: "ide-select-view", view })
       }
@@ -10033,168 +10873,172 @@ export function App() {
         <div className={`gyro-workspace-route is-${activeWorkspaceLayout}`}>
           {activeWorkspaceLayout === "thread" ? (
             <section className="gyro-workspace-primary" aria-label="Thread">
-              {activeChatLayout?.slots.some(Boolean) ? (
-                <ChatGridSurface
-                  layout={activeChatLayout}
-                  maximizedPaneId={chatGrid.maximizedPaneId}
-                  onDropSession={(
-                    sessionId,
-                    sourceProjectKey,
+              <ChatGridSurface
+                layout={displayedChatLayout}
+                maximizedPaneId={chatGrid.maximizedPaneId}
+                onDropSession={(
+                  sessionId,
+                  sourceProjectKey,
+                  slotIndex,
+                  placement,
+                ) => {
+                  const session = sessions.find(
+                    (item) => item.id === sessionId,
+                  );
+                  if (!session) return;
+                  const projectKey = normalizedChatProjectKey(
+                    session.workspacePath,
+                  );
+                  if (
+                    sourceProjectKey &&
+                    sourceProjectKey !== displayedChatLayout.projectKey
+                  ) {
+                    notify(
+                      "terminal",
+                      "Chat project switched",
+                      workspaceName(session.workspacePath),
+                    );
+                  }
+                  dispatchChatGrid({
+                    type: "select-pane",
+                    projectKey,
+                    mode: "drop",
                     slotIndex,
-                    placement,
-                  ) => {
-                    const session = sessions.find(
-                      (item) => item.id === sessionId,
-                    );
-                    if (!session) return;
-                    const projectKey = normalizedChatProjectKey(
-                      session.workspacePath,
-                    );
-                    if (
-                      sourceProjectKey &&
-                      sourceProjectKey !== activeChatLayout.projectKey
-                    ) {
-                      notify(
-                        "terminal",
-                        "Chat project switched",
-                        workspaceName(session.workspacePath),
-                      );
+                    insertPosition: placement?.insertPosition,
+                    splitDirection: placement?.splitDirection,
+                    pane: chatPaneForSession(session),
+                  });
+                  activeSessionIdRef.current = session.id;
+                  setActiveSessionId(session.id);
+                  setWorkspacePath(session.workspacePath);
+                  void refreshEvents(session.id);
+                }}
+                onFocusPane={focusChatPane}
+                onMovePane={(paneId, slotIndex) =>
+                  dispatchChatGrid({
+                    type: "move-pane",
+                    projectKey: displayedChatLayout.projectKey,
+                    paneId,
+                    slotIndex,
+                  })
+                }
+                onToggleMaximize={(paneId) =>
+                  dispatchChatGrid({
+                    type: "toggle-maximize-pane",
+                    paneId,
+                  })
+                }
+                renderPane={renderChatPane}
+              >
+                {!activeChatLayout?.slots.some(Boolean) ? (
+                  <ChatSurface
+                    activeChatPanel={activeChatPanel}
+                    browserPreview={workbench.browserPreview}
+                    capabilityPolicy={activeCapabilityPolicy}
+                    config={config}
+                    providerUsageByProvider={providerUsageByProvider}
+                    capabilityActivities={
+                      activeSessionId
+                        ? Object.values(
+                            capabilityRunsBySessionId[activeSessionId] ?? {},
+                          )
+                        : []
                     }
-                    dispatchChatGrid({
-                      type: "select-pane",
-                      projectKey,
-                      mode: "drop",
-                      slotIndex,
-                      insertPosition: placement?.insertPosition,
-                      splitDirection: placement?.splitDirection,
-                      pane: chatPaneForSession(session),
-                    });
-                    activeSessionIdRef.current = session.id;
-                    setActiveSessionId(session.id);
-                    setWorkspacePath(session.workspacePath);
-                    void refreshEvents(session.id);
-                  }}
-                  onFocusPane={focusChatPane}
-                  onMovePane={(paneId, slotIndex) =>
-                    dispatchChatGrid({
-                      type: "move-pane",
-                      projectKey: activeChatLayout.projectKey,
-                      paneId,
-                      slotIndex,
-                    })
-                  }
-                  onToggleMaximize={(paneId) =>
-                    dispatchChatGrid({
-                      type: "toggle-maximize-pane",
-                      paneId,
-                    })
-                  }
-                  renderPane={renderChatPane}
-                />
-              ) : (
-                <ChatSurface
-                  activeChatPanel={activeChatPanel}
-                  browserPreview={workbench.browserPreview}
-                  capabilityPolicy={activeCapabilityPolicy}
-                  config={config}
-                  providerUsageByProvider={providerUsageByProvider}
-                  capabilityActivities={
-                    activeSessionId
-                      ? Object.values(
-                          capabilityRunsBySessionId[activeSessionId] ?? {},
-                        )
-                      : []
-                  }
-                  attachments={activeChatAttachments}
-                  chatMode={activeChatMode}
-                  diffReview={workbench.diffReview}
-                  draftResetToken={draftResetToken}
-                  draft={activeChatDraft}
-                  events={events}
-                  branchName={
-                    workbench.workspaceMode === "local"
-                      ? (branchCatalog?.current ?? activeSession?.branch)
-                      : activeSession?.branch
-                  }
-                  branchCatalog={branchCatalog}
-                  isEnvironmentRailOpen={activeChatPanel === "environment"}
-                  isGoalComposerActive={isGoalComposerActive}
-                  isComposerSending={isActiveSessionSending}
-                  isBranchLoading={isBranchLoading}
-                  isToolPanelOpen={workbench.isToolPanelOpen}
-                  maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-                  onboarding={workbench.onboarding}
-                  onAgentAction={(action) =>
-                    notify("terminal", "Agent action", action)
-                  }
-                  onCompleteOnboardingStep={(step) =>
-                    dispatchWorkbench({
-                      type: "complete-onboarding-step",
-                      step,
-                    })
-                  }
-                  onAttachMediaFiles={attachDroppedMedia}
-                  onComposerAction={handleComposerAction}
-                  onDraftChange={updateActiveChatDraft}
-                  onRemoveAttachment={removeChatAttachment}
-                  onReusePrompt={updateActiveChatDraft}
-                  onStopChat={stopActiveChat}
-                  onContinueChat={() => void sendDraft("Continue")}
-                  onOpenToolPanel={openToolPanel}
-                  onToggleToolPanel={toggleChatToolPanel}
-                  onPlanItemStatusChange={changePlanItemStatus}
-                  onPlanAction={changePlan}
-                  onPlanDecision={handlePlanDecision}
-                  planEditorRequest={planEditorRequest}
-                  onPlanEditorRequestHandled={() =>
-                    setPlanEditorRequest(undefined)
-                  }
-                  onGoalAction={changeGoal}
-                  onCancelGoalComposer={() => setIsGoalComposerActive(false)}
-                  onLoadChangeDiff={loadInlineChangeDiff}
-                  onEditQueuedMessage={editQueuedChatMessage}
-                  onRemoveQueuedMessage={removeQueuedChatMessage}
-                  onSteerQueuedMessage={steerQueuedChatMessage}
-                  onMutationApprovalAction={handleMutationApprovalAction}
-                  onProviderApprovalAction={handleProviderApprovalAction}
-                  onProviderStatusAction={handleProviderStatusAction}
-                  onSend={sendDraft}
-                  onSetOnboardingStep={(step) =>
-                    dispatchWorkbench({ type: "set-onboarding-step", step })
-                  }
-                  onToggleEnvironmentRail={() =>
-                    dispatchWorkbench({ type: "toggle-chat-environment-rail" })
-                  }
-                  onTogglePlanPanel={() =>
-                    dispatchWorkbench({ type: "toggle-chat-plan" })
-                  }
-                  providerReadiness={workbench.providerReadiness}
-                  queuedMessages={activeQueuedChatMessages.map((item) => ({
-                    attachmentCount: item.context.attachments?.length ?? 0,
-                    hasFailed: item.status === "failed",
-                    id: item.id,
-                    isDispatching: item.status === "sending",
-                    message: item.message,
-                  }))}
-                  savedProjects={savedProjects}
-                  sessionModel={{
-                    modelLabel: activeSession?.modelLabel,
-                    providerId: activeSession?.providerId,
-                    providerLabel: activeSession?.providerLabel,
-                    reasoningEffort: activeSession?.reasoningEffort,
-                  }}
-                  sessionPlan={activeSessionPlan}
-                  sessionGoal={activeSessionGoal}
-                  sessionSummary={activeSession?.summary}
-                  sessionTitle={activeSession?.title}
-                  sourceControl={workbench.ide.sourceControl}
-                  terminalPanes={workbench.terminalPanes}
-                  turnSourceControlBaselines={turnSourceControlBaselines}
-                  worktreeName={activeSession?.worktreeName}
-                  workspaceMode={workbench.workspaceMode}
-                  workspacePath={activeSession?.workspacePath ?? workspacePath}
-                />
-              )}
+                    attachments={activeChatAttachments}
+                    chatMode={activeChatMode}
+                    diffReview={workbench.diffReview}
+                    draftResetToken={draftResetToken}
+                    draft={activeChatDraft}
+                    events={events}
+                    branchName={
+                      workbench.workspaceMode === "local"
+                        ? (branchCatalog?.current ?? activeSession?.branch)
+                        : activeSession?.branch
+                    }
+                    branchCatalog={branchCatalog}
+                    isEnvironmentRailOpen={activeChatPanel === "environment"}
+                    isGoalComposerActive={isGoalComposerActive}
+                    isComposerSending={isActiveSessionSending}
+                    isBranchLoading={isBranchLoading}
+                    isToolPanelOpen={workbench.isToolPanelOpen}
+                    maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
+                    onboarding={workbench.onboarding}
+                    onAgentAction={(action) =>
+                      notify("terminal", "Agent action", action)
+                    }
+                    onCompleteOnboardingStep={(step) =>
+                      dispatchWorkbench({
+                        type: "complete-onboarding-step",
+                        step,
+                      })
+                    }
+                    onAttachMediaFiles={attachDroppedMedia}
+                    onComposerAction={handleComposerAction}
+                    onDraftChange={updateActiveChatDraft}
+                    onRemoveAttachment={removeChatAttachment}
+                    onReusePrompt={updateActiveChatDraft}
+                    onStopChat={stopActiveChat}
+                    onContinueChat={() => void sendDraft("Continue")}
+                    onOpenToolPanel={openToolPanel}
+                    onToggleToolPanel={toggleChatToolPanel}
+                    onPlanItemStatusChange={changePlanItemStatus}
+                    onPlanAction={changePlan}
+                    onPlanDecision={handlePlanDecision}
+                    planEditorRequest={planEditorRequest}
+                    onPlanEditorRequestHandled={() =>
+                      setPlanEditorRequest(undefined)
+                    }
+                    onGoalAction={changeGoal}
+                    onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                    onLoadChangeDiff={loadInlineChangeDiff}
+                    onEditQueuedMessage={editQueuedChatMessage}
+                    onRemoveQueuedMessage={removeQueuedChatMessage}
+                    onSteerQueuedMessage={steerQueuedChatMessage}
+                    onMutationApprovalAction={handleMutationApprovalAction}
+                    onProviderApprovalAction={handleProviderApprovalAction}
+                    onProviderStatusAction={handleProviderStatusAction}
+                    onSend={sendDraft}
+                    onSetOnboardingStep={(step) =>
+                      dispatchWorkbench({ type: "set-onboarding-step", step })
+                    }
+                    onToggleEnvironmentRail={() =>
+                      dispatchWorkbench({
+                        type: "toggle-chat-environment-rail",
+                      })
+                    }
+                    onTogglePlanPanel={() =>
+                      dispatchWorkbench({ type: "toggle-chat-plan" })
+                    }
+                    providerReadiness={workbench.providerReadiness}
+                    queuedMessages={activeQueuedChatMessages.map((item) => ({
+                      attachmentCount: item.context.attachments?.length ?? 0,
+                      hasFailed: item.status === "failed",
+                      id: item.id,
+                      isDispatching: item.status === "sending",
+                      message: item.message,
+                    }))}
+                    savedProjects={savedProjects}
+                    sessionModel={{
+                      modelLabel: activeSession?.modelLabel,
+                      providerId: activeSession?.providerId,
+                      providerLabel: activeSession?.providerLabel,
+                      reasoningEffort: activeSession?.reasoningEffort,
+                    }}
+                    sessionPlan={activeSessionPlan}
+                    sessionGoal={activeSessionGoal}
+                    sessionSummary={activeSession?.summary}
+                    sessionTitle={activeSession?.title}
+                    sourceControl={workbench.ide.sourceControl}
+                    terminalPanes={workbench.terminalPanes}
+                    turnSourceControlBaselines={turnSourceControlBaselines}
+                    worktreeName={activeSession?.worktreeName}
+                    workspaceMode={workbench.workspaceMode}
+                    workspacePath={
+                      activeSession?.workspacePath ?? workspacePath
+                    }
+                  />
+                ) : null}
+              </ChatGridSurface>
             </section>
           ) : null}
 
@@ -10215,10 +11059,73 @@ export function App() {
                 fileContent={selectedFileContent}
                 fileError={selectedFileError}
                 fileLoadState={selectedFileLoadState}
-                files={files}
+                files={visibleWorkspaceFiles}
                 ide={workbench.ide}
-                workspacePath={activeSession?.workspacePath ?? workspacePath}
+                activeWorkspaceRoot={workspaceActionRoot}
+                effectiveMinimapEnabled={
+                  effectiveWorkspaceSettings.editorMinimapEnabled
+                }
+                workspacePath={activeWorkspaceRoot}
+                workspaceRoots={workspaceRoots}
+                workspaceUserSettings={
+                  workbench.preferences.workspaceUserSettings
+                }
+                workspaceSettingsByWorkspace={
+                  workbench.preferences.workspaceSettingsByWorkspace
+                }
+                workspaceSettingsByFolder={
+                  workbench.preferences.workspaceSettingsByFolder
+                }
+                workspaceKeybindings={
+                  workbench.preferences.workspaceKeybindings
+                }
+                onWorkspaceSettingsChange={(scope, path, settings) =>
+                  dispatchWorkbench({
+                    type: "set-workspace-settings",
+                    scope,
+                    path,
+                    settings,
+                  })
+                }
+                onWorkspaceKeybindingChange={(commandId, keybinding) =>
+                  dispatchWorkbench({
+                    type: "set-workspace-keybinding",
+                    commandId,
+                    keybinding,
+                  })
+                }
+                onRegisterWorkspaceContribution={(contribution) =>
+                  dispatchWorkbench({
+                    type: "ide-register-contribution",
+                    contribution,
+                  })
+                }
+                onToggleWorkspaceContribution={(id, enabled) =>
+                  dispatchWorkbench({
+                    type: "ide-set-contribution-enabled",
+                    id,
+                    enabled,
+                  })
+                }
+                onRemoveWorkspaceContribution={(id) =>
+                  dispatchWorkbench({ type: "ide-remove-contribution", id })
+                }
+                workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
+                onTrustWorkspace={() => {
+                  if (!workspaceActionRoot) return;
+                  dispatchWorkbench({
+                    type: "set-workspace-trust",
+                    path: workspaceActionRoot,
+                    decision: "trusted",
+                  });
+                  notify(
+                    "terminal",
+                    "Workspace trusted",
+                    workspaceName(workspaceActionRoot),
+                  );
+                  refreshIdeServices(workspaceActionRoot);
+                }}
                 onAcceptAllDiffs={() =>
                   dispatchWorkbench({
                     type: "set-diff-review-state",
@@ -10338,9 +11245,24 @@ export function App() {
                     directory,
                   })
                 }
-                onToggleMinimap={() =>
-                  dispatchWorkbench({ type: "ide-toggle-minimap" })
-                }
+                onToggleMinimap={() => {
+                  if (!workspaceActionRoot) {
+                    dispatchWorkbench({ type: "ide-toggle-minimap" });
+                    return;
+                  }
+                  dispatchWorkbench({
+                    type: "set-workspace-settings",
+                    scope: "folder",
+                    path: workspaceActionRoot,
+                    settings: {
+                      ...(workbench.preferences.workspaceSettingsByFolder[
+                        workspaceActionRoot
+                      ] ?? {}),
+                      editorMinimapEnabled:
+                        !effectiveWorkspaceSettings.editorMinimapEnabled,
+                    },
+                  });
+                }}
                 onUndoDiff={() =>
                   dispatchWorkbench({
                     type: "undo-diff-action",
@@ -10372,7 +11294,8 @@ export function App() {
               ? renderWorkspaceToolPanel(false)
               : null
             : null}
-          {activeWorkspaceLayout === "code" ? (
+          {activeWorkspaceLayout === "code" &&
+          Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             <IdeStatusBar
               activeBuffer={activeEditorBuffer}
               editorSelection={workbench.ide.selection}
@@ -10653,9 +11576,15 @@ export function App() {
                 notify("command-failed", "Project unavailable", String(error)),
               );
           }}
+          onSelectFile={(path) => openEditorLocation(path)}
           onSelectSession={selectSession}
           onSelectWorkspaceLayout={selectWorkspaceLayout}
+          hasWorkspace={Boolean(activeSession?.workspacePath ?? workspacePath)}
+          workspaceTrusted={workspaceTrusted}
+          mode={commandPaletteMode}
           pinnedSessionIds={pinnedSessionIds}
+          files={visibleWorkspaceFiles}
+          recentFilePaths={workbench.ide.tabs.map((tab) => tab.path)}
           projects={searchableProjects.map((project) => ({
             ...project,
             current:
@@ -11541,13 +12470,30 @@ function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
     })),
     ide: {
       ...workbench.ide,
-      buffers: {},
+      buffers: persistableDirtyEditorBuffers(workbench.ide.buffers),
       selection: undefined,
       outputChannels: workbench.ide.outputChannels.map(
         persistableOutputChannel,
       ),
     },
   };
+}
+
+function persistableDirtyEditorBuffers(
+  buffers: WorkbenchState["ide"]["buffers"],
+) {
+  const persisted: WorkbenchState["ide"]["buffers"] = {};
+  let remainingChars = MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS;
+  for (const buffer of Object.values(buffers)) {
+    if (buffer.status !== "dirty") continue;
+    const chars = buffer.content.length + buffer.savedContent.length;
+    if (chars > MAX_PERSISTED_DIRTY_BUFFER_CHARS || chars > remainingChars) {
+      continue;
+    }
+    persisted[buffer.path] = buffer;
+    remainingChars -= chars;
+  }
+  return persisted;
 }
 
 function persistableOutputChannel(channel: OutputChannel): OutputChannel {
@@ -11703,12 +12649,11 @@ function languageServerDescriptorForPath(path: string) {
 }
 
 function workspaceFileUri(workspacePath: string, relativePath: string) {
-  const fullPath =
-    `${workspacePath.replace(/[\\/]+$/, "")}/${relativePath.replace(/^[/\\]+/, "")}`
-      .replaceAll("\\", "/")
-      .split("/")
-      .map((segment) => encodeURIComponent(segment))
-      .join("/");
+  const fullPath = absoluteWorkspaceFilePath(workspacePath, relativePath)
+    .replaceAll("\\", "/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
   return `file://${fullPath}`;
 }
 
@@ -11771,12 +12716,7 @@ function diagnosticsFromLspMessages(
 function lspRelativePath(uri: string, workspacePath: string) {
   try {
     const absolutePath = decodeURIComponent(uri.replace(/^file:\/\//, ""));
-    const normalizedRoot = workspacePath
-      .replaceAll("\\", "/")
-      .replace(/\/$/, "");
-    return absolutePath.startsWith(`${normalizedRoot}/`)
-      ? absolutePath.slice(normalizedRoot.length + 1)
-      : absolutePath;
+    return absoluteWorkspaceFilePath(workspacePath, absolutePath);
   } catch {
     return uri;
   }
@@ -12905,9 +13845,77 @@ function MonacoEditorPane({
           },
         },
       );
+      const definitionRegistration =
+        monaco.languages.registerDefinitionProvider(language, {
+          provideDefinition: async (_model, position) => {
+            try {
+              const result = await onLspRequest(
+                path,
+                "textDocument/definition",
+                {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                },
+              );
+              return monacoLocationsFromLsp(monaco, result);
+            } catch {
+              return [];
+            }
+          },
+        });
+      const referencesRegistration = monaco.languages.registerReferenceProvider(
+        language,
+        {
+          provideReferences: async (_model, position) => {
+            try {
+              const result = await onLspRequest(
+                path,
+                "textDocument/references",
+                {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                  context: { includeDeclaration: true },
+                },
+              );
+              return monacoLocationsFromLsp(monaco, result);
+            } catch {
+              return [];
+            }
+          },
+        },
+      );
+      const renameRegistration = monaco.languages.registerRenameProvider(
+        language,
+        {
+          provideRenameEdits: async (_model, position, newName) => {
+            try {
+              const result = await onLspRequest(path, "textDocument/rename", {
+                position: {
+                  line: position.lineNumber - 1,
+                  character: position.column - 1,
+                },
+                newName,
+              });
+              return monacoWorkspaceEditFromLsp(monaco, result);
+            } catch (error) {
+              return {
+                edits: [],
+                rejectReason: String(error),
+              };
+            }
+          },
+        },
+      );
       languageRegistrationsRef.current = [
         completionRegistration,
         hoverRegistration,
+        definitionRegistration,
+        referencesRegistration,
+        renameRegistration,
       ];
     }
     editor.onDidChangeCursorSelection((event) => {
@@ -13023,6 +14031,53 @@ function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {
     numberField(end, "line") + 1,
     numberField(end, "character") + 1,
   );
+}
+
+function monacoLocationsFromLsp(
+  monaco: Parameters<OnMount>[1],
+  value: unknown,
+) {
+  const locations = Array.isArray(value) ? value : value ? [value] : [];
+  return locations.flatMap((location) => {
+    if (!isRecord(location)) return [];
+    const uri =
+      typeof location.uri === "string"
+        ? location.uri
+        : typeof location.targetUri === "string"
+          ? location.targetUri
+          : undefined;
+    const range = monacoRangeFromLsp(
+      monaco,
+      location.range ?? location.targetSelectionRange ?? location.targetRange,
+    );
+    return uri && range ? [{ uri: monaco.Uri.parse(uri), range }] : [];
+  });
+}
+
+function monacoWorkspaceEditFromLsp(
+  monaco: Parameters<OnMount>[1],
+  value: unknown,
+) {
+  if (!isRecord(value) || !isRecord(value.changes)) return { edits: [] };
+  const edits = Object.entries(value.changes).flatMap(([uri, changes]) =>
+    Array.isArray(changes)
+      ? changes.flatMap((change) => {
+          if (!isRecord(change) || typeof change.newText !== "string")
+            return [];
+          const range = monacoRangeFromLsp(monaco, change.range);
+          return range
+            ? [
+                {
+                  resource: monaco.Uri.parse(uri),
+                  textEdit: { range, text: change.newText },
+                  versionId: undefined,
+                },
+              ]
+            : [];
+        })
+      : [],
+  );
+  return { edits };
 }
 
 function monacoCompletionKind(monaco: Parameters<OnMount>[1], value: unknown) {

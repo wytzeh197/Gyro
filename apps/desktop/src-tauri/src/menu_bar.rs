@@ -36,6 +36,10 @@ pub struct MenuBarJob {
     pub status: String,
     pub started_at: String,
     pub can_stop: bool,
+    pub provider_id: Option<String>,
+    pub provider_label: Option<String>,
+    pub model_id: Option<String>,
+    pub model_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -497,11 +501,27 @@ mod tests {
                     status: (*status).into(),
                     started_at: "2026-07-19T10:00:00Z".into(),
                     can_stop: true,
+                    provider_id: Some("openai".into()),
+                    provider_label: Some("OpenAI".into()),
+                    model_id: Some("gpt-5.6-sol".into()),
+                    model_label: Some("GPT-5.6 Sol".into()),
                 })
                 .collect(),
             total_active: statuses.len(),
             ..MenuBarSnapshot::default()
         }
+    }
+
+    #[test]
+    fn menu_bar_job_keeps_model_identity_in_snapshot_json() {
+        let snapshot = snapshot_with_jobs(&["finished"]);
+        let json = serde_json::to_value(snapshot).expect("snapshot should serialize");
+        let job = &json["jobs"][0];
+
+        assert_eq!(job["providerId"], "openai");
+        assert_eq!(job["providerLabel"], "OpenAI");
+        assert_eq!(job["modelId"], "gpt-5.6-sol");
+        assert_eq!(job["modelLabel"], "GPT-5.6 Sol");
     }
 
     #[test]
