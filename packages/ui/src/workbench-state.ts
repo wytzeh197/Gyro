@@ -63,8 +63,20 @@ import type {
   WorkbenchPreferences,
   WorkbenchTurn,
   WorkspaceLayoutId,
+  WorkspaceKeybinding,
+  WorkspaceScopedSettings,
+  WorkspaceSettingScope,
 } from "./types";
 import { defaultProviderStatuses as catalogDefaultProviderStatuses } from "./provider-catalog.ts";
+import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
+import {
+  MAX_WORKSPACE_FOLDERS,
+  normalizedWorkspaceFolderPath,
+} from "./workspace-project.ts";
+import {
+  defaultWorkspaceUserSettings,
+  normalizedWorkspaceScopedSettings,
+} from "./workspace-settings.ts";
 
 export const CLI_LAUNCH_PRESET_MAX_PANES = 8;
 export const CHAT_GRID_MAX_SLOTS = 4;
@@ -665,16 +677,64 @@ export function sanitizeStoredIdeState(
       );
     return { ...tab, groupId: ownerGroup?.id };
   });
+  const buffers: Record<string, EditorBuffer> = {};
+  const rawBuffers = storedRecord(ide.buffers);
+  let remainingBufferChars = 1_000_000;
+  if (rawBuffers) {
+    for (const [storedPath, value] of Object.entries(rawBuffers).slice(0, 30)) {
+      const buffer = storedRecord(value);
+      const path = storedRelativeEditorPath(buffer?.path ?? storedPath);
+      if (!path || !tabByPath.has(path) || buffer?.status !== "dirty") continue;
+      const content = typeof buffer.content === "string" ? buffer.content : "";
+      const savedContent =
+        typeof buffer.savedContent === "string" ? buffer.savedContent : "";
+      const chars = content.length + savedContent.length;
+      if (chars > 500_000 || chars > remainingBufferChars) continue;
+      remainingBufferChars -= chars;
+      buffers[path] = {
+        path,
+        content,
+        savedContent,
+        contentHash:
+          typeof buffer.contentHash === "string"
+            ? buffer.contentHash.slice(0, 256)
+            : undefined,
+        sizeBytes:
+          typeof buffer.sizeBytes === "number" &&
+          Number.isFinite(buffer.sizeBytes)
+            ? Math.max(0, Math.round(buffer.sizeBytes))
+            : content.length,
+        truncated: buffer.truncated === true,
+        status: "dirty",
+        updatedAt:
+          typeof buffer.updatedAt === "string"
+            ? buffer.updatedAt.slice(0, 64)
+            : new Date(0).toISOString(),
+      };
+    }
+  }
+  const dirtyPaths = new Set(Object.keys(buffers));
+  const tabsWithRecovery = restoredTabs.map((tab) => ({
+    ...tab,
+    dirty: dirtyPaths.has(tab.path),
+  }));
 
   return {
     ...base,
     activePath,
     activeView,
-    tabs: restoredTabs,
+    tabs: tabsWithRecovery,
+    buffers,
     layout: {
       ...base.layout,
       ...layoutPreferences,
-      groups,
+      groups: groups.map((group) => ({
+        ...group,
+        tabs: group.tabs.map((tab) => ({
+          ...tab,
+          dirty: dirtyPaths.has(tab.path),
+        })),
+      })),
       activeGroupId,
     },
   };
@@ -698,8 +758,6 @@ function storedRelativeEditorPath(value: unknown) {
   if (
     !path ||
     path.length > 4_096 ||
-    path.startsWith("/") ||
-    /^[a-z]:\//i.test(path) ||
     path.includes("\0") ||
     path.split("/").some((segment) => segment === "..")
   ) {
@@ -786,6 +844,11 @@ function defaultIdeContributions(): IdeContribution[] {
     {
       id: "gyro-core-ide",
       label: "Gyro Core Workspace",
+      version: "1",
+      publisher: "Gyro",
+      source: "core",
+      enabled: true,
+      permissions: ["commands", "views", "tasks", "debug", "languages"],
       views: [
         "explorer",
         "search",
@@ -1047,6 +1110,28 @@ export type WorkbenchAction =
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "set-density"; density: WorkbenchDensity }
   | { type: "set-menu-bar-visible"; visible: boolean }
+  | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
+  | { type: "set-workspace-sidebar-width"; width?: number }
+  | { type: "set-workspace-panel-height"; height: number }
+  | {
+      type: "set-workspace-trust";
+      path: string;
+      decision: "trusted" | "restricted";
+    }
+  | { type: "add-workspace-folder"; workspacePath: string; path: string }
+  | { type: "set-workspace-folders"; workspacePath: string; paths: string[] }
+  | { type: "remove-workspace-folder"; workspacePath: string; path: string }
+  | {
+      type: "set-workspace-settings";
+      scope: WorkspaceSettingScope;
+      path?: string;
+      settings: WorkspaceScopedSettings;
+    }
+  | {
+      type: "set-workspace-keybinding";
+      commandId: string;
+      keybinding?: WorkspaceKeybinding | null;
+    }
   | { type: "set-settings-section"; section: SettingsSectionId }
   | { type: "set-usage-provider"; providerId?: ProviderId }
   | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
@@ -1104,6 +1189,8 @@ export type WorkbenchAction =
   | { type: "ide-append-output"; channelId: string; lines: string[] }
   | { type: "ide-select-output-channel"; channelId: string }
   | { type: "ide-register-contribution"; contribution: IdeContribution }
+  | { type: "ide-set-contribution-enabled"; id: string; enabled: boolean }
+  | { type: "ide-remove-contribution"; id: string }
   | { type: "ide-record-ai-tool-call"; toolCall: IdeAiToolCall }
   | { type: "record-command"; commandId: string }
   | { type: "add-notification"; notification: Notification }
@@ -1442,6 +1529,142 @@ export function workbenchReducer(
           showMenuBarIcon: action.visible,
         },
       };
+    case "set-workspace-sidebar-hidden":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceSidebarHidden: action.hidden,
+        },
+      };
+    case "set-workspace-sidebar-width":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceSidebarWidth:
+            typeof action.width === "number" && Number.isFinite(action.width)
+              ? Math.min(520, Math.max(180, Math.round(action.width)))
+              : undefined,
+        },
+      };
+    case "set-workspace-panel-height":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspacePanelHeight: Math.min(
+            1_200,
+            Math.max(140, Math.round(action.height)),
+          ),
+        },
+      };
+    case "set-workspace-trust": {
+      const path = normalizedWorkspaceTrustPath(action.path);
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceTrust: {
+            ...state.preferences.workspaceTrust,
+            [path]: action.decision,
+          },
+        },
+      };
+    }
+    case "add-workspace-folder": {
+      const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
+      const path = normalizedWorkspaceFolderPath(action.path);
+      const current = state.preferences.workspaceFolders[workspacePath] ?? [];
+      if (path === workspacePath || current.includes(path)) return state;
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceFolders: {
+            ...state.preferences.workspaceFolders,
+            [workspacePath]: [...current, path].slice(
+              0,
+              MAX_WORKSPACE_FOLDERS - 1,
+            ),
+          },
+        },
+      };
+    }
+    case "set-workspace-folders": {
+      const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
+      const paths = action.paths
+        .map(normalizedWorkspaceFolderPath)
+        .filter(
+          (path, index, all) =>
+            path !== workspacePath && all.indexOf(path) === index,
+        )
+        .slice(0, MAX_WORKSPACE_FOLDERS - 1);
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceFolders: {
+            ...state.preferences.workspaceFolders,
+            [workspacePath]: paths,
+          },
+        },
+      };
+    }
+    case "remove-workspace-folder": {
+      const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
+      const path = normalizedWorkspaceFolderPath(action.path);
+      const current = state.preferences.workspaceFolders[workspacePath] ?? [];
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceFolders: {
+            ...state.preferences.workspaceFolders,
+            [workspacePath]: current.filter(
+              (candidate) => normalizedWorkspaceFolderPath(candidate) !== path,
+            ),
+          },
+        },
+      };
+    }
+    case "set-workspace-settings": {
+      const settings = normalizedWorkspaceScopedSettings(action.settings);
+      if (action.scope === "user") {
+        return {
+          ...state,
+          preferences: {
+            ...state.preferences,
+            workspaceUserSettings: settings,
+          },
+        };
+      }
+      if (!action.path) return state;
+      const path = normalizedWorkspaceFolderPath(action.path);
+      const key =
+        action.scope === "workspace"
+          ? "workspaceSettingsByWorkspace"
+          : "workspaceSettingsByFolder";
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          [key]: {
+            ...state.preferences[key],
+            [path]: settings,
+          },
+        },
+      };
+    }
+    case "set-workspace-keybinding": {
+      const next = { ...state.preferences.workspaceKeybindings };
+      if (action.keybinding === undefined) delete next[action.commandId];
+      else next[action.commandId] = action.keybinding;
+      return {
+        ...state,
+        preferences: { ...state.preferences, workspaceKeybindings: next },
+      };
+    }
     case "set-settings-section":
       return {
         ...state,
@@ -2257,6 +2480,29 @@ export function workbenchReducer(
                 item.id === action.contribution.id ? action.contribution : item,
               )
             : [...state.ide.contributions, action.contribution],
+        },
+      };
+    case "ide-set-contribution-enabled":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          contributions: state.ide.contributions.map((contribution) =>
+            contribution.id === action.id
+              ? { ...contribution, enabled: action.enabled }
+              : contribution,
+          ),
+        },
+      };
+    case "ide-remove-contribution":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          contributions: state.ide.contributions.filter(
+            (contribution) =>
+              contribution.source === "core" || contribution.id !== action.id,
+          ),
         },
       };
     case "ide-record-ai-tool-call":
@@ -3296,7 +3542,136 @@ function normalizeWorkbenchPreferences(
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
+    workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
+    workspaceSidebarWidth:
+      typeof preferences?.workspaceSidebarWidth === "number" &&
+      Number.isFinite(preferences.workspaceSidebarWidth)
+        ? Math.min(
+            520,
+            Math.max(180, Math.round(preferences.workspaceSidebarWidth)),
+          )
+        : undefined,
+    workspacePanelHeight:
+      typeof preferences?.workspacePanelHeight === "number" &&
+      Number.isFinite(preferences.workspacePanelHeight)
+        ? Math.min(
+            1_200,
+            Math.max(140, Math.round(preferences.workspacePanelHeight)),
+          )
+        : 280,
+    workspaceTrust:
+      preferences?.workspaceTrust &&
+      typeof preferences.workspaceTrust === "object" &&
+      !Array.isArray(preferences.workspaceTrust)
+        ? Object.fromEntries(
+            Object.entries(preferences.workspaceTrust)
+              .filter(
+                ([path, decision]) =>
+                  path.length > 0 &&
+                  path.length <= 4096 &&
+                  (decision === "trusted" || decision === "restricted"),
+              )
+              .slice(0, 500)
+              .map(([path, decision]) => [
+                normalizedWorkspaceTrustPath(path),
+                decision,
+              ]),
+          )
+        : {},
+    workspaceFolders:
+      preferences?.workspaceFolders &&
+      typeof preferences.workspaceFolders === "object" &&
+      !Array.isArray(preferences.workspaceFolders)
+        ? Object.fromEntries(
+            Object.entries(preferences.workspaceFolders)
+              .filter(
+                ([workspacePath, folders]) =>
+                  workspacePath.length > 0 &&
+                  workspacePath.length <= 4096 &&
+                  Array.isArray(folders),
+              )
+              .slice(0, 100)
+              .map(([workspacePath, folders]) => {
+                const normalizedWorkspace =
+                  normalizedWorkspaceFolderPath(workspacePath);
+                const normalizedFolders = (folders as unknown[])
+                  .filter(
+                    (folder): folder is string =>
+                      typeof folder === "string" &&
+                      folder.length > 0 &&
+                      folder.length <= 4096,
+                  )
+                  .map(normalizedWorkspaceFolderPath)
+                  .filter(
+                    (folder, index, all) =>
+                      folder !== normalizedWorkspace &&
+                      all.indexOf(folder) === index,
+                  )
+                  .slice(0, MAX_WORKSPACE_FOLDERS - 1);
+                return [normalizedWorkspace, normalizedFolders];
+              }),
+          )
+        : {},
+    workspaceUserSettings: {
+      ...defaultWorkspaceUserSettings,
+      ...normalizedWorkspaceScopedSettings(preferences?.workspaceUserSettings),
+    },
+    workspaceSettingsByWorkspace: normalizedWorkspaceSettingsMap(
+      preferences?.workspaceSettingsByWorkspace,
+    ),
+    workspaceSettingsByFolder: normalizedWorkspaceSettingsMap(
+      preferences?.workspaceSettingsByFolder,
+    ),
+    workspaceKeybindings: normalizedWorkspaceKeybindings(
+      preferences?.workspaceKeybindings,
+    ),
   };
+}
+
+function normalizedWorkspaceKeybindings(
+  value: Record<string, WorkspaceKeybinding | null> | undefined,
+) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized: Record<string, WorkspaceKeybinding | null> = {};
+  for (const [commandId, binding] of Object.entries(value).slice(0, 500)) {
+    if (!commandId || commandId.length > 200) continue;
+    if (binding === null) {
+      normalized[commandId] = null;
+      continue;
+    }
+    if (
+      !binding ||
+      typeof binding !== "object" ||
+      typeof binding.key !== "string" ||
+      !binding.key.trim() ||
+      binding.key.length > 40
+    ) {
+      continue;
+    }
+    normalized[commandId] = {
+      key: binding.key.toLowerCase(),
+      ...(binding.primary ? { primary: true } : {}),
+      ...(binding.control ? { control: true } : {}),
+      ...(binding.shift ? { shift: true } : {}),
+      ...(binding.alt ? { alt: true } : {}),
+    };
+  }
+  return normalized;
+}
+
+function normalizedWorkspaceSettingsMap(
+  value: Record<string, WorkspaceScopedSettings> | undefined,
+) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([path]) => path.length > 0 && path.length <= 4096)
+      .slice(0, 500)
+      .map(([path, settings]) => [
+        normalizedWorkspaceFolderPath(path),
+        normalizedWorkspaceScopedSettings(settings),
+      ]),
+  );
 }
 
 function normalizeTask(task: Task): Task {
