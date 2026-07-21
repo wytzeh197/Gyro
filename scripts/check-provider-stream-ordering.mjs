@@ -452,6 +452,28 @@ assert.deepEqual(
   ["src/a.ts", "src/b.ts"],
 );
 
+const groupedChronology = interleavedChatTimelineItems([
+  timelineActivity("opening-update", "commentary", 0),
+  timelineActivity("command-a", "command", 1),
+  timelineActivity("command-b", "command", 2),
+  timelineActivity("middle-update", "commentary", 3),
+  timelineActivity("command-c", "command", 4),
+  timelineActivity("command-d", "command", 5),
+]);
+assert.deepEqual(
+  groupedChronology.map((item) => item.kind),
+  ["event", "activity-group", "event", "activity-group"],
+);
+assert.deepEqual(
+  groupedChronology
+    .filter((item) => item.kind === "activity-group")
+    .map((item) => item.events.map((event) => event.id)),
+  [
+    ["command-a", "command-b"],
+    ["command-c", "command-d"],
+  ],
+);
+
 const completedFirstFile = {
   ...firstFile,
   createdAt: "2026-07-13T09:49:30.000Z",
@@ -472,6 +494,32 @@ assert.deepEqual(
 assert.equal(completionMergedTimeline[1].payload.status, "done");
 assert.equal(completionMergedTimeline[1].payload.timelineSequence, 2);
 assert.equal(completionMergedTimeline[1].createdAt, "2026-07-13T09:48:02.000Z");
+
+const liveFinalCommentary = {
+  ...timelineActivity("live-final-commentary", "commentary", 6),
+  message: "The timeline is fixed.",
+  payload: {
+    ...timelineActivity("live-final-commentary", "commentary", 6).payload,
+    label: "The timeline is fixed.",
+  },
+};
+const completedFinalResponse = {
+  id: "completed-final-response",
+  sessionId: "session-1",
+  turnId: "turn-stable-timeline",
+  createdAt: "2026-07-13T09:50:00.000Z",
+  kind: "assistant-message",
+  message: "The timeline is fixed.",
+  payload: { kind: "provider-response", timelineSequence: 6 },
+};
+const finalResponseMergedTimeline = mergeProviderResponseEvents(
+  [firstCommentary, timelineCommand, liveFinalCommentary],
+  [completedFinalResponse],
+);
+assert.deepEqual(
+  finalResponseMergedTimeline.map((event) => event.id),
+  ["commentary-before", "command-after-edit", "completed-final-response"],
+);
 
 console.log(
   "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits).",

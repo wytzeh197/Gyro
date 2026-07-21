@@ -9143,8 +9143,7 @@ fn run_openai_codex_app_server_chat(
         let mut response_text = String::new();
         let mut response_text_chars = 0_usize;
         let mut response_text_truncated = false;
-        let mut pending_delta = String::new();
-        let mut last_delta_emit = Instant::now();
+        let mut commentary_stream = CodexAppServerCommentaryStream::new();
         let mut completed_message = String::new();
         let mut activities = Vec::new();
         let mut completed_activity_ids = HashSet::new();
@@ -9174,11 +9173,11 @@ fn run_openai_codex_app_server_chat(
             ) {
                 Ok(message) => message.map_err(anyhow::Error::msg)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    flush_codex_app_server_delta(
+                    flush_codex_app_server_commentary(
                         app,
                         request,
-                        &mut pending_delta,
-                        &mut last_delta_emit,
+                        &mut commentary_stream,
+                        &activities,
                         false,
                     );
                     continue;
@@ -9236,17 +9235,19 @@ fn run_openai_codex_app_server_chat(
                                 MAX_CHAT_RESPONSE_CHARS,
                             );
                             response_text_truncated = pushed.truncated;
-                            if pushed.accepted_chars > 0 {
-                                pending_delta.extend(delta.chars().take(pushed.accepted_chars));
-                                flush_codex_app_server_delta(
-                                    app,
-                                    request,
-                                    &mut pending_delta,
-                                    &mut last_delta_emit,
-                                    false,
-                                );
-                            }
                         }
+                        commentary_stream.push_delta(
+                            &mut activities,
+                            params.get("itemId").and_then(serde_json::Value::as_str),
+                            delta,
+                        );
+                        flush_codex_app_server_commentary(
+                            app,
+                            request,
+                            &mut commentary_stream,
+                            &activities,
+                            false,
+                        );
                     }
                 }
                 "item/fileChange/patchUpdated" => {
@@ -9292,12 +9293,24 @@ fn run_openai_codex_app_server_chat(
                     if let Some(item) = params.get("item") {
                         match item.get("type").and_then(serde_json::Value::as_str) {
                             Some("agentMessage") => {
-                                if let Some(text) =
-                                    item.get("text").and_then(serde_json::Value::as_str)
-                                {
+                                let text = item.get("text").and_then(serde_json::Value::as_str);
+                                if let Some(text) = text {
                                     completed_message =
                                         truncate_chars(text, MAX_CHAT_RESPONSE_CHARS);
                                 }
+                                commentary_stream.complete_message(
+                                    &mut activities,
+                                    item.get("id").and_then(serde_json::Value::as_str),
+                                    text,
+                                );
+                                flush_codex_app_server_commentary(
+                                    app,
+                                    request,
+                                    &mut commentary_stream,
+                                    &activities,
+                                    true,
+                                );
+                                commentary_stream.finish_message();
                             }
                             Some("commandExecution") => {
                                 let activity = codex_item_activity(item, "command", "Ran command");
@@ -9334,13 +9347,15 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "turn/completed" => {
-                    flush_codex_app_server_delta(
+                    commentary_stream.complete_message(&mut activities, None, None);
+                    flush_codex_app_server_commentary(
                         app,
                         request,
-                        &mut pending_delta,
-                        &mut last_delta_emit,
+                        &mut commentary_stream,
+                        &activities,
                         true,
                     );
+                    commentary_stream.finish_message();
                     let status = params
                         .pointer("/turn/status")
                         .and_then(serde_json::Value::as_str)
@@ -9434,28 +9449,155 @@ fn codex_app_server_policy(
     )
 }
 
-fn flush_codex_app_server_delta(
+// Codex uses agentMessage for both progress updates and the final answer. Keep
+// each live message in the activity timeline; the final matching commentary is
+// removed when the durable assistant response is assembled.
+#[derive(Debug)]
+struct CodexAppServerActiveCommentary {
+    activity_index: usize,
+    chars: usize,
+    truncated: bool,
+}
+
+#[derive(Debug)]
+struct CodexAppServerCommentaryStream {
+    active: Option<CodexAppServerActiveCommentary>,
+    dirty: bool,
+    last_emit_at: Instant,
+    next_fallback_id: u64,
+}
+
+impl CodexAppServerCommentaryStream {
+    fn new() -> Self {
+        Self {
+            active: None,
+            dirty: false,
+            last_emit_at: Instant::now(),
+            next_fallback_id: 0,
+        }
+    }
+
+    fn push_delta(
+        &mut self,
+        activities: &mut Vec<ProviderActivity>,
+        item_id: Option<&str>,
+        delta: &str,
+    ) {
+        if delta.is_empty() {
+            return;
+        }
+        let Some(active) = self.ensure_active(activities, item_id) else {
+            return;
+        };
+        if active.truncated {
+            return;
+        }
+        let Some(activity) = activities.get_mut(active.activity_index) else {
+            return;
+        };
+        let pushed = push_bounded(
+            &mut activity.label,
+            &mut active.chars,
+            delta,
+            MAX_CHAT_RESPONSE_CHARS,
+        );
+        active.truncated = pushed.truncated;
+        self.dirty |= pushed.accepted_chars > 0;
+    }
+
+    fn complete_message(
+        &mut self,
+        activities: &mut Vec<ProviderActivity>,
+        item_id: Option<&str>,
+        text: Option<&str>,
+    ) {
+        if self.active.is_none() && text.is_none_or(str::is_empty) {
+            return;
+        }
+        let Some(active) = self.ensure_active(activities, item_id) else {
+            return;
+        };
+        let Some(activity) = activities.get_mut(active.activity_index) else {
+            return;
+        };
+        if let Some(text) = text {
+            activity.label = truncate_chars(text, MAX_CHAT_RESPONSE_CHARS);
+            active.chars = activity.label.chars().count();
+            active.truncated = text.chars().count() > MAX_CHAT_RESPONSE_CHARS;
+        }
+        activity.status = "done".into();
+        self.dirty |= !activity.label.is_empty();
+    }
+
+    fn finish_message(&mut self) {
+        self.active = None;
+        self.dirty = false;
+    }
+
+    fn take_snapshot(
+        &mut self,
+        activities: &[ProviderActivity],
+        force: bool,
+    ) -> Option<(ProviderActivity, u64)> {
+        if !self.dirty || (!force && self.last_emit_at.elapsed() < PROVIDER_STREAM_FLUSH_INTERVAL) {
+            return None;
+        }
+        let active = self.active.as_ref()?;
+        let activity = activities.get(active.activity_index)?.clone();
+        if activity.label.is_empty() {
+            return None;
+        }
+        self.dirty = false;
+        self.last_emit_at = Instant::now();
+        Some((activity, active.activity_index as u64))
+    }
+
+    fn ensure_active<'a>(
+        &'a mut self,
+        activities: &mut Vec<ProviderActivity>,
+        item_id: Option<&str>,
+    ) -> Option<&'a mut CodexAppServerActiveCommentary> {
+        if self.active.is_none() {
+            if activities.len() >= MAX_CODEX_APP_SERVER_ACTIVITIES {
+                return None;
+            }
+            let id = item_id
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    let id = format!("codex-commentary-{}", self.next_fallback_id);
+                    self.next_fallback_id = self.next_fallback_id.saturating_add(1);
+                    id
+                });
+            let activity_index = activities.len();
+            activities.push(ProviderActivity {
+                id,
+                kind: "commentary".into(),
+                label: String::new(),
+                detail: None,
+                status: "running".into(),
+            });
+            self.active = Some(CodexAppServerActiveCommentary {
+                activity_index,
+                chars: 0,
+                truncated: false,
+            });
+        }
+        self.active.as_mut()
+    }
+}
+
+fn flush_codex_app_server_commentary(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
-    pending_delta: &mut String,
-    last_emit: &mut Instant,
+    commentary_stream: &mut CodexAppServerCommentaryStream,
+    activities: &[ProviderActivity],
     force: bool,
 ) {
-    if pending_delta.is_empty() || (!force && last_emit.elapsed() < PROVIDER_STREAM_FLUSH_INTERVAL)
-    {
-        return;
+    if let Some((activity, sequence)) = commentary_stream.take_snapshot(activities, force) {
+        emit_provider_activity_event(app, request, &activity, Some(sequence));
     }
-    let delta = std::mem::take(pending_delta);
-    *last_emit = Instant::now();
-    emit_provider_chat_event(
-        app,
-        request,
-        "delta",
-        Some(HarnessRunStatus::Running),
-        Some(delta),
-        None,
-        None,
-    );
 }
 
 fn insert_codex_app_server_patch(
@@ -15879,6 +16021,123 @@ while True:
             "I’ll inspect the workspace first.",
         );
         assert_eq!(retained, vec![command]);
+    }
+
+    #[test]
+    fn codex_app_server_commentary_streams_cumulative_snapshots_with_missing_ids() {
+        let mut stream = CodexAppServerCommentaryStream::new();
+        let mut activities = Vec::new();
+
+        stream.push_delta(&mut activities, None, "I’ll inspect");
+        stream.last_emit_at = Instant::now();
+        assert!(stream.take_snapshot(&activities, false).is_none());
+        let (first, first_sequence) = stream
+            .take_snapshot(&activities, true)
+            .expect("first commentary snapshot");
+        assert_eq!(first.id, "codex-commentary-0");
+        assert_eq!(first.label, "I’ll inspect");
+        assert_eq!(first.status, "running");
+        assert_eq!(first_sequence, 0);
+
+        stream.push_delta(&mut activities, None, " the project.");
+        let (cumulative, cumulative_sequence) = stream
+            .take_snapshot(&activities, true)
+            .expect("cumulative commentary snapshot");
+        assert_eq!(cumulative.id, first.id);
+        assert_eq!(cumulative.label, "I’ll inspect the project.");
+        assert_eq!(cumulative_sequence, first_sequence);
+
+        stream.complete_message(
+            &mut activities,
+            None,
+            Some("I’ll inspect the project first."),
+        );
+        let (completed, completed_sequence) = stream
+            .take_snapshot(&activities, true)
+            .expect("completed commentary snapshot");
+        assert_eq!(completed.id, first.id);
+        assert_eq!(completed.label, "I’ll inspect the project first.");
+        assert_eq!(completed.status, "done");
+        assert_eq!(completed_sequence, first_sequence);
+        stream.finish_message();
+
+        stream.push_delta(&mut activities, None, "Next update.");
+        assert_eq!(activities[1].id, "codex-commentary-1");
+    }
+
+    #[test]
+    fn codex_app_server_commentary_preserves_activity_order_and_dedupes_final() {
+        let mut stream = CodexAppServerCommentaryStream::new();
+        let mut activities = Vec::new();
+        let mut commentary_sequences = Vec::new();
+        let mut complete_commentary = |stream: &mut CodexAppServerCommentaryStream,
+                                       activities: &mut Vec<ProviderActivity>,
+                                       item_id: Option<&str>,
+                                       text: &str| {
+            stream.push_delta(activities, item_id, text);
+            stream.complete_message(activities, item_id, Some(text));
+            let (_, sequence) = stream
+                .take_snapshot(activities, true)
+                .expect("completed commentary");
+            commentary_sequences.push(sequence);
+            stream.finish_message();
+        };
+
+        complete_commentary(
+            &mut stream,
+            &mut activities,
+            Some("opening-message"),
+            "I’ll inspect first.",
+        );
+        activities.push(ProviderActivity {
+            id: "command-1".into(),
+            kind: "command".into(),
+            label: "Searched project".into(),
+            detail: None,
+            status: "done".into(),
+        });
+        complete_commentary(
+            &mut stream,
+            &mut activities,
+            None,
+            "I found the relevant code.",
+        );
+        activities.push(ProviderActivity {
+            id: "command-2".into(),
+            kind: "command".into(),
+            label: "Ran tests".into(),
+            detail: None,
+            status: "done".into(),
+        });
+        complete_commentary(
+            &mut stream,
+            &mut activities,
+            Some("final-message"),
+            "The timeline is fixed.",
+        );
+
+        assert_eq!(commentary_sequences, vec![0, 2, 4]);
+        assert_eq!(
+            activities
+                .iter()
+                .map(|activity| (activity.kind.as_str(), activity.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("commentary", "I’ll inspect first."),
+                ("command", "Searched project"),
+                ("commentary", "I found the relevant code."),
+                ("command", "Ran tests"),
+                ("commentary", "The timeline is fixed."),
+            ]
+        );
+
+        let retained = provider_activities_for_response(activities, "The timeline is fixed.");
+        assert_eq!(retained.len(), 4);
+        assert_eq!(retained[0].label, "I’ll inspect first.");
+        assert_eq!(retained[2].label, "I found the relevant code.");
+        assert!(retained
+            .iter()
+            .all(|activity| activity.label != "The timeline is fixed."));
     }
 
     #[test]
