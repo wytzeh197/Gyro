@@ -1150,7 +1150,6 @@ export function AppChrome({
                 (onSettingsBack ?? (() => onSelectDestination("workspace")))();
               }}
               onSectionChange={onSettingsSectionChange}
-              onToggleSidebar={() => setIsSidebarHidden(true)}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -1571,7 +1570,6 @@ function SettingsSidebarContent({
   activeSection,
   onBack,
   onSectionChange,
-  onToggleSidebar,
   workspacePreparation,
   isWorkspacePreparationOpen,
   onToggleWorkspacePreparation,
@@ -1582,7 +1580,6 @@ function SettingsSidebarContent({
   activeSection: SettingsSectionId;
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
-  onToggleSidebar: () => void;
   workspacePreparation?: WorkspacePreparationProgress;
   isWorkspacePreparationOpen: boolean;
   onToggleWorkspacePreparation: () => void;
@@ -1598,13 +1595,6 @@ function SettingsSidebarContent({
           aria-label="Settings navigation"
         >
           <div className="gyro-sidebar-window-actions">
-            <button
-              aria-label="Hide sidebar"
-              onClick={onToggleSidebar}
-              type="button"
-            >
-              <PanelLeftClose size={13} />
-            </button>
             <button
               aria-label="Back from settings"
               className="gyro-settings-back-button"
@@ -15159,8 +15149,10 @@ function Composer({
             </div>
             <div className="gyro-composer-control gyro-composer-control-approval gyro-composer-reveal">
               <button
+                aria-label={`Approval mode: ${approvalCopy.chipLabel}`}
                 className={approvalChipClassName}
                 onClick={() => togglePopover("approval")}
+                title={`Approval mode: ${approvalCopy.chipLabel}`}
                 type="button"
                 {...menuProps("approval")}
               >
@@ -15380,8 +15372,10 @@ function Composer({
         {providerReasoningEffort && effortItems.length > 0 ? (
           <div className="gyro-composer-control gyro-composer-control-effort">
             <button
+              aria-label={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
               className="gyro-composer-chip gyro-effort-chip"
               onClick={() => togglePopover("effort")}
+              title={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
               type="button"
               {...menuProps("effort")}
             >
