@@ -56,13 +56,20 @@ export type ChatGridState = {
 };
 
 export type CapabilityId =
+  | "workspace-context"
   | "workspace-list"
   | "workspace-search"
   | "workspace-read"
+  | "workspace-read-range"
   | "workspace-diagnostics"
   | "workspace-git-status"
   | "workspace-diff"
+  | "workspace-propose-edit"
+  | "workspace-run-task"
+  | "workspace-run-test"
+  | "workspace-read-output"
   | "ide-reveal"
+  | "ide-open-panel"
   | "terminal-open"
   | "terminal-read"
   | "terminal-stop"
@@ -105,6 +112,28 @@ export type CapabilityInvocationContext = {
   workspaceKey: string;
   mode: CapabilityRunMode;
   policyRevision: number;
+  workspaceContextRevision: number;
+};
+
+export type WorkspaceContextSnapshot = {
+  schema: "gyro.workspace-context.v1";
+  workspaceKey: string;
+  revision: number;
+  capturedAt: string;
+  activePath?: string;
+  activeView?: IdeViewId;
+  visibleTabs: string[];
+  selection?: EditorSelection;
+  buffers: Array<{
+    path: string;
+    dirty: boolean;
+    contentHash?: string;
+    diskHash?: string;
+    content?: string;
+  }>;
+  diagnostics: ProblemDiagnostic[];
+  testFailures: TestTreeItem[];
+  activeOutput?: OutputChannel;
 };
 
 export type CapabilityRequest = {
@@ -134,7 +163,7 @@ export type ProjectCapabilityPolicy = {
 
 export type CapabilityResourceRef = {
   id: string;
-  kind: "workspace" | "ide" | "terminal" | "browser";
+  kind: "workspace" | "ide" | "terminal" | "browser" | "proposal" | "output";
   label: string;
 };
 

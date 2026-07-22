@@ -159,6 +159,7 @@ export type {
   GlobalSearchProject,
   GlobalSearchSelection,
   WorkspaceChangedEvent,
+  WorkspaceContextSnapshot,
   WorkspacePreparationError,
   WorkspacePreparationPhase,
   WorkspacePreparationProgress,
