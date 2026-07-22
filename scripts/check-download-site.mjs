@@ -104,8 +104,10 @@ const css = read("site/styles.css");
 const app = read("site/app.js");
 const releaseUtils = read("site/release-utils.js");
 const changelogJs = read("site/changelog.js");
+const headers = read("site/_headers");
+const robots = read("site/robots.txt");
+const sitemap = read("site/sitemap.xml");
 const buildScript = read("scripts/build-download-site.mjs");
-const workflow = read(".github/workflows/pages.yml");
 const fixture = JSON.parse(read("site/fixtures/latest-release.json"));
 
 for (const [name, html] of Object.entries(pages)) {
@@ -130,6 +132,32 @@ for (const [name, html] of Object.entries(pages)) {
   ]);
 }
 
+containsAll(headers, "Cloudflare Pages headers", [
+  "/*",
+  "Content-Security-Policy:",
+  "Permissions-Policy:",
+  "Referrer-Policy: same-origin",
+  "X-Content-Type-Options: nosniff",
+  "X-Frame-Options: DENY",
+]);
+containsAll(robots, "robots.txt", [
+  "User-agent: *",
+  "Allow: /",
+  "Sitemap: https://usegyro.io/sitemap.xml",
+]);
+for (const url of [
+  "https://usegyro.io/",
+  "https://usegyro.io/install/",
+  "https://usegyro.io/changelog/",
+  "https://usegyro.io/privacy/",
+]) {
+  check(sitemap.includes(`<loc>${url}</loc>`), `Sitemap is missing ${url}`);
+}
+check(
+  !allHtml.includes("wytzeh197.github.io/Gyro"),
+  "Pages must use usegyro.io as their canonical public origin",
+);
+
 containsAll(pages.home, "Homepage", [
   "Keep the whole coding run together.",
   "Chat, terminals, files, diffs, and approvals in one local workspace.",
@@ -141,6 +169,7 @@ containsAll(pages.home, "Homepage", [
   "assets/gyro-mark.png",
   'class="surface-card surface-card-wide"',
   'class="surface-pair"',
+  'class="surface-visual"',
   "assets/screenshots/hero-960.webp",
   "assets/screenshots/hero-1920.webp",
   "assets/screenshots/hero-mobile-1200.webp",
@@ -225,7 +254,7 @@ containsAll(pages.privacy, "Privacy page", [
   "Public alpha, license, and support",
   "Trademarks and assets",
   "Security and support",
-  "Last updated 15 July 2026",
+  "Last updated 22 July 2026",
 ]);
 
 containsAll(css, "Shared CSS", [
@@ -238,6 +267,9 @@ containsAll(css, "Shared CSS", [
   "font-size: 13px",
   "min-height: 44px",
   ".surface-card-wide",
+  ".surface-visual",
+  "--grid-columns: 12",
+  "grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr))",
   "grid-template-columns: minmax(260px, 32%) minmax(0, 68%)",
   ".surface-pair",
   ".changelog-layout",
@@ -283,6 +315,9 @@ containsAll(releaseUtils, "Shared release utilities", [
 ]);
 
 containsAll(buildScript, "Site builder", [
+  '"site/_headers", "_headers"',
+  '"site/robots.txt", "robots.txt"',
+  '"site/sitemap.xml", "sitemap.xml"',
   "site/install/index.html",
   "site/changelog/index.html",
   "site/privacy/index.html",
@@ -293,16 +328,6 @@ containsAll(buildScript, "Site builder", [
   "site/assets/screenshots/hero-1920.webp",
   "site/assets/screenshots/workspace-1600.webp",
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
-]);
-
-containsAll(workflow, "Pages workflow", [
-  "actions/configure-pages@v5",
-  "actions/upload-pages-artifact@v3",
-  "actions/deploy-pages@v4",
-  "node scripts/check-download-site.mjs",
-  "node scripts/build-download-site.mjs",
-  "pages: write",
-  "id-token: write",
 ]);
 
 for (const staleMarker of [
@@ -497,10 +522,13 @@ if (!failures.length) {
     );
   }
   for (const route of [
+    "_headers",
     "index.html",
     "install/index.html",
     "changelog/index.html",
     "privacy/index.html",
+    "robots.txt",
+    "sitemap.xml",
   ]) {
     check(filesA.includes(route), `Built site is missing route ${route}`);
   }

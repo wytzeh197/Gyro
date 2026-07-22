@@ -29,6 +29,9 @@ if (outputRoot === repoRoot || outputRoot === sourceRoot) {
 }
 
 const files = [
+  ["site/_headers", "_headers"],
+  ["site/robots.txt", "robots.txt"],
+  ["site/sitemap.xml", "sitemap.xml"],
   ["site/index.html", "index.html"],
   ["site/install/index.html", "install/index.html"],
   ["site/changelog/index.html", "changelog/index.html"],

@@ -70,7 +70,7 @@ quarantine.
 Launch order:
 
 1. GitHub public repository and manually accepted, immutable Alpha release.
-2. [Download site](https://wytzeh197.github.io/Gyro/) with direct Apple Silicon
+2. [Download site](https://usegyro.io/) with direct Apple Silicon
    and Intel choices, the unsigned disclosure, and install help.
 3. CLI-only Homebrew tap after both native Formula validations pass.
 4. Show HN with concrete technical details and a working download.

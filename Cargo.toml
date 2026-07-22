@@ -9,7 +9,7 @@ resolver = "2"
 [workspace.package]
 authors = ["Gyro contributors"]
 edition = "2021"
-homepage = "https://wytzeh197.github.io/Gyro/"
+homepage = "https://usegyro.io/"
 license = "Apache-2.0"
 repository = "https://github.com/wytzeh197/Gyro"
 rust-version = "1.78"
