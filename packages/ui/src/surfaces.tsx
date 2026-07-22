@@ -1150,6 +1150,7 @@ export function AppChrome({
                 (onSettingsBack ?? (() => onSelectDestination("workspace")))();
               }}
               onSectionChange={onSettingsSectionChange}
+              onToggleSidebar={() => setIsSidebarHidden(true)}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -1235,7 +1236,7 @@ export function AppChrome({
             />
           )}
 
-          {activeDestination !== "settings" ? (
+          {activeDestination !== "settings" && !isIdeSurface ? (
             <div className="gyro-sidebar-footer">
               <button
                 className="gyro-account-button"
@@ -1570,6 +1571,7 @@ function SettingsSidebarContent({
   activeSection,
   onBack,
   onSectionChange,
+  onToggleSidebar,
   workspacePreparation,
   isWorkspacePreparationOpen,
   onToggleWorkspacePreparation,
@@ -1580,6 +1582,7 @@ function SettingsSidebarContent({
   activeSection: SettingsSectionId;
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
+  onToggleSidebar: () => void;
   workspacePreparation?: WorkspacePreparationProgress;
   isWorkspacePreparationOpen: boolean;
   onToggleWorkspacePreparation: () => void;
@@ -1596,12 +1599,22 @@ function SettingsSidebarContent({
         >
           <div className="gyro-sidebar-window-actions">
             <button
+              aria-label="Hide sidebar"
+              onClick={onToggleSidebar}
+              type="button"
+            >
+              <PanelLeftClose size={13} />
+            </button>
+            <button
               aria-label="Back from settings"
               className="gyro-settings-back-button"
               onClick={onBack}
               type="button"
             >
               <ArrowLeft size={13} />
+            </button>
+            <button aria-label="Forward" disabled type="button">
+              <ArrowRight size={13} />
             </button>
           </div>
           <strong className="gyro-settings-sidebar-title">Settings</strong>
@@ -5468,7 +5481,7 @@ export function ChatSurface({
     },
     {
       action: "new-chat-select-workspace",
-      detail: "Keep this chat intact and choose another folder",
+      detail: "Choose another folder",
       icon: Folder,
       label: "New chat in another folder",
     },
@@ -5477,7 +5490,7 @@ export function ChatSurface({
     {
       active: true,
       disabled: true,
-      detail: "This context stays fixed for the current chat",
+      detail: "Fixed for this chat",
       icon: workspaceMode === "worktree" ? GitBranch : Laptop,
       label: workspaceMode === "worktree" ? "Worktree" : "Local",
     },
@@ -5488,8 +5501,8 @@ export function ChatSurface({
           : "start-new-chat-mode:worktree",
       detail:
         workspaceMode === "local"
-          ? "Create an isolated branch when the new chat starts"
-          : "Choose the source folder for a new local chat",
+          ? "Create an isolated branch"
+          : "Choose a folder for a local chat",
       icon: workspaceMode === "local" ? GitPullRequest : Laptop,
       label: workspaceMode === "local" ? "New worktree chat" : "New local chat",
     },
@@ -5553,21 +5566,14 @@ export function ChatSurface({
                 type="button"
                 title={`${workspaceName(workspacePath)} / ${branchLabel} / ${workspaceModeLabel}`}
               >
-                <HardDrive aria-hidden="true" size={13} />
-                <em className="gyro-thread-context-project">
-                  {workspaceName(workspacePath)}
-                </em>
-                <i aria-hidden="true">/</i>
+                <GitBranch aria-hidden="true" size={13} />
                 <em className="gyro-thread-context-branch">{branchLabel}</em>
-                <i aria-hidden="true">/</i>
-                <em className="gyro-thread-context-mode">
-                  {workspaceModeLabel}
-                </em>
                 <ChevronDown aria-hidden="true" size={12} />
               </button>
               {activeThreadContextMenu === "workspace" ? (
                 <ComposerPopover
                   align="end"
+                  className="gyro-thread-workspace-menu"
                   id="gyro-thread-workspace-menu"
                   items={threadWorkspaceItems}
                   onAction={(action) => {
@@ -16537,21 +16543,6 @@ function ChatTurn({
             </div>
           ) : null}
         </div>
-        {!isRunning
-          ? changeSummaryItems.map((item) => (
-              <ChatTurnChangeSummary
-                changeSummary={chatTurnChangeSummary(
-                  item.events,
-                  sourceControl,
-                  sourceControlBaseline,
-                )}
-                isRunning={false}
-                key={item.id}
-                onLoadChangeDiff={onLoadChangeDiff}
-                onOpenChanges={onOpenChanges}
-              />
-            ))
-          : null}
         {responseTimelineItems.length > 0 ? (
           <div className="gyro-chat-run-sequence" aria-label="Final response">
             {responseTimelineItems.map((item) => {
@@ -16643,6 +16634,21 @@ function ChatTurn({
             </div>
           </div>
         ) : null}
+        {!isRunning
+          ? changeSummaryItems.map((item) => (
+              <ChatTurnChangeSummary
+                changeSummary={chatTurnChangeSummary(
+                  item.events,
+                  sourceControl,
+                  sourceControlBaseline,
+                )}
+                isRunning={false}
+                key={item.id}
+                onLoadChangeDiff={onLoadChangeDiff}
+                onOpenChanges={onOpenChanges}
+              />
+            ))
+          : null}
       </div>
     </section>
   );
