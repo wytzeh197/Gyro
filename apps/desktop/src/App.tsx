@@ -14000,7 +14000,7 @@ function languageForPath(path: string) {
     case "md":
       return "markdown";
     case "rs":
-      return "rust";
+      return "gyro-rust";
     case "ts":
       return "typescript";
     case "tsx":
