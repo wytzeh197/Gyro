@@ -127,6 +127,7 @@ const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
 const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
+const CODEX_ARTIFACT_COMPLETION_GRACE: Duration = Duration::from_secs(2);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
 const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -9150,10 +9151,16 @@ fn run_openai_codex_app_server_chat(
         let mut patches = HashMap::<String, serde_json::Value>::new();
         let mut context_usage = None;
         let mut turn_started = false;
+        let mut completed_artifact_response_at: Option<Instant> = None;
         let mut last_protocol_activity = Instant::now();
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
+            if completed_artifact_response_at.is_some_and(|completed_at| {
+                completed_at.elapsed() >= CODEX_ARTIFACT_COMPLETION_GRACE
+            }) {
+                break;
+            }
             if provider_chat_cancelled(app, &request.session_id) {
                 anyhow::bail!("chat cancelled by user");
             }
@@ -9196,6 +9203,7 @@ fn run_openai_codex_app_server_chat(
             }
             let method = message.get("method").and_then(serde_json::Value::as_str);
             if let Some(method) = method.filter(|_| message.get("id").is_some()) {
+                completed_artifact_response_at = None;
                 let params = message.get("params").cloned().unwrap_or_default();
                 handle_codex_app_server_request(
                     app, request, &mut stdin, &message, method, &params, &patches,
@@ -9216,6 +9224,7 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "thread/compacted" => {
+                    completed_artifact_response_at = None;
                     let activity = codex_context_compaction_activity(&params, "done");
                     record_codex_app_server_activity(
                         app,
@@ -9226,6 +9235,7 @@ fn run_openai_codex_app_server_chat(
                     );
                 }
                 "item/agentMessage/delta" => {
+                    completed_artifact_response_at = None;
                     if let Some(delta) = params.get("delta").and_then(serde_json::Value::as_str) {
                         if !response_text_truncated {
                             let pushed = push_bounded(
@@ -9251,6 +9261,7 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "item/fileChange/patchUpdated" => {
+                    completed_artifact_response_at = None;
                     if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str)
                     {
                         if patches
@@ -9263,6 +9274,7 @@ fn run_openai_codex_app_server_chat(
                     }
                 }
                 "item/started" => {
+                    completed_artifact_response_at = None;
                     if let Some(item) = params.get("item") {
                         match item.get("type").and_then(serde_json::Value::as_str) {
                             Some("fileChange") => {
@@ -9311,8 +9323,14 @@ fn run_openai_codex_app_server_chat(
                                     true,
                                 );
                                 commentary_stream.finish_message();
+                                completed_artifact_response_at = text
+                                    .filter(|response| {
+                                        completed_response_has_chat_artifact(response)
+                                    })
+                                    .map(|_| Instant::now());
                             }
                             Some("commandExecution") => {
+                                completed_artifact_response_at = None;
                                 let activity = codex_item_activity(item, "command", "Ran command");
                                 record_codex_app_server_activity(
                                     app,
@@ -9323,6 +9341,7 @@ fn run_openai_codex_app_server_chat(
                                 );
                             }
                             Some("fileChange") => {
+                                completed_artifact_response_at = None;
                                 let activity = codex_item_activity(item, "file", "Updated files");
                                 record_codex_app_server_activity(
                                     app,
@@ -9333,6 +9352,7 @@ fn run_openai_codex_app_server_chat(
                                 );
                             }
                             Some("contextCompaction") => {
+                                completed_artifact_response_at = None;
                                 let activity = codex_context_compaction_activity(&params, "done");
                                 record_codex_app_server_activity(
                                     app,
@@ -10806,6 +10826,10 @@ fn extract_chat_artifact_marker(response: &str) -> ChatArtifactExtraction {
         items,
         message: lines.join("\n").trim().to_string(),
     }
+}
+
+fn completed_response_has_chat_artifact(response: &str) -> bool {
+    !extract_chat_artifact_marker(response).items.is_empty()
 }
 
 fn valid_chat_artifact(value: &serde_json::Value) -> bool {
@@ -16456,12 +16480,13 @@ while True:
 
     #[test]
     fn extracts_bounded_chat_artifacts_and_hides_the_marker() {
-        let extracted = extract_chat_artifact_marker(
-            "GYRO_ARTIFACTS: {\"items\":[{\"id\":\"choice\",\"kind\":\"decision\",\"title\":\"Choose\",\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}]}\n\nPick the best option.",
-        );
+        let response = "GYRO_ARTIFACTS: {\"items\":[{\"id\":\"choice\",\"kind\":\"decision\",\"title\":\"Choose\",\"options\":[{\"id\":\"a\",\"label\":\"A\"}]}]}\n\nPick the best option.";
+        let extracted = extract_chat_artifact_marker(response);
         assert_eq!(extracted.items.len(), 1);
         assert_eq!(extracted.items[0]["kind"], "decision");
         assert_eq!(extracted.message, "Pick the best option.");
+        assert!(completed_response_has_chat_artifact(response));
+        assert!(!completed_response_has_chat_artifact("Ordinary response."));
     }
 
     #[test]
