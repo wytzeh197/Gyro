@@ -1,7 +1,7 @@
 # Release Process
 
 Gyro ships a macOS 14+ public **Alpha** from GitHub Releases. The
-[download site](https://wytzeh197.github.io/Gyro/) is the user-facing front
+[download site](https://usegyro.io/) is the user-facing front
 door; GitHub remains the binary source of truth and fallback.
 
 AI tools may assist release preparation, but they are not release evidence and
@@ -105,7 +105,7 @@ Each versioned release body must include:
    signature or notarization, and a link to the
    [Open Anyway guide](https://github.com/wytzeh197/Gyro/blob/main/docs/install-macos.md).
 2. **Direct downloads:** links to both versioned DMGs, labeled by architecture,
-   plus the [download site](https://wytzeh197.github.io/Gyro/) as the preferred
+   plus the [download site](https://usegyro.io/) as the preferred
    chooser.
 3. **Integrity:** a link to the tag's `SHA256SUMS` asset and a reminder to match
    the exact filename.
@@ -153,15 +153,15 @@ do not require a product release by themselves.
    appropriate hardware.
 5. Complete the clean-user Gatekeeper and updater acceptance checks. Publish
    the draft as a non-prerelease only when every check passes.
-6. Confirm the Pages site and `/releases/latest` show the new version and that
+6. Confirm the Cloudflare Pages site and `/releases/latest` show the new version and that
    updater metadata resolves. The `release.published` workflow then validates
    the CLI Formula on Apple Silicon and Intel before updating the tap.
 7. If the prior latest release is defective, mark its title and first release
    paragraph as superseded only after the replacement is live. Link to the
    fixed release; never replace the old assets in place.
 
-After the Pages deployment is verified, set the GitHub repository homepage to
-`https://wytzeh197.github.io/Gyro/` and keep repository topics aligned with the
+After the Cloudflare Pages deployment is verified, set the GitHub repository homepage to
+`https://usegyro.io/` and keep repository topics aligned with the
 public product description.
 
 ## Homebrew CLI

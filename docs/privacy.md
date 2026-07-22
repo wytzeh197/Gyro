@@ -20,7 +20,8 @@ that traffic.
 
 App telemetry is off by default. The public website has no analytics,
 advertising cookies, tracking pixels, account gate, remote fonts, or remote
-images. GitHub hosts the Pages site and release downloads.
+images. Cloudflare serves the website, and GitHub serves release downloads.
+Both providers may process ordinary request metadata under their own policies.
 
 ## Deletion
 
@@ -30,4 +31,4 @@ settings. Data already sent to a provider must be handled through that
 provider.
 
 The public-facing notice is available at
-<https://wytzeh197.github.io/Gyro/privacy/>.
+<https://usegyro.io/privacy/>.

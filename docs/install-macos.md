@@ -1,7 +1,7 @@
 # Install Gyro on macOS
 
 Gyro is a public Alpha for macOS 14 or newer. Download it from the
-[Gyro download site](https://wytzeh197.github.io/Gyro/). GitHub
+[Gyro download site](https://usegyro.io/). GitHub
 [Releases](https://github.com/wytzeh197/Gyro/releases/latest) is the source of
 the binaries and the fallback if the site cannot load release information.
 

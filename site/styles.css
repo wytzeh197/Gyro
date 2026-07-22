@@ -14,6 +14,8 @@
   --orange-dark: #9f3218;
   --accent: var(--orange);
   --shell: min(1152px, calc(100% - 48px));
+  --grid-columns: 12;
+  --grid-gap: clamp(16px, 1.7vw, 24px);
   --radius: 18px;
   --header-height: 64px;
   font-family:
@@ -371,9 +373,39 @@ pre {
   padding: 88px 0;
 }
 
+.product-section {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
+  gap: var(--grid-gap);
+}
+
 .section-heading {
   max-width: 760px;
   margin-bottom: 44px;
+}
+
+.product-section > .section-heading {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
+  column-gap: var(--grid-gap);
+  max-width: none;
+}
+
+.product-section > .section-heading .kicker {
+  grid-column: 1 / 6;
+}
+
+.product-section > .section-heading h2 {
+  grid-column: 1 / 8;
+  grid-row: 2;
+}
+
+.product-section > .section-heading > p:last-child {
+  grid-column: 9 / -1;
+  grid-row: 2;
+  align-self: end;
+  margin-top: 0;
 }
 
 .section-heading h2,
@@ -396,7 +428,13 @@ pre {
 
 .surface-mosaic {
   display: grid;
+  grid-column: 1 / -1;
   gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #fafaf8;
+  box-shadow: 0 18px 48px rgba(23, 23, 20, 0.035);
 }
 
 .surface-pair {
@@ -407,9 +445,13 @@ pre {
 
 .surface-card {
   overflow: hidden;
-  border: 1px solid var(--line);
+  min-width: 0;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface-raised);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 10px 30px rgba(23, 23, 20, 0.025);
 }
 
 .surface-card-wide {
@@ -419,7 +461,8 @@ pre {
 }
 
 .surface-copy {
-  padding: 30px;
+  align-self: start;
+  padding: 32px;
 }
 
 .surface-copy span {
@@ -443,33 +486,37 @@ pre {
   font-size: 15px;
 }
 
-.surface-card picture,
-.surface-card > img {
-  align-self: end;
+.surface-visual {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  place-items: center;
+  margin: 18px 18px 18px 0;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #f0f1ef;
+  box-shadow: inset 0 1px 0 rgba(23, 23, 20, 0.035);
 }
 
-.surface-card img {
+.surface-visual img {
   width: 100%;
   height: auto;
-  border-top: 1px solid var(--line);
-  background: #eeedeb;
-}
-
-.surface-card-wide img {
-  height: 100%;
-  border-top: 0;
-  border-left: 1px solid var(--line);
-  object-fit: contain;
+  border: 0;
+  background: transparent;
 }
 
 .surface-card-tall {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(180px, 42%) minmax(0, 58%);
+  align-items: stretch;
 }
 
 .surface-card-tall .surface-copy {
-  min-height: 190px;
+  padding: 28px 24px;
+}
+
+.surface-card-tall .surface-visual {
+  margin: 14px 14px 14px 0;
 }
 
 .text-link,
@@ -1132,8 +1179,20 @@ pre {
     padding-top: 84px;
   }
 
+  .product-section,
+  .product-section > .section-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .product-section > .section-heading {
+    display: block;
+  }
+
+  .product-section > .section-heading > p:last-child {
+    margin-top: 14px;
+  }
+
   .surface-card-wide,
-  .surface-pair,
   .download-shell,
   .footer-grid,
   .changelog-layout,
@@ -1146,13 +1205,28 @@ pre {
     flex-direction: column;
   }
 
-  .surface-card-wide img {
-    height: auto;
-    border-top: 1px solid var(--line);
-    border-left: 0;
+  .surface-mosaic {
+    padding: 14px;
   }
 
-  .surface-card-tall .surface-copy {
+  .surface-pair {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+    gap: var(--grid-gap);
+  }
+
+  .surface-card-tall {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .surface-visual,
+  .surface-card-tall .surface-visual {
+    margin: 0 16px 16px;
+  }
+
+  .surface-copy {
     min-height: 0;
   }
 
@@ -1178,6 +1252,7 @@ pre {
 @media (max-width: 720px) {
   :root {
     --shell: min(100% - 32px, 1152px);
+    --grid-gap: 16px;
   }
 
   body {
@@ -1260,6 +1335,30 @@ pre {
 
   .surface-copy {
     padding: 24px;
+  }
+
+  .surface-mosaic {
+    gap: 12px;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .surface-pair {
+    gap: 12px;
+  }
+
+  .surface-card {
+    border-radius: 14px;
+  }
+
+  .surface-card-tall .surface-copy {
+    padding: 24px;
+  }
+
+  .surface-visual,
+  .surface-card-tall .surface-visual {
+    margin: 0 10px 10px;
+    border-radius: 10px;
   }
 
   .surface-copy h3 {

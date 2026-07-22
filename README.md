@@ -10,7 +10,7 @@ the same local session from either surface.
 [![CI](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml/badge.svg)](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://github.com/wytzeh197/Gyro)
 
-[Download the latest Alpha](https://wytzeh197.github.io/Gyro/) ·
+[Download the latest Alpha](https://usegyro.io/) ·
 [GitHub Releases](https://github.com/wytzeh197/Gyro/releases/latest) ·
 [Watch the launch film](docs/media/launch/gyro-launch-film.mp4) ·
 [Read the architecture](docs/architecture.md) ·
@@ -68,7 +68,7 @@ the same local session from either surface.
 ## Install the Public Alpha
 
 Gyro.app requires macOS 14 or newer. Use the
-[download site](https://wytzeh197.github.io/Gyro/) to choose the Apple Silicon
+[download site](https://usegyro.io/) to choose the Apple Silicon
 build for M-series Macs or the Intel build for Intel Macs. GitHub
 [Releases](https://github.com/wytzeh197/Gyro/releases/latest) remains the
 artifact source and fallback.
