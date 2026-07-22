@@ -244,7 +244,31 @@ const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
+const menuBarStyleSource = readRepoFile("apps/desktop/src/menu-bar.css");
+const menuBarRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/menu_bar.rs",
+);
 const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+expect(
+  cssRules(menuBarStyleSource, ".gyro-menu-bar-header").some((rule) =>
+    rule.includes("height: 72px"),
+  ) &&
+    cssRules(menuBarStyleSource, ".gyro-menu-bar-job").some((rule) =>
+      rule.includes("height: 66px"),
+    ) &&
+    cssRules(
+      menuBarStyleSource,
+      ".gyro-menu-bar-outcome,\n.gyro-menu-bar-idle",
+    ).some((rule) => rule.includes("height: 68px")) &&
+    cssRules(menuBarStyleSource, ".gyro-menu-bar-footer").some((rule) =>
+      rule.includes("height: 44px"),
+    ) &&
+    cssRules(menuBarStyleSource, ".gyro-menu-bar-idle p").some((rule) =>
+      rule.includes("margin: 0"),
+    ) &&
+    menuBarRustSource.includes("16.0 + 72.0 + content + 44.0"),
+  "The macOS menu-bar popover should use bounded rows that match its native window-height calculation.",
+);
 expect(
   !surfaceSource.includes("gyro-chat-pane-frame-actions") &&
     !surfaceSource.includes('isFocused ? "is-focused"') &&
@@ -289,8 +313,8 @@ expect(
   "Chat headers should keep the title clean and expose one combined workspace context menu.",
 );
 expect(
-  surfaceSource.includes('className="gyro-thread-context-project"') &&
-    surfaceSource.includes('className="gyro-thread-context-mode"') &&
+  !surfaceSource.includes('className="gyro-thread-context-project"') &&
+    !surfaceSource.includes('className="gyro-thread-context-mode"') &&
     surfaceSource.includes('sectionLabel: index === 0 ? "Branch"') &&
     styleSource.includes(
       ".gyro-chat-surface.is-tiled .gyro-thread-pills {\n  display: flex",
@@ -429,6 +453,15 @@ expect(
     styleSource.includes(".gyro-chat-run-activity-group-toggle") &&
     styleSource.includes(".gyro-change-summary-actions"),
   "Chat turns should preserve activity order and show one aggregate change summary only after completion.",
+);
+const chatTurnSource = surfaceSource.slice(
+  surfaceSource.indexOf("function ChatTurn({"),
+  surfaceSource.indexOf("function ChangeSummaryFile({"),
+);
+expect(
+  chatTurnSource.indexOf('aria-label="Final response"') <
+    chatTurnSource.indexOf("changeSummaryItems.map((item)"),
+  "Completed-turn file summaries should render after the final assistant response.",
 );
 expect(
   surfaceSource.includes('label: "Suggested"') &&
@@ -3201,6 +3234,17 @@ expect(
   "Chats should persist and restore their selected provider/model locally until deleted.",
 );
 expect(
+  styleSource.includes("--gyro-provider-openai-logo: #fff") &&
+    styleSource.includes("--gyro-provider-openai-logo: #000") &&
+    cssRules(styleSource, ".gyro-provider-logo.is-openai").some((rule) =>
+      rule.includes("color: var(--gyro-provider-openai-logo)"),
+    ) &&
+    styleSource.includes(
+      ".gyro-composer-menu-item.is-provider:disabled .gyro-provider-logo.is-openai",
+    ),
+  "OpenAI marks should remain monochrome: white in dark mode and black in light mode.",
+);
+expect(
   providerCatalog.every((provider) => provider.enabled === false),
   "Fallback provider configs should not start enabled before setup.",
 );
@@ -3849,9 +3893,11 @@ const settingsSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("function WorkspaceSidebarContent"),
 );
 expect(
-  !settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
-    !settingsSidebarSource.includes("onToggleSidebar"),
-  "Settings should keep its sidebar visible and omit the hide-sidebar control.",
+  settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
+    settingsSidebarSource.includes("onToggleSidebar") &&
+    settingsSidebarSource.includes('aria-label="Back from settings"') &&
+    settingsSidebarSource.includes('aria-label="Forward"'),
+  "Settings should use the same fixed hide, back, and forward controls as every other sidebar surface.",
 );
 expect(
   !appSource.includes("WorkspaceToolPanelPeek") &&
@@ -3983,8 +4029,8 @@ expect(
     surfaceSource.includes('action: "new-chat-select-workspace"') &&
     surfaceSource.includes('"new-local-chat-select-workspace"') &&
     surfaceSource.includes('"start-new-chat-mode:worktree"') &&
-    surfaceSource.includes("This context stays fixed for the current chat") &&
-    surfaceSource.includes("Keep this chat intact and choose another folder") &&
+    surfaceSource.includes("Fixed for this chat") &&
+    surfaceSource.includes("Choose another folder") &&
     !surfaceSource.includes('onComposerAction?.("show-project-context")') &&
     !surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
@@ -4065,7 +4111,7 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 48px minmax(0, 1fr)"),
+      rule.includes("grid-template-rows: 38px minmax(0, 1fr)"),
     ) &&
     threadTopbarRules.some(
       (rule) =>
@@ -4767,7 +4813,7 @@ expect(
       'className="gyro-sidebar-persistent-header is-settings"',
     ) &&
     cssRules(styleSource, ".gyro-sidebar-windowbar.is-settings").some((rule) =>
-      rule.includes("padding-left: 112px"),
+      rule.includes("padding-left: 93px"),
     ) &&
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-surface.is-empty) .gyro-sidebar-windowbar",
@@ -5191,13 +5237,20 @@ expect(
     workspaceRailFoundation.includes(
       '.gyro-workspace-activity-rail[data-visible="true"]',
     ) &&
+    surfaceSource.includes(
+      'activeDestination !== "settings" && !isIdeSurface',
+    ) &&
+    workspaceRailFoundation.includes(".gyro-workspace-activity-rail::after") &&
+    cssRules(styleSource, ".gyro-workspace-activity-rail::after").some(
+      (rule) => rule.includes("top: 48px") && rule.includes("right: 0"),
+    ) &&
     workspaceRailFoundation.includes("pointer-events: none") &&
     workspaceRailFoundation.includes("visibility 0s linear 180ms") &&
     workspaceRailFoundation.includes(
       "@media (prefers-reduced-motion: reduce)",
     ) &&
     !workspaceRailFoundation.includes(":has(.gyro-workspace-route.is-code)"),
-  "Workspace and Sessions should share a stable shell while the Workspace-only Activity Rail animates accessibly between 44px and zero.",
+  "Workspace and Sessions should share a stable shell while the Workspace-only Activity Rail animates accessibly between 44px and zero, keeps its divider below native window controls, and avoids a duplicate Settings footer.",
 );
 
 expect(

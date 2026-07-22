@@ -79,6 +79,7 @@
   --gyro-premium-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --gyro-chat-content-width: 772px;
   --gyro-provider-openai: #7fd2b6;
+  --gyro-provider-openai-logo: #fff;
   --gyro-provider-anthropic: #ff8a3d;
   --gyro-provider-kimi: #7d8cff;
   --gyro-provider-xai: #f6f2ea;
@@ -440,6 +441,7 @@
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.72);
   --gyro-premium-focus: rgba(53, 111, 214, 0.25);
   --gyro-provider-openai: #0f8f72;
+  --gyro-provider-openai-logo: #000;
   --gyro-provider-anthropic: #c15d12;
   --gyro-provider-kimi: #5364d8;
   --gyro-provider-xai: #1c2027;
@@ -14801,7 +14803,11 @@ textarea,
 }
 
 .gyro-provider-logo.is-openai {
-  color: var(--gyro-provider-openai);
+  color: var(--gyro-provider-openai-logo);
+}
+
+.gyro-composer-menu-item.is-provider:disabled .gyro-provider-logo.is-openai {
+  color: var(--gyro-provider-openai-logo);
 }
 
 .gyro-provider-logo.is-anthropic {
@@ -23933,7 +23939,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-windowbar.is-settings {
-  padding-left: 112px;
+  padding-left: 93px;
 }
 
 /* New Chat uses one uninterrupted canvas; thread chrome introduces the divider. */
@@ -24653,6 +24659,95 @@ button.gyro-account-menu-row:hover,
   max-width: 76px;
 }
 
+/* Compact thread chrome: keep context available without dominating the chat. */
+.gyro-chat-surface.is-thread {
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+
+.gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
+  gap: 8px;
+  min-height: 38px;
+  padding-inline: 14px;
+}
+
+.gyro-chat-thread-topbar strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.gyro-thread-topbar-actions {
+  gap: 4px;
+}
+
+.gyro-thread-workspace-context-button,
+.gyro-chat-thread-topbar .gyro-thread-workspace-context-button {
+  gap: 4px;
+  height: 24px;
+  max-width: min(220px, 32vw);
+  padding: 0 5px;
+}
+
+.gyro-thread-context-branch {
+  max-width: 172px;
+}
+
+.gyro-chat-thread-topbar .gyro-chat-surface-button {
+  border-radius: 5px;
+  height: 24px;
+  min-width: 24px;
+}
+
+.gyro-thread-context-control > .gyro-thread-workspace-menu {
+  gap: 0;
+  max-height: min(360px, calc(100vh - 48px));
+  max-width: min(260px, calc(100vw - 24px));
+  padding: 4px;
+  top: calc(100% + 4px);
+  width: min(260px, calc(100vw - 24px));
+}
+
+.gyro-thread-workspace-menu .gyro-composer-popover-title {
+  font-size: 10px;
+  padding: 3px 6px 5px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-popover-section-title {
+  border-top-color: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  margin-top: 2px;
+  padding: 6px 6px 2px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item {
+  border-radius: 5px;
+  gap: 6px;
+  min-height: 36px;
+  padding: 3px 6px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item span {
+  gap: 0;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item strong {
+  font-size: 11.5px;
+  font-weight: 610;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item small {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
+  min-height: 38px;
+}
+
 /* Workspace shell foundation: an animated Activity Rail beside shared navigation. */
 .gyro-app-shell.is-chat-shell.is-workspace-shell {
   --gyro-workspace-activity-rail-width: 0px;
@@ -24688,7 +24783,6 @@ button.gyro-account-menu-row:hover,
 .gyro-workspace-activity-rail {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-sidebar) 92%, black 8%);
-  border-right: 1px solid var(--gyro-border-soft);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -24704,6 +24798,17 @@ button.gyro-account-menu-row:hover,
     visibility 0s linear 180ms;
   visibility: hidden;
   z-index: 30;
+}
+
+.gyro-workspace-activity-rail::after {
+  background: var(--gyro-border-soft);
+  bottom: 0;
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 48px;
+  width: 1px;
 }
 
 .gyro-workspace-activity-rail[data-visible="true"] {
@@ -24782,7 +24887,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-app-shell.is-workspace-chrome-active .gyro-sidebar-windowbar {
-  padding-left: 40px;
+  padding-left: 49px;
 }
 
 @media (max-width: 1280px) and (min-width: 981px) {

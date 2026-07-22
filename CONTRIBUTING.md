@@ -58,6 +58,8 @@ cargo run -p gyro-cli -- --help
 
 Architecture and product constraints are documented in
 [docs/architecture.md](docs/architecture.md) and [docs/vision.md](docs/vision.md).
+Contributors using AI tools must also follow the
+[AI-assisted development policy](docs/ai-development.md).
 
 ## Pull Requests
 

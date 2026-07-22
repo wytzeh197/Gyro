@@ -4,6 +4,10 @@ Gyro ships a macOS 14+ public **Alpha** from GitHub Releases. The
 [download site](https://wytzeh197.github.io/Gyro/) is the user-facing front
 door; GitHub remains the binary source of truth and fallback.
 
+AI tools may assist release preparation, but they are not release evidence and
+must not receive release secrets. Follow the
+[AI-assisted development policy](ai-development.md) alongside this process.
+
 Alpha app bundles are ad-hoc signed, not signed with an Apple Developer ID and
 not notarized. Users must follow the documented one-time
 [Open Anyway installation flow](install-macos.md). Never tell users to disable
