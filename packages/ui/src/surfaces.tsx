@@ -178,6 +178,7 @@ import type {
   WorkbenchTurn,
   WorkspaceFile,
   WorkspaceFileContent,
+  WorkspaceContextSnapshot,
   WorkspaceLayoutId,
   WorkspacePreparationProgress,
   WorkspaceSearchQuery,
@@ -1932,13 +1933,6 @@ function WorkspaceSidebarContent({
   const [sidebarSearchExcludeDraft, setSidebarSearchExcludeDraft] = useState(
     workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
   );
-  const workspaceOutlineSymbols = useMemo(
-    () =>
-      documentOutlineSymbols(
-        ide?.activePath ? (ide.buffers[ide.activePath]?.content ?? "") : "",
-      ),
-    [ide?.activePath, ide?.buffers],
-  );
   const workspaceFileRootKey = files
     .filter((file) => file.isWorkspaceRoot)
     .map((file) => file.path)
@@ -2619,39 +2613,6 @@ function WorkspaceSidebarContent({
                   </button>
                 </div>
               ) : null}
-            </SidebarSection>
-          ) : null}
-
-          {activeIdeView === "explorer" && ide?.activePath ? (
-            <SidebarSection
-              collapsible
-              meta={String(workspaceOutlineSymbols.length)}
-              title="Outline"
-            >
-              {workspaceOutlineSymbols.length > 0 ? (
-                workspaceOutlineSymbols
-                  .slice(0, 80)
-                  .map((symbol) => (
-                    <SidebarDestinationRow
-                      icon={FileCode2}
-                      isActive={false}
-                      key={`${symbol.lineNumber}:${symbol.name}`}
-                      label={symbol.name}
-                      meta={`${symbol.kind} · ${symbol.lineNumber}`}
-                      onClick={() =>
-                        onOpenWorkspaceFile?.(
-                          ide.activePath ?? "",
-                          symbol.lineNumber,
-                          1,
-                        )
-                      }
-                    />
-                  ))
-              ) : (
-                <div className="gyro-sidebar-mini-copy">
-                  No document symbols found in the active file.
-                </div>
-              )}
             </SidebarSection>
           ) : null}
 
@@ -3341,7 +3302,7 @@ function WorkspaceSidebarContent({
                 type="button"
               >
                 <Plus size={15} />
-                New
+                New Session
               </button>
               {newSessionMenuView !== "closed" ? (
                 <div
@@ -3349,83 +3310,97 @@ function WorkspaceSidebarContent({
                   className="gyro-sidebar-new-session-menu is-root"
                   role="menu"
                 >
-                  <button
-                    aria-label="New Chat"
-                    onClick={() => {
-                      setNewSessionMenuView("closed");
-                      onCreateSession();
-                    }}
-                    role="menuitem"
-                    type="button"
+                  <div
+                    aria-label="Chat sessions"
+                    className="gyro-sidebar-session-group is-chat"
+                    role="group"
                   >
-                    <MessageSquare size={15} />
-                    <strong>New Chat</strong>
-                  </button>
-                  <div className="gyro-sidebar-new-session-divider" />
-                  <label className="gyro-sidebar-cli-location">
-                    <span>CLI</span>
-                    <select
-                      aria-label="CLI session location"
-                      onChange={(event) =>
-                        setNewCliWorkspacePath(event.target.value)
-                      }
-                      value={newCliWorkspacePath}
-                    >
-                      {cliProjects.length === 0 ? (
-                        <option value="">Open a project first</option>
-                      ) : null}
-                      {cliProjects.map((project) => (
-                        <option key={project.path} value={project.path}>
-                          {project.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {cliProjects.length === 0 ? (
+                    <span className="gyro-sidebar-session-group-label">
+                      Chat
+                    </span>
                     <button
+                      aria-label="New Chat"
                       onClick={() => {
                         setNewSessionMenuView("closed");
-                        onOpenWorkspace();
+                        onCreateSession();
                       }}
                       role="menuitem"
                       type="button"
                     >
-                      <Folder size={15} />
-                      <span>
-                        <strong>Open project</strong>
-                        <small>Choose where the CLI should run</small>
-                      </span>
+                      <MessageSquare size={15} />
+                      <strong>New Chat</strong>
                     </button>
-                  ) : null}
-                  <div className="gyro-sidebar-cli-profiles">
-                    {commandProfiles.map((profile) => (
-                      <button
-                        disabled={
-                          profile.readiness === "blocked" ||
-                          !newCliWorkspacePath
+                  </div>
+                  <div
+                    aria-label="CLI sessions"
+                    className="gyro-sidebar-session-group is-cli"
+                    role="group"
+                  >
+                    <label className="gyro-sidebar-cli-location">
+                      <span>CLI</span>
+                      <select
+                        aria-label="CLI session location"
+                        onChange={(event) =>
+                          setNewCliWorkspacePath(event.target.value)
                         }
-                        key={profile.id}
+                        value={newCliWorkspacePath}
+                      >
+                        {cliProjects.length === 0 ? (
+                          <option value="">Open a project first</option>
+                        ) : null}
+                        {cliProjects.map((project) => (
+                          <option key={project.path} value={project.path}>
+                            {project.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {cliProjects.length === 0 ? (
+                      <button
                         onClick={() => {
-                          if (!newCliWorkspacePath) return;
-                          onCreateCliSession(profile.id, newCliWorkspacePath);
                           setNewSessionMenuView("closed");
+                          onOpenWorkspace();
                         }}
                         role="menuitem"
                         type="button"
                       >
-                        {profile.providerId ? (
-                          <Bot size={15} />
-                        ) : (
-                          <Terminal size={15} />
-                        )}
+                        <Folder size={15} />
                         <span>
-                          <strong>{profile.displayName}</strong>
-                          {profile.readiness === "blocked" ? (
-                            <small>Setup required</small>
-                          ) : null}
+                          <strong>Open project</strong>
+                          <small>Choose where the CLI should run</small>
                         </span>
                       </button>
-                    ))}
+                    ) : null}
+                    <div className="gyro-sidebar-cli-profiles">
+                      {commandProfiles.map((profile) => (
+                        <button
+                          disabled={
+                            profile.readiness === "blocked" ||
+                            !newCliWorkspacePath
+                          }
+                          key={profile.id}
+                          onClick={() => {
+                            if (!newCliWorkspacePath) return;
+                            onCreateCliSession(profile.id, newCliWorkspacePath);
+                            setNewSessionMenuView("closed");
+                          }}
+                          role="menuitem"
+                          type="button"
+                        >
+                          {profile.providerId ? (
+                            <Bot size={15} />
+                          ) : (
+                            <Terminal size={15} />
+                          )}
+                          <span>
+                            <strong>{profile.displayName}</strong>
+                            {profile.readiness === "blocked" ? (
+                              <small>Setup required</small>
+                            ) : null}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -4892,6 +4867,7 @@ type ChatSurfaceProps = {
     reasoningEffort?: ReasoningEffort;
   };
   workspacePath?: string;
+  workspaceContext?: WorkspaceContextSnapshot;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
   providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
@@ -4998,6 +4974,7 @@ export function ChatSurface({
   sessionSummary,
   sessionModel,
   workspacePath,
+  workspaceContext,
   config,
   providerReadiness,
   providerUsageByProvider,
@@ -5436,6 +5413,7 @@ export function ChatSurface({
             variant="hero"
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
+            workspaceContext={workspaceContext}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
@@ -5659,6 +5637,7 @@ export function ChatSurface({
             savedProjects={savedProjects}
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
+            workspaceContext={workspaceContext}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
@@ -6595,34 +6574,39 @@ function ChatSidePanel({
         workspacePath={workspacePath}
       />
       {capabilityPolicy ? (
-        <section
+        <details
           className="gyro-capability-policy-summary"
-          aria-label="Model capabilities"
+          aria-label="Model permissions"
         >
-          <header>
-            <ShieldCheck size={14} />
-            <strong>Model capabilities</strong>
+          <summary>
+            <span>
+              <ShieldCheck size={14} />
+              <strong>Permissions</strong>
+            </span>
             <small>
               {capabilityActivities.filter((item) =>
                 ["requested", "waiting", "running"].includes(item.status),
               ).length
                 ? `${capabilityActivities.filter((item) => ["requested", "waiting", "running"].includes(item.status)).length} active`
-                : `Policy ${capabilityPolicy.revision}`}
+                : capabilityPolicySummary(capabilityPolicy)}
             </small>
-          </header>
-          <div>
-            <span>Workspace</span>
-            <strong>{capabilityPolicy.classes["workspace-inspect"]}</strong>
+            <ChevronDown aria-hidden="true" size={13} />
+          </summary>
+          <div className="gyro-capability-policy-details">
+            <div>
+              <span>Workspace</span>
+              <strong>{capabilityPolicy.classes["workspace-inspect"]}</strong>
+            </div>
+            <div>
+              <span>Terminal</span>
+              <strong>{capabilityPolicy.classes["terminal-execute"]}</strong>
+            </div>
+            <div>
+              <span>Browser</span>
+              <strong>{capabilityPolicy.classes["browser-navigate"]}</strong>
+            </div>
           </div>
-          <div>
-            <span>Terminal</span>
-            <strong>{capabilityPolicy.classes["terminal-execute"]}</strong>
-          </div>
-          <div>
-            <span>Local browser</span>
-            <strong>{capabilityPolicy.classes["browser-navigate"]}</strong>
-          </div>
-        </section>
+        </details>
       ) : null}
     </aside>
   );
@@ -6661,7 +6645,7 @@ function ChatEnvironmentLauncher({
 }) {
   return (
     <nav className="gyro-chat-tool-launcher" aria-label="Environment tools">
-      <span className="gyro-chat-tool-section-label">Workspace tools</span>
+      <span className="gyro-chat-tool-section-label">Tools</span>
       <button
         aria-label={`Open Changes, ${changesLabel}`}
         onClick={() => onOpenTool("diff")}
@@ -6672,7 +6656,7 @@ function ChatEnvironmentLauncher({
       >
         <GitPullRequest size={15} />
         <span>Changes</span>
-        <small>{changesLabel}</small>
+        {changesLabel === "No changes" ? null : <small>{changesLabel}</small>}
       </button>
       <button
         aria-label={`Open Terminal, ${terminalLabel}`}
@@ -6682,7 +6666,7 @@ function ChatEnvironmentLauncher({
       >
         <Terminal size={15} />
         <span>Terminal</span>
-        <small>{terminalLabel}</small>
+        {terminalLabel === "Ready" ? null : <small>{terminalLabel}</small>}
       </button>
       <button
         aria-label={`Open Browser, ${browserLabel}`}
@@ -6699,7 +6683,7 @@ function ChatEnvironmentLauncher({
       >
         <Globe2 size={15} />
         <span>Browser</span>
-        <small>{browserLabel}</small>
+        {browserLabel === "Ready" ? null : <small>{browserLabel}</small>}
       </button>
       <button
         aria-label={`Open files in Workspace, ${workspaceName(workspacePath)}`}
@@ -6708,7 +6692,7 @@ function ChatEnvironmentLauncher({
       >
         <Folder size={15} />
         <span>Files</span>
-        <small>Open Workspace</small>
+        <small>Open</small>
       </button>
       <button
         aria-expanded={planExpanded}
@@ -6724,10 +6708,26 @@ function ChatEnvironmentLauncher({
       >
         <ListChecks size={15} />
         <span>Plan</span>
-        <small>{planLabel}</small>
+        {planItemCount > 0 ? <small>{planLabel}</small> : null}
       </button>
     </nav>
   );
+}
+
+function capabilityPolicySummary(policy: ProjectCapabilityPolicy) {
+  const access = [
+    policy.classes["workspace-inspect"],
+    policy.classes["terminal-execute"],
+    policy.classes["browser-navigate"],
+  ];
+  const labels = (["allow", "ask", "deny"] as const)
+    .map((level) => ({
+      count: access.filter((value) => value === level).length,
+      level,
+    }))
+    .filter(({ count }) => count > 0)
+    .map(({ count, level }) => `${count} ${level}`);
+  return labels.join(" · ");
 }
 
 function chatToolBrowserStatusLabel(browserPreview?: BrowserPreview) {
@@ -14431,6 +14431,7 @@ function Composer({
   onStop,
   worktreeName,
   workspacePath,
+  workspaceContext,
   workspaceMode = "local",
   config,
   providerReadiness,
@@ -14464,6 +14465,7 @@ function Composer({
   onStop?: () => void;
   worktreeName?: string;
   workspacePath?: string;
+  workspaceContext?: WorkspaceContextSnapshot;
   workspaceMode?: WorkbenchMode;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
@@ -15131,6 +15133,26 @@ function Composer({
         value={draft}
       />
       <div className="gyro-composer-bar">
+        {workspaceContext?.activePath ? (
+          <span
+            className="gyro-composer-chip"
+            title={`Live Workspace context · ${workspaceContext.activePath}`}
+          >
+            <FileCode2 size={14} />
+            <span className="gyro-composer-label">
+              {workspaceName(workspaceContext.activePath)}
+              {workspaceContext.selection?.text
+                ? ` · ${workspaceContext.selection.text.length} selected`
+                : workspaceContext.buffers.some(
+                      (buffer) =>
+                        buffer.path === workspaceContext.activePath &&
+                        buffer.dirty,
+                    )
+                  ? " · unsaved"
+                  : ""}
+            </span>
+          </span>
+        ) : null}
         {hasSelectedProvider || isHero ? (
           <>
             <div className="gyro-composer-control gyro-composer-reveal">
@@ -18270,62 +18292,6 @@ function projectSidebarName(path?: string) {
 
 function parentSegments(path: string) {
   return path.split(/[\\/]/).filter(Boolean).slice(0, -1);
-}
-
-function documentOutlineSymbols(content: string) {
-  const symbols: Array<{
-    name: string;
-    kind: string;
-    lineNumber: number;
-  }> = [];
-  const patterns: Array<{ kind: string; pattern: RegExp }> = [
-    {
-      kind: "class",
-      pattern: /^\s*(?:export\s+)?(?:default\s+)?class\s+([\w$]+)/,
-    },
-    {
-      kind: "interface",
-      pattern: /^\s*(?:export\s+)?interface\s+([\w$]+)/,
-    },
-    {
-      kind: "type",
-      pattern: /^\s*(?:export\s+)?type\s+([\w$]+)/,
-    },
-    {
-      kind: "enum",
-      pattern: /^\s*(?:export\s+)?enum\s+([\w$]+)/,
-    },
-    {
-      kind: "function",
-      pattern:
-        /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([\w$]+)/,
-    },
-    {
-      kind: "function",
-      pattern:
-        /^\s*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>/,
-    },
-    { kind: "struct", pattern: /^\s*(?:pub\s+)?struct\s+([\w$]+)/ },
-    { kind: "enum", pattern: /^\s*(?:pub\s+)?enum\s+([\w$]+)/ },
-    {
-      kind: "function",
-      pattern: /^\s*(?:pub\s+)?(?:async\s+)?fn\s+([\w$]+)/,
-    },
-    {
-      kind: "function",
-      pattern: /^\s*(?:async\s+)?def\s+([\w$]+)/,
-    },
-  ];
-  for (const [index, line] of content.split(/\r?\n/).entries()) {
-    for (const { kind, pattern } of patterns) {
-      const match = line.match(pattern);
-      const name = match?.[1];
-      if (!name) continue;
-      symbols.push({ kind, lineNumber: index + 1, name });
-      break;
-    }
-  }
-  return symbols;
 }
 
 function workspaceAncestorPaths(path: string, workspacePath?: string) {

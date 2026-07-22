@@ -28,7 +28,8 @@ use gyro_core::{
     ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
     ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
     SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -177,7 +178,7 @@ struct ProviderCapabilityResourceManager {
 
 #[derive(Default)]
 struct CapabilityIdeEvidenceManager {
-    by_workspace: Mutex<HashMap<String, serde_json::Value>>,
+    by_workspace: Mutex<HashMap<String, WorkspaceContextSnapshot>>,
 }
 
 static ATTACHMENT_SESSION_LOCKS: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
@@ -296,6 +297,7 @@ struct BoundProviderCapabilityContext {
     workspace: PathBuf,
     workspace_key: String,
     policy: CapabilityPolicySnapshot,
+    workspace_context: WorkspaceContextSnapshot,
 }
 
 #[derive(Clone)]
@@ -633,6 +635,8 @@ struct SaveProjectCapabilityPolicyRequest {
 struct CapabilityIdeEvidenceUpdate {
     workspace_path: String,
     diagnostics: serde_json::Value,
+    #[serde(default)]
+    context: Option<WorkspaceContextSnapshot>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1024,6 +1028,8 @@ struct ProviderChatRequest {
     plan: Option<serde_json::Value>,
     #[serde(default)]
     attachments: Vec<ChatAttachmentRequest>,
+    #[serde(default)]
+    workspace_context: Option<WorkspaceContextSnapshot>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -2542,6 +2548,7 @@ fn execute_claimed_automation(
         goal: None,
         plan: None,
         attachments: Vec::new(),
+        workspace_context: None,
     };
     let result = run_provider_chat_blocking(app.clone(), request)
         .map(|response| response.assistant_event.message);
@@ -2851,6 +2858,37 @@ fn run_provider_chat_blocking(
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
     let run_id = turn_id.unwrap_or_else(Uuid::new_v4);
     bind_provider_capability_context(&app, &store, &request, run_id)?;
+    let workspace_context = active_provider_capability_context(&app, &request.session_id)
+        .map_err(to_string)?
+        .workspace_context;
+    request.workspace_context = Some(workspace_context.clone());
+    let context_already_persisted = store
+        .read_recent_events(session_id, 256)
+        .map_err(to_string)?
+        .iter()
+        .any(|event| {
+            event.turn_id == Some(run_id)
+                && event
+                    .payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("workspace-context")
+        });
+    if !context_already_persisted {
+        store
+            .append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "schema": WorkspaceContextSnapshot::SCHEMA,
+                    "snapshot": workspace_context,
+                }),
+                Some(run_id),
+            )
+            .map_err(to_string)?;
+    }
     if provider_turn_has_unfinished_attempt(&store, session_id, run_id).map_err(to_string)? {
         return Err(
             "this turn has an unfinished provider attempt; start a new turn to avoid replaying tools"
@@ -3270,6 +3308,40 @@ fn bind_provider_capability_context(
     } else {
         CapabilityRunMode::Normal
     };
+    let persisted_context = store
+        .read_recent_events(
+            Uuid::parse_str(&request.session_id).map_err(to_string)?,
+            256,
+        )
+        .map_err(to_string)?
+        .into_iter()
+        .rev()
+        .find(|event| {
+            event.turn_id == Some(run_id)
+                && event
+                    .payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("workspace-context")
+        })
+        .and_then(|event| {
+            event
+                .payload
+                .get("snapshot")
+                .cloned()
+                .and_then(|snapshot| serde_json::from_value(snapshot).ok())
+        });
+    let workspace_context = if let Some(context) = persisted_context {
+        context
+    } else {
+        app.state::<CapabilityIdeEvidenceManager>()
+            .by_workspace
+            .lock()
+            .map_err(|_| "IDE evidence state is unavailable".to_string())?
+            .get(&workspace_key)
+            .cloned()
+            .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone()))
+    };
     let context = BoundProviderCapabilityContext {
         session_id: request.session_id.clone(),
         turn_id: Some(run_id.to_string()),
@@ -3277,6 +3349,7 @@ fn bind_provider_capability_context(
         workspace,
         workspace_key,
         policy: CapabilityPolicySnapshot::from_policy(&policy, mode),
+        workspace_context,
     };
     let manager = app.state::<ProviderCancellationManager>();
     let control = manager
@@ -3474,6 +3547,18 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
             "normal"
         }
     ));
+    if gyro_core::provider_capability_support(&request.provider_id).available {
+        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context to inspect the user-visible editor state, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
+        if let Some(workspace_context) = request.workspace_context.as_ref() {
+            context.push(format!(
+                "Turn Workspace context revision {}: active file {}, active view {}, selection {}. Call gyro_workspace_get_context for the typed snapshot or to detect newer visible state.",
+                workspace_context.revision,
+                workspace_context.active_path.as_deref().unwrap_or("none"),
+                workspace_context.active_view.as_deref().unwrap_or("none"),
+                if workspace_context.selection.is_some() { "attached" } else { "none" },
+            ));
+        }
+    }
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
@@ -4164,14 +4249,92 @@ async fn update_capability_ide_evidence(
     manager: tauri::State<'_, CapabilityIdeEvidenceManager>,
 ) -> Result<(), String> {
     let workspace = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let workspace_key = workspace.display().to_string();
     let diagnostics =
         gyro_core::validate_capability_result_data(redact_json_strings(request.diagnostics))
             .map_err(to_string)?;
+    let mut context = request
+        .context
+        .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone()));
+    context.workspace_key = workspace_key.clone();
+    context.diagnostics = diagnostics.as_array().cloned().unwrap_or_default();
+    normalize_workspace_context_paths(&workspace, &mut context).map_err(to_string)?;
+    context.validate().map_err(to_string)?;
     manager
         .by_workspace
         .lock()
         .map_err(|_| "IDE evidence state is unavailable".to_string())?
-        .insert(workspace.display().to_string(), diagnostics);
+        .insert(workspace_key, context);
+    Ok(())
+}
+
+fn normalize_workspace_context_paths(
+    workspace: &Path,
+    context: &mut WorkspaceContextSnapshot,
+) -> anyhow::Result<()> {
+    let workspace = workspace.canonicalize()?;
+    let normalize = |path: &str| -> anyhow::Result<String> {
+        let candidate = Path::new(path);
+        if candidate.is_absolute() {
+            let candidate =
+                gyro_core::security::assert_path_inside_workspace(&workspace, candidate)?;
+            return candidate
+                .strip_prefix(&workspace)
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                .map_err(anyhow::Error::from);
+        }
+        gyro_core::normalize_capability_relative_path(path)
+    };
+    context.active_path = context.active_path.as_deref().map(&normalize).transpose()?;
+    context.visible_tabs = context
+        .visible_tabs
+        .iter()
+        .map(|path| normalize(path))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let normalize_value_path = |value: &mut serde_json::Value| -> anyhow::Result<()> {
+        let Some(object) = value.as_object_mut() else {
+            return Ok(());
+        };
+        let Some(path) = object
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            return Ok(());
+        };
+        object.insert("path".into(), serde_json::Value::String(normalize(&path)?));
+        Ok(())
+    };
+    if let Some(selection) = context.selection.as_mut() {
+        normalize_value_path(selection)?;
+        if selection
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(gyro_core::capability_path_is_sensitive)
+        {
+            selection
+                .as_object_mut()
+                .map(|object| object.remove("text"));
+        }
+    }
+    for buffer in &mut context.buffers {
+        normalize_value_path(buffer)?;
+        if buffer
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(gyro_core::capability_path_is_sensitive)
+        {
+            buffer
+                .as_object_mut()
+                .map(|object| object.remove("content"));
+        }
+    }
+    for diagnostic in &mut context.diagnostics {
+        normalize_value_path(diagnostic)?;
+    }
+    for test in &mut context.test_failures {
+        normalize_value_path(test)?;
+    }
     Ok(())
 }
 
@@ -7245,12 +7408,20 @@ fn test_tree_from_tasks(tasks: &[TaskDefinitionResult]) -> Vec<TestTreeItemResul
 }
 
 fn run_command_output(command: Command) -> anyhow::Result<IdeCommandOutput> {
-    let output = run_bounded_command(
+    run_command_output_with_cancellation(command, CancellationToken::default())
+}
+
+fn run_command_output_with_cancellation(
+    command: Command,
+    cancellation: CancellationToken,
+) -> anyhow::Result<IdeCommandOutput> {
+    let output = run_bounded_command_with_cancellation(
         &command,
         Duration::from_secs(30 * 60),
         Some(Duration::from_secs(5 * 60)),
         2 * 1024 * 1024,
         1024 * 1024,
+        cancellation,
     )?;
     let mut stdout = gyro_core::security::redact_secrets(&output.stdout);
     let mut stderr = gyro_core::security::redact_secrets(&output.stderr);
@@ -7282,6 +7453,24 @@ fn run_bounded_command(
     max_stdout_chars: usize,
     max_stderr_chars: usize,
 ) -> anyhow::Result<gyro_core::ExecutionOutcome> {
+    run_bounded_command_with_cancellation(
+        command,
+        timeout,
+        inactivity_timeout,
+        max_stdout_chars,
+        max_stderr_chars,
+        CancellationToken::default(),
+    )
+}
+
+fn run_bounded_command_with_cancellation(
+    command: &Command,
+    timeout: Duration,
+    inactivity_timeout: Option<Duration>,
+    max_stdout_chars: usize,
+    max_stderr_chars: usize,
+    cancellation: CancellationToken,
+) -> anyhow::Result<gyro_core::ExecutionOutcome> {
     let mut request = ExecutionRequest::new(command.get_program().to_os_string());
     request.args = command
         .get_args()
@@ -7296,7 +7485,7 @@ fn run_bounded_command(
     request.inactivity_timeout = inactivity_timeout;
     request.max_stdout_chars = max_stdout_chars;
     request.max_stderr_chars = max_stderr_chars;
-    gyro_core::run_command(request, CancellationToken::default(), |_| {})
+    gyro_core::run_command(request, cancellation, |_| {})
 }
 
 fn bounded_command_error(label: &str, output: &gyro_core::ExecutionOutcome) -> anyhow::Error {
@@ -10581,6 +10770,10 @@ fn capability_mcp_env(
             "GYRO_CAPABILITY_POLICY_REVISION",
             bound.policy.revision.to_string(),
         ),
+        (
+            "GYRO_CAPABILITY_WORKSPACE_CONTEXT_REVISION",
+            bound.workspace_context.revision.to_string(),
+        ),
     ]
 }
 
@@ -12547,7 +12740,10 @@ fn effective_capability_class(
     capability_id: CapabilityId,
     arguments: &serde_json::Value,
 ) -> anyhow::Result<CapabilityClass> {
-    if capability_id == CapabilityId::WorkspaceRead {
+    if matches!(
+        capability_id,
+        CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange
+    ) {
         let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
             arguments, "path",
         )?)?;
@@ -12587,7 +12783,7 @@ fn capability_grant_scope(
     arguments: &serde_json::Value,
 ) -> anyhow::Result<(String, String)> {
     match capability_id {
-        CapabilityId::WorkspaceRead => Ok((
+        CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => Ok((
             "path".into(),
             gyro_core::normalize_capability_relative_path(capability_argument_string(
                 arguments, "path",
@@ -12835,6 +13031,41 @@ fn execute_provider_capability(
     let workspace = bound.workspace.display().to_string();
     let arguments = &request.arguments;
     let (summary, data, resource) = match request.capability_id {
+        CapabilityId::WorkspaceContext => {
+            let context = app
+                .state::<CapabilityIdeEvidenceManager>()
+                .by_workspace
+                .lock()
+                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+                .get(&bound.workspace_key)
+                .cloned()
+                .unwrap_or_else(|| bound.workspace_context.clone());
+            let mut data = serde_json::to_value(&context)?;
+            if let Some(object) = data.as_object_mut() {
+                object.insert(
+                    "boundRevision".into(),
+                    serde_json::Value::from(bound.workspace_context.revision),
+                );
+                object.insert(
+                    "stale".into(),
+                    serde_json::Value::Bool(context.revision != bound.workspace_context.revision),
+                );
+            }
+            let stale = context.revision != bound.workspace_context.revision;
+            (
+                format!(
+                    "Inspected Workspace context revision {}{}",
+                    context.revision,
+                    if stale {
+                        " (changed since turn start)"
+                    } else {
+                        ""
+                    }
+                ),
+                data,
+                None,
+            )
+        }
         CapabilityId::WorkspaceList => {
             let depth = arguments
                 .get("depth")
@@ -12903,15 +13134,95 @@ fn execute_provider_capability(
             };
             (format!("Read {path}"), data, Some(resource))
         }
-        CapabilityId::WorkspaceDiagnostics => {
-            let diagnostics = app
+        CapabilityId::WorkspaceReadRange => {
+            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
+                arguments, "path",
+            )?)?;
+            let start_line = capability_positive_position(arguments, "line")?.unwrap_or(1);
+            let end_line = capability_positive_position(arguments, "endLine")?
+                .unwrap_or(start_line.saturating_add(199));
+            if end_line < start_line || end_line.saturating_sub(start_line) > 1_999 {
+                anyhow::bail!("Workspace range must contain at most 2,000 ordered lines");
+            }
+            let latest_context = app
                 .state::<CapabilityIdeEvidenceManager>()
                 .by_workspace
                 .lock()
                 .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
                 .get(&bound.workspace_key)
                 .cloned()
-                .unwrap_or_else(|| serde_json::json!([]));
+                .unwrap_or_else(|| bound.workspace_context.clone());
+            let editor_buffer = latest_context.buffers.iter().find_map(|buffer| {
+                let buffer_path = buffer.get("path")?.as_str()?;
+                let content = buffer.get("content")?.as_str()?;
+                (buffer_path == path).then(|| {
+                    (
+                        content.to_string(),
+                        buffer.get("contentHash").cloned(),
+                        buffer.get("diskHash").cloned(),
+                        buffer
+                            .get("dirty")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false),
+                    )
+                })
+            });
+            let (content, content_hash, disk_hash, dirty, source) =
+                if let Some((content, content_hash, disk_hash, dirty)) = editor_buffer {
+                    (content, content_hash, disk_hash, dirty, "editor-buffer")
+                } else {
+                    let file = read_workspace_file_impl(&workspace, &path)?;
+                    (
+                        file.content,
+                        Some(serde_json::Value::String(file.content_hash)),
+                        None,
+                        false,
+                        "disk",
+                    )
+                };
+            let lines = content.split('\n').collect::<Vec<_>>();
+            let actual_end = end_line.min(lines.len() as u64);
+            let text = if start_line > actual_end {
+                String::new()
+            } else {
+                lines[(start_line - 1) as usize..actual_end as usize].join("\n")
+            };
+            let data = serde_json::json!({
+                "path": path,
+                "startLine": start_line,
+                "line": start_line,
+                "endLine": actual_end,
+                "content": text,
+                "source": source,
+                "dirty": dirty,
+                "contentHash": content_hash,
+                "diskHash": disk_hash,
+                "contextRevision": latest_context.revision,
+            });
+            let resource = CapabilityResourceRef {
+                id: format!(
+                    "workspace:{}:{}:{}-{}",
+                    request.context.session_id, path, start_line, actual_end
+                ),
+                kind: "ide".into(),
+                label: format!("{path}:{start_line}-{actual_end}"),
+            };
+            (
+                format!("Read {path}:{start_line}-{actual_end}"),
+                data,
+                Some(resource),
+            )
+        }
+        CapabilityId::WorkspaceDiagnostics => {
+            let context = app
+                .state::<CapabilityIdeEvidenceManager>()
+                .by_workspace
+                .lock()
+                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+                .get(&bound.workspace_key)
+                .cloned()
+                .unwrap_or_else(|| bound.workspace_context.clone());
+            let diagnostics = serde_json::Value::Array(context.diagnostics);
             let count = diagnostics.as_array().map(Vec::len).unwrap_or(0);
             (
                 format!("Inspected {count} workspace diagnostics"),
@@ -12944,6 +13255,172 @@ fn execute_provider_capability(
                 None,
             )
         }
+        CapabilityId::WorkspaceProposeEdit => {
+            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
+                arguments, "path",
+            )?)?;
+            let content = arguments
+                .get("content")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("capability argument `content` is required"))?
+                .to_string();
+            let expected_hash = arguments
+                .get("expectedHash")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            let latest_context = app
+                .state::<CapabilityIdeEvidenceManager>()
+                .by_workspace
+                .lock()
+                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+                .get(&bound.workspace_key)
+                .cloned()
+                .unwrap_or_else(|| bound.workspace_context.clone());
+            if latest_context.buffers.iter().any(|buffer| {
+                buffer.get("path").and_then(serde_json::Value::as_str) == Some(path.as_str())
+                    && buffer
+                        .get("dirty")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+            }) {
+                anyhow::bail!(
+                    "the target has unsaved editor changes; save or revert it before proposing an edit"
+                );
+            }
+            let candidate = gyro_core::security::assert_path_inside_workspace(
+                &bound.workspace,
+                Path::new(&path),
+            )?;
+            if candidate.exists() && expected_hash.is_none() {
+                anyhow::bail!(
+                    "expectedHash is required when proposing changes to an existing file"
+                );
+            }
+            let proposal = create_file_mutation_proposal_impl(FileMutationProposalRequest {
+                session_id: bound.session_id.clone(),
+                turn_id: bound.turn_id.clone(),
+                path: path.clone(),
+                content,
+                expected_hash,
+            })?;
+            let proposal_id = proposal.id.to_string();
+            if let Ok(store) = open_store() {
+                if let Ok(session_id) = Uuid::parse_str(&bound.session_id) {
+                    if let Ok(events) = store.read_recent_events(session_id, 16) {
+                        for event in events.into_iter().filter(|event| {
+                            event
+                                .payload
+                                .get("proposalId")
+                                .and_then(serde_json::Value::as_str)
+                                == Some(proposal_id.as_str())
+                        }) {
+                            let _ = app.emit(PROVIDER_CAPABILITY_EVENT, event);
+                        }
+                    }
+                }
+            }
+            let resource = CapabilityResourceRef {
+                id: proposal_id,
+                kind: "proposal".into(),
+                label: path.clone(),
+            };
+            (
+                format!("Proposed changes to {path} for Workspace review"),
+                serde_json::to_value(proposal)?,
+                Some(resource),
+            )
+        }
+        CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => {
+            let task_id = capability_argument_string(arguments, "taskId")?.to_string();
+            let tasks = task_discover_impl(&workspace)?;
+            let task = tasks
+                .into_iter()
+                .find(|task| task.id == task_id)
+                .ok_or_else(|| anyhow::anyhow!("task is no longer present in the Workspace"))?;
+            let is_test = request.capability_id == CapabilityId::WorkspaceRunTest;
+            if is_test && task.group != "test" {
+                anyhow::bail!("the requested task is not a discovered test task");
+            }
+            let output_resource = CapabilityResourceRef {
+                id: format!("output:{}:{}", bound.session_id, task_id),
+                kind: "output".into(),
+                label: task.label.clone(),
+            };
+            let _ = app.emit(
+                PROVIDER_CAPABILITY_RESOURCE_EVENT,
+                ProviderCapabilityResourceEvent {
+                    session_id: bound.session_id.clone(),
+                    turn_id: bound.turn_id.clone(),
+                    call_id: request.context.call_id,
+                    resource: output_resource.clone(),
+                    data: serde_json::json!({
+                        "taskId": task.id,
+                        "label": task.label,
+                        "kind": if is_test { "test" } else { "task" },
+                        "status": "running",
+                        "command": task.command,
+                        "args": task.args,
+                    }),
+                },
+            );
+            let cancellation = app
+                .state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
+                .get(&bound.session_id)
+                .map(|control| control.cancellation.clone())
+                .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
+            let _admission = IdeCommandAdmission::acquire().map_err(anyhow::Error::msg)?;
+            let mut command = command_with_gui_path(&task.command);
+            command.current_dir(&bound.workspace).args(&task.args);
+            let mut output = run_command_output_with_cancellation(command, cancellation)?;
+            if is_test {
+                output.stdout = format!("tests {:?}\n{}", vec![task.id.clone()], output.stdout);
+            } else if output.status == "done" {
+                output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
+            }
+            let output_data = serde_json::json!({
+                "taskId": task.id,
+                "label": task.label,
+                "kind": if is_test { "test" } else { "task" },
+                "status": output.status,
+                "stdout": truncate_chars(&output.stdout, 48_000),
+                "stderr": truncate_chars(&output.stderr, 24_000),
+                "finishedAt": chrono::Utc::now(),
+            });
+            if let Ok(mut contexts) = app
+                .state::<CapabilityIdeEvidenceManager>()
+                .by_workspace
+                .lock()
+            {
+                let context = contexts
+                    .entry(bound.workspace_key.clone())
+                    .or_insert_with(|| bound.workspace_context.clone());
+                context.revision = context.revision.saturating_add(1);
+                context.captured_at = chrono::Utc::now();
+                context.active_output = Some(output_data.clone());
+            }
+            (
+                format!("Ran {} {task_id}", if is_test { "test" } else { "task" }),
+                output_data,
+                Some(output_resource),
+            )
+        }
+        CapabilityId::WorkspaceReadOutput => {
+            let context = app
+                .state::<CapabilityIdeEvidenceManager>()
+                .by_workspace
+                .lock()
+                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+                .get(&bound.workspace_key)
+                .cloned()
+                .unwrap_or_else(|| bound.workspace_context.clone());
+            let output = context
+                .active_output
+                .ok_or_else(|| anyhow::anyhow!("Workspace has no active task or test output"))?;
+            ("Read Workspace output".into(), output, None)
+        }
         CapabilityId::IdeReveal => {
             let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
                 arguments, "path",
@@ -12972,6 +13449,25 @@ fn execute_provider_capability(
                     "endLine": end_line,
                     "endColumn": end_column,
                 }),
+                Some(resource),
+            )
+        }
+        CapabilityId::IdeOpenPanel => {
+            let panel = capability_argument_string(arguments, "panel")?;
+            if !matches!(
+                panel,
+                "diff" | "terminal" | "browser" | "problems" | "test-results" | "output"
+            ) {
+                anyhow::bail!("unsupported Workspace panel");
+            }
+            let resource = CapabilityResourceRef {
+                id: format!("ide-panel:{}:{panel}", request.context.session_id),
+                kind: "ide".into(),
+                label: panel.into(),
+            };
+            (
+                format!("Opened Workspace {panel} panel"),
+                serde_json::json!({ "panel": panel }),
                 Some(resource),
             )
         }
@@ -13280,6 +13776,7 @@ fn handle_desktop_provider_capability_request(
         || bound.provider_id != request.context.provider_id
         || bound.workspace_key != request.context.workspace_key
         || bound.policy.revision != request.context.policy_revision
+        || bound.workspace_context.revision != request.context.workspace_context_revision
         || bound.policy.mode != request.context.mode
     {
         return fail(
@@ -13322,6 +13819,14 @@ fn handle_desktop_provider_capability_request(
         return fail(
             "workspace-changed",
             "The owning chat workspace changed during the run.".into(),
+        );
+    }
+    if bound.policy.mode == CapabilityRunMode::Plan
+        && request.capability_id == CapabilityId::WorkspaceProposeEdit
+    {
+        return fail(
+            "plan-mode-read-only",
+            "Plan mode cannot create Workspace edit proposals.".into(),
         );
     }
     let class = match effective_capability_class(request.capability_id, &request.arguments) {
@@ -13460,6 +13965,8 @@ fn handle_desktop_provider_capability_request(
                     "terminal" => result.data.clone(),
                     "browser" => result.data.clone(),
                     "ide" => result.data.clone(),
+                    "proposal" => result.data.clone(),
+                    "output" => result.data.clone(),
                     _ => serde_json::json!({ "label": resource.label }),
                 };
                 let _ = app.emit(
@@ -13532,6 +14039,7 @@ struct DesktopProviderCapabilityContext {
     workspace_key: String,
     mode: CapabilityRunMode,
     policy_revision: u64,
+    workspace_context_revision: u64,
 }
 
 impl DesktopProviderCapabilityContext {
@@ -13553,6 +14061,11 @@ impl DesktopProviderCapabilityContext {
             policy_revision: desktop_permission_env("GYRO_CAPABILITY_POLICY_REVISION")?
                 .parse()
                 .context("invalid provider capability policy revision")?,
+            workspace_context_revision: desktop_permission_env(
+                "GYRO_CAPABILITY_WORKSPACE_CONTEXT_REVISION",
+            )?
+            .parse()
+            .context("invalid Workspace context revision")?,
         })
     }
 }
@@ -13665,16 +14178,32 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
             "globs": { "type": "array", "items": { "type": "string" } },
             "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000 }
         }),
-        CapabilityId::WorkspaceRead | CapabilityId::IdeReveal => serde_json::json!({
+        CapabilityId::WorkspaceRead
+        | CapabilityId::WorkspaceReadRange
+        | CapabilityId::IdeReveal => serde_json::json!({
             "path": { "type": "string" },
             "line": { "type": "integer", "minimum": 1 },
-            "column": { "type": "integer", "minimum": 1 },
             "endLine": { "type": "integer", "minimum": 1 },
+            "column": { "type": "integer", "minimum": 1 },
             "endColumn": { "type": "integer", "minimum": 1 }
         }),
         CapabilityId::WorkspaceDiff => serde_json::json!({
             "path": { "type": "string" },
             "staged": { "type": "boolean" }
+        }),
+        CapabilityId::WorkspaceProposeEdit => serde_json::json!({
+            "path": { "type": "string" },
+            "content": { "type": "string" },
+            "expectedHash": { "type": "string" }
+        }),
+        CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => serde_json::json!({
+            "taskId": { "type": "string" }
+        }),
+        CapabilityId::IdeOpenPanel => serde_json::json!({
+            "panel": {
+                "type": "string",
+                "enum": ["diff", "terminal", "browser", "problems", "test-results", "output"]
+            }
         }),
         CapabilityId::TerminalOpen => serde_json::json!({
             "program": { "type": "string" },
@@ -13691,7 +14220,12 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
     };
     let required = match id {
         CapabilityId::WorkspaceSearch => vec!["query"],
-        CapabilityId::WorkspaceRead | CapabilityId::IdeReveal => vec!["path"],
+        CapabilityId::WorkspaceRead
+        | CapabilityId::WorkspaceReadRange
+        | CapabilityId::IdeReveal => vec!["path"],
+        CapabilityId::WorkspaceProposeEdit => vec!["path", "content"],
+        CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => vec!["taskId"],
+        CapabilityId::IdeOpenPanel => vec!["panel"],
         CapabilityId::TerminalOpen => vec!["program"],
         CapabilityId::BrowserOpen => vec!["url"],
         _ => Vec::new(),
@@ -13728,6 +14262,7 @@ fn desktop_capability_tool_call(
             workspace_key: context.workspace_key.clone(),
             mode: context.mode,
             policy_revision: context.policy_revision,
+            workspace_context_revision: context.workspace_context_revision,
         },
         capability_id,
         arguments: params
@@ -14427,12 +14962,14 @@ mod tests {
             goal: None,
             plan: None,
             attachments: Vec::new(),
+            workspace_context: None,
         }
     }
 
     fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapabilityContext {
         let workspace_key = request.workspace_path.clone().unwrap();
         let policy = ProjectCapabilityPolicy::defaults(workspace_key.clone());
+        let workspace_context = WorkspaceContextSnapshot::empty(workspace_key.clone());
         BoundProviderCapabilityContext {
             session_id: request.session_id.clone(),
             turn_id: request.turn_id.clone(),
@@ -14440,6 +14977,7 @@ mod tests {
             workspace: PathBuf::from(&workspace_key),
             workspace_key,
             policy: CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Normal),
+            workspace_context,
         }
     }
 
@@ -14508,6 +15046,10 @@ mod tests {
         assert_eq!(
             capabilities["env"]["GYRO_CAPABILITY_RUN_NONCE"],
             "test-run-nonce"
+        );
+        assert_eq!(
+            capabilities["env"]["GYRO_CAPABILITY_WORKSPACE_CONTEXT_REVISION"],
+            "0"
         );
     }
 
@@ -14618,6 +15160,44 @@ mod tests {
         .is_err());
         let reload_schema = desktop_capability_tool_schema(CapabilityId::BrowserReload);
         assert!(reload_schema["properties"].as_object().unwrap().is_empty());
+        let context_schema = desktop_capability_tool_schema(CapabilityId::WorkspaceContext);
+        assert!(context_schema["properties"].as_object().unwrap().is_empty());
+        let range_schema = desktop_capability_tool_schema(CapabilityId::WorkspaceReadRange);
+        assert_eq!(range_schema["required"], serde_json::json!(["path"]));
+        let proposal_schema = desktop_capability_tool_schema(CapabilityId::WorkspaceProposeEdit);
+        assert_eq!(
+            proposal_schema["required"],
+            serde_json::json!(["path", "content"])
+        );
+    }
+
+    #[test]
+    fn workspace_context_paths_are_bounded_and_sensitive_content_is_withheld() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(temp.path().join(".env"), "TOKEN=secret\n").unwrap();
+        let mut context = WorkspaceContextSnapshot::empty(temp.path().display().to_string());
+        context.active_path = Some(temp.path().join("main.rs").display().to_string());
+        context.visible_tabs = vec![temp.path().join("main.rs").display().to_string()];
+        context.selection = Some(serde_json::json!({
+            "path": ".env",
+            "text": "TOKEN=secret",
+        }));
+        context.buffers = vec![serde_json::json!({
+            "path": ".env",
+            "dirty": true,
+            "content": "TOKEN=secret",
+        })];
+
+        normalize_workspace_context_paths(temp.path(), &mut context).unwrap();
+
+        assert_eq!(context.active_path.as_deref(), Some("main.rs"));
+        assert_eq!(context.visible_tabs, vec!["main.rs"]);
+        assert!(context.selection.as_ref().unwrap().get("text").is_none());
+        assert!(context.buffers[0].get("content").is_none());
+
+        context.active_path = Some("../outside".into());
+        assert!(normalize_workspace_context_paths(temp.path(), &mut context).is_err());
     }
 
     #[test]
@@ -14632,6 +15212,7 @@ mod tests {
             workspace_key: temp.path().display().to_string(),
             mode: CapabilityRunMode::Normal,
             policy_revision: 0,
+            workspace_context_revision: 0,
         };
         let result = desktop_capability_tool_call(
             &paths,
@@ -15526,6 +16107,7 @@ while True:
                 modified_at: prepared.modified_at,
                 preview_url: None,
             }],
+            workspace_context: None,
         };
         validate_chat_context(&request).unwrap();
         std::fs::write(&file, "changed\n").unwrap();
@@ -16367,6 +16949,7 @@ while True:
             goal: None,
             plan: None,
             attachments: Vec::new(),
+            workspace_context: None,
         };
         let mut attempts = Vec::new();
         let error =
@@ -16530,6 +17113,7 @@ while True:
             goal: None,
             plan: None,
             attachments: Vec::new(),
+            workspace_context: None,
         };
 
         let event = append_provider_status_event(
@@ -16616,6 +17200,7 @@ while True:
             goal: None,
             plan: None,
             attachments: Vec::new(),
+            workspace_context: None,
         };
 
         bind_provider_chat_request(&mut request, &session, &config).unwrap();
