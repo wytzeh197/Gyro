@@ -483,7 +483,9 @@ expect(
     ) &&
     desktopRustSource.includes("WORKSPACE_CHANGE_DEBOUNCE") &&
     desktopRustSource.includes("fn test_tree_from_tasks") &&
-    appSource.includes('workspaceWatchMode === "polling"'),
+    appSource.includes('workspaceWatchMode === "polling"') &&
+    appSource.includes("workspacePreparationPathRef.current ===") &&
+    appSource.includes("normalizeProjectPath(activeSession.workspacePath)"),
   "Workspace preparation should expose honest native stages and disable steady polling when the event watcher is healthy.",
 );
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
@@ -538,6 +540,9 @@ const coreProviderStreamSource = readRepoFile(
   "crates/gyro-core/src/provider_stream.rs",
 );
 const coreMutationsSource = readRepoFile("crates/gyro-core/src/mutations.rs");
+const coreCapabilitiesSource = readRepoFile(
+  "crates/gyro-core/src/capabilities.rs",
+);
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 const updateControllerSource = readRepoFile(
@@ -548,6 +553,20 @@ const tauriConfigSource = readRepoFile(
 );
 const tauriConfig = JSON.parse(tauriConfigSource);
 const releaseWorkflowSource = readRepoFile(".github/workflows/release.yml");
+
+expect(
+  coreCapabilitiesSource.includes("WorkspaceContextSnapshot") &&
+    coreCapabilitiesSource.includes('"gyro_workspace_get_context"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_read_range"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_propose_edit"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_run_task"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_run_test"') &&
+    tauriSource.includes("Workspace context attached") &&
+    tauriSource.includes("workspace_context_revision") &&
+    appSource.includes("workspaceContextSnapshot") &&
+    surfaceSource.includes("Live Workspace context"),
+  "The selected model should receive a live, versioned Workspace runtime with observation, navigation, proposals, and verification tools.",
+);
 
 expect(
   typeSource.includes("export type ChatArtifact =") &&
@@ -1260,9 +1279,9 @@ expect(
     appSource.includes("const applyWorkspaceReplace = useCallback") &&
     appSource.includes("Replace blocked by unsaved changes") &&
     appSource.includes("Replace blocked in Restricted Mode") &&
-    surfaceSource.includes("documentOutlineSymbols(") &&
-    surfaceSource.includes('title="Outline"'),
-  "Workspace navigation should provide a document outline and guarded search-and-replace preview.",
+    !surfaceSource.includes("documentOutlineSymbols(") &&
+    !surfaceSource.includes('title="Outline"'),
+  "Workspace navigation should keep Explorer persistent while providing guarded search-and-replace preview.",
 );
 expect(
   surfaceSource.includes('aria-label="Select all source control changes"') &&
@@ -3729,12 +3748,14 @@ expect(
     (rule) =>
       rule.includes("border: 1px solid var(--gyro-premium-hairline-soft)") &&
       rule.includes("box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft)") &&
-      rule.includes("padding: 4px"),
+      rule.includes("padding: 8px"),
   ) &&
     cssRules(styleSource, ".gyro-sidebar-cli-location select").some((rule) =>
-      rule.includes("min-height: 28px"),
-    ),
-  "The New menu should keep a compact, low-emphasis surface and project picker.",
+      rule.includes("min-height: 26px"),
+    ) &&
+    surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
+    surfaceSource.includes("gyro-sidebar-session-group is-cli"),
+  "The Create menu should keep a compact, grouped surface and inline project picker.",
 );
 expect(
   chatSidebarSource.includes("New Chat") &&
@@ -3786,9 +3807,8 @@ expect(
     appSource.includes("onCreateCliSession={createCliSession}") &&
     appSource.includes('type: "select-sessions"') &&
     surfaceSource.includes("onCreateCliSession(") &&
-    surfaceSource.includes(
-      "onCreateCliSession(profile.id, newCliWorkspacePath)",
-    ) &&
+    surfaceSource.includes("profile.id,") &&
+    surfaceSource.includes("newCliWorkspacePath,") &&
     surfaceSource.includes("!newCliWorkspacePath") &&
     surfaceSource.includes("pane.projectPath ?? pane.workingDirectory") &&
     surfaceSource.includes("selectedTerminalPaneId"),
@@ -4001,7 +4021,7 @@ expect(
     surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
     surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
     surfaceSource.includes("Open files in Workspace") &&
-    surfaceSource.includes("<small>Open Workspace</small>") &&
+    surfaceSource.includes("<small>Open</small>") &&
     surfaceSource.includes('"has-activity"') &&
     surfaceSource.includes('"has-warning"') &&
     !surfaceSource.includes('(browserPreview?.status ?? "Ready")') &&
