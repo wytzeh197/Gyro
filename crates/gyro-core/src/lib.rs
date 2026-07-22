@@ -34,8 +34,9 @@ pub use capabilities::{
     CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInvocationContext,
     CapabilityPolicySnapshot, CapabilityRequest, CapabilityResourceRef, CapabilityResponse,
     CapabilityResult, CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant,
-    ProjectCapabilityPolicy, ProviderCapabilitySupport, CAPABILITY_DESCRIPTORS,
-    CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    ProjectCapabilityPolicy, ProviderCapabilitySupport, WorkspaceContextSnapshot,
+    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,

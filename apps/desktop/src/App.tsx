@@ -128,6 +128,7 @@ import {
   type WorkspaceFileContent,
   type WorkspaceFileStat,
   type WorkspaceChangedEvent,
+  type WorkspaceContextSnapshot,
   type WorkspacePreparationProgress,
   type WorkspacePreparationSnapshot,
   type WorkspaceSearchQuery,
@@ -279,6 +280,7 @@ type ChatTurnContextSnapshot = {
   requireFileEditApproval?: boolean;
   fullAccess?: boolean;
   workspacePath?: string;
+  workspaceContext?: WorkspaceContextSnapshot;
   preserveDraft?: boolean;
   turnId?: string;
   retryTurnId?: string;
@@ -748,6 +750,7 @@ export function App() {
   >("polling");
   const [workspaceChangeGeneration, setWorkspaceChangeGeneration] = useState(0);
   const workspacePreparationRunRef = useRef("");
+  const workspacePreparationPathRef = useRef("");
   const workspacePreparationReadyTimerRef = useRef<number>();
   const openGlobalSearch = useCallback(
     (mode: "commands" | "files" | "global" = "global") => {
@@ -1719,6 +1722,8 @@ export function App() {
           ...current,
           [payload.callId]: payload.data,
         }));
+        const isActiveModelWorkspace =
+          activeSessionIdRef.current === payload.sessionId;
         if (payload.resource.kind === "terminal") {
           const snapshot = terminalSnapshotFromCapabilityData(payload.data);
           if (snapshot) {
@@ -1760,6 +1765,70 @@ export function App() {
               },
             }));
           }
+        }
+        if (isActiveModelWorkspace && payload.resource.kind === "ide") {
+          const data = recordFromUnknown(payload.data);
+          const panel = stringFromRecord(data, "panel");
+          if (
+            panel === "diff" ||
+            panel === "terminal" ||
+            panel === "browser" ||
+            panel === "problems" ||
+            panel === "test-results" ||
+            panel === "output"
+          ) {
+            dispatchWorkbench({ type: "open-tool-panel", tab: panel });
+          } else {
+            const path = stringFromRecord(data, "path");
+            if (path) {
+              const line = typeof data?.line === "number" ? data.line : 1;
+              const column = typeof data?.column === "number" ? data.column : 1;
+              setSelectedFile(path);
+              dispatchWorkbench({
+                type: "ide-open-tab",
+                tab: {
+                  path,
+                  title: workspaceName(path),
+                  dirty: false,
+                  preview: true,
+                },
+              });
+              setEditorRevealTarget({
+                path,
+                lineNumber: Math.max(1, line),
+                column: Math.max(1, column),
+                nonce: Date.now(),
+              });
+              dispatchWorkbench({
+                type: "select-workspace-layout",
+                layout: "code",
+              });
+            }
+          }
+        }
+        if (isActiveModelWorkspace && payload.resource.kind === "output") {
+          const data = recordFromUnknown(payload.data);
+          const kind = stringFromRecord(data, "kind");
+          dispatchWorkbench({
+            type: "ide-upsert-output-channel",
+            channel: {
+              id: payload.resource.id,
+              label: payload.resource.label,
+              kind: kind === "test" ? "test" : "task",
+              lines: [
+                stringFromRecord(data, "stdout"),
+                stringFromRecord(data, "stderr"),
+              ].filter((line): line is string => Boolean(line)),
+              updatedAt: new Date().toISOString(),
+            },
+          });
+          dispatchWorkbench({
+            type: "open-tool-panel",
+            tab: kind === "test" ? "test-results" : "output",
+          });
+        }
+        if (isActiveModelWorkspace && payload.resource.kind === "proposal") {
+          dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
         }
       },
     ).then((unlisten) => {
@@ -2556,6 +2625,7 @@ export function App() {
 
   const prepareWorkspace = useCallback(
     async (root: string) => {
+      workspacePreparationPathRef.current = normalizeProjectPath(root);
       const runId =
         typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
@@ -2709,16 +2779,90 @@ export function App() {
     });
   }, [selectedFile, workspaceRoots]);
 
+  const workspaceContextSnapshot = useMemo<
+    WorkspaceContextSnapshot | undefined
+  >(() => {
+    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    if (!root) return undefined;
+    const contextPath = (path?: string) =>
+      path ? workspaceContextRelativePath(path, root) : undefined;
+    const activeBuffer = workbench.ide.activePath
+      ? workbench.ide.buffers[workbench.ide.activePath]
+      : undefined;
+    const activeOutput = workbench.ide.outputChannels.find(
+      (channel) => channel.id === workbench.ide.activeOutputChannelId,
+    );
+    return {
+      schema: "gyro.workspace-context.v1",
+      workspaceKey: root,
+      revision: Date.now(),
+      capturedAt: new Date().toISOString(),
+      activePath: contextPath(workbench.ide.activePath),
+      activeView: workbench.ide.activeView,
+      visibleTabs: workbench.ide.tabs
+        .map((tab) => contextPath(tab.path))
+        .filter((path): path is string => Boolean(path))
+        .slice(0, 64),
+      selection:
+        workbench.ide.selection &&
+        contextPath(workbench.ide.selection.path) ===
+          contextPath(workbench.ide.activePath)
+          ? {
+              ...workbench.ide.selection,
+              path: contextPath(workbench.ide.selection.path) ?? "",
+              text: workbench.ide.selection.text.slice(0, 16_000),
+            }
+          : undefined,
+      buffers: activeBuffer
+        ? [
+            {
+              path: contextPath(activeBuffer.path) ?? activeBuffer.path,
+              dirty: activeBuffer.content !== activeBuffer.savedContent,
+              contentHash: workspaceContextContentHash(activeBuffer.content),
+              diskHash: activeBuffer.contentHash,
+              content: activeBuffer.content.slice(0, 48_000),
+            },
+          ]
+        : [],
+      diagnostics: workbench.ide.diagnostics
+        .filter(
+          (diagnostic) =>
+            workspaceRootForPath(workspaceRoots, diagnostic.path) === root,
+        )
+        .slice(0, 50)
+        .map((diagnostic) => ({
+          ...diagnostic,
+          path: contextPath(diagnostic.path) ?? diagnostic.path,
+          message: diagnostic.message.slice(0, 1_000),
+        })),
+      testFailures: workspaceFailedTests(workbench.ide.testTree).slice(0, 50),
+      activeOutput: activeOutput
+        ? {
+            ...activeOutput,
+            lines: activeOutput.lines
+              .slice(-50)
+              .map((line) => line.slice(0, 500)),
+          }
+        : undefined,
+    };
+  }, [selectedFile, workbench.ide, workspaceRoots]);
+
   useEffect(() => {
     const root = workspaceRootForPath(workspaceRoots, selectedFile);
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
         workspacePath: root,
-        diagnostics: workbench.ide.diagnostics,
+        diagnostics: workspaceContextSnapshot?.diagnostics ?? [],
+        context: workspaceContextSnapshot,
       },
     });
-  }, [selectedFile, workbench.ide.diagnostics, workspaceRoots]);
+  }, [
+    selectedFile,
+    workbench.ide.diagnostics,
+    workspaceContextSnapshot,
+    workspaceRoots,
+  ]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -6187,6 +6331,14 @@ export function App() {
         overrideContext?.workspacePath ??
         activeSession?.workspacePath ??
         workspacePath;
+      const turnWorkspaceContext =
+        overrideContext?.workspaceContext ??
+        (workspaceContextSnapshot &&
+        chatWorkspacePath &&
+        normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
+          normalizeProjectPath(chatWorkspacePath)
+          ? workspaceContextSnapshot
+          : undefined);
       if (message === "") {
         return false;
       }
@@ -6249,6 +6401,7 @@ export function App() {
             fullAccess,
             turnId: createTurnId(),
             workspacePath: chatWorkspacePath,
+            workspaceContext: turnWorkspaceContext,
           },
         };
         setChatMessageQueues((current) => {
@@ -6514,6 +6667,15 @@ export function App() {
             message,
             turnId,
           });
+          if (turnWorkspaceContext) {
+            await invoke("update_capability_ide_evidence", {
+              request: {
+                workspacePath: persistedSession.workspacePath,
+                diagnostics: turnWorkspaceContext.diagnostics,
+                context: turnWorkspaceContext,
+              },
+            });
+          }
           persistedChatTurnIdsRef.current.add(turnId);
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
@@ -6659,6 +6821,15 @@ export function App() {
             turnId,
           });
           persistedChatTurnIdsRef.current.add(turnId);
+        }
+        if (turnWorkspaceContext) {
+          await invoke("update_capability_ide_evidence", {
+            request: {
+              workspacePath: chatWorkspacePath,
+              diagnostics: turnWorkspaceContext.diagnostics,
+              context: turnWorkspaceContext,
+            },
+          });
         }
         const providerResponse = await invoke<ProviderChatResponse>(
           "run_provider_chat",
@@ -7008,12 +7179,49 @@ export function App() {
             dispatchWorkbench({ type: "browser-navigate", url: browser.url });
             dispatchWorkbench({ type: "open-tool-panel", tab: "browser" });
           }
+        } else if (activity.resource.kind === "output") {
+          const outputData = recordFromUnknown(
+            capabilityResourceDataByCallId[activity.callId],
+          );
+          const stdout = stringFromRecord(outputData, "stdout");
+          const stderr = stringFromRecord(outputData, "stderr");
+          const kind = stringFromRecord(outputData, "kind");
+          dispatchWorkbench({
+            type: "ide-upsert-output-channel",
+            channel: {
+              id: activity.resource.id,
+              label: activity.resource.label,
+              kind: kind === "test" ? "test" : "task",
+              lines: [stdout, stderr].filter((line): line is string =>
+                Boolean(line),
+              ),
+              updatedAt: new Date().toISOString(),
+            },
+          });
+          dispatchWorkbench({
+            type: "open-tool-panel",
+            tab: kind === "test" ? "test-results" : "output",
+          });
+        } else if (activity.resource.kind === "proposal") {
+          dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
         } else {
           const path = activity.resource.label;
           if (path && activity.resource.kind === "ide") {
             const ideData = recordFromUnknown(
               capabilityResourceDataByCallId[activity.callId],
             );
+            const panel = stringFromRecord(ideData, "panel");
+            if (
+              panel === "diff" ||
+              panel === "terminal" ||
+              panel === "browser" ||
+              panel === "problems" ||
+              panel === "test-results" ||
+              panel === "output"
+            ) {
+              dispatchWorkbench({ type: "open-tool-panel", tab: panel });
+              return;
+            }
             const filePath = stringFromRecord(ideData, "path") ?? path;
             const line = typeof ideData?.line === "number" ? ideData.line : 1;
             const column =
@@ -9582,6 +9790,12 @@ export function App() {
       setFiles([]);
       return;
     }
+    if (
+      workspacePreparationPathRef.current ===
+      normalizeProjectPath(activeSession.workspacePath)
+    ) {
+      return;
+    }
     setFiles([]);
     void prepareWorkspace(activeSession.workspacePath);
   }, [activeSession, prepareWorkspace, refreshIdeServices]);
@@ -10764,6 +10978,13 @@ export function App() {
         worktreeName={paneSession?.worktreeName}
         workspaceMode={workbench.workspaceMode}
         workspacePath={pane.workspacePath}
+        workspaceContext={
+          workspaceContextSnapshot &&
+          normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
+            normalizeProjectPath(pane.workspacePath)
+            ? workspaceContextSnapshot
+            : undefined
+        }
       />
     );
   };
@@ -11035,6 +11256,17 @@ export function App() {
                     workspaceMode={workbench.workspaceMode}
                     workspacePath={
                       activeSession?.workspacePath ?? workspacePath
+                    }
+                    workspaceContext={
+                      workspaceContextSnapshot &&
+                      normalizeProjectPath(
+                        workspaceContextSnapshot.workspaceKey,
+                      ) ===
+                        normalizeProjectPath(
+                          activeSession?.workspacePath ?? workspacePath,
+                        )
+                        ? workspaceContextSnapshot
+                        : undefined
                     }
                   />
                 ) : null}
@@ -11530,6 +11762,7 @@ export function App() {
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
+          workspaceContext={workspaceContextSnapshot}
         />
       ) : null}
       {modelStandardPrompt ? (
@@ -13644,6 +13877,32 @@ function relativeFilePath(path: string, parent: string) {
   return normalizedPath.startsWith(prefix)
     ? normalizedPath.slice(prefix.length)
     : workspaceName(normalizedPath);
+}
+
+function workspaceContextRelativePath(path: string, root: string) {
+  const normalizedPath = path.replaceAll("\\", "/").replace(/^\.\//, "");
+  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (normalizedPath === normalizedRoot) return ".";
+  const prefix = `${normalizedRoot}/`;
+  return normalizedPath.startsWith(prefix)
+    ? normalizedPath.slice(prefix.length)
+    : normalizedPath;
+}
+
+function workspaceContextContentHash(content: string) {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `editor-${(hash >>> 0).toString(16).padStart(8, "0")}-${content.length}`;
+}
+
+function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
+  return items.flatMap((item) => [
+    ...(item.status === "failed" ? [item] : []),
+    ...workspaceFailedTests(item.children ?? []),
+  ]);
 }
 
 function editorPathMatches(path: string, root: string) {

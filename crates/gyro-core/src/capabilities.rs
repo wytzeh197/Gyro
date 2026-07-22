@@ -15,13 +15,20 @@ pub const MAX_CAPABILITY_SUMMARY_CHARS: usize = 4_000;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CapabilityId {
+    WorkspaceContext,
     WorkspaceList,
     WorkspaceSearch,
     WorkspaceRead,
+    WorkspaceReadRange,
     WorkspaceDiagnostics,
     WorkspaceGitStatus,
     WorkspaceDiff,
+    WorkspaceProposeEdit,
+    WorkspaceRunTask,
+    WorkspaceRunTest,
+    WorkspaceReadOutput,
     IdeReveal,
+    IdeOpenPanel,
     TerminalOpen,
     TerminalRead,
     TerminalStop,
@@ -34,13 +41,20 @@ pub enum CapabilityId {
 impl CapabilityId {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::WorkspaceContext => "workspace.context",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceSearch => "workspace.search",
             Self::WorkspaceRead => "workspace.read",
+            Self::WorkspaceReadRange => "workspace.read_range",
             Self::WorkspaceDiagnostics => "workspace.diagnostics",
             Self::WorkspaceGitStatus => "workspace.git_status",
             Self::WorkspaceDiff => "workspace.diff",
+            Self::WorkspaceProposeEdit => "workspace.propose_edit",
+            Self::WorkspaceRunTask => "workspace.run_task",
+            Self::WorkspaceRunTest => "workspace.run_test",
+            Self::WorkspaceReadOutput => "workspace.read_output",
             Self::IdeReveal => "ide.reveal",
+            Self::IdeOpenPanel => "ide.open_panel",
             Self::TerminalOpen => "terminal.open",
             Self::TerminalRead => "terminal.read",
             Self::TerminalStop => "terminal.stop",
@@ -53,13 +67,20 @@ impl CapabilityId {
 
     pub fn provider_tool_name(self) -> &'static str {
         match self {
+            Self::WorkspaceContext => "gyro_workspace_get_context",
             Self::WorkspaceList => "gyro_workspace_list",
             Self::WorkspaceSearch => "gyro_workspace_search",
             Self::WorkspaceRead => "gyro_workspace_read",
+            Self::WorkspaceReadRange => "gyro_workspace_read_range",
             Self::WorkspaceDiagnostics => "gyro_workspace_diagnostics",
             Self::WorkspaceGitStatus => "gyro_workspace_git_status",
             Self::WorkspaceDiff => "gyro_workspace_diff",
+            Self::WorkspaceProposeEdit => "gyro_workspace_propose_edit",
+            Self::WorkspaceRunTask => "gyro_workspace_run_task",
+            Self::WorkspaceRunTest => "gyro_workspace_run_test",
+            Self::WorkspaceReadOutput => "gyro_workspace_read_output",
             Self::IdeReveal => "gyro_ide_reveal",
+            Self::IdeOpenPanel => "gyro_ide_open_panel",
             Self::TerminalOpen => "gyro_terminal_open",
             Self::TerminalRead => "gyro_terminal_read",
             Self::TerminalStop => "gyro_terminal_stop",
@@ -272,6 +293,68 @@ pub struct CapabilityInvocationContext {
     pub workspace_key: String,
     pub mode: CapabilityRunMode,
     pub policy_revision: u64,
+    #[serde(default)]
+    pub workspace_context_revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceContextSnapshot {
+    pub schema: String,
+    pub workspace_key: String,
+    pub revision: u64,
+    pub captured_at: DateTime<Utc>,
+    pub active_path: Option<String>,
+    pub active_view: Option<String>,
+    #[serde(default)]
+    pub visible_tabs: Vec<String>,
+    pub selection: Option<Value>,
+    #[serde(default)]
+    pub buffers: Vec<Value>,
+    #[serde(default)]
+    pub diagnostics: Vec<Value>,
+    #[serde(default)]
+    pub test_failures: Vec<Value>,
+    pub active_output: Option<Value>,
+}
+
+impl WorkspaceContextSnapshot {
+    pub const SCHEMA: &'static str = "gyro.workspace-context.v1";
+
+    pub fn empty(workspace_key: impl Into<String>) -> Self {
+        Self {
+            schema: Self::SCHEMA.into(),
+            workspace_key: workspace_key.into(),
+            revision: 0,
+            captured_at: Utc::now(),
+            active_path: None,
+            active_view: None,
+            visible_tabs: Vec::new(),
+            selection: None,
+            buffers: Vec::new(),
+            diagnostics: Vec::new(),
+            test_failures: Vec::new(),
+            active_output: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema != Self::SCHEMA {
+            return Err(anyhow!("unsupported Workspace context schema"));
+        }
+        if self.workspace_key.trim().is_empty() {
+            return Err(anyhow!("Workspace context requires a workspace key"));
+        }
+        if self.visible_tabs.len() > 64
+            || self.buffers.len() > 64
+            || self.diagnostics.len() > 1_000
+            || self.test_failures.len() > 1_000
+        {
+            return Err(anyhow!("Workspace context contains too many entries"));
+        }
+        validate_capability_result_data(serde_json::to_value(self)?)?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -388,6 +471,11 @@ pub struct CapabilityDescriptor {
 
 pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
+        id: CapabilityId::WorkspaceContext,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Inspect the current editor, selection, buffers, diagnostics, tests, and output visible in Gyro Workspace.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::WorkspaceList,
         class: CapabilityClass::WorkspaceInspect,
         description: "List bounded entries inside the current Gyro project.",
@@ -401,6 +489,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::WorkspaceRead,
         class: CapabilityClass::WorkspaceInspect,
         description: "Read a bounded text file inside the current Gyro project.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceReadRange,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read an exact bounded line range from a text file in the current Gyro project.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiagnostics,
@@ -418,9 +511,34 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Inspect a bounded Git diff for the Gyro project.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::WorkspaceProposeEdit,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Create a hash-guarded file edit proposal for review in Gyro Workspace without writing it directly.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceRunTask,
+        class: CapabilityClass::TerminalExecute,
+        description: "Run one discovered Workspace task with visible, attributed output.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceRunTest,
+        class: CapabilityClass::TerminalExecute,
+        description: "Run one discovered Workspace test task with visible, attributed output.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceReadOutput,
+        class: CapabilityClass::TerminalObserve,
+        description: "Read bounded task, test, or terminal output currently recorded by Gyro Workspace.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::IdeReveal,
         class: CapabilityClass::IdeReveal,
         description: "Create a link that reveals a saved file and range in Gyro Workspace.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::IdeOpenPanel,
+        class: CapabilityClass::IdeReveal,
+        description: "Open a trusted Gyro Workspace panel such as Diff, Problems, Test Results, Terminal, Output, or Browser.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalOpen,
@@ -569,6 +687,17 @@ mod tests {
                 Some(descriptor.id)
             );
         }
+    }
+
+    #[test]
+    fn workspace_context_is_versioned_and_bounded() {
+        let mut context = WorkspaceContextSnapshot::empty("/tmp/project");
+        context.active_path = Some("src/main.rs".into());
+        context.visible_tabs = vec!["src/main.rs".into()];
+        context.validate().unwrap();
+
+        context.schema = "gyro.workspace-context.v0".into();
+        assert!(context.validate().is_err());
     }
 
     #[test]
