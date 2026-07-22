@@ -117,7 +117,7 @@ if (!existsSync(releaseNotesPath)) {
   for (const marker of [
     `# Gyro v${expectedVersion}`,
     "## Download and install",
-    "https://wytzeh197.github.io/Gyro/",
+    "https://usegyro.io/",
     `Gyro_${expectedVersion}_aarch64.dmg`,
     `Gyro_${expectedVersion}_x64.dmg`,
     "SHA256SUMS",
