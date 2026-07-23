@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Blocks,
   Bot,
   CalendarClock,
   Camera,
@@ -140,6 +141,7 @@ import type {
   IdeContribution,
   IdeState,
   IdeViewId,
+  LanguageServerState,
   GitReviewActionId,
   GlobalSearchProject,
   GlobalSearchSelection,
@@ -350,6 +352,7 @@ type AppChromeProps = {
   onToggleChatsCollapsed?: () => void;
   onSettingsSectionChange?: (section: SettingsSectionId) => void;
   onSettingsBack?: () => void;
+  settingsBackLabel?: string;
   onUpdateAction?: (state: UpdateState) => void;
   onWorkspaceSidebarHiddenChange?: (hidden: boolean) => void;
   onWorkspaceSidebarWidthChange?: (width?: number) => void;
@@ -371,36 +374,63 @@ const settingsSidebarItems: Array<{
   id: SettingsSectionId;
   label: string;
   icon: IconComponent;
-  group: "Workspace" | "System";
+  group: "Preferences" | "AI & Agents" | "Workspace" | "System";
 }> = [
   {
     id: "general",
     label: "General",
     icon: SlidersHorizontal,
-    group: "Workspace",
+    group: "Preferences",
   },
-  { id: "appearance", label: "Appearance", icon: Palette, group: "Workspace" },
+  {
+    id: "appearance",
+    label: "Appearance",
+    icon: Palette,
+    group: "Preferences",
+  },
+  {
+    id: "keyboard",
+    label: "Keyboard",
+    icon: CommandIcon,
+    group: "Preferences",
+  },
   {
     id: "usage-limits",
     label: "Usage Limits",
     icon: Gauge,
-    group: "Workspace",
+    group: "AI & Agents",
   },
-  { id: "providers", label: "Providers", icon: KeyRound, group: "Workspace" },
+  {
+    id: "providers",
+    label: "Providers",
+    icon: KeyRound,
+    group: "AI & Agents",
+  },
   {
     id: "cli-profiles",
     label: "CLI Profiles",
     icon: Terminal,
-    group: "Workspace",
+    group: "AI & Agents",
   },
   {
     id: "permissions",
     label: "Permissions",
     icon: LockKeyhole,
-    group: "System",
+    group: "AI & Agents",
+  },
+  {
+    id: "editor-workspace",
+    label: "Editor & Search",
+    icon: FileText,
+    group: "Workspace",
+  },
+  {
+    id: "tools-contributions",
+    label: "Tools & Contributions",
+    icon: Blocks,
+    group: "Workspace",
   },
   { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
-  { id: "keyboard", label: "Keyboard", icon: CommandIcon, group: "System" },
   { id: "advanced", label: "Advanced", icon: Settings, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
 ];
@@ -413,6 +443,18 @@ type SettingsSearchEntry = {
 };
 
 const settingsSearchEntries: SettingsSearchEntry[] = [
+  {
+    section: "editor-workspace",
+    label: "Editor & Search",
+    detail: "Editor, Explorer, and search behavior by workspace scope",
+    keywords: "workspace folder minimap exclude maximum results",
+  },
+  {
+    section: "tools-contributions",
+    label: "Tools & Contributions",
+    detail: "Language servers, workspace commands, and local contributions",
+    keywords: "extensions manifests keybindings lsp",
+  },
   {
     section: "general",
     label: "General",
@@ -689,6 +731,7 @@ function WorkspaceActivityRail({
   hasWorkspace,
   isVisible,
   isSidebarHidden,
+  onOpenSettings,
   onSelectView,
   onToggleSidebar,
 }: {
@@ -696,6 +739,7 @@ function WorkspaceActivityRail({
   hasWorkspace: boolean;
   isVisible: boolean;
   isSidebarHidden: boolean;
+  onOpenSettings?: () => void;
   onSelectView?: (view: IdeViewId) => void;
   onToggleSidebar: () => void;
 }) {
@@ -711,6 +755,10 @@ function WorkspaceActivityRail({
         disabled={isDisabled}
         key={view.id}
         onClick={() => {
+          if (view.id === "settings") {
+            onOpenSettings?.();
+            return;
+          }
           if (isActive && !isSidebarHidden) {
             onToggleSidebar();
             return;
@@ -819,6 +867,7 @@ export function AppChrome({
   onToggleChatsCollapsed,
   onSettingsSectionChange,
   onSettingsBack,
+  settingsBackLabel = "Workspace",
   onUpdateAction,
   onWorkspaceSidebarHiddenChange,
   onWorkspaceSidebarWidthChange,
@@ -1115,6 +1164,13 @@ export function AppChrome({
         hasWorkspace={Boolean(workspacePath)}
         isSidebarHidden={isSidebarHidden}
         isVisible={isIdeSurface}
+        onOpenSettings={() => {
+          if (onOpenSettingsSection) {
+            onOpenSettingsSection("editor-workspace");
+            return;
+          }
+          onOpenSettings();
+        }}
         onSelectView={onSelectIdeView}
         onToggleSidebar={() => setIsSidebarHidden((current) => !current)}
       />
@@ -1146,6 +1202,7 @@ export function AppChrome({
           {activeDestination === "settings" ? (
             <SettingsSidebarContent
               activeSection={activeSettingsSection}
+              backLabel={settingsBackLabel}
               onBack={() => {
                 setSettingsQuery("");
                 (onSettingsBack ?? (() => onSelectDestination("workspace")))();
@@ -1570,6 +1627,7 @@ function WorkspacePreparationControl({
 
 function SettingsSidebarContent({
   activeSection,
+  backLabel,
   onBack,
   onSectionChange,
   onToggleSidebar,
@@ -1581,6 +1639,7 @@ function SettingsSidebarContent({
   workspacePreparationRef,
 }: {
   activeSection: SettingsSectionId;
+  backLabel: string;
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onToggleSidebar: () => void;
@@ -1607,18 +1666,16 @@ function SettingsSidebarContent({
               <PanelLeftClose size={13} />
             </button>
             <button
-              aria-label="Back from settings"
-              className="gyro-settings-back-button"
+              aria-label={`Back to ${backLabel}`}
+              className="gyro-settings-back-button has-label"
               onClick={onBack}
+              title={`Back to ${backLabel}`}
               type="button"
             >
               <ArrowLeft size={13} />
-            </button>
-            <button aria-label="Forward" disabled type="button">
-              <ArrowRight size={13} />
+              <span>{backLabel}</span>
             </button>
           </div>
-          <strong className="gyro-settings-sidebar-title">Settings</strong>
           <WorkspacePreparationControl
             controlRef={workspacePreparationRef}
             isOpen={isWorkspacePreparationOpen}
@@ -1636,33 +1693,35 @@ function SettingsSidebarContent({
       </div>
 
       <div className="gyro-sidebar-actions is-settings-pages">
-        {(["Workspace", "System"] as const).map((group) => {
-          const items = settingsSidebarItems.filter(
-            (item) => item.group === group,
-          );
-          if (items.length === 0) return null;
-          return (
-            <div className="gyro-settings-sidebar-group" key={group}>
-              <span>{group}</span>
-              {items.map(({ id, label, icon: Icon }) => (
-                <button
-                  aria-current={activeSection === id ? "page" : undefined}
-                  className={
-                    activeSection === id
-                      ? "gyro-sidebar-action is-active is-settings-page"
-                      : "gyro-sidebar-action is-settings-page"
-                  }
-                  key={id}
-                  onClick={() => onSectionChange?.(id)}
-                  type="button"
-                >
-                  <Icon size={15} />
-                  {label}
-                </button>
-              ))}
-            </div>
-          );
-        })}
+        {(["Preferences", "AI & Agents", "Workspace", "System"] as const).map(
+          (group) => {
+            const items = settingsSidebarItems.filter(
+              (item) => item.group === group,
+            );
+            if (items.length === 0) return null;
+            return (
+              <div className="gyro-settings-sidebar-group" key={group}>
+                <span>{group}</span>
+                {items.map(({ id, label, icon: Icon }) => (
+                  <button
+                    aria-current={activeSection === id ? "page" : undefined}
+                    className={
+                      activeSection === id
+                        ? "gyro-sidebar-action is-active is-settings-page"
+                        : "gyro-sidebar-action is-settings-page"
+                    }
+                    key={id}
+                    onClick={() => onSectionChange?.(id)}
+                    type="button"
+                  >
+                    <Icon size={15} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            );
+          },
+        )}
       </div>
     </>
   );
@@ -1844,9 +1903,7 @@ function WorkspaceSidebarContent({
         ) === index,
     );
   }, [savedProjects, selectedTerminalPaneId, terminalPanes, workspacePath]);
-  const [newCliWorkspacePath, setNewCliWorkspacePath] = useState(
-    cliProjects[0]?.path ?? "",
-  );
+  const newCliWorkspacePath = cliProjects[0]?.path ?? "";
   const newSessionMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
     newSessionMenuView !== "closed",
     () => setNewSessionMenuView("closed"),
@@ -1961,11 +2018,6 @@ function WorkspaceSidebarContent({
       return next.size === current.size ? current : next;
     });
   }, [ide?.sourceControl.files]);
-  useEffect(() => {
-    if (newSessionMenuView === "closed") {
-      setNewCliWorkspacePath(cliProjects[0]?.path ?? "");
-    }
-  }, [cliProjects, newSessionMenuView]);
   useEffect(() => {
     const discoveredKeys = discoveredProjectGroups.map(
       (project) => project.key,
@@ -3216,50 +3268,6 @@ function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
-          {activeIdeView === "settings" ? (
-            <SidebarSection
-              grow
-              meta={String(ide?.contributions.length ?? 0)}
-              title="Workspace Settings"
-            >
-              {(ide?.languageServers ?? []).map((server) => (
-                <SidebarDestinationRow
-                  icon={Activity}
-                  isActive={server.status === "ready"}
-                  key={server.id}
-                  label={server.languageId}
-                  meta={server.status}
-                  onClick={() => onOpenToolPanel("output")}
-                  title={server.message}
-                />
-              ))}
-              {(ide?.contributions ?? []).flatMap((contribution) =>
-                contribution.enabled
-                  ? contribution.commands
-                      .slice(0, 8)
-                      .map((command) => (
-                        <SidebarDestinationRow
-                          icon={Settings}
-                          isActive={false}
-                          key={command.id}
-                          label={command.label}
-                          meta={command.category}
-                          onClick={() =>
-                            command.viewId
-                              ? onSelectIdeView?.(command.viewId)
-                              : onOpenCommandPalette()
-                          }
-                        />
-                      ))
-                  : [],
-              )}
-              <div className="gyro-sidebar-mini-copy">
-                Language servers, debug adapters, Git, and provider CLIs are
-                detected locally. Gyro does not auto-install them.
-              </div>
-            </SidebarSection>
-          ) : null}
-
           {workspacePath ? (
             <nav className="gyro-ide-panel-shortcuts" aria-label="Code tools">
               {paneTabs.map(({ id, label, icon: Icon }) => (
@@ -3336,25 +3344,9 @@ function WorkspaceSidebarContent({
                     className="gyro-sidebar-session-group is-cli"
                     role="group"
                   >
-                    <label className="gyro-sidebar-cli-location">
-                      <span>CLI</span>
-                      <select
-                        aria-label="CLI session location"
-                        onChange={(event) =>
-                          setNewCliWorkspacePath(event.target.value)
-                        }
-                        value={newCliWorkspacePath}
-                      >
-                        {cliProjects.length === 0 ? (
-                          <option value="">Open a project first</option>
-                        ) : null}
-                        {cliProjects.map((project) => (
-                          <option key={project.path} value={project.path}>
-                            {project.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <span className="gyro-sidebar-session-group-label">
+                      CLI
+                    </span>
                     {cliProjects.length === 0 ? (
                       <button
                         onClick={() => {
@@ -4956,7 +4948,7 @@ type ChatSurfaceProps = {
   onGoalAction?: (
     action: "set" | "edit" | "complete" | "reopen" | "clear",
     value?: string,
-  ) => void;
+  ) => boolean | void | Promise<boolean | void>;
   onCancelGoalComposer?: () => void;
   onSetOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
   onCompleteOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
@@ -5037,6 +5029,8 @@ export function ChatSurface({
   onPlanEditorRequestHandled,
 }: ChatSurfaceProps) {
   const [localDraft, setLocalDraft] = useState(draft);
+  const [goalDraft, setGoalDraft] = useState("");
+  const wasGoalComposerActiveRef = useRef(false);
   const [dismissedPlanDecisionKey, setDismissedPlanDecisionKey] = useState<
     string | undefined
   >();
@@ -5055,6 +5049,14 @@ export function ChatSurface({
   useEffect(() => {
     setLocalDraft(draft);
   }, [draft, draftResetToken]);
+  useEffect(() => {
+    if (isGoalComposerActive && !wasGoalComposerActiveRef.current) {
+      setGoalDraft(sessionGoal?.text ?? "");
+    } else if (!isGoalComposerActive) {
+      setGoalDraft("");
+    }
+    wasGoalComposerActiveRef.current = isGoalComposerActive;
+  }, [isGoalComposerActive, sessionGoal?.text]);
   const handleDraftChange = useCallback(
     (value: string) => {
       setLocalDraft(value);
@@ -5062,22 +5064,38 @@ export function ChatSurface({
     },
     [onDraftChange],
   );
-  const handleSend = useCallback(() => {
+  const handleComposerDraftChange = useCallback(
+    (value: string) => {
+      if (isGoalComposerActive) {
+        setGoalDraft(value);
+        return;
+      }
+      handleDraftChange(value);
+    },
+    [handleDraftChange, isGoalComposerActive],
+  );
+  const cancelGoalComposer = useCallback(() => {
+    setGoalDraft("");
+    onCancelGoalComposer?.();
+  }, [onCancelGoalComposer]);
+  const handleSend = useCallback(async () => {
     if (isGoalComposerActive) {
-      const goal = localDraft.trim();
+      const goal = goalDraft.trim();
       if (!goal) return;
-      onGoalAction?.(sessionGoal?.text ? "edit" : "set", goal);
-      setLocalDraft("");
-      onDraftChange?.("");
-      onCancelGoalComposer?.();
+      const result = await onGoalAction?.(
+        sessionGoal?.text ? "edit" : "set",
+        goal,
+      );
+      if (result === false) return;
+      cancelGoalComposer();
       return;
     }
     onSend(localDraft);
   }, [
+    cancelGoalComposer,
+    goalDraft,
     isGoalComposerActive,
     localDraft,
-    onCancelGoalComposer,
-    onDraftChange,
     onGoalAction,
     onSend,
     sessionGoal?.text,
@@ -5396,10 +5414,10 @@ export function ChatSurface({
             chatMode={chatMode}
             config={config}
             constrainToParent={Boolean(activeRailPanel)}
-            draft={localDraft}
+            draft={isGoalComposerActive ? goalDraft : localDraft}
             branchName={branchName}
             branchCatalog={branchCatalog}
-            onDraftChange={handleDraftChange}
+            onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
             onAttachMediaFiles={onAttachMediaFiles}
             onSend={handleSend}
@@ -5419,7 +5437,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
-            onCancelGoalComposer={onCancelGoalComposer}
+            onCancelGoalComposer={cancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
@@ -5623,9 +5641,9 @@ export function ChatSurface({
             chatMode={chatMode}
             config={config}
             constrainToParent={Boolean(activeRailPanel)}
-            draft={localDraft}
+            draft={isGoalComposerActive ? goalDraft : localDraft}
             branchName={branchName}
-            onDraftChange={handleDraftChange}
+            onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
             onAttachMediaFiles={onAttachMediaFiles}
             onSend={handleSend}
@@ -5643,7 +5661,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
-            onCancelGoalComposer={onCancelGoalComposer}
+            onCancelGoalComposer={cancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
             )}
@@ -6073,7 +6091,7 @@ function ChatSidePanel({
   onGoalAction?: (
     action: "set" | "edit" | "complete" | "reopen" | "clear",
     value?: string,
-  ) => void;
+  ) => boolean | void | Promise<boolean | void>;
   editorRequest?: {
     kind: "goal" | "item";
     token: number;
@@ -6122,10 +6140,14 @@ function ChatSidePanel({
     onPlanAction?.(planEditor.mode, planEditor.itemId, title);
     setPlanEditor(undefined);
   };
-  const submitGoalEditor = () => {
+  const submitGoalEditor = async () => {
     const text = goalEditor?.trim();
     if (goalEditor === undefined || !text) return;
-    onGoalAction?.(sessionGoal?.text ? "edit" : "set", text);
+    const result = await onGoalAction?.(
+      sessionGoal?.text ? "edit" : "set",
+      text,
+    );
+    if (result === false) return;
     setGoalEditor(undefined);
   };
 
@@ -7080,6 +7102,7 @@ function workspaceSettingsList(value: string) {
 function WorkspaceSettingsEditor({
   activeWorkspaceRoot,
   folderSettings = {},
+  languageServers = [],
   onChange,
   userSettings = {},
   workspacePath,
@@ -7091,9 +7114,11 @@ function WorkspaceSettingsEditor({
   onRegisterContribution,
   onToggleContribution,
   onRemoveContribution,
+  view,
 }: {
   activeWorkspaceRoot?: string;
   folderSettings?: Record<string, WorkspaceScopedSettings>;
+  languageServers?: LanguageServerState[];
   onChange?: (
     scope: WorkspaceSettingScope,
     path: string | undefined,
@@ -7112,8 +7137,11 @@ function WorkspaceSettingsEditor({
   onRegisterContribution?: (contribution: IdeContribution) => void;
   onToggleContribution?: (id: string, enabled: boolean) => void;
   onRemoveContribution?: (id: string) => void;
+  view: "editor" | "tools";
 }) {
-  const [scope, setScope] = useState<WorkspaceSettingScope>("workspace");
+  const [scope, setScope] = useState<WorkspaceSettingScope>(
+    workspacePath ? "workspace" : "user",
+  );
   const [folderPath, setFolderPath] = useState(
     activeWorkspaceRoot ?? workspaceRoots[0] ?? "",
   );
@@ -7124,6 +7152,11 @@ function WorkspaceSettingsEditor({
       setFolderPath(activeWorkspaceRoot);
     }
   }, [activeWorkspaceRoot, workspaceRoots]);
+  useEffect(() => {
+    if (!workspacePath && scope !== "user") {
+      setScope("user");
+    }
+  }, [scope, workspacePath]);
   const path =
     scope === "workspace"
       ? workspacePath
@@ -7149,325 +7182,381 @@ function WorkspaceSettingsEditor({
         <span className="gyro-workspace-settings-eyebrow">
           <Settings size={13} /> Workspace configuration
         </span>
-        <h1 id="gyro-workspace-settings-title">Settings</h1>
+        <h1 id="gyro-workspace-settings-title">
+          {view === "editor" ? "Editor & Search" : "Tools & Contributions"}
+        </h1>
         <p>
-          Tune the editor and search behavior at user, workspace, or folder
-          scope. Narrower scopes override broader ones.
+          {view === "editor"
+            ? "Tune editor and search behavior at user, workspace, or folder scope. Narrower scopes override broader ones."
+            : "Manage workspace commands, language services, and trusted local contributions."}
         </p>
       </header>
-      <div
-        aria-label="Settings scope"
-        className="gyro-workspace-settings-scopes"
-      >
-        {(["user", "workspace", "folder"] as WorkspaceSettingScope[]).map(
-          (item) => (
-            <button
-              aria-pressed={scope === item}
-              className={scope === item ? "is-active" : undefined}
-              key={item}
-              onClick={() => setScope(item)}
-              type="button"
-            >
-              {item[0]?.toUpperCase()}
-              {item.slice(1)}
-            </button>
-          ),
-        )}
-      </div>
-      {scope === "folder" && workspaceRoots.length > 0 ? (
-        <label className="gyro-workspace-settings-folder">
-          <span>Folder</span>
-          <select
-            onChange={(event) => setFolderPath(event.target.value)}
-            value={folderPath}
+      {view === "editor" ? (
+        <>
+          <div
+            aria-label="Settings scope"
+            className="gyro-workspace-settings-scopes"
           >
-            {workspaceRoots.map((root) => (
-              <option key={root} value={root}>
-                {root.split("/").filter(Boolean).at(-1) ?? root}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      <div className="gyro-workspace-settings-list">
-        <label>
-          <span>
-            <strong>Files: Exclude</strong>
-            <small>Comma-separated globs hidden from Explorer.</small>
-          </span>
-          <input
-            onChange={(event) =>
-              update({
-                ...settings,
-                filesExclude: workspaceSettingsList(event.target.value),
-              })
-            }
-            placeholder={`${inheritedLabel}: .git/**, node_modules/**`}
-            value={(settings.filesExclude ?? []).join(", ")}
-          />
-        </label>
-        <label>
-          <span>
-            <strong>Search: Exclude</strong>
-            <small>Comma-separated globs skipped by workspace search.</small>
-          </span>
-          <input
-            onChange={(event) =>
-              update({
-                ...settings,
-                searchExclude: workspaceSettingsList(event.target.value),
-              })
-            }
-            placeholder={`${inheritedLabel}: .git/**, dist/**`}
-            value={(settings.searchExclude ?? []).join(", ")}
-          />
-        </label>
-        <label>
-          <span>
-            <strong>Search: Maximum Results</strong>
-            <small>Caps results between 10 and 1,000.</small>
-          </span>
-          <input
-            max={1000}
-            min={10}
-            onChange={(event) => {
-              const value = event.target.valueAsNumber;
-              update({
-                ...settings,
-                searchMaxResults: Number.isFinite(value) ? value : undefined,
-              });
-            }}
-            placeholder={inheritedLabel}
-            type="number"
-            value={settings.searchMaxResults ?? ""}
-          />
-        </label>
-        <label>
-          <span>
-            <strong>Editor: Minimap</strong>
-            <small>Shows a compact document overview beside the editor.</small>
-          </span>
-          <select
-            onChange={(event) =>
-              update({
-                ...settings,
-                editorMinimapEnabled:
-                  event.target.value === "inherit"
-                    ? undefined
-                    : event.target.value === "on",
-              })
-            }
-            value={
-              settings.editorMinimapEnabled === undefined
-                ? "inherit"
-                : settings.editorMinimapEnabled
-                  ? "on"
-                  : "off"
-            }
-          >
-            <option value="inherit">{inheritedLabel}</option>
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
-      </div>
-      {scope !== "user" ? (
-        <button
-          className="gyro-workspace-settings-reset"
-          disabled={Object.keys(settings).length === 0}
-          onClick={() => update({})}
-          type="button"
-        >
-          Reset {scope} overrides
-        </button>
-      ) : null}
-      <section className="gyro-workspace-keybindings">
-        <header>
-          <div>
-            <h2>Keyboard shortcuts</h2>
-            <p>
-              Focus a shortcut and press the key combination to reassign it.
-            </p>
-          </div>
-          <kbd>{isMacPlatform() ? "⌘" : "Ctrl"}</kbd>
-        </header>
-        <div>
-          {workspaceCommandRegistry.map((command) => {
-            const hasOverride = command.id in keybindings;
-            const binding = hasOverride
-              ? keybindings[command.id]
-              : command.keybinding;
-            const collision = binding
-              ? workspaceCommandRegistry.find((candidate) => {
-                  if (candidate.id === command.id) return false;
-                  const candidateBinding =
-                    candidate.id in keybindings
-                      ? keybindings[candidate.id]
-                      : candidate.keybinding;
-                  return (
-                    candidateBinding &&
-                    workspaceKeybindingSignature(candidateBinding) ===
-                      workspaceKeybindingSignature(binding)
-                  );
-                })
-              : undefined;
-            return (
-              <label key={command.id}>
-                <span>
-                  <strong>{command.label}</strong>
-                  <small>
-                    {collision
-                      ? `Conflicts with ${collision.label}`
-                      : command.description}
-                  </small>
-                </span>
-                <input
-                  aria-label={`Keybinding for ${command.label}`}
-                  className={collision ? "is-conflict" : undefined}
-                  onKeyDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (event.key === "Escape") {
-                      event.currentTarget.blur();
-                      return;
-                    }
-                    if (
-                      (event.key === "Backspace" || event.key === "Delete") &&
-                      !event.metaKey &&
-                      !event.ctrlKey &&
-                      !event.altKey
-                    ) {
-                      onKeybindingChange?.(command.id, undefined);
-                      return;
-                    }
-                    if (
-                      ["Meta", "Control", "Alt", "Shift"].includes(event.key)
-                    ) {
-                      return;
-                    }
-                    const mac = isMacPlatform();
-                    onKeybindingChange?.(command.id, {
-                      key: event.key.toLowerCase(),
-                      primary: mac ? event.metaKey : event.ctrlKey,
-                      control: mac ? event.ctrlKey : false,
-                      shift: event.shiftKey,
-                      alt: event.altKey,
-                    });
-                  }}
-                  placeholder="Unassigned"
-                  readOnly
-                  value={binding ? workspaceKeybindingLabel(binding) : ""}
-                />
-                {hasOverride ? (
-                  <button
-                    aria-label={`Reset keybinding for ${command.label}`}
-                    onClick={() => onKeybindingChange?.(command.id, undefined)}
-                    title="Reset to default"
-                    type="button"
-                  >
-                    <RefreshCw size={12} />
-                  </button>
-                ) : null}
-              </label>
-            );
-          })}
-        </div>
-      </section>
-      <section className="gyro-workspace-contributions">
-        <header>
-          <div>
-            <h2>Local contributions</h2>
-            <p>
-              Declarative commands and views loaded from a local manifest.
-              Contributions stay disabled until you enable them.
-            </p>
-          </div>
-          <button
-            onClick={() => contributionInputRef.current?.click()}
-            type="button"
-          >
-            <Plus size={13} /> Install from manifest
-          </button>
-          <input
-            accept=".json,.gyro-extension"
-            aria-label="Install local contribution manifest"
-            hidden
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (!file) return;
-              try {
-                const contribution = parsedLocalIdeContribution(
-                  JSON.parse(await file.text()),
-                  file.name,
-                );
-                onRegisterContribution?.(contribution);
-                setContributionError("");
-              } catch (error) {
-                setContributionError(String(error));
-              }
-            }}
-            ref={contributionInputRef}
-            type="file"
-          />
-        </header>
-        {contributionError ? (
-          <p className="gyro-workspace-contribution-error" role="alert">
-            {contributionError}
-          </p>
-        ) : null}
-        <div className="gyro-workspace-contribution-list">
-          {contributions.map((contribution) => (
-            <article key={contribution.id}>
-              <div className="gyro-workspace-contribution-title">
-                <Settings size={14} />
-                <span>
-                  <strong>{contribution.label}</strong>
-                  <small>
-                    {contribution.publisher} · v{contribution.version} ·{" "}
-                    {contribution.source === "core"
-                      ? "bundled with Gyro"
-                      : (contribution.manifestName ?? "local manifest")}
-                  </small>
-                </span>
-                <em className={`is-${contribution.source}`}>
-                  {contribution.source}
-                </em>
-              </div>
-              <div className="gyro-workspace-contribution-permissions">
-                {contribution.permissions.map((permission) => (
-                  <span key={permission}>
-                    <ShieldCheck size={10} /> {permission}
-                  </span>
-                ))}
-              </div>
-              <div className="gyro-workspace-contribution-actions">
+            {(["user", "workspace", "folder"] as WorkspaceSettingScope[]).map(
+              (item) => (
                 <button
-                  disabled={contribution.source === "core"}
-                  onClick={() =>
-                    onToggleContribution?.(
-                      contribution.id,
-                      !contribution.enabled,
-                    )
+                  aria-pressed={scope === item}
+                  className={scope === item ? "is-active" : undefined}
+                  disabled={item !== "user" && !workspacePath}
+                  key={item}
+                  onClick={() => setScope(item)}
+                  title={
+                    item !== "user" && !workspacePath
+                      ? "Open a project to configure this scope"
+                      : undefined
                   }
                   type="button"
                 >
-                  {contribution.enabled ? "Disable" : "Enable"}
+                  {item[0]?.toUpperCase()}
+                  {item.slice(1)}
                 </button>
-                {contribution.source === "local" ? (
-                  <button
-                    className="is-danger"
-                    onClick={() => onRemoveContribution?.(contribution.id)}
-                    type="button"
-                  >
-                    Remove
-                  </button>
-                ) : null}
+              ),
+            )}
+          </div>
+          {!workspacePath ? (
+            <p className="gyro-workspace-settings-empty">
+              Open a project to configure workspace and folder overrides.
+            </p>
+          ) : null}
+          {scope === "folder" && workspaceRoots.length > 0 ? (
+            <label className="gyro-workspace-settings-folder">
+              <span>Folder</span>
+              <select
+                onChange={(event) => setFolderPath(event.target.value)}
+                value={folderPath}
+              >
+                {workspaceRoots.map((root) => (
+                  <option key={root} value={root}>
+                    {root.split("/").filter(Boolean).at(-1) ?? root}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <div className="gyro-workspace-settings-list">
+            <label>
+              <span>
+                <strong>Files: Exclude</strong>
+                <small>Comma-separated globs hidden from Explorer.</small>
+              </span>
+              <input
+                onChange={(event) =>
+                  update({
+                    ...settings,
+                    filesExclude: workspaceSettingsList(event.target.value),
+                  })
+                }
+                placeholder={`${inheritedLabel}: .git/**, node_modules/**`}
+                value={(settings.filesExclude ?? []).join(", ")}
+              />
+            </label>
+            <label>
+              <span>
+                <strong>Search: Exclude</strong>
+                <small>
+                  Comma-separated globs skipped by workspace search.
+                </small>
+              </span>
+              <input
+                onChange={(event) =>
+                  update({
+                    ...settings,
+                    searchExclude: workspaceSettingsList(event.target.value),
+                  })
+                }
+                placeholder={`${inheritedLabel}: .git/**, dist/**`}
+                value={(settings.searchExclude ?? []).join(", ")}
+              />
+            </label>
+            <label>
+              <span>
+                <strong>Search: Maximum Results</strong>
+                <small>Caps results between 10 and 1,000.</small>
+              </span>
+              <input
+                max={1000}
+                min={10}
+                onChange={(event) => {
+                  const value = event.target.valueAsNumber;
+                  update({
+                    ...settings,
+                    searchMaxResults: Number.isFinite(value)
+                      ? value
+                      : undefined,
+                  });
+                }}
+                placeholder={inheritedLabel}
+                type="number"
+                value={settings.searchMaxResults ?? ""}
+              />
+            </label>
+            <label>
+              <span>
+                <strong>Editor: Minimap</strong>
+                <small>
+                  Shows a compact document overview beside the editor.
+                </small>
+              </span>
+              <select
+                onChange={(event) =>
+                  update({
+                    ...settings,
+                    editorMinimapEnabled:
+                      event.target.value === "inherit"
+                        ? undefined
+                        : event.target.value === "on",
+                  })
+                }
+                value={
+                  settings.editorMinimapEnabled === undefined
+                    ? "inherit"
+                    : settings.editorMinimapEnabled
+                      ? "on"
+                      : "off"
+                }
+              >
+                <option value="inherit">{inheritedLabel}</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+          </div>
+          {scope !== "user" ? (
+            <button
+              className="gyro-workspace-settings-reset"
+              disabled={Object.keys(settings).length === 0}
+              onClick={() => update({})}
+              type="button"
+            >
+              Reset {scope} overrides
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <section className="gyro-workspace-services">
+            <header>
+              <h2>Language services</h2>
+              <p>
+                Detected locally for the active project. Gyro does not
+                auto-install external tools.
+              </p>
+            </header>
+            <div>
+              {languageServers.length > 0 ? (
+                languageServers.map((server) => (
+                  <article key={server.id}>
+                    <span>
+                      <strong>{server.languageId}</strong>
+                      <small>{server.message ?? server.command}</small>
+                    </span>
+                    <em data-status={server.status}>{server.status}</em>
+                  </article>
+                ))
+              ) : (
+                <p>No language services detected for the current project.</p>
+              )}
+            </div>
+          </section>
+          <section className="gyro-workspace-keybindings">
+            <header>
+              <div>
+                <h2>Keyboard shortcuts</h2>
+                <p>
+                  Focus a shortcut and press the key combination to reassign it.
+                </p>
               </div>
-            </article>
-          ))}
-        </div>
-      </section>
+              <kbd>{isMacPlatform() ? "⌘" : "Ctrl"}</kbd>
+            </header>
+            <div>
+              {workspaceCommandRegistry.map((command) => {
+                const hasOverride = command.id in keybindings;
+                const binding = hasOverride
+                  ? keybindings[command.id]
+                  : command.keybinding;
+                const collision = binding
+                  ? workspaceCommandRegistry.find((candidate) => {
+                      if (candidate.id === command.id) return false;
+                      const candidateBinding =
+                        candidate.id in keybindings
+                          ? keybindings[candidate.id]
+                          : candidate.keybinding;
+                      return (
+                        candidateBinding &&
+                        workspaceKeybindingSignature(candidateBinding) ===
+                          workspaceKeybindingSignature(binding)
+                      );
+                    })
+                  : undefined;
+                return (
+                  <label key={command.id}>
+                    <span>
+                      <strong>{command.label}</strong>
+                      <small>
+                        {collision
+                          ? `Conflicts with ${collision.label}`
+                          : command.description}
+                      </small>
+                    </span>
+                    <input
+                      aria-label={`Keybinding for ${command.label}`}
+                      className={collision ? "is-conflict" : undefined}
+                      onKeyDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (event.key === "Escape") {
+                          event.currentTarget.blur();
+                          return;
+                        }
+                        if (
+                          (event.key === "Backspace" ||
+                            event.key === "Delete") &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          onKeybindingChange?.(command.id, undefined);
+                          return;
+                        }
+                        if (
+                          ["Meta", "Control", "Alt", "Shift"].includes(
+                            event.key,
+                          )
+                        ) {
+                          return;
+                        }
+                        const mac = isMacPlatform();
+                        onKeybindingChange?.(command.id, {
+                          key: event.key.toLowerCase(),
+                          primary: mac ? event.metaKey : event.ctrlKey,
+                          control: mac ? event.ctrlKey : false,
+                          shift: event.shiftKey,
+                          alt: event.altKey,
+                        });
+                      }}
+                      placeholder="Unassigned"
+                      readOnly
+                      value={binding ? workspaceKeybindingLabel(binding) : ""}
+                    />
+                    {hasOverride ? (
+                      <button
+                        aria-label={`Reset keybinding for ${command.label}`}
+                        onClick={() =>
+                          onKeybindingChange?.(command.id, undefined)
+                        }
+                        title="Reset to default"
+                        type="button"
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                    ) : null}
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+          <section className="gyro-workspace-contributions">
+            <header>
+              <div>
+                <h2>Local contributions</h2>
+                <p>
+                  Declarative commands and views loaded from a local manifest.
+                  Contributions stay disabled until you enable them.
+                </p>
+              </div>
+              <button
+                onClick={() => contributionInputRef.current?.click()}
+                type="button"
+              >
+                <Plus size={13} /> Install from manifest
+              </button>
+              <input
+                accept=".json,.gyro-extension"
+                aria-label="Install local contribution manifest"
+                hidden
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  try {
+                    const contribution = parsedLocalIdeContribution(
+                      JSON.parse(await file.text()),
+                      file.name,
+                    );
+                    onRegisterContribution?.(contribution);
+                    setContributionError("");
+                  } catch (error) {
+                    setContributionError(String(error));
+                  }
+                }}
+                ref={contributionInputRef}
+                type="file"
+              />
+            </header>
+            {contributionError ? (
+              <p className="gyro-workspace-contribution-error" role="alert">
+                {contributionError}
+              </p>
+            ) : null}
+            <div className="gyro-workspace-contribution-list">
+              {contributions.map((contribution) => (
+                <article key={contribution.id}>
+                  <div className="gyro-workspace-contribution-title">
+                    <Settings size={14} />
+                    <span>
+                      <strong>{contribution.label}</strong>
+                      <small>
+                        {contribution.publisher} · v{contribution.version} ·{" "}
+                        {contribution.source === "core"
+                          ? "bundled with Gyro"
+                          : (contribution.manifestName ?? "local manifest")}
+                      </small>
+                    </span>
+                    <em className={`is-${contribution.source}`}>
+                      {contribution.source}
+                    </em>
+                  </div>
+                  <div className="gyro-workspace-contribution-permissions">
+                    {contribution.permissions.map((permission) => (
+                      <span key={permission}>
+                        <ShieldCheck size={10} /> {permission}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="gyro-workspace-contribution-actions">
+                    <button
+                      disabled={contribution.source === "core"}
+                      onClick={() =>
+                        onToggleContribution?.(
+                          contribution.id,
+                          !contribution.enabled,
+                        )
+                      }
+                      type="button"
+                    >
+                      {contribution.enabled ? "Disable" : "Enable"}
+                    </button>
+                    {contribution.source === "local" ? (
+                      <button
+                        className="is-danger"
+                        onClick={() => onRemoveContribution?.(contribution.id)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
     </section>
   );
 }
@@ -7599,26 +7688,8 @@ type IdeSurfaceProps = {
   files: WorkspaceFile[];
   ide?: IdeState;
   workspacePath?: string;
-  workspaceRoots?: string[];
-  activeWorkspaceRoot?: string;
   workspaceTrusted?: boolean;
   effectiveMinimapEnabled?: boolean;
-  workspaceUserSettings?: WorkspaceScopedSettings;
-  workspaceSettingsByWorkspace?: Record<string, WorkspaceScopedSettings>;
-  workspaceSettingsByFolder?: Record<string, WorkspaceScopedSettings>;
-  workspaceKeybindings?: Record<string, WorkspaceKeybinding | null>;
-  onWorkspaceSettingsChange?: (
-    scope: WorkspaceSettingScope,
-    path: string | undefined,
-    settings: WorkspaceScopedSettings,
-  ) => void;
-  onWorkspaceKeybindingChange?: (
-    commandId: string,
-    keybinding?: WorkspaceKeybinding | null,
-  ) => void;
-  onRegisterWorkspaceContribution?: (contribution: IdeContribution) => void;
-  onToggleWorkspaceContribution?: (id: string, enabled: boolean) => void;
-  onRemoveWorkspaceContribution?: (id: string) => void;
   selectedPath?: string;
   fileContent?: WorkspaceFileContent;
   fileError?: string;
@@ -7702,19 +7773,8 @@ export function IdeSurface({
   files,
   ide,
   workspacePath,
-  workspaceRoots = workspacePath ? [workspacePath] : [],
-  activeWorkspaceRoot = workspacePath,
   workspaceTrusted = true,
   effectiveMinimapEnabled,
-  workspaceUserSettings,
-  workspaceSettingsByWorkspace,
-  workspaceSettingsByFolder,
-  workspaceKeybindings,
-  onWorkspaceSettingsChange,
-  onWorkspaceKeybindingChange,
-  onRegisterWorkspaceContribution,
-  onToggleWorkspaceContribution,
-  onRemoveWorkspaceContribution,
   selectedPath,
   fileContent,
   fileError = "",
@@ -7904,23 +7964,7 @@ export function IdeSurface({
             </button>
           </aside>
         ) : null}
-        {ide?.activeView === "settings" ? (
-          <WorkspaceSettingsEditor
-            activeWorkspaceRoot={activeWorkspaceRoot}
-            contributions={ide?.contributions}
-            folderSettings={workspaceSettingsByFolder}
-            keybindings={workspaceKeybindings}
-            onChange={onWorkspaceSettingsChange}
-            onKeybindingChange={onWorkspaceKeybindingChange}
-            onRegisterContribution={onRegisterWorkspaceContribution}
-            onRemoveContribution={onRemoveWorkspaceContribution}
-            onToggleContribution={onToggleWorkspaceContribution}
-            userSettings={workspaceUserSettings}
-            workspacePath={workspacePath}
-            workspaceRoots={workspaceRoots}
-            workspaceSettings={workspaceSettingsByWorkspace}
-          />
-        ) : (
+        {ide?.activeView !== "settings" ? (
           <div
             className={`gyro-editor-groups is-split-${ide?.layout.splitDirection ?? "right"}`}
             data-group-count={editorGroups.length}
@@ -7995,7 +8039,7 @@ export function IdeSurface({
               );
             })}
           </div>
-        )}
+        ) : null}
         {!showEmbeddedPanel && ide?.layout.rightAssistantOpen ? (
           <aside
             className="gyro-ide-assistant"
@@ -12530,6 +12574,27 @@ type SettingsSurfaceProps = {
   onUsageVisualizationChange?: (visualization: "bars" | "wheels") => void;
   onRefreshProviderUsage?: (providerId: ProviderId) => void;
   updateState?: UpdateState;
+  activeWorkspaceRoot?: string;
+  workspacePath?: string;
+  workspaceRoots?: string[];
+  workspaceUserSettings?: WorkspaceScopedSettings;
+  workspaceSettingsByWorkspace?: Record<string, WorkspaceScopedSettings>;
+  workspaceSettingsByFolder?: Record<string, WorkspaceScopedSettings>;
+  workspaceKeybindings?: Record<string, WorkspaceKeybinding | null>;
+  workspaceLanguageServers?: LanguageServerState[];
+  workspaceContributions?: IdeContribution[];
+  onWorkspaceSettingsChange?: (
+    scope: WorkspaceSettingScope,
+    path: string | undefined,
+    settings: WorkspaceScopedSettings,
+  ) => void;
+  onWorkspaceKeybindingChange?: (
+    commandId: string,
+    keybinding?: WorkspaceKeybinding | null,
+  ) => void;
+  onRegisterWorkspaceContribution?: (contribution: IdeContribution) => void;
+  onToggleWorkspaceContribution?: (id: string, enabled: boolean) => void;
+  onRemoveWorkspaceContribution?: (id: string) => void;
 };
 
 function CliLaunchPresetEditor({
@@ -12698,6 +12763,20 @@ export function SettingsSurface({
   onUsageVisualizationChange,
   onRefreshProviderUsage,
   updateState,
+  activeWorkspaceRoot,
+  workspacePath,
+  workspaceRoots = workspacePath ? [workspacePath] : [],
+  workspaceUserSettings,
+  workspaceSettingsByWorkspace,
+  workspaceSettingsByFolder,
+  workspaceKeybindings,
+  workspaceLanguageServers,
+  workspaceContributions,
+  onWorkspaceSettingsChange,
+  onWorkspaceKeybindingChange,
+  onRegisterWorkspaceContribution,
+  onToggleWorkspaceContribution,
+  onRemoveWorkspaceContribution,
 }: SettingsSurfaceProps) {
   const providerConfigs = providersForConfig(config);
   const enabledProviders = providerConfigs.filter(
@@ -12831,6 +12910,39 @@ export function SettingsSurface({
               />
             </SettingsGroup>
           </SettingsSection>
+        ) : null}
+
+        {activeSection === "editor-workspace" ? (
+          <WorkspaceSettingsEditor
+            activeWorkspaceRoot={activeWorkspaceRoot}
+            folderSettings={workspaceSettingsByFolder}
+            keybindings={workspaceKeybindings}
+            onChange={onWorkspaceSettingsChange}
+            userSettings={workspaceUserSettings}
+            view="editor"
+            workspacePath={workspacePath}
+            workspaceRoots={workspaceRoots}
+            workspaceSettings={workspaceSettingsByWorkspace}
+          />
+        ) : null}
+
+        {activeSection === "tools-contributions" ? (
+          <WorkspaceSettingsEditor
+            activeWorkspaceRoot={activeWorkspaceRoot}
+            contributions={workspaceContributions}
+            folderSettings={workspaceSettingsByFolder}
+            keybindings={workspaceKeybindings}
+            languageServers={workspaceLanguageServers}
+            onKeybindingChange={onWorkspaceKeybindingChange}
+            onRegisterContribution={onRegisterWorkspaceContribution}
+            onRemoveContribution={onRemoveWorkspaceContribution}
+            onToggleContribution={onToggleWorkspaceContribution}
+            userSettings={workspaceUserSettings}
+            view="tools"
+            workspacePath={workspacePath}
+            workspaceRoots={workspaceRoots}
+            workspaceSettings={workspaceSettingsByWorkspace}
+          />
         ) : null}
 
         {activeSection === "usage-limits" ? (
