@@ -8183,16 +8183,16 @@ export function App() {
   );
 
   const changeGoal = useCallback(
-    (
+    async (
       action: "set" | "edit" | "complete" | "reopen" | "clear",
       value?: string,
     ) => {
-      if (action !== "set" && !activeSessionGoal) return;
+      if (action !== "set" && !activeSessionGoal) return false;
       const text =
         action === "set" || action === "edit"
           ? value?.trim()
           : activeSessionGoal?.text;
-      if ((action === "set" || action === "edit") && !text) return;
+      if ((action === "set" || action === "edit") && !text) return false;
       const status =
         action === "complete"
           ? "complete"
@@ -8212,7 +8212,7 @@ export function App() {
                 status,
               },
         );
-        return;
+        return true;
       }
       const payload =
         action === "clear"
@@ -8232,18 +8232,17 @@ export function App() {
               : action === "set"
                 ? `Goal set: ${text}`
                 : `Goal updated: ${text}`;
-      void (async () => {
-        if (
-          (action === "set" || action === "edit") &&
-          activeChatMode === "plan"
-        ) {
-          const modeChanged = await changeChatMode("normal");
-          if (!modeChanged) {
-            return;
-          }
+      if (
+        (action === "set" || action === "edit") &&
+        activeChatMode === "plan"
+      ) {
+        const modeChanged = await changeChatMode("normal");
+        if (!modeChanged) {
+          return false;
         }
-        await appendGoalEvent(payload, message);
-      })();
+      }
+      await appendGoalEvent(payload, message);
+      return true;
     },
     [
       activeChatMode,
@@ -10919,7 +10918,7 @@ export function App() {
         onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
         onGoalAction={(action, value) => {
           focusChatPane(pane);
-          changeGoal(action, value);
+          return changeGoal(action, value);
         }}
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
         onLoadChangeDiff={loadInlineChangeDiff}
@@ -11074,6 +11073,9 @@ export function App() {
       }}
       onSelectWorkspaceLayout={selectWorkspaceLayout}
       onSettingsBack={returnFromSettings}
+      settingsBackLabel={
+        activeWorkspaceLayout === "code" ? "Workspace" : "Sessions"
+      }
       onSettingsSectionChange={(section: SettingsSectionId) =>
         dispatchWorkbench({ type: "set-settings-section", section })
       }
@@ -11293,55 +11295,10 @@ export function App() {
                 fileLoadState={selectedFileLoadState}
                 files={visibleWorkspaceFiles}
                 ide={workbench.ide}
-                activeWorkspaceRoot={workspaceActionRoot}
                 effectiveMinimapEnabled={
                   effectiveWorkspaceSettings.editorMinimapEnabled
                 }
                 workspacePath={activeWorkspaceRoot}
-                workspaceRoots={workspaceRoots}
-                workspaceUserSettings={
-                  workbench.preferences.workspaceUserSettings
-                }
-                workspaceSettingsByWorkspace={
-                  workbench.preferences.workspaceSettingsByWorkspace
-                }
-                workspaceSettingsByFolder={
-                  workbench.preferences.workspaceSettingsByFolder
-                }
-                workspaceKeybindings={
-                  workbench.preferences.workspaceKeybindings
-                }
-                onWorkspaceSettingsChange={(scope, path, settings) =>
-                  dispatchWorkbench({
-                    type: "set-workspace-settings",
-                    scope,
-                    path,
-                    settings,
-                  })
-                }
-                onWorkspaceKeybindingChange={(commandId, keybinding) =>
-                  dispatchWorkbench({
-                    type: "set-workspace-keybinding",
-                    commandId,
-                    keybinding,
-                  })
-                }
-                onRegisterWorkspaceContribution={(contribution) =>
-                  dispatchWorkbench({
-                    type: "ide-register-contribution",
-                    contribution,
-                  })
-                }
-                onToggleWorkspaceContribution={(id, enabled) =>
-                  dispatchWorkbench({
-                    type: "ide-set-contribution-enabled",
-                    id,
-                    enabled,
-                  })
-                }
-                onRemoveWorkspaceContribution={(id) =>
-                  dispatchWorkbench({ type: "ide-remove-contribution", id })
-                }
                 workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
                 onTrustWorkspace={() => {
@@ -11543,6 +11500,7 @@ export function App() {
       {activeDestination === "settings" ? (
         <SettingsSurface
           activeSection={workbench.preferences.lastSettingsSection}
+          activeWorkspaceRoot={workspaceActionRoot}
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
@@ -11606,6 +11564,49 @@ export function App() {
           }
           themeMode={workbench.preferences.theme}
           updateState={updater.state}
+          workspaceContributions={workbench.ide.contributions}
+          workspaceKeybindings={workbench.preferences.workspaceKeybindings}
+          workspaceLanguageServers={workbench.ide.languageServers}
+          workspacePath={activeWorkspaceRoot}
+          workspaceRoots={workspaceRoots}
+          workspaceSettingsByFolder={
+            workbench.preferences.workspaceSettingsByFolder
+          }
+          workspaceSettingsByWorkspace={
+            workbench.preferences.workspaceSettingsByWorkspace
+          }
+          workspaceUserSettings={workbench.preferences.workspaceUserSettings}
+          onWorkspaceSettingsChange={(scope, path, settings) =>
+            dispatchWorkbench({
+              type: "set-workspace-settings",
+              scope,
+              path,
+              settings,
+            })
+          }
+          onWorkspaceKeybindingChange={(commandId, keybinding) =>
+            dispatchWorkbench({
+              type: "set-workspace-keybinding",
+              commandId,
+              keybinding,
+            })
+          }
+          onRegisterWorkspaceContribution={(contribution) =>
+            dispatchWorkbench({
+              type: "ide-register-contribution",
+              contribution,
+            })
+          }
+          onToggleWorkspaceContribution={(id, enabled) =>
+            dispatchWorkbench({
+              type: "ide-set-contribution-enabled",
+              id,
+              enabled,
+            })
+          }
+          onRemoveWorkspaceContribution={(id) =>
+            dispatchWorkbench({ type: "ide-remove-contribution", id })
+          }
         />
       ) : null}
       {activeDestination === "tools" ? (
