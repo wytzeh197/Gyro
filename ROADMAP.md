@@ -1397,6 +1397,10 @@ manual configuration.
 
 ### Workstream 1: Public entry
 
+> **Launch messaging sequence:** Do not lead public launch copy with “unify
+> chat, CLI, and IDE” until that experience is seamless end to end in the app.
+> Until then, keep public messaging scoped to what is actually shipped.
+
 Deliver:
 
 - A Gyro-owned public page explaining local-first execution, existing provider

@@ -19,4 +19,13 @@ Gyro uses DCO signoff, not a CLA.
 
 ## Commercial Direction
 
-The v1 core remains free and open source. Future paid offerings may include hosted model credits, team sync, policy controls, and enterprise support, but they must not remove local-first functionality from the open core.
+The v1 core remains free and open source. Chat, CLI, and IDE unification in one
+local session will never be paywalled. Any future paid offering must sit around
+that core rather than inside it.
+
+The current priority order is cross-device session continuity, a unified
+provider usage and cost dashboard, team sync after demonstrated team usage, and
+later organization policy controls and audit exports. Hosted model credits are
+a possible low-priority convenience, while priority support and onboarding may
+be a small later add-on. See [Vision](docs/vision.md#open-core-and-what-stays-free)
+for the product boundary and rationale.

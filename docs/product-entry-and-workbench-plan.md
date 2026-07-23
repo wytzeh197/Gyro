@@ -3,10 +3,10 @@
 ## Purpose
 
 This plan defines how Gyro should move a developer from first discovery to a
-trusted local coding run. It is informed by a review of a polished developer
-tool journey, but it is not a replication brief. Gyro must retain its own
-positioning, information architecture, interaction model, visual language, and
-local-first approval semantics.
+unified local coding run across chat, CLI, and Workspace. It is informed by a
+review of a polished developer tool journey, but it is not a replication brief.
+Gyro must retain its own positioning, information architecture, interaction
+model, visual language, and local-first approval semantics.
 
 The exception is the download and macOS installation phase. That phase should
 follow the established direct-download convention closely because platform
@@ -27,9 +27,10 @@ are user expectations rather than product differentiation.
 
 ## Product Principles
 
-- **Gyro first:** preserve the local-first agent workbench identity. Do not
-  reproduce another product's page composition, navigation, copy, iconography,
-  spacing system, or model-picker structure.
+- **Gyro first:** preserve the provider-agnostic workspace that unifies chat,
+  CLI, and IDE work in one local session. Do not reproduce another product's
+  page composition, navigation, copy, iconography, spacing system, or
+  model-picker structure.
 - **Trust before speed:** the fast path may be short, but workspace, provider,
   permissions, branch, worktree, and mutation state must remain visible.
 - **Honest availability:** never present an unavailable provider or experimental
@@ -52,9 +53,9 @@ under 20 seconds.
 
 - A compact header with product identity, documentation, changelog, GitHub, and
   a persistent download action.
-- A concise statement centered on trusted local coding runs, followed by one
-  sentence explaining local projects, existing provider subscriptions, and
-  approval before mutation.
+- A concise statement centered on bringing chat, CLI, and IDE together,
+  followed by one sentence explaining how local projects, existing provider
+  subscriptions, visible state, and approval before mutation make that safe.
 - Two primary actions: **Download Gyro** and **View on GitHub**.
 - A real product demonstration showing one complete loop: open a repository,
   start a run, inspect a command or edit, approve it, and review the result.
@@ -67,8 +68,9 @@ under 20 seconds.
 
 - Do not reuse the reference headline, supporting sentence, provider-logo row,
   hero proportions, screenshot framing, navigation order, or social-proof copy.
-- Lead with Gyro's differentiator: controlled local execution and continuity
-  between the desktop app and CLI.
+- Lead with Gyro's differentiator: provider-agnostic continuity across chat,
+  CLI, and IDE. Use controlled local execution and approval semantics as the
+  reason that unification is trustworthy.
 - Demonstrate agent state and approval mechanics rather than presenting a static
   dark workbench as the main proof.
 

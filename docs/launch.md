@@ -82,9 +82,18 @@ Launch order:
 
 Primary line:
 
-> Gyro is an open-source coding agent workspace that runs as a macOS app and CLI, with a built-in Workspace surface.
+> Gyro puts chat, CLI, and IDE in one local workspace, across the coding agents you already use.
 
-Avoid claiming Gyro replaces VS Code in v1. v1 is an agent workspace with chat, terminal, editor surface, diffs, settings, and CLI attach.
+Lead with the frustration of moving one coding task between a chat window, a
+terminal, and an editor. Follow with the reason Gyro can safely unify them:
+local-first sessions, visible run state, approval before mutation, and real
+diffs.
+
+Use this line publicly only when the chat-to-CLI-to-Workspace experience is
+seamless end to end. Until then, describe only the surfaces and continuity that
+are actually shipped. Avoid claiming Gyro replaces VS Code in v1; its integrated
+IDE surface is part of the agent workflow, not yet a replacement for every
+mature editor capability.
 
 ## Metrics
 
