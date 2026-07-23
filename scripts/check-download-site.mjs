@@ -159,10 +159,10 @@ check(
 );
 
 containsAll(pages.home, "Homepage", [
-  "Keep the whole coding run together.",
-  "Chat, terminals, files, diffs, and approvals in one local workspace.",
+  "Chat, CLI, and IDE. One place.",
+  "Stop switching tools for one coding task.",
   "Open source · No account · No analytics",
-  "One run. Three surfaces.",
+  "One task. Three connected surfaces.",
   "Direct the work.",
   "Run it locally.",
   "Review every change.",
@@ -178,7 +178,7 @@ containsAll(pages.home, "Homepage", [
   "assets/screenshots/workspace-1600.webp",
   "assets/social-preview.png",
   "Download Gyro for macOS.",
-  "The native workspace for complete coding runs.",
+  "The local workspace that keeps chat, CLI, and code together.",
   "DMG · Apple Silicon &amp; Intel",
   "Install guide",
   "data-download-surface",

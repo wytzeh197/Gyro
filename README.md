@@ -1,10 +1,10 @@
 # Gyro
 
-**A local-first agent workbench for coding with control.**
+**Chat, CLI, and IDE in one place.**
 
-Gyro brings agent chat, terminals, files, diffs, approvals, tasks, and provider
-state into one macOS workspace. Start in the app or the `gyro` CLI, then resume
-the same local session from either surface.
+Gyro brings agent chat, subscription CLIs, files, diffs, terminals, tasks, and
+provider state into one macOS workspace. Start in Chat, move into the CLI or
+Workspace, and keep the same local session and context with you.
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml/badge.svg)](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml)
@@ -28,14 +28,20 @@ the same local session from either surface.
 
 ## Why Gyro
 
-- **Two surfaces, one execution engine.** Sessions unifies Chat and subscription
-  CLI work; Workspace keeps files, diffs, Git, tests, and diagnostics in view.
+Coding with agents is needlessly fragmented: the conversation lives in one
+window, commands in another, and the code and diff somewhere else. Gyro keeps
+that whole loop together. Its local-first engine, visible state, and approval
+policy are what make it safe to trust one place with the work.
+
+- **Chat, CLI, and IDE together.** Sessions unifies Chat and subscription CLI
+  work; Workspace keeps files, diffs, Git, tests, and diagnostics in the same
+  run context.
+- **Bring your own agent.** Codex CLI and Claude Code are the first executable
+  adapters. Other providers remain clearly marked until their adapters exist.
 - **Local by default.** Session history, configuration, and worktrees stay on
   your Mac. Gyro does not send telemetry by default.
 - **Visible control.** Commands and file changes follow an explicit approval
   policy, with diffs and run state kept in view.
-- **Bring your own agent.** Codex CLI and Claude Code are the first executable
-  adapters. Other providers remain clearly marked until their adapters exist.
 - **Safe parallel work.** Create isolated Git worktrees for risky or concurrent
   runs without changing the default local workflow.
 
