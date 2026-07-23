@@ -2193,6 +2193,42 @@ expect(
   "IDE hydration should honor restore-on-launch being disabled.",
 );
 
+const legacySettingsIde = sanitizeStoredIdeState(
+  {
+    activeView: "settings",
+    layout: ideHydrationBase.layout,
+  },
+  ideHydrationBase,
+);
+expect(
+  legacySettingsIde.activeView === "explorer",
+  "Legacy persisted Workspace settings views should normalize to Explorer.",
+);
+
+let unifiedSettingsState = createInitialWorkbenchState();
+unifiedSettingsState = workbenchReducer(unifiedSettingsState, {
+  type: "ide-select-view",
+  view: "search",
+});
+unifiedSettingsState = workbenchReducer(unifiedSettingsState, {
+  type: "set-settings-section",
+  section: "editor-workspace",
+});
+unifiedSettingsState = workbenchReducer(unifiedSettingsState, {
+  type: "select-destination",
+  destination: "settings",
+});
+unifiedSettingsState = workbenchReducer(unifiedSettingsState, {
+  type: "select-destination",
+  destination: "workspace",
+});
+expect(
+  unifiedSettingsState.activeWorkspaceLayout === "code" &&
+    unifiedSettingsState.ide.activeView === "search" &&
+    unifiedSettingsState.preferences.lastSettingsSection === "editor-workspace",
+  "Shared Settings navigation should preserve the originating Workspace layout and activity view.",
+);
+
 let backgroundScmState = createInitialWorkbenchState();
 backgroundScmState = workbenchReducer(backgroundScmState, {
   type: "ide-select-view",
@@ -3750,17 +3786,19 @@ expect(
       rule.includes("box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft)") &&
       rule.includes("padding: 8px"),
   ) &&
-    cssRules(styleSource, ".gyro-sidebar-cli-location select").some((rule) =>
-      rule.includes("min-height: 26px"),
-    ) &&
     surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
-    surfaceSource.includes("gyro-sidebar-session-group is-cli"),
-  "The Create menu should keep a compact, grouped surface and inline project picker.",
+    surfaceSource.includes("gyro-sidebar-session-group is-cli") &&
+    !surfaceSource.includes("gyro-sidebar-cli-location") &&
+    !surfaceSource.includes("CLI session location"),
+  "The Create menu should keep a compact, grouped surface without a project picker.",
 );
 expect(
   chatSidebarSource.includes("New Chat") &&
-    chatSidebarSource.includes("<span>CLI</span>") &&
-    chatSidebarSource.includes("CLI session location") &&
+    chatSidebarSource.includes(
+      '<span className="gyro-sidebar-session-group-label">',
+    ) &&
+    chatSidebarSource.includes("CLI") &&
+    !chatSidebarSource.includes("CLI session location") &&
     !chatSidebarSource.includes("Start in the focused project") &&
     !chatSidebarSource.includes(": profile.command") &&
     chatSidebarSource.includes("commandProfiles.map") &&
@@ -3808,7 +3846,9 @@ expect(
     appSource.includes('type: "select-sessions"') &&
     surfaceSource.includes("onCreateCliSession(") &&
     surfaceSource.includes("profile.id,") &&
-    surfaceSource.includes("newCliWorkspacePath,") &&
+    surfaceSource.includes(
+      'const newCliWorkspacePath = cliProjects[0]?.path ?? "";',
+    ) &&
     surfaceSource.includes("!newCliWorkspacePath") &&
     surfaceSource.includes("pane.projectPath ?? pane.workingDirectory") &&
     surfaceSource.includes("selectedTerminalPaneId"),
@@ -3880,7 +3920,7 @@ expect(
       ".gyro-main:has(> .gyro-settings-topbar) > .gyro-settings-surface",
     ) &&
     surfaceSource.includes("gyro-settings-sidebar-group") &&
-    surfaceSource.includes('aria-label="Back from settings"') &&
+    surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
     surfaceSource.includes("gyro-settings-back-button") &&
     surfaceSource.includes("<h2>{label}</h2>") &&
     surfaceSource.includes('aria-pressed={themeMode === "dark"}') &&
@@ -3888,6 +3928,8 @@ expect(
     surfaceSource.includes('activeDestination !== "settings"') &&
     surfaceSource.includes("General") &&
     surfaceSource.includes("Appearance") &&
+    surfaceSource.includes("Editor & Search") &&
+    surfaceSource.includes("Tools & Contributions") &&
     surfaceSource.includes("Usage Limits") &&
     surfaceSource.includes("Providers") &&
     surfaceSource.includes("CLI Profiles") &&
@@ -3897,6 +3939,8 @@ expect(
     surfaceSource.includes("Advanced") &&
     surfaceSource.includes("Help") &&
     surfaceSource.includes('activeSection === "general"') &&
+    surfaceSource.includes('activeSection === "editor-workspace"') &&
+    surfaceSource.includes('activeSection === "tools-contributions"') &&
     surfaceSource.includes('activeSection === "providers"') &&
     !surfaceSource.includes("isAccountMenuOpen") &&
     !surfaceSource.includes("gyro-account-menu") &&
@@ -3915,9 +3959,27 @@ const settingsSidebarSource = surfaceSource.slice(
 expect(
   settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
     settingsSidebarSource.includes("onToggleSidebar") &&
-    settingsSidebarSource.includes('aria-label="Back from settings"') &&
-    settingsSidebarSource.includes('aria-label="Forward"'),
-  "Settings should use the same fixed hide, back, and forward controls as every other sidebar surface.",
+    settingsSidebarSource.includes("aria-label={`Back to ${backLabel}`}") &&
+    settingsSidebarSource.includes("<span>{backLabel}</span>") &&
+    !settingsSidebarSource.includes('aria-label="Forward"'),
+  "Settings should use a contextual back control that names the originating surface.",
+);
+expect(
+  surfaceSource.includes('onOpenSettingsSection("editor-workspace")') &&
+    surfaceSource.includes('view.id === "settings"') &&
+    surfaceSource.includes("<WorkspaceSettingsEditor") &&
+    surfaceSource.includes('view="editor"') &&
+    surfaceSource.includes('view="tools"') &&
+    !surfaceSource.includes('activeIdeView === "settings"') &&
+    !surfaceSource.includes('ide?.activeView === "settings"') &&
+    appSource.includes(
+      'activeWorkspaceLayout === "code" ? "Workspace" : "Sessions"',
+    ) &&
+    appSource.includes("onSettingsBack={returnFromSettings}") &&
+    reducerSource.includes(
+      'action.view === "settings" ? "explorer" : action.view',
+    ),
+  "Workspace Settings should open the shared Settings destination and preserve the underlying Workspace view for contextual back navigation.",
 );
 expect(
   !appSource.includes("WorkspaceToolPanelPeek") &&
@@ -3939,6 +4001,10 @@ expect(
     styleSource.includes(".gyro-terminal-toolbar {\n  display: none;") &&
     !styleSource.includes("button:not(.gyro-pane-add):not(.is-active)"),
   "Chat bottom panel should be a terminal-only tray opened from the explicit top control, with no reveal strip.",
+);
+const chatSurfaceSource = surfaceSource.slice(
+  surfaceSource.indexOf("export function ChatSurface"),
+  surfaceSource.indexOf("function PlanDecisionCard"),
 );
 expect(
   typeSource.includes('| "plan-updated"') &&
@@ -3979,9 +4045,21 @@ expect(
     appSource.includes('case "add-goal"') &&
     appSource.includes("setIsGoalComposerActive(true)") &&
     surfaceSource.includes("isGoalComposerActive ?") &&
-    surfaceSource.includes(
-      'onGoalAction?.(sessionGoal?.text ? "edit" : "set"',
+    chatSurfaceSource.includes(
+      'const [goalDraft, setGoalDraft] = useState("")',
     ) &&
+    chatSurfaceSource.includes(
+      "draft={isGoalComposerActive ? goalDraft : localDraft}",
+    ) &&
+    chatSurfaceSource.includes("handleComposerDraftChange") &&
+    chatSurfaceSource.includes("cancelGoalComposer") &&
+    chatSurfaceSource.includes("const result = await onGoalAction?.(") &&
+    chatSurfaceSource.includes("if (result === false) return") &&
+    !chatSurfaceSource.includes('onDraftChange?.("");') &&
+    surfaceSource.includes('sessionGoal?.text ? "edit" : "set"') &&
+    appSource.includes("const changeGoal = useCallback(\n    async (") &&
+    appSource.includes("return false;") &&
+    appSource.includes("return true;") &&
     appSource.includes('kind: "item",') &&
     appSource.includes("planEditorRequestTokenRef.current += 1") &&
     !appSource.includes('window.prompt("Session goal"') &&
@@ -3989,6 +4067,7 @@ expect(
     appSource.includes("createGoalSessionEvent") &&
     appSource.includes('kind: "goal-updated"') &&
     styleSource.includes(".gyro-plan-inline-editor") &&
+    styleSource.includes('.gyro-composer-chip.is-goal[aria-pressed="true"]') &&
     styleSource.includes(".gyro-plan-artifact-card") &&
     styleSource.includes(".gyro-plan-harness") &&
     styleSource.includes(".gyro-plan-progress") &&

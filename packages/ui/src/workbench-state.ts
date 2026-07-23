@@ -511,9 +511,12 @@ export function sanitizeStoredIdeState(
       base.layout.rightAssistantOpen,
     ),
   };
-  const activeView = isIdeViewId(ide.activeView)
-    ? ide.activeView
-    : base.activeView;
+  const activeView =
+    isIdeViewId(ide.activeView) && ide.activeView !== "settings"
+      ? ide.activeView
+      : base.activeView === "settings"
+        ? "explorer"
+        : base.activeView;
 
   if (!restoreOnLaunch) {
     return {
@@ -2179,7 +2182,10 @@ export function workbenchReducer(
         ...state,
         activeDestination: "workspace",
         activeWorkspaceLayout: "code",
-        ide: { ...state.ide, activeView: action.view },
+        ide: {
+          ...state.ide,
+          activeView: action.view === "settings" ? "explorer" : action.view,
+        },
       };
     case "ide-toggle-minimap":
       return {
@@ -3522,6 +3528,28 @@ export function normalizeCliLaunchPreset(
   };
 }
 
+function normalizedSettingsSection(
+  value: SettingsSectionId | undefined,
+): SettingsSectionId {
+  switch (value) {
+    case "general":
+    case "editor-workspace":
+    case "tools-contributions":
+    case "providers":
+    case "usage-limits":
+    case "cli-profiles":
+    case "appearance":
+    case "permissions":
+    case "updates":
+    case "keyboard":
+    case "advanced":
+    case "about":
+      return value;
+    default:
+      return "general";
+  }
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -3535,7 +3563,9 @@ function normalizeWorkbenchPreferences(
         )
       : [],
     density: preferences?.density === "comfortable" ? "comfortable" : "compact",
-    lastSettingsSection: preferences?.lastSettingsSection ?? "general",
+    lastSettingsSection: normalizedSettingsSection(
+      preferences?.lastSettingsSection,
+    ),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
     theme: preferences?.theme === "dark" ? "dark" : "light",
     usageProviderId: preferences?.usageProviderId,
