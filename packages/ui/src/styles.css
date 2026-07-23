@@ -81,7 +81,8 @@
   --gyro-provider-openai: #7fd2b6;
   --gyro-provider-openai-logo: #fff;
   --gyro-provider-anthropic: #ff8a3d;
-  --gyro-provider-kimi: #7d8cff;
+  --gyro-provider-kimi: #1783ff;
+  --gyro-provider-kimi-logo: #fff;
   --gyro-provider-xai: #f6f2ea;
   --gyro-provider-gemini: #8bb8ff;
   --gyro-hero-heading: #f4f4f1;
@@ -452,7 +453,8 @@
   --gyro-provider-openai: #0f8f72;
   --gyro-provider-openai-logo: #000;
   --gyro-provider-anthropic: #c15d12;
-  --gyro-provider-kimi: #5364d8;
+  --gyro-provider-kimi: #1783ff;
+  --gyro-provider-kimi-logo: #000;
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
   --gyro-hero-heading: #181d25;
@@ -14828,6 +14830,14 @@ textarea,
   color: var(--gyro-provider-kimi);
 }
 
+.gyro-provider-logo.is-kimi .gyro-kimi-logo-dot {
+  fill: var(--gyro-provider-kimi);
+}
+
+.gyro-provider-logo.is-kimi .gyro-kimi-logo-symbol {
+  fill: var(--gyro-provider-kimi-logo);
+}
+
 .gyro-provider-logo.is-xai {
   color: var(--gyro-provider-xai);
 }
@@ -24916,11 +24926,11 @@ button.gyro-account-menu-row:hover,
   z-index: 30;
 }
 
-/* Keep the macOS traffic-light group on one uninterrupted Light titlebar. */
-:root[data-theme="light"] .gyro-workspace-activity-rail {
-  background:
-    linear-gradient(to bottom, var(--gyro-window) 0 48px, transparent 48px),
-    color-mix(in srgb, var(--gyro-sidebar) 92%, black 8%);
+/* Match the Light workspace titlebar to the activity rail beneath it. */
+:root[data-theme="light"]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-sidebar-windowbar {
+  background: color-mix(in srgb, var(--gyro-sidebar) 92%, black 8%);
 }
 
 /* Unified Settings keeps one sidebar and embeds project-scoped controls. */
