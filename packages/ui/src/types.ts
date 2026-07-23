@@ -267,6 +267,8 @@ export type ChatAttachment = {
 
 export type SettingsSectionId =
   | "general"
+  | "editor-workspace"
+  | "tools-contributions"
   | "providers"
   | "usage-limits"
   | "cli-profiles"

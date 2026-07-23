@@ -94,7 +94,7 @@ export const workspaceViewContainers: readonly WorkspaceViewContainerContributio
     },
     {
       id: "settings",
-      label: "Workspace Contributions",
+      label: "Settings",
       icon: "settings",
       order: 100,
       placement: "secondary",
