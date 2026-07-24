@@ -42,11 +42,21 @@ export type ChatPaneRef =
       workspacePath: string;
     };
 
+export type ChatGridArrangement = "grid" | "columns" | "rows";
+
 export type ChatProjectLayout = {
   projectKey: string;
   slots: Array<ChatPaneRef | null>;
   focusedPaneId?: string;
   splitDirection?: "horizontal" | "vertical";
+  /**
+   * How occupied panes are tiled once there are two or more:
+   * - "columns": all panes side by side in a single row (e.g. "3 next to each other").
+   * - "rows": all panes stacked in a single column ("fully under").
+   * - "grid": 2×2 quadrants (only meaningful with 3–4 panes).
+   * When unset the surface falls back to a sensible default per pane count.
+   */
+  arrangement?: ChatGridArrangement;
 };
 
 export type ChatGridState = {
@@ -542,7 +552,7 @@ export type ProviderId =
   "openai" | "anthropic" | "kimi" | "xai" | "cursor" | "gemini" | "opencode";
 
 export type ProviderExecutionKind =
-  "codex-cli" | "claude-code" | "kimi-acp" | "readiness-only";
+  "codex-cli" | "claude-code" | "kimi-acp" | "acp-cli" | "readiness-only";
 
 export type ProviderCapabilities = {
   executionKind: ProviderExecutionKind;

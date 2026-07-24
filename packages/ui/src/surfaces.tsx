@@ -123,6 +123,7 @@ import type {
   CapabilityActivity,
   CapabilityCallEvent,
   ChatAttachment,
+  ChatGridArrangement,
   ChatPaneRef,
   ChatProjectLayout,
   ChatMode,
@@ -3380,7 +3381,9 @@ function WorkspaceSidebarContent({
                           type="button"
                         >
                           {profile.providerId ? (
-                            <Bot size={15} />
+                            <ProviderLogo
+                              providerId={profile.providerId as ProviderId}
+                            />
                           ) : (
                             <Terminal size={15} />
                           )}
@@ -4584,6 +4587,7 @@ export function ChatGridSurface({
   const slots = layout.slots.slice(0, 4);
   while (slots.length < 4) slots.push(null);
   const dropZones = chatGridDropZones(slots);
+  const arrangement = effectiveChatArrangement(layout, occupiedCount);
 
   const finishDrag = useCallback(() => {
     setDragSource(undefined);
@@ -4653,6 +4657,12 @@ export function ChatGridSurface({
       ]
         .filter(Boolean)
         .join(" ")}
+      data-arrangement={hasMultiplePanes ? arrangement : undefined}
+      style={
+        {
+          "--gyro-grid-count": occupiedCount,
+        } as CSSProperties
+      }
       onDragEnd={finishDrag}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -4706,7 +4716,13 @@ export function ChatGridSurface({
             aria-hidden="true"
             className="gyro-chat-grid-drop-overlay"
             data-drag-source={dragSource}
-            data-layout={occupiedCount === 1 ? "directional" : "positions"}
+            data-layout={
+              occupiedCount === 0
+                ? "full"
+                : occupiedCount === 1
+                  ? "columns"
+                  : "positions"
+            }
             data-zone-count={dropZones.length}
           >
             {dropZones.map((zone) => (
@@ -4734,7 +4750,10 @@ export function ChatGridSurface({
                 }}
                 onDrop={(event) => handleDrop(event, zone)}
               >
-                <span className="gyro-chat-grid-drop-tile">{zone.label}</span>
+                <span
+                  aria-label={zone.label}
+                  className="gyro-chat-grid-drop-tile"
+                />
               </div>
             ))}
           </div>
@@ -4764,74 +4783,38 @@ type ChatGridDropZone = {
 function chatGridDropZones(
   slots: Array<ChatPaneRef | null>,
 ): ChatGridDropZone[] {
-  const occupiedSlots = slots.flatMap((pane, slotIndex) =>
-    pane ? [slotIndex] : [],
-  );
-  if (occupiedSlots.length === 1) {
-    const slotIndex = occupiedSlots[0] ?? 0;
+  const occupiedCount = slots.filter(Boolean).length;
+  // First chat into an empty grid: a single full-height/full-width target.
+  if (occupiedCount === 0) {
+    return [{ id: "full", label: "Open here", position: "full", slotIndex: 0 }];
+  }
+  // Second chat: a full-height Left / Right split — two panes tile side by side.
+  if (occupiedCount === 1) {
+    const slotIndex = slots.findIndex(Boolean);
     return [
-      {
-        id: "above",
-        label: "Above",
-        placement: { insertPosition: "before", splitDirection: "vertical" },
-        position: "above",
-        slotIndex,
-      },
       {
         id: "left",
         label: "Left",
-        placement: {
-          insertPosition: "before",
-          splitDirection: "horizontal",
-        },
+        placement: { insertPosition: "before", splitDirection: "horizontal" },
         position: "left",
-        slotIndex,
+        slotIndex: slotIndex < 0 ? 0 : slotIndex,
       },
       {
         id: "right",
-        label: "Next",
-        placement: {
-          insertPosition: "after",
-          splitDirection: "horizontal",
-        },
+        label: "Right",
+        placement: { insertPosition: "after", splitDirection: "horizontal" },
         position: "right",
-        slotIndex,
-      },
-      {
-        id: "below",
-        label: "Below",
-        placement: { insertPosition: "after", splitDirection: "vertical" },
-        position: "below",
-        slotIndex,
+        slotIndex: slotIndex < 0 ? 0 : slotIndex,
       },
     ];
   }
-
-  if (occupiedSlots.length < 4) {
-    const labels =
-      occupiedSlots.length === 2
-        ? ["Top left", "Next", "Below"]
-        : ["Top left", "Top right", "Bottom left", "Bottom right"];
-    return labels.map((label, index) => {
-      const insertBefore = index === 0;
-      const targetPosition = insertBefore ? 0 : index - 1;
-      return {
-        id: `insert-${index}`,
-        label,
-        placement: {
-          insertPosition: insertBefore ? "before" : "after",
-        },
-        position: `position-${index + 1}`,
-        slotIndex: occupiedSlots[targetPosition] ?? occupiedSlots.at(-1) ?? 0,
-      };
-    });
-  }
-
-  return occupiedSlots.map((slotIndex, index) => ({
-    id: `replace-${slotIndex}`,
-    label: `Replace ${index + 1}`,
+  // Third chat onward: place into a 2×2 grid position (the quadrants fill in).
+  const labels = ["Top left", "Top right", "Bottom left", "Bottom right"];
+  return labels.map((label, index) => ({
+    id: `slot-${index}`,
+    label,
     position: `position-${index + 1}`,
-    slotIndex,
+    slotIndex: index,
   }));
 }
 
@@ -4843,6 +4826,23 @@ function chatDragSource(dataTransfer: DataTransfer) {
     return "session" as const;
   }
   return undefined;
+}
+
+function effectiveChatArrangement(
+  layout: ChatProjectLayout,
+  occupiedCount: number,
+): ChatGridArrangement {
+  if (layout.arrangement) {
+    // A 2×2 grid needs at least three panes to differ from columns.
+    if (layout.arrangement === "grid" && occupiedCount < 3) {
+      return "columns";
+    }
+    return layout.arrangement;
+  }
+  if (occupiedCount === 2) {
+    return layout.splitDirection === "vertical" ? "rows" : "columns";
+  }
+  return "grid";
 }
 
 type ChatSurfaceProps = {
@@ -14214,10 +14214,10 @@ function providerAuthOwnershipDetail(providerId: ProviderId) {
     return "Uses the local Kimi Code OAuth session. Kimi tokens and account data stay in Kimi-owned storage.";
   }
   if (providerId === "xai") {
-    return "Uses XAI_API_KEY from the local environment; Grok API keys and team billing stay with xAI.";
+    return "Uses Grok Build's local login or XAI_API_KEY through ACP; credentials and billing stay with xAI.";
   }
   if (providerId === "gemini") {
-    return "Uses Gemini environment credentials or Google-owned tooling; plan access stays with Google.";
+    return "Uses Gemini CLI's local Google login or environment credentials through ACP; plan access stays with Google.";
   }
   return "Uses provider-owned credential storage; Gyro stores readiness only.";
 }
@@ -14233,10 +14233,10 @@ function providerAuthSummary(providerId: ProviderId) {
     return "Kimi Code sign-in";
   }
   if (providerId === "xai") {
-    return "XAI_API_KEY";
+    return "Grok Build sign-in";
   }
   if (providerId === "gemini") {
-    return "Gemini env";
+    return "Gemini CLI sign-in";
   }
   return "Provider-owned";
 }
@@ -14261,6 +14261,12 @@ function providerConnectionLabel(provider: {
   if (provider.authStatus === "connected" && provider.id === "kimi") {
     return "verified via Kimi Code";
   }
+  if (provider.authStatus === "connected" && provider.id === "xai") {
+    return "verified via Grok Build";
+  }
+  if (provider.authStatus === "connected" && provider.id === "gemini") {
+    return "verified via Gemini CLI";
+  }
   if (provider.authStatus === "connected") {
     return "verified";
   }
@@ -14276,6 +14282,12 @@ function providerConnectedHealthCopy(provider: { id: ProviderId }) {
   }
   if (provider.id === "kimi") {
     return "Kimi is available through the local Kimi Code sign-in on this Mac.";
+  }
+  if (provider.id === "xai") {
+    return "xAI is available through the local Grok Build sign-in on this Mac.";
+  }
+  if (provider.id === "gemini") {
+    return "Gemini is available through the local Gemini CLI sign-in on this Mac.";
   }
   return "Provider-owned credentials were verified on this Mac.";
 }
@@ -14352,7 +14364,7 @@ function ProviderLogo({ providerId }: { providerId: ProviderId }) {
       >
         <svg viewBox="0 0 24 24">
           <path
-            d="m4.714 15.956 4.718-2.648.079-.23-.079-.128h-.23l-3.486-.122-4.602-.218-.571-.122-.534-.704.055-.352.479-.322.686.061 3.795.261 4.098.352h.389l.054-.158-.237-.194-4.805-3.255-2.058-1.463-.364-.461-.158-1.008.656-.722.88.06.225.061 4.396 3.309 1.34 1.033.146-.103.018-.073-3.443-6.088-.17-.619c-.061-.255-.103-.467-.103-.729L6.287.134 6.7 0l.996.134.419.364 2.196 4.642 1.554 3.03.698 1.729.091.255h.158v-.146l.364-3.801.31-3.455.376-.911.747-.492.583.28.48.686-.067.443-1.208 6.697h.213l.243-.243 3.363-4.133 1.396-1.336h1.032l.759 1.129-.34 1.166-4.778 6.063.073.109.188-.018 6.235-1.202.832.389.091.394-.328.808-7.71 1.76-.043.031.049.06 5.828.407.789.522.474.638-.079.486-1.214.619-6.776-1.627h-.182v.109l6.704 6.278.128.577-.322.455-.34-.049-6.29-4.773h-.127v.17l2.787 4.171.121 1.081-.17.352-.607.213-.668-.122-3.543-5.288-.14.079-.674 7.255-.315.371-.729.279-.607-.461-.322-.747 1.311-6.221-.012-.043-.14.018-5.337 7.758-.412.164-.717-.371.067-.661.401-.589 5.683-7.091-.006-.158h-.055l-6.338 4.117-1.13.145-.485-.455.06-.747.231-.243Z"
+            d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"
             fill="currentColor"
           />
         </svg>
@@ -15528,6 +15540,7 @@ function Composer({
               type="button"
               {...menuProps("effort")}
             >
+              <Gauge className="gyro-effort-chip-icon" size={14} />
               <span className="gyro-composer-label">
                 {reasoningEffortLabel(providerReasoningEffort)}
               </span>

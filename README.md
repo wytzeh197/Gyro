@@ -36,8 +36,9 @@ policy are what make it safe to trust one place with the work.
 - **Chat, CLI, and IDE together.** Sessions unifies Chat and subscription CLI
   work; Workspace keeps files, diffs, Git, tests, and diagnostics in the same
   run context.
-- **Bring your own agent.** Codex CLI and Claude Code are the first executable
-  adapters. Other providers remain clearly marked until their adapters exist.
+- **Bring your own agent.** Codex CLI, Claude Code, Kimi Code, Gemini CLI, and
+  Grok Build run through provider-owned local logins. Cursor and OpenCode remain
+  clearly marked until their approval-safe adapters exist.
 - **Local by default.** Session history, configuration, and worktrees stay on
   your Mac. Gyro does not send telemetry by default.
 - **Visible control.** Commands and file changes follow an explicit approval
@@ -58,7 +59,8 @@ policy are what make it safe to trust one place with the work.
 
 ## What Works Today
 
-- Provider-backed conversations through local Codex CLI and Claude Code.
+- Provider-backed conversations through local Codex CLI, Claude Code, Kimi
+  Code, Gemini CLI, and Grok Build.
 - Shared local sessions across Gyro.app and the `gyro` CLI.
 - PTY terminals with profiles, restore, input, resize, stop, and restart.
 - Workspace browsing, Monaco editing, guarded saves, search, Git status, tasks,
@@ -160,8 +162,9 @@ printf 'Inspect this repository\n/exit\n' | \
 cargo run -p gyro-cli -- app open --json
 ```
 
-Interactive Codex and Claude runs ask about each provider command or file action
-that reaches the active approval policy. Desktop Claude Chat sends those
+Interactive Codex, Claude, Kimi, Gemini, and Grok runs ask about each provider
+command or file action that reaches the active approval policy. Kimi, Gemini,
+and Grok share Gyro's workspace-bounded ACP adapter. Desktop Claude Chat sends those
 permission callbacks to Gyro.app over a versioned, user-only local socket.
 Non-interactive commands fail closed unless `--approve` explicitly auto-accepts
 those callbacks. Reviewed Codex file sets and Claude Write/Edit/MultiEdit
@@ -172,7 +175,7 @@ unsupported notebook or binary edits fail closed. Durable Gyro file proposals
 can be reviewed and decided from any terminal without exposing their content in
 the inbox:
 
-Codex and Claude provider session IDs are recorded as soon as the provider
+Provider session IDs are recorded as soon as the provider
 accepts them. A crashed or interrupted run remains resumable; if the provider
 reports that a stored session is stale, Gyro clears that cursor and requires an
 explicit retry in a fresh provider session so tools cannot be replayed

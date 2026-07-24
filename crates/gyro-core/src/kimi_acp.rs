@@ -64,8 +64,10 @@ pub struct KimiAcpActivity {
 
 #[derive(Clone, Debug)]
 pub struct KimiAcpRequest {
+    pub provider_label: String,
     pub program: OsString,
     pub program_args: Vec<OsString>,
+    pub auth_method_ids: Vec<String>,
     pub workspace: PathBuf,
     pub prompt: Vec<Value>,
     pub model: String,
@@ -106,6 +108,7 @@ struct IncomingFrame {
 }
 
 struct KimiAcpConnection {
+    provider_label: String,
     child: Child,
     stdin: ChildStdin,
     incoming: Receiver<Result<IncomingFrame, String>>,
@@ -140,23 +143,27 @@ impl KimiAcpConnection {
             command.env("PATH", augmented_gui_path());
         }
         configure_process_group(&mut command);
-        let mut child = command
-            .spawn()
-            .map_err(|error| anyhow!("start {} acp: {error}", request.program.to_string_lossy()))?;
+        let mut child = command.spawn().map_err(|error| {
+            anyhow!(
+                "start {} through ACP: {error}",
+                request.program.to_string_lossy()
+            )
+        })?;
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| anyhow!("Kimi ACP stdin was unavailable"))?;
+            .ok_or_else(|| anyhow!("{} ACP stdin was unavailable", request.provider_label))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| anyhow!("Kimi ACP stdout was unavailable"))?;
+            .ok_or_else(|| anyhow!("{} ACP stdout was unavailable", request.provider_label))?;
         let stderr = child
             .stderr
             .take()
-            .ok_or_else(|| anyhow!("Kimi ACP stderr was unavailable"))?;
+            .ok_or_else(|| anyhow!("{} ACP stderr was unavailable", request.provider_label))?;
 
         let (incoming_sender, incoming) = mpsc::sync_channel(128);
+        let reader_provider_label = request.provider_label.clone();
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -164,8 +171,9 @@ impl KimiAcpConnection {
                 match reader.read_until(b'\n', &mut bytes) {
                     Ok(0) => break,
                     Ok(_) if bytes.len() > ACP_MAX_FRAME_BYTES => {
-                        let _ = incoming_sender
-                            .send(Err("Kimi ACP frame exceeded its size limit".into()));
+                        let _ = incoming_sender.send(Err(format!(
+                            "{reader_provider_label} ACP frame exceeded its size limit"
+                        )));
                         break;
                     }
                     Ok(_) => {
@@ -178,13 +186,17 @@ impl KimiAcpConnection {
                         let size = bytes.len();
                         let value = serde_json::from_slice(&bytes)
                             .map(|value| IncomingFrame { value, bytes: size })
-                            .map_err(|error| format!("invalid Kimi ACP JSON: {error}"));
+                            .map_err(|error| {
+                                format!("invalid {reader_provider_label} ACP JSON: {error}")
+                            });
                         if incoming_sender.send(value).is_err() {
                             break;
                         }
                     }
                     Err(error) => {
-                        let _ = incoming_sender.send(Err(format!("read Kimi ACP output: {error}")));
+                        let _ = incoming_sender.send(Err(format!(
+                            "read {reader_provider_label} ACP output: {error}"
+                        )));
                         break;
                     }
                 }
@@ -211,6 +223,7 @@ impl KimiAcpConnection {
 
         let now = Instant::now();
         Ok(Self {
+            provider_label: request.provider_label.clone(),
             child,
             stdin,
             incoming,
@@ -262,7 +275,10 @@ impl KimiAcpConnection {
     fn send(&mut self, value: Value) -> Result<()> {
         let bytes = serde_json::to_vec(&value)?;
         if bytes.len() > ACP_MAX_FRAME_BYTES {
-            anyhow::bail!("Kimi ACP request exceeded its size limit");
+            anyhow::bail!(
+                "{} ACP request exceeded its size limit",
+                self.provider_label
+            );
         }
         self.stdin.write_all(&bytes)?;
         self.stdin.write_all(b"\n")?;
@@ -273,20 +289,23 @@ impl KimiAcpConnection {
     fn receive(&mut self) -> Result<Value> {
         loop {
             if self.cancellation.is_cancelled() {
-                anyhow::bail!("Kimi ACP run cancelled");
+                anyhow::bail!("{} ACP run cancelled", self.provider_label);
             }
             if self.started_at.elapsed() >= self.timeout {
-                anyhow::bail!("Kimi ACP run timed out");
+                anyhow::bail!("{} ACP run timed out", self.provider_label);
             }
             if self.last_activity_at.elapsed() >= self.inactivity_timeout {
-                anyhow::bail!("Kimi ACP run became inactive");
+                anyhow::bail!("{} ACP run became inactive", self.provider_label);
             }
             match self.incoming.recv_timeout(ACP_POLL_INTERVAL) {
                 Ok(Ok(frame)) => {
                     self.messages += 1;
                     self.total_bytes = self.total_bytes.saturating_add(frame.bytes);
                     if self.messages > ACP_MAX_MESSAGES || self.total_bytes > ACP_MAX_TOTAL_BYTES {
-                        anyhow::bail!("Kimi ACP output exceeded its bounded protocol budget");
+                        anyhow::bail!(
+                            "{} ACP output exceeded its bounded protocol budget",
+                            self.provider_label
+                        );
                     }
                     self.last_activity_at = Instant::now();
                     return Ok(frame.value);
@@ -298,7 +317,8 @@ impl KimiAcpConnection {
                     }
                     if let Some(status) = self.child.try_wait()? {
                         anyhow::bail!(
-                            "Kimi ACP exited with {status}: {}",
+                            "{} ACP exited with {status}: {}",
+                            self.provider_label,
                             redact_secrets(self.stderr_text.trim())
                         );
                     }
@@ -309,7 +329,8 @@ impl KimiAcpConnection {
                         .recv_timeout(Duration::from_millis(100))
                         .unwrap_or_default();
                     anyhow::bail!(
-                        "Kimi ACP closed its protocol stream: {}",
+                        "{} ACP closed its protocol stream: {}",
+                        self.provider_label,
                         redact_secrets(stderr.trim())
                     );
                 }
@@ -346,7 +367,7 @@ where
             },
         }),
     )?;
-    wait_for_response(
+    let initialize = wait_for_response(
         &mut connection,
         initialize_id,
         &request.workspace,
@@ -356,17 +377,39 @@ where
         &mut on_approval,
         &mut on_write_file,
     )?;
-    let authenticate_id = connection.send_request("authenticate", json!({"methodId": "login"}))?;
-    wait_for_response(
-        &mut connection,
-        authenticate_id,
-        &request.workspace,
-        &mut response,
-        &mut on_delta,
-        &mut on_activity,
-        &mut on_approval,
-        &mut on_write_file,
-    )?;
+    let advertised_auth_methods = initialize
+        .get("authMethods")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|method| method.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let auth_method = request
+        .auth_method_ids
+        .iter()
+        .find(|method| {
+            advertised_auth_methods.is_empty() || advertised_auth_methods.contains(&method.as_str())
+        })
+        .cloned()
+        .or_else(|| {
+            advertised_auth_methods
+                .first()
+                .map(|method| (*method).to_string())
+        });
+    if let Some(auth_method) = auth_method {
+        let authenticate_id =
+            connection.send_request("authenticate", json!({"methodId": auth_method}))?;
+        wait_for_response(
+            &mut connection,
+            authenticate_id,
+            &request.workspace,
+            &mut response,
+            &mut on_delta,
+            &mut on_activity,
+            &mut on_approval,
+            &mut on_write_file,
+        )?;
+    }
 
     let session_id = if let Some(session_id) = request.resume_session_id.as_deref() {
         let resume_id = connection.send_request(
@@ -403,24 +446,26 @@ where
             .get("sessionId")
             .and_then(Value::as_str)
             .filter(|id| !id.trim().is_empty())
-            .ok_or_else(|| anyhow!("Kimi ACP did not return a session id"))?
+            .ok_or_else(|| anyhow!("{} ACP did not return a session id", request.provider_label))?
             .to_string()
     };
 
-    let model_id = connection.send_request(
-        "session/set_model",
-        json!({"sessionId": session_id, "modelId": request.model}),
-    )?;
-    wait_for_response(
-        &mut connection,
-        model_id,
-        &request.workspace,
-        &mut response,
-        &mut on_delta,
-        &mut on_activity,
-        &mut on_approval,
-        &mut on_write_file,
-    )?;
+    if !request.model.trim().is_empty() && !request.model.ends_with("-default") {
+        let model_id = connection.send_request(
+            "session/set_model",
+            json!({"sessionId": session_id, "modelId": request.model}),
+        )?;
+        wait_for_response(
+            &mut connection,
+            model_id,
+            &request.workspace,
+            &mut response,
+            &mut on_delta,
+            &mut on_activity,
+            &mut on_approval,
+            &mut on_write_file,
+        )?;
+    }
     let thinking_id = connection.send_request(
         "session/set_config_option",
         json!({
@@ -511,8 +556,9 @@ where
                 let detail = error
                     .get("message")
                     .and_then(Value::as_str)
-                    .unwrap_or("Kimi ACP request failed");
-                anyhow::bail!(redact_secrets(detail));
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{} ACP request failed", connection.provider_label));
+                anyhow::bail!(redact_secrets(&detail));
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
@@ -547,7 +593,10 @@ where
                     connection.send_error(
                         id,
                         -32602,
-                        "Kimi ACP did not offer a safe permission option",
+                        &format!(
+                            "{} ACP did not offer a safe permission option",
+                            connection.provider_label
+                        ),
                     )?;
                     continue;
                 };
@@ -803,9 +852,27 @@ fn resolve_workspace_write_path(workspace: &Path, requested: &str) -> Result<Pat
 }
 
 pub fn check_kimi_acp_health(program: impl Into<OsString>, timeout: Duration) -> KimiAcpHealth {
+    check_acp_health(
+        "Kimi",
+        program,
+        vec![OsString::from("acp")],
+        &["login"],
+        timeout,
+    )
+}
+
+pub fn check_acp_health(
+    provider_label: &str,
+    program: impl Into<OsString>,
+    program_args: Vec<OsString>,
+    auth_method_ids: &[&str],
+    timeout: Duration,
+) -> KimiAcpHealth {
     let request = KimiAcpRequest {
+        provider_label: provider_label.into(),
         program: program.into(),
-        program_args: vec![OsString::from("acp")],
+        program_args,
+        auth_method_ids: auth_method_ids.iter().map(ToString::to_string).collect(),
         workspace: std::env::temp_dir(),
         prompt: Vec::new(),
         model: "k3".into(),
@@ -842,17 +909,40 @@ pub fn check_kimi_acp_health(program: impl Into<OsString>, timeout: Duration) ->
                 "clientCapabilities": {},
             }),
         )?;
-        wait_for_simple_response(&mut connection, initialize_id)?;
-        let authenticate_id =
-            connection.send_request("authenticate", json!({"methodId": "login"}))?;
-        wait_for_simple_response(&mut connection, authenticate_id)?;
+        let initialize = wait_for_simple_response(&mut connection, initialize_id)?;
+        let advertised_auth_methods = initialize
+            .get("authMethods")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|method| method.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        let auth_method = request
+            .auth_method_ids
+            .iter()
+            .find(|method| {
+                advertised_auth_methods.is_empty()
+                    || advertised_auth_methods.contains(&method.as_str())
+            })
+            .cloned()
+            .or_else(|| {
+                advertised_auth_methods
+                    .first()
+                    .map(|method| (*method).to_string())
+            });
+        if let Some(auth_method) = auth_method {
+            let authenticate_id =
+                connection.send_request("authenticate", json!({"methodId": auth_method}))?;
+            wait_for_simple_response(&mut connection, authenticate_id)?;
+        }
         Ok(())
     })();
     match result {
         Ok(()) => KimiAcpHealth {
             status: KimiAcpHealthStatus::Ready,
-            output: "Kimi Code ACP authenticated; provider-owned token value was not read by Gyro."
-                .into(),
+            output: format!(
+                "{provider_label} ACP authenticated; provider-owned credential value was not read by Gyro."
+            ),
         },
         Err(error) => {
             let output = redact_secrets(&error.to_string());
@@ -935,8 +1025,10 @@ mod tests {
         resume_session_id: Option<String>,
     ) -> KimiAcpRequest {
         KimiAcpRequest {
+            provider_label: "Kimi".into(),
             program: program.into_os_string(),
             program_args: Vec::new(),
+            auth_method_ids: vec!["login".into()],
             workspace,
             prompt: vec![json!({"type": "text", "text": "hello"})],
             model: "k3".into(),

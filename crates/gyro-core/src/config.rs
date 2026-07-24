@@ -132,6 +132,20 @@ impl Default for GyroConfig {
                     api_key_ref: "provider-cli:kimi".into(),
                     enabled: false,
                 },
+                ModelProviderConfig {
+                    id: "xai".into(),
+                    display_name: "xAI".into(),
+                    base_url: None,
+                    api_key_ref: "provider-cli:grok".into(),
+                    enabled: false,
+                },
+                ModelProviderConfig {
+                    id: "gemini".into(),
+                    display_name: "Gemini".into(),
+                    base_url: None,
+                    api_key_ref: "provider-cli:gemini".into(),
+                    enabled: false,
+                },
             ],
             command_profiles: vec![
                 CommandProfile {
@@ -172,6 +186,26 @@ impl Default for GyroConfig {
                     working_directory: None,
                     provider_id: Some("kimi".into()),
                     default_model: Some("k3".into()),
+                    readiness: CommandProfileReadiness::Waiting,
+                },
+                CommandProfile {
+                    id: "grok-build".into(),
+                    display_name: "Grok Build".into(),
+                    command: "grok".into(),
+                    args: Vec::new(),
+                    working_directory: None,
+                    provider_id: Some("xai".into()),
+                    default_model: Some("grok-4.5".into()),
+                    readiness: CommandProfileReadiness::Waiting,
+                },
+                CommandProfile {
+                    id: "gemini-cli".into(),
+                    display_name: "Gemini CLI".into(),
+                    command: "gemini".into(),
+                    args: Vec::new(),
+                    working_directory: None,
+                    provider_id: Some("gemini".into()),
+                    default_model: Some("gemini-default".into()),
                     readiness: CommandProfileReadiness::Waiting,
                 },
             ],
@@ -262,30 +296,47 @@ impl GyroConfig {
                     "codex" => Some("openai".into()),
                     "claude" | "claude-code" => Some("anthropic".into()),
                     "kimi" | "kimi-code" => Some("kimi".into()),
+                    "grok" | "grok-build" => Some("xai".into()),
+                    "gemini" | "gemini-cli" => Some("gemini".into()),
                     _ => None,
                 };
             }
         }
 
-        if !self
-            .model_providers
-            .iter()
-            .any(|provider| provider.id == "kimi")
-        {
-            self.model_providers.push(ModelProviderConfig {
+        for provider in [
+            ModelProviderConfig {
                 id: "kimi".into(),
                 display_name: "Kimi".into(),
                 base_url: None,
                 api_key_ref: "provider-cli:kimi".into(),
                 enabled: false,
-            });
+            },
+            ModelProviderConfig {
+                id: "xai".into(),
+                display_name: "xAI".into(),
+                base_url: None,
+                api_key_ref: "provider-cli:grok".into(),
+                enabled: false,
+            },
+            ModelProviderConfig {
+                id: "gemini".into(),
+                display_name: "Gemini".into(),
+                base_url: None,
+                api_key_ref: "provider-cli:gemini".into(),
+                enabled: false,
+            },
+        ] {
+            if !self
+                .model_providers
+                .iter()
+                .any(|current| current.id == provider.id)
+            {
+                self.model_providers.push(provider);
+            }
         }
-        if !self
-            .command_profiles
-            .iter()
-            .any(|profile| profile.id == "kimi-code")
-        {
-            self.command_profiles.push(CommandProfile {
+
+        for profile in [
+            CommandProfile {
                 id: "kimi-code".into(),
                 display_name: "Kimi Code".into(),
                 command: "kimi".into(),
@@ -294,7 +345,35 @@ impl GyroConfig {
                 provider_id: Some("kimi".into()),
                 default_model: Some("k3".into()),
                 readiness: CommandProfileReadiness::Waiting,
-            });
+            },
+            CommandProfile {
+                id: "grok-build".into(),
+                display_name: "Grok Build".into(),
+                command: "grok".into(),
+                args: Vec::new(),
+                working_directory: None,
+                provider_id: Some("xai".into()),
+                default_model: Some("grok-4.5".into()),
+                readiness: CommandProfileReadiness::Waiting,
+            },
+            CommandProfile {
+                id: "gemini-cli".into(),
+                display_name: "Gemini CLI".into(),
+                command: "gemini".into(),
+                args: Vec::new(),
+                working_directory: None,
+                provider_id: Some("gemini".into()),
+                default_model: Some("gemini-default".into()),
+                readiness: CommandProfileReadiness::Waiting,
+            },
+        ] {
+            if !self
+                .command_profiles
+                .iter()
+                .any(|current| current.id == profile.id)
+            {
+                self.command_profiles.push(profile);
+            }
         }
     }
 }
@@ -555,6 +634,24 @@ mod tests {
             config.command_profiles[1].provider_id.as_deref(),
             Some("anthropic")
         );
+        for provider_id in ["kimi", "xai", "gemini"] {
+            assert!(
+                config
+                    .model_providers
+                    .iter()
+                    .any(|provider| provider.id == provider_id),
+                "missing migrated provider {provider_id}"
+            );
+        }
+        for (profile_id, provider_id) in [
+            ("kimi-code", "kimi"),
+            ("grok-build", "xai"),
+            ("gemini-cli", "gemini"),
+        ] {
+            assert!(config.command_profiles.iter().any(|profile| {
+                profile.id == profile_id && profile.provider_id.as_deref() == Some(provider_id)
+            }));
+        }
     }
 
     #[test]
