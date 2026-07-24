@@ -60,9 +60,9 @@ pub use ipc::{
     DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
 };
 pub use kimi_acp::{
-    check_kimi_acp_health, run_kimi_acp, KimiAcpActivity, KimiAcpApprovalDecision,
-    KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth, KimiAcpHealthStatus, KimiAcpMode,
-    KimiAcpOutput, KimiAcpRequest,
+    check_acp_health, check_kimi_acp_health, run_kimi_acp, KimiAcpActivity,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth,
+    KimiAcpHealthStatus, KimiAcpMode, KimiAcpOutput, KimiAcpRequest,
 };
 pub use mutations::{
     apply_provider_mutation_transaction, apply_provider_mutation_transaction_with_cancellation,

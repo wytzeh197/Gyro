@@ -256,6 +256,77 @@ exit 1"#,
 }
 
 #[test]
+fn real_binary_runs_gemini_and_xai_through_the_shared_acp_adapter() {
+    for (provider_id, auth_method, expected_cursor) in [
+        ("gemini", "oauth-personal", "gemini-acp-session"),
+        ("xai", "cached_token", "xai-acp-session"),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let workspace = temp.path().join("workspace");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        let provider = write_script(
+            temp.path(),
+            &format!(
+                r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"authMethods":[{{"id":"{auth_method}"}}]}}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"sessionId":"{provider_id}-session"}}}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"hello from {provider_id}"}}}}}}}}'
+      printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{"stopReason":"end_turn"}}}}' ;;
+  esac
+done
+"#
+            ),
+        );
+        write_provider_config(&home, &provider, false, provider_id);
+
+        let output = gyro_command(&home, &workspace)
+            .args([
+                "run",
+                "--profile",
+                "test-provider",
+                "--no-open",
+                "--json",
+                "say hello",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{} stderr: {}",
+            provider_id,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            value["run"]["response"],
+            format!("hello from {provider_id}")
+        );
+        assert_eq!(value["run"]["providerId"], provider_id);
+
+        let paths = GyroPaths::from_base_dir(data_base(&home));
+        let store = SessionStore::open(paths).unwrap();
+        let session = store.latest_session().unwrap().unwrap();
+        let binding = store
+            .get_provider_session_binding(session.id, provider_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.resume_cursor_json["kind"], expected_cursor);
+        assert_eq!(
+            binding.resume_cursor_json["sessionId"],
+            format!("{provider_id}-session")
+        );
+    }
+}
+
+#[test]
 fn real_binary_setup_blocks_an_enabled_claude_provider_without_authentication() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");

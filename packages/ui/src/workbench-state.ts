@@ -7,6 +7,7 @@ import type {
   BrowserPreviewDevice,
   BrowserPreviewStatus,
   ChatSidePanelId,
+  ChatGridArrangement,
   ChatGridState,
   ChatPaneRef,
   ChatProjectLayout,
@@ -80,6 +81,19 @@ import {
 
 export const CLI_LAUNCH_PRESET_MAX_PANES = 8;
 export const CHAT_GRID_MAX_SLOTS = 4;
+export const CHAT_GRID_ARRANGEMENTS = [
+  "grid",
+  "columns",
+  "rows",
+] as const satisfies readonly ChatGridArrangement[];
+
+function normalizedChatArrangement(
+  value: unknown,
+): ChatGridArrangement | undefined {
+  return (CHAT_GRID_ARRANGEMENTS as readonly string[]).includes(value as string)
+    ? (value as ChatGridArrangement)
+    : undefined;
+}
 const MAX_RESTORED_EDITOR_TABS = 100;
 const MAX_RESTORED_EDITOR_GROUPS = 8;
 
@@ -93,6 +107,12 @@ export type ChatGridAction =
       slotIndex?: number;
       insertPosition?: "before" | "after";
       splitDirection?: "horizontal" | "vertical";
+      arrangement?: ChatGridArrangement;
+    }
+  | {
+      type: "set-arrangement";
+      projectKey: string;
+      arrangement: ChatGridArrangement;
     }
   | { type: "focus-pane"; projectKey: string; paneId: string }
   | { type: "close-pane"; projectKey: string; paneId: string }
@@ -194,6 +214,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
           : fallbackFocus,
         splitDirection:
           layout.splitDirection === "vertical" ? "vertical" : "horizontal",
+        arrangement: normalizedChatArrangement(layout.arrangement),
       };
     }
   }
@@ -313,6 +334,18 @@ export function chatGridReducer(
 
   const projectKey = normalizedChatProjectKey(action.projectKey);
   if (!projectKey) return state;
+  if (action.type === "set-arrangement") {
+    const layout = state.layouts[projectKey];
+    if (!layout) return state;
+    return {
+      ...state,
+      activeProjectKey: projectKey,
+      layouts: {
+        ...state.layouts,
+        [projectKey]: { ...layout, arrangement: action.arrangement },
+      },
+    };
+  }
   if (action.type === "activate-project") {
     return {
       ...state,
@@ -369,19 +402,37 @@ export function chatGridReducer(
             occupied.length === 2
               ? (action.splitDirection ?? "horizontal")
               : undefined,
+          // An explicit drop arrangement wins; otherwise keep whatever the
+          // user last chose so a row/stack survives adding more panes.
+          arrangement: action.arrangement ?? current.arrangement,
         };
       } else {
-        const targetIndex =
+        let targetIndex =
           requestedIndex ??
           (action.mode === "drop" && emptyIndex >= 0
             ? emptyIndex
             : focusedIndex >= 0
               ? focusedIndex
               : 0);
+        // On a grid-position drop, never clobber an existing chat while the
+        // grid still has room — fill the first empty slot instead. Only when
+        // every slot is taken does dropping onto one replace it.
+        if (
+          action.mode === "drop" &&
+          current.slots[targetIndex] &&
+          emptyIndex >= 0
+        ) {
+          targetIndex = emptyIndex;
+        }
         const slots = current.slots.slice(0, CHAT_GRID_MAX_SLOTS);
         while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
         slots[targetIndex] = action.pane;
-        next = { ...current, slots, focusedPaneId: action.pane.paneId };
+        next = {
+          ...current,
+          slots,
+          focusedPaneId: action.pane.paneId,
+          arrangement: action.arrangement ?? current.arrangement,
+        };
       }
     }
   } else if (action.type === "focus-pane") {

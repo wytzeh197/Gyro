@@ -1,7 +1,10 @@
 use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
-use crate::{check_kimi_acp_health, provider_descriptor, KimiAcpHealthStatus, ProviderHealthKind};
+use crate::{
+    check_acp_health, check_kimi_acp_health, provider_descriptor, KimiAcpHealthStatus,
+    ProviderHealthKind,
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -64,7 +67,7 @@ impl ProviderHealthService {
                 Some("claude auth login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
-            ProviderHealthKind::KimiAcp => Ok(kimi_provider_health()),
+            ProviderHealthKind::KimiAcp => Ok(acp_provider_health(&request.provider_id)),
             ProviderHealthKind::CursorCli => self.cli_check(
                 "cursor",
                 "provider-cli",
@@ -179,6 +182,78 @@ fn kimi_provider_health() -> ProviderHealthCheck {
         provider_mode: Some("Kimi Code ACP".into()),
         secret_storage: "Kimi Code provider-owned files".into(),
         privacy_note: "Gyro stores readiness summaries only; Kimi tokens stay outside Gyro.".into(),
+        diagnostics_opt_in: false,
+    }
+}
+
+fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
+    use std::ffi::OsString;
+
+    let (label, command, args, mut auth_methods, login_command) = match provider_id {
+        "xai" => (
+            "xAI",
+            "grok",
+            vec!["--no-auto-update", "agent", "stdio"],
+            vec!["xai.api_key", "cached_token"],
+            "grok login",
+        ),
+        "gemini" => (
+            "Gemini",
+            "gemini",
+            vec!["--acp"],
+            vec!["oauth-personal", "gemini-api-key", "vertex-ai", "login"],
+            "gemini",
+        ),
+        _ => return kimi_provider_health(),
+    };
+    if provider_id == "xai" {
+        let preferred = if std::env::var_os("XAI_API_KEY").is_some() {
+            "xai.api_key"
+        } else {
+            "cached_token"
+        };
+        auth_methods.sort_by_key(|method| usize::from(*method != preferred));
+    } else if provider_id == "gemini" {
+        let preferred = if std::env::var_os("GEMINI_API_KEY").is_some() {
+            Some("gemini-api-key")
+        } else if std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
+            || std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some()
+        {
+            Some("vertex-ai")
+        } else {
+            None
+        };
+        if let Some(preferred) = preferred {
+            auth_methods.sort_by_key(|method| usize::from(*method != preferred));
+        }
+    }
+    let health = check_acp_health(
+        label,
+        command,
+        args.into_iter().map(OsString::from).collect(),
+        &auth_methods,
+        PROVIDER_HEALTH_TIMEOUT,
+    );
+    let runtime_status = match health.status {
+        KimiAcpHealthStatus::Ready => "ready",
+        KimiAcpHealthStatus::NotInstalled => "not-installed",
+        KimiAcpHealthStatus::NotLoggedIn => "not-logged-in",
+        KimiAcpHealthStatus::Warning => "warning",
+    };
+    ProviderHealthCheck {
+        provider_id: provider_id.into(),
+        output: health.output,
+        runtime_status: runtime_status.into(),
+        auth_owner: "provider-cli".into(),
+        auth_command: Some(format!("{command} ACP handshake")),
+        login_command: Some(login_command.into()),
+        account_label: None,
+        subscription_label: None,
+        provider_mode: Some("local-subscription-cli".into()),
+        secret_storage: "Provider CLI, OS Keychain, or provider-owned files".into(),
+        privacy_note:
+            "Gyro checks the local ACP login state without reading provider credential values."
+                .into(),
         diagnostics_opt_in: false,
     }
 }
