@@ -1,6 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { OnMount } from "@monaco-editor/react";
@@ -473,6 +472,24 @@ function providerLoginProfile(providerId: ProviderId): CommandProfile {
       command: "kimi",
       displayName: "Kimi Login",
       id: "kimi-login",
+      workingDirectory: null,
+    };
+  }
+  if (providerId === "xai") {
+    return {
+      args: ["login"],
+      command: "grok",
+      displayName: "xAI Login",
+      id: "xai-login",
+      workingDirectory: null,
+    };
+  }
+  if (providerId === "gemini") {
+    return {
+      args: [],
+      command: "gemini",
+      displayName: "Gemini Login",
+      id: "gemini-login",
       workingDirectory: null,
     };
   }
@@ -5710,122 +5727,11 @@ export function App() {
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
   );
 
-  const attachDroppedMediaPaths = useCallback(
-    async (paths: string[]) => {
-      const mediaPaths = paths.filter(
-        (path) =>
-          isSupportedChatImagePath(path) || isSupportedChatVideoPath(path),
-      );
-      const unsupportedCount = paths.length - mediaPaths.length;
-      if (!mediaPaths.length) {
-        notify(
-          "command-failed",
-          "Unsupported attachment",
-          "Drop PNG, JPEG, WebP, MP4, MOV, or WebM media onto the chat",
-        );
-        return;
-      }
-      const existing = chatAttachments[activeDraftKey] ?? [];
-      const remaining = {
-        image: Math.max(
-          0,
-          4 - existing.filter((item) => item.kind === "image").length,
-        ),
-        video: Math.max(
-          0,
-          2 - existing.filter((item) => item.kind === "video").length,
-        ),
-      };
-      const prepared: ChatAttachment[] = [];
-      let rejectedCount = unsupportedCount;
-      let limitExceeded = false;
-      for (const path of mediaPaths) {
-        const kind = isSupportedChatVideoPath(path) ? "video" : "image";
-        if (remaining[kind] <= 0) {
-          limitExceeded = true;
-          continue;
-        }
-        remaining[kind] -= 1;
-        try {
-          const attachment = await invoke<ChatAttachment>(
-            "prepare_chat_attachment",
-            {
-              request: {
-                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
-                path,
-                workspacePath,
-                kind,
-              },
-            },
-          );
-          prepared.push({
-            ...attachment,
-            previewUrl: convertFileSrc(attachment.path),
-          });
-        } catch {
-          rejectedCount += 1;
-        }
-      }
-      if (prepared.length) {
-        setChatAttachments((current) => ({
-          ...current,
-          [activeDraftKey]: [...(current[activeDraftKey] ?? []), ...prepared],
-        }));
-      }
-      if (limitExceeded) {
-        notify(
-          "command-failed",
-          "Media limit reached",
-          "Attach up to four images and two videos per message",
-        );
-      } else if (rejectedCount > 0) {
-        notify(
-          "command-failed",
-          "Media rejected",
-          `${rejectedCount} dropped item${rejectedCount === 1 ? " was" : "s were"} not accepted`,
-        );
-      }
-    },
-    [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
-  );
-
-  useEffect(() => {
-    const isChatVisible =
-      activeDestination === "onboarding" ||
-      (activeDestination === "workspace" && activeWorkspaceLayout === "thread");
-    if (!isTauriRuntime() || !isChatVisible) {
-      return;
-    }
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type !== "drop") {
-          return;
-        }
-        const scale = window.devicePixelRatio || 1;
-        const target = document.elementFromPoint(
-          event.payload.position.x / scale,
-          event.payload.position.y / scale,
-        );
-        if (!target?.closest(".gyro-chat-surface")) {
-          return;
-        }
-        void attachDroppedMediaPaths(event.payload.paths);
-      })
-      .then((dispose) => {
-        if (disposed) {
-          dispose();
-        } else {
-          unlisten = dispose;
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [activeDestination, activeWorkspaceLayout, attachDroppedMediaPaths]);
+  // Media dropped from Finder is handled through the webview's HTML5 drop
+  // path (onAttachMediaFiles -> attachDroppedMedia), which routes files to the
+  // specific chat pane they land on. Tauri's native drag-drop handler is left
+  // disabled (dragDropEnabled: false) so HTML5 drag-and-drop — including
+  // dragging sessions from the sidebar into the chat grid — works.
 
   const changeChatMode = useCallback(
     async (mode: ChatMode) => {
@@ -12529,10 +12435,6 @@ function loadChatGridState(): ChatGridState {
   }
 }
 
-function isSupportedChatImagePath(path: string) {
-  return /\.(?:png|jpe?g|webp)$/i.test(path.trim());
-}
-
 function isSupportedChatVideoPath(path: string) {
   return /\.(?:mp4|m4v|mov|webm)$/i.test(path.trim());
 }
@@ -14448,7 +14350,11 @@ function approvalNotificationCopy(
       ? "Claude"
       : config.selectedProviderId === "kimi"
         ? "Kimi"
-        : "Codex";
+        : config.selectedProviderId === "xai"
+          ? "Grok"
+          : config.selectedProviderId === "gemini"
+            ? "Gemini"
+            : "Codex";
   if (mode === "gated") {
     return {
       title: "Ask before executing",
@@ -14485,11 +14391,11 @@ function createProviderHealthOutput(
     case "kimi":
       return "Kimi Code ACP authenticated; provider-owned token value was not read by Gyro.";
     case "xai":
-      return "xai provider-env auth available; XAI_API_KEY is set; value not read by Gyro.";
+      return "Grok Build ACP authenticated; provider-owned credentials were not read by Gyro.";
     case "cursor":
       return "cursor-agent: logged in; command available";
     case "gemini":
-      return "gemini provider-env auth available; GEMINI_API_KEY is set; value not read by Gyro.";
+      return "Gemini CLI ACP authenticated; provider-owned credentials were not read by Gyro.";
     case "opencode":
       return "opencode: local config available";
     case "custom":

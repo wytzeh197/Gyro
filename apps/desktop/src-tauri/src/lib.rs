@@ -8837,11 +8837,88 @@ fn run_provider_chat_once(
     }
 }
 
+#[derive(Clone, Copy)]
+struct AcpProviderRuntime {
+    label: &'static str,
+    program: &'static str,
+    args: &'static [&'static str],
+    auth_methods: &'static [&'static str],
+    cursor_kind: &'static str,
+    default_model: &'static str,
+    runner: &'static str,
+}
+
+fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
+    match provider_id {
+        "kimi" => Some(AcpProviderRuntime {
+            label: "Kimi",
+            program: "kimi",
+            args: &["acp"],
+            auth_methods: &["login"],
+            cursor_kind: "kimi-acp-session",
+            default_model: "k3",
+            runner: "kimi-acp",
+        }),
+        "xai" => Some(AcpProviderRuntime {
+            label: "xAI",
+            program: "grok",
+            args: &["--no-auto-update", "agent", "stdio"],
+            auth_methods: &["xai.api_key", "cached_token"],
+            cursor_kind: "xai-acp-session",
+            default_model: "grok-4.5",
+            runner: "grok-acp",
+        }),
+        "gemini" => Some(AcpProviderRuntime {
+            label: "Gemini",
+            program: "gemini",
+            args: &["--acp"],
+            auth_methods: &["oauth-personal", "gemini-api-key", "vertex-ai", "login"],
+            cursor_kind: "gemini-acp-session",
+            default_model: "gemini-default",
+            runner: "gemini-acp",
+        }),
+        _ => None,
+    }
+}
+
+fn acp_auth_methods(runtime: AcpProviderRuntime) -> Vec<String> {
+    let mut methods = runtime
+        .auth_methods
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if runtime.program == "grok" {
+        let preferred = if std::env::var_os("XAI_API_KEY").is_some() {
+            "xai.api_key"
+        } else {
+            "cached_token"
+        };
+        methods.sort_by_key(|method| usize::from(method != preferred));
+    } else if runtime.program == "gemini" {
+        let preferred = if std::env::var_os("GEMINI_API_KEY").is_some() {
+            Some("gemini-api-key")
+        } else if std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
+            || std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some()
+        {
+            Some("vertex-ai")
+        } else {
+            None
+        };
+        if let Some(preferred) = preferred {
+            methods.sort_by_key(|method| usize::from(method != preferred));
+        }
+    }
+    methods
+}
+
 fn run_kimi_acp_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    let runtime = acp_provider_runtime(&request.provider_id)
+        .ok_or_else(|| anyhow::anyhow!("{} does not have an ACP runtime", request.provider_id))?;
+    let provider_label = request.provider_label.as_deref().unwrap_or(runtime.label);
     let workspace = provider_chat_cwd(request.workspace_path.as_deref())?;
     let cancellation = app
         .state::<ProviderCancellationManager>()
@@ -8892,11 +8969,23 @@ fn run_kimi_acp_chat(
     let require_file_approval = request.require_file_edit_approval;
     let output = run_kimi_acp(
         KimiAcpRequest {
-            program: "kimi".into(),
-            program_args: vec!["acp".into()],
+            provider_label: provider_label.into(),
+            program: runtime.program.into(),
+            program_args: runtime.args.iter().map(Into::into).collect(),
+            auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),
             prompt,
-            model: request.model_id.clone().unwrap_or_else(|| "k3".into()),
+            model: request
+                .model_id
+                .clone()
+                .filter(|model| !(request.provider_id == "xai" && model == runtime.default_model))
+                .unwrap_or_else(|| {
+                    if request.provider_id == "xai" {
+                        String::new()
+                    } else {
+                        runtime.default_model.into()
+                    }
+                }),
             reasoning_effort: request
                 .reasoning_effort
                 .clone()
@@ -8907,7 +8996,7 @@ fn run_kimi_acp_chat(
                 KimiAcpMode::Normal
             },
             resume_session_id: resume_cursor
-                .filter(|cursor| cursor.kind == "kimi-acp-session")
+                .filter(|cursor| cursor.kind == runtime.cursor_kind)
                 .map(|cursor| cursor.session_id.clone()),
             timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
             inactivity_timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
@@ -8978,7 +9067,7 @@ fn run_kimi_acp_chat(
         },
         |target, content| {
             if plan_mode {
-                anyhow::bail!("Kimi file writes are disabled in plan mode");
+                anyhow::bail!("{provider_label} file writes are disabled in plan mode");
             }
             if write_tokens
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |tokens| {
@@ -8986,7 +9075,7 @@ fn run_kimi_acp_chat(
                 })
                 .is_err()
             {
-                anyhow::bail!("Kimi requested an unapproved workspace write");
+                anyhow::bail!("{provider_label} requested an unapproved workspace write");
             }
             let transaction =
                 prepare_provider_text_replacement_transaction(&workspace, target, content)?;
@@ -8998,7 +9087,7 @@ fn run_kimi_acp_chat(
     )?;
     let activities = activities
         .lock()
-        .map_err(|_| anyhow::anyhow!("Kimi activity state is unavailable"))?
+        .map_err(|_| anyhow::anyhow!("{provider_label} activity state is unavailable"))?
         .clone();
     let response = gyro_core::sanitize_harness_text(&output.response);
     Ok(ProviderRunnerOutput {
@@ -9006,13 +9095,13 @@ fn run_kimi_acp_chat(
         context_usage: None,
         response: response.clone(),
         resume_cursor: Some(ProviderResumeCursor {
-            kind: "kimi-acp-session".into(),
+            kind: runtime.cursor_kind.into(),
             session_id: output.session_id.clone(),
         }),
         retry_count: 0,
         resumed: output.resumed,
         output_summary: Some(provider_output_summary(
-            "kimi-acp",
+            runtime.runner,
             &output.stop_reason,
             Some(&output.session_id),
             response.chars().count(),
@@ -12357,6 +12446,7 @@ fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
         ProviderExecutionKind::CodexCli => ProviderAdapterKind::OpenAiCodex,
         ProviderExecutionKind::ClaudeCode => ProviderAdapterKind::AnthropicClaude,
         ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
+        ProviderExecutionKind::AcpCli => ProviderAdapterKind::KimiAcp,
         ProviderExecutionKind::ReadinessOnly => ProviderAdapterKind::ReadinessOnly,
     };
     ProviderAdapterDescriptor {
@@ -16429,7 +16519,7 @@ while True:
     }
 
     #[test]
-    fn provider_adapter_registry_executes_kimi_and_keeps_readiness_only_entries() {
+    fn provider_adapter_registry_executes_all_supported_acp_providers() {
         let openai = provider_adapter_for("openai");
         assert_eq!(openai.kind, ProviderAdapterKind::OpenAiCodex);
         assert_eq!(openai.runner, "codex-cli");
@@ -16442,12 +16532,16 @@ while True:
         assert_eq!(kimi.kind, ProviderAdapterKind::KimiAcp);
         assert_eq!(kimi.runner, "kimi-acp");
 
-        for provider_id in ["xai", "gemini"] {
+        for (provider_id, runner) in [("xai", "grok-acp"), ("gemini", "gemini-acp")] {
             let adapter = provider_adapter_for(provider_id);
-            assert_eq!(adapter.kind, ProviderAdapterKind::ReadinessOnly);
-            assert_eq!(adapter.runner, "readiness-only");
-            assert_eq!(adapter.auth_owner, "provider-env");
+            assert_eq!(adapter.kind, ProviderAdapterKind::KimiAcp);
+            assert_eq!(adapter.runner, runner);
+            assert!(adapter.timeout_seconds > 0);
         }
+        assert_eq!(
+            provider_adapter_for("cursor").kind,
+            ProviderAdapterKind::ReadinessOnly
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub enum ProviderExecutionKind {
     CodexCli,
     ClaudeCode,
     KimiAcp,
+    AcpCli,
     ReadinessOnly,
 }
 
@@ -68,24 +69,24 @@ const PROVIDERS: &[ProviderDescriptor] = &[
     },
     ProviderDescriptor {
         id: "xai",
-        execution_kind: ProviderExecutionKind::ReadinessOnly,
-        health_kind: ProviderHealthKind::Environment,
-        runner: "readiness-only",
-        auth_owner: "provider-env",
-        supports_approvals: false,
-        supports_images: false,
-        supports_resume: false,
+        execution_kind: ProviderExecutionKind::AcpCli,
+        health_kind: ProviderHealthKind::KimiAcp,
+        runner: "grok-acp",
+        auth_owner: "xai-local-grok-login",
+        supports_approvals: true,
+        supports_images: true,
+        supports_resume: true,
         supports_usage: false,
     },
     ProviderDescriptor {
         id: "gemini",
-        execution_kind: ProviderExecutionKind::ReadinessOnly,
-        health_kind: ProviderHealthKind::Environment,
-        runner: "readiness-only",
-        auth_owner: "provider-env",
-        supports_approvals: false,
-        supports_images: false,
-        supports_resume: false,
+        execution_kind: ProviderExecutionKind::AcpCli,
+        health_kind: ProviderHealthKind::KimiAcp,
+        runner: "gemini-acp",
+        auth_owner: "google-local-gemini-login",
+        supports_approvals: true,
+        supports_images: true,
+        supports_resume: true,
         supports_usage: false,
     },
     ProviderDescriptor {
@@ -130,15 +131,21 @@ mod tests {
     use super::{provider_descriptor, provider_is_executable, ProviderExecutionKind};
 
     #[test]
-    fn executable_registry_includes_kimi_and_excludes_readiness_only_providers() {
+    fn executable_registry_includes_acp_providers_and_excludes_readiness_only_providers() {
         assert!(provider_is_executable("openai"));
         assert!(provider_is_executable("anthropic"));
         assert!(provider_is_executable("kimi"));
-        assert!(!provider_is_executable("xai"));
-        assert!(!provider_is_executable("gemini"));
+        assert!(provider_is_executable("xai"));
+        assert!(provider_is_executable("gemini"));
+        assert!(!provider_is_executable("cursor"));
+        assert!(!provider_is_executable("opencode"));
         assert_eq!(
             provider_descriptor("kimi").unwrap().execution_kind,
             ProviderExecutionKind::KimiAcp
+        );
+        assert_eq!(
+            provider_descriptor("gemini").unwrap().execution_kind,
+            ProviderExecutionKind::AcpCli
         );
     }
 }

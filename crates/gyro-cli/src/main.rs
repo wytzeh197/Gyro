@@ -1656,6 +1656,73 @@ enum CliProviderKind {
     Codex,
     Claude,
     Kimi,
+    Acp,
+}
+
+#[derive(Clone, Copy)]
+struct CliAcpProviderRuntime {
+    label: &'static str,
+    args: &'static [&'static str],
+    auth_methods: &'static [&'static str],
+    cursor_kind: &'static str,
+    default_model: &'static str,
+}
+
+fn cli_acp_provider_runtime(provider_id: &str) -> Option<CliAcpProviderRuntime> {
+    match provider_id {
+        "kimi" => Some(CliAcpProviderRuntime {
+            label: "Kimi",
+            args: &["acp"],
+            auth_methods: &["login"],
+            cursor_kind: "kimi-acp-session",
+            default_model: "k3",
+        }),
+        "xai" => Some(CliAcpProviderRuntime {
+            label: "xAI",
+            args: &["--no-auto-update", "agent", "stdio"],
+            auth_methods: &["xai.api_key", "cached_token"],
+            cursor_kind: "xai-acp-session",
+            default_model: "grok-4.5",
+        }),
+        "gemini" => Some(CliAcpProviderRuntime {
+            label: "Gemini",
+            args: &["--acp"],
+            auth_methods: &["oauth-personal", "gemini-api-key", "vertex-ai", "login"],
+            cursor_kind: "gemini-acp-session",
+            default_model: "gemini-default",
+        }),
+        _ => None,
+    }
+}
+
+fn cli_acp_auth_methods(runtime: CliAcpProviderRuntime) -> Vec<String> {
+    let mut methods = runtime
+        .auth_methods
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if runtime.label == "xAI" {
+        let preferred = if std::env::var_os("XAI_API_KEY").is_some() {
+            "xai.api_key"
+        } else {
+            "cached_token"
+        };
+        methods.sort_by_key(|method| usize::from(method != preferred));
+    } else if runtime.label == "Gemini" {
+        let preferred = if std::env::var_os("GEMINI_API_KEY").is_some() {
+            Some("gemini-api-key")
+        } else if std::env::var_os("GOOGLE_GENAI_USE_VERTEXAI").is_some()
+            || std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some()
+        {
+            Some("vertex-ai")
+        } else {
+            None
+        };
+        if let Some(preferred) = preferred {
+            methods.sort_by_key(|method| usize::from(method != preferred));
+        }
+    }
+    methods
 }
 
 struct CliProviderInvocation {
@@ -1991,6 +2058,7 @@ fn cli_provider_kind(profile: &CommandProfile) -> Result<CliProviderKind> {
         Some(gyro_core::ProviderExecutionKind::CodexCli) => Ok(CliProviderKind::Codex),
         Some(gyro_core::ProviderExecutionKind::ClaudeCode) => Ok(CliProviderKind::Claude),
         Some(gyro_core::ProviderExecutionKind::KimiAcp) => Ok(CliProviderKind::Kimi),
+        Some(gyro_core::ProviderExecutionKind::AcpCli) => Ok(CliProviderKind::Acp),
         Some(gyro_core::ProviderExecutionKind::ReadinessOnly) => Err(cli_failure(
             CliErrorCategory::ProviderUnavailable,
             format!(
@@ -2882,7 +2950,16 @@ fn decide_kimi_provider_approval(
     cancellation: &CancellationToken,
     approval: &KimiAcpApprovalRequest,
 ) -> Result<(KimiAcpApprovalDecision, Option<Uuid>)> {
-    ensure_cli_not_cancelled(cancellation, "before Kimi action approval")?;
+    let provider_label = profile
+        .provider_id
+        .as_deref()
+        .and_then(cli_acp_provider_runtime)
+        .map(|runtime| runtime.label)
+        .unwrap_or("Provider");
+    ensure_cli_not_cancelled(
+        cancellation,
+        &format!("before {provider_label} action approval"),
+    )?;
     let approval_id = Uuid::new_v4();
     let kind = match approval.kind {
         KimiAcpApprovalKind::Command => CodexApprovalKind::Command,
@@ -2944,11 +3021,11 @@ fn decide_kimi_provider_approval(
         session.id,
         SessionEventKind::SystemEvent,
         if allowed {
-            "Kimi action approved once."
+            format!("{provider_label} action approved once.")
         } else if denied_by_plan {
-            "Kimi action rejected because plan mode is read-only."
+            format!("{provider_label} action rejected because plan mode is read-only.")
         } else {
-            "Kimi action rejected."
+            format!("{provider_label} action rejected.")
         },
         payload,
         Some(turn_id),
@@ -2982,6 +3059,13 @@ fn execute_kimi_acp_provider(
     cancellation: CancellationToken,
 ) -> Result<CliRunOutput> {
     let provider_id = profile.provider_id.clone().unwrap_or_else(|| "kimi".into());
+    let runtime = cli_acp_provider_runtime(&provider_id).ok_or_else(|| {
+        cli_failure(
+            CliErrorCategory::ProviderUnavailable,
+            format!("provider `{provider_id}` does not have an ACP runtime"),
+        )
+    })?;
+    let provider_label = runtime.label;
     let plan_mode = mode == "plan";
     let write_approvals = Arc::new(Mutex::new(Vec::<Uuid>::new()));
     let approval_tokens = write_approvals.clone();
@@ -2992,14 +3076,25 @@ fn execute_kimi_acp_provider(
         .cloned()
         .map(Into::into)
         .collect::<Vec<_>>();
-    program_args.push("acp".into());
+    program_args.extend(runtime.args.iter().map(Into::into));
     let result = run_kimi_acp(
         KimiAcpRequest {
+            provider_label: provider_label.into(),
             program: profile.command.clone().into(),
             program_args,
+            auth_method_ids: cli_acp_auth_methods(runtime),
             workspace: session.workspace_path.clone(),
             prompt: vec![serde_json::json!({"type": "text", "text": prompt})],
-            model: model.clone().unwrap_or_else(|| "k3".into()),
+            model: model
+                .clone()
+                .filter(|model| !(provider_id == "xai" && model == runtime.default_model))
+                .unwrap_or_else(|| {
+                    if provider_id == "xai" {
+                        String::new()
+                    } else {
+                        runtime.default_model.into()
+                    }
+                }),
             reasoning_effort: "max".into(),
             mode: if plan_mode {
                 KimiAcpMode::Plan
@@ -3007,7 +3102,7 @@ fn execute_kimi_acp_provider(
                 KimiAcpMode::Normal
             },
             resume_session_id: resume_cursor
-                .filter(|(kind, _)| *kind == "kimi-acp-session")
+                .filter(|(kind, _)| *kind == runtime.cursor_kind)
                 .map(|(_, session_id)| session_id.to_string()),
             timeout: Duration::from_secs(timeout_seconds),
             inactivity_timeout: Duration::from_secs(timeout_seconds.min(30 * 60)),
@@ -3026,7 +3121,7 @@ fn execute_kimi_acp_provider(
                 activity.label.clone(),
                 serde_json::json!({
                     "schema": "gyro.provider-activity.v1",
-                    "providerId": "kimi",
+                    "providerId": provider_id,
                     "activityId": activity.id,
                     "activityKind": activity.kind,
                     "detail": activity.detail,
@@ -3051,20 +3146,24 @@ fn execute_kimi_acp_provider(
             if let Some(approval_id) = approval_id {
                 approval_tokens
                     .lock()
-                    .map_err(|_| anyhow!("Kimi approval state is unavailable"))?
+                    .map_err(|_| anyhow!("{provider_label} approval state is unavailable"))?
                     .push(approval_id);
             }
             Ok(decision)
         },
         |target, content| {
             if plan_mode {
-                return Err(anyhow!("Kimi file writes are disabled in plan mode"));
+                return Err(anyhow!(
+                    "{provider_label} file writes are disabled in plan mode"
+                ));
             }
             let approval_id = write_tokens
                 .lock()
-                .map_err(|_| anyhow!("Kimi approval state is unavailable"))?
+                .map_err(|_| anyhow!("{provider_label} approval state is unavailable"))?
                 .pop()
-                .ok_or_else(|| anyhow!("Kimi requested an unapproved workspace write"))?;
+                .ok_or_else(|| {
+                    anyhow!("{provider_label} requested an unapproved workspace write")
+                })?;
             let transaction = prepare_provider_text_replacement_transaction(
                 &session.workspace_path,
                 target,
@@ -3083,10 +3182,10 @@ fn execute_kimi_acp_provider(
             if let Err(error) = store.append_event_with_turn_id(
                 session.id,
                 SessionEventKind::SystemEvent,
-                "Kimi file changes applied through Gyro.",
+                format!("{provider_label} file changes applied through Gyro."),
                 serde_json::json!({
                     "schema": "gyro.provider-approval.v1",
-                    "providerId": "kimi",
+                    "providerId": provider_id,
                     "approvalId": approval_id,
                     "status": "applied",
                     "changedPaths": changed_paths,
@@ -3106,6 +3205,11 @@ fn execute_kimi_acp_provider(
         Err(error) => {
             let detail = gyro_core::sanitize_harness_text(&error.to_string());
             let cancelled = cancellation.is_cancelled();
+            let status_message = if cancelled {
+                format!("{provider_label} ACP run cancelled.")
+            } else {
+                format!("{provider_label} ACP run failed.")
+            };
             update_cli_provider_binding_status(
                 store,
                 session.id,
@@ -3126,11 +3230,7 @@ fn execute_kimi_acp_provider(
                 },
                 profile,
                 model,
-                if cancelled {
-                    "Kimi ACP run cancelled."
-                } else {
-                    "Kimi ACP run failed."
-                },
+                &status_message,
                 Some(&detail),
                 None,
             )?;
@@ -3154,7 +3254,7 @@ fn execute_kimi_acp_provider(
         model.clone(),
         Some("max".into()),
         serde_json::json!({
-            "kind": "kimi-acp-session",
+            "kind": runtime.cursor_kind,
             "sessionId": output.session_id,
         }),
         "ready",
@@ -3175,6 +3275,7 @@ fn execute_kimi_acp_provider(
         )?,
         Some(turn_id),
     )?;
+    let completion_message = format!("{provider_label} ACP run completed.");
     append_cli_run_status(
         store,
         session,
@@ -3184,7 +3285,7 @@ fn execute_kimi_acp_provider(
         HarnessRunStatus::Done,
         profile,
         model,
-        "Kimi ACP run completed.",
+        &completion_message,
         None,
         Some(output.duration_ms),
     )?;
@@ -3293,7 +3394,7 @@ fn execute_cli_provider(
             result => result,
         };
     }
-    if provider_kind == CliProviderKind::Kimi {
+    if matches!(provider_kind, CliProviderKind::Kimi | CliProviderKind::Acp) {
         let result = execute_kimi_acp_provider(
             store,
             mutation_journal_dir,
@@ -3325,13 +3426,12 @@ fn execute_cli_provider(
                     HarnessRunStatus::Failed,
                     profile,
                     model,
-                    "Stale Kimi ACP cursor cleared; retry explicitly to avoid replaying tools.",
+                    "Stale ACP cursor cleared; retry explicitly to avoid replaying tools.",
                     Some(&gyro_core::sanitize_harness_text(&error.to_string())),
                     None,
                 )?;
-                Err(error.context(
-                    "stale Kimi ACP cursor cleared; retry explicitly to avoid replaying tools",
-                ))
+                Err(error
+                    .context("stale ACP cursor cleared; retry explicitly to avoid replaying tools"))
             }
             result => result,
         };
@@ -3500,6 +3600,7 @@ fn execute_cli_provider(
                             CliProviderKind::Codex => "Codex",
                             CliProviderKind::Claude => "Claude",
                             CliProviderKind::Kimi => "Kimi",
+                            CliProviderKind::Acp => "ACP provider",
                         };
                         let resume = format!("`gyro resume {}`", session.id);
                         match failure.kind {
@@ -3512,6 +3613,7 @@ fn execute_cli_provider(
                                         CliProviderKind::Codex => "codex login --device-auth",
                                         CliProviderKind::Claude => "claude auth login",
                                         CliProviderKind::Kimi => "kimi login",
+                                        CliProviderKind::Acp => "the provider login command",
                                     }
                                 ),
                             ),
@@ -3548,6 +3650,7 @@ fn execute_cli_provider(
                 CliProviderKind::Codex => "codex-session",
                 CliProviderKind::Claude => "claude-session",
                 CliProviderKind::Kimi => "kimi-acp-session",
+                CliProviderKind::Acp => "acp-session",
             };
             let binding_status = if matches!(
                 outcome.termination,
@@ -3597,6 +3700,7 @@ fn execute_cli_provider(
             CliProviderKind::Codex => "codex-session",
             CliProviderKind::Claude => "claude-session",
             CliProviderKind::Kimi => "kimi-acp-session",
+            CliProviderKind::Acp => "acp-session",
         };
         store.upsert_provider_session_binding(
             session.id,
@@ -5800,6 +5904,30 @@ mod tests {
             cli_failure_details(&error).0,
             CliErrorCategory::ApprovalRejected
         );
+    }
+
+    #[test]
+    fn gemini_and_xai_profiles_select_the_shared_acp_runtime() {
+        for (provider_id, profile_id, command, expected_cursor) in [
+            ("gemini", "gemini-cli", "gemini", "gemini-acp-session"),
+            ("xai", "grok-build", "grok", "xai-acp-session"),
+        ] {
+            let profile = CommandProfile {
+                id: profile_id.into(),
+                display_name: provider_id.into(),
+                command: command.into(),
+                args: Vec::new(),
+                working_directory: None,
+                provider_id: Some(provider_id.into()),
+                default_model: None,
+                readiness: gyro_core::CommandProfileReadiness::Ready,
+            };
+            assert_eq!(cli_provider_kind(&profile).unwrap(), CliProviderKind::Acp);
+            assert_eq!(
+                cli_acp_provider_runtime(provider_id).unwrap().cursor_kind,
+                expected_cursor
+            );
+        }
     }
 
     #[test]
