@@ -3085,6 +3085,8 @@ fn execute_kimi_acp_provider(
             auth_method_ids: cli_acp_auth_methods(runtime),
             workspace: session.workspace_path.clone(),
             prompt: vec![serde_json::json!({"type": "text", "text": prompt})],
+            // The CLI has no desktop capability bridge to attach.
+            mcp_servers: Vec::new(),
             model: model
                 .clone()
                 .filter(|model| !(provider_id == "xai" && model == runtime.default_model))

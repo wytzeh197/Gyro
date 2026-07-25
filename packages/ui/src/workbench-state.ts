@@ -36,6 +36,11 @@ import type {
   WorkspaceSearchResult,
   GitReviewAction,
   GitReviewActionId,
+  GithubAvailability,
+  GithubPullRequest,
+  GithubState,
+  GithubWorkflowRun,
+  GithubWorkflowRunDetail,
   Notification,
   NotificationKind,
   OnboardingStepId,
@@ -837,6 +842,15 @@ function isIdeViewId(value: unknown): value is IdeViewId {
   );
 }
 
+function defaultGithubState(): GithubState {
+  return {
+    availability: undefined,
+    runs: [],
+    pullRequests: [],
+    loading: false,
+  };
+}
+
 function defaultSourceControlState(): SourceControlState {
   return {
     provider: "git",
@@ -1233,6 +1247,14 @@ export type WorkbenchAction =
     }
   | { type: "ide-set-diagnostics"; diagnostics: ProblemDiagnostic[] }
   | { type: "ide-set-source-control"; sourceControl: SourceControlState }
+  | { type: "github-loading"; loading: boolean }
+  | { type: "github-set-availability"; availability: GithubAvailability }
+  | { type: "github-set-runs"; runs: GithubWorkflowRun[] }
+  | { type: "github-select-run"; runId?: number }
+  | { type: "github-set-run-detail"; detail: GithubWorkflowRunDetail }
+  | { type: "github-set-run-logs"; logs?: string }
+  | { type: "github-set-pull-requests"; pullRequests: GithubPullRequest[] }
+  | { type: "github-error"; error?: string }
   | { type: "ide-set-tasks"; tasks: TaskDefinition[] }
   | { type: "ide-set-test-tree"; tests: TestTreeItem[] }
   | { type: "ide-set-debug-session"; session: DebugSessionState }
@@ -1275,6 +1297,8 @@ export type WorkbenchAction =
       command?: string;
       projectPath?: string;
       workingDirectory?: string;
+      governedSessionId?: string;
+      governedProviderId?: string;
     }
   | {
       type: "set-terminal-pane-attention";
@@ -1332,7 +1356,13 @@ export type WorkbenchAction =
     }
   | { type: "select-diff-file"; path: string }
   | { type: "toggle-diff-directory"; directory: string }
-  | { type: "run-git-review-action"; actionId: GitReviewActionId }
+  | { type: "start-git-review-action"; actionId: GitReviewActionId }
+  | {
+      type: "settle-git-review-action";
+      actionId: GitReviewActionId;
+      outcome: "done" | "failed";
+      message: string;
+    }
   | {
       type: "set-diff-file-state";
       path: string;
@@ -1439,6 +1469,7 @@ export function createInitialWorkbenchState(
     activeOutputChannelId: "system",
     contributions: defaultIdeContributions(),
     aiToolCalls: [],
+    github: defaultGithubState(),
   };
 
   return {
@@ -2430,6 +2461,98 @@ export function workbenchReducer(
           sourceControl: action.sourceControl,
           fileDecorations: decorationsFromSourceControl(action.sourceControl),
         },
+        // Push/commit availability is derived from source control, so a fresh
+        // status has to re-settle the action bar.
+        diffReview: normalizeDiffReview(state.diffReview, action.sourceControl),
+      };
+    case "github-loading":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: { ...state.ide.github, loading: action.loading },
+        },
+      };
+    case "github-set-availability":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: {
+            ...state.ide.github,
+            availability: action.availability,
+            lastCheckedAt: new Date().toISOString(),
+            error: action.availability.error,
+          },
+        },
+      };
+    case "github-set-runs":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: {
+            ...state.ide.github,
+            runs: action.runs,
+            lastCheckedAt: new Date().toISOString(),
+            error: undefined,
+          },
+        },
+      };
+    case "github-select-run":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: {
+            ...state.ide.github,
+            selectedRunId: action.runId,
+            // Detail and logs belong to the previous run; drop them so the UI
+            // never shows one run's jobs under another run's heading.
+            runDetail: undefined,
+            runLogs: undefined,
+          },
+        },
+      };
+    case "github-set-run-detail":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: {
+            ...state.ide.github,
+            runDetail: action.detail,
+            selectedRunId: action.detail.run.id,
+          },
+        },
+      };
+    case "github-set-run-logs":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: { ...state.ide.github, runLogs: action.logs },
+        },
+      };
+    case "github-set-pull-requests":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: {
+            ...state.ide.github,
+            pullRequests: action.pullRequests,
+            error: undefined,
+          },
+        },
+      };
+    case "github-error":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          github: { ...state.ide.github, error: action.error, loading: false },
+        },
       };
     case "ide-set-tasks":
       return {
@@ -2714,6 +2837,12 @@ export function workbenchReducer(
         (action.status === "running" || action.status === "waiting"
           ? existingPane?.hasForegroundJob
           : false);
+      // Governance is decided at launch. A later poll that omits it must not
+      // silently downgrade a governed pane to looking ungoverned.
+      const nextGovernedSessionId =
+        action.governedSessionId ?? existingPane?.governedSessionId;
+      const nextGovernedProviderId =
+        action.governedProviderId ?? existingPane?.governedProviderId;
       const nextActivePaneTab =
         (state.isToolPanelOpen ||
           state.activeWorkspaceLayout === "terminal-grid") &&
@@ -2731,7 +2860,9 @@ export function workbenchReducer(
         existingPane.hasForegroundJob === nextHasForegroundJob &&
         existingPane.lastEvent === action.event &&
         existingPane.output === action.output &&
-        existingPane.status === action.status
+        existingPane.status === action.status &&
+        existingPane.governedSessionId === nextGovernedSessionId &&
+        existingPane.governedProviderId === nextGovernedProviderId
       ) {
         return state;
       }
@@ -2751,6 +2882,8 @@ export function workbenchReducer(
                   action.status === "failed" ? "failed" : pane.attention,
                 projectPath: nextProjectPath,
                 workingDirectory: nextWorkingDirectory,
+                governedSessionId: nextGovernedSessionId,
+                governedProviderId: nextGovernedProviderId,
               }
             : pane,
         ),
@@ -3039,7 +3172,7 @@ export function workbenchReducer(
         activePaneTab: "diff",
         isToolPanelOpen: true,
         diffReview: {
-          ...normalizeDiffReview(state.diffReview),
+          ...normalizeDiffReview(state.diffReview, state.ide.sourceControl),
           activeTurnId: action.turnId ?? state.diffReview.activeTurnId,
           approvalState: "pending",
           files,
@@ -3092,12 +3225,15 @@ export function workbenchReducer(
         },
       };
     }
-    case "run-git-review-action": {
-      const review = normalizeDiffReview(state.diffReview);
+    case "start-git-review-action": {
+      const review = normalizeDiffReview(
+        state.diffReview,
+        state.ide.sourceControl,
+      );
       const actionToRun = review.gitActions.find(
         (gitAction) => gitAction.id === action.actionId,
       );
-      if (!actionToRun || actionToRun.status !== "ready") {
+      if (!actionToRun || actionToRun.status === "blocked") {
         return {
           ...state,
           diffReview: {
@@ -3108,19 +3244,48 @@ export function workbenchReducer(
           },
         };
       }
+      return {
+        ...state,
+        diffReview: {
+          ...review,
+          gitActions: review.gitActions.map((gitAction) =>
+            gitAction.id === action.actionId
+              ? {
+                  ...gitAction,
+                  status: "running" as const,
+                  error: undefined,
+                }
+              : gitAction,
+          ),
+          lastAction: `${actionToRun.label}…`,
+        },
+      };
+    }
+    case "settle-git-review-action": {
+      // Records what the backend actually did; the caller only dispatches this
+      // once the underlying git or gh command has returned.
+      const review = normalizeDiffReview(
+        state.diffReview,
+        state.ide.sourceControl,
+      );
       const now = new Date().toISOString();
-      const nextReview = {
+      const settled = {
         ...review,
         gitActions: review.gitActions.map((gitAction) =>
           gitAction.id === action.actionId
-            ? { ...gitAction, lastRunAt: now, status: "done" as const }
+            ? {
+                ...gitAction,
+                status: action.outcome,
+                lastRunAt: now,
+                error: action.outcome === "failed" ? action.message : undefined,
+              }
             : gitAction,
         ),
-        lastAction: `${actionToRun.label} completed locally`,
+        lastAction: action.message,
       };
       return {
         ...state,
-        diffReview: normalizeDiffReview(nextReview),
+        diffReview: normalizeDiffReview(settled, state.ide.sourceControl),
       };
     }
     case "set-diff-file-state": {
@@ -3131,38 +3296,44 @@ export function workbenchReducer(
       const rejected = files.filter((file) => file.state === "rejected").length;
       return {
         ...state,
-        diffReview: normalizeDiffReview({
-          ...state.diffReview,
-          approvalState:
-            accepted === files.length
-              ? "approved"
-              : rejected === files.length
-                ? "rejected"
-                : accepted > 0 || rejected > 0
-                  ? "partially-approved"
-                  : "pending",
-          files,
-          lastAction: action.action,
-        }),
+        diffReview: normalizeDiffReview(
+          {
+            ...state.diffReview,
+            approvalState:
+              accepted === files.length
+                ? "approved"
+                : rejected === files.length
+                  ? "rejected"
+                  : accepted > 0 || rejected > 0
+                    ? "partially-approved"
+                    : "pending",
+            files,
+            lastAction: action.action,
+          },
+          state.ide.sourceControl,
+        ),
       };
     }
     case "set-diff-review-state":
       return {
         ...state,
-        diffReview: normalizeDiffReview({
-          ...state.diffReview,
-          approvalState: action.state,
-          files: state.diffReview.files.map((file) => ({
-            ...file,
-            state:
-              action.state === "approved"
-                ? "accepted"
-                : action.state === "rejected"
-                  ? "rejected"
-                  : file.state,
-          })),
-          lastAction: action.action,
-        }),
+        diffReview: normalizeDiffReview(
+          {
+            ...state.diffReview,
+            approvalState: action.state,
+            files: state.diffReview.files.map((file) => ({
+              ...file,
+              state:
+                action.state === "approved"
+                  ? "accepted"
+                  : action.state === "rejected"
+                    ? "rejected"
+                    : file.state,
+            })),
+            lastAction: action.action,
+          },
+          state.ide.sourceControl,
+        ),
       };
     case "undo-diff-action":
       return {
@@ -4090,6 +4261,7 @@ function defaultDiffReview() {
 
 function normalizeDiffReview(
   diffReview: WorkbenchState["diffReview"],
+  sourceControl?: SourceControlState,
 ): WorkbenchState["diffReview"] {
   const normalized = {
     ...diffReview,
@@ -4102,7 +4274,7 @@ function normalizeDiffReview(
   };
   return {
     ...normalized,
-    gitActions: normalizeGitReviewActions(normalized),
+    gitActions: normalizeGitReviewActions(normalized, sourceControl),
   };
 }
 
@@ -4135,11 +4307,21 @@ function defaultGitReviewActions(): GitReviewAction[] {
   ];
 }
 
+/**
+ * Derive which git actions can run right now.
+ *
+ * Availability follows the repository's real state where we know it — staged
+ * files make a commit possible, unpushed commits make a push possible — and
+ * falls back to the completed-action chain when source control has not reported
+ * yet. A `running` action stays put, and a `failed` one becomes available again
+ * so the user can retry after fixing the cause.
+ */
 function normalizeGitReviewActions(
   diffReview: Pick<
     WorkbenchState["diffReview"],
     "approvalState" | "gitActions"
   >,
+  sourceControl?: SourceControlState,
 ): GitReviewAction[] {
   const existing = new Map(
     diffReview.gitActions.map((action) => [action.id, action]),
@@ -4150,31 +4332,38 @@ function normalizeGitReviewActions(
       ...existing.get(action.id),
     }),
   );
-  const createBranchDone =
-    actions.find((action) => action.id === "create-branch")?.status === "done";
-  const commitDone =
-    actions.find((action) => action.id === "commit")?.status === "done";
-  const pushDone =
-    actions.find((action) => action.id === "push")?.status === "done";
+  const statusOf = (id: GitReviewActionId) =>
+    actions.find((action) => action.id === id)?.status;
+  const commitDone = statusOf("commit") === "done";
+  const pushDone = statusOf("push") === "done";
   const approved = diffReview.approvalState === "approved";
 
+  const repoKnown = sourceControl?.available === true;
+  const hasStagedChanges = repoKnown
+    ? sourceControl.files.some((file) => file.staged)
+    : undefined;
+  const hasUnpushedCommits = repoKnown ? sourceControl.ahead > 0 : undefined;
+  const hasUpstream = repoKnown ? Boolean(sourceControl.upstream) : undefined;
+
   return actions.map((action) => {
-    if (action.status === "done" || action.status === "failed") {
+    if (action.status === "running" || action.status === "done") {
       return action;
     }
+    const ready = (value: boolean): GitReviewAction => ({
+      ...action,
+      status: value ? ("ready" as const) : ("blocked" as const),
+    });
     if (action.id === "create-branch") {
-      return { ...action, status: "ready" as const };
+      return ready(true);
     }
     if (action.id === "commit") {
-      return {
-        ...action,
-        status: approved && createBranchDone ? "ready" : "blocked",
-      };
+      return ready(hasStagedChanges ?? approved);
     }
     if (action.id === "push") {
-      return { ...action, status: commitDone ? "ready" : "blocked" };
+      return ready(hasUnpushedCommits ?? commitDone);
     }
-    return { ...action, status: pushDone ? "ready" : "blocked" };
+    // A pull request needs a branch that exists on the remote.
+    return ready((hasUpstream && !hasUnpushedCommits) ?? pushDone);
   });
 }
 

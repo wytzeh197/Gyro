@@ -132,6 +132,13 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         contextWindowTokens: 1_000_000,
       },
       {
+        id: "claude-opus-5",
+        displayName: "Claude Opus 5",
+        description:
+          "Frontier model for complex agentic coding and long-horizon work.",
+        contextWindowTokens: 1_000_000,
+      },
+      {
         id: "claude-opus-4-8",
         displayName: "Claude Opus 4.8",
         description: "Strong model for complex agentic coding.",
@@ -294,6 +301,42 @@ export function selectedModelLabel(provider: ModelProviderConfig) {
   );
 }
 
+/**
+ * Model a new session on this provider starts with.
+ *
+ * Falls back through the catalog default and then the first listed model so a
+ * provider always resolves to something selectable, even if a saved default
+ * points at a model the catalog has since dropped.
+ */
+export function providerDefaultModelId(provider: ModelProviderConfig) {
+  const models = provider.models;
+  if (
+    provider.defaultModelId &&
+    models.some((model) => model.id === provider.defaultModelId)
+  ) {
+    return provider.defaultModelId;
+  }
+  const catalogDefault = getProviderCatalogEntry(provider.id)?.defaultModelId;
+  if (catalogDefault && models.some((model) => model.id === catalogDefault)) {
+    return catalogDefault;
+  }
+  return models[0]?.id;
+}
+
+export function providerDefaultModel(
+  provider: ModelProviderConfig,
+): ProviderModel | undefined {
+  return getProviderModel(provider, providerDefaultModelId(provider));
+}
+
+export function defaultModelLabel(provider: ModelProviderConfig) {
+  return (
+    providerDefaultModel(provider)?.displayName ??
+    providerDefaultModelId(provider) ??
+    "Choose model"
+  );
+}
+
 export function selectedReasoningEffort(provider: ModelProviderConfig) {
   const model = getProviderModel(provider);
   const supported = model?.supportedReasoningEfforts ?? [];
@@ -382,11 +425,16 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
         (model) => !catalogModelIds.has(model.id),
       ),
     ];
+    const defaultModelId =
+      savedProvider?.defaultModelId &&
+      models.some((model) => model.id === savedProvider.defaultModelId)
+        ? savedProvider.defaultModelId
+        : catalogProvider.defaultModelId;
     const selectedModelId =
       savedProvider?.selectedModelId &&
       models.some((model) => model.id === savedProvider.selectedModelId)
         ? savedProvider.selectedModelId
-        : catalogProvider.selectedModelId;
+        : defaultModelId;
     const authStatus =
       savedProvider?.authStatus ??
       (savedProvider?.enabled ? "connected" : catalogProvider.authStatus);
@@ -406,6 +454,7 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       baseUrl: savedProvider?.baseUrl ?? catalogProvider.baseUrl,
       enabled: authStatus === "connected",
       models,
+      defaultModelId,
       selectedModelId,
       selectedReasoningEffort: (() => {
         const model = models.find((item) => item.id === selectedModelId);

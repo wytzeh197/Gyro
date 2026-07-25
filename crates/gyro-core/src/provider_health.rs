@@ -510,7 +510,7 @@ fn retained_stream_output(output: &str, truncated: bool, marker: &str) -> String
     output
 }
 
-fn augmented_gui_path() -> String {
+pub(crate) fn augmented_gui_path() -> String {
     let mut paths = std::env::var_os("HOME")
         .map(PathBuf::from)
         .map(|home| user_cli_paths(&home))

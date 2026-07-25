@@ -70,6 +70,9 @@ pub struct KimiAcpRequest {
     pub auth_method_ids: Vec<String>,
     pub workspace: PathBuf,
     pub prompt: Vec<Value>,
+    /// Stdio MCP servers to expose to the agent, in ACP `session/new` form.
+    /// Empty leaves the agent with only its own built-in tools.
+    pub mcp_servers: Vec<Value>,
     pub model: String,
     pub reasoning_effort: String,
     pub mode: KimiAcpMode,
@@ -414,7 +417,11 @@ where
     let session_id = if let Some(session_id) = request.resume_session_id.as_deref() {
         let resume_id = connection.send_request(
             "session/resume",
-            json!({"sessionId": session_id, "cwd": request.workspace, "mcpServers": []}),
+            json!({
+                "sessionId": session_id,
+                "cwd": request.workspace,
+                "mcpServers": request.mcp_servers,
+            }),
         )?;
         wait_for_response(
             &mut connection,
@@ -430,7 +437,7 @@ where
     } else {
         let new_id = connection.send_request(
             "session/new",
-            json!({"cwd": request.workspace, "mcpServers": []}),
+            json!({"cwd": request.workspace, "mcpServers": request.mcp_servers}),
         )?;
         let result = wait_for_response(
             &mut connection,
@@ -875,6 +882,8 @@ pub fn check_acp_health(
         auth_method_ids: auth_method_ids.iter().map(ToString::to_string).collect(),
         workspace: std::env::temp_dir(),
         prompt: Vec::new(),
+        // A health probe only checks that the agent starts and authenticates.
+        mcp_servers: Vec::new(),
         model: "k3".into(),
         reasoning_effort: "max".into(),
         mode: KimiAcpMode::Normal,
@@ -1031,6 +1040,7 @@ mod tests {
             auth_method_ids: vec!["login".into()],
             workspace,
             prompt: vec![json!({"type": "text", "text": "hello"})],
+            mcp_servers: Vec::new(),
             model: "k3".into(),
             reasoning_effort: "max".into(),
             mode: KimiAcpMode::Normal,

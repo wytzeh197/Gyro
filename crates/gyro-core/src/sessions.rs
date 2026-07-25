@@ -871,6 +871,9 @@ impl SessionStore {
         };
         let policy = serde_json::from_str::<ProjectCapabilityPolicy>(&stored)
             .ok()
+            // A policy saved before a capability class existed keeps its own
+            // choices and picks up the safe default for the new class.
+            .map(ProjectCapabilityPolicy::with_missing_classes_defaulted)
             .filter(|policy| policy.validate().is_ok())
             .filter(|policy| policy.workspace_key == workspace_key);
         Ok(policy
@@ -2444,6 +2447,63 @@ mod tests {
             .classes
             .values()
             .all(|access| *access == crate::capabilities::CapabilityAccess::Deny));
+    }
+
+    #[test]
+    fn capability_policy_saved_before_a_class_existed_keeps_its_choices() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let workspace_key = temp.path().display().to_string();
+
+        // Simulate a policy written by an older build: valid, but with no entry
+        // for the GitHub classes. The user's own choice here is Deny for
+        // terminal execution, which must survive the upgrade.
+        let mut legacy = ProjectCapabilityPolicy::defaults(workspace_key.clone());
+        legacy.classes.insert(
+            crate::capabilities::CapabilityClass::TerminalExecute,
+            crate::capabilities::CapabilityAccess::Deny,
+        );
+        legacy
+            .classes
+            .remove(&crate::capabilities::CapabilityClass::GithubInspect);
+        legacy
+            .classes
+            .remove(&crate::capabilities::CapabilityClass::GithubWrite);
+        store
+            .conn
+            .execute(
+                "insert into project_capability_policies
+                 (workspace_key, policy_json, revision, updated_at)
+                 values (?1, ?2, ?3, ?4)",
+                params![
+                    workspace_key,
+                    serde_json::to_string(&legacy).unwrap(),
+                    3_u64,
+                    Utc::now().to_rfc3339()
+                ],
+            )
+            .unwrap();
+
+        let recovered = store.get_project_capability_policy(&workspace_key).unwrap();
+        // Not downgraded to deny-all...
+        assert_eq!(
+            recovered.access_for(crate::capabilities::CapabilityClass::WorkspaceInspect),
+            crate::capabilities::CapabilityAccess::Allow
+        );
+        // ...the user's explicit Deny is preserved...
+        assert_eq!(
+            recovered.access_for(crate::capabilities::CapabilityClass::TerminalExecute),
+            crate::capabilities::CapabilityAccess::Deny
+        );
+        // ...and the new classes arrive at their safe defaults.
+        assert_eq!(
+            recovered.access_for(crate::capabilities::CapabilityClass::GithubInspect),
+            crate::capabilities::CapabilityAccess::Allow
+        );
+        assert_eq!(
+            recovered.access_for(crate::capabilities::CapabilityClass::GithubWrite),
+            crate::capabilities::CapabilityAccess::Ask
+        );
     }
 
     #[test]
