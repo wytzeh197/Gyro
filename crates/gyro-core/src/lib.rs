@@ -5,6 +5,7 @@ pub mod config;
 pub mod diff;
 pub mod doctor;
 pub mod execution;
+pub mod github;
 pub mod harness;
 pub mod ipc;
 pub mod keychain;
@@ -12,6 +13,7 @@ pub mod kimi_acp;
 pub mod mutations;
 pub mod paths;
 pub mod policy;
+pub mod provider_contract;
 pub mod provider_health;
 pub mod provider_registry;
 pub mod provider_stream;
@@ -47,6 +49,13 @@ pub use execution::{
     run_command, CancellationToken, ExecutionChunk, ExecutionOutcome, ExecutionRequest,
     ExecutionStream, ExecutionTermination,
 };
+pub use github::{
+    create_pull_request, github_availability, list_pull_requests, list_workflow_runs,
+    pull_request_for_branch, rerun_workflow, workflow_run_detail, workflow_run_logs,
+    CreatePullRequestRequest, GithubAvailability, GithubPullRequest, GithubRunState,
+    GithubWorkflowJob, GithubWorkflowRun, GithubWorkflowRunDetail, GithubWorkflowStep,
+    GITHUB_SCHEMA_V1, MAX_PULL_REQUESTS, MAX_WORKFLOW_RUNS,
+};
 pub use harness::{
     decode_provider_resume_cursor, harness_payload_value, sanitize_harness_text,
     validate_harness_payload_value, validate_mutation_approval_policy,
@@ -78,6 +87,12 @@ pub use mutations::{
 };
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};
+pub use provider_contract::{
+    audit_provider_args, executable_provider_contracts, is_cli_argument_error, probe_provider_args,
+    provider_cli_contract, provider_cli_contracts, ArgAcceptance, ArgContractViolation,
+    PromptDelivery, ProviderCliContract, ARG_CONTRACT_MARKER, ARG_TERMINATOR,
+    PROVIDER_ARG_PROBE_TIMEOUT,
+};
 pub use provider_health::{
     provider_account_label, provider_mode_label, provider_runtime_status_from_output,
     provider_subscription_label, should_skip_codex_login_for_external_env, ProviderHealthCheck,

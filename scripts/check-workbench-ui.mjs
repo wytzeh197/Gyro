@@ -229,6 +229,7 @@ expect(
 );
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const workbenchSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
 const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
@@ -1709,14 +1710,33 @@ expect(
     ?.status === "blocked",
   "Git commit action should stay blocked before approval.",
 );
+// Git actions are a two-phase lifecycle: the reducer marks an action running,
+// and only the real backend result settles it. Starting one must never report
+// success on its own.
+const gitActionStatus = (id) =>
+  state.diffReview.gitActions.find((action) => action.id === id)?.status;
 state = workbenchReducer(state, {
-  type: "run-git-review-action",
+  type: "start-git-review-action",
   actionId: "create-branch",
 });
 expect(
-  state.diffReview.gitActions.find((action) => action.id === "create-branch")
-    ?.status === "done",
-  "Git create-branch action did not complete locally.",
+  gitActionStatus("create-branch") === "running",
+  "Starting a git action should mark it running, not done.",
+);
+expect(
+  !appSource.includes('type: "run-git-review-action"') &&
+    !workbenchSource.includes("completed locally"),
+  "Git review actions must call the backend instead of faking completion.",
+);
+state = workbenchReducer(state, {
+  type: "settle-git-review-action",
+  actionId: "create-branch",
+  outcome: "done",
+  message: "Switched to gyro/smoke",
+});
+expect(
+  gitActionStatus("create-branch") === "done",
+  "A settled git action should record the backend result.",
 );
 state = workbenchReducer(state, {
   type: "set-diff-review-state",
@@ -1724,27 +1744,93 @@ state = workbenchReducer(state, {
   action: "approved in smoke",
 });
 expect(
-  state.diffReview.gitActions.find((action) => action.id === "commit")
-    ?.status === "ready",
-  "Git commit action should become ready after branch and approval.",
+  gitActionStatus("commit") === "ready",
+  "Git commit action should become ready after approval.",
 );
 state = workbenchReducer(state, {
-  type: "run-git-review-action",
+  type: "settle-git-review-action",
   actionId: "commit",
+  outcome: "done",
+  message: "Commit succeeded",
 });
 expect(
-  state.diffReview.gitActions.find((action) => action.id === "push")?.status ===
-    "ready",
+  gitActionStatus("push") === "ready",
   "Git push action should become ready after commit.",
 );
+// A failed push has to stay retryable rather than latching permanently.
 state = workbenchReducer(state, {
-  type: "run-git-review-action",
+  type: "settle-git-review-action",
   actionId: "push",
+  outcome: "failed",
+  message: "Push failed: no upstream",
 });
 expect(
-  state.diffReview.gitActions.find((action) => action.id === "open-pr")
-    ?.status === "ready",
+  gitActionStatus("push") === "ready" &&
+    state.diffReview.gitActions.find((action) => action.id === "push")
+      ?.error === "Push failed: no upstream",
+  "A failed git action should keep its error and become retryable.",
+);
+state = workbenchReducer(state, {
+  type: "settle-git-review-action",
+  actionId: "push",
+  outcome: "done",
+  message: "Push succeeded",
+});
+expect(
+  gitActionStatus("open-pr") === "ready",
   "Git PR action should become ready after push.",
+);
+// Real repository state should drive availability once git status arrives.
+// Reset the completed actions first so gating is derived, not inherited.
+const gitStateBase = workbenchReducer(state, {
+  type: "undo-diff-action",
+  action: "reset for source control check",
+});
+const sourceControlBase = {
+  provider: "git",
+  available: true,
+  branch: "gyro/smoke",
+  behind: 0,
+  additions: 0,
+  deletions: 0,
+  statsPartial: false,
+  files: [],
+};
+const unpushedState = workbenchReducer(gitStateBase, {
+  type: "ide-set-source-control",
+  sourceControl: { ...sourceControlBase, ahead: 2, upstream: undefined },
+});
+const statusIn = (next, id) =>
+  next.diffReview.gitActions.find((action) => action.id === id)?.status;
+expect(
+  statusIn(unpushedState, "push") === "ready" &&
+    statusIn(unpushedState, "open-pr") === "blocked",
+  "Unpushed commits with no upstream should allow push but block the PR.",
+);
+const pushedState = workbenchReducer(gitStateBase, {
+  type: "ide-set-source-control",
+  sourceControl: {
+    ...sourceControlBase,
+    ahead: 0,
+    upstream: "origin/gyro/smoke",
+  },
+});
+expect(
+  statusIn(pushedState, "open-pr") === "ready",
+  "A pushed branch with an upstream should allow opening a PR.",
+);
+const stagedState = workbenchReducer(gitStateBase, {
+  type: "ide-set-source-control",
+  sourceControl: {
+    ...sourceControlBase,
+    ahead: 0,
+    upstream: "origin/gyro/smoke",
+    files: [{ path: "a.ts", status: "modified", staged: true }],
+  },
+});
+expect(
+  statusIn(stagedState, "commit") === "ready",
+  "Staged files should make the commit action available.",
 );
 
 state = workbenchReducer(state, {

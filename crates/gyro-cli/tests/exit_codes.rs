@@ -49,6 +49,7 @@ fn write_provider_config(home: &Path, command: &Path, approvals_required: bool, 
             base_url: None,
             api_key_ref: format!("provider:{provider_id}"),
             enabled: true,
+            default_model_id: None,
         }],
         command_profiles: vec![CommandProfile {
             id: "test-provider".into(),
@@ -393,6 +394,7 @@ fn real_binary_does_not_launch_a_profile_with_a_disabled_provider() {
             base_url: None,
             api_key_ref: "provider:anthropic".into(),
             enabled: false,
+            default_model_id: None,
         }],
         command_profiles: vec![CommandProfile {
             id: "test-provider".into(),
