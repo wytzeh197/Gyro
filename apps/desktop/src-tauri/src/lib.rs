@@ -11083,6 +11083,9 @@ fn run_anthropic_claude_chat(
 
     let combined =
         gyro_core::security::redact_secrets(format!("{}{}", output.stdout, output.stderr).trim());
+    if let Some(detail) = claude_login_failure(&combined) {
+        anyhow::bail!("{detail}");
+    }
     if combined.is_empty() {
         anyhow::bail!(
             "Anthropic through Claude exited with {}",
@@ -11090,6 +11093,33 @@ fn run_anthropic_claude_chat(
         );
     }
     anyhow::bail!("{}", truncate_error_detail(&combined));
+}
+
+/// Claude Code reports a rejected sign-in inside its stream-json output rather
+/// than on stderr, so a failed run reads as a healthy session start for
+/// thousands of characters before the 401 appears. Reducing it to one line
+/// keeps the stored failure legible and lets it classify as a sign-in problem
+/// instead of a generic retry that cannot succeed.
+const CLAUDE_LOGIN_EXPIRED_DETAIL: &str = "Claude Code rejected this send with 401 authentication_failed, so its stored sign-in is no longer valid. Sign in again and Gyro will resend the message.";
+
+fn claude_login_failure(output: &str) -> Option<&'static str> {
+    if output.contains("OAuth access token has expired")
+        || output.contains("Failed to authenticate")
+    {
+        return Some(CLAUDE_LOGIN_EXPIRED_DETAIL);
+    }
+    output
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+        .any(|value| {
+            value
+                .get("error_status")
+                .and_then(serde_json::Value::as_i64)
+                == Some(401)
+                || value.get("error").and_then(serde_json::Value::as_str)
+                    == Some("authentication_failed")
+        })
+        .then_some(CLAUDE_LOGIN_EXPIRED_DETAIL)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -12147,6 +12177,21 @@ fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
         return (
             "offline",
             "Check your internet connection, then retry this message.",
+        );
+    }
+    // Checked before the generic authentication branch: an expired sign-in is
+    // the one auth failure Gyro can walk someone out of, so it needs a kind of
+    // its own. The surface offers sign-in for it instead of a health re-check,
+    // which a stale token still passes.
+    if normalized.contains("authentication_failed")
+        || normalized.contains("oauth access token has expired")
+        || normalized.contains("failed to authenticate")
+        || normalized.contains("\"error_status\":401")
+        || normalized.contains("401 unauthorized")
+    {
+        return (
+            "login-expired",
+            "This provider's sign-in expired. Sign in again and Gyro will resend your message.",
         );
     }
     if normalized.contains("unauthorized")
@@ -18002,6 +18047,56 @@ while True:
             "rate-limit"
         );
         assert_eq!(provider_failure_recovery("provider crashed").0, "retry");
+    }
+
+    #[test]
+    fn expired_sign_ins_are_recovered_by_signing_in_again() {
+        // Both lines are what `claude` actually emits on a dead login: the
+        // retry notice arrives mid-stream as JSON, the plain sentence at the
+        // end. Neither can be fixed by retrying, so they must not classify as
+        // `retry`, and they must stay distinct from `authentication` so the
+        // surface offers sign-in rather than a health re-check.
+        for error in [
+            r#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":401,"error":"authentication_failed"}"#,
+            "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+            CLAUDE_LOGIN_EXPIRED_DETAIL,
+        ] {
+            let (kind, message) = provider_failure_recovery(error);
+            assert_eq!(kind, "login-expired", "misclassified: {error}");
+            assert!(message.contains("Sign in again"), "unhelpful: {message}");
+        }
+
+        // A login that was never established is a different problem with a
+        // different fix, so it keeps the generic authentication kind.
+        assert_eq!(
+            provider_failure_recovery("not logged in").0,
+            "authentication"
+        );
+    }
+
+    #[test]
+    fn a_rejected_sign_in_replaces_the_raw_stream_dump() {
+        // The 401 sits far inside an otherwise healthy-looking stream, which is
+        // why the stored failure used to be thousands of characters of session
+        // setup with the cause buried in the middle.
+        let stream = format!(
+            "{}\n{}\n{}",
+            r#"{"type":"system","subtype":"init","tools":["Bash","Read","Write"],"model":"claude-opus-5"}"#,
+            r#"{"type":"system","subtype":"status","status":"requesting"}"#,
+            r#"{"type":"system","subtype":"api_retry","attempt":2,"error_status":401,"error":"authentication_failed"}"#,
+        );
+        assert_eq!(
+            claude_login_failure(&stream),
+            Some(CLAUDE_LOGIN_EXPIRED_DETAIL)
+        );
+
+        // A healthy stream and an unrelated failure must not be reported as a
+        // sign-in problem, or Gyro sends people to log in over a real bug.
+        assert_eq!(
+            claude_login_failure(r#"{"type":"system","subtype":"init","model":"claude-opus-5"}"#),
+            None
+        );
+        assert_eq!(claude_login_failure("error: connection refused"), None);
     }
 
     #[test]

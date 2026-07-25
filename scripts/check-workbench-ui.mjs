@@ -4568,8 +4568,22 @@ expect(
     tauriSource.includes("provider_failure_recovery") &&
     tauriSource.includes('"recoveryKind"') &&
     surfaceSource.includes("providerStatus.recoveryMessage") &&
-    surfaceSource.includes('providerStatus.recoveryKind === "authentication"'),
+    surfaceSource.includes("providerNeedsSignIn(providerStatus.recoveryKind)"),
   "Chat recovery should clear stale resume state and distinguish offline, authentication, and retry guidance.",
+);
+expect(
+  tauriSource.includes('"login-expired"') &&
+    tauriSource.includes("fn claude_login_failure") &&
+    surfaceSource.includes('recoveryKind === "login-expired"') &&
+    surfaceSource.includes(
+      "providerSignInLabel(providerStatus.recoveryKind)",
+    ) &&
+    appSource.includes(
+      "connectProvider(providerId, { forceLogin: needsSignIn })",
+    ) &&
+    appSource.includes("if (connected && needsSignIn) replayFailedTurn();") &&
+    appSource.includes("if (!options?.forceLogin && result.connectionStatus"),
+  "A send rejected over an expired sign-in should offer sign-in, skip the health shortcut that still passes on a stale token, and resend the message once the login succeeds.",
 );
 expect(
   coreSessionsSource.includes("update_session_summary") &&
