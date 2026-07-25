@@ -3843,6 +3843,147 @@ button.gyro-account-menu-row:hover {
   opacity: 0.55;
 }
 
+.gyro-sidebar-github-row {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  display: flex;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-sidebar-github-row:hover,
+.gyro-sidebar-github-row.is-active {
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+}
+
+.gyro-sidebar-github-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-github-row small {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-github-detail {
+  border-left: 1px solid var(--gyro-border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 6px 12px;
+  padding-left: 8px;
+}
+
+.gyro-sidebar-github-job {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 11.5px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gyro-sidebar-github-job span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-github-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.gyro-sidebar-github-actions button {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  padding: 3px 6px;
+}
+
+.gyro-sidebar-github-actions button:not(:disabled):hover {
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+}
+
+.gyro-sidebar-github-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Run/job/check state colors, keyed by the normalized GithubRunState. */
+.gyro-github-state {
+  flex: 0 0 auto;
+}
+
+.gyro-github-state.is-success {
+  color: var(--gyro-success);
+}
+
+.gyro-github-state.is-failure,
+.gyro-github-state.is-timed-out,
+.gyro-github-state.is-action-required,
+.gyro-github-state.is-stale {
+  color: var(--gyro-danger);
+}
+
+.gyro-github-state.is-queued,
+.gyro-github-state.is-in-progress {
+  animation: gyro-terminal-status-pulse 1.4s ease-in-out infinite;
+  color: var(--gyro-warn);
+}
+
+.gyro-github-state.is-cancelled,
+.gyro-github-state.is-skipped,
+.gyro-github-state.is-neutral,
+.gyro-github-state.is-unknown {
+  color: var(--gyro-faint);
+}
+
+.gyro-git-action-strip button.is-done {
+  border-color: color-mix(in srgb, var(--gyro-success) 40%, transparent);
+}
+
+.gyro-git-action-strip button.is-running {
+  animation: gyro-terminal-status-pulse 1.4s ease-in-out infinite;
+  border-color: color-mix(in srgb, var(--gyro-accent) 45%, transparent);
+  color: var(--gyro-text);
+}
+
+/* A failed action stays clickable so the user can retry after fixing it. */
+.gyro-git-action-strip button.is-failed {
+  background: var(--gyro-danger-soft);
+  border-color: color-mix(in srgb, var(--gyro-danger) 50%, transparent);
+  color: var(--gyro-danger);
+}
+
+.gyro-git-action-strip button.is-failed small {
+  color: var(--gyro-danger);
+}
+
 .gyro-git-action-strip button small {
   color: var(--gyro-faint);
   font-size: 10.5px;
@@ -14853,7 +14994,10 @@ textarea,
  * contrast and coloring (OpenAI black, Claude orange, etc.) in every theme.
  */
 .gyro-sidebar-thread-main .gyro-provider-logo svg,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main .gyro-provider-logo svg {
+.gyro-app-shell.is-chat-shell
+  .gyro-sidebar-thread-main
+  .gyro-provider-logo
+  svg {
   color: inherit;
 }
 
@@ -18119,6 +18263,30 @@ textarea:focus-visible,
   font-size: 10px;
 }
 
+/* The model's answer, shown next to the code instead of only in the chat. */
+.gyro-ide-assistant-reply {
+  border-top: 1px solid var(--gyro-border-soft);
+  margin-top: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-top: 6px;
+}
+
+.gyro-ide-assistant-reply p {
+  color: var(--gyro-text);
+  font-size: 12px;
+  line-height: 1.55;
+  /* Model replies contain code and long identifiers; wrap instead of
+     forcing the panel to scroll sideways. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.gyro-ide-assistant-reply p.is-pending {
+  color: var(--gyro-faint);
+  font-style: italic;
+}
+
 .gyro-ide-assistant-context strong {
   color: var(--gyro-muted);
   font-size: 11px;
@@ -18940,10 +19108,11 @@ button.gyro-settings-row em::after {
 .gyro-provider-table-head,
 .gyro-provider-table > .gyro-provider-row {
   align-items: center;
+  column-gap: 14px;
   display: grid;
   grid-template-columns:
-    minmax(130px, 1fr) minmax(150px, 1fr) minmax(130px, 0.8fr)
-    210px;
+    minmax(130px, 1fr) minmax(150px, 0.9fr) minmax(110px, 0.55fr)
+    276px;
 }
 .gyro-provider-table-head {
   color: var(--gyro-faint);
@@ -18955,8 +19124,8 @@ button.gyro-settings-row em::after {
 }
 .gyro-provider-table > .gyro-provider-row {
   border-bottom: 0.5px solid var(--gyro-premium-hairline-soft);
-  min-height: 68px;
-  padding: 10px 12px;
+  min-height: 56px;
+  padding: 8px 12px;
 }
 .gyro-provider-source {
   color: var(--gyro-muted);
@@ -19254,8 +19423,21 @@ button.gyro-settings-row em::after {
   white-space: nowrap;
 }
 
+/*
+ * `.gyro-provider-row span` blanket-sets `display: block`, which flattened the
+ * status pill and collapsed its state dot to zero height. Restore the flex box
+ * on the pill itself so the dot renders inside provider rows too.
+ */
+.gyro-provider-row .gyro-settings-status {
+  align-items: center;
+  display: inline-flex;
+  font-size: 11.5px;
+  gap: 7px;
+}
+
 .gyro-settings-status i {
   box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 9%, transparent);
+  flex: none;
 }
 
 .gyro-provider-table.is-native-list {
@@ -19294,29 +19476,73 @@ button.gyro-settings-row em::after {
   width: 19px;
 }
 
-.gyro-provider-identity > div,
-.gyro-provider-capability {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
 .gyro-provider-identity strong,
-.gyro-provider-capability strong {
+.gyro-provider-default-model strong {
   color: var(--gyro-text);
   font-size: 12.5px;
   font-weight: 590;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.gyro-provider-identity span,
-.gyro-provider-capability span {
-  color: var(--gyro-muted);
-  font-size: 10.75px;
-  line-height: 1.35;
+/*
+ * `.gyro-provider-row > div` shrink-wraps every cell, which left the model
+ * selects at five different widths. This column reads as a column, so stretch.
+ */
+.gyro-provider-table > .gyro-provider-row > .gyro-provider-default-model {
+  justify-self: stretch;
+  min-width: 0;
 }
 
-.gyro-provider-capability span {
-  max-width: 210px;
+/*
+ * Sits in a table row rather than a form, so the control stays visually quiet
+ * until hover or focus — a hairline field, not a filled input.
+ */
+.gyro-provider-default-model select {
+  appearance: none;
+  background:
+    linear-gradient(
+        45deg,
+        transparent 50%,
+        color-mix(in srgb, var(--gyro-muted) 82%, transparent) 50%
+      )
+      calc(100% - 13px) calc(50% + 1px) / 5px 5px no-repeat,
+    linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--gyro-muted) 82%, transparent) 50%,
+        transparent 50%
+      )
+      calc(100% - 8px) calc(50% + 1px) / 5px 5px no-repeat,
+    var(--gyro-premium-control);
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 7px;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 590;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 26px 0 9px;
+  text-overflow: ellipsis;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+  width: 100%;
+}
+
+.gyro-provider-default-model select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--gyro-accent) 42%, var(--gyro-border));
+}
+
+.gyro-provider-default-model select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 78%, white 10%);
+  outline-offset: 2px;
+}
+
+.gyro-provider-row.is-readiness-only .gyro-provider-default-model select {
+  opacity: 0.72;
 }
 
 .gyro-settings-provider-actions > button {
@@ -19401,8 +19627,14 @@ button.gyro-settings-row em::after {
     padding: 14px 4px;
   }
 
-  .gyro-provider-capability span {
-    max-width: none;
+  /* Stacked rows have no column to align to, so stop the select spanning it. */
+  .gyro-provider-table > .gyro-provider-row > .gyro-provider-default-model {
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .gyro-provider-default-model select {
+    width: auto;
   }
 
   .gyro-settings-provider-actions {
