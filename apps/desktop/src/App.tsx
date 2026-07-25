@@ -19,6 +19,7 @@ import {
   IdeSurface,
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
+  providerNeedsSignIn,
   ProvidersSurface,
   SettingsSurface,
   TaskBoardSurface,
@@ -402,6 +403,10 @@ const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const PROVIDER_AUTH_POLL_INTERVAL_MS = 3_000;
 const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
+// A sign-in Gyro asked for waits longer than a background readiness poll: it
+// runs a browser login someone has to complete by hand, and giving up early
+// means dropping the message that was waiting on it.
+const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
@@ -5402,7 +5407,10 @@ export function App() {
   );
 
   const connectProvider = useCallback(
-    async (providerId: ProviderId) => {
+    async (
+      providerId: ProviderId,
+      options?: { forceLogin?: boolean },
+    ): Promise<boolean> => {
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
       );
@@ -5441,9 +5449,14 @@ export function App() {
                 : "Provider env setup needed",
               result.healthSummary ?? providerLabel,
             );
-            return;
+            return result.connectionStatus === "connected";
           }
-          if (result.connectionStatus === "connected") {
+          // A provider CLI can report a healthy login while the token it stored
+          // is already expired — `claude auth status` does exactly that. So a
+          // caller recovering from a send the provider itself rejected asks for
+          // the sign-in flow outright instead of believing this answer and
+          // sending someone back into the same failure.
+          if (!options?.forceLogin && result.connectionStatus === "connected") {
             notify(
               "provider",
               providerId === "openai"
@@ -5453,7 +5466,7 @@ export function App() {
                 ? "OpenAI is available through your local ChatGPT/Codex login."
                 : providerLabel,
             );
-            return;
+            return true;
           }
         } catch (error) {
           recordProviderHealthOutput(providerId, String(error));
@@ -5468,7 +5481,7 @@ export function App() {
             : "Provider env setup needed",
           result.healthSummary ?? providerLabel,
         );
-        return;
+        return result.connectionStatus === "connected";
       }
 
       if (provider?.authMode === "env") {
@@ -5477,7 +5490,7 @@ export function App() {
           "Provider env setup needed",
           `${provider.displayName} auth stays in ${provider.apiKeyRef}; configure it outside Gyro and test again.`,
         );
-        return;
+        return false;
       }
 
       const profile = providerLoginProfile(providerId);
@@ -5504,7 +5517,7 @@ export function App() {
       if (!isTauriRuntime()) {
         setProviderAuthStatus(providerId, "connected");
         notify("provider", "Preview provider verified", providerLabel);
-        return;
+        return true;
       }
 
       try {
@@ -5545,6 +5558,62 @@ export function App() {
           `Complete ${commandText}. Gyro will connect automatically.`,
         );
 
+        // The health check is what mislabelled the provider as connected, so a
+        // forced sign-in cannot use it to decide when the repair is done. The
+        // login command exiting is the honest signal: it succeeds only once the
+        // provider has written fresh credentials.
+        if (options?.forceLogin) {
+          for (
+            let attempt = 0;
+            attempt < PROVIDER_SIGN_IN_POLL_ATTEMPTS;
+            attempt += 1
+          ) {
+            await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
+            const progress = await invoke<TerminalPaneSnapshot>(
+              "read_terminal_output",
+              {
+                paneId,
+                knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+              },
+            ).catch(() => undefined);
+            if (!progress) continue;
+            terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
+            dispatchWorkbench({
+              type: "sync-terminal-pane-snapshot",
+              paneId,
+              event:
+                progress.exitCode === null || progress.exitCode === undefined
+                  ? progress.status
+                  : `${progress.status} (${progress.exitCode})`,
+              output: progress.output ?? "",
+              status: terminalStatusFromSnapshot(progress.status),
+              hasForegroundJob: progress.hasForegroundJob ?? undefined,
+            });
+            if (progress.output) setTerminalOutput(progress.output);
+            if (progress.exitCode === null || progress.exitCode === undefined) {
+              continue;
+            }
+            if (progress.exitCode === 0) {
+              setProviderAuthStatus(providerId, "connected");
+              notify("provider", "Provider signed in", providerLabel);
+              return true;
+            }
+            notify(
+              "approval",
+              "Provider sign-in did not finish",
+              `${commandText} exited with ${progress.exitCode}.`,
+            );
+            return false;
+          }
+
+          notify(
+            "approval",
+            "Provider sign-in still pending",
+            `Finish ${commandText} in the terminal, then send again.`,
+          );
+          return false;
+        }
+
         for (
           let attempt = 0;
           attempt < PROVIDER_AUTH_POLL_ATTEMPTS;
@@ -5581,7 +5650,7 @@ export function App() {
                 ? "OpenAI is available through your local ChatGPT/Codex login."
                 : providerLabel,
             );
-            return;
+            return true;
           }
         }
 
@@ -5590,6 +5659,7 @@ export function App() {
           "Provider sign-in still pending",
           `Finish ${commandText}, then press Connect again.`,
         );
+        return false;
       } catch (error) {
         dispatchWorkbench({
           type: "set-terminal-pane-status",
@@ -5601,6 +5671,7 @@ export function App() {
         setTerminalOutput(output);
         recordProviderHealthOutput(providerId, output);
         notify("command-failed", `${providerLabel} login failed`, output);
+        return false;
       }
     },
     [
@@ -7627,12 +7698,8 @@ export function App() {
         return;
       }
 
-      if (action === "reconnect-provider" && isProviderId(providerId)) {
-        connectProvider(providerId);
-        return;
-      }
-
-      if (action === "retry-send" && userMessage) {
+      const replayFailedTurn = () => {
+        if (!userMessage) return;
         if (turnId) {
           setChatMessageQueues((current) => {
             const queued = current[event.sessionId] ?? [];
@@ -7678,6 +7745,27 @@ export function App() {
               ? (planRecord as unknown as SessionPlan)
               : undefined,
         });
+      };
+
+      if (action === "reconnect-provider" && isProviderId(providerId)) {
+        // A send the provider rejected over its own sign-in is the one case
+        // where Gyro knows the stored credential is bad, whatever the CLI's
+        // status command claims. Go straight to the login flow, and once it
+        // succeeds put the message back on the wire so the sign-in is the only
+        // thing the person had to do.
+        const needsSignIn = providerNeedsSignIn(
+          stringFromRecord(payload, "recoveryKind"),
+        );
+        void connectProvider(providerId, { forceLogin: needsSignIn }).then(
+          (connected) => {
+            if (connected && needsSignIn) replayFailedTurn();
+          },
+        );
+        return;
+      }
+
+      if (action === "retry-send") {
+        replayFailedTurn();
       }
     },
     [

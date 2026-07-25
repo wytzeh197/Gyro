@@ -16189,14 +16189,14 @@ const ChatEvent = memo(function ChatEvent({
                 Retry
               </button>
               {providerStatus.status === "failed" &&
-              providerStatus.recoveryKind === "authentication" ? (
+              providerNeedsSignIn(providerStatus.recoveryKind) ? (
                 <button
                   onClick={() =>
                     onProviderStatusAction?.("reconnect-provider", event)
                   }
                   type="button"
                 >
-                  Reconnect
+                  {providerSignInLabel(providerStatus.recoveryKind)}
                 </button>
               ) : null}
             </>
@@ -17134,7 +17134,7 @@ function ChatTurn({
               ) : null}
               {providerStatus.status !== "cancelled" &&
               (providerStatus.status === "blocked" ||
-                providerStatus.recoveryKind === "authentication") ? (
+                providerNeedsSignIn(providerStatus.recoveryKind)) ? (
                 <button
                   onClick={() =>
                     onProviderStatusAction?.(
@@ -17144,7 +17144,9 @@ function ChatTurn({
                   }
                   type="button"
                 >
-                  Reconnect
+                  {providerStatus.status === "blocked"
+                    ? "Reconnect"
+                    : providerSignInLabel(providerStatus.recoveryKind)}
                 </button>
               ) : null}
             </div>
@@ -18055,6 +18057,16 @@ function isStreamingAssistantEvent(event: SessionEvent) {
     payload?.kind === "provider-stream" &&
     payload.streaming === true
   );
+}
+
+// A sign-in that expired and one that was never established need the same
+// button but not the same word: the first is a repair, the second is setup.
+export function providerNeedsSignIn(recoveryKind: string | undefined) {
+  return recoveryKind === "login-expired" || recoveryKind === "authentication";
+}
+
+function providerSignInLabel(recoveryKind: string | undefined) {
+  return recoveryKind === "login-expired" ? "Sign in" : "Reconnect";
 }
 
 function providerStatusFromEvent(event: SessionEvent) {
