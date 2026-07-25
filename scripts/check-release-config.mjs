@@ -240,12 +240,18 @@ for (const marker of [
   "brew test gyro/release-validation/gyro",
   "runner: macos-15",
   "runner: macos-15-intel",
-  "HOMEBREW_TAP_TOKEN",
-  "HOMEBREW_TAP_PUBLISH_ENABLED",
+  "sync-gyro-formula.yml",
 ]) {
   if (!homebrewWorkflow.includes(marker)) {
     failures.push(`Homebrew publish workflow is missing ${marker}.`);
   }
+}
+
+if (/secrets\.HOMEBREW_TAP_TOKEN/.test(homebrewWorkflow)) {
+  failures.push(
+    "Homebrew workflow pushes to the tap with a cross-repository token again; " +
+      "the tap pulls the Formula itself in sync-gyro-formula.yml.",
+  );
 }
 
 for (const marker of [

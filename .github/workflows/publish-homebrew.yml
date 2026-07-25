@@ -1,12 +1,20 @@
 name: Publish Homebrew CLI
 
+# Validates the generated Formula by installing the released CLI on both macOS
+# architectures. Publishing to wytzeh197/homebrew-tap is not done here: pushing
+# to another repository needs a personal access token, and the one this job
+# expected was never configured, so the tap silently stayed on an old version
+# while this workflow still reported success. The tap now pulls the Formula
+# itself (sync-gyro-formula.yml there) and gates on a successful run of this
+# workflow for the tag, so keep this file name stable.
+
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Published Gyro release tag to validate and publish
+        description: Published Gyro release tag to validate
         required: true
         type: string
 
@@ -94,35 +102,4 @@ jobs:
           gyro doctor --json | jq -e '.schema == "gyro.cli.v1" and (.checks | type == "array")'
           brew test gyro/release-validation/gyro
         env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
-
-  publish:
-    name: Publish CLI Formula to tap
-    needs: validate
-    if: ${{ vars.HOMEBREW_TAP_PUBLISH_ENABLED == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download the validated Formula
-        uses: actions/download-artifact@v4
-        with:
-          name: published-homebrew-formula
-          path: release-assets
-      - name: Publish to wytzeh197/homebrew-tap
-        run: |
-          set -euo pipefail
-          gh auth setup-git
-          gh repo clone wytzeh197/homebrew-tap tap -- --depth=1
-          mkdir -p tap/Formula
-          cp release-assets/gyro.rb tap/Formula/gyro.rb
-          git -C tap config user.name "github-actions[bot]"
-          git -C tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C tap add Formula/gyro.rb
-          if git -C tap diff --cached --quiet; then
-            echo "The tap already contains the Formula for $TAG."
-            exit 0
-          fi
-          git -C tap commit -m "gyro ${TAG#v}"
-          git -C tap push origin HEAD
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
