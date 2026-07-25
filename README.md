@@ -91,8 +91,7 @@ Homebrew installs only the `gyro` CLI, not Gyro.app:
 
 ```bash
 brew tap wytzeh197/tap
-brew trust --formula wytzeh197/tap/gyro
-brew install gyro
+brew install wytzeh197/tap/gyro
 ```
 
 See [Homebrew packaging](docs/homebrew.md) for verification and upgrade

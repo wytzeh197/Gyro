@@ -83,10 +83,8 @@ The tagged release workflow needs:
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secret.
 - `TAURI_UPDATER_PUBLIC_KEY` Actions variable.
 
-The Homebrew publish workflow needs:
-
-- `HOMEBREW_TAP_TOKEN`, a fine-grained token limited to
-  `wytzeh197/homebrew-tap` with **Contents: Read and write**.
+The Homebrew workflows need no secret. Gyro only validates the Formula; the tap
+pulls it with its own `GITHUB_TOKEN`. See `docs/homebrew.md`.
 
 No Apple certificate or notarization secret belongs in the Alpha workflow.
 Keep the updater private key backed up outside the repository; rotate it only
@@ -169,13 +167,13 @@ public product description.
 `packaging/homebrew/Formula/gyro.rb` is a template containing checksum markers;
 never publish it. The release-generated `gyro.rb` has real checksums. On
 `release.published`, `.github/workflows/publish-homebrew.yml` preserves that
-exact asset, installs and tests it on both architectures, then writes it to
-`Formula/gyro.rb` in `wytzeh197/homebrew-tap`.
+exact asset and installs and tests it on both architectures. `wytzeh197/homebrew-tap`
+then pulls the validated asset into its own `Formula/gyro.rb` via
+`sync-gyro-formula.yml`, within half an hour or immediately on manual dispatch.
 
 ```bash
 brew tap wytzeh197/tap
-brew trust --formula wytzeh197/tap/gyro
-brew install gyro
+brew install wytzeh197/tap/gyro
 ```
 
 There is no Homebrew Cask for Gyro.app during the unsigned Alpha. See
