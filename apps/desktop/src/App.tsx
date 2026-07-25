@@ -52,6 +52,7 @@ import {
   workspaceCommandForKeybinding,
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
+  providerDefaultModelId,
   providerSupportsUsage,
   providersForConfig,
   resolvedWorkspaceSettings,
@@ -84,8 +85,15 @@ import {
   type EditorSelection,
   type GyroConfig,
   type GitBranchCatalog,
+  type GitReviewActionId,
+  type GithubAvailability,
+  type GithubPullRequest,
+  type GithubWorkflowRun,
+  type GithubWorkflowRunDetail,
   type HarnessRunStatus,
+  type IdeAiToolCall,
   type IdeAssistantAction,
+  type IdeAssistantReply,
   type IdeAssistantRequest,
   type LanguageServerState,
   type MenuBarOutcome,
@@ -209,6 +217,8 @@ type TerminalPaneSnapshot = {
   workingDirectory?: string;
   cols: number;
   rows: number;
+  governedSessionId?: string | null;
+  governedProviderId?: string | null;
 };
 
 type LspSessionResult = {
@@ -305,6 +315,12 @@ type IdeCommandOutput = {
   status: "done" | "failed";
   stdout: string;
   stderr: string;
+};
+
+/** Result of git_push / git_pull / git_fetch: output plus refreshed status. */
+type GitSyncResult = {
+  output: IdeCommandOutput;
+  status: SourceControlState;
 };
 
 type AutomationDraft = Pick<
@@ -536,6 +552,24 @@ function providerHealthDetailsFromCheck(
     secretStorage: check.secretStorage,
     subscriptionLabel: check.subscriptionLabel ?? fallback.subscriptionLabel,
   };
+}
+
+/**
+ * Propose a branch name from the pending commit message, so the common case is
+ * one keystroke instead of typing a slug by hand.
+ */
+/** Provider-facing name of the capability that creates reviewable edits. */
+const GYRO_PROPOSE_EDIT_TOOL = "gyro_workspace_propose_edit";
+
+function suggestedBranchName(commitMessage: string) {
+  const slug = commitMessage
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  return slug ? `gyro/${slug}` : "gyro/review";
 }
 
 function waitFor(ms: number) {
@@ -1724,6 +1758,12 @@ export function App() {
             [activity.callId]: activity,
           },
         }));
+        // Mirror the call into the Workspace AI view so tool use is visible
+        // where the work is happening, not only in the chat transcript.
+        dispatchWorkbench({
+          type: "ide-record-ai-tool-call",
+          toolCall: ideAiToolCallFromActivity(activity),
+        });
       }
     }).then((unlisten) => {
       if (!isMounted) unlisten();
@@ -3748,6 +3788,318 @@ export function App() {
     ],
   );
 
+  /**
+   * Refresh GitHub availability, workflow runs, and pull requests for a
+   * workspace. Availability is probed first so a machine without `gh` — or a
+   * repository that is not on GitHub — costs one call instead of three.
+   */
+  const refreshGithub = useCallback(
+    async (root: string) => {
+      if (!root || !isTauriRuntime()) {
+        return;
+      }
+      dispatchWorkbench({ type: "github-loading", loading: true });
+      try {
+        const availability = await invoke<GithubAvailability>("github_status", {
+          request: { workspacePath: root },
+        });
+        dispatchWorkbench({ type: "github-set-availability", availability });
+        if (!availability.available) {
+          return;
+        }
+        const [runs, pullRequests] = await Promise.all([
+          invoke<GithubWorkflowRun[]>("github_workflow_runs", {
+            request: { workspacePath: root, limit: 20 },
+          }),
+          invoke<GithubPullRequest[]>("github_pull_requests", {
+            request: { workspacePath: root, limit: 20 },
+          }),
+        ]);
+        dispatchWorkbench({ type: "github-set-runs", runs });
+        dispatchWorkbench({ type: "github-set-pull-requests", pullRequests });
+      } catch (error) {
+        dispatchWorkbench({ type: "github-error", error: String(error) });
+      } finally {
+        dispatchWorkbench({ type: "github-loading", loading: false });
+      }
+    },
+    [dispatchWorkbench],
+  );
+
+  // Probe GitHub once per workspace rather than on every IDE refresh: each
+  // probe spawns `gh` and talks to the network, so it is far too costly to
+  // attach to staging or committing.
+  useEffect(() => {
+    if (!workspaceActionRoot) {
+      return;
+    }
+    void refreshGithub(workspaceActionRoot);
+  }, [refreshGithub, workspaceActionRoot]);
+
+  // While a run is queued or in progress its state is stale the moment we read
+  // it, so poll — but only while the user is actually looking at Source Control.
+  const hasActiveGithubRun = workbench.ide.github.runs.some(
+    (run) => run.state === "queued" || run.state === "in-progress",
+  );
+  const watchingGithub =
+    workbench.activeDestination === "workspace" &&
+    workbench.ide.activeView === "source-control";
+  useEffect(() => {
+    if (!workspaceActionRoot || !hasActiveGithubRun || !watchingGithub) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshGithub(workspaceActionRoot);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveGithubRun, refreshGithub, watchingGithub, workspaceActionRoot]);
+
+  /** Select a workflow run and load its jobs. */
+  const selectGithubRun = useCallback(
+    async (runId: number) => {
+      const root = workspaceActionRoot;
+      if (!root || !isTauriRuntime()) {
+        return;
+      }
+      // Collapse a second click on the open run.
+      if (workbench.ide.github.selectedRunId === runId) {
+        dispatchWorkbench({ type: "github-select-run", runId: undefined });
+        return;
+      }
+      dispatchWorkbench({ type: "github-select-run", runId });
+      try {
+        const detail = await invoke<GithubWorkflowRunDetail>(
+          "github_workflow_run_detail",
+          { request: { workspacePath: root, runId } },
+        );
+        dispatchWorkbench({ type: "github-set-run-detail", detail });
+      } catch (error) {
+        dispatchWorkbench({ type: "github-error", error: String(error) });
+      }
+    },
+    [workbench.ide.github.selectedRunId, workspaceActionRoot],
+  );
+
+  /**
+   * Load a run's failed-step logs into the Output panel, which is already the
+   * home for long command output.
+   */
+  const viewGithubRunLogs = useCallback(
+    async (runId: number) => {
+      const root = workspaceActionRoot;
+      if (!root || !isTauriRuntime()) {
+        return;
+      }
+      try {
+        const logs = await invoke<string>("github_workflow_logs", {
+          request: { workspacePath: root, runId, failedOnly: true },
+        });
+        const lines = logs.trim()
+          ? logs.split("\n")
+          : ["No failed-step logs for this run."];
+        dispatchWorkbench({ type: "github-set-run-logs", logs });
+        dispatchWorkbench({
+          type: "ide-upsert-output-channel",
+          channel: {
+            id: "github-actions",
+            label: "GitHub Actions",
+            kind: "system",
+            lines,
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        dispatchWorkbench({
+          type: "ide-select-output-channel",
+          channelId: "github-actions",
+        });
+        dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
+      } catch (error) {
+        notify("command-failed", "Could not read workflow logs", String(error));
+      }
+    },
+    [notify, workspaceActionRoot],
+  );
+
+  const rerunGithubRun = useCallback(
+    async (runId: number, failedOnly: boolean) => {
+      const root = workspaceActionRoot;
+      if (!root || !isTauriRuntime()) {
+        return;
+      }
+      try {
+        const runs = await invoke<GithubWorkflowRun[]>(
+          "github_rerun_workflow",
+          { request: { workspacePath: root, runId, failedOnly } },
+        );
+        dispatchWorkbench({ type: "github-set-runs", runs });
+        notify(
+          "tests-passed",
+          failedOnly ? "Re-running failed jobs" : "Re-running workflow",
+          `Run ${runId}`,
+        );
+      } catch (error) {
+        notify("command-failed", "Re-run failed", String(error));
+      }
+    },
+    [notify, workspaceActionRoot],
+  );
+
+  const openGithubUrl = useCallback(
+    async (url: string) => {
+      try {
+        if (isTauriRuntime()) {
+          await openUrl(url);
+        } else {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+      } catch (error) {
+        notify("command-failed", "Could not open GitHub", String(error));
+      }
+    },
+    [notify],
+  );
+
+  /**
+   * Run one of the diff-review git actions for real.
+   *
+   * Each branch performs the actual git or gh work and reports the true result;
+   * the reducer only records the lifecycle. A failure leaves the action
+   * retryable rather than marking it done.
+   */
+  const runGitReviewAction = useCallback(
+    async (actionId: GitReviewActionId) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        return;
+      }
+      if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+        notify(
+          "command-failed",
+          "Git actions are blocked in Restricted Mode",
+          workspaceName(root),
+        );
+        return;
+      }
+      if (!isTauriRuntime()) {
+        return;
+      }
+
+      const sourceControl = workbench.ide.sourceControl;
+      const branch = sourceControl.branch;
+      dispatchWorkbench({ type: "start-git-review-action", actionId });
+
+      const settle = (outcome: "done" | "failed", message: string) => {
+        dispatchWorkbench({
+          type: "settle-git-review-action",
+          actionId,
+          outcome,
+          message,
+        });
+        notify(
+          outcome === "done" ? "tests-passed" : "command-failed",
+          message,
+          workspaceName(root),
+        );
+      };
+
+      /** Surface a non-zero git exit as a failure instead of a silent no-op. */
+      const settleFromOutput = (label: string, output: IdeCommandOutput) => {
+        if (output.status === "done") {
+          settle("done", `${label} succeeded`);
+          return;
+        }
+        const detail =
+          output.stderr.trim() || output.stdout.trim() || output.status;
+        settle("failed", `${label} failed: ${detail}`);
+      };
+
+      try {
+        switch (actionId) {
+          case "create-branch": {
+            const name = window.prompt(
+              "New branch name",
+              suggestedBranchName(workbench.diffReview.commitMessage),
+            );
+            if (!name?.trim()) {
+              settle("failed", "Branch creation cancelled");
+              return;
+            }
+            const catalog = await invoke<GitBranchCatalog>(
+              "git_create_branch",
+              { request: { workspacePath: root, branch: name.trim() } },
+            );
+            setBranchCatalog(catalog);
+            refreshIdeServices(root);
+            settle("done", `Switched to ${name.trim()}`);
+            return;
+          }
+          case "commit": {
+            const message = workbench.diffReview.commitMessage.trim();
+            if (!message) {
+              settle("failed", "A commit message is required");
+              return;
+            }
+            const output = await invoke<IdeCommandOutput>("git_commit", {
+              request: { workspacePath: root, message },
+            });
+            refreshIdeServices(root);
+            settleFromOutput("Commit", output);
+            return;
+          }
+          case "push": {
+            const result = await invoke<GitSyncResult>("git_push", {
+              request: {
+                workspacePath: root,
+                // A branch with no upstream needs one on first push.
+                setUpstream: !sourceControl.upstream,
+              },
+            });
+            dispatchWorkbench({
+              type: "ide-set-source-control",
+              sourceControl: result.status,
+            });
+            settleFromOutput("Push", result.output);
+            return;
+          }
+          case "open-pr": {
+            const title = window.prompt(
+              "Pull request title",
+              workbench.diffReview.commitMessage.trim() || branch || "",
+            );
+            if (!title?.trim()) {
+              settle("failed", "Pull request cancelled");
+              return;
+            }
+            const pullRequest = await invoke<GithubPullRequest>(
+              "github_create_pull_request",
+              {
+                request: {
+                  workspacePath: root,
+                  title: title.trim(),
+                  draft: false,
+                },
+              },
+            );
+            void refreshGithub(root);
+            settle("done", `Opened pull request #${pullRequest.number}`);
+            return;
+          }
+        }
+      } catch (error) {
+        settle("failed", String(error));
+      }
+    },
+    [
+      notify,
+      refreshGithub,
+      refreshIdeServices,
+      workbench.diffReview.commitMessage,
+      workbench.ide.sourceControl,
+      workbench.preferences.workspaceTrust,
+      workspaceActionRoot,
+    ],
+  );
+
   const activateWorkspacePath = useCallback(
     async (selected: string, notificationTitle = "Workspace opened") => {
       const normalizedSelected = normalizeProjectPath(selected);
@@ -4191,7 +4543,7 @@ export function App() {
       const session = createPreviewSession(
         sessionLayout,
         workbench.workspaceMode,
-        selectedSessionModelFromConfig(config),
+        newSessionModelFromConfig(config),
         workspacePath ?? "",
         "New chat",
       );
@@ -4220,13 +4572,13 @@ export function App() {
       const session = shouldCreateWorktree
         ? await invoke<Session>("create_worktree_session", {
             branch: metadata.branch,
-            ...selectedSessionModelFromConfig(config),
+            ...newSessionModelFromConfig(config),
             title,
             worktreeName: metadata.worktreeName,
             workspacePath: workspace,
           })
         : await invoke<Session>("create_desktop_session", {
-            ...selectedSessionModelFromConfig(config),
+            ...newSessionModelFromConfig(config),
             title,
             workspacePath: workspace,
           });
@@ -4242,7 +4594,7 @@ export function App() {
       const session = createPreviewSession(
         sessionLayout,
         workbench.workspaceMode,
-        selectedSessionModelFromConfig(config),
+        newSessionModelFromConfig(config),
         workspacePath ?? "",
         "New chat",
       );
@@ -4773,25 +5125,53 @@ export function App() {
 
       try {
         const size = template ? terminalSizeForTemplate(template) : undefined;
-        const snapshot = await invoke<TerminalPaneSnapshot>(
-          "create_terminal_pane",
-          {
-            request: {
-              args: process.args,
-              cols: size?.cols,
-              command: process.command,
-              paneId,
-              profileId: profile.id,
-              rows: size?.rows,
-              title: profile.displayName,
-              workspacePath: launchWorkspacePath,
-              workspaceMode: "local",
-              workingDirectory: launchWorkspacePath
-                ? "Workspace"
-                : profile.workingDirectory,
+        const paneRequest = {
+          args: process.args,
+          cols: size?.cols,
+          command: process.command,
+          paneId,
+          profileId: profile.id,
+          rows: size?.rows,
+          title: profile.displayName,
+          workspacePath: launchWorkspacePath,
+          workspaceMode: "local",
+          workingDirectory: launchWorkspacePath
+            ? "Workspace"
+            : profile.workingDirectory,
+        };
+        // Ask for governance when the profile supports it. If the backend
+        // cannot honour it the pane still opens, but ungoverned and labelled
+        // as such — a pane must never look protected when it is not.
+        // A command override runs through `zsh -lc`, not the agent binary, so
+        // it never carries the profile's governance.
+        const wantsGovernance =
+          !commandOverride &&
+          Boolean(launchWorkspacePath) &&
+          profileSupportsGovernance(profile);
+        let snapshot: TerminalPaneSnapshot;
+        try {
+          snapshot = await invoke<TerminalPaneSnapshot>(
+            "create_terminal_pane",
+            {
+              request: { ...paneRequest, governed: wantsGovernance },
             },
-          },
-        );
+          );
+        } catch (governanceError) {
+          if (!wantsGovernance) {
+            throw governanceError;
+          }
+          notify(
+            "approval",
+            "Terminal running without Gyro approvals",
+            String(governanceError),
+          );
+          snapshot = await invoke<TerminalPaneSnapshot>(
+            "create_terminal_pane",
+            {
+              request: { ...paneRequest, governed: false },
+            },
+          );
+        }
         const status = terminalStatusFromSnapshot(snapshot.status);
         dispatchWorkbench({
           type: "sync-terminal-pane-snapshot",
@@ -4806,6 +5186,8 @@ export function App() {
           output: snapshot.output ?? "",
           status,
           hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+          governedSessionId: snapshot.governedSessionId ?? undefined,
+          governedProviderId: snapshot.governedProviderId ?? undefined,
         });
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
@@ -5320,6 +5702,37 @@ export function App() {
       recordModelSelection,
       saveSessionModel,
     ],
+  );
+
+  /**
+   * Set the model new sessions on a provider start with.
+   *
+   * Unlike `selectProviderModel` this leaves `selectedProviderId` and the active
+   * session untouched — configuring Anthropic's default from Settings must not
+   * yank an in-flight Codex thread onto another provider.
+   */
+  const selectProviderDefaultModel = useCallback(
+    (providerId: ProviderId, modelId: string) => {
+      const providers = providersForConfig(config).map((provider) =>
+        provider.id === providerId
+          ? { ...provider, defaultModelId: modelId }
+          : provider,
+      );
+      const provider = providers.find((item) => item.id === providerId);
+      const model = provider ? getProviderModel(provider, modelId) : undefined;
+      void persistConfig(
+        { ...config, modelProviders: providers },
+        { notifySuccess: false },
+      );
+      notify(
+        "provider",
+        "Default model updated",
+        `${provider?.displayName ?? providerId} starts new chats on ${
+          model?.displayName ?? modelId
+        }`,
+      );
+    },
+    [config, notify, persistConfig],
   );
 
   const selectProviderReasoningEffort = useCallback(
@@ -7897,6 +8310,50 @@ export function App() {
     dispatchWorkbench({ type: "ide-set-selection", selection });
   }, []);
 
+  /**
+   * The assistant's reply to the last Workspace-initiated request.
+   *
+   * Reads the same session events the Sessions surface renders, narrowed to the
+   * turn the Workspace started, so the answer appears next to the code it is
+   * about while it streams.
+   */
+  const workspaceAssistantReply = useMemo<IdeAssistantReply | undefined>(() => {
+    const request = workbench.ide.lastAssistantRequest;
+    if (!request?.turnId) {
+      return undefined;
+    }
+    const turnEvents =
+      sessionEventsById[request.sessionId ?? activeSessionId ?? ""];
+    if (!turnEvents) {
+      return undefined;
+    }
+    const text = turnEvents
+      .filter(
+        (event) =>
+          event.kind === "assistant-message" &&
+          (turnIdFromSessionEvent(event) ?? event.turnId) === request.turnId,
+      )
+      .map((event) => event.message)
+      .join("\n")
+      .trim();
+    const turn =
+      workbench.activeTurn?.id === request.turnId
+        ? workbench.activeTurn
+        : undefined;
+    return {
+      turnId: request.turnId,
+      text,
+      // No turn and no text yet means the run has not reported back; once text
+      // exists without a live turn, the reply is complete.
+      status: turn?.status ?? (text ? "done" : "queued"),
+    };
+  }, [
+    activeSessionId,
+    sessionEventsById,
+    workbench.activeTurn,
+    workbench.ide.lastAssistantRequest,
+  ]);
+
   const runEditorAssistantAction = useCallback(
     (action: IdeAssistantAction, instruction: string) => {
       if (!checkProviderReadiness("chat")) {
@@ -7910,6 +8367,10 @@ export function App() {
       const provider = providersForConfig(config).find(
         (item) => item.id === config.selectedProviderId,
       );
+      // Mint the turn id here rather than letting sendDraft generate one, so
+      // the Workspace can find this request's reply and stream it in place
+      // instead of sending the user to the Sessions surface to read it.
+      const turnId = createTurnId();
       const request: IdeAssistantRequest = {
         id: `ide-ai-${Date.now()}`,
         action,
@@ -7920,51 +8381,43 @@ export function App() {
         providerId: provider?.id,
         model: provider?.selectedModelId,
         createdAt: new Date().toISOString(),
+        turnId,
+        sessionId: activeSessionId,
       };
       dispatchWorkbench({ type: "ide-record-assistant-request", request });
       void appendEditorEvent("ai-editor-requested", `AI ${action}`, {
         request,
       });
+      const editsFile =
+        action === "fix-selection" ||
+        action === "refactor-file" ||
+        action === "generate-tests" ||
+        action === "apply-proposed-edit";
       const context = [
         `Workspace action: ${action}`,
         path ? `File: ${path}` : undefined,
         selection?.text ? `Selected code:\n${selection.text}` : undefined,
         instruction,
+        // Ask for the edit through the propose-edit tool so it lands in the
+        // diff panel as a hash-guarded proposal the user approves. Previously
+        // Gyro wrote a "proposed" diff entry itself the moment the button was
+        // pressed, which claimed an edit existed before the model had produced
+        // one.
+        editsFile && path
+          ? `Produce the edit by calling ${GYRO_PROPOSE_EDIT_TOOL} for ${path}. Do not describe the change instead of proposing it.`
+          : undefined,
       ]
         .filter(Boolean)
         .join("\n\n");
-      void sendDraft(context);
-      if (
-        action === "fix-selection" ||
-        action === "refactor-file" ||
-        action === "generate-tests" ||
-        action === "apply-proposed-edit"
-      ) {
-        const targetPath = path ?? "workspace";
-        dispatchWorkbench({
-          type: "sync-diff-event",
-          path: targetPath,
-          message: `AI edit requested: ${instruction}`,
-          source: "agent-generated",
-          turnId: workbench.activeTurn?.id,
-        });
-        void appendEditorEvent(
-          "ai-edit-proposed",
-          `AI edit proposed for ${targetPath}`,
-          {
-            request,
-            path: targetPath,
-          },
-        );
-      }
+      void sendDraft(context, { turnId });
     },
     [
+      activeSessionId,
       appendEditorEvent,
       checkProviderReadiness,
       config,
       selectedFile,
       sendDraft,
-      workbench.activeTurn?.id,
       workbench.ide.activePath,
       workbench.ide.selection,
       workbench.ide.tabs,
@@ -10559,9 +11012,7 @@ export function App() {
         }
       }}
       onReviewTerminalChanges={reviewTerminalChanges}
-      onRunGitReviewAction={(actionId) =>
-        dispatchWorkbench({ type: "run-git-review-action", actionId })
-      }
+      onRunGitReviewAction={(actionId) => void runGitReviewAction(actionId)}
       onRunCommandProfile={runCommandProfile}
       onRunProfile={runProfile}
       onSelectDiffFile={(path) =>
@@ -10952,6 +11403,15 @@ export function App() {
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}
       onRefreshSourceControl={refreshSourceControl}
+      onRefreshGithub={() =>
+        workspaceActionRoot
+          ? void refreshGithub(workspaceActionRoot)
+          : undefined
+      }
+      onSelectGithubRun={selectGithubRun}
+      onViewGithubRunLogs={viewGithubRunLogs}
+      onRerunGithubRun={rerunGithubRun}
+      onOpenGithubUrl={openGithubUrl}
       onDiscardSourceControlFile={discardSourceControlFile}
       onRunIdeTask={runIdeTask}
       onStartDebugSession={startIdeDebugSession}
@@ -11258,6 +11718,7 @@ export function App() {
                   dispatchWorkbench({ type: "set-browser-url", url })
                 }
                 onAssistantAction={runEditorAssistantAction}
+                assistantReply={workspaceAssistantReply}
                 onCommentDiff={(path) =>
                   dispatchWorkbench({ type: "add-diff-comment", path })
                 }
@@ -11294,10 +11755,7 @@ export function App() {
                 }
                 onRenameTerminalPane={renameTerminalPane}
                 onRunGitReviewAction={(actionId) =>
-                  dispatchWorkbench({
-                    type: "run-git-review-action",
-                    actionId,
-                  })
+                  void runGitReviewAction(actionId)
                 }
                 onRestartTerminalPane={restartTerminalPane}
                 onSelectDiffFile={(path) =>
@@ -11447,6 +11905,7 @@ export function App() {
           onThemeChange={(theme) =>
             dispatchWorkbench({ type: "set-theme", theme })
           }
+          onSelectProviderDefaultModel={selectProviderDefaultModel}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           selectedUsageProviderId={selectedUsageProviderId}
@@ -12003,7 +12462,13 @@ function sanitizeStoredDiffReview(
       ? diffReview.collapsedDirectories
       : base.diffReview.collapsedDirectories,
     gitActions: Array.isArray(diffReview.gitActions)
-      ? diffReview.gitActions
+      ? // A git action that was in flight when the app closed has no process to
+        // resume; restore it as runnable rather than spinning forever.
+        diffReview.gitActions.map((action) =>
+          action.status === "running"
+            ? { ...action, status: "ready" as const }
+            : action,
+        )
       : base.diffReview.gitActions,
   };
 }
@@ -12881,6 +13346,23 @@ function getCommandProfile(
   );
 }
 
+/**
+ * Whether a pane profile can run under Gyro's approval policy.
+ *
+ * Mirrors `governable_pane_provider` in the Tauri backend, which is the
+ * authority — this only avoids asking for governance the backend will refuse.
+ * Governance needs an interactive permission hook, which today means Claude
+ * Code; Codex approves through the app-server path a raw PTY cannot speak.
+ */
+function profileSupportsGovernance(profile: CommandProfile) {
+  const command = profile.command.trim().split("/").pop() ?? "";
+  return (
+    profile.id === "claude" ||
+    profile.id === "claude-code" ||
+    command === "claude"
+  );
+}
+
 function terminalProcessForProfile(
   profile: CommandProfile,
   commandOverride?: string,
@@ -12978,6 +13460,39 @@ function terminalSnapshotFromCapabilityData(
     workingDirectory: stringFromRecord(pane, "workingDirectory"),
     cols: typeof pane?.cols === "number" ? pane.cols : 120,
     rows: typeof pane?.rows === "number" ? pane.rows : 32,
+  };
+}
+
+/**
+ * Project a capability call onto the Workspace AI view's tool-call row.
+ *
+ * The capability status vocabulary is wider than the view's, so waiting and
+ * requested both read as queued, and every terminal-but-unsuccessful status
+ * reads as failed.
+ */
+function ideAiToolCallFromActivity(
+  activity: CapabilityActivity,
+): IdeAiToolCall {
+  const status: IdeAiToolCall["status"] =
+    activity.status === "completed"
+      ? "done"
+      : activity.status === "running"
+        ? "running"
+        : activity.status === "denied"
+          ? "blocked"
+          : activity.status === "requested" || activity.status === "waiting"
+            ? "queued"
+            : "failed";
+  return {
+    id: activity.callId,
+    name: activity.capabilityId,
+    status,
+    summary: activity.summary,
+    createdAt: activity.createdAt,
+    finishedAt:
+      status === "done" || status === "failed" || status === "blocked"
+        ? activity.createdAt
+        : undefined,
   };
 }
 
@@ -14338,6 +14853,33 @@ function selectedSessionModelFromConfig(config: GyroConfig) {
     modelId: model?.id ?? provider?.selectedModelId,
     modelLabel: model?.displayName ?? provider?.selectedModelId,
     reasoningEffort: provider ? selectedReasoningEffort(provider) : undefined,
+  };
+}
+
+/**
+ * Model a brand-new session opens on.
+ *
+ * Deliberately reads the provider's configured default rather than
+ * `selectedModelId`: the latter tracks whichever session was last active, so
+ * without this a new chat would silently inherit the previous thread's model
+ * and the Settings default would never take effect.
+ */
+function newSessionModelFromConfig(config: GyroConfig) {
+  const provider = providersForConfig(config).find(
+    (item) => item.id === config.selectedProviderId,
+  );
+  if (!provider) {
+    return selectedSessionModelFromConfig(config);
+  }
+  const modelId = providerDefaultModelId(provider);
+  const model = getProviderModel(provider, modelId);
+  return {
+    providerId: provider.id,
+    providerLabel: provider.displayName,
+    modelId: model?.id ?? modelId,
+    modelLabel: model?.displayName ?? modelId,
+    reasoningEffort:
+      model?.defaultReasoningEffort ?? model?.supportedReasoningEfforts?.[0],
   };
 }
 

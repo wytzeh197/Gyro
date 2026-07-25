@@ -57,6 +57,8 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  RotateCcw,
+  ScrollText,
   Sparkles,
   Square,
   Sun,
@@ -66,6 +68,7 @@ import {
   UserCircle,
   Video,
   X,
+  XCircle,
 } from "lucide-react";
 import {
   Fragment,
@@ -144,14 +147,19 @@ import type {
   IdeViewId,
   LanguageServerState,
   GitReviewActionId,
+  GithubRunState,
+  GithubState,
+  IdeAssistantReply,
   GlobalSearchProject,
   GlobalSearchSelection,
   GitBranchCatalog,
   GyroConfig,
+  ModelProviderConfig,
   Notification,
   NotificationPermissionState,
   OnboardingState,
   ProviderId,
+  ProviderModel,
   ProviderUsageState,
   ProviderReadiness,
   ProviderHandoff,
@@ -198,9 +206,11 @@ import {
   isUserSelectedWorkspacePath,
 } from "./workbench-state";
 import {
+  defaultModelLabel,
   getProviderModel,
   isProviderExecutable,
   providerCapabilities,
+  providerDefaultModelId,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
@@ -340,6 +350,14 @@ type AppChromeProps = {
   onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
   onCommitSourceControl?: (message: string) => void;
+  onRefreshGithub?: () => void | Promise<void>;
+  onSelectGithubRun?: (runId: number) => void | Promise<void>;
+  onViewGithubRunLogs?: (runId: number) => void | Promise<void>;
+  onRerunGithubRun?: (
+    runId: number,
+    failedOnly: boolean,
+  ) => void | Promise<void>;
+  onOpenGithubUrl?: (url: string) => void | Promise<void>;
   onRunIdeTask?: (task: TaskDefinition) => void;
   onStartDebugSession?: (command: string) => void;
   onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
@@ -855,6 +873,11 @@ export function AppChrome({
   onDiscardSourceControlFile,
   onOpenSourceControlDiff,
   onCommitSourceControl,
+  onRefreshGithub,
+  onSelectGithubRun,
+  onViewGithubRunLogs,
+  onRerunGithubRun,
+  onOpenGithubUrl,
   onRunIdeTask,
   onStartDebugSession,
   onSendDebugCommand,
@@ -1256,6 +1279,11 @@ export function AppChrome({
               onRefreshSourceControl={onRefreshSourceControl}
               onOpenSourceControlDiff={onOpenSourceControlDiff}
               onCommitSourceControl={onCommitSourceControl}
+              onRefreshGithub={onRefreshGithub}
+              onSelectGithubRun={onSelectGithubRun}
+              onViewGithubRunLogs={onViewGithubRunLogs}
+              onRerunGithubRun={onRerunGithubRun}
+              onOpenGithubUrl={onOpenGithubUrl}
               onRunIdeTask={onRunIdeTask}
               onStartDebugSession={onStartDebugSession}
               onSendDebugCommand={onSendDebugCommand}
@@ -1773,6 +1801,11 @@ function WorkspaceSidebarContent({
   onDiscardSourceControlFile,
   onOpenSourceControlDiff,
   onCommitSourceControl,
+  onRefreshGithub,
+  onSelectGithubRun,
+  onViewGithubRunLogs,
+  onRerunGithubRun,
+  onOpenGithubUrl,
   onRunIdeTask,
   onStartDebugSession,
   onSendDebugCommand,
@@ -1853,6 +1886,14 @@ function WorkspaceSidebarContent({
   onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
   onCommitSourceControl?: (message: string) => void;
+  onRefreshGithub?: () => void | Promise<void>;
+  onSelectGithubRun?: (runId: number) => void | Promise<void>;
+  onViewGithubRunLogs?: (runId: number) => void | Promise<void>;
+  onRerunGithubRun?: (
+    runId: number,
+    failedOnly: boolean,
+  ) => void | Promise<void>;
+  onOpenGithubUrl?: (url: string) => void | Promise<void>;
   onRunIdeTask?: (task: TaskDefinition) => void;
   onStartDebugSession?: (command: string) => void;
   onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
@@ -3085,6 +3126,15 @@ function WorkspaceSidebarContent({
                   No local Git changes detected.
                 </div>
               )}
+              <GithubSidebarPanel
+                github={ide?.github}
+                branch={ide?.sourceControl.branch}
+                onOpenUrl={onOpenGithubUrl}
+                onRefresh={onRefreshGithub}
+                onRerunRun={onRerunGithubRun}
+                onSelectRun={onSelectGithubRun}
+                onViewLogs={onViewGithubRunLogs}
+              />
             </SidebarSection>
           ) : null}
 
@@ -6908,6 +6958,16 @@ export function CliWorkspaceSurface({
   const visibleTasks = tasks.length > 0 ? tasks : [];
   const panes = terminalPanes ?? [];
   const activePanes = panes.filter(terminalPaneHasActiveWork);
+  const focusedPane =
+    panes.find((pane) => pane.id === selectedTerminalPaneId) ?? panes[0];
+  const focusedProfile = focusedPane
+    ? terminalProfiles.find((profile) => profile.id === focusedPane.profileId)
+    : undefined;
+  // Only the backend can confirm a pane launched under Gyro's approval policy.
+  // Without that confirmation the rail says so plainly rather than showing a
+  // reassuring badge the pane does not earn.
+  const governedPanes = panes.filter((pane) => pane.governedSessionId);
+  const focusedGoverned = Boolean(focusedPane?.governedSessionId);
 
   return (
     <div className="gyro-cli-surface">
@@ -6939,11 +6999,48 @@ export function CliWorkspaceSurface({
             </div>
           </div>
           <div className="gyro-context-grid">
-            <ContextMetric label="Agent" value="Codex CLI" tone="slate" />
-            <ContextMetric label="Branch" value="not attached" />
-            <ContextMetric label="Panes" value={`${panes.length}/16`} />
-            <ContextMetric label="Approval" value="required" tone="amber" />
+            <ContextMetric
+              label="Agent"
+              value={
+                focusedProfile?.displayName ??
+                focusedPane?.profileId ??
+                "no pane"
+              }
+              tone="slate"
+            />
+            <ContextMetric
+              label="Branch"
+              value={
+                focusedPane?.worktreeName ?? focusedPane?.branch ?? "no pane"
+              }
+            />
+            <ContextMetric
+              label="Panes"
+              value={
+                governedPanes.length > 0
+                  ? `${panes.length}/16 · ${governedPanes.length} governed`
+                  : `${panes.length}/16`
+              }
+            />
+            <ContextMetric
+              label="Approval"
+              value={
+                !focusedPane
+                  ? "no pane"
+                  : focusedGoverned
+                    ? "via Gyro"
+                    : "terminal only"
+              }
+              tone={focusedGoverned ? "slate" : "amber"}
+            />
           </div>
+          {focusedPane ? (
+            <div className="gyro-muted-note">
+              {focusedGoverned
+                ? "This pane's file edits arrive as Gyro proposals you review in Diff review."
+                : "This pane runs like any terminal. Gyro cannot review its file edits."}
+            </div>
+          ) : null}
           <div className="gyro-compact-section">
             <div className="gyro-mini-heading">Recent tasks</div>
             {visibleTasks.length > 0 ? (
@@ -6980,7 +7077,11 @@ export function CliWorkspaceSurface({
                   <span className={`gyro-ring is-${session.status}`} />
                   <div>
                     <strong>{session.title}</strong>
-                    <span>{session.profileId}</span>
+                    <span>
+                      {session.governedSessionId
+                        ? `${session.profileId} · governed`
+                        : session.profileId}
+                    </span>
                   </div>
                   <small>{session.status}</small>
                 </button>
@@ -7718,6 +7819,7 @@ type IdeSurfaceProps = {
   onEditorRevert?: (path: string) => void;
   onEditorSelectionChange?: (selection?: EditorSelection) => void;
   onAssistantAction?: (action: IdeAssistantAction, instruction: string) => void;
+  assistantReply?: IdeAssistantReply;
   renderEditor?: (props: {
     buffer?: EditorBuffer;
     fileContent?: WorkspaceFileContent;
@@ -7799,6 +7901,7 @@ export function IdeSurface({
   onEditorRevert,
   onEditorSelectionChange,
   onAssistantAction,
+  assistantReply,
   renderEditor,
   terminalOutput,
   activePaneTab,
@@ -8007,6 +8110,7 @@ export function IdeSurface({
                   }
                   onActivate={() => onSelectEditorGroup?.(group.id)}
                   onAssistantAction={onAssistantAction}
+                  assistantReply={assistantReply}
                   onCloseGroup={() => onCloseEditorGroup?.(group.id)}
                   onCloseTab={(path) => onCloseEditorTab?.(path, group.id)}
                   onEditorChange={onEditorChange}
@@ -8074,7 +8178,11 @@ export function IdeSurface({
                   <span>
                     {ide.lastAssistantRequest.action.replaceAll("-", " ")}
                   </span>
-                  <small>Sent to the session timeline</small>
+                  <small>
+                    {assistantReply
+                      ? assistantReply.status
+                      : "sent to the session"}
+                  </small>
                 </div>
               ) : (
                 <p>Ask about the active file or selected code.</p>
@@ -8086,6 +8194,19 @@ export function IdeSurface({
                   <small>{toolCall.status}</small>
                 </div>
               ))}
+              {assistantReply ? (
+                <div className="gyro-ide-assistant-reply">
+                  {assistantReply.text ? (
+                    <p>{assistantReply.text}</p>
+                  ) : (
+                    <p className="is-pending">
+                      {assistantReply.status === "failed"
+                        ? "The provider did not return a reply."
+                        : "Waiting for the model…"}
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </div>
             <form
               className="gyro-ide-assistant-composer"
@@ -8291,6 +8412,7 @@ type EditorGroupPaneProps = {
   onEditorRevert?: (path: string) => void;
   onEditorSelectionChange?: (selection?: EditorSelection) => void;
   onAssistantAction?: (action: IdeAssistantAction, instruction: string) => void;
+  assistantReply?: IdeAssistantReply;
   renderEditor?: IdeSurfaceProps["renderEditor"];
 };
 
@@ -8322,6 +8444,7 @@ function EditorGroupPane({
   onEditorRevert,
   onEditorSelectionChange,
   onAssistantAction,
+  assistantReply,
   renderEditor,
 }: EditorGroupPaneProps) {
   const canSave = activeBuffer?.status === "dirty";
@@ -11184,14 +11307,21 @@ export function DiffReviewSurface({
           <div className="gyro-git-action-strip" aria-label="Git actions">
             {review.gitActions.map((action) => {
               const Icon = gitReviewActionIcon(action.id);
-              const gitActionStatus = hasFiles ? action.status : "blocked";
+              // Only committing depends on the reviewed files; pushing and
+              // opening a PR act on commits that already exist, so they stay
+              // available even when nothing is pending review.
+              const gitActionStatus =
+                hasFiles || action.id !== "commit" ? action.status : "blocked";
               return (
                 <button
                   className={`is-${gitActionStatus}`}
-                  disabled={gitActionStatus !== "ready"}
+                  disabled={
+                    gitActionStatus === "blocked" ||
+                    gitActionStatus === "running"
+                  }
                   key={action.id}
                   onClick={() => onRunGitAction?.(action.id)}
-                  title={action.detail}
+                  title={action.error ?? action.detail}
                   type="button"
                 >
                   <Icon size={14} />
@@ -11222,6 +11352,221 @@ export function DiffReviewSurface({
         </footer>
       </section>
     </div>
+  );
+}
+
+/** Icon for a normalized GitHub run state. */
+function githubRunStateIcon(state: GithubRunState): IconComponent {
+  if (state === "success") {
+    return Check;
+  }
+  if (state === "queued" || state === "in-progress") {
+    return CircleDashed;
+  }
+  if (
+    state === "failure" ||
+    state === "timed-out" ||
+    state === "action-required" ||
+    state === "stale"
+  ) {
+    return XCircle;
+  }
+  return Minus;
+}
+
+/**
+ * GitHub pull requests and Actions runs for the current workspace.
+ *
+ * Renders nothing but a short hint when `gh` is missing, logged out, or the
+ * repository is not on GitHub — the states where showing controls would only
+ * promise something Gyro cannot deliver.
+ */
+function GithubSidebarPanel({
+  github,
+  branch,
+  onOpenUrl,
+  onRefresh,
+  onRerunRun,
+  onSelectRun,
+  onViewLogs,
+}: {
+  github?: GithubState;
+  branch?: string;
+  onOpenUrl?: (url: string) => void | Promise<void>;
+  onRefresh?: () => void | Promise<void>;
+  onRerunRun?: (runId: number, failedOnly: boolean) => void | Promise<void>;
+  onSelectRun?: (runId: number) => void | Promise<void>;
+  onViewLogs?: (runId: number) => void | Promise<void>;
+}) {
+  const availability = github?.availability;
+  const header = (
+    <div className="gyro-sidebar-scm-group-label is-github">
+      <ChevronDown size={13} />
+      <span>GitHub</span>
+      {github?.loading ? <small>loading…</small> : null}
+      <button
+        aria-label="Refresh GitHub"
+        onClick={() => void onRefresh?.()}
+        title="Refresh GitHub"
+        type="button"
+      >
+        <RefreshCw size={13} />
+      </button>
+    </div>
+  );
+
+  if (!github || !availability?.available) {
+    return (
+      <>
+        {header}
+        <div className="gyro-sidebar-mini-copy">
+          {availability?.hint ??
+            availability?.error ??
+            "Checking GitHub availability…"}
+        </div>
+      </>
+    );
+  }
+
+  // Runs for the checked-out branch first: that is what the user just pushed.
+  const runs = [...github.runs].sort((first, second) => {
+    const firstMatches = branch && first.branch === branch ? 0 : 1;
+    const secondMatches = branch && second.branch === branch ? 0 : 1;
+    return firstMatches - secondMatches;
+  });
+  const selectedRun = github.runs.find(
+    (run) => run.id === github.selectedRunId,
+  );
+  const detail =
+    github.runDetail?.run.id === github.selectedRunId
+      ? github.runDetail
+      : undefined;
+
+  return (
+    <>
+      {header}
+      {github.error ? (
+        <div className="gyro-sidebar-mini-copy">{github.error}</div>
+      ) : null}
+      {github.pullRequests.length > 0 ? (
+        <>
+          <div className="gyro-sidebar-scm-group-label">
+            <span>Pull requests</span>
+            <small>{github.pullRequests.length}</small>
+          </div>
+          {github.pullRequests.slice(0, 8).map((pullRequest) => {
+            const ChecksIcon = pullRequest.checks
+              ? githubRunStateIcon(pullRequest.checks)
+              : undefined;
+            return (
+              <button
+                className="gyro-sidebar-github-row"
+                key={pullRequest.number}
+                onClick={() => void onOpenUrl?.(pullRequest.url)}
+                title={`#${pullRequest.number} ${pullRequest.title}`}
+                type="button"
+              >
+                <GitPullRequest size={13} />
+                <span className="gyro-sidebar-github-title">
+                  {pullRequest.title}
+                </span>
+                <small>#{pullRequest.number}</small>
+                {ChecksIcon ? (
+                  <ChecksIcon
+                    className={`gyro-github-state is-${pullRequest.checks}`}
+                    size={12}
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </>
+      ) : null}
+      <div className="gyro-sidebar-scm-group-label">
+        <span>Actions</span>
+        <small>{runs.length}</small>
+      </div>
+      {runs.length === 0 ? (
+        <div className="gyro-sidebar-mini-copy">No workflow runs yet.</div>
+      ) : (
+        runs.slice(0, 10).map((run) => {
+          const StateIcon = githubRunStateIcon(run.state);
+          const isSelected = run.id === github.selectedRunId;
+          return (
+            <div key={run.id}>
+              <button
+                className={`gyro-sidebar-github-row${isSelected ? " is-active" : ""}`}
+                onClick={() => void onSelectRun?.(run.id)}
+                title={`${run.workflowName} · ${run.title} · ${run.branch}`}
+                type="button"
+              >
+                <StateIcon
+                  className={`gyro-github-state is-${run.state}`}
+                  size={13}
+                />
+                <span className="gyro-sidebar-github-title">
+                  {run.workflowName}
+                </span>
+                <small>{run.branch}</small>
+              </button>
+              {isSelected ? (
+                <div className="gyro-sidebar-github-detail">
+                  {detail ? (
+                    detail.jobs.map((job) => {
+                      const JobIcon = githubRunStateIcon(job.state);
+                      return (
+                        <div
+                          className="gyro-sidebar-github-job"
+                          key={job.id}
+                          title={`${job.name} — ${job.state}`}
+                        >
+                          <JobIcon
+                            className={`gyro-github-state is-${job.state}`}
+                            size={12}
+                          />
+                          <span>{job.name}</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="gyro-sidebar-mini-copy">Loading jobs…</div>
+                  )}
+                  <div className="gyro-sidebar-github-actions">
+                    <button
+                      onClick={() => void onViewLogs?.(run.id)}
+                      title="Show failed-step logs in the Output panel"
+                      type="button"
+                    >
+                      <ScrollText size={12} />
+                      Logs
+                    </button>
+                    <button
+                      // Re-running only the failed jobs is the common repair;
+                      // it is also far cheaper than a full re-run.
+                      disabled={!selectedRun?.state}
+                      onClick={() => void onRerunRun?.(run.id, true)}
+                      title="Re-run the failed jobs in this run"
+                      type="button"
+                    >
+                      <RotateCcw size={12} />
+                      Re-run failed
+                    </button>
+                    <button
+                      onClick={() => void onOpenUrl?.(run.url)}
+                      title="Open this run on GitHub"
+                      type="button"
+                    >
+                      <Globe2 size={12} />
+                      Open
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })
+      )}
+    </>
   );
 }
 
@@ -12567,6 +12912,10 @@ type SettingsSurfaceProps = {
   onTestNotification?: () => void;
   onToggleProvider?: (providerId: string) => void;
   onTestProvider?: (providerId: string) => void;
+  onSelectProviderDefaultModel?: (
+    providerId: ProviderId,
+    modelId: string,
+  ) => void;
   selectedUsageProviderId?: ProviderId;
   usageVisualization?: "bars" | "wheels";
   providerUsage?: ProviderUsageState;
@@ -12756,6 +13105,7 @@ export function SettingsSurface({
   onTestNotification,
   onToggleProvider,
   onTestProvider,
+  onSelectProviderDefaultModel,
   selectedUsageProviderId,
   usageVisualization = "bars",
   providerUsage,
@@ -13091,17 +13441,19 @@ export function SettingsSurface({
           <SettingsSection
             icon={KeyRound}
             title="Providers"
-            description="Connect model providers separately from local Gyro access; credentials stay in provider CLI, SDK, Keychain, or env storage."
+            description="Connect a provider and choose the model it starts new chats with."
           >
             <div className="gyro-provider-table is-native-list">
               <div className="gyro-provider-table-head">
                 <span>Provider</span>
+                <span>Default model</span>
                 <span>Connection</span>
-                <span>Capability</span>
                 <span>Actions</span>
               </div>
               {[...enabledProviders, ...disabledProviders].map((provider) => {
                 const capabilities = providerCapabilities(provider.id);
+                const defaultModelId = providerDefaultModelId(provider);
+                const hasModelChoice = provider.models.length > 1;
                 return (
                   <div
                     className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}`}
@@ -13109,10 +13461,29 @@ export function SettingsSurface({
                   >
                     <div className="gyro-provider-identity">
                       <ProviderLogo providerId={provider.id} />
-                      <div>
-                        <strong>{provider.displayName}</strong>
-                        <span>{selectedModelLabel(provider)}</span>
-                      </div>
+                      <strong>{provider.displayName}</strong>
+                    </div>
+                    <div className="gyro-provider-default-model">
+                      {hasModelChoice ? (
+                        <select
+                          aria-label={`${provider.displayName} default model`}
+                          onChange={(event) =>
+                            onSelectProviderDefaultModel?.(
+                              provider.id,
+                              event.target.value,
+                            )
+                          }
+                          value={defaultModelId ?? ""}
+                        >
+                          {provider.models.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <strong>{defaultModelLabel(provider)}</strong>
+                      )}
                     </div>
                     <SettingsStatus
                       status={
@@ -13125,17 +13496,6 @@ export function SettingsSurface({
                     >
                       {providerConnectionLabel(provider)}
                     </SettingsStatus>
-                    <div className="gyro-provider-capability">
-                      <strong>
-                        {capabilities?.executable
-                          ? provider.id === "openai" ||
-                            provider.id === "anthropic"
-                            ? "Runs + Gyro tools"
-                            : "Runs · tools unavailable"
-                          : "Readiness only"}
-                      </strong>
-                      <span>{providerAuthSummary(provider.id)}</span>
-                    </div>
                     <div className="gyro-settings-provider-actions">
                       <button
                         className="gyro-primary-button"

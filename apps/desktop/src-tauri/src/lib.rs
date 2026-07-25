@@ -770,6 +770,74 @@ struct GitCommitRequest {
     message: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitSyncRequest {
+    workspace_path: String,
+    /// Push the current branch and record it as upstream when it has none yet.
+    #[serde(default)]
+    set_upstream: bool,
+    #[serde(default)]
+    remote: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitCreateBranchRequest {
+    workspace_path: String,
+    branch: String,
+    #[serde(default)]
+    start_point: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitSyncResult {
+    output: IdeCommandOutput,
+    status: SourceControlStatus,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubWorkspaceRequest {
+    workspace_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubWorkflowRunsRequest {
+    workspace_path: String,
+    #[serde(default)]
+    branch: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubWorkflowRunRequest {
+    workspace_path: String,
+    run_id: u64,
+    #[serde(default)]
+    failed_only: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubPullRequestsRequest {
+    workspace_path: String,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubCreatePullRequestRequest {
+    workspace_path: String,
+    #[serde(flatten)]
+    pull_request: gyro_core::CreatePullRequestRequest,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct IdeCommandOutput {
@@ -969,7 +1037,7 @@ impl Drop for DebugAdapterProcess {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalPaneRequest {
     pane_id: String,
@@ -982,6 +1050,31 @@ struct TerminalPaneRequest {
     working_directory: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
+    /// Ask Gyro to run this pane under its approval policy.
+    ///
+    /// The renderer may only request governance; the command layer decides
+    /// whether the profile supports it and resolves everything else itself.
+    #[serde(default)]
+    governed: bool,
+    /// Resolved in `create_terminal_pane` from app state, never from the
+    /// renderer, so a compromised window cannot choose the session identity or
+    /// environment an agent CLI starts with.
+    #[serde(skip)]
+    governance: Option<PaneGovernance>,
+}
+
+/// Gyro-owned launch additions that put a pane under the same approval policy
+/// and capability bridge a Chat turn gets.
+///
+/// This is the difference between a Gyro pane and any other terminal emulator:
+/// the agent's file writes arrive as reviewable Gyro proposals instead of a
+/// y/n prompt that scrolls out of the buffer.
+#[derive(Clone, Debug)]
+struct PaneGovernance {
+    session_id: String,
+    provider_id: String,
+    env: Vec<(String, String)>,
+    args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1000,6 +1093,10 @@ struct TerminalPaneSnapshot {
     working_directory: Option<String>,
     cols: u16,
     rows: u16,
+    /// Set only when the pane actually runs under Gyro's approval policy, so
+    /// the CLI surface can report governance instead of asserting it.
+    governed_session_id: Option<String>,
+    governed_provider_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1497,7 +1594,9 @@ impl TerminalProcessManager {
         Ok(snapshot_terminal_process(process, None))
     }
 
-    fn close(&self, pane_id: &str) -> anyhow::Result<()> {
+    /// Closes a pane, returning the governed session it held so the caller can
+    /// retire its approval authority.
+    fn close(&self, pane_id: &str) -> anyhow::Result<Option<String>> {
         let mut process = {
             let mut processes = self
                 .processes
@@ -1507,9 +1606,26 @@ impl TerminalProcessManager {
                 .remove(pane_id)
                 .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?
         };
+        let governed_session = process
+            .request
+            .governance
+            .as_ref()
+            .map(|governance| governance.session_id.clone());
         terminate_terminal_process(&mut process);
         drop(process);
-        Ok(())
+        Ok(governed_session)
+    }
+
+    /// The governed session a live pane currently holds, if any.
+    fn governed_session(&self, pane_id: &str) -> Option<String> {
+        self.processes
+            .lock()
+            .ok()?
+            .get(pane_id)?
+            .request
+            .governance
+            .as_ref()
+            .map(|governance| governance.session_id.clone())
     }
 
     fn restart(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
@@ -1779,7 +1895,11 @@ async fn delete_session(app: tauri::AppHandle, session_id: String) -> Result<boo
             .and_then(|mut terminals| terminals.remove(&session_id));
         if let Some(owned) = owned_terminal {
             let _ = app.state::<TerminalProcessManager>().stop(&owned.pane_id);
-            let _ = app.state::<TerminalProcessManager>().close(&owned.pane_id);
+            if let Ok(Some(governed_session)) =
+                app.state::<TerminalProcessManager>().close(&owned.pane_id)
+            {
+                release_pane_governance(&app, &governed_session);
+            }
         }
         if let Ok(mut browsers) = app
             .state::<ProviderCapabilityResourceManager>()
@@ -5496,6 +5616,250 @@ fn git_commit_blocking(request: GitCommitRequest) -> Result<IdeCommandOutput, St
 }
 
 #[tauri::command]
+async fn git_create_branch(request: GitCreateBranchRequest) -> Result<GitBranchCatalog, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_create_branch_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("git branch creation worker failed: {error}"))?
+}
+
+fn git_create_branch_impl(request: &GitCreateBranchRequest) -> anyhow::Result<GitBranchCatalog> {
+    gyro_core::validate_branch_name(&request.branch)?;
+    let root = workspace_root(&request.workspace_path)?;
+    let repo_root = git_repo_root(&root)
+        .ok_or_else(|| anyhow::anyhow!("the selected folder is not a Git repository"))?;
+    let catalog = git_branch_catalog_impl(&request.workspace_path)?;
+    if catalog
+        .branches
+        .iter()
+        .any(|branch| branch == &request.branch)
+    {
+        return Err(anyhow::anyhow!("that branch already exists"));
+    }
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["checkout", "-b"])
+        .arg(&request.branch);
+    if let Some(start_point) = request
+        .start_point
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        gyro_core::validate_branch_name(start_point)?;
+        command.arg(start_point);
+    }
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(30),
+        None,
+        2 * 1024 * 1024,
+        64 * 1024,
+    )?;
+    if !output.succeeded() {
+        return Err(anyhow::anyhow!(
+            "{}",
+            gyro_core::security::redact_secrets(first_error_line(&output.stderr).as_str())
+        ));
+    }
+    git_branch_catalog_impl(&request.workspace_path)
+}
+
+#[tauri::command]
+async fn git_push(request: GitSyncRequest) -> Result<GitSyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || git_push_blocking(request))
+        .await
+        .map_err(|error| format!("git push worker failed: {error}"))?
+}
+
+fn git_push_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let mut command = command_with_gui_path("git");
+    command.arg("-C").arg(&root).arg("push");
+    if request.set_upstream {
+        // A branch created locally has no upstream yet; `--set-upstream` is the
+        // difference between "push" working and failing with a hint.
+        let branch = git_current_branch(&root)
+            .ok_or_else(|| "could not determine the current branch".to_string())?;
+        command
+            .arg("--set-upstream")
+            .arg(request.remote.as_deref().unwrap_or("origin"))
+            .arg(branch);
+    }
+    let output = run_command_output(command).map_err(to_string)?;
+    Ok(GitSyncResult {
+        output,
+        status: git_status_impl(&request.workspace_path).map_err(to_string)?,
+    })
+}
+
+#[tauri::command]
+async fn git_pull(request: GitSyncRequest) -> Result<GitSyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || git_pull_blocking(request))
+        .await
+        .map_err(|error| format!("git pull worker failed: {error}"))?
+}
+
+fn git_pull_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let mut command = command_with_gui_path("git");
+    // `--ff-only` keeps a button press from silently producing a merge commit or
+    // a rebase; a diverged branch surfaces as an error the user can act on.
+    command.arg("-C").arg(&root).args(["pull", "--ff-only"]);
+    let output = run_command_output(command).map_err(to_string)?;
+    Ok(GitSyncResult {
+        output,
+        status: git_status_impl(&request.workspace_path).map_err(to_string)?,
+    })
+}
+
+#[tauri::command]
+async fn git_fetch(request: GitSyncRequest) -> Result<GitSyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || git_fetch_blocking(request))
+        .await
+        .map_err(|error| format!("git fetch worker failed: {error}"))?
+}
+
+fn git_fetch_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(&root)
+        .args(["fetch", "--prune"])
+        .arg(request.remote.as_deref().unwrap_or("origin"));
+    let output = run_command_output(command).map_err(to_string)?;
+    // The point of fetching from the UI is refreshed ahead/behind counts.
+    Ok(GitSyncResult {
+        output,
+        status: git_status_impl(&request.workspace_path).map_err(to_string)?,
+    })
+}
+
+fn git_current_branch(root: &Path) -> Option<String> {
+    let mut command = command_with_gui_path("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"]);
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )
+    .ok()?;
+    if !output.succeeded() {
+        return None;
+    }
+    let branch = output.stdout.trim().to_string();
+    // Detached HEAD reports "HEAD", which is not a pushable branch name.
+    (!branch.is_empty() && branch != "HEAD").then_some(branch)
+}
+
+fn first_error_line(stderr: &str) -> String {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("the git command failed")
+        .to_string()
+}
+
+#[tauri::command]
+async fn github_status(
+    request: GithubWorkspaceRequest,
+) -> Result<gyro_core::GithubAvailability, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        Ok(gyro_core::github_availability(&root))
+    })
+    .await
+    .map_err(|error| format!("github status worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn github_workflow_runs(
+    request: GithubWorkflowRunsRequest,
+) -> Result<Vec<gyro_core::GithubWorkflowRun>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        gyro_core::list_workflow_runs(
+            &root,
+            request.branch.as_deref(),
+            request.limit.unwrap_or(20),
+        )
+        .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("github workflow runs worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn github_workflow_run_detail(
+    request: GithubWorkflowRunRequest,
+) -> Result<gyro_core::GithubWorkflowRunDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        gyro_core::workflow_run_detail(&root, request.run_id).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("github workflow detail worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn github_workflow_logs(request: GithubWorkflowRunRequest) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        gyro_core::workflow_run_logs(&root, request.run_id, request.failed_only).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("github workflow logs worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn github_rerun_workflow(
+    request: GithubWorkflowRunRequest,
+) -> Result<Vec<gyro_core::GithubWorkflowRun>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        gyro_core::rerun_workflow(&root, request.run_id, request.failed_only).map_err(to_string)?;
+        // Re-list so the caller immediately sees the re-queued run.
+        gyro_core::list_workflow_runs(&root, None, 20).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("github rerun worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn github_pull_requests(
+    request: GithubPullRequestsRequest,
+) -> Result<Vec<gyro_core::GithubPullRequest>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        gyro_core::list_pull_requests(&root, request.limit.unwrap_or(20)).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("github pull requests worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn github_create_pull_request(
+    request: GithubCreatePullRequestRequest,
+) -> Result<gyro_core::GithubPullRequest, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        gyro_core::create_pull_request(&root, &request.pull_request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("github pull request worker failed: {error}"))?
+}
+
+#[tauri::command]
 async fn lsp_start(
     request: LspStartRequest,
     manager: tauri::State<'_, LanguageServerManager>,
@@ -7511,13 +7875,42 @@ fn content_hash(bytes: &[u8]) -> String {
 
 #[tauri::command]
 async fn create_terminal_pane(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
-    request: TerminalPaneRequest,
+    mut request: TerminalPaneRequest,
 ) -> Result<TerminalPaneSnapshot, String> {
+    // Governance is resolved here, never taken from the renderer, so the
+    // session identity and approval environment an agent CLI inherits always
+    // come from persisted backend state.
+    request.governance = None;
+    if request.governed {
+        request.governance = Some(resolve_pane_governance(&app, &request).map_err(to_string)?);
+    }
+    let governed_session = request
+        .governance
+        .as_ref()
+        .map(|governance| governance.session_id.clone());
+    // Relaunching into an occupied pane id replaces that process, so retire the
+    // approval authority it held rather than leaving a dead pane able to
+    // approve. `restart` deliberately does not come through here: it reuses the
+    // same governance so a restarted pane keeps its session identity.
+    let displaced = manager.governed_session(&request.pane_id);
     let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.create(request).map_err(to_string))
-        .await
-        .map_err(|error| format!("terminal create worker failed: {error}"))?
+    let result =
+        tauri::async_runtime::spawn_blocking(move || manager.create(request).map_err(to_string))
+            .await
+            .map_err(|error| format!("terminal create worker failed: {error}"))?;
+    if let Some(displaced) = displaced.filter(|session| Some(session) != governed_session.as_ref())
+    {
+        release_pane_governance(&app, &displaced);
+    }
+    if result.is_err() {
+        // A pane that never started must not leave approval authority behind.
+        if let Some(session_id) = governed_session {
+            release_pane_governance(&app, &session_id);
+        }
+    }
+    result
 }
 
 #[tauri::command]
@@ -7665,13 +8058,19 @@ async fn list_active_capability_resources(
 
 #[tauri::command]
 async fn close_terminal_pane(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<(), String> {
     let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.close(&pane_id).map_err(to_string))
-        .await
-        .map_err(|error| format!("terminal close worker failed: {error}"))?
+    let governed_session =
+        tauri::async_runtime::spawn_blocking(move || manager.close(&pane_id).map_err(to_string))
+            .await
+            .map_err(|error| format!("terminal close worker failed: {error}"))??;
+    if let Some(session_id) = governed_session {
+        release_pane_governance(&app, &session_id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -8593,10 +8992,18 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     let command_path = terminal_command_path(&request.command);
     let mut command = CommandBuilder::new(command_path.as_str());
     command.args(request.args.iter().map(String::as_str));
+    if let Some(governance) = request.governance.as_ref() {
+        command.args(governance.args.iter().map(String::as_str));
+    }
     if let Some(cwd) = cwd.as_ref() {
         command.cwd(cwd);
     }
     configure_terminal_environment(&mut command);
+    if let Some(governance) = request.governance.as_ref() {
+        for (name, value) in &governance.env {
+            command.env(name, value);
+        }
+    }
     if !command_path.contains('/') {
         command.env("PATH", augmented_gui_path());
     }
@@ -8958,6 +9365,20 @@ fn run_kimi_acp_chat(
         }
     }
 
+    // Give ACP agents the same Gyro capability tools the Claude and Codex
+    // adapters get. Both Kimi and Grok accept stdio MCP servers here; if the
+    // capability context is unavailable the agent simply runs without them
+    // rather than failing the turn.
+    let mcp_servers = match (
+        active_provider_approval_nonce(app, &request.session_id),
+        active_provider_capability_context(app, &request.session_id),
+    ) {
+        (Ok(nonce), Ok(bound)) => capability_acp_mcp_server(&bound, &nonce)
+            .map(|server| vec![server])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+
     let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
     let activity_sink = activities.clone();
     let approved_file_writes = Arc::new(AtomicUsize::new(0));
@@ -8975,6 +9396,7 @@ fn run_kimi_acp_chat(
             auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),
             prompt,
+            mcp_servers,
             model: request
                 .model_id
                 .clone()
@@ -9156,7 +9578,7 @@ fn run_openai_codex_chat(
 
     let mut process = command_with_gui_path("codex");
     process.current_dir(cwd);
-    process.args(codex_chat_args(
+    let args = codex_chat_args(
         resume_cursor.and_then(|cursor| {
             (cursor.kind == "codex-session").then_some(cursor.session_id.as_str())
         }),
@@ -9169,7 +9591,9 @@ fn run_openai_codex_chat(
         request.full_access,
         &request.attachments,
         &prompt,
-    ));
+    );
+    audit_provider_chat_args(&request.provider_id, &args)?;
+    process.args(args);
 
     let output =
         run_streaming_command(
@@ -10596,7 +11020,7 @@ fn run_anthropic_claude_chat(
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let mut process = command_with_gui_path("claude");
     process.current_dir(cwd);
-    process.args(claude_chat_args(
+    let args = claude_chat_args(
         resume_cursor
             .filter(|cursor| cursor.kind == "claude-session")
             .map(|_| session_id.as_str()),
@@ -10608,7 +11032,9 @@ fn run_anthropic_claude_chat(
         request.full_access,
         permission_mcp_config.as_deref(),
         &prompt,
-    ));
+    );
+    audit_provider_chat_args(&request.provider_id, &args)?;
+    process.args(args);
 
     let output =
         run_streaming_command(
@@ -10731,6 +11157,20 @@ fn codex_chat_args(
     args
 }
 
+/// Check a provider argument vector against its CLI contract before spawning.
+///
+/// A violation is a Gyro bug rather than a provider outage, so the run stops
+/// here with a message that says so. Letting the vector through instead makes
+/// the CLI report a downstream symptom — most memorably a missing prompt — that
+/// reads like a transient failure and invites an endless retry.
+fn audit_provider_chat_args(provider_id: &str, args: &[String]) -> anyhow::Result<()> {
+    let Some(contract) = gyro_core::provider_cli_contract(provider_id) else {
+        return Ok(());
+    };
+    gyro_core::audit_provider_args(contract, args)
+        .map_err(|violation| anyhow::anyhow!("{}", violation.message(provider_id)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn claude_chat_args(
     resume_session_id: Option<&str>,
@@ -10747,6 +11187,8 @@ fn claude_chat_args(
         "--print".into(),
         "--output-format".into(),
         "stream-json".into(),
+        // `--print --output-format stream-json` is rejected without `--verbose`.
+        "--verbose".into(),
         "--include-partial-messages".into(),
     ];
     if let Some(resume_session_id) = resume_session_id {
@@ -10800,6 +11242,11 @@ fn claude_chat_args(
         args.push("--allowedTools".into());
         args.push(capability_tools);
     }
+    // `claude --allowedTools <tools...>` is variadic. Without an option
+    // terminator, Commander consumes the chat prompt as another tool name and
+    // the CLI exits with "Input must be provided either through stdin or as a
+    // prompt argument when using --print".
+    args.push("--".into());
     args.push(prompt.into());
     args
 }
@@ -10832,6 +11279,26 @@ fn active_provider_capability_context(
         .map_err(|_| anyhow::anyhow!("provider capability context is unavailable"))?
         .clone()
         .ok_or_else(|| anyhow::anyhow!("provider capability context is not bound"))
+}
+
+/// The Gyro capability server as an ACP `session/new` MCP entry.
+///
+/// ACP takes env as an array of `{name, value}` objects, unlike the object map
+/// the Claude and Codex CLIs use, so the shared env list is reshaped here.
+fn capability_acp_mcp_server(
+    bound: &BoundProviderCapabilityContext,
+    approval_nonce: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let executable = std::env::current_exe().context("resolve Gyro capability server path")?;
+    Ok(serde_json::json!({
+        "name": "gyro_capabilities",
+        "command": executable,
+        "args": ["provider-capability-server"],
+        "env": capability_mcp_env(bound, approval_nonce)
+            .into_iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+            .collect::<Vec<_>>(),
+    }))
 }
 
 fn capability_mcp_env(
@@ -10905,8 +11372,22 @@ fn provider_run_approval_matches(
             .is_some_and(|control| control.approval_nonce == approval_nonce)
 }
 
-fn desktop_claude_permission_mcp_config(
-    request: &ProviderChatRequest,
+/// Identity and approval requirements a Claude CLI run reports back to Gyro.
+///
+/// Chat fills this from a `ProviderChatRequest`; a governed pane fills it from
+/// the pane's own persisted CLI session. Both produce the same bridge, so a
+/// pane's file writes land in the same proposal store Chat uses.
+struct ClaudePermissionBridgeIdentity<'a> {
+    session_id: &'a str,
+    turn_id: Option<&'a str>,
+    provider_id: &'a str,
+    provider_label: &'a str,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
+}
+
+fn desktop_claude_permission_mcp_config_for(
+    identity: &ClaudePermissionBridgeIdentity<'_>,
     approval_nonce: &str,
     bound: &BoundProviderCapabilityContext,
 ) -> anyhow::Result<String> {
@@ -10918,13 +11399,13 @@ fn desktop_claude_permission_mcp_config(
                 "command": executable,
                 "args": ["provider-permission-server"],
                 "env": {
-                    "GYRO_DESKTOP_PERMISSION_SESSION_ID": request.session_id,
-                    "GYRO_DESKTOP_PERMISSION_TURN_ID": request.turn_id.as_deref().unwrap_or(""),
+                    "GYRO_DESKTOP_PERMISSION_SESSION_ID": identity.session_id,
+                    "GYRO_DESKTOP_PERMISSION_TURN_ID": identity.turn_id.unwrap_or(""),
                     "GYRO_DESKTOP_PERMISSION_RUN_NONCE": approval_nonce,
-                    "GYRO_DESKTOP_PERMISSION_PROVIDER_ID": request.provider_id,
-                    "GYRO_DESKTOP_PERMISSION_PROVIDER_LABEL": request.provider_label.as_deref().unwrap_or("Anthropic"),
-                    "GYRO_DESKTOP_PERMISSION_REQUIRE_COMMAND": request.require_command_approval.to_string(),
-                    "GYRO_DESKTOP_PERMISSION_REQUIRE_FILE": request.require_file_edit_approval.to_string(),
+                    "GYRO_DESKTOP_PERMISSION_PROVIDER_ID": identity.provider_id,
+                    "GYRO_DESKTOP_PERMISSION_PROVIDER_LABEL": identity.provider_label,
+                    "GYRO_DESKTOP_PERMISSION_REQUIRE_COMMAND": identity.require_command_approval.to_string(),
+                    "GYRO_DESKTOP_PERMISSION_REQUIRE_FILE": identity.require_file_edit_approval.to_string(),
                 }
             },
             "gyro_capabilities": {
@@ -10938,6 +11419,189 @@ fn desktop_claude_permission_mcp_config(
         }
     }))
     .context("encode Gyro desktop permission bridge config")
+}
+
+fn desktop_claude_permission_mcp_config(
+    request: &ProviderChatRequest,
+    approval_nonce: &str,
+    bound: &BoundProviderCapabilityContext,
+) -> anyhow::Result<String> {
+    desktop_claude_permission_mcp_config_for(
+        &ClaudePermissionBridgeIdentity {
+            session_id: &request.session_id,
+            turn_id: request.turn_id.as_deref(),
+            provider_id: &request.provider_id,
+            provider_label: request.provider_label.as_deref().unwrap_or("Anthropic"),
+            require_command_approval: request.require_command_approval,
+            require_file_edit_approval: request.require_file_edit_approval,
+        },
+        approval_nonce,
+        bound,
+    )
+}
+
+/// The provider a pane profile can be governed as, if any.
+///
+/// Governance is deliberately narrow: it only covers CLIs that expose an
+/// interactive hook Gyro can enforce. Claude Code has
+/// `--permission-prompt-tool`, and `handle_desktop_provider_approval_request`
+/// only accepts `anthropic`. Codex routes approvals through the app-server
+/// path instead, which a raw PTY pane does not speak, so it stays ungoverned
+/// here rather than being labelled as protected when it is not.
+fn governable_pane_provider(request: &TerminalPaneRequest) -> Option<&'static str> {
+    let profile = request.profile_id.as_deref().unwrap_or_default();
+    let command = Path::new(request.command.trim())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    (matches!(profile, "claude" | "claude-code") || command == "claude").then_some("anthropic")
+}
+
+/// Put a pane under Gyro's approval policy.
+///
+/// Creates the pane's own CLI session, registers a run control so
+/// `handle_desktop_provider_approval_request` recognises its approvals, and
+/// returns the launch additions that point the CLI at Gyro's bridge.
+fn resolve_pane_governance(
+    app: &tauri::AppHandle,
+    request: &TerminalPaneRequest,
+) -> anyhow::Result<PaneGovernance> {
+    let provider_id = governable_pane_provider(request)
+        .ok_or_else(|| anyhow::anyhow!("this profile cannot run under Gyro approvals"))?;
+    let workspace = request
+        .workspace_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("a governed pane needs a trusted workspace"))?;
+    let workspace = PathBuf::from(workspace)
+        .canonicalize()
+        .context("resolve governed pane workspace")?;
+    if !workspace.is_dir() {
+        anyhow::bail!("the governed pane workspace is not a directory");
+    }
+
+    let paths = GyroPaths::for_current_user()?;
+    let config = GyroConfig::load(&paths)?;
+    let provider = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .ok_or_else(|| anyhow::anyhow!("{provider_id} is not configured in Gyro settings"))?;
+    if !provider.enabled {
+        anyhow::bail!("{} is disabled in Gyro settings", provider.display_name);
+    }
+    let provider_label = provider.display_name.clone();
+
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let workspace_key = workspace.display().to_string();
+    let branch = git_branch_catalog_impl(&workspace_key)
+        .ok()
+        .and_then(|catalog| catalog.current)
+        .unwrap_or_else(|| "main".into());
+    let session = store.create_session_with_context(
+        &workspace,
+        SessionOrigin::Cli,
+        request.title.clone(),
+        CreateSessionContext {
+            branch,
+            provider_id: Some(provider_id.to_string()),
+            provider_label: Some(provider_label.clone()),
+            workspace_mode: if request.workspace_mode.as_deref() == Some("worktree") {
+                SessionWorkspaceMode::Worktree
+            } else {
+                SessionWorkspaceMode::Local
+            },
+            ..CreateSessionContext::default()
+        },
+    )?;
+    let session_id = session.id.to_string();
+
+    let bound = BoundProviderCapabilityContext {
+        session_id: session_id.clone(),
+        turn_id: None,
+        provider_id: provider_id.to_string(),
+        workspace: workspace.clone(),
+        workspace_key: workspace_key.clone(),
+        policy: CapabilityPolicySnapshot::from_policy(
+            &store.get_project_capability_policy(&workspace_key)?,
+            CapabilityRunMode::Normal,
+        ),
+        workspace_context: app
+            .state::<CapabilityIdeEvidenceManager>()
+            .by_workspace
+            .lock()
+            .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
+            .get(&workspace_key)
+            .cloned()
+            .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone())),
+    };
+
+    // A pane is long-lived, so unlike a Chat turn its run control lives for the
+    // life of the pane and is removed in `release_pane_governance`.
+    let control = Arc::new(ProviderRunControl::default());
+    let approval_nonce = control.approval_nonce.clone();
+    *control
+        .capability_context
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider capability context is unavailable"))? =
+        Some(bound.clone());
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
+        .insert(session_id.clone(), control);
+
+    let mcp_config = desktop_claude_permission_mcp_config_for(
+        &ClaudePermissionBridgeIdentity {
+            session_id: &session_id,
+            turn_id: None,
+            provider_id,
+            provider_label: &provider_label,
+            require_command_approval: config.require_command_approval,
+            require_file_edit_approval: config.require_file_edit_approval,
+        },
+        &approval_nonce,
+        &bound,
+    )?;
+    let capability_tools = CAPABILITY_DESCRIPTORS
+        .iter()
+        .map(|descriptor| {
+            format!(
+                "mcp__gyro_capabilities__{}",
+                descriptor.id.provider_tool_name()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    Ok(PaneGovernance {
+        session_id,
+        provider_id: provider_id.to_string(),
+        env: Vec::new(),
+        args: vec![
+            "--setting-sources".into(),
+            String::new(),
+            "--mcp-config".into(),
+            mcp_config,
+            "--strict-mcp-config".into(),
+            "--permission-prompt-tool".into(),
+            "mcp__gyro_approval__approve".into(),
+            "--allowedTools".into(),
+            format!("mcp__gyro_approval__approve,{capability_tools}"),
+            "--permission-mode".into(),
+            "default".into(),
+        ],
+    })
+}
+
+/// Drop a governed pane's run control so a closed pane cannot keep approving.
+fn release_pane_governance(app: &tauri::AppHandle, session_id: &str) {
+    if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        if let Some(control) = flags.remove(session_id) {
+            control.cancellation.cancel();
+        }
+    }
 }
 
 fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
@@ -11465,6 +12129,15 @@ fn provider_turn_has_unfinished_attempt(
 
 fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
     let normalized = error.to_ascii_lowercase();
+    // Checked first: an argument failure is definitive, and it is the one class
+    // where retrying cannot possibly help. Reporting it as a generic retry is
+    // what left an unusable provider looking like a flaky one.
+    if gyro_core::is_cli_argument_error(error) {
+        return (
+            "cli-contract",
+            "This provider's CLI does not accept the command Gyro built, which usually means its version changed. Update Gyro and the provider CLI; retrying will not help.",
+        );
+    }
     if normalized.contains("offline")
         || normalized.contains("network is unreachable")
         || normalized.contains("connection refused")
@@ -12730,6 +13403,16 @@ fn snapshot_terminal_process(
             .map(|path| path.display().to_string()),
         cols: process.cols,
         rows: process.rows,
+        governed_session_id: process
+            .request
+            .governance
+            .as_ref()
+            .map(|governance| governance.session_id.clone()),
+        governed_provider_id: process
+            .request
+            .governance
+            .as_ref()
+            .map(|governance| governance.provider_id.clone()),
     }
 }
 
@@ -12782,6 +13465,25 @@ fn capability_argument_string<'a>(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow::anyhow!("capability argument `{name}` is required"))
+}
+
+fn capability_argument_u64(arguments: &serde_json::Value, name: &str) -> anyhow::Result<u64> {
+    arguments
+        .get(name)
+        .and_then(|value| {
+            value.as_u64().or_else(|| {
+                // Providers that emit every argument as a string still need to
+                // be able to name a run id.
+                value.as_str().and_then(|value| value.trim().parse().ok())
+            })
+        })
+        .ok_or_else(|| anyhow::anyhow!("capability argument `{name}` must be a positive number"))
+}
+
+fn capability_argument_usize(arguments: &serde_json::Value, name: &str) -> Option<usize> {
+    capability_argument_u64(arguments, name)
+        .ok()
+        .map(|value| value.clamp(1, 50) as usize)
 }
 
 fn capability_argument_strings(
@@ -13613,6 +14315,7 @@ fn execute_provider_capability(
                     working_directory: Some(cwd.display().to_string()),
                     cols: Some(120),
                     rows: Some(32),
+                    ..Default::default()
                 })?;
             terminals.insert(
                 bound.session_id.clone(),
@@ -13788,6 +14491,121 @@ fn execute_provider_capability(
                     Some(resource),
                 )
             }
+        }
+        CapabilityId::GithubStatus => {
+            let availability = gyro_core::github_availability(&bound.workspace);
+            (
+                match (&availability.repository, availability.available) {
+                    (Some(repository), true) => format!("GitHub is ready for {repository}"),
+                    _ => "GitHub is not available for this project".into(),
+                },
+                serde_json::to_value(availability)?,
+                None,
+            )
+        }
+        CapabilityId::GithubPullRequests => {
+            let limit = capability_argument_usize(arguments, "limit").unwrap_or(20);
+            let pull_requests = gyro_core::list_pull_requests(&bound.workspace, limit)?;
+            (
+                format!("Listed {} open pull requests", pull_requests.len()),
+                serde_json::to_value(pull_requests)?,
+                None,
+            )
+        }
+        CapabilityId::GithubWorkflowRuns => {
+            let limit = capability_argument_usize(arguments, "limit").unwrap_or(20);
+            let branch = arguments
+                .get("branch")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let runs = gyro_core::list_workflow_runs(&bound.workspace, branch, limit)?;
+            (
+                format!("Listed {} workflow runs", runs.len()),
+                serde_json::to_value(runs)?,
+                None,
+            )
+        }
+        CapabilityId::GithubWorkflowLogs => {
+            let run_id = capability_argument_u64(arguments, "runId")?;
+            // Default to failed steps only: a full run log routinely exceeds the
+            // capability result budget and buries the actual failure.
+            let failed_only = arguments
+                .get("failedOnly")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            let logs = gyro_core::workflow_run_logs(&bound.workspace, run_id, failed_only)?;
+            let logs = gyro_core::sanitize_capability_summary(&logs);
+            (
+                format!("Read logs for workflow run {run_id}"),
+                serde_json::json!({ "runId": run_id, "failedOnly": failed_only, "logs": logs }),
+                None,
+            )
+        }
+        CapabilityId::GithubCreatePullRequest => {
+            let title = capability_argument_string(arguments, "title")?.to_string();
+            let pull_request = gyro_core::create_pull_request(
+                &bound.workspace,
+                &gyro_core::CreatePullRequestRequest {
+                    title,
+                    body: arguments
+                        .get("body")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                    base: arguments
+                        .get("base")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                    head: None,
+                    draft: arguments
+                        .get("draft")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                },
+            )?;
+            (
+                format!("Opened pull request #{}", pull_request.number),
+                serde_json::to_value(pull_request)?,
+                None,
+            )
+        }
+        CapabilityId::GithubRerunWorkflow => {
+            let run_id = capability_argument_u64(arguments, "runId")?;
+            let failed_only = arguments
+                .get("failedOnly")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            gyro_core::rerun_workflow(&bound.workspace, run_id, failed_only)?;
+            (
+                format!("Re-ran workflow run {run_id}"),
+                serde_json::json!({ "runId": run_id, "failedOnly": failed_only }),
+                None,
+            )
+        }
+        CapabilityId::GithubPush => {
+            let status = git_status_impl(&workspace)?;
+            let result = git_push_blocking(GitSyncRequest {
+                workspace_path: workspace,
+                set_upstream: status.upstream.is_none(),
+                remote: None,
+            })
+            .map_err(anyhow::Error::msg)?;
+            if result.output.status != "done" {
+                let detail = if result.output.stderr.trim().is_empty() {
+                    result.output.stdout.trim().to_string()
+                } else {
+                    result.output.stderr.trim().to_string()
+                };
+                anyhow::bail!("git push failed: {detail}");
+            }
+            (
+                format!(
+                    "Pushed {} to its remote",
+                    result.status.branch.as_deref().unwrap_or("the branch")
+                ),
+                serde_json::to_value(result.status)?,
+                None,
+            )
         }
     };
     let data = gyro_core::validate_capability_result_data(redact_json_strings(data))?;
@@ -14306,6 +15124,27 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
         CapabilityId::BrowserScreenshot => serde_json::json!({
             "device": { "type": "string", "enum": ["responsive", "desktop", "tablet", "mobile"] }
         }),
+        CapabilityId::GithubPullRequests => serde_json::json!({
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+        }),
+        CapabilityId::GithubWorkflowRuns => serde_json::json!({
+            "branch": { "type": "string" },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+        }),
+        CapabilityId::GithubWorkflowLogs => serde_json::json!({
+            "runId": { "type": "integer", "minimum": 1 },
+            "failedOnly": { "type": "boolean" }
+        }),
+        CapabilityId::GithubRerunWorkflow => serde_json::json!({
+            "runId": { "type": "integer", "minimum": 1 },
+            "failedOnly": { "type": "boolean" }
+        }),
+        CapabilityId::GithubCreatePullRequest => serde_json::json!({
+            "title": { "type": "string" },
+            "body": { "type": "string" },
+            "base": { "type": "string" },
+            "draft": { "type": "boolean" }
+        }),
         _ => serde_json::json!({}),
     };
     let required = match id {
@@ -14318,6 +15157,8 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
         CapabilityId::IdeOpenPanel => vec!["panel"],
         CapabilityId::TerminalOpen => vec!["program"],
         CapabilityId::BrowserOpen => vec!["url"],
+        CapabilityId::GithubWorkflowLogs | CapabilityId::GithubRerunWorkflow => vec!["runId"],
+        CapabilityId::GithubCreatePullRequest => vec!["title"],
         _ => Vec::new(),
     };
     serde_json::json!({
@@ -14659,12 +15500,23 @@ pub fn run() {
             git_commit,
             git_branches,
             git_checkout_branch,
+            git_create_branch,
             git_remove_worktree,
             git_diff,
             git_discard,
+            git_fetch,
+            git_pull,
+            git_push,
             git_stage,
             git_status,
             git_unstage,
+            github_create_pull_request,
+            github_pull_requests,
+            github_rerun_workflow,
+            github_status,
+            github_workflow_logs,
+            github_workflow_run_detail,
+            github_workflow_runs,
             list_automations,
             list_active_capability_resources,
             list_due_automations,
@@ -16424,6 +17276,8 @@ while True:
         assert!(fresh_claude.contains(&"--print".to_string()));
         assert!(fresh_claude.contains(&"stream-json".to_string()));
         assert!(fresh_claude.contains(&"--include-partial-messages".to_string()));
+        // `--print --output-format stream-json` is rejected without `--verbose`.
+        assert!(fresh_claude.contains(&"--verbose".to_string()));
         assert!(fresh_claude.contains(&"--session-id".to_string()));
         assert!(fresh_claude.contains(&"--mcp-config".to_string()));
         assert!(fresh_claude.contains(&"--permission-prompt-tool".to_string()));
@@ -16460,6 +17314,12 @@ while True:
             "edit it",
         );
         assert!(full_access_claude.contains(&"--dangerously-skip-permissions".to_string()));
+        // `--allowedTools` is variadic, so the prompt must sit behind an option
+        // terminator or the CLI parses it as another tool name.
+        assert_eq!(
+            full_access_claude.iter().rev().take(2).collect::<Vec<_>>(),
+            vec![&"edit it".to_string(), &"--".to_string()]
+        );
 
         let resumed_claude = claude_chat_args(
             Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
@@ -16476,7 +17336,148 @@ while True:
         assert!(resumed_claude.contains(&"plan".to_string()));
         assert!(resumed_claude.contains(&"--mcp-config".to_string()));
         assert!(resumed_claude.contains(&"--strict-mcp-config".to_string()));
-        assert_eq!(resumed_claude.last(), Some(&"again".to_string()));
+        assert_eq!(
+            resumed_claude.iter().rev().take(2).collect::<Vec<_>>(),
+            vec![&"again".to_string(), &"--".to_string()]
+        );
+    }
+
+    /// Every argument vector Gyro can build, across providers and permission
+    /// branches, paired with the provider that would run it.
+    ///
+    /// Both builders take many flags whose combinations select different
+    /// branches, and only some of those branches end in a variadic option. This
+    /// enumerates them so a new branch cannot quietly reintroduce an argument
+    /// shape the CLI would misread.
+    fn every_provider_chat_arg_vector() -> Vec<(&'static str, String, Vec<String>)> {
+        let output_path = PathBuf::from("/tmp/gyro-last-message.txt");
+        let image = ChatAttachmentRequest {
+            id: "image-1".into(),
+            kind: "image".into(),
+            name: "shot.png".into(),
+            path: "/tmp/shot.png".into(),
+            relative_path: None,
+            mime_type: Some("image/png".into()),
+            size: 128,
+            content_hash: None,
+            modified_at: None,
+            preview_url: None,
+        };
+        let session = "019f4612-7e58-7412-9fe9-5f0d6cb29c8e";
+        let mut vectors = Vec::new();
+
+        for (label, mode, require_command, require_edit, full_access, resume) in [
+            ("plan", ChatMode::Plan, false, false, false, false),
+            ("gated", ChatMode::Normal, true, true, false, false),
+            ("full-access", ChatMode::Normal, false, false, true, false),
+            ("resumed", ChatMode::Normal, false, false, true, true),
+        ] {
+            vectors.push((
+                "anthropic",
+                format!("claude/{label}"),
+                claude_chat_args(
+                    resume.then_some(session),
+                    session,
+                    Some("claude-sonnet-5"),
+                    &mode,
+                    require_command,
+                    require_edit,
+                    full_access,
+                    Some("{\"mcpServers\":{}}"),
+                    "reply with ok",
+                ),
+            ));
+            vectors.push((
+                "openai",
+                format!("codex/{label}"),
+                codex_chat_args(
+                    resume.then_some(session),
+                    &output_path,
+                    Some("gpt-5.6-sol"),
+                    Some("medium"),
+                    &mode,
+                    require_command,
+                    require_edit,
+                    full_access,
+                    // Attachments matter here: `codex --image <FILE>...` is the
+                    // other variadic option in the codebase.
+                    std::slice::from_ref(&image),
+                    "reply with ok",
+                ),
+            ));
+        }
+
+        // ACP agents receive the prompt over stdio, but Gyro still chooses the
+        // flags that start them, and those can drift just as easily.
+        for provider_id in ["kimi", "xai", "gemini"] {
+            let runtime = acp_provider_runtime(provider_id).expect("acp runtime");
+            vectors.push((
+                provider_id,
+                format!("{}/launch", runtime.program),
+                runtime.args.iter().map(|arg| (*arg).to_string()).collect(),
+            ));
+        }
+        vectors
+    }
+
+    #[test]
+    fn every_provider_arg_vector_satisfies_its_cli_contract() {
+        for (provider_id, label, args) in every_provider_chat_arg_vector() {
+            let contract = gyro_core::provider_cli_contract(provider_id)
+                .expect("provider declares a contract");
+
+            assert_eq!(
+                gyro_core::audit_provider_args(contract, &args),
+                Ok(()),
+                "{label} builds an argument vector its CLI would misread: {args:?}"
+            );
+        }
+    }
+
+    /// Verify the installed provider CLIs still accept the argument vectors
+    /// Gyro builds.
+    ///
+    /// This launches the real CLIs, so it is opt-in rather than part of the
+    /// default suite:
+    ///
+    /// ```text
+    /// cargo test -p gyro-desktop -- --ignored provider_arg_vectors
+    /// ```
+    ///
+    /// It is the only check that catches drift on the CLI's side of the
+    /// contract — an undocumented flag disappearing, or a new rule about which
+    /// flags must appear together. A provider whose CLI is not installed is
+    /// skipped rather than failed.
+    #[test]
+    #[ignore = "launches the installed provider CLIs"]
+    fn provider_arg_vectors_are_accepted_by_the_installed_clis() {
+        let mut checked = 0usize;
+        let mut skipped = Vec::new();
+
+        for (provider_id, label, args) in every_provider_chat_arg_vector() {
+            let contract = gyro_core::provider_cli_contract(provider_id)
+                .expect("provider declares a contract");
+            let probe = gyro_core::probe_provider_args(
+                contract.program,
+                &args,
+                gyro_core::PROVIDER_ARG_PROBE_TIMEOUT,
+            )
+            .expect("probe runs");
+
+            match probe {
+                gyro_core::ArgAcceptance::Accepted => checked += 1,
+                gyro_core::ArgAcceptance::Unavailable { .. } => skipped.push(label),
+                gyro_core::ArgAcceptance::Rejected { message } => panic!(
+                    "`{}` rejected the {label} argument vector: {message}\nargs: {args:?}",
+                    contract.program
+                ),
+            }
+        }
+
+        assert!(
+            checked > 0,
+            "no provider CLI was available to verify (skipped: {skipped:?})"
+        );
     }
 
     #[test]
@@ -17004,6 +18005,26 @@ while True:
     }
 
     #[test]
+    fn cli_argument_failures_are_not_reported_as_retryable() {
+        // Both messages came from `claude` rejecting a command Gyro built.
+        // Telling someone to retry these sends them into a loop that cannot
+        // succeed, so they must classify as a version mismatch instead.
+        for error in [
+            "Error: Input must be provided either through stdin or as a prompt argument when using --print",
+            "Error: When using --print, --output-format=stream-json requires --verbose",
+        ] {
+            let (kind, message) = provider_failure_recovery(error);
+            assert_eq!(kind, "cli-contract", "misclassified: {error}");
+            assert!(message.contains("version changed"));
+        }
+
+        // The audit's own message must classify the same way, so a vector Gyro
+        // rejects before spawning reads identically to one the CLI rejects.
+        let violation = gyro_core::ArgContractViolation::UnterminatedPrompt.message("anthropic");
+        assert_eq!(provider_failure_recovery(&violation).0, "cli-contract");
+    }
+
+    #[test]
     fn stale_resume_binding_is_cleared_without_replaying_the_request() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -17509,6 +18530,7 @@ while True:
             working_directory: None,
             cols: None,
             rows: None,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -17530,6 +18552,7 @@ while True:
             working_directory: Some("Home".into()),
             cols: None,
             rows: None,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -17570,6 +18593,7 @@ while True:
             working_directory: Some("Workspace".into()),
             cols: None,
             rows: None,
+            ..Default::default()
         };
         assert_eq!(
             resolve_terminal_cwd(&local_request).unwrap(),
@@ -17614,6 +18638,171 @@ while True:
     }
 
     #[test]
+    fn claude_panes_are_governable_by_profile_or_binary() {
+        let by_profile = TerminalPaneRequest {
+            profile_id: Some("claude-code".into()),
+            command: "claude".into(),
+            ..Default::default()
+        };
+        assert_eq!(governable_pane_provider(&by_profile), Some("anthropic"));
+
+        // A custom profile id still governs when it launches the Claude binary.
+        let by_binary = TerminalPaneRequest {
+            profile_id: Some("my-claude".into()),
+            command: "/opt/homebrew/bin/claude".into(),
+            ..Default::default()
+        };
+        assert_eq!(governable_pane_provider(&by_binary), Some("anthropic"));
+    }
+
+    #[test]
+    fn panes_gyro_cannot_enforce_are_not_governable() {
+        // Codex approves through the app-server path, which a raw PTY pane does
+        // not speak. Claiming governance here would be a false promise.
+        for (profile, command) in [
+            ("codex", "codex"),
+            ("shell", "zsh"),
+            ("kimi-code", "kimi"),
+            ("gemini", "gemini"),
+        ] {
+            let request = TerminalPaneRequest {
+                profile_id: Some(profile.into()),
+                command: command.into(),
+                ..Default::default()
+            };
+            assert_eq!(
+                governable_pane_provider(&request),
+                None,
+                "{profile} must not be reported as governed"
+            );
+        }
+    }
+
+    #[test]
+    fn governed_pane_launch_args_route_approvals_through_gyro() {
+        let bound = BoundProviderCapabilityContext {
+            session_id: "session".into(),
+            turn_id: None,
+            provider_id: "anthropic".into(),
+            workspace: PathBuf::from("/tmp/workspace"),
+            workspace_key: "/tmp/workspace".into(),
+            policy: CapabilityPolicySnapshot::from_policy(
+                &ProjectCapabilityPolicy::defaults("/tmp/workspace"),
+                CapabilityRunMode::Normal,
+            ),
+            workspace_context: WorkspaceContextSnapshot::empty("/tmp/workspace"),
+        };
+        let config = desktop_claude_permission_mcp_config_for(
+            &ClaudePermissionBridgeIdentity {
+                session_id: "session",
+                turn_id: None,
+                provider_id: "anthropic",
+                provider_label: "Anthropic",
+                require_command_approval: true,
+                require_file_edit_approval: true,
+            },
+            "pane-nonce",
+            &bound,
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        let approval = &parsed["mcpServers"]["gyro_approval"];
+        assert_eq!(
+            approval["args"],
+            serde_json::json!(["provider-permission-server"])
+        );
+        assert_eq!(
+            approval["env"]["GYRO_DESKTOP_PERMISSION_SESSION_ID"],
+            "session"
+        );
+        assert_eq!(
+            approval["env"]["GYRO_DESKTOP_PERMISSION_RUN_NONCE"],
+            "pane-nonce"
+        );
+        assert_eq!(
+            approval["env"]["GYRO_DESKTOP_PERMISSION_REQUIRE_FILE"],
+            "true"
+        );
+        // The capability bridge rides along so a governed pane sees the same
+        // workspace tools a Chat turn does.
+        assert_eq!(
+            parsed["mcpServers"]["gyro_capabilities"]["args"],
+            serde_json::json!(["provider-capability-server"])
+        );
+    }
+
+    #[test]
+    fn governance_args_are_kept_out_of_the_displayed_command() {
+        // The bridge config is a large JSON blob; surfacing it as the pane's
+        // command would make the CLI surface unreadable.
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-governed-display".into(),
+                title: "Claude".into(),
+                profile_id: Some("claude".into()),
+                command: "sh".into(),
+                args: vec!["-c".into(), "true".into()],
+                governance: Some(PaneGovernance {
+                    session_id: "session".into(),
+                    provider_id: "anthropic".into(),
+                    env: Vec::new(),
+                    args: vec!["--mcp-config".into(), "{\"huge\":true}".into()],
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let snapshot = manager.read("pane-governed-display", None).unwrap();
+
+        assert_eq!(snapshot.command, "sh -c true");
+        assert_eq!(snapshot.governed_session_id.as_deref(), Some("session"));
+        assert_eq!(snapshot.governed_provider_id.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn closing_a_governed_pane_reports_its_session_for_release() {
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-governed-close".into(),
+                title: "Claude".into(),
+                profile_id: Some("claude".into()),
+                command: "sh".into(),
+                args: vec!["-c".into(), "sleep 5".into()],
+                governance: Some(PaneGovernance {
+                    session_id: "session-to-release".into(),
+                    provider_id: "anthropic".into(),
+                    env: Vec::new(),
+                    args: Vec::new(),
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let released = manager.close("pane-governed-close").unwrap();
+
+        assert_eq!(released.as_deref(), Some("session-to-release"));
+    }
+
+    #[test]
+    fn closing_an_ungoverned_pane_releases_nothing() {
+        let manager = TerminalProcessManager::default();
+        manager
+            .create(TerminalPaneRequest {
+                pane_id: "pane-plain-close".into(),
+                title: "Shell".into(),
+                profile_id: Some("shell".into()),
+                command: "sh".into(),
+                args: vec!["-c".into(), "sleep 5".into()],
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(manager.close("pane-plain-close").unwrap(), None);
+    }
+
+    #[test]
     fn terminal_manager_runs_command_and_captures_output() {
         let manager = TerminalProcessManager::default();
         let snapshot = manager
@@ -17628,6 +18817,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(snapshot.status, "running");
@@ -17667,6 +18857,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(snapshot.status, "running");
@@ -17708,6 +18899,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -17761,6 +18953,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -17796,6 +18989,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -17858,6 +19052,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -17885,6 +19080,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -18550,6 +19746,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -18615,6 +19812,7 @@ while True:
                 working_directory: None,
                 cols: None,
                 rows: None,
+                ..Default::default()
             })
             .unwrap();
 

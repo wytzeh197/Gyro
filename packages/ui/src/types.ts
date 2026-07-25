@@ -314,6 +314,12 @@ export type TerminalPane = {
   layout?: TerminalPaneLayout;
   createdAt: string;
   owner?: ModelResourceOwner;
+  /**
+   * Set only once the backend confirms the pane launched under Gyro's approval
+   * policy, so the CLI surface reports governance rather than claiming it.
+   */
+  governedSessionId?: string;
+  governedProviderId?: string;
 };
 
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
@@ -457,7 +463,8 @@ export type DiffApprovalState =
 
 export type GitReviewActionId = "create-branch" | "commit" | "push" | "open-pr";
 
-export type GitReviewActionStatus = "blocked" | "ready" | "done" | "failed";
+export type GitReviewActionStatus =
+  "blocked" | "ready" | "running" | "done" | "failed";
 
 export type GitReviewAction = {
   id: GitReviewActionId;
@@ -465,6 +472,8 @@ export type GitReviewAction = {
   detail: string;
   status: GitReviewActionStatus;
   lastRunAt?: string;
+  /** Message from the backend when `status` is `failed`. */
+  error?: string;
 };
 
 export type DiffReview = {
@@ -1021,6 +1030,16 @@ export type IdeAssistantRequest = {
   providerId?: string;
   model?: string;
   createdAt: string;
+  /** Chat turn this request started, used to show its reply in the Workspace. */
+  turnId?: string;
+  sessionId?: string;
+};
+
+/** The reply to a Workspace-initiated assistant request, as it streams in. */
+export type IdeAssistantReply = {
+  turnId: string;
+  text: string;
+  status: WorkbenchTurnStatus;
 };
 
 export type IdeViewId =
@@ -1099,6 +1118,104 @@ export type SourceControlState = {
   deletions: number;
   statsPartial: boolean;
   files: SourceControlFile[];
+  lastCheckedAt?: string;
+  error?: string;
+};
+
+/**
+ * Normalized state for a workflow run, job, step, or PR check rollup. Mirrors
+ * `GithubRunState` in crates/gyro-core/src/github.rs.
+ */
+export type GithubRunState =
+  | "queued"
+  | "in-progress"
+  | "success"
+  | "failure"
+  | "cancelled"
+  | "skipped"
+  | "neutral"
+  | "timed-out"
+  | "action-required"
+  | "stale"
+  | "unknown";
+
+export type GithubAvailability = {
+  schema: string;
+  /** gh installed, authenticated, and the workspace is a GitHub repository. */
+  available: boolean;
+  cliInstalled: boolean;
+  authenticated: boolean;
+  account?: string;
+  host?: string;
+  repository?: string;
+  defaultBranch?: string;
+  error?: string;
+  hint?: string;
+};
+
+export type GithubWorkflowStep = {
+  name: string;
+  number: number;
+  state: GithubRunState;
+  conclusion?: string;
+};
+
+export type GithubWorkflowJob = {
+  id: number;
+  name: string;
+  state: GithubRunState;
+  status: string;
+  conclusion?: string;
+  startedAt?: string;
+  completedAt?: string;
+  url: string;
+  steps: GithubWorkflowStep[];
+};
+
+export type GithubWorkflowRun = {
+  id: number;
+  number: number;
+  title: string;
+  workflowName: string;
+  state: GithubRunState;
+  status: string;
+  conclusion?: string;
+  branch: string;
+  sha: string;
+  event: string;
+  url: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type GithubWorkflowRunDetail = {
+  run: GithubWorkflowRun;
+  jobs: GithubWorkflowJob[];
+};
+
+export type GithubPullRequest = {
+  number: number;
+  title: string;
+  state: string;
+  author?: string;
+  headRef: string;
+  baseRef: string;
+  url: string;
+  isDraft: boolean;
+  checks?: GithubRunState;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+/** Workspace-scoped GitHub state held in the IDE slice. */
+export type GithubState = {
+  availability?: GithubAvailability;
+  runs: GithubWorkflowRun[];
+  selectedRunId?: number;
+  runDetail?: GithubWorkflowRunDetail;
+  runLogs?: string;
+  pullRequests: GithubPullRequest[];
+  loading: boolean;
   lastCheckedAt?: string;
   error?: string;
 };
@@ -1222,6 +1339,7 @@ export type IdeState = {
   activeOutputChannelId?: string;
   contributions: IdeContribution[];
   aiToolCalls: IdeAiToolCall[];
+  github: GithubState;
 };
 
 export type WorkbenchState = {
@@ -1313,6 +1431,12 @@ export type ModelProviderConfig = {
   authMode: ProviderAuthMode;
   authStatus: ProviderAuthStatus;
   models: ProviderModel[];
+  /**
+   * Model new sessions on this provider start with. Persisted, so it survives
+   * restarts; `selectedModelId` tracks the live session instead and is rewritten
+   * every time the active session changes.
+   */
+  defaultModelId?: string;
   selectedModelId?: string;
   selectedReasoningEffort?: ReasoningEffort;
   capabilities?: ProviderCapabilities;

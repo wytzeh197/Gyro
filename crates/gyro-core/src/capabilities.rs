@@ -36,6 +36,13 @@ pub enum CapabilityId {
     BrowserInspect,
     BrowserReload,
     BrowserScreenshot,
+    GithubStatus,
+    GithubPullRequests,
+    GithubWorkflowRuns,
+    GithubWorkflowLogs,
+    GithubCreatePullRequest,
+    GithubRerunWorkflow,
+    GithubPush,
 }
 
 impl CapabilityId {
@@ -62,6 +69,13 @@ impl CapabilityId {
             Self::BrowserInspect => "browser.inspect",
             Self::BrowserReload => "browser.reload",
             Self::BrowserScreenshot => "browser.screenshot",
+            Self::GithubStatus => "github.status",
+            Self::GithubPullRequests => "github.pull_requests",
+            Self::GithubWorkflowRuns => "github.workflow_runs",
+            Self::GithubWorkflowLogs => "github.workflow_logs",
+            Self::GithubCreatePullRequest => "github.create_pull_request",
+            Self::GithubRerunWorkflow => "github.rerun_workflow",
+            Self::GithubPush => "github.push",
         }
     }
 
@@ -88,6 +102,13 @@ impl CapabilityId {
             Self::BrowserInspect => "gyro_browser_inspect",
             Self::BrowserReload => "gyro_browser_reload",
             Self::BrowserScreenshot => "gyro_browser_screenshot",
+            Self::GithubStatus => "gyro_github_status",
+            Self::GithubPullRequests => "gyro_github_pull_requests",
+            Self::GithubWorkflowRuns => "gyro_github_workflow_runs",
+            Self::GithubWorkflowLogs => "gyro_github_workflow_logs",
+            Self::GithubCreatePullRequest => "gyro_github_create_pull_request",
+            Self::GithubRerunWorkflow => "gyro_github_rerun_workflow",
+            Self::GithubPush => "gyro_github_push",
         }
     }
 
@@ -115,6 +136,10 @@ pub enum CapabilityClass {
     TerminalObserve,
     BrowserInspect,
     BrowserNavigate,
+    /// Read-only GitHub queries through the user's existing `gh` login.
+    GithubInspect,
+    /// Outward-facing GitHub effects — pushing, opening PRs, re-running CI.
+    GithubWrite,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -187,6 +212,10 @@ impl ProjectCapabilityPolicy {
         classes.insert(CapabilityClass::TerminalObserve, CapabilityAccess::Allow);
         classes.insert(CapabilityClass::BrowserInspect, CapabilityAccess::Allow);
         classes.insert(CapabilityClass::BrowserNavigate, CapabilityAccess::Ask);
+        classes.insert(CapabilityClass::GithubInspect, CapabilityAccess::Allow);
+        // Pushing, opening a pull request, and re-running CI are visible outside
+        // this machine, so they are never granted without an explicit decision.
+        classes.insert(CapabilityClass::GithubWrite, CapabilityAccess::Ask);
         Self {
             schema: CAPABILITY_SCHEMA_V1.into(),
             workspace_key: workspace_key.into(),
@@ -204,6 +233,22 @@ impl ProjectCapabilityPolicy {
         }
         policy.revision = revision;
         policy
+    }
+
+    /// Fill in any capability class this policy predates, using the safe
+    /// default for each.
+    ///
+    /// A policy stored before a class existed is not malformed, it is just old.
+    /// Without this, adding a class would make [`Self::validate`] reject every
+    /// saved policy and silently downgrade the project to deny-all.
+    pub fn with_missing_classes_defaulted(mut self) -> Self {
+        let defaults = Self::defaults(self.workspace_key.clone());
+        for class in ALL_CAPABILITY_CLASSES {
+            self.classes
+                .entry(class)
+                .or_insert_with(|| defaults.access_for(class));
+        }
+        self
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -264,6 +309,8 @@ impl CapabilityPolicySnapshot {
     }
 
     pub fn access_for(&self, class: CapabilityClass) -> CapabilityAccess {
+        // Plan mode is an allowlist: only classes that change nothing outside
+        // Gyro survive it, so any class added later is denied until listed here.
         if self.mode == CapabilityRunMode::Plan
             && !matches!(
                 class,
@@ -271,6 +318,7 @@ impl CapabilityPolicySnapshot {
                     | CapabilityClass::WorkspaceSensitiveRead
                     | CapabilityClass::IdeReveal
                     | CapabilityClass::BrowserInspect
+                    | CapabilityClass::GithubInspect
             )
         {
             return CapabilityAccess::Deny;
@@ -575,9 +623,44 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         class: CapabilityClass::BrowserInspect,
         description: "Capture this chat's loopback preview.",
     },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubStatus,
+        class: CapabilityClass::GithubInspect,
+        description: "Check whether GitHub is reachable for this project and which repository and account it resolves to.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubPullRequests,
+        class: CapabilityClass::GithubInspect,
+        description: "List open pull requests for this project with their check status.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubWorkflowRuns,
+        class: CapabilityClass::GithubInspect,
+        description: "List recent GitHub Actions workflow runs for this project, optionally filtered to one branch.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubWorkflowLogs,
+        class: CapabilityClass::GithubInspect,
+        description: "Read bounded logs for one GitHub Actions run, defaulting to only the failed steps.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubCreatePullRequest,
+        class: CapabilityClass::GithubWrite,
+        description: "Open a pull request for the current branch. Visible to collaborators once created.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubRerunWorkflow,
+        class: CapabilityClass::GithubWrite,
+        description: "Re-run a GitHub Actions run, optionally only its failed jobs. Consumes Actions minutes.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::GithubPush,
+        class: CapabilityClass::GithubWrite,
+        description: "Push the current branch to its remote. Publishes local commits to GitHub.",
+    },
 ];
 
-pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 7] = [
+pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 9] = [
     CapabilityClass::WorkspaceInspect,
     CapabilityClass::WorkspaceSensitiveRead,
     CapabilityClass::IdeReveal,
@@ -585,6 +668,8 @@ pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 7] = [
     CapabilityClass::TerminalObserve,
     CapabilityClass::BrowserInspect,
     CapabilityClass::BrowserNavigate,
+    CapabilityClass::GithubInspect,
+    CapabilityClass::GithubWrite,
 ];
 
 pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor {
@@ -594,15 +679,27 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
         .expect("every capability id has a descriptor")
 }
 
+/// Which Gyro capability tools a provider can be given.
+///
+/// Every provider that runs a real chat adapter receives the tools: the Codex
+/// and Claude CLIs load the capability MCP server from their own config, and the
+/// ACP providers get it through `session/new`. Readiness-only providers have no
+/// chat runner at all, so there is nowhere to attach tools.
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
-    let available = matches!(provider_id, "openai" | "anthropic");
+    let available = matches!(
+        provider_id,
+        "openai" | "anthropic" | "kimi" | "xai" | "gemini"
+    );
     ProviderCapabilitySupport {
         provider_id: provider_id.into(),
         available,
-        capabilities: available
-            .then(|| CAPABILITY_DESCRIPTORS.iter().map(|item| item.id).collect())
-            .unwrap_or_default(),
-        reason: (!available).then(|| "Gyro tools are not available for this provider yet.".into()),
+        capabilities: if available {
+            CAPABILITY_DESCRIPTORS.iter().map(|item| item.id).collect()
+        } else {
+            Vec::new()
+        },
+        reason: (!available)
+            .then(|| "Gyro tools need a provider that runs a chat session on this device.".into()),
     }
 }
 
@@ -737,6 +834,66 @@ mod tests {
             snapshot.access_for(CapabilityClass::BrowserNavigate),
             CapabilityAccess::Deny
         );
+        // Reading CI and PR state changes nothing, so it survives Plan mode...
+        assert_eq!(
+            snapshot.access_for(CapabilityClass::GithubInspect),
+            CapabilityAccess::Allow
+        );
+        // ...while pushing and opening pull requests never do.
+        assert_eq!(
+            snapshot.access_for(CapabilityClass::GithubWrite),
+            CapabilityAccess::Deny
+        );
+    }
+
+    #[test]
+    fn every_chat_capable_provider_can_receive_tools() {
+        // Providers that run a chat adapter get the tools; readiness-only
+        // providers have no runner to attach an MCP server to.
+        for provider_id in ["openai", "anthropic", "kimi", "xai", "gemini"] {
+            let support = provider_capability_support(provider_id);
+            assert!(support.available, "{provider_id} should support Gyro tools");
+            assert_eq!(support.capabilities.len(), CAPABILITY_DESCRIPTORS.len());
+            assert!(support.reason.is_none());
+        }
+        for provider_id in ["cursor", "opencode", "unknown"] {
+            let support = provider_capability_support(provider_id);
+            assert!(
+                !support.available,
+                "{provider_id} has no chat runner and cannot host tools"
+            );
+            assert!(support.capabilities.is_empty());
+            assert!(support.reason.is_some());
+        }
+    }
+
+    #[test]
+    fn github_write_capabilities_are_never_allowed_by_default() {
+        let policy = ProjectCapabilityPolicy::defaults("/tmp/project");
+        assert_eq!(
+            policy.access_for(CapabilityClass::GithubInspect),
+            CapabilityAccess::Allow
+        );
+        // Pushing, opening a PR, and re-running CI are visible outside this
+        // machine, so they must require a decision.
+        assert_eq!(
+            policy.access_for(CapabilityClass::GithubWrite),
+            CapabilityAccess::Ask
+        );
+        for descriptor in CAPABILITY_DESCRIPTORS {
+            let outward = matches!(
+                descriptor.id,
+                CapabilityId::GithubCreatePullRequest
+                    | CapabilityId::GithubRerunWorkflow
+                    | CapabilityId::GithubPush
+            );
+            assert_eq!(
+                descriptor.class == CapabilityClass::GithubWrite,
+                outward,
+                "{} is classified incorrectly",
+                descriptor.id
+            );
+        }
     }
 
     #[test]

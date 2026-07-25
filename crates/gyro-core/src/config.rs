@@ -16,6 +16,13 @@ pub struct ModelProviderConfig {
     pub base_url: Option<String>,
     pub api_key_ref: String,
     pub enabled: bool,
+    /// Model new sessions on this provider start with.
+    ///
+    /// The renderer also sends `models` and `selectedModelId`; both are derived
+    /// from the provider catalog on every load, so they stay out of the on-disk
+    /// schema. A user-chosen default is not derivable, so it persists here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -117,6 +124,7 @@ impl Default for GyroConfig {
                     base_url: None,
                     api_key_ref: "provider:openai".into(),
                     enabled: false,
+                    default_model_id: None,
                 },
                 ModelProviderConfig {
                     id: "anthropic".into(),
@@ -124,6 +132,7 @@ impl Default for GyroConfig {
                     base_url: None,
                     api_key_ref: "provider:anthropic".into(),
                     enabled: false,
+                    default_model_id: None,
                 },
                 ModelProviderConfig {
                     id: "kimi".into(),
@@ -131,6 +140,7 @@ impl Default for GyroConfig {
                     base_url: None,
                     api_key_ref: "provider-cli:kimi".into(),
                     enabled: false,
+                    default_model_id: None,
                 },
                 ModelProviderConfig {
                     id: "xai".into(),
@@ -138,6 +148,7 @@ impl Default for GyroConfig {
                     base_url: None,
                     api_key_ref: "provider-cli:grok".into(),
                     enabled: false,
+                    default_model_id: None,
                 },
                 ModelProviderConfig {
                     id: "gemini".into(),
@@ -145,6 +156,7 @@ impl Default for GyroConfig {
                     base_url: None,
                     api_key_ref: "provider-cli:gemini".into(),
                     enabled: false,
+                    default_model_id: None,
                 },
             ],
             command_profiles: vec![
@@ -310,6 +322,7 @@ impl GyroConfig {
                 base_url: None,
                 api_key_ref: "provider-cli:kimi".into(),
                 enabled: false,
+                default_model_id: None,
             },
             ModelProviderConfig {
                 id: "xai".into(),
@@ -317,6 +330,7 @@ impl GyroConfig {
                 base_url: None,
                 api_key_ref: "provider-cli:grok".into(),
                 enabled: false,
+                default_model_id: None,
             },
             ModelProviderConfig {
                 id: "gemini".into(),
@@ -324,6 +338,7 @@ impl GyroConfig {
                 base_url: None,
                 api_key_ref: "provider-cli:gemini".into(),
                 enabled: false,
+                default_model_id: None,
             },
         ] {
             if !self
