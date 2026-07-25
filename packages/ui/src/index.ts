@@ -289,6 +289,7 @@ export {
   IdeSurface,
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
+  providerNeedsSignIn,
   ProvidersSurface,
   SettingsSurface,
   SettingsPanel,
