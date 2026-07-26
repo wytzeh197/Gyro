@@ -4,6 +4,8 @@ use std::sync::{
     Mutex,
 };
 use std::time::Duration;
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub const MENU_BAR_STATUS_EVENT: &str = "gyro://menu-bar-status";
@@ -15,6 +17,13 @@ const MENU_BAR_TRAY_ID: &str = "gyro-menu-bar";
 const MENU_BAR_POPOVER_LABEL: &str = "menu-bar-popover";
 #[cfg(target_os = "macos")]
 const MENU_BAR_POPOVER_WIDTH: f64 = 388.0;
+/// A tray press that dismisses the popover also blurs it, so the blur handler
+/// closes the window before the tray click arrives. Within this window the
+/// pending tray press is treated as the close, not as a fresh open.
+#[cfg(target_os = "macos")]
+const MENU_BAR_POPOVER_REOPEN_GUARD: Duration = Duration::from_millis(250);
+#[cfg(target_os = "macos")]
+static MENU_BAR_POPOVER_DISMISSED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -324,6 +333,9 @@ fn toggle_popover(app: &AppHandle, rect: tauri::Rect, pointer: tauri::PhysicalPo
         let _ = window.hide();
         return;
     }
+    if took_recent_outside_dismiss() {
+        return;
+    }
     resize_popover(app);
     position_popover(app, rect, pointer);
     let _ = window.show();
@@ -341,6 +353,44 @@ fn hide_popover(app: &AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 fn hide_popover(_app: &AppHandle) {}
+
+#[cfg(target_os = "macos")]
+fn note_outside_dismiss() {
+    if let Ok(mut dismissed_at) = MENU_BAR_POPOVER_DISMISSED_AT.lock() {
+        *dismissed_at = Some(Instant::now());
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn took_recent_outside_dismiss() -> bool {
+    let Ok(mut dismissed_at) = MENU_BAR_POPOVER_DISMISSED_AT.lock() else {
+        return false;
+    };
+    dismissed_at
+        .take()
+        .is_some_and(|at| at.elapsed() < MENU_BAR_POPOVER_REOPEN_GUARD)
+}
+
+/// Closes the menu bar popover as soon as the press lands anywhere outside it,
+/// which on macOS surfaces as the popover window losing focus.
+pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    #[cfg(target_os = "macos")]
+    {
+        if window.label() != MENU_BAR_POPOVER_LABEL {
+            return;
+        }
+        if matches!(event, tauri::WindowEvent::Focused(false))
+            && window.is_visible().unwrap_or(false)
+        {
+            note_outside_dismiss();
+            let _ = window.hide();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, event);
+    }
+}
 
 fn restore_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]

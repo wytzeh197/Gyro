@@ -89,9 +89,9 @@ pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};
 pub use provider_contract::{
     audit_provider_args, executable_provider_contracts, is_cli_argument_error, probe_provider_args,
-    provider_cli_contract, provider_cli_contracts, ArgAcceptance, ArgContractViolation,
-    PromptDelivery, ProviderCliContract, ARG_CONTRACT_MARKER, ARG_TERMINATOR,
-    PROVIDER_ARG_PROBE_TIMEOUT,
+    provider_cli_contract, provider_cli_contracts, stream_contract_failure, ArgAcceptance,
+    ArgContractViolation, PromptDelivery, ProviderCliContract, ARG_CONTRACT_MARKER, ARG_TERMINATOR,
+    PROVIDER_ARG_PROBE_TIMEOUT, STREAM_CONTRACT_MARKER,
 };
 pub use provider_health::{
     provider_account_label, provider_mode_label, provider_runtime_status_from_output,
