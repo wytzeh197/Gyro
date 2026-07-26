@@ -628,6 +628,16 @@ export type ProviderStatus = {
   healthCheckedAt?: string;
   healthOutput?: string;
   healthSummary?: string;
+  /**
+   * When the provider itself last rejected the sign-in Gyro sent with.
+   *
+   * A CLI status command reports whether a login is stored, not whether it
+   * still works: `claude auth status` answers `loggedIn: true` for a token the
+   * API has already expired. A rejected send is the only proof Gyro gets, so it
+   * is recorded here and outranks any later status probe until a sign-in
+   * actually completes.
+   */
+  signInRejectedAt?: string;
   defaultModel: string;
   effort: "low" | "medium" | "high" | "extra-high";
   allowedTools: string[];
@@ -687,6 +697,8 @@ export type ProviderChatStreamEvent = {
   activityStatus?: "running" | "done" | "failed" | null;
   message?: string | null;
   error?: string | null;
+  /** How a failed turn can be repaired, as classified by the backend. */
+  recoveryKind?: string | null;
 };
 
 export type ProviderRunDiagnostics = {

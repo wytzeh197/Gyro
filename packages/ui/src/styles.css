@@ -25446,3 +25446,160 @@ button.gyro-account-menu-row:hover,
     transition-duration: 0.01ms;
   }
 }
+
+/* ==========================================================================
+   Split screen: tiled chat panes
+
+   A tiled pane used to inherit full-window sizing. Its gutters were keyed to
+   the viewport (7vw = ~90px per side), so a 640px half-pane spent ~28% of its
+   width on empty margin; system events shrank to fit and centred while turns
+   filled a 772px column, giving the transcript three different left edges; and
+   focus was signalled by a flat black scrim that washed the inactive chat out
+   in Light mode while being invisible in Dark.
+
+   These rules key the pane to its own width, put every row on one column, and
+   move the focus cue off the content so both chats stay readable.
+   ========================================================================== */
+
+/* -- Pane framing and focus ---------------------------------------------- */
+
+/* A seam that reads in both themes instead of a near-invisible hairline. */
+.gyro-chat-grid.has-multiple-panes {
+  background: var(--gyro-premium-hairline-strong);
+  gap: 1px;
+}
+
+/* Focus stops dimming the other chat. Both transcripts stay legible; the
+   active pane is marked at its top edge and the inactive one simply recedes. */
+.gyro-chat-grid.has-multiple-panes
+  .gyro-chat-grid-slot.is-occupied.is-subdued-pane::after,
+.gyro-chat-grid.has-multiple-panes
+  .gyro-chat-grid-slot.is-occupied.is-current-pane::after {
+  background: transparent;
+  content: "";
+  height: 2px;
+  inset: 0 0 auto;
+  pointer-events: none;
+  position: absolute;
+  transition: background-color 120ms ease-out;
+  z-index: 200;
+}
+
+.gyro-chat-grid.has-multiple-panes
+  .gyro-chat-grid-slot.is-occupied.is-current-pane::after {
+  background: var(--gyro-accent);
+}
+
+/* The quiet half of the cue: an unfocused chat keeps its full contrast and
+   only lets its title fall back to muted. Tinting the pane itself was tried
+   and rejected — a mix against --gyro-text lightens on Dark and darkens on
+   Light, so the inactive pane read as raised in one theme and recessed in the
+   other. */
+.gyro-chat-grid.has-multiple-panes
+  .gyro-chat-grid-slot.is-subdued-pane
+  .gyro-chat-thread-topbar
+  strong {
+  color: var(--gyro-premium-muted);
+}
+
+/* -- Pane-relative gutters ------------------------------------------------ */
+
+/* The canvas owns the transcript and the composer, so container units here
+   resolve against the pane rather than the window. */
+.gyro-chat-surface.is-tiled .gyro-chat-thread-canvas {
+  container-type: inline-size;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-transcript {
+  padding: 22px clamp(16px, 5cqi, 44px) 18px;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-composer-dock {
+  padding: 8px clamp(16px, 5cqi, 44px) 12px;
+}
+
+/* -- One content column --------------------------------------------------- */
+
+/* Stretch every transcript row to the same column so system events, turns and
+   run activity share one left edge. */
+.gyro-chat-surface.is-tiled .gyro-chat-transcript {
+  justify-items: stretch;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-transcript > .gyro-message,
+.gyro-chat-surface.is-tiled .gyro-chat-transcript > .gyro-chat-turn,
+.gyro-chat-surface.is-tiled .gyro-chat-transcript > .gyro-agent-run-card,
+.gyro-chat-surface.is-tiled .gyro-chat-transcript > .gyro-provider-status-row {
+  margin-inline: auto;
+  max-width: min(100%, var(--gyro-chat-content-width));
+  width: min(100%, var(--gyro-chat-content-width));
+}
+
+/* -- Vertical rhythm ------------------------------------------------------ */
+
+/* Full-width spacing leaves a half-pane mostly empty; tighten the steps so a
+   narrow pane still shows several turns of conversation. */
+.gyro-chat-surface.is-tiled .gyro-chat-transcript .gyro-message {
+  margin-bottom: 10px;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-turn {
+  margin-bottom: 20px;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-turn > .gyro-message.is-user {
+  margin-bottom: 14px;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-run-error {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+/* -- Composer ------------------------------------------------------------- */
+
+.gyro-chat-surface.is-tiled
+  .gyro-chat-composer-dock
+  .gyro-composer-shell.is-hero.has-provider {
+  border-radius: 14px;
+}
+
+.gyro-chat-surface.is-tiled
+  .gyro-chat-composer-dock
+  .gyro-composer-shell.is-hero.has-provider
+  > textarea {
+  min-height: 46px;
+  padding: 11px 12px 2px;
+}
+
+/* -- Topbar --------------------------------------------------------------- */
+
+.gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar {
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  min-height: 42px;
+  padding-right: 10px;
+}
+
+.gyro-chat-surface.is-tiled .gyro-chat-thread-identity > strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Three and four up leave far less room; drop to the tightest gutters. */
+.gyro-chat-grid.is-count-3 .gyro-chat-surface.is-tiled .gyro-chat-transcript,
+.gyro-chat-grid.is-count-4 .gyro-chat-surface.is-tiled .gyro-chat-transcript,
+.gyro-chat-grid.is-count-3 .gyro-chat-surface.is-tiled .gyro-chat-composer-dock,
+.gyro-chat-grid.is-count-4
+  .gyro-chat-surface.is-tiled
+  .gyro-chat-composer-dock {
+  padding-inline: clamp(12px, 4cqi, 24px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-chat-grid.has-multiple-panes
+    .gyro-chat-grid-slot.is-occupied.is-current-pane::after {
+    transition: none;
+  }
+}

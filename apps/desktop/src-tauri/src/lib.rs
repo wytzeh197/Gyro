@@ -1342,6 +1342,14 @@ struct ProviderChatStreamEvent {
     activity_status: Option<String>,
     message: Option<String>,
     error: Option<String>,
+    /// How the failure can be repaired, classified by
+    /// [`provider_failure_recovery`].
+    ///
+    /// The stored status event already carries this, but the live surfaces read
+    /// the stream. Sending it here is what lets a send the provider rejected
+    /// over its own sign-in correct the provider's health immediately, instead
+    /// of leaving Settings claiming a verified connection.
+    recovery_kind: Option<String>,
 }
 
 #[derive(Debug)]
@@ -11050,13 +11058,23 @@ fn run_anthropic_claude_chat(
                 )
             })?;
     if output.status_success {
-        let response = sanitize_provider_chat_response(
-            output
-                .assistant_text
-                .as_deref()
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or(output.stdout.trim()),
-        );
+        // Falling back to raw stdout is only sane when the CLI printed prose.
+        // Claude Code prints a JSON stream, so the same fallback answered a
+        // question with a dump of the transcript the moment the stream shape
+        // moved. An unreadable stream is version drift, and saying so is the
+        // only response that leads anywhere.
+        let parsed_response = output
+            .assistant_text
+            .as_deref()
+            .filter(|text| !text.trim().is_empty());
+        if parsed_response.is_none() && output.parsed_stream_json {
+            anyhow::bail!(gyro_core::stream_contract_failure(
+                "Anthropic",
+                "Claude Code"
+            ));
+        }
+        let response =
+            sanitize_provider_chat_response(parsed_response.unwrap_or(output.stdout.trim()));
         if response.is_empty() {
             anyhow::bail!("Anthropic finished, but Claude did not return a chat response.");
         }
@@ -11083,6 +11101,9 @@ fn run_anthropic_claude_chat(
 
     let combined =
         gyro_core::security::redact_secrets(format!("{}{}", output.stdout, output.stderr).trim());
+    if let Some(detail) = claude_login_failure(&combined) {
+        anyhow::bail!("{detail}");
+    }
     if combined.is_empty() {
         anyhow::bail!(
             "Anthropic through Claude exited with {}",
@@ -11090,6 +11111,33 @@ fn run_anthropic_claude_chat(
         );
     }
     anyhow::bail!("{}", truncate_error_detail(&combined));
+}
+
+/// Claude Code reports a rejected sign-in inside its stream-json output rather
+/// than on stderr, so a failed run reads as a healthy session start for
+/// thousands of characters before the 401 appears. Reducing it to one line
+/// keeps the stored failure legible and lets it classify as a sign-in problem
+/// instead of a generic retry that cannot succeed.
+const CLAUDE_LOGIN_EXPIRED_DETAIL: &str = "Claude Code rejected this send with 401 authentication_failed, so its stored sign-in is no longer valid. Sign in again and Gyro will resend the message.";
+
+fn claude_login_failure(output: &str) -> Option<&'static str> {
+    if output.contains("OAuth access token has expired")
+        || output.contains("Failed to authenticate")
+    {
+        return Some(CLAUDE_LOGIN_EXPIRED_DETAIL);
+    }
+    output
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+        .any(|value| {
+            value
+                .get("error_status")
+                .and_then(serde_json::Value::as_i64)
+                == Some(401)
+                || value.get("error").and_then(serde_json::Value::as_str)
+                    == Some("authentication_failed")
+        })
+        .then_some(CLAUDE_LOGIN_EXPIRED_DETAIL)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -12149,6 +12197,21 @@ fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
             "Check your internet connection, then retry this message.",
         );
     }
+    // Checked before the generic authentication branch: an expired sign-in is
+    // the one auth failure Gyro can walk someone out of, so it needs a kind of
+    // its own. The surface offers sign-in for it instead of a health re-check,
+    // which a stale token still passes.
+    if normalized.contains("authentication_failed")
+        || normalized.contains("oauth access token has expired")
+        || normalized.contains("failed to authenticate")
+        || normalized.contains("\"error_status\":401")
+        || normalized.contains("401 unauthorized")
+    {
+        return (
+            "login-expired",
+            "This provider's sign-in expired. Sign in again and Gyro will resend your message.",
+        );
+    }
     if normalized.contains("unauthorized")
         || normalized.contains("authentication")
         || normalized.contains("not logged in")
@@ -12396,6 +12459,7 @@ struct StreamingCommandOutput {
     stdout: String,
     stderr: String,
     assistant_text: Option<String>,
+    parsed_stream_json: bool,
     provider_session_id: Option<String>,
 }
 
@@ -12412,6 +12476,11 @@ struct StreamingCommandState {
     pending_delta_chars: usize,
     provider_session_id: Option<String>,
     stdout_line_buffer: String,
+    /// Whether any stdout line parsed as JSON.
+    ///
+    /// Separates "this CLI streamed structured output Gyro could not read" from
+    /// "this CLI printed plain text", which decide different fallbacks.
+    parsed_stream_json: bool,
     last_emit_at: Instant,
 }
 
@@ -12430,6 +12499,7 @@ impl StreamingCommandState {
             pending_delta_chars: 0,
             provider_session_id: None,
             stdout_line_buffer: String::new(),
+            parsed_stream_json: false,
             last_emit_at: Instant::now(),
         }
     }
@@ -12688,6 +12758,7 @@ fn run_streaming_command(
         stderr: outcome.stderr,
         assistant_text: (!stream_state.assistant_text.trim().is_empty())
             .then_some(stream_state.assistant_text),
+        parsed_stream_json: stream_state.parsed_stream_json,
         provider_session_id: stream_state.provider_session_id,
     })
 }
@@ -12710,6 +12781,7 @@ fn handle_provider_stdout_line(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
         return;
     };
+    stream_state.parsed_stream_json = true;
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
     }
@@ -13039,6 +13111,9 @@ fn emit_provider_chat_event(
         activity_label: None,
         activity_detail: None,
         activity_status: None,
+        recovery_kind: error
+            .as_deref()
+            .map(|error| provider_failure_recovery(error).0.to_string()),
         message,
         error,
     };
@@ -13069,6 +13144,7 @@ fn emit_provider_activity_event(
         activity_status: Some(activity.status.clone()),
         message: None,
         error: None,
+        recovery_kind: None,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -15459,6 +15535,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            menu_bar::handle_window_event(window, event);
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -18002,6 +18079,72 @@ while True:
             "rate-limit"
         );
         assert_eq!(provider_failure_recovery("provider crashed").0, "retry");
+    }
+
+    #[test]
+    fn expired_sign_ins_are_recovered_by_signing_in_again() {
+        // Both lines are what `claude` actually emits on a dead login: the
+        // retry notice arrives mid-stream as JSON, the plain sentence at the
+        // end. Neither can be fixed by retrying, so they must not classify as
+        // `retry`, and they must stay distinct from `authentication` so the
+        // surface offers sign-in rather than a health re-check.
+        for error in [
+            r#"{"type":"system","subtype":"api_retry","attempt":1,"error_status":401,"error":"authentication_failed"}"#,
+            "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+            CLAUDE_LOGIN_EXPIRED_DETAIL,
+        ] {
+            let (kind, message) = provider_failure_recovery(error);
+            assert_eq!(kind, "login-expired", "misclassified: {error}");
+            assert!(message.contains("Sign in again"), "unhelpful: {message}");
+        }
+
+        // A login that was never established is a different problem with a
+        // different fix, so it keeps the generic authentication kind.
+        assert_eq!(
+            provider_failure_recovery("not logged in").0,
+            "authentication"
+        );
+    }
+
+    #[test]
+    fn a_rejected_sign_in_replaces_the_raw_stream_dump() {
+        // The 401 sits far inside an otherwise healthy-looking stream, which is
+        // why the stored failure used to be thousands of characters of session
+        // setup with the cause buried in the middle.
+        let stream = format!(
+            "{}\n{}\n{}",
+            r#"{"type":"system","subtype":"init","tools":["Bash","Read","Write"],"model":"claude-opus-5"}"#,
+            r#"{"type":"system","subtype":"status","status":"requesting"}"#,
+            r#"{"type":"system","subtype":"api_retry","attempt":2,"error_status":401,"error":"authentication_failed"}"#,
+        );
+        assert_eq!(
+            claude_login_failure(&stream),
+            Some(CLAUDE_LOGIN_EXPIRED_DETAIL)
+        );
+
+        // A healthy stream and an unrelated failure must not be reported as a
+        // sign-in problem, or Gyro sends people to log in over a real bug.
+        assert_eq!(
+            claude_login_failure(r#"{"type":"system","subtype":"init","model":"claude-opus-5"}"#),
+            None
+        );
+        assert_eq!(claude_login_failure("error: connection refused"), None);
+    }
+
+    #[test]
+    fn a_failed_turn_streams_the_recovery_kind_it_stores() {
+        // Provider health is corrected from the live stream, so the classified
+        // kind has to travel with the failure. Sending only the raw error would
+        // leave the surfaces re-deriving it, and Settings kept claiming a
+        // verified sign-in exactly because nothing told it otherwise.
+        let recovery_kind = |error: &str| provider_failure_recovery(error).0;
+        assert_eq!(recovery_kind(CLAUDE_LOGIN_EXPIRED_DETAIL), "login-expired");
+        assert_eq!(recovery_kind("network is unreachable"), "offline");
+
+        // Only failures carry an error, so a healthy phase stays unclassified
+        // and cannot demote a working provider.
+        let no_error: Option<&str> = None;
+        assert_eq!(no_error.map(recovery_kind), None);
     }
 
     #[test]
