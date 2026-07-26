@@ -211,6 +211,7 @@ import {
   isProviderExecutable,
   providerCapabilities,
   providerDefaultModelId,
+  providerNeedsSignInRepair,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
@@ -254,9 +255,16 @@ function restingSidebarWidth() {
   return 240;
 }
 
+/**
+ * Dismisses a popover, dropdown, or menu on the first pointer press that lands
+ * outside it. The returned ref goes on the floating surface itself. Pass
+ * `triggerRef` when the button that opens the surface sits outside that
+ * subtree, so pressing the trigger toggles instead of dismiss-then-reopen.
+ */
 function useOutsidePointerDismiss<T extends HTMLElement>(
   isOpen: boolean,
   onDismiss: () => void,
+  triggerRef?: RefObject<HTMLElement | null>,
 ) {
   const ref = useRef<T | null>(null);
 
@@ -267,7 +275,15 @@ function useOutsidePointerDismiss<T extends HTMLElement>(
 
     const handlePointerDown = (event: PointerEvent) => {
       const current = ref.current;
-      if (!current || event.composedPath().includes(current)) {
+      if (!current) {
+        return;
+      }
+      const path = event.composedPath();
+      if (path.includes(current)) {
+        return;
+      }
+      const trigger = triggerRef?.current;
+      if (trigger && path.includes(trigger)) {
         return;
       }
       onDismiss();
@@ -277,7 +293,7 @@ function useOutsidePointerDismiss<T extends HTMLElement>(
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
     };
-  }, [isOpen, onDismiss]);
+  }, [isOpen, onDismiss, triggerRef]);
 
   return ref;
 }
@@ -3810,9 +3826,11 @@ function SessionSidebarRow({
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
 }) {
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
     isMenuOpen,
     onMenuClose,
+    menuTriggerRef,
   );
   const sessionProviderId = providerIdForSession(session);
   const modelTitle =
@@ -3838,7 +3856,6 @@ function SessionSidebarRow({
       draggable={Boolean(onDragStart)}
       onDragEnd={onDragEnd}
       onDragStart={onDragStart}
-      ref={menuRef}
     >
       <button
         aria-label={
@@ -3893,6 +3910,7 @@ function SessionSidebarRow({
           aria-label="Chat options"
           className="gyro-session-action is-more"
           onClick={onMenuToggle}
+          ref={menuTriggerRef}
           title="More"
           type="button"
         >
@@ -3900,7 +3918,7 @@ function SessionSidebarRow({
         </button>
       </div>
       {isMenuOpen ? (
-        <div className="gyro-session-menu" role="menu">
+        <div className="gyro-session-menu" ref={menuRef} role="menu">
           {onOpenInGrid ? (
             <button onClick={onOpenInGrid} role="menuitem" type="button">
               Open in chat grid
@@ -5908,9 +5926,11 @@ function ChatMessageQueue({
     placement: "down" | "up";
   }>();
   const menuMessageId = menuState?.messageId;
-  const menuRef = useOutsidePointerDismiss<HTMLElement>(
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
     menuMessageId !== undefined,
     () => setMenuState(undefined),
+    menuTriggerRef,
   );
   return (
     <section className="gyro-chat-message-queue" aria-label="Queued messages">
@@ -5922,7 +5942,6 @@ function ChatMessageQueue({
               .filter(Boolean)
               .join(" ")}
             key={message.id}
-            ref={menuMessageId === message.id ? menuRef : undefined}
           >
             <CornerDownRight
               aria-hidden="true"
@@ -5970,6 +5989,7 @@ function ChatMessageQueue({
                       : { messageId: message.id, placement },
                   );
                 }}
+                ref={menuMessageId === message.id ? menuTriggerRef : undefined}
                 title={message.isDispatching ? "Message is sending" : "More"}
                 type="button"
               >
@@ -5980,6 +6000,7 @@ function ChatMessageQueue({
               <div
                 aria-label={`Options for queue position ${index + 1}`}
                 className={`gyro-chat-message-queue-menu is-${menuState?.placement ?? "down"}`}
+                ref={menuRef}
                 role="menu"
               >
                 <button
@@ -10855,7 +10876,7 @@ export function ProvidersSurface({
                       <strong>{provider.displayName}</strong>
                       <span>
                         {provider.authMode.toUpperCase()} ·{" "}
-                        {providerConnectionLabel(provider)} ·{" "}
+                        {providerConnectionLabel(provider, status)} ·{" "}
                         {status?.runtimeStatus ??
                           status?.connectionStatus ??
                           "unknown"}
@@ -12912,6 +12933,9 @@ type SettingsSurfaceProps = {
   onTestNotification?: () => void;
   onToggleProvider?: (providerId: string) => void;
   onTestProvider?: (providerId: string) => void;
+  /** Repairs a connected provider whose credential the provider itself rejected. */
+  onSignInProvider?: (providerId: string) => void;
+  providerStatuses?: ProviderStatus[];
   onSelectProviderDefaultModel?: (
     providerId: ProviderId,
     modelId: string,
@@ -12945,6 +12969,37 @@ type SettingsSurfaceProps = {
   onToggleWorkspaceContribution?: (id: string, enabled: boolean) => void;
   onRemoveWorkspaceContribution?: (id: string) => void;
 };
+
+/**
+ * A native `<details>` stays open until its own summary is pressed again, so
+ * the disclosure is controlled here to dismiss it like every other dropdown.
+ */
+function ProviderDetailsMenu({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const detailsRef = useOutsidePointerDismiss<HTMLDetailsElement>(isOpen, () =>
+    setIsOpen(false),
+  );
+
+  return (
+    <details
+      className="gyro-provider-details"
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      open={isOpen}
+      ref={detailsRef}
+    >
+      <summary aria-label={label}>
+        <MoreHorizontal size={16} />
+      </summary>
+      {children}
+    </details>
+  );
+}
 
 function CliLaunchPresetEditor({
   onChange,
@@ -13105,6 +13160,8 @@ export function SettingsSurface({
   onTestNotification,
   onToggleProvider,
   onTestProvider,
+  onSignInProvider,
+  providerStatuses,
   onSelectProviderDefaultModel,
   selectedUsageProviderId,
   usageVisualization = "bars",
@@ -13315,7 +13372,12 @@ export function SettingsSurface({
                     {providerConfigs.map((provider) => (
                       <option key={provider.id} value={provider.id}>
                         {provider.displayName} ·{" "}
-                        {providerConnectionLabel(provider)}
+                        {providerConnectionLabel(
+                          provider,
+                          providerStatuses?.find(
+                            (status) => status.id === provider.id,
+                          ),
+                        )}
                       </option>
                     ))}
                   </select>
@@ -13454,6 +13516,13 @@ export function SettingsSurface({
                 const capabilities = providerCapabilities(provider.id);
                 const defaultModelId = providerDefaultModelId(provider);
                 const hasModelChoice = provider.models.length > 1;
+                const health = providerStatuses?.find(
+                  (status) => status.id === provider.id,
+                );
+                const needsSignInRepair = providerNeedsSignInRepair(
+                  provider,
+                  health,
+                );
                 return (
                   <div
                     className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}`}
@@ -13487,30 +13556,38 @@ export function SettingsSurface({
                     </div>
                     <SettingsStatus
                       status={
-                        provider.authStatus === "connected"
-                          ? "good"
-                          : provider.authStatus === "connecting"
-                            ? "warning"
+                        needsSignInRepair ||
+                        provider.authStatus === "connecting"
+                          ? "warning"
+                          : provider.authStatus === "connected"
+                            ? "good"
                             : "neutral"
                       }
                     >
-                      {providerConnectionLabel(provider)}
+                      {providerConnectionLabel(provider, health)}
                     </SettingsStatus>
                     <div className="gyro-settings-provider-actions">
                       <button
                         className="gyro-primary-button"
                         disabled={
                           provider.authStatus === "connecting" ||
-                          provider.authStatus === "connected"
+                          (provider.authStatus === "connected" &&
+                            !needsSignInRepair)
                         }
-                        onClick={() => onToggleProvider?.(provider.id)}
+                        onClick={() =>
+                          needsSignInRepair
+                            ? onSignInProvider?.(provider.id)
+                            : onToggleProvider?.(provider.id)
+                        }
                         type="button"
                       >
-                        {provider.authStatus === "connected"
-                          ? "Connected"
-                          : provider.authMode === "env"
-                            ? "Check environment"
-                            : providerPrimaryActionLabel(provider)}
+                        {needsSignInRepair
+                          ? "Sign in again"
+                          : provider.authStatus === "connected"
+                            ? "Connected"
+                            : provider.authMode === "env"
+                              ? "Check environment"
+                              : providerPrimaryActionLabel(provider)}
                       </button>
                       <button
                         className="gyro-secondary-button"
@@ -13520,10 +13597,9 @@ export function SettingsSurface({
                       >
                         {providerTestActionLabel(provider)}
                       </button>
-                      <details className="gyro-provider-details">
-                        <summary aria-label={`${provider.displayName} details`}>
-                          <MoreHorizontal size={16} />
-                        </summary>
+                      <ProviderDetailsMenu
+                        label={`${provider.displayName} details`}
+                      >
                         <div>
                           <strong>Technical details</strong>
                           <code>{provider.apiKeyRef}</code>
@@ -13540,7 +13616,7 @@ export function SettingsSurface({
                             </button>
                           ) : null}
                         </div>
-                      </details>
+                      </ProviderDetailsMenu>
                     </div>
                   </div>
                 );
@@ -14608,10 +14684,25 @@ function providerCredentialSummary(secretStorage?: string) {
   return "Gyro stores readiness only.";
 }
 
-function providerConnectionLabel(provider: {
-  authStatus: string;
-  id: ProviderId;
-}) {
+/**
+ * What the connection column may claim.
+ *
+ * "verified" is a claim about the credential working, and only live health can
+ * support it. Reading `authStatus` alone is what let Settings report a verified
+ * Claude Code sign-in while every send in chat came back rejected.
+ */
+function providerConnectionLabel(
+  provider: Pick<ModelProviderConfig, "authStatus" | "enabled"> & {
+    id: ProviderId;
+  },
+  health?: Pick<
+    ProviderStatus,
+    "connectionStatus" | "runtimeStatus" | "signInRejectedAt"
+  >,
+) {
+  if (providerNeedsSignInRepair(provider, health)) {
+    return health?.signInRejectedAt ? "sign-in expired" : "needs attention";
+  }
   if (provider.authStatus === "connected" && provider.id === "openai") {
     return "verified via Codex";
   }
@@ -15008,6 +15099,8 @@ function Composer({
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
   const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const providerPickerRef = useRef<HTMLDivElement | null>(null);
+  // Scoped to the open control (its trigger plus panel) rather than the whole
+  // composer, so pressing the textarea or any other chip closes the dropdown.
   const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
     Boolean(activePopover),
     () => {
@@ -15308,6 +15401,12 @@ function Composer({
         });
   const isSlashMenuOpen =
     !isSlashMenuDismissed && filteredSlashCommands.length > 0;
+  // The slash menu is driven by the draft, so it stays open while the textarea
+  // is in use and closes on a press anywhere outside the composer.
+  const slashMenuScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isSlashMenuOpen,
+    () => setIsSlashMenuDismissed(true),
+  );
   const selectedSlashCommandIndex = Math.min(
     activeSlashCommandIndex,
     Math.max(0, filteredSlashCommands.length - 1),
@@ -15420,7 +15519,7 @@ function Composer({
             }
           : undefined
       }
-      ref={popoverScopeRef}
+      ref={slashMenuScopeRef}
       onKeyDown={(event) => {
         if (event.key === "Escape" && activePopover) {
           event.stopPropagation();
@@ -15648,7 +15747,10 @@ function Composer({
         ) : null}
         {hasSelectedProvider || isHero ? (
           <>
-            <div className="gyro-composer-control gyro-composer-reveal">
+            <div
+              className="gyro-composer-control gyro-composer-reveal"
+              ref={activePopover === "context" ? popoverScopeRef : undefined}
+            >
               <button
                 aria-label="Add context"
                 className="gyro-composer-tool"
@@ -15668,7 +15770,10 @@ function Composer({
                 />
               ) : null}
             </div>
-            <div className="gyro-composer-control gyro-composer-control-approval gyro-composer-reveal">
+            <div
+              className="gyro-composer-control gyro-composer-control-approval gyro-composer-reveal"
+              ref={activePopover === "approval" ? popoverScopeRef : undefined}
+            >
               <button
                 aria-label={`Approval mode: ${approvalCopy.chipLabel}`}
                 className={approvalChipClassName}
@@ -15837,7 +15942,10 @@ function Composer({
             </div>
           </div>
         ) : null}
-        <div className="gyro-composer-control gyro-composer-control-model">
+        <div
+          className="gyro-composer-control gyro-composer-control-model"
+          ref={activePopover === "provider" ? popoverScopeRef : undefined}
+        >
           <button
             className="gyro-composer-chip gyro-model-chip"
             onClick={toggleProviderPopover}
@@ -15891,7 +15999,10 @@ function Composer({
           ) : null}
         </div>
         {providerReasoningEffort && effortItems.length > 0 ? (
-          <div className="gyro-composer-control gyro-composer-control-effort">
+          <div
+            className="gyro-composer-control gyro-composer-control-effort"
+            ref={activePopover === "effort" ? popoverScopeRef : undefined}
+          >
             <button
               aria-label={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
               className="gyro-composer-chip gyro-effort-chip"
@@ -15965,7 +16076,10 @@ function Composer({
       </div>
       {shouldShowContextRow ? (
         <div className="gyro-composer-context-row gyro-composer-reveal">
-          <div className="gyro-composer-control">
+          <div
+            className="gyro-composer-control"
+            ref={activePopover === "project" ? popoverScopeRef : undefined}
+          >
             <button
               className="gyro-composer-chip"
               onClick={() => togglePopover("project")}
@@ -16023,7 +16137,12 @@ function Composer({
               />
             ) : null}
           </div>
-          <div className="gyro-composer-control">
+          <div
+            className="gyro-composer-control"
+            ref={
+              activePopover === "workspace-mode" ? popoverScopeRef : undefined
+            }
+          >
             <button
               className="gyro-composer-chip"
               onClick={() => togglePopover("workspace-mode")}
@@ -16061,7 +16180,10 @@ function Composer({
               />
             ) : null}
           </div>
-          <div className="gyro-composer-control">
+          <div
+            className="gyro-composer-control"
+            ref={activePopover === "branch" ? popoverScopeRef : undefined}
+          >
             <button
               className="gyro-composer-chip"
               onClick={() => togglePopover("branch")}

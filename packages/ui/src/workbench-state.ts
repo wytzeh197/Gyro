@@ -73,7 +73,10 @@ import type {
   WorkspaceScopedSettings,
   WorkspaceSettingScope,
 } from "./types";
-import { defaultProviderStatuses as catalogDefaultProviderStatuses } from "./provider-catalog.ts";
+import {
+  defaultProviderStatuses as catalogDefaultProviderStatuses,
+  providerHealthAfterSignInRejection,
+} from "./provider-catalog.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
   MAX_WORKSPACE_FOLDERS,
@@ -1406,6 +1409,8 @@ export type WorkbenchAction =
       output: string;
       details?: ProviderHealthDetails;
     }
+  | { type: "record-provider-sign-in-rejection"; providerId: string }
+  | { type: "clear-provider-sign-in-rejection"; providerId: string }
   | {
       type: "set-provider-readiness";
       status: ProviderReadinessStatus;
@@ -3492,19 +3497,50 @@ export function workbenchReducer(
     case "record-provider-health":
       return {
         ...state,
+        providerStatuses: state.providerStatuses.map((provider) => {
+          if (provider.id !== action.providerId) {
+            return provider;
+          }
+          const probed = {
+            ...provider,
+            connectionStatus: action.status,
+            authOwner: action.details?.authOwner ?? provider.authOwner,
+            healthDetails: action.details ?? provider.healthDetails,
+            healthCheckedAt: new Date().toISOString(),
+            healthOutput: action.output,
+            healthSummary: action.summary,
+            runtimeStatus:
+              action.details?.runtimeStatus ?? provider.runtimeStatus,
+          };
+          // A status command cannot clear a rejection it is incapable of
+          // seeing, so the probe reports around the rejection until a sign-in
+          // clears it.
+          return provider.signInRejectedAt
+            ? providerHealthAfterSignInRejection(
+                probed,
+                provider.signInRejectedAt,
+              )
+            : probed;
+        }),
+      };
+    case "record-provider-sign-in-rejection":
+      return {
+        ...state,
         providerStatuses: state.providerStatuses.map((provider) =>
           provider.id === action.providerId
-            ? {
-                ...provider,
-                connectionStatus: action.status,
-                authOwner: action.details?.authOwner ?? provider.authOwner,
-                healthDetails: action.details ?? provider.healthDetails,
-                healthCheckedAt: new Date().toISOString(),
-                healthOutput: action.output,
-                healthSummary: action.summary,
-                runtimeStatus:
-                  action.details?.runtimeStatus ?? provider.runtimeStatus,
-              }
+            ? providerHealthAfterSignInRejection(
+                { ...provider, healthCheckedAt: new Date().toISOString() },
+                new Date().toISOString(),
+              )
+            : provider,
+        ),
+      };
+    case "clear-provider-sign-in-rejection":
+      return {
+        ...state,
+        providerStatuses: state.providerStatuses.map((provider) =>
+          provider.id === action.providerId && provider.signInRejectedAt
+            ? { ...provider, signInRejectedAt: undefined }
             : provider,
         ),
       };
