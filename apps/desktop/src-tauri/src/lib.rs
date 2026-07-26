@@ -1342,6 +1342,14 @@ struct ProviderChatStreamEvent {
     activity_status: Option<String>,
     message: Option<String>,
     error: Option<String>,
+    /// How the failure can be repaired, classified by
+    /// [`provider_failure_recovery`].
+    ///
+    /// The stored status event already carries this, but the live surfaces read
+    /// the stream. Sending it here is what lets a send the provider rejected
+    /// over its own sign-in correct the provider's health immediately, instead
+    /// of leaving Settings claiming a verified connection.
+    recovery_kind: Option<String>,
 }
 
 #[derive(Debug)]
@@ -11050,13 +11058,23 @@ fn run_anthropic_claude_chat(
                 )
             })?;
     if output.status_success {
-        let response = sanitize_provider_chat_response(
-            output
-                .assistant_text
-                .as_deref()
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or(output.stdout.trim()),
-        );
+        // Falling back to raw stdout is only sane when the CLI printed prose.
+        // Claude Code prints a JSON stream, so the same fallback answered a
+        // question with a dump of the transcript the moment the stream shape
+        // moved. An unreadable stream is version drift, and saying so is the
+        // only response that leads anywhere.
+        let parsed_response = output
+            .assistant_text
+            .as_deref()
+            .filter(|text| !text.trim().is_empty());
+        if parsed_response.is_none() && output.parsed_stream_json {
+            anyhow::bail!(gyro_core::stream_contract_failure(
+                "Anthropic",
+                "Claude Code"
+            ));
+        }
+        let response =
+            sanitize_provider_chat_response(parsed_response.unwrap_or(output.stdout.trim()));
         if response.is_empty() {
             anyhow::bail!("Anthropic finished, but Claude did not return a chat response.");
         }
@@ -12441,6 +12459,7 @@ struct StreamingCommandOutput {
     stdout: String,
     stderr: String,
     assistant_text: Option<String>,
+    parsed_stream_json: bool,
     provider_session_id: Option<String>,
 }
 
@@ -12457,6 +12476,11 @@ struct StreamingCommandState {
     pending_delta_chars: usize,
     provider_session_id: Option<String>,
     stdout_line_buffer: String,
+    /// Whether any stdout line parsed as JSON.
+    ///
+    /// Separates "this CLI streamed structured output Gyro could not read" from
+    /// "this CLI printed plain text", which decide different fallbacks.
+    parsed_stream_json: bool,
     last_emit_at: Instant,
 }
 
@@ -12475,6 +12499,7 @@ impl StreamingCommandState {
             pending_delta_chars: 0,
             provider_session_id: None,
             stdout_line_buffer: String::new(),
+            parsed_stream_json: false,
             last_emit_at: Instant::now(),
         }
     }
@@ -12733,6 +12758,7 @@ fn run_streaming_command(
         stderr: outcome.stderr,
         assistant_text: (!stream_state.assistant_text.trim().is_empty())
             .then_some(stream_state.assistant_text),
+        parsed_stream_json: stream_state.parsed_stream_json,
         provider_session_id: stream_state.provider_session_id,
     })
 }
@@ -12755,6 +12781,7 @@ fn handle_provider_stdout_line(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
         return;
     };
+    stream_state.parsed_stream_json = true;
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
     }
@@ -13084,6 +13111,9 @@ fn emit_provider_chat_event(
         activity_label: None,
         activity_detail: None,
         activity_status: None,
+        recovery_kind: error
+            .as_deref()
+            .map(|error| provider_failure_recovery(error).0.to_string()),
         message,
         error,
     };
@@ -13114,6 +13144,7 @@ fn emit_provider_activity_event(
         activity_status: Some(activity.status.clone()),
         message: None,
         error: None,
+        recovery_kind: None,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -15504,6 +15535,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            menu_bar::handle_window_event(window, event);
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -18097,6 +18129,22 @@ while True:
             None
         );
         assert_eq!(claude_login_failure("error: connection refused"), None);
+    }
+
+    #[test]
+    fn a_failed_turn_streams_the_recovery_kind_it_stores() {
+        // Provider health is corrected from the live stream, so the classified
+        // kind has to travel with the failure. Sending only the raw error would
+        // leave the surfaces re-deriving it, and Settings kept claiming a
+        // verified sign-in exactly because nothing told it otherwise.
+        let recovery_kind = |error: &str| provider_failure_recovery(error).0;
+        assert_eq!(recovery_kind(CLAUDE_LOGIN_EXPIRED_DETAIL), "login-expired");
+        assert_eq!(recovery_kind("network is unreachable"), "offline");
+
+        // Only failures carry an error, so a healthy phase stays unclassified
+        // and cannot demote a working provider.
+        let no_error: Option<&str> = None;
+        assert_eq!(no_error.map(recovery_kind), None);
     }
 
     #[test]

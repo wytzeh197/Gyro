@@ -54,6 +54,7 @@ import {
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
   providerDefaultModelId,
+  providerHealthAfterSignInRejection,
   providerSupportsUsage,
   providersForConfig,
   resolvedWorkspaceSettings,
@@ -838,6 +839,35 @@ export function App() {
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
   const languageServerIdsRef = useRef<Record<string, string>>({});
   const languageServerOpenedDocsRef = useRef(new Set<string>());
+  // Providers that rejected the sign-in Gyro sent with, mirrored into a ref so
+  // the stream and health callbacks read the live set without re-subscribing.
+  // The writers below update it eagerly: a sign-in and the health check that
+  // follows it happen inside one callback, before any re-render.
+  const providerSignInRejectionsRef = useRef<Record<string, string>>({});
+  providerSignInRejectionsRef.current = Object.fromEntries(
+    workbench.providerStatuses.flatMap((status) =>
+      status.signInRejectedAt ? [[status.id, status.signInRejectedAt]] : [],
+    ),
+  );
+  const recordProviderSignInRejection = useCallback((providerId: string) => {
+    providerSignInRejectionsRef.current = {
+      ...providerSignInRejectionsRef.current,
+      [providerId]: new Date().toISOString(),
+    };
+    dispatchWorkbench({
+      type: "record-provider-sign-in-rejection",
+      providerId,
+    });
+  }, []);
+  const clearProviderSignInRejection = useCallback((providerId: string) => {
+    if (!providerSignInRejectionsRef.current[providerId]) {
+      return;
+    }
+    const { [providerId]: _cleared, ...remaining } =
+      providerSignInRejectionsRef.current;
+    providerSignInRejectionsRef.current = remaining;
+    dispatchWorkbench({ type: "clear-provider-sign-in-rejection", providerId });
+  }, []);
 
   const activeDestination = workbench.activeDestination;
   const activeWorkspaceLayout = workbench.activeWorkspaceLayout;
@@ -1555,9 +1585,14 @@ export function App() {
         (!isProviderId(targetProviderId) ||
           !isProviderExecutable(targetProviderId))
           ? `${targetProvider ?? targetProviderId} is visible for readiness only and cannot execute ${intent} runs`
-          : targetProvider
-            ? `${targetProvider} is not connected yet`
-            : "Enable and connect a provider before sending";
+          : targetProviderId &&
+              providerSignInRejectionsRef.current[targetProviderId]
+            ? // Naming the rejection matters: the provider CLI still reports a
+              // stored login, so "not connected" would read as a Gyro mistake.
+              `${targetProvider ?? targetProviderId} rejected the sign-in Gyro sent with; sign in again to continue`
+            : targetProvider
+              ? `${targetProvider} is not connected yet`
+              : "Enable and connect a provider before sending";
 
       dispatchWorkbench({
         type: "set-provider-readiness",
@@ -1946,6 +1981,20 @@ export function App() {
 
   const processProviderChatStreamEvent = useCallback(
     (streamEvent: ProviderChatStreamEvent) => {
+      // A turn is the only place Gyro sees a credential actually used, so its
+      // outcome is what provider health is worth believing. The CLI status
+      // commands answer from stored credentials without checking them, and
+      // trusting those alone is what let Settings report a verified sign-in
+      // while every send came back rejected.
+      if (
+        streamEvent.phase === "failed" &&
+        providerNeedsSignIn(streamEvent.recoveryKind ?? undefined)
+      ) {
+        recordProviderSignInRejection(streamEvent.providerId);
+      }
+      if (streamEvent.phase === "completed") {
+        clearProviderSignInRejection(streamEvent.providerId);
+      }
       if (
         streamEvent.phase === "started" ||
         streamEvent.phase === "completed" ||
@@ -1988,7 +2037,9 @@ export function App() {
       scheduleProviderStreamFlush();
     },
     [
+      clearProviderSignInRejection,
       flushProviderStreamBatches,
+      recordProviderSignInRejection,
       scheduleProviderStreamFlush,
       setEventsForSession,
     ],
@@ -5368,7 +5419,7 @@ export function App() {
       const details = check
         ? providerHealthDetailsFromCheck(check, parsed.healthDetails)
         : parsed.healthDetails;
-      const result = {
+      const probed = {
         ...parsed,
         connectionStatus: check
           ? providerConnectionStatusFromRuntime(
@@ -5379,6 +5430,14 @@ export function App() {
         healthDetails: details,
         runtimeStatus: details.runtimeStatus,
       };
+      // The probe reports what the provider CLI has stored, which is exactly
+      // the claim a rejected send disproved. Callers read this result to decide
+      // whether a sign-in is still needed, so the rejection has to survive here
+      // too, not only in the recorded state.
+      const rejectedAt = providerSignInRejectionsRef.current[providerId];
+      const result = rejectedAt
+        ? providerHealthAfterSignInRejection(probed, rejectedAt)
+        : probed;
       dispatchWorkbench({
         type: "record-provider-health",
         providerId,
@@ -5415,6 +5474,13 @@ export function App() {
         (item) => item.id === providerId,
       );
       const providerLabel = provider?.displayName ?? providerId;
+      // A provider that rejected the last send needs the login flow whoever
+      // asked for the connection: its status command still reports a stored
+      // sign-in, so believing that answer would return someone to the failure
+      // they just came from.
+      const forceLogin = Boolean(
+        options?.forceLogin || providerSignInRejectionsRef.current[providerId],
+      );
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
@@ -5456,7 +5522,7 @@ export function App() {
           // caller recovering from a send the provider itself rejected asks for
           // the sign-in flow outright instead of believing this answer and
           // sending someone back into the same failure.
-          if (!options?.forceLogin && result.connectionStatus === "connected") {
+          if (!forceLogin && result.connectionStatus === "connected") {
             notify(
               "provider",
               providerId === "openai"
@@ -5562,7 +5628,7 @@ export function App() {
         // forced sign-in cannot use it to decide when the repair is done. The
         // login command exiting is the honest signal: it succeeds only once the
         // provider has written fresh credentials.
-        if (options?.forceLogin) {
+        if (forceLogin) {
           for (
             let attempt = 0;
             attempt < PROVIDER_SIGN_IN_POLL_ATTEMPTS;
@@ -5594,7 +5660,21 @@ export function App() {
               continue;
             }
             if (progress.exitCode === 0) {
+              // Fresh credentials are written, so the rejection this repaired
+              // is spent and the status command is worth reading again.
+              clearProviderSignInRejection(providerId);
               setProviderAuthStatus(providerId, "connected");
+              const verified = await invoke<ProviderHealthCheck>(
+                "check_provider_health",
+                { request: providerHealthRequest(provider, providerId) },
+              ).catch(() => undefined);
+              if (verified) {
+                recordProviderHealthOutput(
+                  providerId,
+                  verified.output,
+                  verified,
+                );
+              }
               notify("provider", "Provider signed in", providerLabel);
               return true;
             }
@@ -5676,6 +5756,7 @@ export function App() {
     },
     [
       activeSession?.workspacePath,
+      clearProviderSignInRejection,
       config,
       notify,
       recordProviderHealthOutput,
@@ -9579,6 +9660,21 @@ export function App() {
     [config, connectProvider, notify, setProviderAuthStatus],
   );
 
+  /**
+   * Repair a provider Gyro still counts as connected but whose credential the
+   * provider itself rejected. Distinct from the connect toggle, which reads a
+   * connected provider as a request to disable it.
+   */
+  const signInProvider = useCallback(
+    (providerId: string) => {
+      if (!isProviderId(providerId)) {
+        return;
+      }
+      void connectProvider(providerId, { forceLogin: true });
+    },
+    [connectProvider],
+  );
+
   const testProvider = useCallback(
     async (providerId: string) => {
       const provider = providersForConfig(config).find(
@@ -11994,8 +12090,10 @@ export function App() {
             dispatchWorkbench({ type: "set-theme", theme })
           }
           onSelectProviderDefaultModel={selectProviderDefaultModel}
+          onSignInProvider={signInProvider}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
+          providerStatuses={workbench.providerStatuses}
           selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
           onUsageProviderChange={(providerId) => {
