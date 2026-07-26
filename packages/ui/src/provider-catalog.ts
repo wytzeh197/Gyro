@@ -357,6 +357,45 @@ export function providerAuthStatusAfterHealth(
   return connectionStatus === "connected" ? "connected" : current;
 }
 
+export const PROVIDER_SIGN_IN_REJECTED_SUMMARY =
+  "The provider rejected the sign-in Gyro sent with. Its status command still reports a stored login, so sign in again to repair it.";
+
+/**
+ * Health a provider carries once it has rejected the sign-in Gyro sent with.
+ *
+ * The provider CLIs answer their status commands from stored credentials
+ * without checking them: `claude auth status` reports `loggedIn: true` for a
+ * token the API expired weeks ago. A rejected send is the one observation that
+ * proves otherwise, so it is recorded as health and, until a sign-in completes,
+ * outranks every later probe. Without that precedence the next status command
+ * would restore the "verified" claim the send just disproved.
+ */
+export function providerHealthAfterSignInRejection<
+  T extends Pick<
+    ProviderStatus,
+    "connectionStatus" | "runtimeStatus" | "healthSummary" | "signInRejectedAt"
+  >,
+>(health: T, rejectedAt: string): T {
+  return {
+    ...health,
+    connectionStatus: "not-configured",
+    runtimeStatus: "not-logged-in",
+    healthSummary: PROVIDER_SIGN_IN_REJECTED_SUMMARY,
+    signInRejectedAt: rejectedAt,
+  };
+}
+
+/** Whether a provider Gyro believes is connected can actually be used. */
+export function providerNeedsSignInRepair(
+  provider: Pick<ModelProviderConfig, "authStatus" | "enabled">,
+  health?: Pick<ProviderStatus, "connectionStatus" | "runtimeStatus">,
+) {
+  return (
+    provider.authStatus === "connected" &&
+    !isProviderRuntimeUsable(provider, health)
+  );
+}
+
 export function providerConnectionStatusFromRuntime(
   runtimeStatus: ProviderRuntimeStatus,
   fallback: ProviderConnectionStatus = "disconnected",
@@ -381,7 +420,7 @@ export function providerConnectionStatusFromRuntime(
  * work.
  */
 export function isProviderRuntimeUsable(
-  provider: ModelProviderConfig,
+  provider: Pick<ModelProviderConfig, "authStatus" | "enabled">,
   health?: Pick<ProviderStatus, "connectionStatus" | "runtimeStatus">,
 ) {
   if (!provider.enabled) {

@@ -59,7 +59,9 @@ import {
   providerCatalog,
   providerAuthStatusAfterHealth,
   providerConnectionStatusFromRuntime,
+  providerNeedsSignInRepair,
   providersForConfig,
+  PROVIDER_SIGN_IN_REJECTED_SUMMARY,
 } from "../packages/ui/src/provider-catalog.ts";
 import {
   CHAT_RESPONSE_TRUNCATION_SUFFIX,
@@ -539,6 +541,9 @@ const coreProviderHealthSource = readRepoFile(
 );
 const coreProviderStreamSource = readRepoFile(
   "crates/gyro-core/src/provider_stream.rs",
+);
+const coreProviderContractSource = readRepoFile(
+  "crates/gyro-core/src/provider_contract.rs",
 );
 const coreMutationsSource = readRepoFile("crates/gyro-core/src/mutations.rs");
 const coreCapabilitiesSource = readRepoFile(
@@ -4568,8 +4573,97 @@ expect(
     tauriSource.includes("provider_failure_recovery") &&
     tauriSource.includes('"recoveryKind"') &&
     surfaceSource.includes("providerStatus.recoveryMessage") &&
-    surfaceSource.includes('providerStatus.recoveryKind === "authentication"'),
+    surfaceSource.includes("providerNeedsSignIn(providerStatus.recoveryKind)"),
   "Chat recovery should clear stale resume state and distinguish offline, authentication, and retry guidance.",
+);
+expect(
+  // Claude Code wraps its partial messages in a `stream_event` envelope; the
+  // release that introduced it turned every reply into a dump of the stream.
+  coreProviderStreamSource.includes("fn stream_event_payload") &&
+    coreProviderStreamSource.includes(
+      'value.get("type").and_then(Value::as_str) == Some("stream_event")',
+    ) &&
+    coreProviderStreamSource.includes("fn extract_assistant_message_text") &&
+    // A stream Gyro cannot read is version drift, not an answer.
+    tauriSource.includes(
+      "parsed_response.is_none() && output.parsed_stream_json",
+    ) &&
+    tauriSource.includes("gyro_core::stream_contract_failure") &&
+    coreProviderContractSource.includes("STREAM_CONTRACT_MARKER"),
+  "A provider stream Gyro cannot read should be reported as version drift instead of answering with the raw transcript.",
+);
+expect(
+  tauriSource.includes('"login-expired"') &&
+    tauriSource.includes("fn claude_login_failure") &&
+    surfaceSource.includes('recoveryKind === "login-expired"') &&
+    surfaceSource.includes(
+      "providerSignInLabel(providerStatus.recoveryKind)",
+    ) &&
+    appSource.includes(
+      "connectProvider(providerId, { forceLogin: needsSignIn })",
+    ) &&
+    appSource.includes("if (connected && needsSignIn) replayFailedTurn();") &&
+    appSource.includes("if (!forceLogin && result.connectionStatus"),
+  "A send rejected over an expired sign-in should offer sign-in, skip the health shortcut that still passes on a stale token, and resend the message once the login succeeds.",
+);
+// A rejected send against a CLI whose status command still reports a stored
+// login: the exact state where Settings claimed a verified Claude Code sign-in
+// while chat could not send at all.
+let signInRejectionState = workbenchReducer(createInitialWorkbenchState(), {
+  type: "record-provider-sign-in-rejection",
+  providerId: "anthropic",
+});
+const rejectedAnthropic = () =>
+  signInRejectionState.providerStatuses.find(
+    (provider) => provider.id === "anthropic",
+  );
+const connectedAnthropic = {
+  ...providerCatalog.find((provider) => provider.id === "anthropic"),
+  authStatus: "connected",
+  enabled: true,
+};
+expect(
+  tauriSource.includes("recovery_kind: error") &&
+    appSource.includes(
+      "recordProviderSignInRejection(streamEvent.providerId)",
+    ) &&
+    rejectedAnthropic()?.runtimeStatus === "not-logged-in" &&
+    !isProviderRuntimeUsable(connectedAnthropic, rejectedAnthropic()),
+  "A send the provider rejected over its own sign-in should demote that provider's health.",
+);
+signInRejectionState = workbenchReducer(signInRejectionState, {
+  type: "record-provider-health",
+  providerId: "anthropic",
+  status: "connected",
+  summary: "claude auth status reports a stored login",
+  details: { ...parsedConnectedProvider.healthDetails, runtimeStatus: "ready" },
+  output: '{"loggedIn":true,"subscriptionType":"max"}',
+});
+expect(
+  rejectedAnthropic()?.connectionStatus === "not-configured" &&
+    rejectedAnthropic()?.healthSummary === PROVIDER_SIGN_IN_REJECTED_SUMMARY &&
+    providerNeedsSignInRepair(connectedAnthropic, rejectedAnthropic()) &&
+    appSource.includes("providerSignInRejectionsRef.current[providerId]") &&
+    surfaceSource.includes('? "Sign in again"'),
+  "A status command that cannot see an expired token should not clear the rejection that proved it.",
+);
+signInRejectionState = workbenchReducer(signInRejectionState, {
+  type: "clear-provider-sign-in-rejection",
+  providerId: "anthropic",
+});
+signInRejectionState = workbenchReducer(signInRejectionState, {
+  type: "record-provider-health",
+  providerId: "anthropic",
+  status: "connected",
+  summary: "claude auth status reports a stored login",
+  details: { ...parsedConnectedProvider.healthDetails, runtimeStatus: "ready" },
+  output: '{"loggedIn":true,"subscriptionType":"max"}',
+});
+expect(
+  rejectedAnthropic()?.connectionStatus === "connected" &&
+    !rejectedAnthropic()?.signInRejectedAt &&
+    isProviderRuntimeUsable(connectedAnthropic, rejectedAnthropic()),
+  "A completed sign-in should retire the rejection and let health probes speak again.",
 );
 expect(
   coreSessionsSource.includes("update_session_summary") &&
@@ -4761,12 +4855,49 @@ expect(
 expect(
   surfaceSource.includes("function useOutsidePointerDismiss") &&
     surfaceSource.includes('document.addEventListener("pointerdown"') &&
-    surfaceSource.includes("event.composedPath().includes(current)") &&
+    surfaceSource.includes("const path = event.composedPath()") &&
+    surfaceSource.includes("path.includes(current)") &&
     surfaceSource.includes("const menuRef = useOutsidePointerDismiss") &&
-    surfaceSource.includes("ref={popoverScopeRef}") &&
     surfaceSource.includes("event.target === event.currentTarget") &&
     surfaceSource.includes("ref={detailRef}"),
   "Menus, popovers, command palette, and detail panels should dismiss on outside pointer clicks.",
+);
+expect(
+  surfaceSource.includes("triggerRef?: RefObject<HTMLElement | null>") &&
+    surfaceSource.includes("path.includes(trigger)") &&
+    // The dismiss scope is the open control itself, not a whole composer, row,
+    // or message, so a press on any neighbouring control still closes it.
+    [
+      "context",
+      "approval",
+      "provider",
+      "effort",
+      "project",
+      "workspace-mode",
+      "branch",
+    ].every((popover) =>
+      surfaceSource.includes(
+        `activePopover === "${popover}" ? popoverScopeRef : undefined`,
+      ),
+    ) &&
+    surfaceSource.includes("ref={slashMenuScopeRef}") &&
+    surfaceSource.includes(
+      "const slashMenuScopeRef = useOutsidePointerDismiss",
+    ) &&
+    surfaceSource.includes(
+      '<div className="gyro-session-menu" ref={menuRef}',
+    ) &&
+    surfaceSource.includes("menuMessageId === message.id ? menuTriggerRef") &&
+    !surfaceSource.includes("ref={popoverScopeRef}"),
+  "Dropdown dismissal should be scoped to the open control and its trigger, not the surrounding row.",
+);
+expect(
+  menuBarRustSource.includes("pub fn handle_window_event") &&
+    menuBarRustSource.includes("tauri::WindowEvent::Focused(false)") &&
+    menuBarRustSource.includes("note_outside_dismiss") &&
+    menuBarRustSource.includes("took_recent_outside_dismiss") &&
+    desktopRustSource.includes("menu_bar::handle_window_event(window, event)"),
+  "The menu bar popover should close when the press lands outside it, while the tray icon still toggles.",
 );
 expect(
   surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
