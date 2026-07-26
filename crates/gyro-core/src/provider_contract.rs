@@ -160,6 +160,26 @@ pub fn audit_provider_args<S: AsRef<str>>(
     Ok(())
 }
 
+/// Marker shared by failures where a CLI's output stopped matching what Gyro
+/// knows how to read.
+///
+/// The arguments are only half of what Gyro depends on; the other half is the
+/// shape of the stream it parses back. When Claude Code moved its partial
+/// messages inside a `stream_event` envelope, no text matched any known shape
+/// and the chat answered with the raw transcript. A run that reaches the end
+/// with nothing readable is version drift, exactly like a rejected flag, and
+/// [`is_cli_argument_error`] recognises it so both are reported that way.
+pub const STREAM_CONTRACT_MARKER: &str = "Gyro could not read this provider's output";
+
+/// Report a provider run whose output Gyro could not parse.
+pub fn stream_contract_failure(provider_label: &str, cli_label: &str) -> String {
+    format!(
+        "{STREAM_CONTRACT_MARKER}: {provider_label} finished, but nothing in the stream matched a \
+         reply Gyro knows how to read, which usually means {cli_label} changed its output format. \
+         Update Gyro and {cli_label}; retrying will not help."
+    )
+}
+
 /// Whether provider output describes an argument-parsing failure.
 ///
 /// Both CLI families are covered: `claude` uses Commander (Node) and `codex`
@@ -170,6 +190,8 @@ pub fn is_cli_argument_error(output: &str) -> bool {
     const PATTERNS: &[&str] = &[
         // Gyro's own pre-spawn audit.
         "gyro's argument contract",
+        // Gyro's own read of a stream it no longer recognises.
+        "gyro could not read this provider's output",
         // Observed verbatim from `claude` when a variadic option absorbed the
         // prompt, and when a flag combination was incomplete.
         "input must be provided either through stdin or as a prompt argument",
@@ -426,6 +448,18 @@ mod tests {
         ));
         assert!(is_cli_argument_error("error: unexpected argument '--nope'"));
         assert!(is_cli_argument_error("error: unknown option '--nope'"));
+    }
+
+    #[test]
+    fn an_unreadable_stream_is_reported_as_version_drift() {
+        // A run that succeeds and streams nothing Gyro can read is the same
+        // class of problem as a rejected flag: the CLI moved, and retrying
+        // repeats it. Classifying it that way is what keeps the raw transcript
+        // out of the chat, which is how this surfaced in the first place.
+        let failure = stream_contract_failure("Anthropic", "Claude Code");
+        assert!(is_cli_argument_error(&failure), "unclassified: {failure}");
+        assert!(failure.contains("Claude Code"));
+        assert!(failure.contains("retrying will not help"));
     }
 
     #[test]
