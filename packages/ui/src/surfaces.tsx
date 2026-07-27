@@ -68,6 +68,7 @@ import {
   Trash2,
   UserCircle,
   Video,
+  Wrench,
   X,
   XCircle,
 } from "lucide-react";
@@ -15277,17 +15278,16 @@ function ProviderLogo({ providerId }: { providerId: ProviderId }) {
   }
 
   if (providerId === "xai") {
+    // Grok monochrome mark (not the X/Twitter glyph and not the geometric xAI
+    // lockup, which reads as a broken X at 15–19px). currentColor follows theme.
     return (
       <span
         aria-hidden="true"
         className="gyro-provider-logo is-xai"
-        title="xAI"
+        title="Grok"
       >
-        <svg viewBox="0 0 24 24">
-          <path
-            d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"
-            fill="currentColor"
-          />
+        <svg viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd">
+          <path d="M9.27 15.29 17.248 9.393c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 0 0-1.829-1A8.975 8.975 0 0 0 5.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815" />
         </svg>
       </span>
     );
@@ -16153,8 +16153,8 @@ function Composer({
           isGoalComposerActive
             ? "Define the outcome for this chat"
             : variant === "hero"
-              ? "Ask for follow-up changes or attach images"
-              : "Ask for follow-up changes or attach context"
+              ? "Describe a task or attach images"
+              : "Ask for follow-up changes or attach images"
         }
         value={draft}
       />
@@ -17640,12 +17640,9 @@ function ChatTurn({
                       <ProviderActivityGroup events={item.events} />
                     ) : item.event.kind === "assistant-message" ? (
                       <div className="gyro-chat-run-timeline is-narration">
-                        <article className="gyro-message is-assistant">
+                        <article className="gyro-message is-assistant is-run-narration">
                           <div>
-                            <AssistantResponse
-                              actions={artifactActions}
-                              event={item.event}
-                            />
+                            <RunNarration message={item.event.message} />
                           </div>
                         </article>
                       </div>
@@ -18026,14 +18023,11 @@ function ProviderActivityRow({
       </article>
     );
   }
-  const compactedLabel =
-    count > 1
-      ? activity.kind === "command"
-        ? `Ran ${count} commands`
-        : activity.kind === "search"
-          ? `Searched ${count} times`
-          : `Used ${count} tools`
-      : activity.label;
+  const compactedLabel = humanizeProviderActivityLabel(
+    activity.kind,
+    activity.label,
+    count,
+  );
   if (activity.kind === "file") {
     const path = providerActivityFilePath(event);
     const file = path
@@ -18092,7 +18086,7 @@ function ProviderActivityRow({
       {activity.kind === "command" ? (
         <Terminal size={13} />
       ) : activity.kind === "tool" ? (
-        <Sparkles size={13} />
+        <Wrench size={13} />
       ) : activity.kind === "context" ? (
         <Minimize2 size={13} />
       ) : (
@@ -18178,22 +18172,19 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
       : visibility === "preview"
         ? events.slice(0, 3)
         : [];
-  // A lone action names itself. Flattening it to "Used tool" threw away the
-  // one detail that made the step readable next to the calls that keep theirs.
-  const label =
-    events.length === 1
-      ? activity.label
-      : activity.kind === "command"
-        ? `Ran ${events.length} commands`
-        : activity.kind === "search"
-          ? `Searched ${events.length} times`
-          : `Used ${events.length} tools`;
+  // Claude-level work list: short collapsed labels ("Ran a command"), not raw
+  // MCP ids or "Used 3 tools" sparkle rows.
+  const label = humanizeProviderActivityLabel(
+    activity.kind,
+    activity.label,
+    events.length,
+  );
   const Icon =
     activity.kind === "command"
       ? Terminal
       : activity.kind === "search"
         ? Search
-        : Sparkles;
+        : Wrench;
   const span = activitySpanLabel(events);
   return (
     <section className="gyro-chat-run-activity-group">
@@ -18460,7 +18451,11 @@ function AssistantResponse({
   actions?: ChatArtifactActions;
   event: SessionEvent;
 }) {
-  const visibleMessage = stripHiddenSessionTitleMarker(event.message);
+  // Repair glued stream blocks (`repo.Gyro is…`) so the final answer reads as
+  // separate paragraphs rather than one thick run-on line.
+  const visibleMessage = structuredCommentaryBlocks(
+    stripHiddenSessionTitleMarker(event.message),
+  ).join("\n\n");
   const artifacts = useMemo(
     () =>
       chatArtifactsFromEvent(event).filter(
@@ -18772,6 +18767,67 @@ function providerActivityFromEvent(event: SessionEvent) {
     label: stringFromEventPayload(payload, "label") ?? event.message,
     status: stringFromEventPayload(payload, "status") ?? "done",
   };
+}
+
+/**
+ * Claude-style work labels: short, human, collapsed by default.
+ * Raw MCP / provider tool ids stay out of the summary row.
+ */
+function humanizeProviderActivityLabel(
+  kind: string,
+  label: string,
+  count: number,
+) {
+  if (count > 1) {
+    if (kind === "command") return `Ran ${count} commands`;
+    if (kind === "search") return `Searched ${count} times`;
+    if (kind === "file") return `Edited ${count} files`;
+    return `Ran ${count} tools`;
+  }
+  if (kind === "command") return "Ran a command";
+  if (kind === "search") {
+    if (/^search(?:ed)?(?:\s|$|:)/i.test(label.trim())) return label;
+    return "Searched";
+  }
+  if (kind === "file") return label.startsWith("Updated ") ? label : "Edited a file";
+  if (kind === "context") return "Compacted context";
+  const raw = label.trim();
+  if (
+    !raw ||
+    /^use_tool$/i.test(raw) ||
+    /^search_tool$/i.test(raw) ||
+    /^xai tool$/i.test(raw) ||
+    /^kimi tool$/i.test(raw) ||
+    /^grok tool$/i.test(raw) ||
+    /mcp__/i.test(raw) ||
+    /gyro_capabilities__/i.test(raw) ||
+    raw.length > 42
+  ) {
+    return "Used a tool";
+  }
+  // snake_case provider tool names → "Read" / "List dir" style is still noisy;
+  // keep short readable names only.
+  if (/^[a-z][a-z0-9_]*$/i.test(raw) && raw.includes("_")) {
+    return "Used a tool";
+  }
+  return raw;
+}
+
+/** Mid-run assistant prose — muted, glue-repaired, never the heavy final answer. */
+function RunNarration({ message }: { message: string }) {
+  const blocks = structuredCommentaryBlocks(
+    stripHiddenSessionTitleMarker(message),
+  );
+  if (blocks.length === 0) return null;
+  return (
+    <div className="gyro-run-narration">
+      {blocks.map((block, index) => (
+        <p key={`${index}-${block.slice(0, 24)}`}>
+          {renderAssistantInlineContent(block)}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 function isHiddenSessionTitleActivity(event: SessionEvent) {

@@ -6,6 +6,7 @@ import {
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
+  separateStreamedTextBlock,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import { structuredCommentaryBlocks } from "../packages/ui/src/chat-commentary.ts";
 import {
@@ -27,6 +28,16 @@ assert.deepEqual(
 assert.deepEqual(structuredCommentaryBlocks("Use v0.1.0-alpha.28.2 here."), [
   "Use v0.1.0-alpha.28.2 here.",
 ]);
+// Bolded answer blocks still split at the glued boundary (is.**Gyro…).
+assert.deepEqual(
+  structuredCommentaryBlocks(
+    "matches what Gyro actually is.**Gyro is a local-first workspace.**",
+  ),
+  [
+    "matches what Gyro actually is.",
+    "**Gyro is a local-first workspace.**",
+  ],
+);
 
 function streamEvent(sequence, phase = "delta", textDelta = `${sequence}`) {
   return {
@@ -563,7 +574,8 @@ const streamedAssistant = blockEventsRef.current
   .find((event) => event.kind === "assistant-message");
 assert.equal(
   streamedAssistant.message,
-  "I'll look. at the code.Here is the answer.",
+  "I'll look. at the code.\n\nHere is the answer.",
+  "text that resumes after a tool must not glue onto the previous sentence",
 );
 assert.deepEqual(
   streamedAssistant.payload.segments.map((segment) => segment.start),
@@ -572,8 +584,17 @@ assert.deepEqual(
 );
 assert.equal(
   streamedAssistant.message.slice(23),
-  "Here is the answer.",
-  "the block mark should land on the resumed text",
+  "\n\nHere is the answer.",
+  "the block mark should land on the paragraph break before the resumed text",
+);
+assert.equal(
+  separateStreamedTextBlock("Now the edits.", "Now the handler:"),
+  "\n\nNow the handler:",
+);
+assert.equal(
+  separateStreamedTextBlock("Already ends.\n", "Next block"),
+  "Next block",
+  "do not double-separate when a break is already present",
 );
 
 // The durable response is the same text concatenated, so the marks survive it
