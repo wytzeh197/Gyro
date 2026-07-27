@@ -17141,7 +17141,9 @@ function CapabilityActivityCard({
         {activity.resource ? <small>{activity.resource.label}</small> : null}
       </div>
       <div className="gyro-capability-activity-actions">
-        <small>{isBusy ? "Working" : activity.status}</small>
+        <small>
+          {isBusy ? "Working" : capabilityStatusLabel(activity.status)}
+        </small>
         {activity.resource && activity.status !== "inactive" ? (
           <button
             onClick={() => onAction?.("show-capability", event)}
@@ -17162,6 +17164,24 @@ function CapabilityActivityCard({
       </div>
     </article>
   );
+}
+
+/** Sentence case, so a finished call does not read "completed" next to "Working". */
+function capabilityStatusLabel(status: CapabilityCallEvent["status"]) {
+  switch (status) {
+    case "completed":
+      return "Done";
+    case "failed":
+      return "Failed";
+    case "denied":
+      return "Denied";
+    case "cancelled":
+      return "Cancelled";
+    case "inactive":
+      return "Inactive";
+    default:
+      return "Working";
+  }
 }
 
 type ChatTranscriptTurn = {
@@ -17222,8 +17242,25 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
 function deriveTranscriptState(events: SessionEvent[]) {
   const mutationDecisions = new Map<string, Record<string, unknown>>();
   const providerApprovalDecisions = new Map<string, Record<string, unknown>>();
+  /*
+   * A capability call reports itself several times as it runs — requested,
+   * running, then completed — and each report is its own event. Approvals
+   * already fold their updates back onto the event that opened them; capability
+   * calls did not, so one workspace read stacked three near-identical cards.
+   * Keep the first event as the card's place in the turn and let the newest
+   * payload supply what it says.
+   */
+  const capabilityCallUpdates = new Map<string, Record<string, unknown>>();
+  const capabilityCallAnchors = new Map<string, string>();
   for (const event of events) {
     const payload = eventPayloadRecord(event);
+    const capabilityCall = capabilityCallFromEvent(event);
+    if (capabilityCall) {
+      capabilityCallUpdates.set(capabilityCall.callId, payload ?? {});
+      if (!capabilityCallAnchors.has(capabilityCall.callId)) {
+        capabilityCallAnchors.set(capabilityCall.callId, event.id);
+      }
+    }
     if (
       event.kind === "system-event" &&
       stringFromEventPayload(payload, "kind") === "mutation-approval"
@@ -17262,6 +17299,17 @@ function deriveTranscriptState(events: SessionEvent[]) {
     return turn;
   };
   for (const originalEvent of events) {
+    const originalCapabilityCall = capabilityCallFromEvent(originalEvent);
+    if (
+      originalCapabilityCall &&
+      capabilityCallAnchors.get(originalCapabilityCall.callId) !==
+        originalEvent.id
+    ) {
+      continue;
+    }
+    const capabilityUpdate = originalCapabilityCall
+      ? capabilityCallUpdates.get(originalCapabilityCall.callId)
+      : undefined;
     const originalApproval = mutationApprovalFromEvent(originalEvent);
     const originalProviderApproval = providerApprovalFromEvent(originalEvent);
     const decision = originalApproval
@@ -17269,16 +17317,18 @@ function deriveTranscriptState(events: SessionEvent[]) {
       : originalProviderApproval
         ? providerApprovalDecisions.get(originalProviderApproval.approvalId)
         : undefined;
-    const event = decision
-      ? {
-          ...originalEvent,
-          payload: {
-            ...(eventPayloadRecord(originalEvent) ?? {}),
-            status: decision.status,
-            error: decision.error,
-          },
-        }
-      : originalEvent;
+    const event = capabilityUpdate
+      ? { ...originalEvent, payload: capabilityUpdate }
+      : decision
+        ? {
+            ...originalEvent,
+            payload: {
+              ...(eventPayloadRecord(originalEvent) ?? {}),
+              status: decision.status,
+              error: decision.error,
+            },
+          }
+        : originalEvent;
     const turnId = turnKeyFromEvent(event);
     const payload = eventPayloadRecord(event);
     const payloadKind = stringFromEventPayload(payload, "kind");
@@ -17340,6 +17390,14 @@ function deriveTranscriptState(events: SessionEvent[]) {
     } else if (providerApprovalFromEvent(event)) {
       turn.timelineEvents.push(event);
     } else if (providerActivityFromEvent(event)) {
+      turn.timelineEvents.push(event);
+    } else if (capabilityCallFromEvent(event)) {
+      /*
+       * Capability calls used to fall through to `looseEvents`, which render
+       * ahead of every turn — so the workspace reads a turn made showed up at
+       * the top of the transcript, above the message that asked for them. They
+       * are work the turn did; they belong in its timeline, in order.
+       */
       turn.timelineEvents.push(event);
     } else if (providerStatusFromEvent(event)) {
       turn.statusEvent = event;
