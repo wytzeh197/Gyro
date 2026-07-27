@@ -196,4 +196,50 @@ assert.equal(
   "a message followed by work should stay in the run",
 );
 
+// No stream marks, but the provider glued the preamble to the answer. Recover
+// the boundary so collapse keeps only the answer and expand shows the preamble
+// as muted work — not one meshed final bubble.
+const glued = chatTurnTimelineSections([
+  event(
+    "assistant-message",
+    "I'll check the project context and docs so the one-sentence answer matches what Gyro actually is.Gyro is a local-first macOS workspace that unifies agent chat in one place.",
+    {},
+    0,
+  ),
+]);
+assert.equal(
+  glued.response?.message,
+  "Gyro is a local-first macOS workspace that unifies agent chat in one place.",
+  "glued closing sentence should be the only final answer",
+);
+assert.deepEqual(
+  glued.work.map((item) =>
+    item.kind === "event" ? item.event.message : item.kind,
+  ),
+  [
+    "I'll check the project context and docs so the one-sentence answer matches what Gyro actually is.",
+  ],
+  "glued preamble should stay in the work stream",
+);
+
+// Markdown-bolded answer after a glued boundary still splits.
+const gluedBold = chatTurnTimelineSections([
+  event(
+    "assistant-message",
+    "I'll inspect the stream first.**Gyro is a local-first macOS workspace.**",
+    {},
+    0,
+  ),
+]);
+assert.equal(
+  gluedBold.response?.message,
+  "**Gyro is a local-first macOS workspace.**",
+  "bolded glued answer should still be the final response",
+);
+assert.equal(
+  gluedBold.work.length,
+  1,
+  "bolded glued preamble should stay in work",
+);
+
 console.log("chat timeline checks passed");
