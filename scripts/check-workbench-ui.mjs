@@ -554,6 +554,7 @@ const coreIpcSource = readRepoFile("crates/gyro-core/src/ipc.rs");
 const coreProviderHealthSource = readRepoFile(
   "crates/gyro-core/src/provider_health.rs",
 );
+const coreCliPathSource = readRepoFile("crates/gyro-core/src/cli_path.rs");
 const coreProviderStreamSource = readRepoFile(
   "crates/gyro-core/src/provider_stream.rs",
 );
@@ -4789,8 +4790,15 @@ expect(
       "should_skip_codex_login_for_external_env",
     ) &&
     coreProviderHealthSource.includes("crate::security::redact_secrets") &&
-    tauriSource.includes("fn augmented_gui_path") &&
+    (tauriSource.includes("fn augmented_gui_path") ||
+      tauriSource.includes("augmented_gui_path")) &&
+    tauriSource.includes("user_cli_paths") &&
     tauriSource.includes("command_with_gui_path(") &&
+    coreCliPathSource.includes(".grok/bin") &&
+    coreCliPathSource.includes(".kimi-code/bin") &&
+    coreCliPathSource.includes(".npm-global/bin") &&
+    appSource.includes('destination: "providers"') &&
+    appSource.includes("completeProviderLogin") &&
     surfaceSource.includes("Gyro local access stays separate") &&
     surfaceSource.includes("Provider event logs are sensitive and opt-in") &&
     surfaceSource.includes("Claude Code login and claude auth status") &&
