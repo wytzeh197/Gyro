@@ -5823,25 +5823,55 @@ export function App() {
           `Complete ${commandText}. Gyro will connect automatically.`,
         );
 
-        // The health check is what mislabelled the provider as connected, so a
-        // forced sign-in cannot use it to decide when the repair is done. The
-        // login command exiting is the honest signal: it succeeds only once the
-        // provider has written fresh credentials.
-        if (forceLogin) {
-          for (
-            let attempt = 0;
-            attempt < PROVIDER_SIGN_IN_POLL_ATTEMPTS;
-            attempt += 1
-          ) {
-            await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
-            const progress = await invoke<TerminalPaneSnapshot>(
-              "read_terminal_output",
-              {
-                paneId,
-                knownOutputRevision: terminalOutputRevisionRef.current[paneId],
-              },
+        // Shared post-login watcher for every CLI provider (OpenAI, Anthropic,
+        // Kimi, xAI, Gemini, Cursor, OpenCode). A successful login process exit
+        // is the primary completion signal — providers only exit 0 after writing
+        // credentials. Health is a secondary signal for first-time Connect, but
+        // not during forced repair: status commands can still claim a stale
+        // stored login is healthy.
+        const completeProviderLogin = async (source: "login-exit" | "health") => {
+          clearProviderSignInRejection(providerId);
+          setProviderAuthStatus(providerId, "connected");
+          if (source === "login-exit") {
+            const verified = await invoke<ProviderHealthCheck>(
+              "check_provider_health",
+              { request: providerHealthRequest(provider, providerId) },
             ).catch(() => undefined);
-            if (!progress) continue;
+            if (verified) {
+              recordProviderHealthOutput(providerId, verified.output, verified);
+            }
+          }
+          dispatchWorkbench({
+            type: "select-destination",
+            destination: "providers",
+          });
+          notify(
+            "provider",
+            source === "login-exit" ? "Provider signed in" : "Provider verified",
+            providerId === "openai" && source === "health"
+              ? "OpenAI is available through your local ChatGPT/Codex login."
+              : providerLabel,
+          );
+          return true as const;
+        };
+
+        // Browser / device-code logins need the longer window. Keep the short
+        // readiness constant as a floor so the two knobs cannot drift apart.
+        const loginPollAttempts = Math.max(
+          PROVIDER_AUTH_POLL_ATTEMPTS,
+          PROVIDER_SIGN_IN_POLL_ATTEMPTS,
+        );
+        for (let attempt = 0; attempt < loginPollAttempts; attempt += 1) {
+          await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
+
+          const progress = await invoke<TerminalPaneSnapshot>(
+            "read_terminal_output",
+            {
+              paneId,
+              knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+            },
+          ).catch(() => undefined);
+          if (progress) {
             terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
             dispatchWorkbench({
               type: "sync-terminal-pane-snapshot",
@@ -5855,50 +5885,28 @@ export function App() {
               hasForegroundJob: progress.hasForegroundJob ?? undefined,
             });
             if (progress.output) setTerminalOutput(progress.output);
-            if (progress.exitCode === null || progress.exitCode === undefined) {
-              continue;
-            }
-            if (progress.exitCode === 0) {
-              // Fresh credentials are written, so the rejection this repaired
-              // is spent and the status command is worth reading again.
-              clearProviderSignInRejection(providerId);
-              setProviderAuthStatus(providerId, "connected");
-              const verified = await invoke<ProviderHealthCheck>(
-                "check_provider_health",
-                { request: providerHealthRequest(provider, providerId) },
-              ).catch(() => undefined);
-              if (verified) {
-                recordProviderHealthOutput(
-                  providerId,
-                  verified.output,
-                  verified,
-                );
+            if (
+              progress.exitCode !== null &&
+              progress.exitCode !== undefined
+            ) {
+              if (progress.exitCode === 0) {
+                return completeProviderLogin("login-exit");
               }
-              notify("provider", "Provider signed in", providerLabel);
-              return true;
+              notify(
+                "approval",
+                "Provider sign-in did not finish",
+                `${commandText} exited with ${progress.exitCode}.`,
+              );
+              return false;
             }
-            notify(
-              "approval",
-              "Provider sign-in did not finish",
-              `${commandText} exited with ${progress.exitCode}.`,
-            );
-            return false;
           }
 
-          notify(
-            "approval",
-            "Provider sign-in still pending",
-            `Finish ${commandText} in the terminal, then send again.`,
-          );
-          return false;
-        }
+          // During forced repair, ignore health until the login process exits —
+          // that is what proves fresh credentials replaced the rejected ones.
+          if (forceLogin) {
+            continue;
+          }
 
-        for (
-          let attempt = 0;
-          attempt < PROVIDER_AUTH_POLL_ATTEMPTS;
-          attempt += 1
-        ) {
-          await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
@@ -5920,23 +5928,16 @@ export function App() {
             check,
           );
           if (result.connectionStatus === "connected") {
-            notify(
-              "provider",
-              providerId === "openai"
-                ? "Using Codex sign-in"
-                : "Provider verified",
-              providerId === "openai"
-                ? "OpenAI is available through your local ChatGPT/Codex login."
-                : providerLabel,
-            );
-            return true;
+            return completeProviderLogin("health");
           }
         }
 
         notify(
           "approval",
           "Provider sign-in still pending",
-          `Finish ${commandText}, then press Connect again.`,
+          forceLogin
+            ? `Finish ${commandText} in the terminal, then send again.`
+            : `Finish ${commandText}, then press Connect again.`,
         );
         return false;
       } catch (error) {
