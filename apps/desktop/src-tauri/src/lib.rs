@@ -12531,6 +12531,13 @@ struct StreamingCommandOutput {
 struct StreamingCommandState {
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
+    /// Whether `context_usage` describes one request rather than a whole turn.
+    ///
+    /// A turn-wide total is a billing figure: it sums every request the run
+    /// made, so it climbs past the context window on any turn that used tools.
+    /// Once a per-request reading has landed, a turn-wide one must not replace
+    /// it.
+    context_usage_is_per_request: bool,
     /// Newest reading per window id. A run can announce the same window more
     /// than once, and only the last reading describes where the plan stands.
     rate_limits: Vec<ProviderRateLimitWindow>,
@@ -12557,6 +12564,7 @@ impl StreamingCommandState {
         Self {
             activities: Vec::new(),
             context_usage: None,
+            context_usage_is_per_request: false,
             rate_limits: Vec::new(),
             stdout_text: String::new(),
             stdout_text_chars: 0,
@@ -12570,6 +12578,38 @@ impl StreamingCommandState {
             stdout_line_buffer: String::new(),
             parsed_stream_json: false,
             last_emit_at: Instant::now(),
+        }
+    }
+
+    /// Fold a Claude Code usage reading into what the meter will report.
+    ///
+    /// The closing frame is the only one that names the model's context window,
+    /// and the per-request frames are the only ones whose counts describe what
+    /// the window actually holds, so each contributes what it alone knows.
+    fn apply_claude_context_usage(&mut self, frame: ClaudeUsageFrame, usage: ProviderContextUsage) {
+        match frame {
+            ClaudeUsageFrame::Request => {
+                let carried_window = self
+                    .context_usage
+                    .as_ref()
+                    .and_then(|current| current.model_context_window);
+                self.context_usage = Some(ProviderContextUsage {
+                    model_context_window: usage.model_context_window.or(carried_window),
+                    ..usage
+                });
+                self.context_usage_is_per_request = true;
+            }
+            ClaudeUsageFrame::Turn => {
+                if !self.context_usage_is_per_request {
+                    self.context_usage = Some(usage);
+                    return;
+                }
+                if let (Some(current), Some(window)) =
+                    (self.context_usage.as_mut(), usage.model_context_window)
+                {
+                    current.model_context_window = Some(window);
+                }
+            }
         }
     }
 
@@ -12855,10 +12895,11 @@ fn handle_provider_stdout_line(
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
     }
-    if let Some(context_usage) = provider_context_usage_from_codex_exec(&value)
-        .or_else(|| provider_context_usage_from_claude_stream(&value))
-    {
+    if let Some(context_usage) = provider_context_usage_from_codex_exec(&value) {
         stream_state.context_usage = Some(context_usage);
+        stream_state.context_usage_is_per_request = false;
+    } else if let Some((frame, context_usage)) = provider_context_usage_from_claude_stream(&value) {
+        stream_state.apply_claude_context_usage(frame, context_usage);
     }
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(&value) {
         merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
@@ -12953,6 +12994,15 @@ fn provider_context_usage_from_codex_exec(
     })
 }
 
+/// What a Claude Code usage frame is counting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClaudeUsageFrame {
+    /// One request, so the counts describe what the window holds.
+    Request,
+    /// Every request in the turn added together.
+    Turn,
+}
+
 /// Read a turn's token usage out of Claude Code's `stream-json` output.
 ///
 /// Claude Code reports the request's cached tokens separately from the tokens
@@ -12961,16 +13011,21 @@ fn provider_context_usage_from_codex_exec(
 /// the sum of the fresh input and both cache buckets, and that sum is what the
 /// composer meter needs.
 ///
-/// The `result` frame closes the turn and carries the authoritative totals plus
-/// the model's real context window; the per-message `assistant` frames carry
-/// the same shape mid-turn and keep the meter moving on a long run.
+/// Each `assistant` frame reports the one request that produced it, so its
+/// counts are the conversation as the model saw it. The closing `result` frame
+/// instead sums every request the turn made — a turn that ran ten tools bills
+/// the re-sent conversation ten times over, which read as 1.18M tokens against
+/// a 200K window. Only its `modelUsage` window is worth keeping.
 fn provider_context_usage_from_claude_stream(
     value: &serde_json::Value,
-) -> Option<ProviderContextUsage> {
+) -> Option<(ClaudeUsageFrame, ProviderContextUsage)> {
     let frame_type = value.get("type").and_then(serde_json::Value::as_str)?;
-    let usage = match frame_type {
-        "result" => value.get("usage")?,
-        "assistant" => value.get("message")?.get("usage")?,
+    let (frame, usage) = match frame_type {
+        "result" => (ClaudeUsageFrame::Turn, value.get("usage")?),
+        "assistant" => (
+            ClaudeUsageFrame::Request,
+            value.get("message")?.get("usage")?,
+        ),
         _ => return None,
     };
     let field = |key: &str| usage.get(key).and_then(serde_json::Value::as_u64);
@@ -12979,14 +13034,17 @@ fn provider_context_usage_from_claude_stream(
     let cache_read = field("cache_read_input_tokens").unwrap_or_default();
     let input_tokens = fresh_input + cache_creation + cache_read;
     let output_tokens = field("output_tokens").unwrap_or_default();
-    Some(ProviderContextUsage {
-        input_tokens: Some(input_tokens),
-        cached_input_tokens: Some(cache_creation + cache_read),
-        output_tokens: Some(output_tokens),
-        reasoning_output_tokens: None,
-        total_tokens: Some(input_tokens + output_tokens),
-        model_context_window: claude_stream_context_window(value),
-    })
+    Some((
+        frame,
+        ProviderContextUsage {
+            input_tokens: Some(input_tokens),
+            cached_input_tokens: Some(cache_creation + cache_read),
+            output_tokens: Some(output_tokens),
+            reasoning_output_tokens: None,
+            total_tokens: Some(input_tokens + output_tokens),
+            model_context_window: claude_stream_context_window(value),
+        },
+    ))
 }
 
 /// The context window Claude Code attributes to the model it just ran.
@@ -13117,6 +13175,21 @@ fn provider_model_context_window(provider_id: &str, model_id: Option<&str>) -> O
     Some(window)
 }
 
+/// Whether a usage record claims more of the window than the window holds.
+///
+/// The composer reads these counts as "what the conversation occupies", which
+/// a run cannot push past the window itself.
+fn exceeds_context_window(usage: &ProviderContextUsage) -> bool {
+    let Some(window) = usage.model_context_window.filter(|window| *window > 0) else {
+        return false;
+    };
+    let occupied = usage
+        .total_tokens
+        .unwrap_or_default()
+        .max(usage.input_tokens.unwrap_or_default() + usage.output_tokens.unwrap_or_default());
+    occupied > window
+}
+
 /// Guarantee a turn's usage record carries a context window.
 ///
 /// The composer meter reports "used of window". A provider that reports usage
@@ -13134,6 +13207,17 @@ fn provider_context_usage_with_window(
         Some(mut usage) => {
             if usage.model_context_window.is_none() {
                 usage.model_context_window = catalog_window;
+            }
+            if exceeds_context_window(&usage) {
+                // No conversation can occupy more of the window than it holds,
+                // so a reading this large is a billing total the CLI summed
+                // over the turn — `codex exec` reports only that shape. Keeping
+                // the window and dropping the counts leaves the composer on its
+                // own estimate instead of "1.18M of 200K".
+                usage = ProviderContextUsage {
+                    model_context_window: usage.model_context_window,
+                    ..ProviderContextUsage::default()
+                };
             }
             Some(usage)
         }
@@ -18275,7 +18359,7 @@ while True:
 
     #[test]
     fn claude_stream_context_usage_counts_cached_input() {
-        let usage = provider_context_usage_from_claude_stream(&serde_json::json!({
+        let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
             "type": "result",
             "usage": {
                 "input_tokens": 10,
@@ -18288,6 +18372,7 @@ while True:
             }
         }))
         .unwrap();
+        assert_eq!(frame, ClaudeUsageFrame::Turn);
         // The window is what the conversation occupies, not what the last
         // request re-sent, so both cache buckets count toward the input.
         assert_eq!(usage.input_tokens, Some(19_034));
@@ -18298,15 +18383,73 @@ while True:
 
     #[test]
     fn claude_stream_context_usage_tracks_assistant_frames() {
-        let usage = provider_context_usage_from_claude_stream(&serde_json::json!({
+        let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
             "type": "assistant",
             "message": {
                 "usage": { "input_tokens": 10, "cache_read_input_tokens": 500, "output_tokens": 3 }
             }
         }))
         .unwrap();
+        assert_eq!(frame, ClaudeUsageFrame::Request);
         assert_eq!(usage.input_tokens, Some(510));
         assert_eq!(usage.model_context_window, None);
+    }
+
+    /// A tool-using turn re-sends the conversation on every request, so the
+    /// closing frame's totals are a multiple of the window. The meter has to
+    /// keep the last request's occupancy and take only the window from the
+    /// close.
+    #[test]
+    fn claude_turn_totals_never_replace_the_last_request() {
+        let mut state = StreamingCommandState::new();
+        for cache_read in [40_000_u64, 88_000] {
+            let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "usage": {
+                        "input_tokens": 12,
+                        "cache_read_input_tokens": cache_read,
+                        "output_tokens": 900
+                    }
+                }
+            }))
+            .unwrap();
+            state.apply_claude_context_usage(frame, usage);
+        }
+        let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
+            "type": "result",
+            "usage": {
+                "input_tokens": 64,
+                "cache_read_input_tokens": 1_171_028,
+                "output_tokens": 11_063
+            },
+            "modelUsage": { "claude-opus-4-5": { "contextWindow": 200000 } }
+        }))
+        .unwrap();
+        state.apply_claude_context_usage(frame, usage);
+
+        let merged = state.context_usage.expect("usage");
+        assert_eq!(merged.input_tokens, Some(88_012));
+        assert_eq!(merged.total_tokens, Some(88_912));
+        assert_eq!(merged.model_context_window, Some(200_000));
+    }
+
+    /// A turn that answered in one request has no per-request frame to prefer,
+    /// and there the closing totals are that request.
+    #[test]
+    fn claude_turn_totals_stand_in_when_no_request_frame_arrived() {
+        let mut state = StreamingCommandState::new();
+        let (frame, usage) = provider_context_usage_from_claude_stream(&serde_json::json!({
+            "type": "result",
+            "usage": { "input_tokens": 4_000, "output_tokens": 120 },
+            "modelUsage": { "claude-opus-4-5": { "contextWindow": 200000 } }
+        }))
+        .unwrap();
+        state.apply_claude_context_usage(frame, usage);
+
+        let merged = state.context_usage.expect("usage");
+        assert_eq!(merged.total_tokens, Some(4_120));
+        assert_eq!(merged.model_context_window, Some(200_000));
     }
 
     #[test]
@@ -18344,6 +18487,41 @@ while True:
         .unwrap();
         assert_eq!(reported.model_context_window, Some(131_072));
         assert_eq!(reported.input_tokens, Some(1_000));
+    }
+
+    /// `codex exec` reports only a running total for the thread, which passes
+    /// the window after a few turns. The meter keeps the window and falls back
+    /// to its own estimate rather than reporting tokens the window cannot hold.
+    #[test]
+    fn usage_larger_than_the_window_is_treated_as_a_billing_total() {
+        let usage = provider_context_usage_with_window(
+            Some(ProviderContextUsage {
+                input_tokens: Some(29_142_187),
+                cached_input_tokens: Some(28_661_248),
+                output_tokens: Some(37_749),
+                ..ProviderContextUsage::default()
+            }),
+            "openai",
+            Some("gpt-5.4-mini"),
+        )
+        .unwrap();
+        assert_eq!(usage.model_context_window, Some(400_000));
+        assert_eq!(usage.input_tokens, None);
+        assert_eq!(usage.total_tokens, None);
+
+        // A reading the window can hold is left exactly as reported.
+        let intact = provider_context_usage_with_window(
+            Some(ProviderContextUsage {
+                input_tokens: Some(90_767),
+                output_tokens: Some(105),
+                total_tokens: Some(90_872),
+                ..ProviderContextUsage::default()
+            }),
+            "openai",
+            Some("gpt-5.4-mini"),
+        )
+        .unwrap();
+        assert_eq!(intact.total_tokens, Some(90_872));
     }
 
     #[test]
