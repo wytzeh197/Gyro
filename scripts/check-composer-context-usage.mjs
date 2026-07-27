@@ -79,14 +79,48 @@ const clamped = estimateComposerContextUsage(
     event("5", "assistant-message", "full", {
       providerId: "openai",
       modelId: "tiny",
-      contextUsage: { inputTokens: 2_000, modelContextWindow: 1_000 },
+      contextUsage: {
+        inputTokens: 999,
+        outputTokens: 1,
+        modelContextWindow: 1_000,
+      },
     }),
   ],
-  "",
+  "x".repeat(4_000),
   { providerId: "openai", modelId: "tiny", modelLabel: "Tiny" },
 );
 assert.equal(clamped.percent, 100);
 assert.equal(clamped.remainingLabel, "0");
+
+// A turn total is not what the window holds. Claude Code's closing frame sums
+// every request the turn made, which read as "1.18M of 200K · 0 remaining"
+// against a window six times smaller. A reading the window cannot hold is
+// dropped and the thread estimate stands in, so sessions recorded before the
+// fix stop reporting it too.
+const billingTotal = estimateComposerContextUsage(
+  [
+    event("9", "assistant-message", "z".repeat(2_000), {
+      providerId: "anthropic",
+      modelId: "claude-opus-5",
+      contextUsage: {
+        inputTokens: 1_171_092,
+        outputTokens: 11_063,
+        totalTokens: 1_182_155,
+        modelContextWindow: 200_000,
+      },
+    }),
+  ],
+  "",
+  {
+    providerId: "anthropic",
+    modelId: "claude-opus-5",
+    modelLabel: "Claude Opus 5",
+  },
+);
+assert.equal(billingTotal.source, "estimated");
+assert.equal(billingTotal.windowLabel, "200K");
+assert.equal(billingTotal.usedLabel, "500");
+assert.equal(billingTotal.remainingLabel, "200K");
 
 // A nearly untouched 1M window must not report more headroom than the window
 // holds. Rounding the remainder to the nearest thousand reads "1000K", a unit
@@ -203,23 +237,103 @@ const merged = composerLimitWindows(
   [{ id: "five-hour", label: "5-hour limit", usedPercent: 84 }],
   now,
 );
-assert.equal(merged.length, 1);
+assert.equal(merged[0].id, "five-hour");
 assert.equal(merged[0].percent, 84);
 assert.equal(merged[0].severity, "warning");
+assert.equal(merged[1].id, "weekly");
+assert.equal(merged[1].percent, undefined);
 
-// Limits belong to the provider, not the thread.
+// Limits belong to the provider, not the thread: another provider's windows
+// never carry over, so the meter falls back to its own unreported pair.
+const crossProvider = composerLimitWindows(
+  [
+    event("11", "assistant-message", "hi", {
+      providerId: "anthropic",
+      rateLimits: [
+        { id: "five-hour", label: "5-hour limit", status: "exhausted" },
+      ],
+    }),
+  ],
+  { providerId: "openai" },
+  [],
+  now,
+);
+assert.deepEqual(
+  crossProvider.map((window) => [window.id, window.percent, window.status]),
+  [
+    ["five-hour", undefined, "unknown"],
+    ["weekly", undefined, "unknown"],
+  ],
+);
+
+// A plan-based provider that has not reported yet still lists both windows,
+// rather than showing a context bar with no limits under it.
+const unreported = composerLimitWindows(
+  [],
+  { providerId: "anthropic" },
+  [],
+  now,
+);
+assert.deepEqual(
+  unreported.map((window) => [window.id, window.label, window.percentLabel]),
+  [
+    ["five-hour", "5-hour limit", "—"],
+    ["weekly", "Weekly limit", "—"],
+  ],
+);
+
+// A reported window keeps its own label and level; only the missing half is
+// filled in.
+const partial = composerLimitWindows(
+  [
+    event("12", "assistant-message", "hi", {
+      providerId: "anthropic",
+      rateLimits: [
+        {
+          id: "weekly",
+          label: "Weekly · all models",
+          usedPercent: 42,
+          status: "ok",
+        },
+      ],
+    }),
+  ],
+  { providerId: "anthropic" },
+  [],
+  now,
+);
+assert.deepEqual(
+  partial.map((window) => [window.id, window.label, window.percent]),
+  [
+    ["five-hour", "5-hour limit", undefined],
+    ["weekly", "Weekly · all models", 42],
+  ],
+);
+
+// A provider naming its own allowance is left alone; the standard pair would
+// be limits it never claimed.
+const customWindows = composerLimitWindows(
+  [
+    event("13", "assistant-message", "hi", {
+      providerId: "openai",
+      rateLimits: [
+        { id: "monthly", label: "Monthly credits", usedPercent: 12 },
+      ],
+    }),
+  ],
+  { providerId: "openai" },
+  [],
+  now,
+);
+assert.deepEqual(
+  customWindows.map((window) => window.id),
+  ["monthly"],
+);
+
+// Providers without plan windows stay empty rather than showing a pair they
+// do not meter.
 assert.equal(
-  composerLimitWindows(
-    [
-      event("11", "assistant-message", "hi", {
-        providerId: "anthropic",
-        rateLimits: [{ id: "five-hour", label: "5-hour limit", status: "ok" }],
-      }),
-    ],
-    { providerId: "openai" },
-    [],
-    now,
-  ).length,
+  composerLimitWindows([], { providerId: "gemini" }, [], now).length,
   0,
 );
 

@@ -2579,6 +2579,89 @@ export function App() {
     ],
   );
 
+  const createWorkspaceBranch = useCallback(
+    async (startPoint?: string) => {
+      const root = activeSession?.workspacePath ?? workspacePath;
+      if (!root) {
+        notify(
+          "command-failed",
+          "Choose a workspace",
+          "Select a Git repository before creating a branch.",
+        );
+        return;
+      }
+      if (workbench.workspaceMode === "worktree") {
+        notify(
+          "command-failed",
+          "Worktree branch is fixed",
+          "Start a local chat to create a branch in the shared workspace.",
+        );
+        return;
+      }
+      if (
+        (activeSessionId &&
+          sendingSessionIdsRef.current.has(activeSessionId)) ||
+        isStartingFirstTurn
+      ) {
+        notify(
+          "command-failed",
+          "Branch is busy",
+          "Wait for the active turn to finish before creating a branch.",
+        );
+        return;
+      }
+      const branch = window
+        .prompt(
+          startPoint
+            ? `New branch name (from ${startPoint})`
+            : "New branch name",
+          "",
+        )
+        ?.trim();
+      if (!branch) {
+        return;
+      }
+      setIsBranchLoading(true);
+      try {
+        const catalog = isTauriRuntime()
+          ? await invoke<GitBranchCatalog>("git_create_branch", {
+              request: {
+                workspacePath: root,
+                branch,
+                startPoint: startPoint || undefined,
+              },
+            })
+          : { available: true, current: branch, branches: [branch] };
+        setBranchCatalog(catalog);
+        if (activeSessionId && isTauriRuntime()) {
+          await invoke<Session>("set_session_branch", {
+            sessionId: activeSessionId,
+            branch,
+          });
+          await refreshSessions();
+        }
+        refreshIdeSourceControl(root);
+        notify("terminal", "Branch created", branch);
+      } catch (error) {
+        notify("command-failed", "Could not create branch", String(error));
+        await refreshWorkspaceBranches(root);
+      } finally {
+        setIsBranchLoading(false);
+      }
+    },
+    [
+      activeSession?.workspacePath,
+      activeSessionId,
+      isStartingFirstTurn,
+      notify,
+      refreshIdeSourceControl,
+      refreshSessions,
+      refreshWorkspaceBranches,
+      workbench.workspaceMode,
+      workspacePath,
+    ],
+  );
+
   const removeWorkspaceWorktree = useCallback(
     async (branch: string) => {
       const root = activeSession?.workspacePath ?? workspacePath;
@@ -6721,6 +6804,20 @@ export function App() {
         return;
       }
 
+      if (action.startsWith("create-branch-from:")) {
+        const encodedStartPoint = action.replace("create-branch-from:", "");
+        try {
+          void createWorkspaceBranch(decodeURIComponent(encodedStartPoint));
+        } catch {
+          notify(
+            "command-failed",
+            "Invalid branch",
+            "The start point could not be read.",
+          );
+        }
+        return;
+      }
+
       if (action.startsWith("remove-worktree:")) {
         const encodedBranch = action.replace("remove-worktree:", "");
         try {
@@ -6920,6 +7017,7 @@ export function App() {
       changeChatMode,
       connectProvider,
       config,
+      createWorkspaceBranch,
       notify,
       openGlobalSearch,
       openSettingsSection,

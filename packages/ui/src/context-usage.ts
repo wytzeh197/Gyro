@@ -106,6 +106,37 @@ function formatCompactTokenCount(tokens: number) {
   return String(tokens);
 }
 
+function resolveContextWindow(
+  reportedContextWindow: number | undefined,
+  model: ContextModelSelection,
+) {
+  return (
+    (reportedContextWindow && reportedContextWindow > 0
+      ? reportedContextWindow
+      : undefined) ??
+    (model.contextWindowTokens && model.contextWindowTokens > 0
+      ? model.contextWindowTokens
+      : undefined) ??
+    PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"] ??
+    128_000
+  );
+}
+
+/**
+ * The tokens a usage record says the conversation occupies.
+ *
+ * `totalTokens` and the input/output pair disagree often enough that the
+ * larger of the two is the honest reading.
+ */
+function occupiedTokens(usage: Record<string, unknown>) {
+  const inputTokens = finiteNumber(usage, "inputTokens") ?? 0;
+  const outputTokens = finiteNumber(usage, "outputTokens") ?? 0;
+  return Math.max(
+    inputTokens + outputTokens,
+    finiteNumber(usage, "totalTokens") ?? 0,
+  );
+}
+
 export function estimateComposerContextUsage(
   events: SessionEvent[],
   draft: string,
@@ -135,6 +166,16 @@ export function estimateComposerContextUsage(
       reportedContextWindow = finiteNumber(usage, "modelContextWindow");
     }
     if (finiteNumber(usage, "inputTokens") === undefined) continue;
+    // A run that used tools bills the re-sent conversation once per request, so
+    // some CLIs report a turn total several times the window. Nothing can
+    // occupy more of the window than it holds, so a reading that large is
+    // ignored and the thread estimate stands in — including for turns recorded
+    // before Gyro stopped storing those totals.
+    if (
+      occupiedTokens(usage) > resolveContextWindow(reportedContextWindow, model)
+    ) {
+      continue;
+    }
 
     reportedEventIndex = index;
     reportedUsage = usage;
@@ -144,15 +185,10 @@ export function estimateComposerContextUsage(
   const reportedInputTokens = finiteNumber(reportedUsage, "inputTokens");
   const reportedOutputTokens = finiteNumber(reportedUsage, "outputTokens") ?? 0;
   const reportedTotalTokens = finiteNumber(reportedUsage, "totalTokens");
-  const contextWindowTokens =
-    (reportedContextWindow && reportedContextWindow > 0
-      ? reportedContextWindow
-      : undefined) ??
-    (model.contextWindowTokens && model.contextWindowTokens > 0
-      ? model.contextWindowTokens
-      : undefined) ??
-    PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"] ??
-    128_000;
+  const contextWindowTokens = resolveContextWindow(
+    reportedContextWindow,
+    model,
+  );
 
   let estimatedCharacters = draft.length;
   for (
@@ -206,6 +242,22 @@ export function estimateComposerContextUsage(
 }
 
 const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
+
+/** Providers whose plans meter a rolling 5-hour window and a weekly one. */
+const PLAN_LIMIT_PROVIDERS = new Set<ProviderId>(["anthropic", "openai"]);
+
+/**
+ * The windows listed before the provider has said anything about them.
+ *
+ * Both plan-based CLIs only mention a limit once a run has touched it, so a
+ * fresh session showed the context bar with no limits underneath — which reads
+ * as a plan without limits rather than one that has not reported yet. The pair
+ * is listed from the start and an unreported window stays unmeasured.
+ */
+const DEFAULT_PLAN_LIMIT_WINDOWS: ProviderUsageWindow[] = [
+  { id: "five-hour", label: "5-hour limit" },
+  { id: "weekly", label: "Weekly limit" },
+];
 
 /**
  * When a window resets, phrased the way a limit is actually read.
@@ -320,6 +372,23 @@ export function composerLimitWindows(
 
   for (const window of polledWindows) {
     byId.set(window.id, window);
+  }
+
+  // A provider that names windows Gyro does not model is describing its own
+  // allowance, and padding it with the standard pair would invent limits it
+  // never claimed. Only a provider still speaking the standard vocabulary gets
+  // the missing halves filled in.
+  const speaksDefaultWindows = [...byId.keys()].every((id) =>
+    LIMIT_WINDOW_ORDER.includes(id),
+  );
+  if (
+    model.providerId &&
+    PLAN_LIMIT_PROVIDERS.has(model.providerId) &&
+    speaksDefaultWindows
+  ) {
+    for (const window of DEFAULT_PLAN_LIMIT_WINDOWS) {
+      if (!byId.has(window.id)) byId.set(window.id, window);
+    }
   }
 
   return [...byId.values()]
