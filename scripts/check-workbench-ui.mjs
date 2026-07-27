@@ -53,6 +53,7 @@ import {
   workspacePathExcluded,
 } from "../packages/ui/src/workspace-settings.ts";
 import {
+  CLAUDE_REASONING_EFFORTS,
   isProviderExecutable,
   isProviderRuntimeUsable,
   normalizedConfig,
@@ -437,13 +438,14 @@ expect(
   "Linked screenshots should use a contained preview tray inside the composer.",
 );
 expect(
-  surfaceSource.includes("interleavedChatTimelineItems(turn.timelineEvents)") &&
+  surfaceSource.includes("chatTurnTimelineSections(turn.timelineEvents)") &&
+    timelineSource.includes("export function chatTurnTimelineSections") &&
     timelineSource.includes('kind: "file-summary"') &&
     timelineSource.includes('kind: "activity-group"') &&
     timelineSource.includes("const fileEvents: SessionEvent[] = []") &&
     timelineSource.includes("id: `file-summary-${firstFileEvent.id}`") &&
     timelineSource.includes("orderedChatTimelineEvents(events)") &&
-    surfaceSource.includes('className="gyro-chat-run-sequence"') &&
+    surfaceSource.includes('className="gyro-chat-run-sequence is-work"') &&
     surfaceSource.includes("function ProviderActivityGroup") &&
     surfaceSource.includes('"collapsed" | "preview" | "expanded"') &&
     surfaceSource.includes("events.slice(0, 3)") &&
@@ -465,6 +467,19 @@ expect(
   chatTurnSource.indexOf('aria-label="Final response"') <
     chatTurnSource.indexOf("changeSummaryItems.map((item)"),
   "Completed-turn file summaries should render after the final assistant response.",
+);
+expect(
+  chatTurnSource.includes('aria-label="Work timeline"') &&
+    chatTurnSource.indexOf('aria-label="Work timeline"') <
+      chatTurnSource.indexOf('aria-label="Final response"') &&
+    chatTurnSource.includes('item.event.kind === "assistant-message"') &&
+    chatTurnSource.includes("gyro-chat-run-timeline is-narration") &&
+    chatTurnSource.includes("offsetLabel={runOffsetLabel(runStart") &&
+    surfaceSource.includes("function ChatRunStep") &&
+    surfaceSource.includes("function runOffsetLabel") &&
+    styleSource.includes(".gyro-chat-run-step-time") &&
+    !chatTurnSource.includes("responseTimelineItems.map"),
+  "Mid-run narration should stay in the work timeline where it was spoken, with only the closing message rendered as the response.",
 );
 expect(
   surfaceSource.includes('label: "Suggested"') &&
@@ -903,6 +918,59 @@ expect(
     migratedIdeState.ide.languageServers.length === 0,
   "Persisted IDE state from before language servers should hydrate safely.",
 );
+const modelFocusBase = workbenchReducer(createInitialWorkbenchState(), {
+  type: "select-destination",
+  destination: "settings",
+});
+const modelFocusState = workbenchReducer(modelFocusBase, {
+  type: "set-model-focus",
+  focus: {
+    sessionId: "session-one",
+    kind: "ide",
+    label: "surfaces.tsx",
+    path: "packages/ui/src/surfaces.tsx",
+    line: 1204,
+    callId: "call-one",
+    updatedAt: "2026-07-27T10:00:00.000Z",
+  },
+});
+expect(
+  modelFocusState.activeDestination === "settings" &&
+    modelFocusState.activeWorkspaceLayout ===
+      modelFocusBase.activeWorkspaceLayout &&
+    modelFocusState.isToolPanelOpen === modelFocusBase.isToolPanelOpen &&
+    modelFocusState.modelFocus?.callId === "call-one" &&
+    modelFocusState.modelFocusHistory.length === 1,
+  "Recording model focus should report position without moving the user's destination, layout, or drawer.",
+);
+const repeatedModelFocusState = workbenchReducer(modelFocusState, {
+  type: "set-model-focus",
+  focus: {
+    sessionId: "session-one",
+    kind: "terminal",
+    label: "pnpm test",
+    paneTab: "terminal",
+    callId: "call-one",
+    updatedAt: "2026-07-27T10:00:05.000Z",
+  },
+});
+expect(
+  repeatedModelFocusState.modelFocusHistory.length === 1 &&
+    repeatedModelFocusState.modelFocus?.kind === "terminal",
+  "A repeated capability call should update its focus entry rather than stacking duplicates.",
+);
+expect(
+  createInitialWorkbenchState().preferences.modelFollow === "peek" &&
+    createInitialWorkbenchState({
+      preferences: { modelFollow: "nonsense" },
+    }).preferences.modelFollow === "peek" &&
+    workbenchReducer(initialState, {
+      type: "set-model-follow",
+      mode: "follow",
+    }).preferences.modelFollow === "follow",
+  "Model follow should default to peek, reject unknown stored values, and stay switchable.",
+);
+
 let editorGroupState = workbenchReducer(initialState, {
   type: "ide-open-tab",
   tab: { path: "src/main.ts", title: "main.ts", dirty: false },
@@ -3008,12 +3076,12 @@ expect(
     surfaceSource.includes("function ProviderActivityRow") &&
     surfaceSource.includes("timelineEvents: SessionEvent[]") &&
     surfaceSource.includes("turn.timelineEvents.push(event)") &&
-    surfaceSource.includes('className="gyro-chat-run-sequence"') &&
+    surfaceSource.includes('className="gyro-chat-run-sequence is-work"') &&
     surfaceSource.includes(
       'className="gyro-chat-run-timeline is-final-response"',
     ) &&
     surfaceSource.includes('aria-label="Work timeline"') &&
-    surfaceSource.includes("interleavedChatTimelineItems") &&
+    surfaceSource.includes("chatTurnTimelineSections") &&
     surfaceSource.includes(
       'isRunning ? "Assistant update" : "Final response"',
     ) &&
@@ -3024,7 +3092,7 @@ expect(
     surfaceSource.includes("`${hours}h`") &&
     surfaceSource.includes("`${minutes % 60}m`") &&
     surfaceSource.includes("`${seconds}s`") &&
-    surfaceSource.includes("interleavedChatTimelineItems") &&
+    surfaceSource.includes("chatTurnTimelineSections") &&
     surfaceSource.includes("providerActivityPathsMatch") &&
     surfaceSource.includes('if (activity.kind === "file")') &&
     surfaceSource.includes("`Ran ${count} commands`") &&
@@ -3093,8 +3161,8 @@ expect(
     surfaceSource.includes("sourceControlStatsForActivityPath") &&
     surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
     surfaceSource.includes("gyro-chat-run-change-summary") &&
-    surfaceSource.includes("const changeSummaryItems = timelineItems.filter") &&
-    surfaceSource.includes('item.kind !== "file-summary"') &&
+    surfaceSource.includes("files: changeSummaryItems,") &&
+    timelineSource.includes('item.kind !== "file-summary"') &&
     surfaceSource.includes("changeSummaryItems.map((item)") &&
     surfaceSource.includes('activity.kind === "file"') &&
     surfaceSource.includes('activity.status === "running"') &&
@@ -3139,7 +3207,7 @@ expect(
     surfaceSource.includes("isRunning && turn.timelineEvents.length === 0") &&
     styleSource.includes(".gyro-chat-run-header") &&
     surfaceSource.includes("visibleWorkTimelineItems") &&
-    surfaceSource.includes("responseTimelineItems") &&
+    surfaceSource.includes("responseEvent") &&
     styleSource.includes(".gyro-chat-run-activity") &&
     styleSource.includes(".gyro-chat-run-activity.is-file") &&
     styleSource.includes(".gyro-chat-run-change-summary") &&
@@ -5810,9 +5878,9 @@ expect(
     surfaceSource.includes(
       "Gyro does not estimate allowance from local activity",
     ) &&
-    surfaceSource.includes('aria-label="Provider usage limits"') &&
+    surfaceSource.includes('aria-label="Plan usage limits"') &&
     surfaceSource.includes('className="gyro-composer-limit-summary"') &&
-    surfaceSource.includes("providerUsage.windows.map((window)") &&
+    surfaceSource.includes("limitWindows.map((window)") &&
     styleSource.includes(".gyro-composer-limit-summary"),
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
 );
@@ -5944,6 +6012,91 @@ expect(
     desktopRustSource.includes("provider_context_usage_from_codex_exec") &&
     desktopRustSource.includes('"contextUsage".into()'),
   "Composer context usage should prefer provider telemetry and render a readable detail card.",
+);
+
+expect(
+  // Claude Code reports cached input separately from what it re-sent, so a
+  // reading that ignores the cache buckets shows a few hundred tokens for a
+  // thread holding hundreds of thousands.
+  desktopRustSource.includes("provider_context_usage_from_claude_stream") &&
+    desktopRustSource.includes("cache_creation_input_tokens") &&
+    desktopRustSource.includes("cache_read_input_tokens") &&
+    desktopRustSource.includes("claude_stream_context_window") &&
+    // The ACP providers report no tokens at all. They still need the window, or
+    // the meter measures Grok's 131K against a default it never had.
+    desktopRustSource.includes("fn provider_model_context_window") &&
+    desktopRustSource.includes("fn provider_context_usage_with_window") &&
+    readRepoFile("packages/ui/src/context-usage.ts").includes(
+      "COMPACT_MILLIONS_THRESHOLD",
+    ) &&
+    providerCatalog.every((provider) =>
+      provider.models.every((model) => (model.contextWindowTokens ?? 0) > 0),
+    ),
+  "Every provider should resolve a real context window, whether or not its CLI reports token usage.",
+);
+
+expect(
+  // The sidebar is pinned to the viewport, so a project list longer than the
+  // fold needs its own scroll region or it spills past the pinned footer —
+  // taking the "less" button that collapses a project with it.
+  cssRules(styleSource, ".gyro-sidebar-project-chat-list").some(
+    (rule) =>
+      rule.includes("overflow-y: auto") && rule.includes("flex: 1 1 auto"),
+  ) &&
+    cssRules(
+      styleSource,
+      ".gyro-sidebar-project-chat-list .gyro-sidebar-project-row",
+    ).some(
+      (rule) =>
+        rule.includes("position: sticky") &&
+        rule.includes("top: 0") &&
+        // A sticky title needs opaque backing, or chats scroll through it.
+        rule.includes("background: var(--gyro-sidebar)"),
+    ) &&
+    styleSource.includes("overscroll-behavior: contain") &&
+    surfaceSource.includes('className="gyro-sidebar-more-button"') &&
+    surfaceSource.includes('{isExpanded ? "less" : "more"}'),
+  "The sidebar project list should scroll under a fixed project title and keep the collapse button reachable.",
+);
+
+expect(
+  // The context popover carries a bar per plan window — 5-hour and weekly for
+  // Claude, whatever the provider names for the rest.
+  surfaceSource.includes("composerLimitWindows") &&
+    surfaceSource.includes("ComposerLimitRow") &&
+    surfaceSource.includes("Plan usage limits") &&
+    surfaceSource.includes("gyro-composer-limit-bar") &&
+    // An unmeasured window must not render as a bar sitting at zero: that
+    // reads as a full allowance rather than as an unknown one.
+    surfaceSource.includes("is-unmeasured") &&
+    styleSource.includes(".gyro-composer-limit-bar.is-unmeasured") &&
+    cssRules(styleSource, ".gyro-composer-limit-bar").some((rule) =>
+      rule.includes("height: 5px"),
+    ) &&
+    styleSource.includes(".gyro-composer-limit-row.is-critical") &&
+    styleSource.includes(
+      ':root[data-theme="light"] .gyro-composer-limit-heading em',
+    ) &&
+    desktopRustSource.includes("fn provider_rate_limit_from_claude_stream") &&
+    desktopRustSource.includes('"rateLimits".into()') &&
+    desktopRustSource.includes("fn merge_provider_rate_limit"),
+  "The context popover should render a bar per plan limit window, and never fill one the provider did not measure.",
+);
+
+expect(
+  // `claude --effort <level>` takes low/medium/high/xhigh/max. `ultra` is a
+  // GPT-5.6 level the CLI rejects, and passing it through fails the whole run.
+  CLAUDE_REASONING_EFFORTS.join(",") === "low,medium,high,xhigh,max" &&
+    providerCatalog
+      .find((provider) => provider.id === "anthropic")
+      ?.models.every(
+        (model) =>
+          model.supportedReasoningEfforts?.join(",") ===
+          CLAUDE_REASONING_EFFORTS.join(","),
+      ) === true &&
+    desktopRustSource.includes("fn claude_reasoning_effort_arg") &&
+    desktopRustSource.includes('args.push("--effort".into())'),
+  "Claude models should expose the effort levels Claude Code accepts, and only those.",
 );
 
 expect(

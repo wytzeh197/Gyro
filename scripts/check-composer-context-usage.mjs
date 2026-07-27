@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { estimateComposerContextUsage } from "../packages/ui/src/context-usage.ts";
+import {
+  composerLimitWindows,
+  estimateComposerContextUsage,
+  formatLimitReset,
+} from "../packages/ui/src/context-usage.ts";
 
 function event(id, kind, message, payload = {}) {
   return {
@@ -83,5 +87,140 @@ const clamped = estimateComposerContextUsage(
 );
 assert.equal(clamped.percent, 100);
 assert.equal(clamped.remainingLabel, "0");
+
+// A nearly untouched 1M window must not report more headroom than the window
+// holds. Rounding the remainder to the nearest thousand reads "1000K", a unit
+// the meter never uses and a number larger than the window it sits beside.
+const nearlyEmpty = estimateComposerContextUsage(
+  [
+    event("6", "assistant-message", "hello", {
+      providerId: "anthropic",
+      modelId: "claude-opus-5",
+      contextUsage: {
+        inputTokens: 334,
+        outputTokens: 0,
+        totalTokens: 334,
+        modelContextWindow: 1_000_000,
+      },
+    }),
+  ],
+  "",
+  {
+    providerId: "anthropic",
+    modelId: "claude-opus-5",
+    modelLabel: "Claude Opus 5",
+    contextWindowTokens: 1_000_000,
+  },
+);
+assert.equal(nearlyEmpty.usedLabel, "334");
+assert.equal(nearlyEmpty.windowLabel, "1M");
+assert.equal(nearlyEmpty.remainingLabel, "1M");
+assert.equal(nearlyEmpty.percentLabel, "<1%");
+
+// Providers that report no token counts still publish the window Gyro resolved
+// for their model. The meter has to size itself from that record and keep
+// estimating the usage, rather than fall back to a default window.
+const windowOnly = estimateComposerContextUsage(
+  [
+    event("7", "assistant-message", "hello", {
+      providerId: "xai",
+      modelId: "grok-4.5",
+      contextUsage: { modelContextWindow: 131_072 },
+    }),
+    event("8", "user-message", "y".repeat(4_000)),
+  ],
+  "",
+  { providerId: "xai", modelId: "grok-4.5", modelLabel: "Grok 4.5" },
+);
+assert.equal(windowOnly.source, "estimated");
+assert.equal(windowOnly.windowLabel, "131K");
+assert.equal(windowOnly.usedLabel, "1K");
+
+const now = Date.parse("2026-07-27T10:00:00.000Z");
+
+assert.equal(
+  formatLimitReset("2026-07-27T14:31:00.000Z", now),
+  "Resets in 4 hr 31 min",
+);
+assert.equal(
+  formatLimitReset("2026-07-27T10:20:00.000Z", now),
+  "Resets in 20 min",
+);
+assert.equal(formatLimitReset(undefined, now), undefined);
+// A reset beyond the day is a calendar point; a countdown in days says less.
+assert.match(formatLimitReset("2026-08-02T18:59:00.000Z", now), /^Resets \w/);
+
+// Claude Code names its windows and their resets but never measures how full
+// they are. An unmeasured window must stay unmeasured rather than render as a
+// bar sitting at zero, which reads as a full allowance.
+const streamLimits = composerLimitWindows(
+  [
+    event("9", "assistant-message", "hi", {
+      providerId: "anthropic",
+      modelId: "claude-opus-5",
+      rateLimits: [
+        {
+          id: "weekly",
+          label: "Weekly · all models",
+          status: "ok",
+          resetsAt: "2026-08-02T18:59:00.000Z",
+        },
+        {
+          id: "five-hour",
+          label: "5-hour limit",
+          status: "exhausted",
+          usedPercent: 100,
+          resetsAt: "2026-07-27T14:31:00.000Z",
+        },
+      ],
+    }),
+  ],
+  { providerId: "anthropic", modelId: "claude-opus-5" },
+  [],
+  now,
+);
+assert.equal(streamLimits.length, 2);
+// The shorter window is the one a run hits first, so it leads.
+assert.equal(streamLimits[0].id, "five-hour");
+assert.equal(streamLimits[0].percent, 100);
+assert.equal(streamLimits[0].severity, "critical");
+assert.equal(streamLimits[0].resetsLabel, "Resets in 4 hr 31 min");
+assert.equal(streamLimits[1].id, "weekly");
+assert.equal(streamLimits[1].percent, undefined);
+assert.equal(streamLimits[1].percentLabel, "—");
+
+// A polled snapshot is newer than anything read back off the thread, so it
+// wins where both describe the same window.
+const merged = composerLimitWindows(
+  [
+    event("10", "assistant-message", "hi", {
+      providerId: "openai",
+      modelId: "gpt-5.6-sol",
+      rateLimits: [{ id: "five-hour", label: "5-hour limit", status: "ok" }],
+    }),
+  ],
+  { providerId: "openai", modelId: "gpt-5.6-sol" },
+  [{ id: "five-hour", label: "5-hour limit", usedPercent: 84 }],
+  now,
+);
+assert.equal(merged.length, 1);
+assert.equal(merged[0].percent, 84);
+assert.equal(merged[0].severity, "warning");
+
+// Limits belong to the provider, not the thread.
+assert.equal(
+  composerLimitWindows(
+    [
+      event("11", "assistant-message", "hi", {
+        providerId: "anthropic",
+        rateLimits: [{ id: "five-hour", label: "5-hour limit", status: "ok" }],
+      }),
+    ],
+    { providerId: "openai" },
+    [],
+    now,
+  ).length,
+  0,
+);
 
 console.log("Composer context usage checks passed.");

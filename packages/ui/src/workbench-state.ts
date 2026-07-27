@@ -27,6 +27,8 @@ import type {
   IdeContribution,
   IdeViewId,
   LanguageServerState,
+  ModelFocus,
+  ModelFollowMode,
   OutputChannel,
   ProblemDiagnostic,
   SourceControlState,
@@ -1271,6 +1273,9 @@ export type WorkbenchAction =
   | { type: "ide-set-contribution-enabled"; id: string; enabled: boolean }
   | { type: "ide-remove-contribution"; id: string }
   | { type: "ide-record-ai-tool-call"; toolCall: IdeAiToolCall }
+  | { type: "set-model-focus"; focus: ModelFocus }
+  | { type: "clear-model-focus" }
+  | { type: "set-model-follow"; mode: ModelFollowMode }
   | { type: "record-command"; commandId: string }
   | { type: "add-notification"; notification: Notification }
   | { type: "dismiss-notification"; id: string }
@@ -1494,6 +1499,8 @@ export function createInitialWorkbenchState(
     providerHandoffs,
     providerReadiness: defaultProviderReadiness(),
     activeTurn: overrides.activeTurn,
+    modelFocus: overrides.modelFocus,
+    modelFocusHistory: overrides.modelFocusHistory ?? [],
     onboarding: {
       activeStep: "account",
       completedSteps: [],
@@ -2705,6 +2712,27 @@ export function workbenchReducer(
             : [action.toolCall, ...state.ide.aiToolCalls].slice(0, 50),
         },
       };
+    case "set-model-focus":
+      // Deliberately leaves activeDestination, activeWorkspaceLayout and
+      // isToolPanelOpen alone: the model reports where it works, it does not
+      // steer the window.
+      return {
+        ...state,
+        modelFocus: action.focus,
+        modelFocusHistory: [
+          action.focus,
+          ...state.modelFocusHistory.filter(
+            (focus) => focus.callId !== action.focus.callId,
+          ),
+        ].slice(0, 20),
+      };
+    case "clear-model-focus":
+      return { ...state, modelFocus: undefined };
+    case "set-model-follow":
+      return {
+        ...state,
+        preferences: { ...state.preferences, modelFollow: action.mode },
+      };
     case "record-command":
       return {
         ...state,
@@ -3808,6 +3836,10 @@ function normalizedSettingsSection(
   }
 }
 
+function normalizedModelFollowMode(value: unknown): ModelFollowMode {
+  return value === "off" || value === "follow" ? value : "peek";
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -3824,6 +3856,7 @@ function normalizeWorkbenchPreferences(
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),
+    modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
     theme: preferences?.theme === "dark" ? "dark" : "light",
     usageProviderId: preferences?.usageProviderId,
