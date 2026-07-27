@@ -1,0 +1,28 @@
+<!doctype html>
+<!--
+  Screenshot capture harness. Not an app entry point: `vite build` only bundles
+  index.html, so this file never ships. See src/capture-fixtures.ts.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/gyro-logo.png" />
+    <meta name="theme-color" content="#07080a" />
+    <title>Gyro capture harness</title>
+    <style>
+      /* The capture is cropped to the app surface, so hide the scrollbars and
+         let the shell fill the viewport exactly. */
+      html,
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/capture-fixtures.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
