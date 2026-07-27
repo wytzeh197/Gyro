@@ -38,6 +38,7 @@ const files = [
   ["site/privacy/index.html", "privacy/index.html"],
   ["site/styles.css", "styles.css"],
   ["site/app.js", "app.js"],
+  ["site/theme.js", "theme.js"],
   ["site/changelog.js", "changelog.js"],
   ["site/release-utils.js", "release-utils.js"],
   ["site/assets/gyro-logo.png", "assets/gyro-logo.png"],
@@ -46,33 +47,14 @@ const files = [
   ["site/assets/github.svg", "assets/github.svg"],
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
   ["site/assets/social-preview.png", "assets/social-preview.png"],
-  ["site/assets/screenshots/hero-960.webp", "assets/screenshots/hero-960.webp"],
+  ["site/assets/screenshots/hero-600.webp", "assets/screenshots/hero-600.webp"],
   [
-    "site/assets/screenshots/hero-1920.webp",
-    "assets/screenshots/hero-1920.webp",
+    "site/assets/screenshots/hero-1200.webp",
+    "assets/screenshots/hero-1200.webp",
   ],
   [
-    "site/assets/screenshots/hero-mobile-600.webp",
-    "assets/screenshots/hero-mobile-600.webp",
-  ],
-  [
-    "site/assets/screenshots/hero-mobile-1200.webp",
-    "assets/screenshots/hero-mobile-1200.webp",
-  ],
-  ["site/assets/screenshots/chat-800.webp", "assets/screenshots/chat-800.webp"],
-  [
-    "site/assets/screenshots/chat-1600.webp",
-    "assets/screenshots/chat-1600.webp",
-  ],
-  ["site/assets/screenshots/cli-800.webp", "assets/screenshots/cli-800.webp"],
-  ["site/assets/screenshots/cli-1600.webp", "assets/screenshots/cli-1600.webp"],
-  [
-    "site/assets/screenshots/workspace-800.webp",
-    "assets/screenshots/workspace-800.webp",
-  ],
-  [
-    "site/assets/screenshots/workspace-1600.webp",
-    "assets/screenshots/workspace-1600.webp",
+    "site/assets/screenshots/hero-2400.webp",
+    "assets/screenshots/hero-2400.webp",
   ],
 ];
 
