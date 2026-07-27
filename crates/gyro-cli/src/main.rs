@@ -1679,7 +1679,14 @@ fn cli_acp_provider_runtime(provider_id: &str) -> Option<CliAcpProviderRuntime> 
         }),
         "xai" => Some(CliAcpProviderRuntime {
             label: "xAI",
-            args: &["--no-auto-update", "agent", "stdio"],
+            args: &[
+                "--no-auto-update",
+                "--permission-mode",
+                "default",
+                "agent",
+                "--no-leader",
+                "stdio",
+            ],
             auth_methods: &["xai.api_key", "cached_token"],
             cursor_kind: "xai-acp-session",
             default_model: "grok-4.5",
@@ -3085,6 +3092,7 @@ fn execute_kimi_acp_provider(
             auth_method_ids: cli_acp_auth_methods(runtime),
             workspace: session.workspace_path.clone(),
             prompt: vec![serde_json::json!({"type": "text", "text": prompt})],
+            conversation_history_text: None,
             // The CLI has no desktop capability bridge to attach.
             mcp_servers: Vec::new(),
             model: model

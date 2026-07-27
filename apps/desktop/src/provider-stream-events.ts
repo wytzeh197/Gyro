@@ -671,10 +671,16 @@ export function upsertStreamingAssistantEvent(
         .some(
           (event) => event.turnId === turnId && isProviderActivityEvent(event),
         );
+    // Mirror the Rust stream separator: a text block that resumes after tools
+    // must not glue onto the previous sentence when the provider omits a
+    // leading newline (`edits.` + `Now the…` → `edits.Now the…`).
+    const blockDelta = startsBlock
+      ? separateStreamedTextBlock(existing.message, textDelta)
+      : textDelta;
     const segments = assistantMessageSegments(existingPayload);
     const next: SessionEvent = {
       ...existing,
-      message: appendChatResponseDelta(existing.message, textDelta),
+      message: appendChatResponseDelta(existing.message, blockDelta),
       payload: {
         ...existingPayload,
         kind: "provider-stream",
@@ -746,6 +752,15 @@ export function appendChatResponseDelta(message: string, textDelta: string) {
     return message;
   }
   return truncateChatResponse(`${message}${textDelta}`);
+}
+
+/** Paragraph-separate a new text block when the provider omitted a leading break. */
+export function separateStreamedTextBlock(existing: string, delta: string) {
+  if (!existing || !delta) return delta;
+  const existingEndsBreak = /\s$/.test(existing);
+  const deltaStartsBreak = /^\s/.test(delta);
+  if (existingEndsBreak || deltaStartsBreak) return delta;
+  return `\n\n${delta}`;
 }
 
 export function truncateChatResponse(value: string) {
