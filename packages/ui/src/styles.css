@@ -4990,11 +4990,27 @@ button.gyro-account-menu-row:hover {
 
 .gyro-provider-logo.is-openai,
 .gyro-provider-logo.is-anthropic,
-.gyro-provider-logo.is-xai,
 .gyro-provider-logo.is-cursor,
 .gyro-provider-logo.is-gemini,
 .gyro-provider-logo.is-opencode {
   color: #f0ece5;
+}
+
+/* Grok: monochrome mark that follows theme (dark ink on light, light on dark). */
+.gyro-provider-logo.is-xai {
+  color: var(--gyro-provider-xai);
+}
+
+/* Light popovers force muted item color; keep the Grok mark solid so it does
+   not wash out to a faint X-shaped smudge on white. */
+:root[data-theme="light"] .gyro-composer-menu-item .gyro-provider-logo.is-xai,
+:root[data-theme="light"] .gyro-model-chip .gyro-provider-logo.is-xai {
+  color: #111418;
+}
+
+:root[data-theme="dark"] .gyro-composer-menu-item .gyro-provider-logo.is-xai,
+:root[data-theme="dark"] .gyro-model-chip .gyro-provider-logo.is-xai {
+  color: #f2f0ea;
 }
 
 .gyro-provider-icon .gyro-provider-logo {
@@ -10597,17 +10613,27 @@ textarea:focus-visible {
 }
 
 .gyro-provider-picker {
-  align-items: start;
-  display: block;
-  max-width: min(148px, calc(100vw - 32px));
+  /* Top-align so the models panel is only as tall as its items, not stretched
+     to the full provider list height. */
+  align-items: flex-start;
+  display: flex;
+  /* Providers first, models always to their right. */
+  flex-direction: row;
+  gap: 4px;
+  max-width: min(360px, calc(100vw - 24px));
   overflow: visible;
   position: absolute;
-  width: 148px;
   z-index: 44;
 }
 
+/* Provider list alone stays compact; with models open, sit side-by-side and
+   grow left from the chip so the models panel fits on the right of providers. */
+.gyro-provider-picker:not(.has-flyout) {
+  width: 156px;
+}
+
 .gyro-provider-picker.has-flyout {
-  width: 148px;
+  width: auto;
 }
 
 .gyro-provider-picker[data-placement="up"] {
@@ -10623,6 +10649,8 @@ textarea:focus-visible {
 }
 
 .gyro-provider-picker[data-align="end"] {
+  /* Grow left from the model chip. Providers sit further left; models sit
+     immediately to their right, still on-screen. */
   right: 0;
 }
 
@@ -10631,37 +10659,29 @@ textarea:focus-visible {
   max-width: none;
   min-width: 0;
   position: static;
-  width: 100%;
+  width: auto;
 }
 
 .gyro-provider-picker-menu {
-  width: 148px;
+  flex: 0 0 auto;
+  width: 156px;
 }
 
 .gyro-provider-model-flyout {
   bottom: auto !important;
-  max-height: none !important;
-  overflow: visible !important;
-  position: absolute !important;
-  top: 0 !important;
-  width: 208px !important;
+  flex: 0 0 auto;
+  height: fit-content !important;
+  left: auto !important;
+  max-height: min(340px, calc(100vh - 32px)) !important;
+  overflow-y: auto !important;
+  position: static !important;
+  right: auto !important;
+  top: auto !important;
+  width: min(176px, 42vw) !important;
 }
 
 .gyro-effort-picker {
   min-width: 176px;
-}
-
-.gyro-provider-picker[data-flyout-side="right"] .gyro-provider-model-flyout {
-  left: calc(100% + 4px);
-}
-
-.gyro-provider-picker[data-flyout-side="left"] .gyro-provider-model-flyout {
-  right: calc(100% + 4px);
-}
-
-.gyro-provider-picker[data-flyout-vertical="up"] .gyro-provider-model-flyout {
-  bottom: 0 !important;
-  top: auto !important;
 }
 
 .gyro-composer-popover-section-title {
@@ -15067,10 +15087,6 @@ textarea,
 
 .gyro-provider-logo.is-kimi .gyro-kimi-logo-symbol {
   fill: var(--gyro-provider-kimi-logo);
-}
-
-.gyro-provider-logo.is-xai {
-  color: var(--gyro-provider-xai);
 }
 
 .gyro-provider-logo.is-gemini {
@@ -20065,10 +20081,12 @@ button.gyro-settings-row em::after {
   align-items: center;
   color: var(--gyro-faint);
   display: flex;
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 450;
   gap: 5px;
-  min-height: 31px;
-  padding: 0 0 6px;
+  letter-spacing: -0.01em;
+  min-height: 28px;
+  padding: 0 0 4px;
 }
 
 .gyro-chat-run-header svg {
@@ -20635,38 +20653,26 @@ button.gyro-settings-row em::after {
   padding: 14px 0 6px;
 }
 
-/* The work stream is one column of beats: narration where it was spoken, then
-   the activity it introduced. The rail keeps the offsets legible down the run. */
+/* Claude-level work list: quiet stack of steps, no clock rail or spine. */
 .gyro-chat-run-sequence.is-work {
-  gap: 10px;
+  gap: 8px;
+  padding: 4px 0 10px;
   position: relative;
 }
 
 .gyro-chat-run-sequence.is-work::before {
-  background: var(--gyro-premium-hairline);
-  bottom: 12px;
-  content: "";
-  left: 48px;
-  position: absolute;
-  top: 12px;
-  width: 1px;
+  display: none;
 }
 
 .gyro-chat-run-step {
   display: grid;
-  gap: 20px;
-  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
   position: relative;
 }
 
 .gyro-chat-run-step-time {
-  color: var(--gyro-faint);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-  line-height: 28px;
-  text-align: right;
-  user-select: none;
+  display: none;
 }
 
 .gyro-chat-run-step-body {
@@ -20678,9 +20684,24 @@ button.gyro-settings-row em::after {
   margin: 0;
 }
 
-.gyro-chat-run-timeline.is-narration .gyro-response-body {
+.gyro-chat-run-timeline.is-narration .gyro-response-body,
+.gyro-run-narration {
   color: var(--gyro-muted);
   font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  line-height: 1.55;
+}
+
+.gyro-run-narration {
+  display: grid;
+  gap: 8px;
+  max-width: 920px;
+  padding: 2px 0 4px;
+}
+
+.gyro-run-narration p {
+  margin: 0;
 }
 
 .gyro-chat-run-sequence > .gyro-chat-run-timeline {
@@ -20718,14 +20739,17 @@ button.gyro-settings-row em::after {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--gyro-muted);
+  color: var(--gyro-faint);
   cursor: pointer;
   display: inline-flex;
   font-size: 13px;
-  gap: 8px;
+  font-weight: 450;
+  gap: 6px;
   justify-content: start;
-  min-height: 28px;
-  padding: 2px 3px 2px 0;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  min-height: 26px;
+  padding: 2px 0;
 }
 
 .gyro-chat-run-activity-group-toggle > small {
@@ -20784,12 +20808,14 @@ button.gyro-settings-row em::after {
   border-radius: 5px;
   color: var(--gyro-faint);
   display: grid;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 450;
   gap: 7px;
   grid-template-columns: 14px minmax(0, auto) 14px;
   justify-content: start;
-  min-height: 27px;
-  padding: 3px 5px 3px 1px;
+  letter-spacing: -0.01em;
+  min-height: 26px;
+  padding: 2px 0;
   text-align: left;
 }
 
@@ -21170,31 +21196,54 @@ button.gyro-settings-row em::after {
   padding: 0;
 }
 
+/* Final answer: regular weight prose, Claude-like density — not the heavy
+   17px / 650 weight body that made completed turns look "thick". */
+.gyro-chat-run-sequence.is-response {
+  padding-top: 12px;
+}
+
+.gyro-chat-run-timeline.is-final-response > .gyro-message.is-assistant {
+  margin-top: 4px;
+}
+
+.gyro-chat-run .gyro-response,
 .gyro-chat-run .gyro-response-body {
   color: var(--gyro-text);
-  font-size: 14px;
-  gap: 12px;
-  line-height: 1.58;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: -0.011em;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.gyro-chat-run .gyro-response-body {
+  gap: 14px;
 }
 
 .gyro-chat-run .gyro-response-body p,
-.gyro-chat-run .gyro-response-body li {
+.gyro-chat-run .gyro-response-body li,
+.gyro-chat-run .gyro-response-streaming-text {
   color: var(--gyro-text);
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: inherit;
+  line-height: inherit;
 }
 
 .gyro-chat-run .gyro-response-body h3 {
   color: var(--gyro-text);
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 550;
 }
 
 .gyro-chat-run .gyro-response-body ul {
-  gap: 5px;
+  gap: 6px;
   padding-left: 3px;
 }
 
 .gyro-chat-run .gyro-response-body ol {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   margin: 0;
   padding-left: 21px;
 }
@@ -21209,7 +21258,19 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-run .gyro-response-body strong {
   color: var(--gyro-text);
-  font-weight: 620;
+  font-weight: 550;
+}
+
+:root[data-theme="light"] .gyro-chat-run .gyro-response-body,
+:root[data-theme="light"] .gyro-chat-run .gyro-response-body p,
+:root[data-theme="light"] .gyro-chat-run .gyro-response-body li,
+:root[data-theme="light"] .gyro-chat-run .gyro-response-streaming-text {
+  color: #1c1f24;
+  font-weight: 400;
+}
+
+:root[data-theme="light"] .gyro-run-narration {
+  color: #5c6370;
 }
 
 .gyro-chat-thread-canvas {

@@ -1,4 +1,5 @@
-import type { SessionEvent } from "./types";
+import { gluedAssistantBlockStarts } from "./chat-commentary.ts";
+import type { SessionEvent } from "./types.ts";
 
 export type InterleavedChatTimelineItem =
   | { kind: "event"; event: SessionEvent }
@@ -66,42 +67,60 @@ const ASSISTANT_SEGMENT_ID_SEPARATOR = "#segment-";
  * the preamble it spoke before running tools and the answer it ended with share
  * a single bubble. The stream layer records where each block started; this
  * reads those marks back so each block can take its own place on the timeline.
+ *
+ * When marks are missing (no tools between blocks, or a persisted reply that
+ * never recorded them), fall back to the unmistakable glued-stream boundary so
+ * a finished turn still splits "I'll check…" from "Gyro is…" instead of
+ * meshing both into the final answer.
  */
 function assistantMessageSegments(
   event: SessionEvent,
 ): AssistantMessageSegment[] | undefined {
   const raw = eventPayload(event)?.segments;
-  if (!Array.isArray(raw) || raw.length < 2) {
+  if (Array.isArray(raw) && raw.length >= 2) {
+    const segments: AssistantMessageSegment[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        // Fall through to glue recovery rather than keeping a half-parsed mark
+        // list that would slice at the wrong characters.
+        break;
+      }
+      const { start, sequence, createdAt } = entry as Record<string, unknown>;
+      const previous = segments.at(-1);
+      if (
+        typeof start !== "number" ||
+        !Number.isSafeInteger(start) ||
+        start < 0 ||
+        start > event.message.length ||
+        (previous !== undefined && start <= previous.start)
+      ) {
+        break;
+      }
+      segments.push({
+        start,
+        sequence:
+          typeof sequence === "number" && Number.isSafeInteger(sequence)
+            ? sequence
+            : undefined,
+        createdAt: typeof createdAt === "string" ? createdAt : undefined,
+      });
+    }
+    if (segments.length >= 2 && segments[0]?.start === 0) {
+      return segments;
+    }
+  }
+  return gluedAssistantMessageSegments(event.message);
+}
+
+/** Recover block starts from `edits.Now…` / `is.Gyro…` when the stream left no marks. */
+function gluedAssistantMessageSegments(
+  message: string,
+): AssistantMessageSegment[] | undefined {
+  const starts = gluedAssistantBlockStarts(message);
+  if (starts.length < 2) {
     return undefined;
   }
-  const segments: AssistantMessageSegment[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      return undefined;
-    }
-    const { start, sequence, createdAt } = entry as Record<string, unknown>;
-    const previous = segments.at(-1);
-    if (
-      typeof start !== "number" ||
-      !Number.isSafeInteger(start) ||
-      start < 0 ||
-      start > event.message.length ||
-      (previous !== undefined && start <= previous.start)
-    ) {
-      // A persisted message that no longer matches the marks we streamed is
-      // better rendered whole than sliced at the wrong characters.
-      return undefined;
-    }
-    segments.push({
-      start,
-      sequence:
-        typeof sequence === "number" && Number.isSafeInteger(sequence)
-          ? sequence
-          : undefined,
-      createdAt: typeof createdAt === "string" ? createdAt : undefined,
-    });
-  }
-  return segments[0]?.start === 0 ? segments : undefined;
+  return starts.map((start) => ({ start }));
 }
 
 /**
