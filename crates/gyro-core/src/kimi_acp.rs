@@ -62,6 +62,10 @@ pub struct KimiAcpRequest {
     pub auth_method_ids: Vec<String>,
     pub workspace: PathBuf,
     pub prompt: Vec<Value>,
+    /// Prior Gyro-chat turns, used only when the agent cannot reopen its ACP
+    /// session (Grok often lacks `session/resume`). Injected into a fresh
+    /// `session/new` so multi-turn still has context.
+    pub conversation_history_text: Option<String>,
     /// Stdio MCP servers to expose to the agent, in ACP `session/new` form.
     /// Empty leaves the agent with only its own built-in tools.
     pub mcp_servers: Vec<Value>,
@@ -348,7 +352,6 @@ where
     WriteFile: FnMut(&Path, &str) -> Result<()>,
 {
     let started_at = Instant::now();
-    let resumed = request.resume_session_id.is_some();
     let mut connection = KimiAcpConnection::start(&request)?;
     let mut response = String::new();
     let initialize_id = connection.send_request(
@@ -406,55 +409,33 @@ where
         )?;
     }
 
-    let session_id = if let Some(session_id) = request.resume_session_id.as_deref() {
-        let resume_id = connection.send_request(
-            "session/resume",
-            json!({
-                "sessionId": session_id,
-                "cwd": request.workspace,
-                "mcpServers": request.mcp_servers,
-            }),
-        )?;
-        wait_for_response(
-            &mut connection,
-            resume_id,
-            &request.workspace,
-            &mut response,
-            &mut on_delta,
-            &mut on_activity,
-            &mut on_approval,
-            &mut on_write_file,
-        )?;
-        session_id.to_string()
-    } else {
-        let new_id = connection.send_request(
-            "session/new",
-            json!({"cwd": request.workspace, "mcpServers": request.mcp_servers}),
-        )?;
-        let result = wait_for_response(
-            &mut connection,
-            new_id,
-            &request.workspace,
-            &mut response,
-            &mut on_delta,
-            &mut on_activity,
-            &mut on_approval,
-            &mut on_write_file,
-        )?;
-        result
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .filter(|id| !id.trim().is_empty())
-            .ok_or_else(|| anyhow!("{} ACP did not return a session id", request.provider_label))?
-            .to_string()
-    };
+    // Grok (and some other ACP agents) do not implement every session method
+    // Kimi does. Prefer the reopen method the agent advertises; if reopen fails
+    // with Method not found, fall back to session/new and inject history.
+    let (session_id, resumed, reopened_as_fresh) = open_acp_session(
+        &mut connection,
+        &request,
+        &initialize,
+        &mut response,
+        &mut on_delta,
+        &mut on_activity,
+        &mut on_approval,
+        &mut on_write_file,
+    )?;
 
-    if !request.model.trim().is_empty() && !request.model.ends_with("-default") {
+    // Grok takes model/effort as process flags (Synara style). In-session
+    // session/set_model and session/set_config_option often return Method not
+    // found and must not fail the turn.
+    let skip_in_session_config = is_grok_acp_program(&request.program);
+    if !skip_in_session_config
+        && !request.model.trim().is_empty()
+        && !request.model.ends_with("-default")
+    {
         let model_id = connection.send_request(
             "session/set_model",
             json!({"sessionId": session_id, "modelId": request.model}),
         )?;
-        wait_for_response(
+        let _ = wait_for_response(
             &mut connection,
             model_id,
             &request.workspace,
@@ -463,32 +444,34 @@ where
             &mut on_activity,
             &mut on_approval,
             &mut on_write_file,
-        )?;
+        );
     }
-    let thinking_id = connection.send_request(
-        "session/set_config_option",
-        json!({
-            "sessionId": session_id,
-            "configId": "thinking",
-            "value": request.reasoning_effort,
-        }),
-    )?;
-    let _ = wait_for_response(
-        &mut connection,
-        thinking_id,
-        &request.workspace,
-        &mut response,
-        &mut on_delta,
-        &mut on_activity,
-        &mut on_approval,
-        &mut on_write_file,
-    );
+    if !skip_in_session_config {
+        let thinking_id = connection.send_request(
+            "session/set_config_option",
+            json!({
+                "sessionId": session_id,
+                "configId": "thinking",
+                "value": request.reasoning_effort,
+            }),
+        )?;
+        let _ = wait_for_response(
+            &mut connection,
+            thinking_id,
+            &request.workspace,
+            &mut response,
+            &mut on_delta,
+            &mut on_activity,
+            &mut on_approval,
+            &mut on_write_file,
+        );
+    }
     if request.mode == KimiAcpMode::Plan {
         let mode_id = connection.send_request(
             "session/set_mode",
             json!({"sessionId": session_id, "modeId": "plan"}),
         )?;
-        wait_for_response(
+        let _ = wait_for_response(
             &mut connection,
             mode_id,
             &request.workspace,
@@ -497,12 +480,32 @@ where
             &mut on_activity,
             &mut on_approval,
             &mut on_write_file,
-        )?;
+        );
+    }
+
+    let mut prompt = request.prompt.clone();
+    if reopened_as_fresh {
+        if let Some(history) = request
+            .conversation_history_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            prompt.insert(
+                0,
+                json!({
+                    "type": "text",
+                    "text": format!(
+                        "Prior conversation in this Gyro chat (the agent session could not be reopened, so this is continuity context):\n{history}"
+                    ),
+                }),
+            );
+        }
     }
 
     let prompt_id = connection.send_request(
         "session/prompt",
-        json!({"sessionId": session_id, "prompt": request.prompt}),
+        json!({"sessionId": session_id, "prompt": prompt}),
     )?;
     let result = wait_for_response(
         &mut connection,
@@ -529,6 +532,184 @@ where
         resumed,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
     })
+}
+
+fn is_grok_acp_program(program: &OsString) -> bool {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "grok" || name.starts_with("grok-"))
+}
+
+/// Whether the agent advertises ACP session reopen via resume or load.
+fn acp_session_reopen_methods(initialize: &Value) -> (bool, bool) {
+    let caps = initialize.get("agentCapabilities");
+    let supports_resume = caps
+        .and_then(|value| value.pointer("/sessionCapabilities/resume"))
+        .is_some()
+        || caps
+            .and_then(|value| value.get("sessionCapabilities"))
+            .and_then(|value| value.get("resume"))
+            .is_some();
+    let supports_load = caps
+        .and_then(|value| value.get("loadSession"))
+        .and_then(Value::as_bool)
+        == Some(true)
+        || caps
+            .and_then(|value| value.get("load_session"))
+            .and_then(Value::as_bool)
+            == Some(true);
+    (supports_resume, supports_load)
+}
+
+fn is_acp_method_not_found(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("method not found")
+        || normalized.contains("method_not_found")
+        || normalized.contains("\"code\":-32601")
+        || normalized.contains("code\": -32601")
+        || normalized.contains("-32601")
+}
+
+/// Open or reopen an ACP session using the methods the agent actually supports.
+///
+/// Returns `(session_id, resumed, reopened_as_fresh)`.
+/// `reopened_as_fresh` is true when a stored cursor could not be reopened and a
+/// new session was created instead — the caller should inject transcript history.
+#[allow(clippy::too_many_arguments)]
+fn open_acp_session<Delta, Activity, Approval, WriteFile>(
+    connection: &mut KimiAcpConnection,
+    request: &KimiAcpRequest,
+    initialize: &Value,
+    response: &mut String,
+    on_delta: &mut Delta,
+    on_activity: &mut Activity,
+    on_approval: &mut Approval,
+    on_write_file: &mut WriteFile,
+) -> Result<(String, bool, bool)>
+where
+    Delta: FnMut(&str),
+    Activity: FnMut(&KimiAcpActivity),
+    Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
+    WriteFile: FnMut(&Path, &str) -> Result<()>,
+{
+    let Some(resume_session_id) = request.resume_session_id.as_deref() else {
+        let session_id = create_acp_session(
+            connection,
+            request,
+            response,
+            on_delta,
+            on_activity,
+            on_approval,
+            on_write_file,
+        )?;
+        return Ok((session_id, false, false));
+    };
+
+    let (supports_resume, supports_load) = acp_session_reopen_methods(initialize);
+    let reopen_payload = json!({
+        "sessionId": resume_session_id,
+        "cwd": request.workspace,
+        "mcpServers": request.mcp_servers,
+    });
+
+    // Order: resume when advertised (Kimi-shaped), else load when advertised
+    // (Grok/Synara-shaped). When neither capability is advertised, try both
+    // before falling back — some CLIs omit flags but still implement one.
+    let mut methods: Vec<&str> = Vec::new();
+    if supports_resume {
+        methods.push("session/resume");
+    }
+    if supports_load {
+        methods.push("session/load");
+    }
+    if methods.is_empty() {
+        methods.push("session/resume");
+        methods.push("session/load");
+    }
+
+    for method in methods {
+        let request_id = connection.send_request(method, reopen_payload.clone())?;
+        match wait_for_response(
+            connection,
+            request_id,
+            &request.workspace,
+            response,
+            on_delta,
+            on_activity,
+            on_approval,
+            on_write_file,
+        ) {
+            Ok(_) => {
+                return Ok((resume_session_id.to_string(), true, false));
+            }
+            Err(error) => {
+                let detail = error.to_string();
+                let recoverable = is_acp_method_not_found(&detail) || {
+                    let lower = detail.to_ascii_lowercase();
+                    lower.contains("not found")
+                        || lower.contains("expired")
+                        || lower.contains("unknown")
+                        || lower.contains("unsupported")
+                };
+                if recoverable {
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+    }
+
+    // Reopen unavailable — start a fresh ACP session and let the caller inject
+    // Gyro's transcript so the second message still has context.
+    let session_id = create_acp_session(
+        connection,
+        request,
+        response,
+        on_delta,
+        on_activity,
+        on_approval,
+        on_write_file,
+    )?;
+    Ok((session_id, false, true))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_acp_session<Delta, Activity, Approval, WriteFile>(
+    connection: &mut KimiAcpConnection,
+    request: &KimiAcpRequest,
+    response: &mut String,
+    on_delta: &mut Delta,
+    on_activity: &mut Activity,
+    on_approval: &mut Approval,
+    on_write_file: &mut WriteFile,
+) -> Result<String>
+where
+    Delta: FnMut(&str),
+    Activity: FnMut(&KimiAcpActivity),
+    Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
+    WriteFile: FnMut(&Path, &str) -> Result<()>,
+{
+    let new_id = connection.send_request(
+        "session/new",
+        json!({"cwd": request.workspace, "mcpServers": request.mcp_servers}),
+    )?;
+    let result = wait_for_response(
+        connection,
+        new_id,
+        &request.workspace,
+        response,
+        on_delta,
+        on_activity,
+        on_approval,
+        on_write_file,
+    )?;
+    result
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{} ACP did not return a session id", request.provider_label))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -567,7 +748,13 @@ where
         let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
         match method {
             "session/update" => {
-                handle_session_update(&params, response, on_delta, on_activity);
+                handle_session_update(
+                    &params,
+                    &connection.provider_label,
+                    response,
+                    on_delta,
+                    on_activity,
+                );
             }
             "session/request_permission" => {
                 let Some(id) = message.get("id").cloned() else {
@@ -639,6 +826,7 @@ where
 
 fn handle_session_update<Delta, Activity>(
     params: &Value,
+    provider_label: &str,
     response: &mut String,
     on_delta: &mut Delta,
     on_activity: &mut Activity,
@@ -661,15 +849,21 @@ fn handle_session_update<Delta, Activity>(
             }
         }
         Some("tool_call") | Some("tool_call_update") => {
+            // Grok, Gemini, and Kimi share this ACP path. Never hardcode one
+            // provider's name into the fallback — a Grok turn labeled
+            // "Kimi tool" reads like the wrong backend is running.
+            let default_id = format!("{}-tool", acp_activity_id_slug(provider_label));
+            let default_label = format!("{provider_label} tool");
             let id = update
                 .get("toolCallId")
                 .and_then(Value::as_str)
-                .unwrap_or("kimi-tool")
+                .unwrap_or(default_id.as_str())
                 .to_string();
             let label = update
                 .get("title")
                 .and_then(Value::as_str)
-                .unwrap_or("Kimi tool")
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or(default_label.as_str())
                 .to_string();
             let kind = update
                 .get("kind")
@@ -695,7 +889,7 @@ fn handle_session_update<Delta, Activity>(
         }
         Some("plan") => {
             on_activity(&KimiAcpActivity {
-                id: "kimi-plan".into(),
+                id: format!("{}-plan", acp_activity_id_slug(provider_label)),
                 kind: "plan".into(),
                 label: "Updated plan".into(),
                 detail: update.get("entries").map(Value::to_string),
@@ -703,6 +897,20 @@ fn handle_session_update<Delta, Activity>(
             });
         }
         _ => {}
+    }
+}
+
+/// Stable id fragment from a provider label (`xAI` → `xai`, `Grok` → `grok`).
+fn acp_activity_id_slug(provider_label: &str) -> String {
+    let slug = provider_label
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    if slug.is_empty() {
+        "acp".into()
+    } else {
+        slug
     }
 }
 
@@ -874,6 +1082,7 @@ pub fn check_acp_health(
         auth_method_ids: auth_method_ids.iter().map(ToString::to_string).collect(),
         workspace: std::env::temp_dir(),
         prompt: Vec::new(),
+        conversation_history_text: None,
         // A health probe only checks that the agent starts and authenticates.
         mcp_servers: Vec::new(),
         model: "k3".into(),
@@ -983,9 +1192,10 @@ fn append_bounded(target: &mut String, text: &str, max_chars: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        check_kimi_acp_health, classify_approval, permission_option_id,
-        resolve_workspace_write_path, run_kimi_acp, KimiAcpApprovalDecision, KimiAcpApprovalKind,
-        KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
+        acp_activity_id_slug, acp_session_reopen_methods, check_kimi_acp_health, classify_approval,
+        is_acp_method_not_found, permission_option_id, resolve_workspace_write_path, run_kimi_acp,
+        KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode,
+        KimiAcpRequest,
     };
     use crate::CancellationToken;
     use serde_json::json;
@@ -1020,6 +1230,7 @@ mod tests {
             auth_method_ids: vec!["login".into()],
             workspace,
             prompt: vec![json!({"type": "text", "text": "hello"})],
+            conversation_history_text: None,
             mcp_servers: Vec::new(),
             model: "k3".into(),
             reasoning_effort: "max".into(),
@@ -1066,6 +1277,47 @@ mod tests {
         assert!(resolve_workspace_write_path(temp.path(), "../outside.txt").is_err());
     }
 
+    #[test]
+    fn activity_id_slug_follows_the_provider_label() {
+        assert_eq!(acp_activity_id_slug("xAI"), "xai");
+        assert_eq!(acp_activity_id_slug("Kimi"), "kimi");
+        assert_eq!(acp_activity_id_slug("Gemini"), "gemini");
+        assert_eq!(acp_activity_id_slug("  "), "acp");
+    }
+
+    #[test]
+    fn acp_reopen_methods_read_initialize_capabilities() {
+        let (resume, load) = acp_session_reopen_methods(&json!({
+            "agentCapabilities": {
+                "loadSession": true,
+                "sessionCapabilities": {}
+            }
+        }));
+        assert!(!resume);
+        assert!(load);
+
+        let (resume, load) = acp_session_reopen_methods(&json!({
+            "agentCapabilities": {
+                "sessionCapabilities": { "resume": {} }
+            }
+        }));
+        assert!(resume);
+        assert!(!load);
+
+        let (resume, load) = acp_session_reopen_methods(&json!({}));
+        assert!(!resume);
+        assert!(!load);
+    }
+
+    #[test]
+    fn method_not_found_is_detected() {
+        assert!(is_acp_method_not_found("Method not found"));
+        assert!(is_acp_method_not_found(
+            r#"{"code":-32601,"message":"Method not found"}"#
+        ));
+        assert!(!is_acp_method_not_found("rate limit exceeded"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn runs_fresh_acp_session_and_streams_text_and_activity() {
@@ -1106,6 +1358,104 @@ done
         assert_eq!(deltas, ["hello from K3"]);
         assert_eq!(activities[0].id, "tool-1");
         assert!(!output.resumed);
+    }
+
+    /// Grok-shaped agents often reject session/resume with Method not found.
+    /// The turn must still complete via session/new with injected history.
+    #[cfg(unix)]
+    #[test]
+    fn reopen_falls_back_to_new_when_resume_is_unsupported() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}],"agentCapabilities":{}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/resume"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"Method not found"}}' ;;
+    *'"method":"session/load"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"sessionId":"fresh-after-failed-reopen"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in
+        *Prior\ conversation*)
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"history-aware reply"}}}}'
+          ;;
+        *)
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"missing history"}}}}'
+          ;;
+      esac
+      printf '%s\n' '{"jsonrpc":"2.0","id":8,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            Some("stale-session".into()),
+        );
+        request.provider_label = "xAI".into();
+        request.conversation_history_text = Some("User: hello\n\nAssistant: hi there".into());
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(output.session_id, "fresh-after-failed-reopen");
+        assert!(!output.resumed);
+        assert_eq!(output.response, "history-aware reply");
+    }
+
+    /// Unlabeled ACP tool calls must inherit the running provider's name, so a
+    /// Grok turn never surfaces the leftover "Kimi tool" fallback this adapter
+    /// used when it only served Moonshot.
+    #[cfg(unix)]
+    #[test]
+    fn unlabeled_tool_activity_uses_the_provider_label() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"xai-session"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"call-1","kind":"other","status":"in_progress"}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        );
+        let mut activities = Vec::new();
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            None,
+        );
+        request.provider_label = "xAI".into();
+        request.model = "grok-4.5".into();
+        run_kimi_acp(
+            request,
+            |_| {},
+            |activity| activities.push(activity.clone()),
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(activities[0].label, "xAI tool");
+        assert_eq!(activities[0].id, "call-1");
+        assert!(!activities
+            .iter()
+            .any(|activity| activity.label.contains("Kimi")));
     }
 
     #[cfg(unix)]

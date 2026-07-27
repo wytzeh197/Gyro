@@ -3131,10 +3131,27 @@ fn run_provider_chat_blocking(
             return Err(error);
         }
     };
-    let title_extraction =
-        extract_session_title_marker(&runner_output.response, request.suggest_title);
-    let plan_extraction = extract_plan_update_marker(&title_extraction.message);
-    let artifact_extraction = extract_chat_artifact_marker(&plan_extraction.message);
+    // One pass removes every GYRO_* control marker (including ones glued
+    // mid-line after multi-block streams) and returns title, plan, and
+    // artifacts together. Chaining the per-marker helpers would drop later
+    // markers because each helper strips all of them.
+    let control_markers = strip_hidden_control_markers(&runner_output.response);
+    let title_extraction = SessionTitleExtraction {
+        title: if request.suggest_title {
+            control_markers.session_title
+        } else {
+            None
+        },
+        message: control_markers.message.clone(),
+    };
+    let plan_extraction = PlanUpdateExtraction {
+        payload: control_markers.plan_update,
+        message: control_markers.message.clone(),
+    };
+    let artifact_extraction = ChatArtifactExtraction {
+        items: control_markers.artifacts,
+        message: control_markers.message,
+    };
     let resume_cursor_value = runner_output
         .resume_cursor
         .as_ref()
@@ -9318,7 +9335,16 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
         "xai" => Some(AcpProviderRuntime {
             label: "xAI",
             program: "grok",
-            args: &["--no-auto-update", "agent", "stdio"],
+            // Synara-compatible agent entry: --no-leader keeps Grok in ACP
+            // client mode. Model/effort are appended dynamically when set.
+            args: &[
+                "--no-auto-update",
+                "--permission-mode",
+                "default",
+                "agent",
+                "--no-leader",
+                "stdio",
+            ],
             auth_methods: &["xai.api_key", "cached_token"],
             cursor_kind: "xai-acp-session",
             default_model: "grok-4.5",
@@ -9428,6 +9454,26 @@ fn run_kimi_acp_chat(
         _ => Vec::new(),
     };
 
+    let resume_session_id = resume_cursor
+        .filter(|cursor| cursor.kind == runtime.cursor_kind)
+        .map(|cursor| cursor.session_id.clone());
+    // When a follow-up may have to open a fresh ACP session (Grok often cannot
+    // resume), pass Gyro's transcript so multi-turn still has context.
+    let conversation_history_text = if resume_session_id.is_some() {
+        acp_conversation_history_text(app, &request.session_id)
+    } else {
+        None
+    };
+
+    let program_args = if request.provider_id == "xai" {
+        build_grok_acp_program_args(
+            request.model_id.as_deref(),
+            request.reasoning_effort.as_deref(),
+        )
+    } else {
+        runtime.args.iter().map(Into::into).collect()
+    };
+
     let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
     let activity_sink = activities.clone();
     let approved_file_writes = Arc::new(AtomicUsize::new(0));
@@ -9441,10 +9487,11 @@ fn run_kimi_acp_chat(
         KimiAcpRequest {
             provider_label: provider_label.into(),
             program: runtime.program.into(),
-            program_args: runtime.args.iter().map(Into::into).collect(),
+            program_args,
             auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),
             prompt,
+            conversation_history_text,
             mcp_servers,
             model: request
                 .model_id
@@ -9466,9 +9513,7 @@ fn run_kimi_acp_chat(
             } else {
                 KimiAcpMode::Normal
             },
-            resume_session_id: resume_cursor
-                .filter(|cursor| cursor.kind == runtime.cursor_kind)
-                .map(|cursor| cursor.session_id.clone()),
+            resume_session_id,
             timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
             inactivity_timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
             cancellation: cancellation.clone(),
@@ -11819,59 +11864,18 @@ struct ChatArtifactExtraction {
 }
 
 fn extract_plan_update_marker(response: &str) -> PlanUpdateExtraction {
-    let mut payload = None;
-    let mut lines = Vec::new();
-    for line in response.lines() {
-        if let Some(encoded) = line.trim().strip_prefix("GYRO_PLAN_UPDATE:") {
-            if payload.is_none() {
-                payload = serde_json::from_str::<serde_json::Value>(encoded.trim())
-                    .ok()
-                    .filter(|value| value.is_object());
-            }
-            continue;
-        }
-        lines.push(line);
-    }
+    let stripped = strip_hidden_control_markers(response);
     PlanUpdateExtraction {
-        payload,
-        message: lines.join("\n").trim().to_string(),
+        payload: stripped.plan_update,
+        message: stripped.message,
     }
 }
 
 fn extract_chat_artifact_marker(response: &str) -> ChatArtifactExtraction {
-    const MAX_ARTIFACTS: usize = 8;
-    const MAX_MARKER_BYTES: usize = 64 * 1024;
-    let mut items = Vec::new();
-    let mut lines = Vec::new();
-    for line in response.lines() {
-        let Some(encoded) = line.trim().strip_prefix("GYRO_ARTIFACTS:") else {
-            lines.push(line);
-            continue;
-        };
-        if encoded.len() > MAX_MARKER_BYTES || items.len() >= MAX_ARTIFACTS {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(encoded.trim()) else {
-            continue;
-        };
-        let candidates = value
-            .get("items")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .or_else(|| value.as_array().cloned())
-            .unwrap_or_default();
-        for candidate in candidates {
-            if items.len() >= MAX_ARTIFACTS {
-                break;
-            }
-            if valid_chat_artifact(&candidate) {
-                items.push(candidate);
-            }
-        }
-    }
+    let stripped = strip_hidden_control_markers(response);
     ChatArtifactExtraction {
-        items,
-        message: lines.join("\n").trim().to_string(),
+        items: stripped.artifacts,
+        message: stripped.message,
     }
 }
 
@@ -11950,54 +11954,247 @@ fn valid_chat_artifact(value: &serde_json::Value) -> bool {
 }
 
 fn extract_session_title_marker(response: &str, allow_title: bool) -> SessionTitleExtraction {
-    if !allow_title {
-        return SessionTitleExtraction {
-            title: None,
-            message: response.to_string(),
-        };
+    // Always strip the marker from the visible reply. Title application is
+    // optional; leaving the protocol token in the bubble is never correct.
+    let stripped = strip_hidden_control_markers(response);
+    SessionTitleExtraction {
+        title: if allow_title {
+            stripped.session_title
+        } else {
+            None
+        },
+        message: stripped.message,
     }
+}
 
-    let normalized = response.replace("\r\n", "\n");
-    let mut lines = normalized.lines();
-    let mut prefix = Vec::new();
-    let mut first_content = None;
+/// Control markers Claude may emit for Gyro-only side channels.
+///
+/// They are meant to sit on their own line before the visible answer. When a
+/// turn streams several text blocks and those blocks are concatenated without a
+/// separator, the marker lands mid-line (`callback:GYRO_SESSION_TITLE: …`) and
+/// a line-prefix stripper misses it. This walks the whole response and removes
+/// every occurrence, even mid-line, so the protocol never reaches the bubble.
+struct StrippedControlMarkers {
+    message: String,
+    session_title: Option<String>,
+    plan_update: Option<serde_json::Value>,
+    artifacts: Vec<serde_json::Value>,
+}
 
-    for line in lines.by_ref() {
-        if line.trim().is_empty() {
-            prefix.push(line);
+const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";
+const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
+const GYRO_ARTIFACTS_MARKER: &str = "GYRO_ARTIFACTS:";
+const MAX_CHAT_ARTIFACTS: usize = 8;
+const MAX_CHAT_ARTIFACT_MARKER_BYTES: usize = 64 * 1024;
+
+fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
+    // Repair glued blocks first so a marker that opens a block after
+    // `edits.Now…GYRO_…` is more likely to sit where a line scanner can see it;
+    // mid-line stripping below still catches markers that remain embedded.
+    let normalized = repair_glued_assistant_blocks(&response.replace("\r\n", "\n"));
+    let mut session_title = None;
+    let mut plan_update = None;
+    let mut artifacts = Vec::new();
+    let mut kept_lines = Vec::new();
+
+    for line in normalized.lines() {
+        let cleaned = strip_control_markers_from_line(
+            line,
+            &mut session_title,
+            &mut plan_update,
+            &mut artifacts,
+        );
+        if cleaned.trim().is_empty() {
+            if line.is_empty() {
+                // Preserve intentional paragraph breaks between text blocks.
+                kept_lines.push(String::new());
+            }
+            // Pure marker lines, or lines that only held a glued marker, drop.
             continue;
         }
-        first_content = Some(line);
-        break;
+        kept_lines.push(cleaned);
     }
 
-    let Some(first_content) = first_content else {
-        return SessionTitleExtraction {
-            title: None,
-            message: response.to_string(),
-        };
-    };
+    // Dropping a pure marker line that sat between paragraph breaks can leave
+    // three newlines in a row; collapse those so the bubble does not grow
+    // extra empty space where the protocol line used to be.
+    let message = collapse_extra_blank_lines(&kept_lines.join("\n"))
+        .trim()
+        .to_string();
 
-    const MARKER: &str = "GYRO_SESSION_TITLE:";
-    let Some(raw_title) = first_content.trim().strip_prefix(MARKER) else {
-        return SessionTitleExtraction {
-            title: None,
-            message: response.to_string(),
-        };
-    };
-    let title = sanitize_session_title_candidate(raw_title);
-    let remainder = lines.collect::<Vec<_>>().join("\n").trim().to_string();
-    let message = if remainder.is_empty() {
-        response.to_string()
-    } else if prefix.is_empty() {
-        remainder
+    StrippedControlMarkers {
+        message,
+        session_title,
+        plan_update,
+        artifacts,
+    }
+}
+
+fn collapse_extra_blank_lines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut newline_run = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' {
+            newline_run += 1;
+            if newline_run <= 2 {
+                out.push(ch);
+            }
+        } else {
+            newline_run = 0;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn strip_control_markers_from_line(
+    line: &str,
+    session_title: &mut Option<String>,
+    plan_update: &mut Option<serde_json::Value>,
+    artifacts: &mut Vec<serde_json::Value>,
+) -> String {
+    let mut rest = line;
+    let mut kept = String::new();
+    let mut removed_marker = false;
+    while let Some((marker, at)) = next_control_marker(rest) {
+        removed_marker = true;
+        kept.push_str(&rest[..at]);
+        let after_marker = &rest[at + marker.len()..];
+        match marker {
+            GYRO_SESSION_TITLE_MARKER => {
+                // Title is free text to the end of the line.
+                if session_title.is_none() {
+                    *session_title = sanitize_session_title_candidate(after_marker);
+                }
+                rest = "";
+            }
+            GYRO_PLAN_UPDATE_MARKER => {
+                match take_leading_json_value(after_marker.trim_start()) {
+                    Some((value, remainder)) if value.is_object() => {
+                        if plan_update.is_none() {
+                            *plan_update = Some(value);
+                        }
+                        rest = remainder;
+                    }
+                    _ => {
+                        // Unparseable payload: drop the rest of the line so a
+                        // broken marker never shows in the bubble.
+                        rest = "";
+                    }
+                }
+            }
+            GYRO_ARTIFACTS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
+                Some((value, remainder)) => {
+                    collect_chat_artifacts_from_value(value, artifacts);
+                    rest = remainder;
+                }
+                None => {
+                    rest = "";
+                }
+            },
+            _ => unreachable!("unknown control marker"),
+        }
+    }
+    kept.push_str(rest);
+    if removed_marker {
+        // Mid-line markers leave a hanging word boundary (`callback:`); trim
+        // only when a marker was actually cut out of this line.
+        trim_dangling_marker_prefix(&kept)
     } else {
-        format!("{}\n{}", prefix.join("\n"), remainder)
-            .trim()
-            .to_string()
-    };
+        kept
+    }
+}
 
-    SessionTitleExtraction { title, message }
+fn next_control_marker(text: &str) -> Option<(&'static str, usize)> {
+    let candidates = [
+        GYRO_SESSION_TITLE_MARKER,
+        GYRO_PLAN_UPDATE_MARKER,
+        GYRO_ARTIFACTS_MARKER,
+    ];
+    candidates
+        .into_iter()
+        .filter_map(|marker| text.find(marker).map(|at| (marker, at)))
+        .min_by_key(|(_, at)| *at)
+}
+
+/// Read one JSON value from the start of `text`, returning it and the unparsed tail.
+fn take_leading_json_value(text: &str) -> Option<(serde_json::Value, &str)> {
+    if text.is_empty() || text.len() > MAX_CHAT_ARTIFACT_MARKER_BYTES {
+        return None;
+    }
+    // StreamDeserializer exposes the consumed byte offset; a plain
+    // Deserializer does not on the serde_json version Gyro pins.
+    let mut stream = serde_json::Deserializer::from_str(text).into_iter::<serde_json::Value>();
+    let value = stream.next()?.ok()?;
+    let consumed = stream.byte_offset();
+    // JSON tokens are ASCII-framed, so the byte offset is a char-safe split.
+    Some((value, text.get(consumed..).unwrap_or("")))
+}
+
+fn collect_chat_artifacts_from_value(
+    value: serde_json::Value,
+    artifacts: &mut Vec<serde_json::Value>,
+) {
+    if artifacts.len() >= MAX_CHAT_ARTIFACTS {
+        return;
+    }
+    let candidates = value
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .or_else(|| value.as_array().cloned())
+        .unwrap_or_default();
+    for candidate in candidates {
+        if artifacts.len() >= MAX_CHAT_ARTIFACTS {
+            break;
+        }
+        if valid_chat_artifact(&candidate) {
+            artifacts.push(candidate);
+        }
+    }
+}
+
+/// Drop trailing `:` / punctuation left when a mid-line marker is removed.
+fn trim_dangling_marker_prefix(text: &str) -> String {
+    text.trim_end_matches(|ch: char| {
+        matches!(ch, ':' | ';' | ',' | '—' | '-' | '–') || ch.is_whitespace()
+    })
+    .trim_end()
+    .to_string()
+}
+
+/// Insert paragraph breaks where successive streamed blocks were glued.
+///
+/// Claude often opens a new text block after tools with a capital letter and
+/// no leading newline. Concatenating deltas then yields `edits.Now the…`.
+/// Matches the commentary repair: a sentence end hard against a new sentence
+/// (`[.!?](?=[A-Z][a-z]|I['’])`), leaving versions and paths alone.
+///
+/// Optional markdown emphasis between the punctuation and the capital covers
+/// providers that bold the next block (`is.**Gyro is…**`).
+fn repair_glued_assistant_blocks(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len().saturating_add(8));
+    for index in 0..chars.len() {
+        out.push(chars[index]);
+        if !matches!(chars[index], '.' | '!' | '?') {
+            continue;
+        }
+        let mut look = index + 1;
+        // Skip one run of * or _ so `is.**Gyro` still counts as glued.
+        while matches!(chars.get(look), Some('*' | '_')) {
+            look += 1;
+        }
+        let should_break = match (chars.get(look), chars.get(look + 1)) {
+            (Some('I'), Some('\'' | '’')) => true,
+            (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => true,
+            _ => false,
+        };
+        if should_break {
+            out.push_str("\n\n");
+        }
+    }
+    out
 }
 
 fn sanitize_session_title_candidate(title: &str) -> Option<String> {
@@ -12547,6 +12744,12 @@ struct StreamingCommandState {
     assistant_text: String,
     assistant_text_chars: usize,
     assistant_text_truncated: bool,
+    /// Insert a paragraph break before the next text delta.
+    ///
+    /// Set when a tool/activity runs (or a new text content block opens) after
+    /// the assistant has already spoken. Without it, Claude's next block starts
+    /// mid-stream with no leading newline and glues onto the previous sentence.
+    text_block_separator_pending: bool,
     pending_delta_chunks: Vec<String>,
     pending_delta_chars: usize,
     provider_session_id: Option<String>,
@@ -12572,12 +12775,25 @@ impl StreamingCommandState {
             assistant_text: String::new(),
             assistant_text_chars: 0,
             assistant_text_truncated: false,
+            text_block_separator_pending: false,
             pending_delta_chunks: Vec::new(),
             pending_delta_chars: 0,
             provider_session_id: None,
             stdout_line_buffer: String::new(),
             parsed_stream_json: false,
             last_emit_at: Instant::now(),
+        }
+    }
+
+    fn note_intervening_work(&mut self) {
+        if !self.assistant_text.is_empty() {
+            self.text_block_separator_pending = true;
+        }
+    }
+
+    fn note_new_text_content_block(&mut self) {
+        if !self.assistant_text.is_empty() {
+            self.text_block_separator_pending = true;
         }
     }
 
@@ -12709,6 +12925,13 @@ impl StreamingCommandState {
         if self.assistant_text_truncated {
             return;
         }
+        let separated = if self.text_block_separator_pending {
+            self.text_block_separator_pending = false;
+            separate_streamed_text_block(&self.assistant_text, delta)
+        } else {
+            None
+        };
+        let delta = separated.as_deref().unwrap_or(delta);
         let result = push_bounded(
             &mut self.assistant_text,
             &mut self.assistant_text_chars,
@@ -12904,11 +13127,17 @@ fn handle_provider_stdout_line(
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(&value) {
         merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
     }
+    if provider_stream_opens_text_content_block(&value) {
+        stream_state.note_new_text_content_block();
+    }
     if let Some(commentary) = extract_provider_commentary_activity(&value) {
         if let Some(activity) = stream_state.push_activity(commentary) {
             let activity_sequence = stream_state.activity_sequence(&activity);
             emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
         }
+        // Commentary is narration, not a tool, but it still sits between text
+        // blocks when it appears as its own stream item.
+        stream_state.note_intervening_work();
         return;
     }
     if let Some(activity) = extract_provider_activity(&value) {
@@ -12916,6 +13145,7 @@ fn handle_provider_stdout_line(
             let activity_sequence = stream_state.activity_sequence(&activity);
             emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
         }
+        stream_state.note_intervening_work();
     }
     if let Some(chunk) = extract_provider_text_chunk(&value) {
         match chunk {
@@ -12943,6 +13173,42 @@ fn handle_provider_stdout_line(
         }
         stream_state.flush_pending_delta(app, request, false);
     }
+}
+
+/// True when Claude (or another Anthropic-shaped stream) opens a fresh text block.
+fn provider_stream_opens_text_content_block(value: &serde_json::Value) -> bool {
+    let event = value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|frame_type| {
+            if frame_type == "stream_event" {
+                value.get("event")
+            } else {
+                Some(value)
+            }
+        })
+        .unwrap_or(value);
+    event.get("type").and_then(serde_json::Value::as_str) == Some("content_block_start")
+        && event
+            .pointer("/content_block/type")
+            .and_then(serde_json::Value::as_str)
+            == Some("text")
+}
+
+/// Paragraph-separate a new streamed text block from the previous one when the
+/// provider omitted a leading newline.
+fn separate_streamed_text_block(existing: &str, delta: &str) -> Option<String> {
+    if existing.is_empty() || delta.is_empty() {
+        return None;
+    }
+    let existing_ends_break = existing.ends_with("\n\n")
+        || existing.ends_with("\n")
+        || existing.ends_with(char::is_whitespace);
+    let delta_starts_break = delta.starts_with('\n') || delta.starts_with(char::is_whitespace);
+    if existing_ends_break || delta_starts_break {
+        return None;
+    }
+    Some(format!("\n\n{delta}"))
 }
 
 fn provider_context_usage_from_app_server(
@@ -13566,6 +13832,14 @@ fn provider_output_summary(
 
 fn is_stale_resume_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
+    // Grok ACP returns bare "Method not found" when session/resume is not
+    // implemented — treat that as a dead cursor so Retry starts clean.
+    if normalized.contains("method not found")
+        || normalized.contains("method_not_found")
+        || normalized.contains("-32601")
+    {
+        return true;
+    }
     let resume_identity = normalized.contains("resume")
         || normalized.contains("session")
         || normalized.contains("thread");
@@ -13576,6 +13850,62 @@ fn is_stale_resume_error(error: &str) -> bool {
         || normalized.contains("expired")
         || normalized.contains("could not resume");
     resume_identity && missing_identity
+}
+
+/// Build Grok ACP spawn args the way Synara does: model/effort at process start.
+fn build_grok_acp_program_args(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "--no-auto-update".into(),
+        "--permission-mode".into(),
+        "default".into(),
+        "agent".into(),
+        "--no-leader".into(),
+    ];
+    if let Some(model) = model_id.map(str::trim).filter(|model| !model.is_empty()) {
+        args.push("-m".into());
+        args.push(model.into());
+    }
+    if let Some(effort) = reasoning_effort
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+    {
+        args.push("--reasoning-effort".into());
+        args.push(effort.into());
+    }
+    args.push("stdio".into());
+    args
+}
+
+/// Recent user/assistant turns for ACP agents that cannot reopen a session.
+fn acp_conversation_history_text(_app: &tauri::AppHandle, session_id: &str) -> Option<String> {
+    let session_uuid = parse_uuid(session_id).ok()?;
+    let store = open_store().ok()?;
+    let events = store.read_recent_events(session_uuid, 40).ok()?;
+    let mut lines = Vec::new();
+    for event in events {
+        let role = match event.kind {
+            SessionEventKind::UserMessage => "User",
+            SessionEventKind::AssistantMessage => "Assistant",
+            _ => continue,
+        };
+        let text = event.message.trim();
+        if text.is_empty() {
+            continue;
+        }
+        // Cap each turn so a long tool dump does not blow the next prompt.
+        let clipped: String = text.chars().take(2_000).collect();
+        lines.push(format!("{role}: {clipped}"));
+    }
+    // Drop the trailing user line — it is the message currently being sent and
+    // already lives in the main prompt.
+    if lines.last().is_some_and(|line| line.starts_with("User: ")) {
+        lines.pop();
+    }
+    let joined = lines.join("\n\n");
+    (!joined.trim().is_empty()).then_some(joined)
 }
 
 fn command_with_gui_path(command: &str) -> Command {
@@ -18317,7 +18647,48 @@ while True:
     fn stale_resume_errors_are_retryable() {
         assert!(is_stale_resume_error("Could not resume session: not found"));
         assert!(is_stale_resume_error("missing thread for provider"));
+        assert!(is_stale_resume_error("Method not found"));
         assert!(!is_stale_resume_error("rate limit exceeded"));
+    }
+
+    #[test]
+    fn grok_acp_args_match_synara_shape() {
+        let args = build_grok_acp_program_args(Some("grok-4.5"), Some("high"));
+        let as_str: Vec<String> = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            as_str,
+            vec![
+                "--no-auto-update",
+                "--permission-mode",
+                "default",
+                "agent",
+                "--no-leader",
+                "-m",
+                "grok-4.5",
+                "--reasoning-effort",
+                "high",
+                "stdio",
+            ]
+        );
+        let minimal = build_grok_acp_program_args(None, None);
+        let minimal_str: Vec<String> = minimal
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            minimal_str,
+            vec![
+                "--no-auto-update",
+                "--permission-mode",
+                "default",
+                "agent",
+                "--no-leader",
+                "stdio",
+            ]
+        );
     }
 
     #[test]
@@ -18837,10 +19208,74 @@ while True:
         assert_eq!(extracted.title.as_deref(), Some("Fix Model Picker"));
         assert_eq!(extracted.message, "Done.");
 
-        let untouched =
+        // Title application is optional; the protocol token must still leave
+        // the visible reply even when the app will not rename the session.
+        let stripped_without_apply =
             extract_session_title_marker("GYRO_SESSION_TITLE: Fix Model Picker\n\nDone.", false);
-        assert!(untouched.title.is_none());
-        assert!(untouched.message.contains("GYRO_SESSION_TITLE"));
+        assert!(stripped_without_apply.title.is_none());
+        assert_eq!(stripped_without_apply.message, "Done.");
+        assert!(!stripped_without_apply
+            .message
+            .contains("GYRO_SESSION_TITLE"));
+    }
+
+    #[test]
+    fn strips_control_markers_glued_mid_line_after_tool_preambles() {
+        // Reproduces the live transcript where successive Claude text blocks
+        // glued together and left GYRO_SESSION_TITLE visible in the bubble.
+        let raw = "Now the edits.Now the desktop handler:Now add the dependency to the composer-action callback:GYRO_SESSION_TITLE: Create branch from picker\n\nAdded a **New branch…** entry at the top of the branch picker.";
+        let extracted = extract_session_title_marker(raw, true);
+        assert_eq!(
+            extracted.title.as_deref(),
+            Some("Create branch from picker")
+        );
+        assert!(!extracted.message.contains("GYRO_SESSION_TITLE"));
+        assert!(extracted.message.contains("Added a **New branch…** entry"));
+        // Glued sentence boundaries are repaired so preambles stay readable.
+        assert!(extracted.message.contains("edits.\n\nNow the desktop"));
+    }
+
+    #[test]
+    fn repairs_glued_blocks_when_the_next_block_is_markdown_bold() {
+        let repaired = repair_glued_assistant_blocks(
+            "matches what Gyro actually is.**Gyro is a local-first workspace.**",
+        );
+        assert!(repaired.contains("is.\n\n**Gyro is a local-first"));
+        assert!(!repaired.contains("is.**Gyro"));
+    }
+
+    #[test]
+    fn strips_artifact_markers_glued_mid_line() {
+        let raw = "Good question — let me verify rather than assume.GYRO_ARTIFACTS: {\"items\":[{\"id\":\"rebuild-desktop\",\"kind\":\"command\",\"title\":\"Rebuild to see the fixed meter\",\"command\":\"pnpm desktop:install-local\"}]}\n\nYes for Claude — the meter is fixed.";
+        let extracted = extract_chat_artifact_marker(raw);
+        assert_eq!(extracted.items.len(), 1);
+        assert_eq!(extracted.items[0]["id"], "rebuild-desktop");
+        assert!(!extracted.message.contains("GYRO_ARTIFACTS"));
+        assert!(extracted.message.starts_with("Good question"));
+        assert!(extracted.message.contains("Yes for Claude"));
+    }
+
+    #[test]
+    fn streaming_state_separates_text_blocks_after_tool_activity() {
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta("Now the edits.");
+        state.note_intervening_work();
+        state.push_assistant_delta("Now the desktop handler:");
+        state.note_intervening_work();
+        state.push_assistant_delta(
+            "GYRO_SESSION_TITLE: Create branch from picker\n\nAdded a branch action.",
+        );
+
+        assert_eq!(
+            state.assistant_text,
+            "Now the edits.\n\nNow the desktop handler:\n\nGYRO_SESSION_TITLE: Create branch from picker\n\nAdded a branch action."
+        );
+        let cleaned = extract_session_title_marker(&state.assistant_text, true);
+        assert_eq!(cleaned.title.as_deref(), Some("Create branch from picker"));
+        assert_eq!(
+            cleaned.message,
+            "Now the edits.\n\nNow the desktop handler:\n\nAdded a branch action."
+        );
     }
 
     #[test]
