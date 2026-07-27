@@ -837,7 +837,14 @@ button {
   color: var(--gyro-muted);
 }
 
+/*
+ * The list grows to fill the sidebar, and a grid's default `align-content:
+ * stretch` hands that leftover height to the auto rows — which padded every
+ * gap until "Projects" and the first project sat a screen apart. Packing the
+ * rows to the top keeps the spacing the `gap` asks for at any list length.
+ */
 .gyro-sidebar-project-chat-list {
+  align-content: start;
   display: grid;
   gap: 2px;
   min-height: 0;
@@ -861,6 +868,7 @@ button {
 }
 
 .gyro-sidebar-project-group {
+  align-content: start;
   display: grid;
   gap: 2px;
 }
