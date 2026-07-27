@@ -441,12 +441,22 @@ function preserveFirstSeenTimelineMetadata(
       : typeof firstPayload.providerSequence === "number"
         ? firstPayload.providerSequence
         : undefined;
+  // Only the stream saw where each block of a turn's text began. The durable
+  // response is that same text concatenated, so the marks stay valid and the
+  // preambles keep their place instead of collapsing back into the answer.
+  const segments =
+    updated.kind === "assistant-message" &&
+    !Array.isArray(updatedPayload.segments) &&
+    Array.isArray(firstPayload.segments)
+      ? firstPayload.segments
+      : undefined;
   return {
     ...updated,
     createdAt: firstSeen.createdAt,
     payload: {
       ...updatedPayload,
       ...(timelineSequence === undefined ? {} : { timelineSequence }),
+      ...(segments === undefined ? {} : { segments }),
     },
   };
 }
@@ -649,19 +659,52 @@ export function upsertStreamingAssistantEvent(
     if (!existing) {
       return events;
     }
-    const nextEvents = events.slice();
-    nextEvents[existingIndex] = {
+    const existingPayload = recordFromUnknown(existing.payload) ?? {};
+    // Text that resumes after a tool ran is a new block, not a continuation of
+    // the sentence before it. Marking where it starts lets the timeline show
+    // the preamble beside the work it introduced and keep the closing block as
+    // the answer, instead of gluing an entire turn into one bubble.
+    const startsBlock =
+      existing.message.length > 0 &&
+      events
+        .slice(existingIndex + 1)
+        .some(
+          (event) => event.turnId === turnId && isProviderActivityEvent(event),
+        );
+    const segments = assistantMessageSegments(existingPayload);
+    const next: SessionEvent = {
       ...existing,
       message: appendChatResponseDelta(existing.message, textDelta),
       payload: {
-        ...(recordFromUnknown(existing.payload) ?? {}),
+        ...existingPayload,
         kind: "provider-stream",
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         streaming: true,
+        segments: startsBlock
+          ? [
+              ...segments,
+              {
+                start: existing.message.length,
+                sequence: streamEvent.sequence,
+                createdAt: new Date().toISOString(),
+              },
+            ]
+          : segments,
       },
     };
-    return nextEvents;
+    if (!startsBlock) {
+      const nextEvents = events.slice();
+      nextEvents[existingIndex] = next;
+      return nextEvents;
+    }
+    // Move it behind the activity it now trails so the next delta is measured
+    // against this block rather than reopening the one before it.
+    return [
+      ...events.slice(0, existingIndex),
+      ...events.slice(existingIndex + 1),
+      next,
+    ];
   }
   return [
     ...events,
@@ -678,9 +721,21 @@ export function upsertStreamingAssistantEvent(
         modelId: streamEvent.modelId,
         streaming: true,
         timelineSequence: streamEvent.sequence,
+        segments: [
+          {
+            start: 0,
+            sequence: streamEvent.sequence,
+            createdAt: new Date().toISOString(),
+          },
+        ],
       },
     },
   ];
+}
+
+function assistantMessageSegments(payload: Record<string, unknown>) {
+  const segments = payload.segments;
+  return Array.isArray(segments) ? segments : [];
 }
 
 export function appendChatResponseDelta(message: string, textDelta: string) {
