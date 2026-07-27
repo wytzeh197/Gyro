@@ -24,6 +24,7 @@ import {
   Folder,
   Gauge,
   GitBranch,
+  GitBranchPlus,
   GitPullRequest,
   Globe2,
   Goal,
@@ -99,6 +100,7 @@ import {
 import {
   chatTurnTimelineSections,
   orderedChatTimelineEvents,
+  type ChatTurnTimelineSections,
 } from "./chat-timeline";
 import {
   composerLimitWindows,
@@ -14874,7 +14876,18 @@ function branchPopoverItems({
       },
     ];
   }
-  return branchCatalog.branches.map((branch) => ({
+  const createBranchItem: ComposerPopoverItem = {
+    action: `create-branch-from:${encodeURIComponent(branchCatalog.current ?? "")}`,
+    disabled: isDisabled,
+    detail: isDisabled
+      ? "Wait for the active turn to finish"
+      : branchCatalog.current
+        ? `Branch from ${branchCatalog.current}`
+        : "Branch from the current commit",
+    icon: GitBranchPlus,
+    label: "New branch…",
+  };
+  const branchItems = branchCatalog.branches.map((branch) => ({
     action: `select-branch:${encodeURIComponent(branch)}`,
     active: branch === branchCatalog.current,
     disabled: isDisabled,
@@ -14895,6 +14908,7 @@ function branchPopoverItems({
     icon: GitBranch,
     label: branch,
   }));
+  return [createBranchItem, ...branchItems];
 }
 
 function ComposerPopover({
@@ -17569,11 +17583,15 @@ function ChatTurn({
     files: changeSummaryItems,
     response: responseEvent,
     work: workTimelineItems,
-  } = chatTurnTimelineSections(turn.timelineEvents);
+  } = chatTurnTimelineSections(turn.timelineEvents, { isRunning });
   const canCollapseThought = !isRunning && workTimelineItems.length > 0;
   const visibleWorkTimelineItems =
     isRunning || !isThoughtCollapsed ? workTimelineItems : [];
   const runStart = Date.parse(turn.runStartedAt ?? turn.startedAt);
+  const runOffsetLabels = runStepOffsetLabels(
+    runStart,
+    visibleWorkTimelineItems,
+  );
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
       {turn.user ? (
@@ -17610,17 +17628,13 @@ function ChatTurn({
               className="gyro-chat-run-sequence is-work"
               aria-label="Work timeline"
             >
-              {visibleWorkTimelineItems.map((item) => {
-                const startedAt =
-                  item.kind === "activity-group"
-                    ? (item.events[0] as SessionEvent).createdAt
-                    : item.event.createdAt;
+              {visibleWorkTimelineItems.map((item, index) => {
                 return (
                   <ChatRunStep
                     key={
                       item.kind === "activity-group" ? item.id : item.event.id
                     }
-                    offsetLabel={runOffsetLabel(runStart, startedAt)}
+                    offsetLabel={runOffsetLabels[index]}
                   >
                     {item.kind === "activity-group" ? (
                       <ProviderActivityGroup events={item.events} />
@@ -17654,6 +17668,13 @@ function ChatTurn({
                   </ChatRunStep>
                 );
               })}
+              {isRunning && responseEvent ? (
+                <ChatRunStep>
+                  <div className="gyro-chat-run-thinking" role="status">
+                    Finalizing
+                  </div>
+                </ChatRunStep>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -18108,12 +18129,31 @@ function ChatRunStep({
   );
 }
 
-function runOffsetLabel(runStart: number, createdAt: string) {
-  const at = Date.parse(createdAt);
-  if (!Number.isFinite(runStart) || !Number.isFinite(at)) return undefined;
-  const seconds = Math.max(0, Math.round((at - runStart) / 1_000));
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+/**
+ * The gutter reads as a clock, so it has to run forwards. An event's timestamp
+ * is when the renderer first saw it, which is not always when the provider
+ * ordered it, so each step is clamped to the one above it rather than allowed
+ * to report an earlier second than the step before.
+ */
+function runStepOffsetLabels(
+  runStart: number,
+  items: ChatTurnTimelineSections["work"],
+) {
+  let previousSeconds = 0;
+  return items.map((item) => {
+    const createdAt =
+      item.kind === "activity-group"
+        ? (item.events[0] as SessionEvent).createdAt
+        : item.event.createdAt;
+    const at = Date.parse(createdAt);
+    if (!Number.isFinite(runStart) || !Number.isFinite(at)) return undefined;
+    const seconds = Math.max(
+      previousSeconds,
+      Math.round((at - runStart) / 1_000),
+    );
+    previousSeconds = seconds;
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  });
 }
 
 function activitySpanLabel(events: SessionEvent[]) {
@@ -18138,17 +18178,15 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
       : visibility === "preview"
         ? events.slice(0, 3)
         : [];
+  // A lone action names itself. Flattening it to "Used tool" threw away the
+  // one detail that made the step readable next to the calls that keep theirs.
   const label =
-    activity.kind === "command"
-      ? events.length === 1
-        ? "Ran command"
-        : `Ran ${events.length} commands`
-      : activity.kind === "search"
-        ? events.length === 1
-          ? "Searched"
-          : `Searched ${events.length} times`
-        : events.length === 1
-          ? "Used tool"
+    events.length === 1
+      ? activity.label
+      : activity.kind === "command"
+        ? `Ran ${events.length} commands`
+        : activity.kind === "search"
+          ? `Searched ${events.length} times`
           : `Used ${events.length} tools`;
   const Icon =
     activity.kind === "command"

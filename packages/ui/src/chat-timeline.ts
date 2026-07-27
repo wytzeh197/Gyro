@@ -10,31 +10,39 @@ export type InterleavedChatTimelineItem =
       events: SessionEvent[];
     };
 
+/**
+ * Sorts a turn into the order the provider produced it.
+ *
+ * Only some events carry a provider sequence; approvals and capability calls
+ * do not. Sorting just the sequenced ones and dealing them back into the slots
+ * they used to occupy shuffled the unsequenced events into other events' time
+ * positions, which is why the run gutter used to count backwards. Instead an
+ * unsequenced event inherits the sequence of the event it followed, so it stays
+ * pinned behind its cause while everything sorts as one list.
+ */
 export function orderedChatTimelineEvents(events: SessionEvent[]) {
-  const ordered = events.slice();
-  const sequenced = events
-    .map((event, index) => ({
-      event,
-      index,
-      sequence: timelineSequence(event),
-    }))
-    .filter(
-      (
-        item,
-      ): item is { event: SessionEvent; index: number; sequence: number } =>
-        item.sequence !== undefined,
-    );
-  const sortedEvents = sequenced
-    .slice()
-    .sort(
-      (first, second) =>
-        first.sequence - second.sequence || first.index - second.index,
-    )
+  let inheritedSequence: number | undefined;
+  return events
+    .map((event, index) => {
+      const sequence = timelineSequence(event);
+      if (sequence !== undefined) {
+        inheritedSequence = sequence;
+      }
+      return { event, index, sequence: sequence ?? inheritedSequence };
+    })
+    .sort((first, second) => {
+      if (first.sequence === second.sequence) {
+        return first.index - second.index;
+      }
+      if (first.sequence === undefined) {
+        return -1;
+      }
+      if (second.sequence === undefined) {
+        return 1;
+      }
+      return first.sequence - second.sequence;
+    })
     .map((item) => item.event);
-  sequenced.forEach((item, index) => {
-    ordered[item.index] = sortedEvents[index] as SessionEvent;
-  });
-  return ordered;
 }
 
 export type ChatTurnTimelineSections = {
@@ -44,6 +52,90 @@ export type ChatTurnTimelineSections = {
   response?: SessionEvent;
   files: Extract<InterleavedChatTimelineItem, { kind: "file-summary" }>[];
 };
+
+export type AssistantMessageSegment = {
+  start: number;
+  sequence?: number;
+  createdAt?: string;
+};
+
+const ASSISTANT_SEGMENT_ID_SEPARATOR = "#segment-";
+
+/**
+ * A provider streams every text block of a turn into one assistant event, so
+ * the preamble it spoke before running tools and the answer it ended with share
+ * a single bubble. The stream layer records where each block started; this
+ * reads those marks back so each block can take its own place on the timeline.
+ */
+function assistantMessageSegments(
+  event: SessionEvent,
+): AssistantMessageSegment[] | undefined {
+  const raw = eventPayload(event)?.segments;
+  if (!Array.isArray(raw) || raw.length < 2) {
+    return undefined;
+  }
+  const segments: AssistantMessageSegment[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return undefined;
+    }
+    const { start, sequence, createdAt } = entry as Record<string, unknown>;
+    const previous = segments.at(-1);
+    if (
+      typeof start !== "number" ||
+      !Number.isSafeInteger(start) ||
+      start < 0 ||
+      start > event.message.length ||
+      (previous !== undefined && start <= previous.start)
+    ) {
+      // A persisted message that no longer matches the marks we streamed is
+      // better rendered whole than sliced at the wrong characters.
+      return undefined;
+    }
+    segments.push({
+      start,
+      sequence:
+        typeof sequence === "number" && Number.isSafeInteger(sequence)
+          ? sequence
+          : undefined,
+      createdAt: typeof createdAt === "string" ? createdAt : undefined,
+    });
+  }
+  return segments[0]?.start === 0 ? segments : undefined;
+}
+
+/**
+ * Splits multi-block assistant messages into one event per block so the blocks
+ * can interleave with the tools that ran between them.
+ */
+export function expandAssistantMessageSegments(events: SessionEvent[]) {
+  return events.flatMap((event) => {
+    if (event.kind !== "assistant-message") {
+      return [event];
+    }
+    const segments = assistantMessageSegments(event);
+    if (!segments) {
+      return [event];
+    }
+    const payload = eventPayload(event) ?? {};
+    return segments
+      .map((segment, index) => {
+        const end = segments[index + 1]?.start ?? event.message.length;
+        const { segments: _segments, ...rest } = payload;
+        return {
+          ...event,
+          id: `${event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
+          createdAt: segment.createdAt ?? event.createdAt,
+          message: event.message.slice(segment.start, end),
+          payload:
+            segment.sequence === undefined
+              ? rest
+              : { ...rest, timelineSequence: segment.sequence },
+        };
+      })
+      .filter((segment) => segment.message.trim().length > 0);
+  });
+}
 
 function isNarrationEvent(item: InterleavedChatTimelineItem) {
   return item.kind === "event" && item.event.kind === "assistant-message";
@@ -55,15 +147,32 @@ function isNarrationEvent(item: InterleavedChatTimelineItem) {
  * Assistant messages emitted mid-run are preambles to the tools that follow
  * them, so they stay in the work stream at the position they were spoken;
  * pulling every one of them out left the transcript reading out of order.
+ *
+ * A closing message only reads as an answer once it is the last thing in the
+ * turn. While a run is still going the opening line is a preamble to work that
+ * has not started yet, so it stays above the divider until some work precedes
+ * it — otherwise the first thing a run showed was an "answer" below the line.
  */
 export function chatTurnTimelineSections(
   events: SessionEvent[],
+  options?: { isRunning?: boolean },
 ): ChatTurnTimelineSections {
   const items = interleavedChatTimelineItems(events);
   const spoken = items.filter(
     (item) => isNarrationEvent(item) && !isBlankMessage(item),
   );
-  const response = spoken.at(-1);
+  const closing = spoken.at(-1);
+  const sequenced: InterleavedChatTimelineItem[] = items.filter(
+    (item) => item.kind !== "file-summary",
+  );
+  const closesTurn = closing !== undefined && sequenced.at(-1) === closing;
+  const followsWork =
+    closing !== undefined &&
+    sequenced
+      .slice(0, sequenced.indexOf(closing))
+      .some((item) => !isNarrationEvent(item));
+  const response =
+    closesTurn && (followsWork || !options?.isRunning) ? closing : undefined;
   const responseEvent = response?.kind === "event" ? response.event : undefined;
   const work = items.filter(
     (
@@ -89,7 +198,9 @@ function isBlankMessage(item: InterleavedChatTimelineItem) {
 export function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
   const fileEvents: SessionEvent[] = [];
-  for (const event of orderedChatTimelineEvents(events)) {
+  for (const event of orderedChatTimelineEvents(
+    expandAssistantMessageSegments(events),
+  )) {
     const activityKind = providerActivityKind(event);
     if (activityKind === "file") {
       fileEvents.push(event);
