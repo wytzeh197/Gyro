@@ -92,6 +92,8 @@ export type {
   IdeSessionEventPayloadKind,
   IdeState,
   IdeViewId,
+  ModelFocus,
+  ModelFollowMode,
   ModelProviderConfig,
   HarnessRunStatus,
   Notification,
@@ -226,8 +228,16 @@ export {
 } from "./provider-catalog";
 export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
 export {
+  createGlobalSearchTarget,
+  globalSearchMatch,
   globalSearchMatchScore,
+  GlobalSearchRanker,
   normalizedGlobalSearchText,
+} from "./global-search";
+export type {
+  GlobalSearchMatch,
+  GlobalSearchRange,
+  GlobalSearchTarget,
 } from "./global-search";
 export {
   workspaceCommandRegistry,
@@ -303,3 +313,4 @@ export {
   WorkspaceToolPanel,
   WorkspaceHeader,
 } from "./surfaces";
+export type { ModelFocusPeekContent } from "./surfaces";

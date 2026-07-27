@@ -37,6 +37,55 @@ export function orderedChatTimelineEvents(events: SessionEvent[]) {
   return ordered;
 }
 
+export type ChatTurnTimelineSections = {
+  /** Narration and activity, in the order they happened. */
+  work: Exclude<InterleavedChatTimelineItem, { kind: "file-summary" }>[];
+  /** The closing assistant message — the only one that is an answer. */
+  response?: SessionEvent;
+  files: Extract<InterleavedChatTimelineItem, { kind: "file-summary" }>[];
+};
+
+function isNarrationEvent(item: InterleavedChatTimelineItem) {
+  return item.kind === "event" && item.event.kind === "assistant-message";
+}
+
+/**
+ * Splits a turn into the work that happened and the answer it ended with.
+ *
+ * Assistant messages emitted mid-run are preambles to the tools that follow
+ * them, so they stay in the work stream at the position they were spoken;
+ * pulling every one of them out left the transcript reading out of order.
+ */
+export function chatTurnTimelineSections(
+  events: SessionEvent[],
+): ChatTurnTimelineSections {
+  const items = interleavedChatTimelineItems(events);
+  const spoken = items.filter(
+    (item) => isNarrationEvent(item) && !isBlankMessage(item),
+  );
+  const response = spoken.at(-1);
+  const responseEvent = response?.kind === "event" ? response.event : undefined;
+  const work = items.filter(
+    (
+      item,
+    ): item is Exclude<InterleavedChatTimelineItem, { kind: "file-summary" }> =>
+      item.kind !== "file-summary" &&
+      !(isNarrationEvent(item) && isBlankMessage(item)) &&
+      item !== response,
+  );
+  const files = items.filter(
+    (
+      item,
+    ): item is Extract<InterleavedChatTimelineItem, { kind: "file-summary" }> =>
+      item.kind === "file-summary",
+  );
+  return { work, response: responseEvent, files };
+}
+
+function isBlankMessage(item: InterleavedChatTimelineItem) {
+  return item.kind === "event" && item.event.message.trim().length === 0;
+}
+
 export function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
   const fileEvents: SessionEvent[] = [];

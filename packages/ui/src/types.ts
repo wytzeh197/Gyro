@@ -885,6 +885,7 @@ export type WorkbenchPreferences = {
   sidebarChatsCollapsed: boolean;
   chatEnvironmentRailOpen: boolean;
   activeChatPanel?: ChatSidePanelId;
+  modelFollow: ModelFollowMode;
   cliLaunchPreset: CliLaunchPreset;
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
@@ -920,9 +921,17 @@ export type WorkspaceKeybinding = {
 };
 
 export type ProviderUsageWindow = {
-  id: "five-hour" | "weekly";
+  id: string;
   label: string;
-  usedPercent: number;
+  /**
+   * How much of the window is spent, when the provider measures it.
+   *
+   * Codex reports a percentage. Claude Code names the window and its reset but
+   * never how full it is, so an unmeasured window leaves this absent rather
+   * than claiming a level it was never told.
+   */
+  usedPercent?: number;
+  status?: "ok" | "warning" | "exhausted";
   resetsAt?: string;
 };
 
@@ -1322,6 +1331,36 @@ export type IdeAiToolCall = {
   finishedAt?: string;
 };
 
+/**
+ * Where the model is currently working. Purely descriptive: recording a focus
+ * never moves the user's viewport, so the chat thread stays put while the
+ * ambient surfaces show what the model is touching.
+ */
+export type ModelFocus = {
+  sessionId: string;
+  kind: "ide" | "terminal" | "browser" | "output" | "proposal";
+  label: string;
+  detail?: string;
+  path?: string;
+  line?: number;
+  column?: number;
+  paneTab?: WorkbenchPaneTab;
+  /** Terminal pane backing a "terminal" focus, so a peek can tail it. */
+  paneId?: string;
+  /** Capability resource id, used to find the matching output channel. */
+  resourceId?: string;
+  callId: string;
+  updatedAt: string;
+};
+
+/**
+ * How the app reacts when the model reveals where it is working.
+ * - "off": ambient badges only.
+ * - "peek": badges plus an inline strip that opens a transient peek.
+ * - "follow": the legacy behaviour, where the app navigates along with it.
+ */
+export type ModelFollowMode = "off" | "peek" | "follow";
+
 export type IdeSessionEventPayloadKind =
   | "editor-file-opened"
   | "editor-selection-changed"
@@ -1377,6 +1416,8 @@ export type WorkbenchState = {
   selectedProviderSessionId?: string;
   providerReadiness: ProviderReadiness;
   activeTurn?: WorkbenchTurn;
+  modelFocus?: ModelFocus;
+  modelFocusHistory: ModelFocus[];
   ide: IdeState;
   onboarding: OnboardingState;
   preferences: WorkbenchPreferences;
