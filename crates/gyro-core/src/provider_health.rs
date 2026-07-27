@@ -7,23 +7,12 @@ use crate::{
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const PROVIDER_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_HEALTH_MAX_STDOUT_CHARS: usize = 32 * 1024;
 const PROVIDER_HEALTH_MAX_STDERR_CHARS: usize = 16 * 1024;
-
-const GUI_CLI_PATHS: &[&str] = &[
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-];
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -438,7 +427,7 @@ fn command_output_with_limits(
     if !command.contains('/') {
         request.env.push((
             OsString::from("PATH"),
-            Some(OsString::from(augmented_gui_path())),
+            Some(OsString::from(crate::cli_path::augmented_gui_path())),
         ));
     }
     let outcome = run_command(request, CancellationToken::default(), |_| {})
@@ -510,66 +499,6 @@ fn retained_stream_output(output: &str, truncated: bool, marker: &str) -> String
     output
 }
 
-pub(crate) fn augmented_gui_path() -> String {
-    let mut paths = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| user_cli_paths(&home))
-        .unwrap_or_default();
-    paths.extend(
-        std::env::var("PATH")
-            .unwrap_or_default()
-            .split(':')
-            .filter(|path| !path.is_empty())
-            .map(ToOwned::to_owned),
-    );
-    paths.extend(GUI_CLI_PATHS.iter().map(|path| (*path).to_string()));
-    let mut seen = HashSet::new();
-    paths.retain(|path| seen.insert(path.clone()));
-    paths.join(":")
-}
-
-fn user_cli_paths(home: &Path) -> Vec<String> {
-    let mut paths = vec![
-        home.join(".local/bin"),
-        home.join("bin"),
-        home.join(".volta/bin"),
-        home.join(".asdf/shims"),
-        home.join(".local/share/mise/shims"),
-        home.join(".bun/bin"),
-        home.join(".cargo/bin"),
-    ];
-    let nvm_versions = home.join(".nvm/versions/node");
-    let mut nvm_bins = std::fs::read_dir(nvm_versions)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-    nvm_bins.sort_by_key(|path| std::cmp::Reverse(node_version_key(path)));
-    paths.extend(nvm_bins.into_iter().map(|path| path.join("bin")));
-    paths
-        .into_iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect()
-}
-
-fn node_version_key(path: &Path) -> (u64, u64, u64) {
-    let version = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .trim_start_matches('v');
-    let mut parts = version
-        .split('.')
-        .map(|part| part.parse::<u64>().unwrap_or_default());
-    (
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,10 +520,6 @@ mod tests {
             Some("https://api.openai.com"),
             Some("env:OPENAI_API_KEY")
         ));
-        assert!(
-            node_version_key(Path::new("/tmp/v22.10.1"))
-                > node_version_key(Path::new("/tmp/v20.18.0"))
-        );
         assert_eq!(
             provider_runtime_status_from_output(
                 r#"{"error":"authentication_failed","message":"Invalid authentication credentials"}"#
