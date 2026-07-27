@@ -111,4 +111,89 @@ assert.deepEqual(
   "narration should break activity groups",
 );
 
+// A provider streams every block of a turn into one assistant event. The marks
+// recorded by the stream layer split it back up so the preamble sits beside the
+// work it introduced and only the closing block reads as the answer.
+const segmented = chatTurnTimelineSections([
+  {
+    ...event("assistant-message", "", {}, 0),
+    message: "I'll read the palette first.Done — it ranks fuzzily now.",
+    payload: {
+      segments: [
+        { start: 0, sequence: 0, createdAt: "2026-07-27T09:00:00.000Z" },
+        { start: 28, sequence: 2, createdAt: "2026-07-27T09:00:20.000Z" },
+      ],
+    },
+  },
+  {
+    ...activity("tool", "Read surfaces.tsx", 0),
+    payload: {
+      kind: "provider-activity",
+      activityKind: "tool",
+      label: "Read surfaces.tsx",
+      status: "done",
+      timelineSequence: 1,
+    },
+  },
+]);
+assert.equal(
+  segmented.response?.message,
+  "Done — it ranks fuzzily now.",
+  "only the closing block should be the answer",
+);
+assert.deepEqual(
+  segmented.work.map((item) =>
+    item.kind === "activity-group"
+      ? `group:${item.events.length}`
+      : `say:${item.event.message}`,
+  ),
+  ["say:I'll read the palette first.", "group:1"],
+  "the opening block should stay above the tool it introduced",
+);
+
+// Marks that no longer fit the message are ignored rather than slicing it at
+// the wrong characters.
+const mismatched = chatTurnTimelineSections([
+  {
+    ...event("assistant-message", "Short answer.", {}, 0),
+    payload: { segments: [{ start: 0 }, { start: 900 }] },
+  },
+]);
+assert.equal(
+  mismatched.response?.message,
+  "Short answer.",
+  "an unusable split should leave the message whole",
+);
+
+// While a run is going the opening line is a preamble to work that has not
+// started yet, so it stays in the run instead of posing as an answer.
+const opening = [event("assistant-message", "Let me look at that.", {}, 0)];
+assert.equal(
+  chatTurnTimelineSections(opening, { isRunning: true }).response,
+  undefined,
+  "a running turn should not answer with its first line",
+);
+assert.equal(
+  chatTurnTimelineSections(opening).response?.message,
+  "Let me look at that.",
+  "a finished turn keeps its only message as the answer",
+);
+assert.equal(
+  chatTurnTimelineSections([activity("tool", "Read one", 0), ...opening], {
+    isRunning: true,
+  }).response?.message,
+  "Let me look at that.",
+  "once work precedes it, the closing line is the answer",
+);
+
+// Narration that trails a tool is a preamble to the next batch, not an answer.
+assert.equal(
+  chatTurnTimelineSections([
+    event("assistant-message", "Now I'll run the tests.", {}, 0),
+    activity("command", "npm test", 1),
+  ]).response,
+  undefined,
+  "a message followed by work should stay in the run",
+);
+
 console.log("chat timeline checks passed");
