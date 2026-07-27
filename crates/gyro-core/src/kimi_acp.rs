@@ -18,14 +18,6 @@ const ACP_MAX_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 const ACP_MAX_STDERR_CHARS: usize = 64 * 1024;
 const ACP_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
-const GUI_CLI_PATHS: &[&str] = &[
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KimiAcpMode {
@@ -143,7 +135,7 @@ impl KimiAcpConnection {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if !request.program.to_string_lossy().contains('/') {
-            command.env("PATH", augmented_gui_path());
+            command.env("PATH", crate::cli_path::augmented_gui_path());
         }
         configure_process_group(&mut command);
         let mut child = command.spawn().map_err(|error| {
@@ -983,18 +975,6 @@ fn wait_for_simple_response(connection: &mut KimiAcpConnection, expected_id: u64
     }
 }
 
-fn augmented_gui_path() -> OsString {
-    let mut paths = GUI_CLI_PATHS.iter().map(PathBuf::from).collect::<Vec<_>>();
-    if let Some(current) = std::env::var_os("PATH") {
-        for path in std::env::split_paths(&current) {
-            if !paths.iter().any(|candidate| candidate == &path) {
-                paths.push(path);
-            }
-        }
-    }
-    std::env::join_paths(paths).unwrap_or_else(|_| OsString::from(GUI_CLI_PATHS.join(":")))
-}
-
 fn append_bounded(target: &mut String, text: &str, max_chars: usize) {
     let remaining = max_chars.saturating_sub(target.chars().count());
     target.extend(text.chars().take(remaining));
@@ -1215,6 +1195,27 @@ done
             Duration::from_millis(100),
         );
         assert_eq!(health.status, KimiAcpHealthStatus::NotInstalled);
+    }
+
+    #[test]
+    fn acp_gui_path_includes_provider_cli_install_locations() {
+        let path = crate::cli_path::augmented_gui_path();
+        assert!(
+            path.contains(".local/bin") || path.contains("/.local/bin"),
+            "expected ~/.local/bin on ACP PATH, got {path}"
+        );
+        assert!(
+            path.contains(".grok/bin"),
+            "expected ~/.grok/bin on ACP PATH so Dock-launched health finds Grok, got {path}"
+        );
+        assert!(
+            path.contains(".kimi-code/bin"),
+            "expected ~/.kimi-code/bin on ACP PATH, got {path}"
+        );
+        assert!(
+            path.contains(".npm-global/bin") || path.contains(".cursor/bin"),
+            "expected npm/cursor install locations on ACP PATH, got {path}"
+        );
     }
 
     #[cfg(unix)]

@@ -5,8 +5,8 @@
 //! probe degrades to an unavailable [`GithubAvailability`] with a hint instead
 //! of failing, so the Workspace can render a quiet empty state.
 
+use crate::cli_path::augmented_gui_path;
 use crate::execution::{run_command, CancellationToken, ExecutionRequest, ExecutionTermination};
-use crate::provider_health::augmented_gui_path;
 use crate::security::redact_secrets;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};

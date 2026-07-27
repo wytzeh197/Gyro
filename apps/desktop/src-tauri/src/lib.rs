@@ -1,5 +1,8 @@
 use anyhow::Context;
 use base64::Engine as _;
+use gyro_core::augmented_gui_path;
+#[cfg(test)]
+use gyro_core::user_cli_paths;
 use gyro_core::{
     apply_provider_mutation_transaction_with_cancellation, begin_provider_mutation_transaction,
     create_worktree, decide_mutation_proposal,
@@ -137,14 +140,6 @@ const AUTOMATION_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 const AUTOMATION_RESULT_MARKER_PREFIX: &str = "<!-- gyro-automation-result:";
 const AUTOMATION_RESULT_MARKER_SUFFIX: &str = "-->";
 const TEXT_TRUNCATION_SUFFIX: &str = "...";
-const GUI_CLI_PATHS: &[&str] = &[
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-];
 
 #[derive(Default)]
 struct ProviderCancellationManager {
@@ -13583,66 +13578,6 @@ fn terminate_provider_process_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn augmented_gui_path() -> String {
-    let mut paths = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| user_cli_paths(&home))
-        .unwrap_or_default();
-    paths.extend(
-        std::env::var("PATH")
-            .unwrap_or_default()
-            .split(':')
-            .filter(|path| !path.is_empty())
-            .map(ToOwned::to_owned),
-    );
-    paths.extend(GUI_CLI_PATHS.iter().map(|path| (*path).to_string()));
-    let mut seen = HashSet::new();
-    paths.retain(|path| seen.insert(path.clone()));
-    paths.join(":")
-}
-
-fn user_cli_paths(home: &Path) -> Vec<String> {
-    let mut paths = vec![
-        home.join(".local/bin"),
-        home.join("bin"),
-        home.join(".volta/bin"),
-        home.join(".asdf/shims"),
-        home.join(".local/share/mise/shims"),
-        home.join(".bun/bin"),
-        home.join(".cargo/bin"),
-    ];
-    let nvm_versions = home.join(".nvm/versions/node");
-    let mut nvm_bins = fs::read_dir(nvm_versions)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-    nvm_bins.sort_by_key(|path| std::cmp::Reverse(node_version_key(path)));
-    paths.extend(nvm_bins.into_iter().map(|path| path.join("bin")));
-    paths
-        .into_iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect()
-}
-
-fn node_version_key(path: &Path) -> (u64, u64, u64) {
-    let version = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .trim_start_matches('v');
-    let mut parts = version
-        .split('.')
-        .map(|part| part.parse::<u64>().unwrap_or_default());
-    (
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default(),
-        parts.next().unwrap_or_default(),
-    )
-}
-
 fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<TerminalOutputBuffer>>)
 where
     R: Read + Send + 'static,
@@ -17445,6 +17380,10 @@ while True:
         assert!(nvm_paths[2].ends_with("v9.9.9/bin"));
         assert!(paths.iter().any(|path| path.ends_with(".volta/bin")));
         assert!(paths.iter().any(|path| path.ends_with(".asdf/shims")));
+        assert!(paths.iter().any(|path| path.ends_with(".grok/bin")));
+        assert!(paths.iter().any(|path| path.ends_with(".kimi-code/bin")));
+        assert!(paths.iter().any(|path| path.ends_with(".npm-global/bin")));
+        assert!(paths.iter().any(|path| path.ends_with(".cursor/bin")));
     }
 
     #[test]
