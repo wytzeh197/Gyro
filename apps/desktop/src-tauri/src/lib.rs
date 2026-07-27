@@ -1356,6 +1356,7 @@ struct ProviderChatStreamEvent {
 struct ProviderRunnerOutput {
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
+    rate_limits: Vec<ProviderRateLimitWindow>,
     response: String,
     resume_cursor: Option<ProviderResumeCursor>,
     retry_count: u32,
@@ -1363,14 +1364,28 @@ struct ProviderRunnerOutput {
     output_summary: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+/// What a turn consumed of the model's context window.
+///
+/// Every count is optional because the provider CLIs disagree about what they
+/// report: Codex and Claude Code both publish token usage, while the ACP agents
+/// publish none. Zero-filling the gap would read downstream as "this turn used
+/// no context" and throw away the composer's own estimate, so an unreported
+/// count stays absent and only the window — which Gyro can always resolve —
+/// is guaranteed to be present.
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderContextUsage {
-    input_tokens: u64,
-    cached_input_tokens: u64,
-    output_tokens: u64,
-    reasoning_output_tokens: u64,
-    total_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     model_context_window: Option<u64>,
 }
 
@@ -1414,6 +1429,27 @@ struct ProviderUsageSnapshot {
     provider_id: String,
     windows: Vec<ProviderUsageWindow>,
     fetched_at: String,
+}
+
+/// A plan limit a provider reported while answering, rather than on request.
+///
+/// Codex answers `account/rateLimits/read` with a used percentage. Claude Code
+/// has no equivalent command and instead announces limits on the chat stream,
+/// where it names the window and when it resets but never how much of it is
+/// spent. `used_percent` is therefore optional: a bar that invented a fill for
+/// the providers that do not measure one would be indistinguishable from a
+/// measured bar, and wrong in the case that matters — near the limit.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ProviderRateLimitWindow {
+    id: String,
+    label: String,
+    /// `ok`, `warning`, or `exhausted`.
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    used_percent: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resets_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3181,10 +3217,20 @@ fn run_provider_chat_blocking(
                 serde_json::Value::Array(artifact_extraction.items.clone()),
             );
         }
-        if let Some(context_usage) = runner_output.context_usage.as_ref() {
+        if let Some(context_usage) = provider_context_usage_with_window(
+            runner_output.context_usage.clone(),
+            &request.provider_id,
+            request.model_id.as_deref(),
+        ) {
             object.insert(
                 "contextUsage".into(),
-                serde_json::to_value(context_usage).map_err(to_string)?,
+                serde_json::to_value(&context_usage).map_err(to_string)?,
+            );
+        }
+        if !runner_output.rate_limits.is_empty() {
+            object.insert(
+                "rateLimits".into(),
+                serde_json::to_value(&runner_output.rate_limits).map_err(to_string)?,
             );
         }
     }
@@ -9523,6 +9569,8 @@ fn run_kimi_acp_chat(
     Ok(ProviderRunnerOutput {
         activities,
         context_usage: None,
+        // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
+        rate_limits: Vec::new(),
         response: response.clone(),
         resume_cursor: Some(ProviderResumeCursor {
             kind: runtime.cursor_kind.into(),
@@ -9628,6 +9676,7 @@ fn run_openai_codex_chat(
             return Ok(ProviderRunnerOutput {
                 activities: provider_activities_for_response(output.activities, &response),
                 context_usage: output.context_usage,
+                rate_limits: output.rate_limits,
                 response,
                 resume_cursor: provider_session_id
                     .clone()
@@ -9652,6 +9701,7 @@ fn run_openai_codex_chat(
             return Ok(ProviderRunnerOutput {
                 activities: provider_activities_for_response(output.activities, &stdout),
                 context_usage: output.context_usage,
+                rate_limits: output.rate_limits,
                 response: stdout,
                 resume_cursor: provider_session_id
                     .clone()
@@ -10117,6 +10167,7 @@ fn run_openai_codex_app_server_chat(
         Ok(ProviderRunnerOutput {
             activities: provider_activities_for_response(activities, &response),
             context_usage,
+            rate_limits: Vec::new(),
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "codex-session".into(),
@@ -11034,6 +11085,7 @@ fn run_anthropic_claude_chat(
             .map(|_| session_id.as_str()),
         &session_id,
         request.model_id.as_deref(),
+        request.reasoning_effort.as_deref(),
         &request.mode,
         request.require_command_approval,
         request.require_file_edit_approval,
@@ -11082,7 +11134,8 @@ fn run_anthropic_claude_chat(
         let provider_session_id = session_id.clone();
         return Ok(ProviderRunnerOutput {
             activities: provider_activities_for_response(output.activities, &response),
-            context_usage: None,
+            context_usage: output.context_usage,
+            rate_limits: output.rate_limits,
             response,
             resume_cursor: Some(ProviderResumeCursor {
                 kind: "claude-session".into(),
@@ -11224,6 +11277,7 @@ fn claude_chat_args(
     resume_session_id: Option<&str>,
     session_id: &str,
     model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
     mode: &ChatMode,
     require_command_approval: bool,
     require_file_edit_approval: bool,
@@ -11249,6 +11303,10 @@ fn claude_chat_args(
     if let Some(model) = model_id.map(str::trim).filter(|model| !model.is_empty()) {
         args.push("--model".into());
         args.push(model.into());
+    }
+    if let Some(effort) = claude_reasoning_effort_arg(reasoning_effort) {
+        args.push("--effort".into());
+        args.push(effort);
     }
     let capability_tools = CAPABILITY_DESCRIPTORS
         .iter()
@@ -12044,6 +12102,17 @@ fn codex_reasoning_effort_arg(
     supported.then_some(effort)
 }
 
+/// The `claude --effort <level>` value for a requested reasoning effort.
+///
+/// Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`. `ultra` is
+/// a GPT-5.6 level with no Claude equivalent, and passing it through would make
+/// the CLI reject the whole run, so it is dropped here and the model keeps its
+/// own default.
+fn claude_reasoning_effort_arg(reasoning_effort: Option<&str>) -> Option<String> {
+    let effort = reasoning_effort?.trim().to_ascii_lowercase();
+    matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max").then_some(effort)
+}
+
 fn append_provider_status_event(
     store: &SessionStore,
     session_id: Uuid,
@@ -12454,6 +12523,7 @@ fn push_bounded(
 struct StreamingCommandOutput {
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
+    rate_limits: Vec<ProviderRateLimitWindow>,
     status_success: bool,
     status_label: String,
     stdout: String,
@@ -12466,6 +12536,9 @@ struct StreamingCommandOutput {
 struct StreamingCommandState {
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
+    /// Newest reading per window id. A run can announce the same window more
+    /// than once, and only the last reading describes where the plan stands.
+    rate_limits: Vec<ProviderRateLimitWindow>,
     stdout_text: String,
     stdout_text_chars: usize,
     stdout_text_truncated: bool,
@@ -12489,6 +12562,7 @@ impl StreamingCommandState {
         Self {
             activities: Vec::new(),
             context_usage: None,
+            rate_limits: Vec::new(),
             stdout_text: String::new(),
             stdout_text_chars: 0,
             stdout_text_truncated: false,
@@ -12752,6 +12826,7 @@ fn run_streaming_command(
     Ok(StreamingCommandOutput {
         activities: stream_state.activities,
         context_usage: stream_state.context_usage,
+        rate_limits: stream_state.rate_limits,
         status_success: outcome.succeeded(),
         status_label,
         stdout: stream_state.stdout_text,
@@ -12785,8 +12860,13 @@ fn handle_provider_stdout_line(
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
     }
-    if let Some(context_usage) = provider_context_usage_from_codex_exec(&value) {
+    if let Some(context_usage) = provider_context_usage_from_codex_exec(&value)
+        .or_else(|| provider_context_usage_from_claude_stream(&value))
+    {
         stream_state.context_usage = Some(context_usage);
+    }
+    if let Some(rate_limit) = provider_rate_limit_from_claude_stream(&value) {
+        merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
     }
     if let Some(commentary) = extract_provider_commentary_activity(&value) {
         if let Some(activity) = stream_state.push_activity(commentary) {
@@ -12835,23 +12915,15 @@ fn provider_context_usage_from_app_server(
     let token_usage = params.get("tokenUsage")?;
     let last = token_usage.get("last")?;
     Some(ProviderContextUsage {
-        input_tokens: last.get("inputTokens")?.as_u64()?,
+        input_tokens: Some(last.get("inputTokens")?.as_u64()?),
         cached_input_tokens: last
             .get("cachedInputTokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
-        output_tokens: last
-            .get("outputTokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
+            .and_then(serde_json::Value::as_u64),
+        output_tokens: last.get("outputTokens").and_then(serde_json::Value::as_u64),
         reasoning_output_tokens: last
             .get("reasoningOutputTokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
-        total_tokens: last
-            .get("totalTokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
+            .and_then(serde_json::Value::as_u64),
+        total_tokens: last.get("totalTokens").and_then(serde_json::Value::as_u64),
         model_context_window: token_usage
             .get("modelContextWindow")
             .and_then(serde_json::Value::as_u64),
@@ -12866,28 +12938,215 @@ fn provider_context_usage_from_codex_exec(
     }
     let usage = value.get("usage")?;
     Some(ProviderContextUsage {
-        input_tokens: usage.get("input_tokens")?.as_u64()?,
+        input_tokens: Some(usage.get("input_tokens")?.as_u64()?),
         cached_input_tokens: usage
             .get("cached_input_tokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
+            .and_then(serde_json::Value::as_u64),
         output_tokens: usage
             .get("output_tokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
+            .and_then(serde_json::Value::as_u64),
         reasoning_output_tokens: usage
             .get("reasoning_output_tokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
+            .and_then(serde_json::Value::as_u64),
         total_tokens: usage
             .get("total_tokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default(),
+            .and_then(serde_json::Value::as_u64),
         model_context_window: usage
             .get("model_context_window")
             .or_else(|| value.get("model_context_window"))
             .and_then(serde_json::Value::as_u64),
     })
+}
+
+/// Read a turn's token usage out of Claude Code's `stream-json` output.
+///
+/// Claude Code reports the request's cached tokens separately from the tokens
+/// it actually sent, so `input_tokens` alone describes a few hundred tokens of
+/// a conversation holding hundreds of thousands. What occupies the window is
+/// the sum of the fresh input and both cache buckets, and that sum is what the
+/// composer meter needs.
+///
+/// The `result` frame closes the turn and carries the authoritative totals plus
+/// the model's real context window; the per-message `assistant` frames carry
+/// the same shape mid-turn and keep the meter moving on a long run.
+fn provider_context_usage_from_claude_stream(
+    value: &serde_json::Value,
+) -> Option<ProviderContextUsage> {
+    let frame_type = value.get("type").and_then(serde_json::Value::as_str)?;
+    let usage = match frame_type {
+        "result" => value.get("usage")?,
+        "assistant" => value.get("message")?.get("usage")?,
+        _ => return None,
+    };
+    let field = |key: &str| usage.get(key).and_then(serde_json::Value::as_u64);
+    let fresh_input = field("input_tokens")?;
+    let cache_creation = field("cache_creation_input_tokens").unwrap_or_default();
+    let cache_read = field("cache_read_input_tokens").unwrap_or_default();
+    let input_tokens = fresh_input + cache_creation + cache_read;
+    let output_tokens = field("output_tokens").unwrap_or_default();
+    Some(ProviderContextUsage {
+        input_tokens: Some(input_tokens),
+        cached_input_tokens: Some(cache_creation + cache_read),
+        output_tokens: Some(output_tokens),
+        reasoning_output_tokens: None,
+        total_tokens: Some(input_tokens + output_tokens),
+        model_context_window: claude_stream_context_window(value),
+    })
+}
+
+/// The context window Claude Code attributes to the model it just ran.
+///
+/// Only the `result` frame carries `modelUsage`, and it is keyed by model id,
+/// so the window is read from whichever entry reports one rather than by
+/// matching a name Gyro would have to keep in step with the CLI's aliases.
+fn claude_stream_context_window(value: &serde_json::Value) -> Option<u64> {
+    value
+        .get("modelUsage")?
+        .as_object()?
+        .values()
+        .find_map(|entry| {
+            entry
+                .get("contextWindow")
+                .and_then(serde_json::Value::as_u64)
+        })
+}
+
+/// Read a plan limit out of Claude Code's `rate_limit_event` frame.
+///
+/// The frame names the window (`five_hour`, `weekly`, …), says whether the
+/// account is inside it, and gives the reset time. It carries no used
+/// percentage, so only an exhausted window resolves to a number — that one is
+/// measured, not guessed. Overage counts as exhausted: the plan limit is spent
+/// even though the request went through.
+fn provider_rate_limit_from_claude_stream(
+    value: &serde_json::Value,
+) -> Option<ProviderRateLimitWindow> {
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("rate_limit_event") {
+        return None;
+    }
+    let info = value.get("rate_limit_info")?;
+    let raw_type = info
+        .get("rateLimitType")
+        .and_then(serde_json::Value::as_str)?;
+    let (id, label) = provider_rate_limit_window_label(raw_type);
+    let raw_status = info
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("allowed");
+    let using_overage = info
+        .get("isUsingOverage")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or_default();
+    let status = match raw_status {
+        "rejected" | "blocked" => "exhausted",
+        "warning" | "approaching_limit" => "warning",
+        _ if using_overage => "exhausted",
+        _ => "ok",
+    };
+    Some(ProviderRateLimitWindow {
+        id,
+        label,
+        status: status.into(),
+        used_percent: (status == "exhausted").then_some(100),
+        resets_at: info
+            .get("resetsAt")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+            .map(|timestamp| timestamp.to_rfc3339()),
+    })
+}
+
+/// Gyro's id and display label for a provider's window name.
+///
+/// Falls through to a humanised form of whatever the provider sent so a window
+/// Gyro has not seen before still reaches the composer with a readable name
+/// rather than being dropped.
+fn provider_rate_limit_window_label(raw_type: &str) -> (String, String) {
+    match raw_type {
+        "five_hour" | "5_hour" | "session" => ("five-hour".into(), "5-hour limit".into()),
+        "weekly" | "seven_day" => ("weekly".into(), "Weekly · all models".into()),
+        "weekly_opus" | "seven_day_opus" => ("weekly-opus".into(), "Weekly · Opus".into()),
+        other => (
+            other.replace('_', "-"),
+            format!(
+                "{}{} limit",
+                other[..1].to_uppercase(),
+                other[1..].replace('_', " ")
+            ),
+        ),
+    }
+}
+
+/// Keep the newest reading for each window.
+fn merge_provider_rate_limit(
+    windows: &mut Vec<ProviderRateLimitWindow>,
+    window: ProviderRateLimitWindow,
+) {
+    match windows.iter_mut().find(|existing| existing.id == window.id) {
+        Some(existing) => *existing = window,
+        None => windows.push(window),
+    }
+    // The shorter window is the one a run hits first, so it leads the list.
+    windows.sort_by_key(|window| match window.id.as_str() {
+        "five-hour" => 0,
+        "weekly" => 1,
+        _ => 2,
+    });
+}
+
+/// The context window a provider's model exposes, in tokens.
+///
+/// Providers that report their own window win; this table is what answers for
+/// the ones that never do. Without it the composer meter falls back to a single
+/// default and measures a 1M-token model against 128K — or the reverse — which
+/// makes the remaining-context number wrong in exactly the situation it matters.
+///
+/// Keep in step with `providerCatalog` in `packages/ui/src/provider-catalog.ts`;
+/// `check-workbench-ui` asserts the two agree.
+fn provider_model_context_window(provider_id: &str, model_id: Option<&str>) -> Option<u64> {
+    let model_id = model_id.map(str::trim).unwrap_or_default();
+    let window = match provider_id {
+        "openai" => match model_id {
+            "gpt-5.4-mini" => 400_000,
+            _ => 1_050_000,
+        },
+        "anthropic" => match model_id {
+            "claude-haiku-4-5" => 200_000,
+            _ => 1_000_000,
+        },
+        "kimi" => 1_000_000,
+        "gemini" => 1_000_000,
+        "xai" => 131_072,
+        _ => return None,
+    };
+    Some(window)
+}
+
+/// Guarantee a turn's usage record carries a context window.
+///
+/// The composer meter reports "used of window". A provider that reports usage
+/// without a window, or reports nothing at all, would otherwise be measured
+/// against a hardcoded default, so the window is filled in from Gyro's own
+/// catalog and a provider with no usage at all still emits a window-only
+/// record. The absent counts are what tell the composer to keep estimating.
+fn provider_context_usage_with_window(
+    reported: Option<ProviderContextUsage>,
+    provider_id: &str,
+    model_id: Option<&str>,
+) -> Option<ProviderContextUsage> {
+    let catalog_window = provider_model_context_window(provider_id, model_id);
+    match reported {
+        Some(mut usage) => {
+            if usage.model_context_window.is_none() {
+                usage.model_context_window = catalog_window;
+            }
+            Some(usage)
+        }
+        None => catalog_window.map(|window| ProviderContextUsage {
+            model_context_window: Some(window),
+            ..ProviderContextUsage::default()
+        }),
+    }
 }
 
 fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
@@ -17343,6 +17602,7 @@ while True:
             None,
             "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
             Some("sonnet"),
+            Some("xhigh"),
             &ChatMode::Normal,
             true,
             true,
@@ -17363,11 +17623,15 @@ while True:
         assert!(fresh_claude
             .windows(2)
             .any(|args| args == ["--model", "sonnet"]));
+        assert!(fresh_claude
+            .windows(2)
+            .any(|args| args == ["--effort", "xhigh"]));
         assert_eq!(fresh_claude.last(), Some(&"hello".to_string()));
 
         let auto_approve_claude = claude_chat_args(
             None,
             "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
+            None,
             None,
             &ChatMode::Normal,
             false,
@@ -17382,6 +17646,7 @@ while True:
         let full_access_claude = claude_chat_args(
             None,
             "019f4612-7e58-7412-9fe9-5f0d6cb29c8e",
+            None,
             None,
             &ChatMode::Normal,
             false,
@@ -17402,6 +17667,7 @@ while True:
             Some("019f4612-7e58-7412-9fe9-5f0d6cb29c8e"),
             "unused",
             None,
+            Some("ultra"),
             &ChatMode::Plan,
             false,
             false,
@@ -17411,6 +17677,9 @@ while True:
         );
         assert!(resumed_claude.contains(&"--resume".to_string()));
         assert!(resumed_claude.contains(&"plan".to_string()));
+        // `ultra` is a GPT-5.6 level Claude Code rejects, so it is dropped
+        // rather than passed through to fail the run.
+        assert!(!resumed_claude.contains(&"--effort".to_string()));
         assert!(resumed_claude.contains(&"--mcp-config".to_string()));
         assert!(resumed_claude.contains(&"--strict-mcp-config".to_string()));
         assert_eq!(
@@ -17456,6 +17725,7 @@ while True:
                     resume.then_some(session),
                     session,
                     Some("claude-sonnet-5"),
+                    Some("high"),
                     &mode,
                     require_command,
                     require_edit,
@@ -18042,7 +18312,7 @@ while True:
             }
         }))
         .unwrap();
-        assert_eq!(usage.input_tokens, 42_137);
+        assert_eq!(usage.input_tokens, Some(42_137));
         assert_eq!(usage.model_context_window, Some(128_000));
     }
 
@@ -18060,8 +18330,173 @@ while True:
             }
         }))
         .unwrap();
-        assert_eq!(usage.input_tokens, 42_137);
+        assert_eq!(usage.input_tokens, Some(42_137));
         assert_eq!(usage.model_context_window, Some(128_000));
+    }
+
+    #[test]
+    fn claude_stream_context_usage_counts_cached_input() {
+        let usage = provider_context_usage_from_claude_stream(&serde_json::json!({
+            "type": "result",
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 7415,
+                "cache_read_input_tokens": 11609,
+                "output_tokens": 53
+            },
+            "modelUsage": {
+                "claude-haiku-4-5": { "contextWindow": 200000 }
+            }
+        }))
+        .unwrap();
+        // The window is what the conversation occupies, not what the last
+        // request re-sent, so both cache buckets count toward the input.
+        assert_eq!(usage.input_tokens, Some(19_034));
+        assert_eq!(usage.cached_input_tokens, Some(19_024));
+        assert_eq!(usage.total_tokens, Some(19_087));
+        assert_eq!(usage.model_context_window, Some(200_000));
+    }
+
+    #[test]
+    fn claude_stream_context_usage_tracks_assistant_frames() {
+        let usage = provider_context_usage_from_claude_stream(&serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "usage": { "input_tokens": 10, "cache_read_input_tokens": 500, "output_tokens": 3 }
+            }
+        }))
+        .unwrap();
+        assert_eq!(usage.input_tokens, Some(510));
+        assert_eq!(usage.model_context_window, None);
+    }
+
+    #[test]
+    fn every_catalog_provider_resolves_a_context_window() {
+        assert_eq!(
+            provider_model_context_window("anthropic", Some("claude-haiku-4-5")),
+            Some(200_000)
+        );
+        assert_eq!(
+            provider_model_context_window("openai", Some("gpt-5.4-mini")),
+            Some(400_000)
+        );
+        for provider_id in ["openai", "anthropic", "kimi", "gemini", "xai"] {
+            assert!(provider_model_context_window(provider_id, None).is_some());
+        }
+    }
+
+    #[test]
+    fn providers_without_reported_usage_still_carry_a_window() {
+        // Gemini and Grok run through ACP, which reports no tokens at all. The
+        // meter still has to measure against the right window.
+        let usage =
+            provider_context_usage_with_window(None, "gemini", Some("gemini-default")).unwrap();
+        assert_eq!(usage.model_context_window, Some(1_000_000));
+        assert_eq!(usage.input_tokens, None);
+
+        let reported = provider_context_usage_with_window(
+            Some(ProviderContextUsage {
+                input_tokens: Some(1_000),
+                ..ProviderContextUsage::default()
+            }),
+            "xai",
+            Some("grok-4.5"),
+        )
+        .unwrap();
+        assert_eq!(reported.model_context_window, Some(131_072));
+        assert_eq!(reported.input_tokens, Some(1_000));
+    }
+
+    #[test]
+    fn claude_rate_limit_events_name_the_window_and_reset() {
+        let window = provider_rate_limit_from_claude_stream(&serde_json::json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "resetsAt": 1785157800,
+                "rateLimitType": "five_hour",
+                "isUsingOverage": false
+            }
+        }))
+        .unwrap();
+        assert_eq!(window.id, "five-hour");
+        assert_eq!(window.label, "5-hour limit");
+        assert_eq!(window.status, "ok");
+        // Claude Code never says how much of the window is spent, and a bar
+        // filled to an invented level is worse than an unfilled one.
+        assert_eq!(window.used_percent, None);
+        assert!(window.resets_at.is_some());
+    }
+
+    #[test]
+    fn claude_overage_counts_the_plan_limit_as_spent() {
+        let window = provider_rate_limit_from_claude_stream(&serde_json::json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "rejected",
+                "rateLimitType": "weekly",
+                "isUsingOverage": true
+            }
+        }))
+        .unwrap();
+        assert_eq!(window.id, "weekly");
+        assert_eq!(window.status, "exhausted");
+        assert_eq!(window.used_percent, Some(100));
+
+        let allowed_on_overage = provider_rate_limit_from_claude_stream(&serde_json::json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "rateLimitType": "five_hour",
+                "isUsingOverage": true
+            }
+        }))
+        .unwrap();
+        assert_eq!(allowed_on_overage.status, "exhausted");
+    }
+
+    #[test]
+    fn rate_limit_windows_keep_the_newest_reading_shortest_first() {
+        let mut windows = Vec::new();
+        for (raw_type, status) in [
+            ("weekly", "allowed"),
+            ("five_hour", "allowed"),
+            ("five_hour", "rejected"),
+        ] {
+            let window = provider_rate_limit_from_claude_stream(&serde_json::json!({
+                "type": "rate_limit_event",
+                "rate_limit_info": { "status": status, "rateLimitType": raw_type }
+            }))
+            .unwrap();
+            merge_provider_rate_limit(&mut windows, window);
+        }
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].id, "five-hour");
+        assert_eq!(windows[0].status, "exhausted");
+        assert_eq!(windows[1].id, "weekly");
+    }
+
+    #[test]
+    fn unknown_rate_limit_windows_still_reach_the_composer() {
+        let window = provider_rate_limit_from_claude_stream(&serde_json::json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "warning", "rateLimitType": "monthly_opus" }
+        }))
+        .unwrap();
+        assert_eq!(window.id, "monthly-opus");
+        assert_eq!(window.label, "Monthly opus limit");
+        assert_eq!(window.status, "warning");
+    }
+
+    #[test]
+    fn claude_effort_arg_drops_levels_claude_code_rejects() {
+        assert_eq!(
+            claude_reasoning_effort_arg(Some("xhigh")),
+            Some("xhigh".into())
+        );
+        assert_eq!(claude_reasoning_effort_arg(Some("max")), Some("max".into()));
+        assert_eq!(claude_reasoning_effort_arg(Some("ultra")), None);
+        assert_eq!(claude_reasoning_effort_arg(None), None);
     }
 
     #[test]
@@ -18219,6 +18654,7 @@ while True:
                 Ok(ProviderRunnerOutput {
                     activities: Vec::new(),
                     context_usage: None,
+                    rate_limits: Vec::new(),
                     response: "Recovered".into(),
                     resume_cursor: None,
                     retry_count: 0,
