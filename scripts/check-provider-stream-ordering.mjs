@@ -521,6 +521,111 @@ assert.deepEqual(
   ["commentary-before", "command-after-edit", "completed-final-response"],
 );
 
+// Text that resumes after a tool ran opens a new block, so the timeline can
+// tell a preamble from the answer inside one streamed assistant message.
+const blockEventsRef = { current: new Map([["session-1", []]]) };
+let blockEvents = [];
+const setBlockEvents = (update) => {
+  blockEvents = typeof update === "function" ? update(blockEvents) : update;
+};
+const streamBlockDelta = (sequence, textDelta) =>
+  applyProviderChatStreamDeltas(blockEventsRef, setBlockEvents, [
+    {
+      sessionId: "session-1",
+      turnId: "turn-blocks",
+      providerId: "anthropic",
+      eventId: `block-${sequence}`,
+      sequence,
+      phase: "delta",
+      textDelta,
+    },
+  ]);
+blockEvents = [];
+blockEventsRef.current.set("session-1", []);
+streamBlockDelta(1, "I'll look. ");
+streamBlockDelta(2, "at the code.");
+applyProviderChatStreamActivity(blockEventsRef, setBlockEvents, {
+  sessionId: "session-1",
+  turnId: "turn-blocks",
+  providerId: "anthropic",
+  eventId: "block-activity",
+  sequence: 3,
+  activitySequence: 3,
+  phase: "activity",
+  activityId: "read-1",
+  activityKind: "tool",
+  activityLabel: "Read surfaces.tsx",
+  activityStatus: "done",
+});
+streamBlockDelta(4, "Here is the answer.");
+const streamedAssistant = blockEventsRef.current
+  .get("session-1")
+  .find((event) => event.kind === "assistant-message");
+assert.equal(
+  streamedAssistant.message,
+  "I'll look. at the code.Here is the answer.",
+);
+assert.deepEqual(
+  streamedAssistant.payload.segments.map((segment) => segment.start),
+  [0, 23],
+  "a block should open where text resumed after the tool",
+);
+assert.equal(
+  streamedAssistant.message.slice(23),
+  "Here is the answer.",
+  "the block mark should land on the resumed text",
+);
+
+// The durable response is the same text concatenated, so the marks survive it
+// and the preamble does not collapse back into the answer.
+const persistedBlockResponse = {
+  id: "persisted-block-response",
+  sessionId: "session-1",
+  turnId: "turn-blocks",
+  createdAt: "2026-07-13T09:52:00.000Z",
+  kind: "assistant-message",
+  message: streamedAssistant.message,
+  payload: { kind: "provider-response" },
+};
+const blockMerged = mergeProviderResponseEvents(
+  blockEventsRef.current.get("session-1"),
+  [persistedBlockResponse],
+);
+assert.deepEqual(
+  blockMerged
+    .find((event) => event.kind === "assistant-message")
+    .payload.segments.map((segment) => segment.start),
+  [0, 23],
+  "completion should keep the block marks the stream recorded",
+);
+
+// An unsequenced event stays behind the event it followed instead of being
+// dealt into another event's time slot.
+const unsequencedApproval = {
+  id: "approval-after-command",
+  sessionId: "session-1",
+  turnId: "turn-stable-timeline",
+  createdAt: "2026-07-13T09:48:09.000Z",
+  kind: "system-event",
+  message: "Approve command",
+  payload: { kind: "provider-approval" },
+};
+assert.deepEqual(
+  orderedChatTimelineEvents([
+    laterCommentary,
+    timelineCommand,
+    unsequencedApproval,
+    firstCommentary,
+  ]).map((event) => event.id),
+  [
+    "commentary-before",
+    "command-after-edit",
+    "approval-after-command",
+    "commentary-after",
+  ],
+  "an unsequenced event should follow the event it arrived behind",
+);
+
 console.log(
-  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits).",
+  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits, streamed text blocks).",
 );
