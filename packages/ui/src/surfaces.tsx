@@ -97,16 +97,22 @@ import {
   type ChatArtifactActions,
 } from "./chat-artifacts";
 import {
-  interleavedChatTimelineItems,
+  chatTurnTimelineSections,
   orderedChatTimelineEvents,
 } from "./chat-timeline";
 import {
+  composerLimitWindows,
   estimateComposerContextUsage,
   type ComposerContextUsage,
+  type ComposerLimitWindow,
 } from "./context-usage";
 import {
-  globalSearchMatchScore,
+  createGlobalSearchTarget,
+  GlobalSearchRanker,
   normalizedGlobalSearchText,
+  type GlobalSearchMatch,
+  type GlobalSearchRange,
+  type GlobalSearchTarget,
 } from "./global-search";
 import {
   workspaceCommandRegistry,
@@ -154,6 +160,8 @@ import type {
   GlobalSearchSelection,
   GitBranchCatalog,
   GyroConfig,
+  ModelFocus,
+  ModelFollowMode,
   ModelProviderConfig,
   Notification,
   NotificationPermissionState,
@@ -4753,6 +4761,10 @@ export function ChatGridSurface({
         const paneMaximized = pane?.paneId === maximizedPaneId;
         const paneFocused = pane?.paneId === focusedPaneId;
         const hiddenByMaximize = isMaximized && !paneMaximized;
+        const slotArea =
+          arrangement === "grid"
+            ? chatGridSlotArea(slots, slotIndex)
+            : undefined;
         return (
           <section
             aria-label={pane ? `Chat pane ${slotIndex + 1}` : "Empty chat pane"}
@@ -4768,6 +4780,7 @@ export function ChatGridSurface({
             key={pane?.paneId ?? `empty-${slotIndex}`}
             onFocusCapture={() => pane && onFocusPane(pane)}
             onPointerDown={() => pane && onFocusPane(pane)}
+            style={slotArea}
           >
             {pane
               ? renderPane(pane, {
@@ -4896,6 +4909,20 @@ function chatDragSource(dataTransfer: DataTransfer) {
   return undefined;
 }
 
+// Pin every slot to its own cell of the 2×2 grid, and let a pane whose column
+// partner is empty stretch across both rows — three chats then fill the whole
+// height instead of leaving a blank quadrant next to a half-height column.
+function chatGridSlotArea(
+  slots: Array<ChatPaneRef | null>,
+  slotIndex: number,
+): CSSProperties {
+  const partnerIndex = slotIndex < 2 ? slotIndex + 2 : slotIndex - 2;
+  return {
+    gridColumn: (slotIndex % 2) + 1,
+    gridRow: slots[partnerIndex] ? (slotIndex < 2 ? 1 : 2) : "1 / -1",
+  };
+}
+
 function effectiveChatArrangement(
   layout: ChatProjectLayout,
   occupiedCount: number,
@@ -4941,6 +4968,10 @@ type ChatSurfaceProps = {
   browserPreview?: BrowserPreview;
   capabilityActivities?: CapabilityActivity[];
   capabilityPolicy?: ProjectCapabilityPolicy;
+  modelFocus?: ModelFocus;
+  modelFollow?: ModelFollowMode;
+  onLoadModelFocusPeek?: (focus: ModelFocus) => Promise<ModelFocusPeekContent>;
+  onOpenModelFocus?: (focus: ModelFocus) => void;
   onboarding?: OnboardingState;
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
@@ -5045,6 +5076,10 @@ export function ChatSurface({
   browserPreview,
   capabilityActivities = [],
   capabilityPolicy,
+  modelFocus,
+  modelFollow = "peek",
+  onLoadModelFocusPeek,
+  onOpenModelFocus,
   onboarding,
   sessionPlan,
   sessionGoal,
@@ -5114,6 +5149,52 @@ export function ChatSurface({
     activeThreadContextMenu !== null,
     () => setActiveThreadContextMenu(null),
   );
+  const [activePeek, setActivePeek] = useState<{
+    focus: ModelFocus;
+    isLoading: boolean;
+    content?: ModelFocusPeekContent;
+    error?: string;
+  }>();
+  const visibleModelFocus = modelFollow === "off" ? undefined : modelFocus;
+  const isModelFocusBusy = Boolean(
+    visibleModelFocus &&
+    capabilityActivities.some(
+      (activity) =>
+        activity.callId === visibleModelFocus.callId &&
+        ["requested", "waiting", "running"].includes(activity.status),
+    ),
+  );
+  const openModelFocusPeek = useCallback(
+    (focus: ModelFocus) => {
+      setActivePeek({ focus, isLoading: Boolean(onLoadModelFocusPeek) });
+      if (!onLoadModelFocusPeek) return;
+      void onLoadModelFocusPeek(focus)
+        .then((content) =>
+          setActivePeek((current) =>
+            current?.focus.callId === focus.callId
+              ? { ...current, content, isLoading: false }
+              : current,
+          ),
+        )
+        .catch((error: unknown) =>
+          setActivePeek((current) =>
+            current?.focus.callId === focus.callId
+              ? { ...current, error: String(error), isLoading: false }
+              : current,
+          ),
+        );
+    },
+    [onLoadModelFocusPeek],
+  );
+  // A peek is tied to one focus; when the model moves on, close it rather than
+  // leaving a stale slice hovering over the thread.
+  useEffect(() => {
+    setActivePeek((current) =>
+      current && current.focus.callId !== modelFocus?.callId
+        ? undefined
+        : current,
+    );
+  }, [modelFocus?.callId]);
   useEffect(() => {
     setLocalDraft(draft);
   }, [draft, draftResetToken]);
@@ -5303,6 +5384,15 @@ export function ChatSurface({
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
     : undefined;
+  const composerLimits = useMemo(
+    () =>
+      composerLimitWindows(
+        deferredEvents,
+        contextModel,
+        composerProviderUsage?.windows ?? [],
+      ),
+    [composerProviderUsage?.windows, contextModel, deferredEvents],
+  );
   const transcriptState = useMemo(
     () => deriveTranscriptState(deferredEvents),
     [deferredEvents],
@@ -5495,6 +5585,7 @@ export function ChatSurface({
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
             providerUsage={composerProviderUsage}
+            limitWindows={composerLimits}
             savedProjects={savedProjects}
             variant="hero"
             workspaceMode={workspaceMode}
@@ -5655,6 +5746,7 @@ export function ChatSurface({
           <ChatSurfaceControls
             activePanel={activeRailPanel}
             isToolPanelOpen={Boolean(isToolPanelOpen)}
+            modelFocus={visibleModelFocus}
             onCloseChat={onCloseChat}
             onToggleToolPanel={onToggleToolPanel}
             onToggleEnvironmentRail={onToggleEnvironmentRail}
@@ -5678,6 +5770,28 @@ export function ChatSurface({
         </div>
 
         <div className="gyro-chat-composer-dock">
+          {activePeek ? (
+            <ModelFocusPeek
+              content={activePeek.content}
+              error={activePeek.error}
+              focus={activePeek.focus}
+              isLoading={activePeek.isLoading}
+              onClose={() => setActivePeek(undefined)}
+              onOpen={() => {
+                const focus = activePeek.focus;
+                setActivePeek(undefined);
+                onOpenModelFocus?.(focus);
+              }}
+            />
+          ) : null}
+          {visibleModelFocus ? (
+            <ModelFocusStrip
+              focus={visibleModelFocus}
+              isBusy={isModelFocusBusy}
+              onOpen={() => onOpenModelFocus?.(visibleModelFocus)}
+              onPeek={() => openModelFocusPeek(visibleModelFocus)}
+            />
+          ) : null}
           {isTranscriptAwayFromBottom ? (
             <button
               aria-label="Jump to latest message"
@@ -5720,6 +5834,7 @@ export function ChatSurface({
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
             providerUsage={composerProviderUsage}
+            limitWindows={composerLimits}
             savedProjects={savedProjects}
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
@@ -6035,9 +6150,189 @@ function ChatMessageQueue({
   );
 }
 
+/**
+ * A slice of whatever the model is looking at, rendered over the thread so the
+ * user can check on it without the app navigating away.
+ */
+export type ModelFocusPeekContent = {
+  title: string;
+  subtitle?: string;
+  lines: string[];
+  /** 1-based number of the first entry in `lines`, for the gutter. */
+  startLine?: number;
+  highlightLine?: number;
+};
+
+function ModelFocusIcon({ kind }: { kind: ModelFocus["kind"] }) {
+  if (kind === "terminal") return <Terminal size={14} />;
+  if (kind === "browser") return <Globe2 size={14} />;
+  if (kind === "output") return <ScrollText size={14} />;
+  if (kind === "proposal") return <GitPullRequest size={14} />;
+  return <FileCode2 size={14} />;
+}
+
+function modelFocusVerb(focus: ModelFocus) {
+  switch (focus.kind) {
+    case "terminal":
+      return "Running";
+    case "browser":
+      return "Browsing";
+    case "output":
+      return focus.detail === "Tests" ? "Testing" : "Output";
+    case "proposal":
+      return "Proposing";
+    default:
+      return focus.path ? "Reading" : "Opened";
+  }
+}
+
+function modelFocusHeadline(focus: ModelFocus) {
+  if (focus.kind === "ide" && focus.path && focus.line) {
+    return `${focus.label}:${focus.line}`;
+  }
+  if (focus.kind === "browser" || focus.kind === "terminal") {
+    return focus.detail ?? focus.label;
+  }
+  return focus.label;
+}
+
+/**
+ * The ambient "the model is working here" line above the composer. It reports
+ * position only; navigating is always the user's own click.
+ */
+function ModelFocusStrip({
+  focus,
+  isBusy,
+  onOpen,
+  onPeek,
+}: {
+  focus: ModelFocus;
+  isBusy: boolean;
+  onOpen: () => void;
+  onPeek: () => void;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className={[
+        "gyro-model-focus-strip",
+        `is-${focus.kind}`,
+        isBusy ? "is-busy" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <span aria-hidden="true" className="gyro-model-focus-icon">
+        <ModelFocusIcon kind={focus.kind} />
+      </span>
+      <button
+        aria-label={`Peek at ${modelFocusHeadline(focus)} without leaving the thread`}
+        className="gyro-model-focus-label"
+        onClick={onPeek}
+        title="Peek without leaving the thread"
+        type="button"
+      >
+        <strong>{modelFocusVerb(focus)}</strong>
+        <span>{modelFocusHeadline(focus)}</span>
+      </button>
+      <button className="gyro-model-focus-open" onClick={onOpen} type="button">
+        Open in workspace
+      </button>
+    </div>
+  );
+}
+
+function ModelFocusPeek({
+  content,
+  error,
+  focus,
+  isLoading,
+  onClose,
+  onOpen,
+}: {
+  content?: ModelFocusPeekContent;
+  error?: string;
+  focus: ModelFocus;
+  isLoading: boolean;
+  onClose: () => void;
+  onOpen: () => void;
+}) {
+  const scopeRef = useOutsidePointerDismiss<HTMLDivElement>(true, onClose);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+  const startLine = content?.startLine ?? 1;
+  return (
+    <div
+      aria-label="Model activity peek"
+      className="gyro-model-focus-peek"
+      ref={scopeRef}
+      role="dialog"
+    >
+      <header>
+        <span aria-hidden="true">
+          <ModelFocusIcon kind={focus.kind} />
+        </span>
+        <div>
+          <strong>{content?.title ?? modelFocusHeadline(focus)}</strong>
+          {(content?.subtitle ?? focus.detail) ? (
+            <small>{content?.subtitle ?? focus.detail}</small>
+          ) : null}
+        </div>
+        <button
+          aria-label="Close peek"
+          className="gyro-chat-tool-close"
+          onClick={onClose}
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      </header>
+      <div className="gyro-model-focus-peek-body">
+        {isLoading ? (
+          <p className="is-pending">Loading…</p>
+        ) : error ? (
+          <p className="is-pending">{error}</p>
+        ) : content && content.lines.length > 0 ? (
+          <pre>
+            {content.lines.map((line, index) => {
+              const lineNumber = startLine + index;
+              return (
+                <code
+                  className={
+                    lineNumber === content.highlightLine
+                      ? "is-highlighted"
+                      : undefined
+                  }
+                  key={lineNumber}
+                >
+                  <small>{lineNumber}</small>
+                  <span>{line || " "}</span>
+                </code>
+              );
+            })}
+          </pre>
+        ) : (
+          <p className="is-pending">Nothing to preview yet.</p>
+        )}
+      </div>
+      <footer>
+        <button onClick={onOpen} type="button">
+          Open in workspace
+        </button>
+      </footer>
+    </div>
+  );
+}
+
 function ChatSurfaceControls({
   activePanel,
   isToolPanelOpen,
+  modelFocus,
   onCloseChat,
   onToggleToolPanel,
   onToggleEnvironmentRail,
@@ -6046,12 +6341,18 @@ function ChatSurfaceControls({
 }: {
   activePanel?: ChatSidePanelId;
   isToolPanelOpen: boolean;
+  modelFocus?: ModelFocus;
   onCloseChat?: () => void;
   onToggleToolPanel?: () => void;
   onToggleEnvironmentRail?: () => void;
   onTogglePlanPanel?: () => void;
   planItemCount: number;
 }) {
+  // Peripheral awareness: the surface holding the model's latest work gets a
+  // dot, so it can be found without anything moving on its own.
+  const drawerHasModelActivity = Boolean(
+    modelFocus?.paneTab && !isToolPanelOpen,
+  );
   return (
     <div className="gyro-chat-surface-controls" aria-label="Chat surfaces">
       <button
@@ -6062,14 +6363,22 @@ function ChatSurfaceControls({
         className={[
           "gyro-chat-surface-button",
           isToolPanelOpen ? "is-active" : "",
+          drawerHasModelActivity ? "has-model-activity" : "",
         ]
           .filter(Boolean)
           .join(" ")}
         onClick={onToggleToolPanel}
-        title="Bottom drawer"
+        title={
+          drawerHasModelActivity
+            ? `Bottom drawer · model activity in ${modelFocus?.paneTab}`
+            : "Bottom drawer"
+        }
         type="button"
       >
         <PanelBottom size={15} />
+        {drawerHasModelActivity ? (
+          <span aria-hidden="true" className="gyro-model-activity-dot" />
+        ) : null}
       </button>
       <button
         aria-label={
@@ -12080,16 +12389,21 @@ type GlobalSearchEntry = {
   icon: IconComponent;
   selection: GlobalSearchSelection;
   shortcut?: string;
-  searchText: string;
+  target: GlobalSearchTarget;
   priority: number;
   action?: GlobalSearchAction;
   disabledReason?: string;
 };
 
+type GlobalSearchHit = {
+  entry: GlobalSearchEntry;
+  match: GlobalSearchMatch;
+};
+
 type GlobalSearchGroup = {
   id: string;
   label: string;
-  entries: GlobalSearchEntry[];
+  hits: GlobalSearchHit[];
 };
 
 const legacyGlobalSearchActions: GlobalSearchAction[] = [
@@ -12285,6 +12599,39 @@ function primaryGlobalSearchShortcut(mode: GlobalSearchMode) {
   return isMacPlatform() ? "⌘K" : "Ctrl K";
 }
 
+/** Holds one ranker per collection so keystrokes narrow the previous survivors. */
+function useGlobalSearchRanker(entries: GlobalSearchEntry[]) {
+  const rankerRef = useRef<GlobalSearchRanker<GlobalSearchEntry> | null>(null);
+  if (!rankerRef.current) {
+    rankerRef.current = new GlobalSearchRanker<GlobalSearchEntry>();
+  }
+  rankerRef.current.setCandidates(entries);
+  return rankerRef.current;
+}
+
+function GlobalSearchHighlight({
+  ranges,
+  text,
+}: {
+  ranges: GlobalSearchRange[];
+  text: string;
+}) {
+  if (ranges.length === 0) return <>{text}</>;
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start > cursor) nodes.push(text.slice(cursor, range.start));
+    nodes.push(
+      <mark className="gyro-global-search-hit" key={range.start}>
+        {text.slice(range.start, range.end)}
+      </mark>,
+    );
+    cursor = range.end;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return <>{nodes}</>;
+}
+
 export function CommandPaletteOverlay({
   onClose,
   onSelectDestination,
@@ -12330,7 +12677,7 @@ export function CommandPaletteOverlay({
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const normalizedQuery = normalizedGlobalSearchText(query);
+  const optionRefs = useRef(new Map<string, HTMLButtonElement>());
   const platformShortcut = (shortcut?: GlobalSearchAction["shortcut"]) =>
     shortcut ? (isMacPlatform() ? shortcut.mac : shortcut.other) : undefined;
   const actionEntries = useMemo(
@@ -12342,7 +12689,11 @@ export function CommandPaletteOverlay({
         icon: action.icon,
         selection: { kind: "action", id: action.id },
         shortcut: platformShortcut(action.shortcut),
-        searchText: `${action.label} ${action.meta} ${action.keywords ?? ""}`,
+        target: createGlobalSearchTarget(
+          action.label,
+          action.meta,
+          action.keywords ?? "",
+        ),
         priority:
           recents.indexOf(action.id) >= 0
             ? recents.indexOf(action.id)
@@ -12357,7 +12708,7 @@ export function CommandPaletteOverlay({
       })),
     [hasWorkspace, recents, workspaceTrusted],
   );
-  const sessionEntries = useMemo(() => {
+  const sessionEntries = useMemo<GlobalSearchEntry[]>(() => {
     const pinned = new Set(pinnedSessionIds);
     return [...sessions]
       .sort(
@@ -12366,34 +12717,44 @@ export function CommandPaletteOverlay({
           new Date(second.updatedAt).getTime() -
             new Date(first.updatedAt).getTime(),
       )
-      .map<GlobalSearchEntry>((session, index) => ({
-        id: `session:${session.id}`,
-        label: session.title || "Untitled session",
-        detail:
+      .map<GlobalSearchEntry>((session, index) => {
+        const detail =
           session.summary ||
-          `${workspaceName(session.workspacePath)}${session.providerLabel ? ` · ${session.providerLabel}` : ""}`,
-        icon: pinned.has(session.id) ? Pin : MessageSquare,
-        selection: { kind: "session", sessionId: session.id },
-        searchText: `${session.title} ${session.summary ?? ""} ${session.workspacePath} ${session.providerLabel ?? ""}`,
-        priority: (pinned.has(session.id) ? 0 : 100) + index,
-      }));
+          `${workspaceName(session.workspacePath)}${session.providerLabel ? ` · ${session.providerLabel}` : ""}`;
+        return {
+          id: `session:${session.id}`,
+          label: session.title || "Untitled session",
+          detail,
+          icon: pinned.has(session.id) ? Pin : MessageSquare,
+          selection: { kind: "session", sessionId: session.id },
+          target: createGlobalSearchTarget(
+            session.title || "Untitled session",
+            detail,
+            `${session.workspacePath} ${session.providerLabel ?? ""}`,
+          ),
+          priority: (pinned.has(session.id) ? 0 : 100) + index,
+        };
+      });
   }, [pinnedSessionIds, sessions]);
-  const projectEntries = useMemo(
+  const projectEntries = useMemo<GlobalSearchEntry[]>(
     () =>
-      projects.map<GlobalSearchEntry>((project, index) => ({
-        id: `project:${project.path}`,
-        label: project.label,
-        detail: project.current
+      projects.map<GlobalSearchEntry>((project, index) => {
+        const detail = project.current
           ? "Current project"
-          : project.detail || project.path,
-        icon: project.current ? Folder : HardDrive,
-        selection: { kind: "project", path: project.path },
-        searchText: `${project.label} ${project.path} ${project.detail ?? ""}`,
-        priority: (project.current ? 0 : 100) + index,
-      })),
+          : project.detail || project.path;
+        return {
+          id: `project:${project.path}`,
+          label: project.label,
+          detail,
+          icon: project.current ? Folder : HardDrive,
+          selection: { kind: "project", path: project.path },
+          target: createGlobalSearchTarget(project.label, detail, project.path),
+          priority: (project.current ? 0 : 100) + index,
+        };
+      }),
     [projects],
   );
-  const fileEntries = useMemo(() => {
+  const fileEntries = useMemo<GlobalSearchEntry[]>(() => {
     const recentOrder = new Map(
       recentFilePaths.map((path, index) => [path, index]),
     );
@@ -12411,7 +12772,7 @@ export function CommandPaletteOverlay({
           detail: parent,
           icon: FileCode2,
           selection: { kind: "file", path: file.path },
-          searchText: `${label} ${file.path}`,
+          target: createGlobalSearchTarget(label, parent, file.path),
           priority: recentIndex ?? 1_000 + index,
         };
       })
@@ -12421,111 +12782,66 @@ export function CommandPaletteOverlay({
           first.label.localeCompare(second.label),
       );
   }, [files, recentFilePaths]);
+  const actionRanker = useGlobalSearchRanker(actionEntries);
+  const fileRanker = useGlobalSearchRanker(fileEntries);
+  const projectRanker = useGlobalSearchRanker(projectEntries);
+  const sessionRanker = useGlobalSearchRanker(sessionEntries);
+  // Ranking runs off the deferred query so long file lists never block a
+  // keystroke from painting.
+  const deferredQuery = useDeferredValue(query);
   const groups = useMemo<GlobalSearchGroup[]>(() => {
+    const searching = Boolean(normalizedGlobalSearchText(deferredQuery));
+    const rank = (
+      ranker: GlobalSearchRanker<GlobalSearchEntry>,
+      limit: number,
+    ) =>
+      ranker
+        .rank(deferredQuery, limit)
+        .map(({ item, match }) => ({ entry: item, match }));
     if (mode === "commands") {
-      const entries = normalizedQuery
-        ? actionEntries
-            .map((entry) => ({
-              entry,
-              score: globalSearchMatchScore(
-                query,
-                entry.label,
-                entry.searchText,
-              ),
-            }))
-            .filter(({ score }) => Number.isFinite(score))
-            .sort(
-              (first, second) =>
-                first.score - second.score ||
-                first.entry.priority - second.entry.priority,
-            )
-            .slice(0, 12)
-            .map(({ entry }) => entry)
-        : actionEntries.slice(0, 12);
-      return [{ id: "commands", label: "Commands", entries }].filter(
-        (group) => group.entries.length > 0,
-      );
+      return [
+        { id: "commands", label: "Commands", hits: rank(actionRanker, 12) },
+      ].filter((group) => group.hits.length > 0);
     }
     if (mode === "files") {
-      const entries = normalizedQuery
-        ? fileEntries
-            .map((entry) => ({
-              entry,
-              score: globalSearchMatchScore(
-                query,
-                entry.label,
-                entry.searchText,
-              ),
-            }))
-            .filter(({ score }) => Number.isFinite(score))
-            .sort(
-              (first, second) =>
-                first.score - second.score ||
-                first.entry.priority - second.entry.priority,
-            )
-            .slice(0, 16)
-            .map(({ entry }) => entry)
-        : fileEntries.slice(0, 12);
-      return [{ id: "files", label: "Files", entries }].filter(
-        (group) => group.entries.length > 0,
-      );
-    }
-    if (!normalizedQuery) {
       return [
         {
-          id: "suggested",
-          label: "Suggested",
-          entries: actionEntries.slice(0, 6),
+          id: "files",
+          label: "Files",
+          hits: rank(fileRanker, searching ? 16 : 12),
         },
-        {
-          id: "open-files",
-          label: "Open files",
-          entries: fileEntries.slice(0, 6),
-        },
+      ].filter((group) => group.hits.length > 0);
+    }
+    if (!searching) {
+      return [
+        { id: "suggested", label: "Suggested", hits: rank(actionRanker, 6) },
+        { id: "open-files", label: "Open files", hits: rank(fileRanker, 6) },
         {
           id: "recent-sessions",
           label: "Recent sessions",
-          entries: sessionEntries.slice(0, 5),
+          hits: rank(sessionRanker, 5),
         },
-        {
-          id: "projects",
-          label: "Projects",
-          entries: projectEntries.slice(0, 4),
-        },
-      ].filter((group) => group.entries.length > 0);
+        { id: "projects", label: "Projects", hits: rank(projectRanker, 4) },
+      ].filter((group) => group.hits.length > 0);
     }
-    const ranked = (entries: GlobalSearchEntry[]) =>
-      entries
-        .map((entry) => ({
-          entry,
-          score: globalSearchMatchScore(query, entry.label, entry.searchText),
-        }))
-        .filter(({ score }) => Number.isFinite(score))
-        .sort(
-          (first, second) =>
-            first.score - second.score ||
-            first.entry.priority - second.entry.priority ||
-            first.entry.label.localeCompare(second.entry.label),
-        )
-        .slice(0, 8)
-        .map(({ entry }) => entry);
     return [
-      { id: "files", label: "Files", entries: ranked(fileEntries) },
-      { id: "projects", label: "Projects", entries: ranked(projectEntries) },
-      { id: "sessions", label: "Sessions", entries: ranked(sessionEntries) },
-      { id: "actions", label: "Actions", entries: ranked(actionEntries) },
-    ].filter((group) => group.entries.length > 0);
+      { id: "files", label: "Files", hits: rank(fileRanker, 8) },
+      { id: "projects", label: "Projects", hits: rank(projectRanker, 8) },
+      { id: "sessions", label: "Sessions", hits: rank(sessionRanker, 8) },
+      { id: "actions", label: "Actions", hits: rank(actionRanker, 8) },
+    ].filter((group) => group.hits.length > 0);
   }, [
-    actionEntries,
-    fileEntries,
-    normalizedQuery,
+    actionRanker,
+    deferredQuery,
+    fileRanker,
     mode,
-    projectEntries,
-    query,
-    sessionEntries,
+    projectRanker,
+    sessionRanker,
   ]);
-  const visibleEntries = groups.flatMap((group) => group.entries);
+  const visibleHits = groups.flatMap((group) => group.hits);
+  const visibleEntries = visibleHits.map((hit) => hit.entry);
   const activeEntry = visibleEntries[selectedIndex];
+  const isStale = query !== deferredQuery;
 
   useEffect(() => {
     returnFocusRef.current = document.activeElement as HTMLElement | null;
@@ -12538,6 +12854,12 @@ export function CommandPaletteOverlay({
       setSelectedIndex(Math.max(0, visibleEntries.length - 1));
     }
   }, [selectedIndex, visibleEntries.length]);
+  useEffect(() => {
+    if (!activeEntry) return;
+    optionRefs.current
+      .get(activeEntry.id)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeEntry]);
 
   const activateEntry = (entry?: GlobalSearchEntry) => {
     if (!entry || entry.disabledReason) return;
@@ -12585,10 +12907,17 @@ export function CommandPaletteOverlay({
               ? "Quick Open"
               : "Search Gyro"
         }
-        className="gyro-command-palette is-global-search"
+        className={[
+          "gyro-command-palette is-global-search",
+          isStale ? "is-ranking" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
       >
         <header>
-          <Search size={17} />
+          <span className="gyro-global-search-glyph">
+            <Search size={16} />
+          </span>
           <input
             aria-activedescendant={activeEntry?.id}
             aria-autocomplete="list"
@@ -12654,16 +12983,22 @@ export function CommandPaletteOverlay({
           ) : null}
           {groups.map((group) => (
             <section className="gyro-global-search-group" key={group.id}>
-              <div className="gyro-global-search-heading">{group.label}</div>
-              {group.entries.map((entry) => {
+              <div className="gyro-global-search-heading">
+                <span>{group.label}</span>
+                <span className="gyro-global-search-count">
+                  {group.hits.length}
+                </span>
+              </div>
+              {group.hits.map(({ entry, match }, groupIndex) => {
                 const Icon = entry.icon;
-                const index = visibleEntries.indexOf(entry);
+                const index = visibleHits.indexOf(group.hits[groupIndex]!);
+                const active = index === selectedIndex;
                 return (
                   <button
                     aria-disabled={Boolean(entry.disabledReason)}
-                    aria-selected={index === selectedIndex}
+                    aria-selected={active}
                     className={[
-                      index === selectedIndex ? "is-active" : "",
+                      active ? "is-active" : "",
                       entry.disabledReason ? "is-disabled" : "",
                     ]
                       .filter(Boolean)
@@ -12673,17 +13008,39 @@ export function CommandPaletteOverlay({
                     onClick={() => activateEntry(entry)}
                     onPointerDown={(event) => event.preventDefault()}
                     onPointerMove={() => setSelectedIndex(index)}
+                    ref={(node) => {
+                      if (node) optionRefs.current.set(entry.id, node);
+                      else optionRefs.current.delete(entry.id);
+                    }}
                     role="option"
                     type="button"
                   >
                     <span className="gyro-global-search-icon">
-                      <Icon size={16} />
+                      <Icon size={15} />
                     </span>
                     <span className="gyro-global-search-copy">
-                      <strong>{entry.label}</strong>
-                      <small>{entry.disabledReason ?? entry.detail}</small>
+                      <strong>
+                        <GlobalSearchHighlight
+                          ranges={match.labelRanges}
+                          text={entry.label}
+                        />
+                      </strong>
+                      <small>
+                        {entry.disabledReason ? (
+                          entry.disabledReason
+                        ) : (
+                          <GlobalSearchHighlight
+                            ranges={match.detailRanges}
+                            text={entry.detail}
+                          />
+                        )}
+                      </small>
                     </span>
-                    {entry.shortcut ? <kbd>{entry.shortcut}</kbd> : null}
+                    {entry.shortcut ? (
+                      <kbd>{entry.shortcut}</kbd>
+                    ) : active && !entry.disabledReason ? (
+                      <kbd className="gyro-global-search-enter">↵</kbd>
+                    ) : null}
                   </button>
                 );
               })}
@@ -12694,7 +13051,11 @@ export function CommandPaletteOverlay({
           </span>
         </div>
         <footer className="gyro-global-search-footer">
-          <span>Search stays local to this Mac.</span>
+          <span>
+            {query.trim()
+              ? `${visibleEntries.length} result${visibleEntries.length === 1 ? "" : "s"} · local only`
+              : "Search stays local to this Mac."}
+          </span>
           <span>
             <kbd>↑↓</kbd> navigate <kbd>↵</kbd> open <kbd>esc</kbd> close
           </span>
@@ -12918,6 +13279,8 @@ type SettingsSurfaceProps = {
   themeMode: ThemeMode;
   density?: WorkbenchDensity;
   showMenuBarIcon?: boolean;
+  modelFollow?: ModelFollowMode;
+  onModelFollowChange?: (mode: ModelFollowMode) => void;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onDensityChange?: (density: WorkbenchDensity) => void;
@@ -13145,6 +13508,8 @@ export function SettingsSurface({
   themeMode,
   density = "compact",
   showMenuBarIcon = true,
+  modelFollow = "peek",
+  onModelFollowChange,
   activeSection = "general",
   onThemeChange,
   onDensityChange,
@@ -13238,6 +13603,23 @@ export function SettingsSurface({
                   checked={showMenuBarIcon}
                   label="Show Gyro in menu bar"
                   onChange={(visible) => onMenuBarVisibilityChange?.(visible)}
+                />
+              </SettingsRow>
+            </SettingsGroup>
+            <SettingsGroup label="Model activity">
+              <SettingsRow
+                label="When the model opens a workspace surface"
+                detail="Peek keeps you in the thread and shows a strip above the composer. Follow lets the model switch the app to what it opened."
+              >
+                <SettingsSegmented
+                  label="Model activity behavior"
+                  value={modelFollow}
+                  options={[
+                    { label: "Off", value: "off" },
+                    { label: "Peek", value: "peek" },
+                    { label: "Follow", value: "follow" },
+                  ]}
+                  onChange={(value) => onModelFollowChange?.(value)}
                 />
               </SettingsRow>
             </SettingsGroup>
@@ -14303,7 +14685,9 @@ function UsageCard({
   visualization: "bars" | "wheels";
 }) {
   if (!window) return null;
-  const used = Math.max(0, Math.min(100, window.usedPercent));
+  // Settings only ever shows windows Codex measured, so an unmeasured one is
+  // treated as untouched rather than dropped from the card.
+  const used = Math.max(0, Math.min(100, window.usedPercent ?? 0));
   const remaining = 100 - used;
   const severity =
     remaining <= 10 ? "critical" : remaining <= 25 ? "warning" : "normal";
@@ -14346,6 +14730,40 @@ function UsageCard({
         <span>{formatUsageReset(window.resetsAt)}</span>
       </div>
     </article>
+  );
+}
+
+/**
+ * One plan limit under the composer's context bar.
+ *
+ * A window whose level the provider never measures renders an unfilled track
+ * rather than a guess, so the bar reads as "Gyro was not told" instead of
+ * "you have used none of it" — the two look identical once a bar is filled.
+ */
+function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
+  const measured = window.percent !== undefined;
+  return (
+    <div className={`gyro-composer-limit-row is-${window.severity}`}>
+      <div className="gyro-composer-limit-heading">
+        <strong>{window.label}</strong>
+        <span>
+          {window.resetsLabel ? <em>{window.resetsLabel}</em> : null}
+          <b>{window.percentLabel}</b>
+        </span>
+      </div>
+      <div
+        aria-label={`${window.label}: ${
+          measured ? `${window.percentLabel} used` : "level not reported"
+        }`}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        {...(measured ? { "aria-valuenow": window.percent } : {})}
+        className={`gyro-composer-limit-bar${measured ? "" : " is-unmeasured"}`}
+        role="progressbar"
+      >
+        {measured ? <span style={{ width: `${window.percent}%` }} /> : null}
+      </div>
+    </div>
   );
 }
 
@@ -15020,6 +15438,7 @@ function Composer({
   config,
   providerReadiness,
   providerUsage,
+  limitWindows = [],
   onComposerAction,
   onCancelGoalComposer,
   sessionModel,
@@ -15054,6 +15473,7 @@ function Composer({
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
   providerUsage?: ProviderUsageState;
+  limitWindows?: ComposerLimitWindow[];
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
   sessionModel?: {
@@ -15911,28 +16331,21 @@ function Composer({
               >
                 <span style={{ width: `${contextUsage.percent}%` }} />
               </div>
-              {providerUsage ? (
+              {limitWindows.length > 0 || providerUsage ? (
                 <div
-                  aria-label="Provider usage limits"
+                  aria-label="Plan usage limits"
                   className="gyro-composer-limit-summary"
                 >
-                  <span className="gyro-composer-limit-title">Limits</span>
-                  {providerUsage.windows.length > 0 ? (
-                    providerUsage.windows.map((window) => {
-                      const remaining = Math.max(
-                        0,
-                        Math.min(100, 100 - window.usedPercent),
-                      );
-                      return (
-                        <span key={window.id}>
-                          <small>{window.label}</small>
-                          <strong>{remaining}% left</strong>
-                        </span>
-                      );
-                    })
+                  <span className="gyro-composer-limit-title">
+                    Plan usage limits
+                  </span>
+                  {limitWindows.length > 0 ? (
+                    limitWindows.map((window) => (
+                      <ComposerLimitRow key={window.id} window={window} />
+                    ))
                   ) : (
                     <small>
-                      {providerUsage.status === "loading"
+                      {providerUsage?.status === "loading"
                         ? "Updating…"
                         : "Unavailable"}
                     </small>
@@ -17094,31 +17507,15 @@ function ChatTurn({
   const isPlanResponseTurn = Boolean(
     plan?.content && plan.sourceTurnId === turn.id,
   );
-  const timelineItems = interleavedChatTimelineItems(turn.timelineEvents);
-  const changeSummaryItems = timelineItems.filter(
-    (
-      item,
-    ): item is Extract<
-      (typeof timelineItems)[number],
-      { kind: "file-summary" }
-    > => item.kind === "file-summary",
-  );
-  const workTimelineItems = timelineItems.filter(
-    (
-      item,
-    ): item is Exclude<
-      (typeof timelineItems)[number],
-      { kind: "file-summary" }
-    > =>
-      item.kind !== "file-summary" &&
-      (item.kind !== "event" || item.event.kind !== "assistant-message"),
-  );
+  const {
+    files: changeSummaryItems,
+    response: responseEvent,
+    work: workTimelineItems,
+  } = chatTurnTimelineSections(turn.timelineEvents);
   const canCollapseThought = !isRunning && workTimelineItems.length > 0;
-  const responseTimelineItems = timelineItems.filter(
-    (item) => item.kind === "event" && item.event.kind === "assistant-message",
-  );
   const visibleWorkTimelineItems =
     isRunning || !isThoughtCollapsed ? workTimelineItems : [];
+  const runStart = Date.parse(turn.runStartedAt ?? turn.startedAt);
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
       {turn.user ? (
@@ -17151,72 +17548,88 @@ function ChatTurn({
             </div>
           ) : null}
           {visibleWorkTimelineItems.length > 0 ? (
-            <div className="gyro-chat-run-sequence" aria-label="Work timeline">
+            <div
+              className="gyro-chat-run-sequence is-work"
+              aria-label="Work timeline"
+            >
               {visibleWorkTimelineItems.map((item) => {
-                if (item.kind === "activity-group") {
-                  return (
-                    <ProviderActivityGroup events={item.events} key={item.id} />
-                  );
-                }
-                const event = item.event;
-                return mutationApprovalFromEvent(event) ||
-                  providerApprovalFromEvent(event) ||
-                  capabilityCallFromEvent(event) ? (
-                  <ChatEvent
-                    event={event}
-                    key={event.id}
-                    onMutationApprovalAction={onMutationApprovalAction}
-                    onProviderApprovalAction={onProviderApprovalAction}
-                  />
-                ) : (
-                  <ProviderActivityRow
-                    event={event}
-                    key={event.id}
-                    onOpenChanges={onOpenChanges}
-                    sourceControl={sourceControl}
-                    sourceControlBaseline={sourceControlBaseline}
-                  />
+                const startedAt =
+                  item.kind === "activity-group"
+                    ? (item.events[0] as SessionEvent).createdAt
+                    : item.event.createdAt;
+                return (
+                  <ChatRunStep
+                    key={
+                      item.kind === "activity-group" ? item.id : item.event.id
+                    }
+                    offsetLabel={runOffsetLabel(runStart, startedAt)}
+                  >
+                    {item.kind === "activity-group" ? (
+                      <ProviderActivityGroup events={item.events} />
+                    ) : item.event.kind === "assistant-message" ? (
+                      <div className="gyro-chat-run-timeline is-narration">
+                        <article className="gyro-message is-assistant">
+                          <div>
+                            <AssistantResponse
+                              actions={artifactActions}
+                              event={item.event}
+                            />
+                          </div>
+                        </article>
+                      </div>
+                    ) : mutationApprovalFromEvent(item.event) ||
+                      providerApprovalFromEvent(item.event) ||
+                      capabilityCallFromEvent(item.event) ? (
+                      <ChatEvent
+                        event={item.event}
+                        onMutationApprovalAction={onMutationApprovalAction}
+                        onProviderApprovalAction={onProviderApprovalAction}
+                      />
+                    ) : (
+                      <ProviderActivityRow
+                        event={item.event}
+                        onOpenChanges={onOpenChanges}
+                        sourceControl={sourceControl}
+                        sourceControlBaseline={sourceControlBaseline}
+                      />
+                    )}
+                  </ChatRunStep>
                 );
               })}
             </div>
           ) : null}
         </div>
-        {responseTimelineItems.length > 0 ? (
-          <div className="gyro-chat-run-sequence" aria-label="Final response">
-            {responseTimelineItems.map((item) => {
-              if (item.kind !== "event") {
-                return null;
-              }
-              const event = item.event;
-              return (
-                <div
-                  aria-label={isRunning ? "Assistant update" : "Final response"}
-                  className="gyro-chat-run-timeline is-final-response"
-                  key={event.id}
-                >
-                  <article className="gyro-message is-assistant">
-                    <div>
-                      {isPlanResponseTurn ? (
-                        <PlanArtifactCard
-                          content={plan?.content ?? event.message}
-                          isOpen={Boolean(isPlanPanelOpen)}
-                          isPending={isPlanDecisionPending}
-                          onOpen={onOpenPlan}
-                          onPlanDecision={onPlanDecision}
-                          showDecision={false}
-                          title={plan?.title ?? "Implementation plan"}
-                        />
-                      ) : (
-                        <AssistantResponse
-                          actions={artifactActions}
-                          event={event}
-                        />
-                      )}
-                    </div>
-                  </article>
+        {responseEvent ? (
+          <div
+            className="gyro-chat-run-sequence is-response"
+            aria-label="Final response"
+          >
+            <div
+              aria-label={isRunning ? "Assistant update" : "Final response"}
+              className="gyro-chat-run-timeline is-final-response"
+              key={responseEvent.id}
+            >
+              <article className="gyro-message is-assistant">
+                <div>
+                  {isPlanResponseTurn ? (
+                    <PlanArtifactCard
+                      content={plan?.content ?? responseEvent.message}
+                      isOpen={Boolean(isPlanPanelOpen)}
+                      isPending={isPlanDecisionPending}
+                      onOpen={onOpenPlan}
+                      onPlanDecision={onPlanDecision}
+                      showDecision={false}
+                      title={plan?.title ?? "Implementation plan"}
+                    />
+                  ) : (
+                    <AssistantResponse
+                      actions={artifactActions}
+                      event={responseEvent}
+                    />
+                  )}
                 </div>
-              );
-            })}
+              </article>
+            </div>
           </div>
         ) : null}
         {providerStatus &&
@@ -17616,6 +18029,44 @@ function ProviderActivityRow({
   );
 }
 
+/**
+ * One beat of a run. The marker carries the offset from the start of the turn,
+ * so a six-minute run reads as a timeline instead of a single total.
+ */
+function ChatRunStep({
+  children,
+  offsetLabel,
+}: {
+  children: ReactNode;
+  offsetLabel?: string;
+}) {
+  return (
+    <div className="gyro-chat-run-step">
+      <span aria-hidden={!offsetLabel} className="gyro-chat-run-step-time">
+        {offsetLabel ?? ""}
+      </span>
+      <div className="gyro-chat-run-step-body">{children}</div>
+    </div>
+  );
+}
+
+function runOffsetLabel(runStart: number, createdAt: string) {
+  const at = Date.parse(createdAt);
+  if (!Number.isFinite(runStart) || !Number.isFinite(at)) return undefined;
+  const seconds = Math.max(0, Math.round((at - runStart) / 1_000));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function activitySpanLabel(events: SessionEvent[]) {
+  const first = Date.parse((events[0] as SessionEvent).createdAt);
+  const last = Date.parse((events.at(-1) as SessionEvent).createdAt);
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return undefined;
+  const seconds = Math.round((last - first) / 1_000);
+  if (seconds < 2) return undefined;
+  return formatThoughtDuration(seconds);
+}
+
 function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
   const activity = providerActivityFromEvent(events[0] as SessionEvent);
   const [visibility, setVisibility] = useState<
@@ -17647,6 +18098,7 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
       : activity.kind === "search"
         ? Search
         : Sparkles;
+  const span = activitySpanLabel(events);
   return (
     <section className="gyro-chat-run-activity-group">
       <button
@@ -17667,6 +18119,7 @@ function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
       >
         <Icon size={14} />
         <span>{label}</span>
+        {span ? <small>{span}</small> : null}
         {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
       </button>
       {isOpen ? (
@@ -18261,6 +18714,9 @@ function isHiddenTranscriptEvent(event: SessionEvent) {
   const payload = eventPayloadRecord(event);
   const payloadKind = stringFromEventPayload(payload, "kind");
   const payloadSchema = stringFromEventPayload(payload, "schema");
+  if (event.kind === "system-event" && payloadKind === "workspace-context") {
+    return true;
+  }
   if (
     payloadKind === "mutation-approval" &&
     event.kind !== "approval-requested"

@@ -101,6 +101,9 @@ import {
   type MenuBarOutcome,
   type MenuBarSnapshot,
   type OutputChannel,
+  type ModelFocus,
+  type ModelFocusPeekContent,
+  type ModelFollowMode,
   type ModelProviderConfig,
   type NotificationPermissionState,
   type ProviderHealthDetails,
@@ -396,6 +399,8 @@ const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
 const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
+/** Lines shown either side of the revealed line in a model focus peek. */
+const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
@@ -647,6 +652,12 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+  // Read inside capability listeners, which must not resubscribe whenever the
+  // user changes surface or follow preference.
+  const modelFollowRef = useRef(workbench.preferences.modelFollow);
+  modelFollowRef.current = workbench.preferences.modelFollow;
+  const activeWorkspaceLayoutRef = useRef(workbench.activeWorkspaceLayout);
+  activeWorkspaceLayoutRef.current = workbench.activeWorkspaceLayout;
   const [sessionEventsById, setSessionEventsById] = useState<
     Record<string, SessionEvent[]>
   >({});
@@ -1821,8 +1832,34 @@ export function App() {
         }));
         const isActiveModelWorkspace =
           activeSessionIdRef.current === payload.sessionId;
+        // The model reports where it is working; only "follow" lets that
+        // report move the user. Everything else populates state in place and
+        // surfaces it through the ambient strip and badges.
+        const shouldFollow =
+          isActiveModelWorkspace && modelFollowRef.current === "follow";
+        const recordFocus = (
+          focus: Omit<ModelFocus, "sessionId" | "callId" | "updatedAt">,
+        ) => {
+          dispatchWorkbench({
+            type: "set-model-focus",
+            focus: {
+              ...focus,
+              sessionId: payload.sessionId,
+              callId: payload.callId,
+              updatedAt: new Date().toISOString(),
+            },
+          });
+        };
         if (payload.resource.kind === "terminal") {
           const snapshot = terminalSnapshotFromCapabilityData(payload.data);
+          recordFocus({
+            kind: "terminal",
+            label: payload.resource.label,
+            detail: snapshot?.command,
+            paneTab: "terminal",
+            paneId: snapshot?.paneId,
+            resourceId: payload.resource.id,
+          });
           if (snapshot) {
             const pane = terminalPaneFromSnapshot(snapshot, "local");
             dispatchWorkbench({
@@ -1848,6 +1885,12 @@ export function App() {
             (item) => item.id === payload.sessionId,
           );
           const url = stringFromRecord(data, "url") ?? payload.resource.label;
+          recordFocus({
+            kind: "browser",
+            label: payload.resource.label,
+            detail: url,
+            paneTab: "browser",
+          });
           if (session && url) {
             setBrowserResourcesBySessionId((current) => ({
               ...current,
@@ -1863,7 +1906,7 @@ export function App() {
             }));
           }
         }
-        if (isActiveModelWorkspace && payload.resource.kind === "ide") {
+        if (payload.resource.kind === "ide") {
           const data = recordFromUnknown(payload.data);
           const panel = stringFromRecord(data, "panel");
           if (
@@ -1874,58 +1917,102 @@ export function App() {
             panel === "test-results" ||
             panel === "output"
           ) {
-            dispatchWorkbench({ type: "open-tool-panel", tab: panel });
+            recordFocus({
+              kind: "ide",
+              label: payload.resource.label,
+              paneTab: panel,
+            });
+            if (shouldFollow) {
+              dispatchWorkbench({ type: "open-tool-panel", tab: panel });
+            }
           } else {
             const path = stringFromRecord(data, "path");
             if (path) {
               const line = typeof data?.line === "number" ? data.line : 1;
               const column = typeof data?.column === "number" ? data.column : 1;
-              setSelectedFile(path);
-              dispatchWorkbench({
-                type: "ide-open-tab",
-                tab: {
-                  path,
-                  title: workspaceName(path),
-                  dirty: false,
-                  preview: true,
-                },
-              });
-              setEditorRevealTarget({
+              recordFocus({
+                kind: "ide",
+                label: workspaceName(path),
+                detail: path,
                 path,
-                lineNumber: Math.max(1, line),
+                line: Math.max(1, line),
                 column: Math.max(1, column),
-                nonce: Date.now(),
               });
-              dispatchWorkbench({
-                type: "select-workspace-layout",
-                layout: "code",
-              });
+              // The tab is opened as a preview either way, so the file is
+              // already waiting once the user walks over to Code.
+              if (isActiveModelWorkspace) {
+                dispatchWorkbench({
+                  type: "ide-open-tab",
+                  tab: {
+                    path,
+                    title: workspaceName(path),
+                    dirty: false,
+                    preview: true,
+                  },
+                });
+                setEditorRevealTarget({
+                  path,
+                  lineNumber: Math.max(1, line),
+                  column: Math.max(1, column),
+                  nonce: Date.now(),
+                });
+              }
+              if (
+                shouldFollow ||
+                (isActiveModelWorkspace &&
+                  activeWorkspaceLayoutRef.current === "code")
+              ) {
+                setSelectedFile(path);
+              }
+              if (shouldFollow) {
+                dispatchWorkbench({
+                  type: "select-workspace-layout",
+                  layout: "code",
+                });
+              }
             }
           }
         }
-        if (isActiveModelWorkspace && payload.resource.kind === "output") {
+        if (payload.resource.kind === "output") {
           const data = recordFromUnknown(payload.data);
           const kind = stringFromRecord(data, "kind");
-          dispatchWorkbench({
-            type: "ide-upsert-output-channel",
-            channel: {
-              id: payload.resource.id,
-              label: payload.resource.label,
-              kind: kind === "test" ? "test" : "task",
-              lines: [
-                stringFromRecord(data, "stdout"),
-                stringFromRecord(data, "stderr"),
-              ].filter((line): line is string => Boolean(line)),
-              updatedAt: new Date().toISOString(),
-            },
+          const paneTab = kind === "test" ? "test-results" : "output";
+          recordFocus({
+            kind: "output",
+            label: payload.resource.label,
+            detail: kind === "test" ? "Tests" : "Task output",
+            paneTab,
+            resourceId: payload.resource.id,
           });
-          dispatchWorkbench({
-            type: "open-tool-panel",
-            tab: kind === "test" ? "test-results" : "output",
-          });
+          if (isActiveModelWorkspace) {
+            dispatchWorkbench({
+              type: "ide-upsert-output-channel",
+              channel: {
+                id: payload.resource.id,
+                label: payload.resource.label,
+                kind: kind === "test" ? "test" : "task",
+                lines: [
+                  stringFromRecord(data, "stdout"),
+                  stringFromRecord(data, "stderr"),
+                ].filter((line): line is string => Boolean(line)),
+                updatedAt: new Date().toISOString(),
+              },
+            });
+          }
+          if (shouldFollow) {
+            dispatchWorkbench({ type: "open-tool-panel", tab: paneTab });
+          }
         }
-        if (isActiveModelWorkspace && payload.resource.kind === "proposal") {
-          dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
+        if (payload.resource.kind === "proposal") {
+          recordFocus({
+            kind: "proposal",
+            label: payload.resource.label,
+            detail: "Proposed change",
+            paneTab: "diff",
+          });
+          if (shouldFollow) {
+            dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
+          }
         }
       },
     ).then((unlisten) => {
@@ -4750,6 +4837,118 @@ export function App() {
       dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     },
     [acknowledgeFinishedChat, sessions],
+  );
+
+  /**
+   * The one path that navigates on the model's behalf, and only because the
+   * user clicked "Open in workspace" on the focus strip or its peek.
+   */
+  const openModelFocus = useCallback(
+    (focus: ModelFocus) => {
+      if (focus.sessionId !== activeSessionIdRef.current) {
+        selectSession(focus.sessionId);
+      }
+      if (focus.kind === "ide" && focus.path) {
+        setSelectedFile(focus.path);
+        dispatchWorkbench({
+          type: "ide-open-tab",
+          tab: {
+            path: focus.path,
+            title: workspaceName(focus.path),
+            dirty: false,
+            preview: true,
+          },
+        });
+        setEditorRevealTarget({
+          path: focus.path,
+          lineNumber: Math.max(1, focus.line ?? 1),
+          column: Math.max(1, focus.column ?? 1),
+          nonce: Date.now(),
+        });
+        dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
+        return;
+      }
+      if (focus.kind === "terminal" && focus.paneId) {
+        dispatchWorkbench({
+          type: "select-terminal-pane",
+          paneId: focus.paneId,
+        });
+      }
+      if (focus.paneTab) {
+        dispatchWorkbench({ type: "open-tool-panel", tab: focus.paneTab });
+      }
+    },
+    [selectSession],
+  );
+
+  const loadModelFocusPeek = useCallback(
+    async (focus: ModelFocus): Promise<ModelFocusPeekContent> => {
+      if (focus.kind === "terminal") {
+        const pane = workbench.terminalPanes.find(
+          (item) => item.id === focus.paneId,
+        );
+        return {
+          title: focus.detail ?? focus.label,
+          subtitle: pane ? pane.status : "No terminal snapshot yet",
+          lines: (pane?.output ?? "").split("\n").slice(-40),
+        };
+      }
+      if (focus.kind === "output") {
+        const channel = workbench.ide.outputChannels.find(
+          (item) => item.id === focus.resourceId,
+        );
+        return {
+          title: focus.label,
+          subtitle: focus.detail,
+          lines: (channel?.lines ?? [])
+            .flatMap((line) => line.split("\n"))
+            .slice(-40),
+        };
+      }
+      if (focus.kind === "proposal") {
+        return {
+          title: focus.label,
+          subtitle: `${workbench.diffReview.files.length} file(s) in review`,
+          lines: workbench.diffReview.files.map(
+            (file) => `${file.state.padEnd(9)} ${file.path}`,
+          ),
+        };
+      }
+      if (focus.kind === "browser") {
+        return {
+          title: focus.label,
+          subtitle: focus.detail,
+          lines: focus.detail ? [focus.detail] : [],
+        };
+      }
+      const root = workspaceRoots[0];
+      if (!focus.path || !root) {
+        return { title: focus.label, lines: [] };
+      }
+      const content = await invoke<WorkspaceFileContent>(
+        "read_workspace_file_full",
+        { path: focus.path, workspacePath: root },
+      );
+      const allLines = content.content.split("\n");
+      const target = Math.max(1, focus.line ?? 1);
+      const startLine = Math.max(1, target - MODEL_FOCUS_PEEK_CONTEXT_LINES);
+      return {
+        title: focus.label,
+        subtitle: focus.path,
+        lines: allLines.slice(
+          startLine - 1,
+          target + MODEL_FOCUS_PEEK_CONTEXT_LINES,
+        ),
+        startLine,
+        highlightLine: target,
+      };
+    },
+    [
+      workbench.diffReview.files,
+      workbench.ide.outputChannels,
+      workbench.terminalPanes,
+      workspaceRoots,
+    ],
   );
 
   useEffect(() => {
@@ -11337,6 +11536,15 @@ export function App() {
           capabilityPoliciesByProject[normalizeProjectPath(pane.workspacePath)]
         }
         config={config}
+        modelFocus={
+          pane.kind === "session" &&
+          workbench.modelFocus?.sessionId === pane.sessionId
+            ? workbench.modelFocus
+            : undefined
+        }
+        modelFollow={workbench.preferences.modelFollow}
+        onLoadModelFocusPeek={loadModelFocusPeek}
+        onOpenModelFocus={openModelFocus}
         providerUsageByProvider={providerUsageByProvider}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
@@ -11709,6 +11917,14 @@ export function App() {
                     browserPreview={workbench.browserPreview}
                     capabilityPolicy={activeCapabilityPolicy}
                     config={config}
+                    modelFocus={
+                      workbench.modelFocus?.sessionId === activeSessionId
+                        ? workbench.modelFocus
+                        : undefined
+                    }
+                    modelFollow={workbench.preferences.modelFollow}
+                    onLoadModelFocusPeek={loadModelFocusPeek}
+                    onOpenModelFocus={openModelFocus}
                     providerUsageByProvider={providerUsageByProvider}
                     capabilityActivities={
                       activeSessionId
@@ -12063,6 +12279,10 @@ export function App() {
           }
           onMenuBarVisibilityChange={(visible) =>
             dispatchWorkbench({ type: "set-menu-bar-visible", visible })
+          }
+          modelFollow={workbench.preferences.modelFollow}
+          onModelFollowChange={(mode: ModelFollowMode) =>
+            dispatchWorkbench({ type: "set-model-follow", mode })
           }
           onExportDiagnostics={() =>
             isTauriRuntime()
@@ -12496,6 +12716,8 @@ function loadInitialWorkbenchState(): WorkbenchState {
       diffReview,
       ide: sanitizeStoredIdeState(parsed.ide, base.ide),
       isToolPanelOpen,
+      modelFocus: undefined,
+      modelFocusHistory: [],
       notifications: Array.isArray(parsed.notifications)
         ? parsed.notifications.filter(
             (notification) =>

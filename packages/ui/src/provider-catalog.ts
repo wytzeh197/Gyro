@@ -24,6 +24,12 @@ export const GPT_56_REASONING_EFFORTS: ReasoningEffort[] = [
   "ultra",
 ];
 
+/** The levels `claude --effort <level>` accepts. `ultra` has no equivalent. */
+export const CLAUDE_REASONING_EFFORTS: ReasoningEffort[] = [
+  ...LEGACY_OPENAI_REASONING_EFFORTS,
+  "max",
+];
+
 type ProviderCatalogEntry = ModelProviderConfig & {
   capabilities: ProviderCapabilities;
   defaultModelId: string;
@@ -115,12 +121,16 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "claude-sonnet-5",
     selectedModelId: "claude-sonnet-5",
+    selectedReasoningEffort: "high",
     capabilities: {
       executionKind: "claude-code",
       executable: true,
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
+      // Whether the provider exposes a queryable quota source, not whether it
+      // reports token usage. Claude Code has no usage command; its limits
+      // arrive as `rate_limit_event` frames on the chat stream instead.
       supportsUsage: false,
       visibility: "standard",
     },
@@ -130,6 +140,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Claude Fable 5",
         description: "Most capable broadly released Claude model.",
         contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
         id: "claude-opus-5",
@@ -137,24 +149,32 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         description:
           "Frontier model for complex agentic coding and long-horizon work.",
         contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
         id: "claude-opus-4-8",
         displayName: "Claude Opus 4.8",
         description: "Strong model for complex agentic coding.",
         contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
         id: "claude-sonnet-5",
         displayName: "Claude Sonnet 5",
         description: "Best speed and intelligence balance.",
         contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
         id: "claude-haiku-4-5",
         displayName: "Claude Haiku 4.5",
         description: "Fastest option for lighter work.",
         contextWindowTokens: 200_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
     ],
     effort: "high",
