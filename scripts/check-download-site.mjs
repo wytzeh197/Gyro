@@ -129,6 +129,8 @@ for (const [name, html] of Object.entries(pages)) {
     "License",
     "Attributions",
     "Source",
+    "data-theme-toggle",
+    "theme.js",
   ]);
 }
 
@@ -157,6 +159,31 @@ check(
   !allHtml.includes("wytzeh197.github.io/Gyro"),
   "Pages must use usegyro.io as their canonical public origin",
 );
+for (const [name, html] of Object.entries(pages)) {
+  const themeScript = html.indexOf("theme.js");
+  const stylesheet = html.indexOf("styles.css");
+  check(
+    themeScript !== -1 && themeScript < stylesheet,
+    `${name} page must load theme.js before styles.css so the stored theme applies before first paint`,
+  );
+}
+// The toggle lives in theme.js, not app.js: the changelog and privacy pages
+// carry the header toggle but never load app.js.
+containsAll(read("site/theme.js"), "Theme runtime", [
+  "gyro.site-theme",
+  "data-theme-toggle",
+  "addEventListener",
+]);
+check(
+  !app.includes("data-theme-toggle"),
+  "The theme toggle must be wired in theme.js, which every page loads",
+);
+for (const [name, html] of Object.entries(pages)) {
+  check(
+    html.includes("data-theme-toggle"),
+    `${name} page must expose the header theme toggle`,
+  );
+}
 
 containsAll(pages.home, "Homepage", [
   "Chat, CLI, and IDE. One place.",
@@ -167,15 +194,16 @@ containsAll(pages.home, "Homepage", [
   "Run it locally.",
   "Review every change.",
   "assets/gyro-mark.png",
-  'class="surface-card surface-card-wide"',
-  'class="surface-pair"',
-  'class="surface-visual"',
-  "assets/screenshots/hero-960.webp",
-  "assets/screenshots/hero-1920.webp",
-  "assets/screenshots/hero-mobile-1200.webp",
-  "assets/screenshots/chat-1600.webp",
-  "assets/screenshots/cli-1600.webp",
-  "assets/screenshots/workspace-1600.webp",
+  'class="spine"',
+  'class="surface-card"',
+  'class="surface-visual figure"',
+  'class="byo-stage"',
+  "Use what you already paid for",
+  "data-byo-path",
+  "fig. 01",
+  "assets/screenshots/hero-600.webp",
+  "assets/screenshots/hero-1200.webp",
+  "assets/screenshots/hero-2400.webp",
   "assets/social-preview.png",
   "Download Gyro for macOS.",
   "The local workspace that keeps chat, CLI, and code together.",
@@ -204,6 +232,14 @@ check(
 check(
   !css.toLowerCase().includes("gradient("),
   "Site styles must not contain gradient backgrounds",
+);
+check(
+  !/assets\/screenshots\/(chat|cli|workspace)-/.test(allHtml),
+  "Only the hero may use a product screenshot; the surfaces use drawn figures",
+);
+check(
+  (pages.home.match(/<svg/g) ?? []).length >= 3,
+  "Homepage must draw its own surface figures",
 );
 
 containsAll(pages.install, "Install page", [
@@ -266,12 +302,19 @@ containsAll(css, "Shared CSS", [
   "font-size: 16px",
   "font-size: 13px",
   "min-height: 44px",
-  ".surface-card-wide",
+  ".surface-card",
   ".surface-visual",
   "--grid-columns: 12",
   "grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr))",
   "grid-template-columns: minmax(260px, 32%) minmax(0, 68%)",
-  ".surface-pair",
+  ".surface-index",
+  ".byo-stage",
+  ".byo-word",
+  ':root[data-theme="light"]',
+  ".theme-toggle",
+  "--mono:",
+  ".spine",
+  ".figure",
   ".changelog-layout",
   ".version-rail nav",
   ".legal-layout",
@@ -283,6 +326,11 @@ containsAll(css, "Shared CSS", [
   "@media (prefers-reduced-motion: reduce)",
   "@media (prefers-contrast: more)",
 ]);
+
+check(
+  app.includes("startBringYourOwn") && app.includes("prefers-reduced-motion"),
+  "The zigzag reveal must be scroll-driven and skip when motion is reduced",
+);
 
 containsAll(app, "Download runtime", [
   "LATEST_RELEASE_API",
@@ -322,11 +370,11 @@ containsAll(buildScript, "Site builder", [
   "site/changelog/index.html",
   "site/privacy/index.html",
   "site/release-utils.js",
+  '"site/theme.js", "theme.js"',
   "site/changelog.js",
   "site/assets/gyro-mark.png",
   "site/assets/social-preview.png",
-  "site/assets/screenshots/hero-1920.webp",
-  "site/assets/screenshots/workspace-1600.webp",
+  "site/assets/screenshots/hero-2400.webp",
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
 ]);
 
@@ -347,6 +395,12 @@ for (const staleMarker of [
   );
 }
 
+// style-src 'self' blocks inline style attributes, so positioning has to live
+// in the stylesheet. This catches the silent-failure mode.
+check(
+  !/<[a-z][^>]*\sstyle=/i.test(allHtml),
+  "Pages must not use inline style attributes; the CSP blocks them",
+);
 check(
   !/<script[^>]+src=["']https?:/i.test(allHtml),
   "Pages must not load remote scripts",
@@ -401,16 +455,9 @@ check(
 );
 
 const screenshotSpecs = [
-  ["site/assets/screenshots/hero-960.webp", 960, 540],
-  ["site/assets/screenshots/hero-1920.webp", 1920, 1080],
-  ["site/assets/screenshots/hero-mobile-600.webp", 600, 480],
-  ["site/assets/screenshots/hero-mobile-1200.webp", 1200, 960],
-  ["site/assets/screenshots/chat-800.webp", 800, 450],
-  ["site/assets/screenshots/chat-1600.webp", 1600, 900],
-  ["site/assets/screenshots/cli-800.webp", 800, 450],
-  ["site/assets/screenshots/cli-1600.webp", 1600, 900],
-  ["site/assets/screenshots/workspace-800.webp", 800, 450],
-  ["site/assets/screenshots/workspace-1600.webp", 1600, 900],
+  ["site/assets/screenshots/hero-600.webp", 600, 480],
+  ["site/assets/screenshots/hero-1200.webp", 1200, 960],
+  ["site/assets/screenshots/hero-2400.webp", 2400, 1920],
 ];
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));
@@ -529,6 +576,7 @@ if (!failures.length) {
     "privacy/index.html",
     "robots.txt",
     "sitemap.xml",
+    "theme.js",
   ]) {
     check(filesA.includes(route), `Built site is missing route ${route}`);
   }
