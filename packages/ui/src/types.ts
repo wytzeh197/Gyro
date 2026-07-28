@@ -26,7 +26,7 @@ export type WorkbenchMode = "local" | "worktree";
 
 export type ChatSidePanelId = "environment" | "plan";
 
-export type ChatMode = "normal" | "plan";
+export type ChatMode = "normal" | "plan" | "council";
 
 export type ChatPaneRef =
   | {
@@ -111,7 +111,7 @@ export type CapabilityStatus =
 export type CapabilityApprovalDecision =
   "deny" | "allow-once" | "allow-project";
 
-export type CapabilityRunMode = "normal" | "plan";
+export type CapabilityRunMode = "normal" | "plan" | "council";
 
 export type CapabilityInvocationContext = {
   sessionId: string;
@@ -893,6 +893,11 @@ export type WorkbenchPreferences = {
   workspaceSidebarHidden: boolean;
   workspaceSidebarWidth?: number;
   workspacePanelHeight: number;
+  /**
+   * Preferred mode for new chats. Session storage and APIs still use
+   * `local` | `worktree`; this only seeds drafts that have not set a mode yet.
+   */
+  defaultWorkspaceMode: WorkbenchMode;
   workspaceTrust: Record<string, WorkspaceTrustDecision>;
   workspaceFolders: Record<string, string[]>;
   workspaceUserSettings: WorkspaceScopedSettings;
@@ -942,6 +947,40 @@ export type ProviderUsageState = {
   fetchedAt?: string;
   stale?: boolean;
   error?: string;
+};
+
+/**
+ * What one action spent, as Gyro's own usage ledger recorded it.
+ *
+ * The ledger counts provider calls rather than user turns, because one turn can
+ * be several calls: a Council turn is its seats plus a synthesis.
+ */
+export type UsageOrigin =
+  | "chat"
+  | "automation"
+  | "council-seat"
+  | "council-synthesis"
+  | "council-resynthesis";
+
+export type UsageOriginTotals = {
+  origin: UsageOrigin;
+  label: string;
+  calls: number;
+  totalTokens: number;
+};
+
+export type SessionUsageTotals = {
+  calls: number;
+  /** Calls whose tokens the provider reported. */
+  measuredCalls: number;
+  /** Calls Gyro estimated because the provider reports no counts. */
+  estimatedCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  byOrigin: UsageOriginTotals[];
+  firstCallAt?: string;
+  lastCallAt?: string;
 };
 
 export type CliLaunchPresetFocus = "first" | "last";
@@ -1459,10 +1498,271 @@ export type SessionEvent = {
     | "plan-updated"
     | "goal-updated"
     | "chat-mode-changed"
+    | "council-run-started"
+    | "council-seat-started"
+    | "council-seat-completed"
+    | "council-seat-failed"
+    | "council-synthesis-started"
+    | "council-synthesis-completed"
+    | "council-run-completed"
+    | "council-run-cancelled"
     | "system-event";
   message: string;
   payload: unknown;
 };
+
+export type CouncilToolPolicy = "none";
+
+export type CouncilRunStatus =
+  | "queued"
+  | "running"
+  | "synthesizing"
+  | "done"
+  | "partial"
+  | "failed"
+  | "cancelled";
+
+export type CouncilSeatStatus =
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type CouncilPreset = {
+  id: string;
+  name: string;
+  description?: string;
+  seatProviderIds: string[];
+  seatModelIds?: Record<string, string | null>;
+  synthesizerProviderId: string;
+  synthesizerModelId?: string | null;
+  toolPolicy: CouncilToolPolicy;
+  builtIn?: boolean;
+};
+
+export type CouncilConfig = {
+  defaultPresetId: string;
+  presets: CouncilPreset[];
+  maxSeats: number;
+  seatTimeoutSeconds: number;
+  synthesizerTimeoutSeconds: number;
+  synthesizeOnPartial: boolean;
+  enabled: boolean;
+};
+
+/**
+ * Ceilings that stop spending nobody chose.
+ *
+ * Preflight covers the deliberate expensive send; these cover retry loops,
+ * runaway turns, and schedules running while nobody is watching.
+ */
+export type UsageGuardConfig = {
+  enabled: boolean;
+  /** The current hold on provider runs, with its reason and expiry. */
+  pause: PauseState;
+  /** Per-provider spend caps measured against the ledger. */
+  budgets: UsageBudget[];
+  windowMinutes: number;
+  maxCallsPerWindow: number;
+  /** Lower than the overall ceiling: unattended spend is caught earlier. */
+  maxUnattendedCallsPerWindow: number;
+  /** Tokens one call may bill before it is stopped. Zero disables it. */
+  maxTokensPerCall: number;
+  maxResynthesesPerWindow: number;
+};
+
+/** Why Gyro is holding provider runs. A pause carries its provenance. */
+export type PauseReason =
+  | { kind: "manual" }
+  | { kind: "budgetExhausted"; providerId: string };
+
+/** What a pause covers. Automations can be stopped without stopping chat. */
+export type PauseScope = "all" | "automations";
+
+export type PauseState = {
+  active: boolean;
+  scope: PauseScope;
+  reason?: PauseReason;
+  since?: string;
+  /** When the pause lifts by itself. Absent for a manual pause. */
+  autoResumeAt?: string;
+};
+
+export type UsageBudget = {
+  providerId: string;
+  windowHours: number;
+  /** Tokens allowed in the window. Zero means the budget is off. */
+  maxTokens: number;
+  notifyPercent: number;
+  throttlePercent: number;
+};
+
+export type BudgetLevel = "ok" | "notify" | "throttle" | "exhausted";
+
+export type BudgetState = {
+  providerId: string;
+  usedTokens: number;
+  maxTokens: number;
+  percent: number;
+  level: BudgetLevel;
+  windowHours: number;
+  windowResetsAt: string;
+  /** Whether any spend counted here was estimated rather than reported. */
+  hasEstimates: boolean;
+};
+
+/** The current hold and every configured budget, as the UI reads them. */
+export type UsageSafetySnapshot = {
+  pause: PauseState;
+  budgets: BudgetState[];
+};
+
+export type CouncilAttachmentRef = {
+  id: string;
+  name?: string;
+  path?: string;
+  kind?: string;
+};
+
+export type CouncilContextSnapshot = {
+  id: string;
+  prompt: string;
+  projectKey?: string;
+  workspacePath?: string;
+  attachments: CouncilAttachmentRef[];
+  gitSummary?: string | null;
+  createdAt: string;
+};
+
+export type CouncilSeat = {
+  id: string;
+  councilRunId: string;
+  runId: string;
+  providerId: string;
+  providerLabel: string;
+  modelId?: string | null;
+  modelLabel?: string | null;
+  status: CouncilSeatStatus;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  rawOutput?: string;
+  artifactPath?: string;
+  error?: string | null;
+  diagnostics?: ProviderRunDiagnostics | null;
+};
+
+export type CouncilDisagreementPosition = {
+  seatId: string;
+  seatLabel?: string;
+  summary: string;
+};
+
+export type CouncilDisagreement = {
+  topic: string;
+  positions: CouncilDisagreementPosition[];
+  recommendation?: string;
+};
+
+export type CouncilUniqueInsight = {
+  seatId: string;
+  seatLabel?: string;
+  insight: string;
+};
+
+export type CouncilSynthesis = {
+  synthesizerProviderId: string;
+  synthesizerModelId?: string | null;
+  synthesizerRunId?: string;
+  unifiedMarkdown: string;
+  recommendation: string;
+  agreement: string[];
+  disagreements: CouncilDisagreement[];
+  uniqueInsights: CouncilUniqueInsight[];
+  risksAndTests: string[];
+  adoptionSteps: string[];
+  parseWarnings?: string[];
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  userEditedMarkdown?: string | null;
+  artifactPath?: string;
+};
+
+export type CouncilRunTotals = {
+  wallDurationMs?: number;
+  seatsSucceeded: number;
+  seatsFailed: number;
+  estimatedCostUsd?: number | null;
+};
+
+export type CouncilRun = {
+  schema: "gyro.council.v1";
+  id: string;
+  sessionId: string;
+  status: CouncilRunStatus;
+  presetId?: string | null;
+  snapshot: CouncilContextSnapshot;
+  seats: CouncilSeat[];
+  synthesis?: CouncilSynthesis | null;
+  toolPolicy: CouncilToolPolicy;
+  synthesizerProviderId?: string | null;
+  synthesizerModelId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  cancelledAt?: string | null;
+  totals?: CouncilRunTotals;
+};
+
+/** Compact seat summary embedded in assistant `council-response` payloads. */
+export type CouncilSeatSummary = {
+  id: string;
+  providerId: string;
+  providerLabel: string;
+  modelId?: string | null;
+  status: CouncilSeatStatus | string;
+  durationMs?: number;
+  error?: string | null;
+  artifactPath?: string | null;
+  outputPreview?: string | null;
+};
+
+export type CouncilResponsePayload = {
+  kind: "council-response";
+  councilRunId: string;
+  status: CouncilRunStatus | string;
+  presetId?: string | null;
+  seats: CouncilSeatSummary[];
+  synthesis?: CouncilSynthesis | null;
+  totals?: CouncilRunTotals | null;
+  manifestPath?: string | null;
+  retry?: boolean;
+};
+
+export type CouncilActionRequest =
+  | {
+      type: "continue-as-run";
+      markdown: string;
+      councilRunId: string;
+    }
+  | {
+      type: "promote-seat";
+      councilRunId: string;
+      seat: CouncilSeatSummary;
+      fullText?: string;
+    }
+  | {
+      type: "resynthesize";
+      councilRunId: string;
+      sessionId: string;
+    }
+  | {
+      type: "load-seat";
+      councilRunId: string;
+      sessionId: string;
+      seatId: string;
+    };
 
 export type CommandProfile = {
   id: string;
@@ -1526,6 +1826,8 @@ export type GyroConfig = {
   selectedProviderId?: ProviderId;
   modelProviders: ModelProviderConfig[];
   commandProfiles: CommandProfile[];
+  council?: CouncilConfig;
+  usageGuard?: UsageGuardConfig;
 };
 
 export type UpdateStatus =

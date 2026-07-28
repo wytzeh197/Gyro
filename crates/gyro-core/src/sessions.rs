@@ -23,6 +23,8 @@ const MAX_SESSION_EVENT_TAIL_READ_BYTES: usize = 32 * 1024 * 1024;
 const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
+/// Bump when additive schema migrations change so reopen skips table_info scans.
+const SESSION_STORE_SCHEMA_VERSION: i32 = 2;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -83,7 +85,41 @@ pub enum SessionEventKind {
     PlanUpdated,
     GoalUpdated,
     ChatModeChanged,
+    CouncilRunStarted,
+    CouncilSeatStarted,
+    CouncilSeatCompleted,
+    CouncilSeatFailed,
+    CouncilSynthesisStarted,
+    CouncilSynthesisCompleted,
+    CouncilRunCompleted,
+    CouncilRunCancelled,
     SystemEvent,
+}
+
+impl SessionEventKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::SessionCreated => "session-created",
+            Self::UserMessage => "user-message",
+            Self::AssistantMessage => "assistant-message",
+            Self::CommandRequested => "command-requested",
+            Self::CommandOutput => "command-output",
+            Self::FileEditProposed => "file-edit-proposed",
+            Self::ApprovalRequested => "approval-requested",
+            Self::PlanUpdated => "plan-updated",
+            Self::GoalUpdated => "goal-updated",
+            Self::ChatModeChanged => "chat-mode-changed",
+            Self::CouncilRunStarted => "council-run-started",
+            Self::CouncilSeatStarted => "council-seat-started",
+            Self::CouncilSeatCompleted => "council-seat-completed",
+            Self::CouncilSeatFailed => "council-seat-failed",
+            Self::CouncilSynthesisStarted => "council-synthesis-started",
+            Self::CouncilSynthesisCompleted => "council-synthesis-completed",
+            Self::CouncilRunCompleted => "council-run-completed",
+            Self::CouncilRunCancelled => "council-run-cancelled",
+            Self::SystemEvent => "system-event",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -268,11 +304,14 @@ impl SessionStore {
         let conn = Connection::open(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(2))?;
+        // Shared app + CLI writers need a longer busy window under WAL.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // NORMAL is safe with WAL for power-loss of recent index updates. JSONL
+        // event fsync remains the durability bar for chat history.
         conn.execute_batch(
             "pragma foreign_keys = on;
              pragma journal_mode = wal;
-             pragma synchronous = full;",
+             pragma synchronous = normal;",
         )?;
         let store = Self { paths, conn };
         store.initialize()?;
@@ -616,6 +655,32 @@ impl SessionStore {
         let rows = stmt.query_map(params![session_id.to_string()], row_to_mutation_proposal)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
+    }
+
+    /// Pending proposals that have not yet been written into the session event
+    /// log as approval cards. Used so long-session recovery cannot re-append.
+    pub fn list_unsurfaced_pending_mutation_proposals(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<MutationProposal>> {
+        let mut stmt = self.conn.prepare(
+            "select id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at
+             from mutation_proposals
+             where session_id = ?1 and status = 'pending' and surfaced_at is null
+             order by created_at asc",
+        )?;
+        let rows = stmt.query_map(params![session_id.to_string()], row_to_mutation_proposal)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn mark_mutation_proposal_surfaced(&self, proposal_id: Uuid) -> Result<bool> {
+        let changed = self.conn.execute(
+            "update mutation_proposals set surfaced_at = ?1
+             where id = ?2 and status = 'pending' and surfaced_at is null",
+            params![Utc::now().to_rfc3339(), proposal_id.to_string()],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn list_pending_mutation_proposals_all(
@@ -983,7 +1048,9 @@ impl SessionStore {
                 SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
             )
         }) {
-            if let Some(existing) = find_existing_turn_message(&events_path, turn_id, &kind)? {
+            if let Some(existing) =
+                self.find_indexed_turn_message(session_id, turn_id, &kind, &events_path)?
+            {
                 if existing.message == message {
                     return Ok(existing);
                 }
@@ -1010,6 +1077,28 @@ impl SessionStore {
         drop(event_lock);
         drop(file);
 
+        if let Some(turn_id) = event.turn_id.filter(|_| {
+            matches!(
+                event.kind,
+                SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
+            )
+        }) {
+            if let Err(error) = self.record_turn_message_index(session_id, turn_id, &event) {
+                eprintln!(
+                    "session event was saved but its turn index was not updated: {error}"
+                );
+            }
+        }
+        if let Some(turn_id) = event.turn_id {
+            if let Some(status) = provider_status_from_payload(&event.payload) {
+                if let Err(error) = self.record_turn_provider_status(session_id, turn_id, &status) {
+                    eprintln!(
+                        "session event was saved but its turn status index was not updated: {error}"
+                    );
+                }
+            }
+        }
+
         if let Err(error) = self.conn.execute(
             "update sessions set updated_at = ?1 where id = ?2",
             params![event.created_at.to_rfc3339(), session_id.to_string()],
@@ -1020,6 +1109,24 @@ impl SessionStore {
             eprintln!("session event was saved but its updated_at index was not: {error}");
         }
         Ok(event)
+    }
+
+    /// Latest durable provider-status for a turn, independent of the recent
+    /// event-read window used by Chat UI loading.
+    pub fn latest_provider_status_for_turn(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "select status from session_turn_status
+                 where session_id = ?1 and turn_id = ?2",
+                params![session_id.to_string(), turn_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn append_system_events_with_turn_id(
@@ -1150,6 +1257,37 @@ impl SessionStore {
     }
 
     fn initialize(&self) -> Result<()> {
+        let user_version: i32 = self
+            .conn
+            .query_row("pragma user_version", [], |row| row.get(0))?;
+        if user_version >= SESSION_STORE_SCHEMA_VERSION {
+            self.ensure_core_tables()?;
+            crate::usage::ensure_usage_schema(&self.conn)?;
+            return Ok(());
+        }
+        self.ensure_core_tables()?;
+        self.ensure_column(
+            "workspace_mode",
+            "workspace_mode text not null default 'local'",
+        )?;
+        self.ensure_column("branch", "branch text not null default 'main'")?;
+        self.ensure_column("worktree_name", "worktree_name text")?;
+        self.ensure_column("provider_id", "provider_id text")?;
+        self.ensure_column("provider_label", "provider_label text")?;
+        self.ensure_column("model_id", "model_id text")?;
+        self.ensure_column("model_label", "model_label text")?;
+        self.ensure_column("reasoning_effort", "reasoning_effort text")?;
+        self.ensure_column("summary", "summary text")?;
+        self.ensure_column("summary_updated_at", "summary_updated_at text")?;
+        self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
+        self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
+        crate::usage::ensure_usage_schema(&self.conn)?;
+        self.conn
+            .pragma_update(None, "user_version", SESSION_STORE_SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    fn ensure_core_tables(&self) -> Result<()> {
         self.conn.execute_batch(
             "create table if not exists sessions (
                id text primary key not null,
@@ -1204,34 +1342,181 @@ impl SessionStore {
                error text,
                created_at text not null,
                updated_at text not null,
+               surfaced_at text,
                foreign key (session_id) references sessions(id) on delete cascade
              );
 
              create index if not exists idx_mutation_proposals_session_status
              on mutation_proposals(session_id, status, created_at asc);
 
+             create index if not exists idx_mutation_proposals_status_updated
+             on mutation_proposals(status, updated_at asc);
+
              create table if not exists project_capability_policies (
                workspace_key text primary key not null,
                policy_json text not null,
                revision integer not null,
                updated_at text not null
+             );
+
+             create table if not exists session_turn_messages (
+               session_id text not null,
+               turn_id text not null,
+               kind text not null,
+               event_id text not null,
+               message text not null,
+               created_at text not null,
+               primary key (session_id, turn_id, kind),
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create table if not exists session_turn_status (
+               session_id text not null,
+               turn_id text not null,
+               status text not null,
+               updated_at text not null,
+               primary key (session_id, turn_id),
+               foreign key (session_id) references sessions(id) on delete cascade
              );",
         )?;
-        self.ensure_column(
-            "workspace_mode",
-            "workspace_mode text not null default 'local'",
-        )?;
-        self.ensure_column("branch", "branch text not null default 'main'")?;
-        self.ensure_column("worktree_name", "worktree_name text")?;
-        self.ensure_column("provider_id", "provider_id text")?;
-        self.ensure_column("provider_label", "provider_label text")?;
-        self.ensure_column("model_id", "model_id text")?;
-        self.ensure_column("model_label", "model_label text")?;
-        self.ensure_column("reasoning_effort", "reasoning_effort text")?;
-        self.ensure_column("summary", "summary text")?;
-        self.ensure_column("summary_updated_at", "summary_updated_at text")?;
-        self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         Ok(())
+    }
+
+    fn find_indexed_turn_message(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        kind: &SessionEventKind,
+        events_path: &Path,
+    ) -> Result<Option<SessionEvent>> {
+        if let Some((event_id, message, created_at)) = self
+            .conn
+            .query_row(
+                "select event_id, message, created_at from session_turn_messages
+                 where session_id = ?1 and turn_id = ?2 and kind = ?3",
+                params![
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    kind.as_str()
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            let event_id = Uuid::parse_str(&event_id).map_err(|error| anyhow!(error))?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at)
+                .map(|value| value.with_timezone(&Utc))
+                .map_err(|error| anyhow!(error))?;
+            return Ok(Some(SessionEvent {
+                id: event_id,
+                session_id,
+                turn_id: Some(turn_id),
+                kind: kind.clone(),
+                message,
+                payload: Value::Null,
+                created_at,
+            }));
+        }
+        // Legacy logs written before the turn index existed.
+        find_existing_turn_message(events_path, turn_id, kind)
+    }
+
+    fn record_turn_message_index(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        event: &SessionEvent,
+    ) -> Result<()> {
+        self.conn.execute(
+            "insert into session_turn_messages
+             (session_id, turn_id, kind, event_id, message, created_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6)
+             on conflict(session_id, turn_id, kind) do nothing",
+            params![
+                session_id.to_string(),
+                turn_id.to_string(),
+                event.kind.as_str(),
+                event.id.to_string(),
+                event.message,
+                event.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn record_turn_provider_status(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        status: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "insert into session_turn_status (session_id, turn_id, status, updated_at)
+             values (?1, ?2, ?3, ?4)
+             on conflict(session_id, turn_id) do update set
+               status = excluded.status,
+               updated_at = excluded.updated_at",
+            params![
+                session_id.to_string(),
+                turn_id.to_string(),
+                status,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Append one provider call to the usage ledger.
+    ///
+    /// Callers record every call, including failed and cancelled ones: a run
+    /// that burned tokens and then timed out still spent them.
+    pub fn record_usage(&self, entry: &crate::usage::UsageEntry) -> Result<Uuid> {
+        crate::usage::insert_usage_entry(&self.conn, entry)
+    }
+
+    /// What one chat has cost, across every call it produced.
+    pub fn session_usage_totals(&self, session_id: Uuid) -> Result<crate::usage::UsageTotals> {
+        crate::usage::session_usage_totals(&self.conn, session_id)
+    }
+
+    /// What every provider has cost since a point in time.
+    pub fn usage_totals_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<crate::usage::UsageTotals> {
+        crate::usage::usage_totals_since(&self.conn, since)
+    }
+
+    /// Call counts in the guard window, split by attended and unattended work.
+    pub fn recent_usage(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<crate::usage::RecentUsage> {
+        crate::usage::recent_usage(&self.conn, since)
+    }
+
+    /// Measure one budget against the ledger.
+    pub fn budget_state(
+        &self,
+        budget: &crate::usage::UsageBudget,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<crate::usage::BudgetState> {
+        crate::usage::budget_state(&self.conn, budget, now)
+    }
+
+    /// What one provider has cost since a point in time.
+    pub fn provider_usage_totals_since(
+        &self,
+        provider_id: &str,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<crate::usage::UsageTotals> {
+        crate::usage::provider_usage_totals_since(&self.conn, provider_id, since)
     }
 
     fn ensure_provider_binding_column(&self, column_name: &str, definition: &str) -> Result<()> {
@@ -1250,6 +1535,20 @@ impl SessionStore {
         Ok(())
     }
 
+    fn ensure_mutation_proposal_column(&self, column_name: &str, definition: &str) -> Result<()> {
+        let mut stmt = self.conn.prepare("pragma table_info(mutation_proposals)")?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if columns.iter().any(|column| column == column_name) {
+            return Ok(());
+        }
+        self.conn.execute_batch(&format!(
+            "alter table mutation_proposals add column {definition};"
+        ))?;
+        Ok(())
+    }
+
     fn ensure_column(&self, column_name: &str, definition: &str) -> Result<()> {
         let mut stmt = self.conn.prepare("pragma table_info(sessions)")?;
         let columns = stmt
@@ -1262,6 +1561,17 @@ impl SessionStore {
             .execute_batch(&format!("alter table sessions add column {definition};"))?;
         Ok(())
     }
+}
+
+fn provider_status_from_payload(payload: &Value) -> Option<String> {
+    let object = payload.as_object()?;
+    if object.get("kind")?.as_str()? != "provider-status" {
+        return None;
+    }
+    object
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn find_existing_turn_message(
@@ -1964,6 +2274,83 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.to_string().contains("already contains a different"));
+    }
+
+    #[test]
+    fn turn_provider_status_index_survives_event_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "turn status")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "running",
+                serde_json::json!({ "kind": "provider-status", "status": "running" }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..50 {
+            store
+                .append_event(
+                    session.id,
+                    SessionEventKind::SystemEvent,
+                    format!("noise {index}"),
+                    serde_json::json!({ "n": index }),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session.id, turn_id)
+                .unwrap()
+                .as_deref(),
+            Some("running")
+        );
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "done",
+                serde_json::json!({ "kind": "provider-status", "status": "done" }),
+                Some(turn_id),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session.id, turn_id)
+                .unwrap()
+                .as_deref(),
+            Some("done")
+        );
+    }
+
+    #[test]
+    fn unsurfaced_pending_mutation_proposals_are_marked_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "surface once")
+            .unwrap();
+        let proposal = store
+            .create_mutation_proposal(session.id, None, "file.txt", "content\n", None, false)
+            .unwrap();
+        assert_eq!(
+            store
+                .list_unsurfaced_pending_mutation_proposals(session.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store.mark_mutation_proposal_surfaced(proposal.id).unwrap());
+        assert!(store
+            .list_unsurfaced_pending_mutation_proposals(session.id)
+            .unwrap()
+            .is_empty());
+        assert!(!store.mark_mutation_proposal_surfaced(proposal.id).unwrap());
     }
 
     #[test]

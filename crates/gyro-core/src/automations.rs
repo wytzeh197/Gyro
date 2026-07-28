@@ -181,11 +181,13 @@ impl AutomationStore {
         let conn = Connection::open(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(2))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // NORMAL is safe with WAL for this local automation index. JSONL session
+        // durability is handled separately by the session store.
         conn.execute_batch(
             "pragma foreign_keys = on;
              pragma journal_mode = wal;
-             pragma synchronous = full;",
+             pragma synchronous = normal;",
         )?;
         let store = Self { conn };
         store.initialize()?;

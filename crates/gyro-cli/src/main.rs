@@ -1216,6 +1216,12 @@ fn handle_permission_tool_call(
         return Err(error);
     }
     if let Some(pending) = pending_mutation {
+        if let Err(error) = pending.mark_applied() {
+            eprintln!(
+                "Gyro could not write the durable applied marker before cleanup: {}",
+                gyro_core::sanitize_harness_text(&error.to_string())
+            );
+        }
         if let Err(error) = pending.finalize() {
             eprintln!(
                 "Gyro deferred provider mutation cleanup until restart: {}",
@@ -2768,6 +2774,12 @@ fn decide_codex_provider_approval(
         return Err(error);
     }
     if let Some(pending) = pending_mutation {
+        if let Err(error) = pending.mark_applied() {
+            eprintln!(
+                "Gyro could not write the durable applied marker before cleanup: {}",
+                gyro_core::sanitize_harness_text(&error.to_string())
+            );
+        }
         if let Err(error) = pending.finalize() {
             eprintln!(
                 "Gyro deferred provider mutation cleanup until restart: {}",
@@ -3205,6 +3217,7 @@ fn execute_kimi_acp_provider(
                 pending.rollback()?;
                 return Err(error);
             }
+            pending.mark_applied()?;
             pending.finalize()?;
             Ok(())
         },
