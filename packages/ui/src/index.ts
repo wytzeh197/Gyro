@@ -37,6 +37,23 @@ export type {
   ChatArtifactKind,
   ChatArtifactStatus,
   ChatMode,
+  CouncilActionRequest,
+  CouncilAttachmentRef,
+  CouncilConfig,
+  CouncilContextSnapshot,
+  CouncilDisagreement,
+  CouncilDisagreementPosition,
+  CouncilPreset,
+  CouncilResponsePayload,
+  CouncilRun,
+  CouncilRunStatus,
+  CouncilRunTotals,
+  CouncilSeat,
+  CouncilSeatStatus,
+  CouncilSeatSummary,
+  CouncilSynthesis,
+  CouncilToolPolicy,
+  CouncilUniqueInsight,
   ChatGridState,
   ChatPaneRef,
   ChatProjectLayout,
@@ -154,6 +171,17 @@ export type {
   UpdateStatus,
   ProviderUsageState,
   ProviderUsageWindow,
+  SessionUsageTotals,
+  UsageOrigin,
+  UsageOriginTotals,
+  UsageGuardConfig,
+  UsageBudget,
+  UsageSafetySnapshot,
+  PauseState,
+  PauseScope,
+  PauseReason,
+  BudgetState,
+  BudgetLevel,
   WorkbenchDensity,
   WorkbenchMode,
   WorkbenchPaneTab,
@@ -226,6 +254,31 @@ export {
   selectedModelLabel,
   selectedReasoningEffort,
 } from "./provider-catalog";
+export {
+  councilPreflightLabel,
+  defaultCouncilConfig,
+  defaultCouncilPreset,
+  DEFAULT_COUNCIL_PRESETS,
+  normalizedCouncilConfig,
+  readyCouncilProviders,
+  resolveCouncilSeatRequests,
+} from "./council";
+export type {
+  CouncilSeatRequest,
+  CouncilSeatResolution,
+} from "./council";
+export {
+  estimateTurnCost,
+  formatTokenCount,
+  isOutsizedTurn,
+  summarizeSessionCost,
+  summarizeUsageSafety,
+} from "./usage-ledger";
+export type {
+  SessionCostSummary,
+  TurnCostEstimate,
+  UsageSafetyNotice,
+} from "./usage-ledger";
 export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
 export {
   createGlobalSearchTarget,
@@ -260,6 +313,15 @@ export {
   normalizedWorkspaceTrustPath,
   workspaceTrustDecision,
 } from "./workspace-trust";
+export {
+  workspaceModeDetail,
+  workspaceModeLabel,
+  workspaceModePopoverLabel,
+  workspaceModeShortLabel,
+  workspaceModeTechnicalHint,
+  workspaceModeToastDetail,
+  workspaceModeToastTitle,
+} from "./workspace-mode";
 export {
   MAX_WORKSPACE_FOLDERS,
   absoluteWorkspaceFilePath,

@@ -3254,7 +3254,9 @@ expect(
     tauriSource.includes("upsert_provider_session_binding") &&
     tauriSource.includes("validate_chat_message") &&
     tauriSource.includes("async fn run_provider_chat") &&
-    /spawn_blocking\(move \|\|\s*\{?\s*run_provider_chat_blocking\((?:app|worker_app),\s*request\)/.test(
+    // Interactive sends must be tagged as chat for the usage ledger, so an
+    // automation can never be counted against the person at the keyboard.
+    /spawn_blocking\(move \|\|\s*\{?\s*run_provider_chat_blocking\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
       tauriSource,
     ) &&
     tauriSource.includes("async fn save_config") &&

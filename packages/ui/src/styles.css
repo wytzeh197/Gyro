@@ -313,6 +313,347 @@
   color: var(--gyro-warning, #e3ad54);
 }
 
+.gyro-composer-chip.is-council {
+  color: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 88%, #c4b5fd);
+}
+
+.gyro-composer-chip.is-council:hover .gyro-composer-chip-remove {
+  opacity: 1;
+}
+
+.gyro-council-preflight {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft, #262626);
+  color: var(--gyro-muted, #b3b3b3);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  gap: 8px;
+  padding: 8px 12px 6px;
+}
+
+.gyro-council-preflight.is-blocked {
+  color: var(--gyro-warn, #e8b45f);
+}
+
+.gyro-council-preflight-seats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* What one Council send costs, disclosed before Enter commits it. */
+.gyro-council-preflight-cost {
+  color: var(--gyro-faint, #8b8b8b);
+  flex-basis: 100%;
+  font-size: 10.5px;
+}
+
+/* Why runs are stopped, or which budget is about to stop them. */
+.gyro-composer-safety-notice {
+  align-items: center;
+  border-radius: 10px;
+  color: var(--gyro-text, #f0f0f0);
+  display: flex;
+  gap: 9px;
+  margin: 8px 8px 0;
+  padding: 8px 10px;
+}
+
+.gyro-composer-safety-notice.is-paused {
+  background: color-mix(in srgb, var(--gyro-danger, #ef7d7d) 12%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-danger, #ef7d7d) 36%, transparent);
+}
+
+.gyro-composer-safety-notice.is-warning {
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-warn, #e8b45f) 30%, transparent);
+}
+
+.gyro-composer-safety-notice > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-composer-safety-notice strong {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.gyro-composer-safety-notice small {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.gyro-composer-safety-notice button {
+  background: color-mix(in srgb, var(--gyro-text, #f0f0f0) 10%, transparent);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 7px;
+  color: var(--gyro-text, #f0f0f0);
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  margin-left: auto;
+  padding: 4px 10px;
+}
+
+/* Second-press confirmation for a send large enough to be worth agreeing to. */
+.gyro-composer-cost-confirm {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-warn, #e8b45f) 34%, transparent);
+  border-radius: 10px;
+  color: var(--gyro-text, #f0f0f0);
+  display: flex;
+  gap: 9px;
+  margin: 8px 8px 0;
+  padding: 8px 10px;
+}
+
+.gyro-composer-cost-confirm > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-composer-cost-confirm strong {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.gyro-composer-cost-confirm small {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.gyro-composer-cost-confirm button {
+  background: transparent;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 7px;
+  color: var(--gyro-muted, #b3b3b3);
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  margin-left: auto;
+  padding: 4px 9px;
+}
+
+.gyro-composer-cost-confirm button + button {
+  margin-left: 0;
+}
+
+.gyro-composer-cost-confirm-send {
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 22%, transparent);
+  color: var(--gyro-text, #f0f0f0);
+}
+
+.gyro-council-preflight-chip {
+  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 12%, transparent);
+  border-radius: 999px;
+  color: var(--gyro-text, #f0f0f0);
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+
+:root[data-theme="light"] .gyro-council-preflight-chip {
+  color: #1d2329;
+}
+
+.gyro-council-response {
+  display: grid;
+  gap: 12px;
+}
+
+.gyro-council-header {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-council-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gyro-council-title-row strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gyro-council-status {
+  border: 1px solid var(--gyro-border, #303030);
+  border-radius: 999px;
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: 11px;
+  padding: 2px 8px;
+  text-transform: lowercase;
+}
+
+.gyro-council-status.is-done {
+  border-color: color-mix(in srgb, var(--gyro-success, #70d39f) 45%, transparent);
+  color: var(--gyro-success, #70d39f);
+}
+
+.gyro-council-status.is-partial {
+  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 45%, transparent);
+  color: var(--gyro-warn, #e8b45f);
+}
+
+.gyro-council-status.is-failed,
+.gyro-council-status.is-cancelled {
+  border-color: color-mix(in srgb, var(--gyro-danger, #ef7d7d) 45%, transparent);
+  color: var(--gyro-danger, #ef7d7d);
+}
+
+.gyro-council-badge {
+  border-radius: 999px;
+  background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
+  color: var(--gyro-accent, #7aa7ff);
+  font-size: 10px;
+  padding: 2px 7px;
+}
+
+.gyro-council-meta {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: 12px;
+  margin: 0;
+}
+
+.gyro-council-banner {
+  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gyro-accent, #7aa7ff) 28%, transparent);
+  border-radius: 8px;
+  color: var(--gyro-text, #f0f0f0);
+  font-size: 12px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.gyro-council-banner.is-warn {
+  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 32%, transparent);
+}
+
+.gyro-council-seats {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-council-seat {
+  border: 1px solid var(--gyro-border, #303030);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.gyro-council-seat.is-failed,
+.gyro-council-seat.is-cancelled {
+  border-color: color-mix(in srgb, var(--gyro-danger, #ef7d7d) 35%, transparent);
+}
+
+.gyro-council-seat-header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-council-seat-header:hover {
+  background: color-mix(in srgb, var(--gyro-text, #fff) 4%, transparent);
+}
+
+.gyro-council-seat-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.gyro-council-seat-status,
+.gyro-council-seat-latency {
+  color: var(--gyro-muted, #b3b3b3);
+  font-size: 11px;
+}
+
+.gyro-council-seat-header svg.is-open {
+  transform: rotate(180deg);
+}
+
+.gyro-council-seat-body {
+  border-top: 1px solid var(--gyro-border, #303030);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.gyro-council-seat-output {
+  background: var(--gyro-code-bg, #0c0c0c);
+  border-radius: 8px;
+  color: var(--gyro-code-text, #e6e6e6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+.gyro-council-seat-actions,
+.gyro-council-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gyro-council-seat-actions button,
+.gyro-council-actions button:not([aria-label]) {
+  background: var(--gyro-control-bg, #1b1b1b);
+  border: 1px solid var(--gyro-border, #303030);
+  border-radius: 8px;
+  color: var(--gyro-text, #f0f0f0);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.gyro-council-seat-actions button:hover,
+.gyro-council-actions button:not([aria-label]):hover {
+  background: var(--gyro-control-hover, #272727);
+}
+
+.gyro-council-seat-actions button:disabled,
+.gyro-council-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+:root[data-theme="light"] .gyro-council-seat-output {
+  background: #f3f4f6;
+  color: #1d2329;
+}
+
+:root[data-theme="light"] .gyro-council-seat-actions button,
+:root[data-theme="light"] .gyro-council-actions button:not([aria-label]) {
+  background: #f0f1f3;
+  border-color: #d5d8dd;
+  color: #1d2329;
+}
+
 .gyro-composer-chip-remove {
   border-left: 1px solid currentColor;
   margin-left: 1px;
@@ -905,6 +1246,51 @@ button {
 
 .gyro-session-row {
   position: relative;
+}
+
+.gyro-sidebar-thread-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-sidebar-thread-title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gyro-session-badge {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 520;
+  gap: 3px;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.gyro-session-badge.is-agent-workspace {
+  background: rgba(88, 140, 255, 0.12);
+  border-color: rgba(88, 140, 255, 0.24);
+  color: #9bb8ff;
+}
+
+.gyro-session-badge.is-cli {
+  background: rgba(120, 200, 160, 0.1);
+  border-color: rgba(120, 200, 160, 0.22);
+  color: #8fd6b0;
 }
 
 .gyro-session-row.is-active,
@@ -10165,6 +10551,106 @@ textarea:focus-visible {
   text-align: center;
 }
 
+.gyro-chat-start-trust {
+  color: var(--gyro-muted, #9a9ea6);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: -12px 0 0;
+  max-width: 34rem;
+  text-align: center;
+}
+
+.gyro-chat-start-pillars {
+  display: grid;
+  gap: 8px;
+  justify-items: stretch;
+  max-width: 620px;
+  width: 100%;
+}
+
+.gyro-chat-start-pillar {
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 11px 12px;
+  text-align: left;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.gyro-chat-start-pillar:hover {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.gyro-chat-start-pillar.is-primary {
+  background: rgba(88, 140, 255, 0.08);
+  border-color: rgba(88, 140, 255, 0.22);
+}
+
+.gyro-chat-start-pillar-icon {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  color: var(--gyro-muted, #9a9ea6);
+  display: grid;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.gyro-chat-start-pillar.is-primary .gyro-chat-start-pillar-icon {
+  background: rgba(88, 140, 255, 0.14);
+  color: #9bb8ff;
+}
+
+.gyro-chat-start-pillar strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.gyro-chat-start-pillar small {
+  color: var(--gyro-muted, #9a9ea6);
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+.gyro-thread-mode-badge {
+  align-items: center;
+  background: rgba(88, 140, 255, 0.12);
+  border: 1px solid rgba(88, 140, 255, 0.24);
+  border-radius: 999px;
+  color: #9bb8ff;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 520;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 3px 8px;
+  vertical-align: middle;
+}
+
+.gyro-thread-mode-badge em {
+  color: inherit;
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.gyro-thread-pill-button.is-agent-workspace,
+.gyro-composer-chip.is-agent-workspace {
+  border-color: rgba(88, 140, 255, 0.28);
+  color: #9bb8ff;
+}
+
 .gyro-chat-start .gyro-onboarding-steps {
   background: #191b1f;
   border-color: #2b2f35;
@@ -12250,6 +12736,11 @@ body {
   display: none;
 }
 
+.gyro-chat-thread-topbar > div:first-child span.gyro-thread-mode-badge {
+  align-items: center;
+  display: inline-flex;
+}
+
 .gyro-chat-thread-topbar strong {
   color: #f3f1ec;
   font-size: 14px;
@@ -12257,6 +12748,9 @@ body {
 }
 
 .gyro-chat-thread-identity {
+  align-items: center;
+  display: flex;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -22558,6 +23052,32 @@ button.gyro-account-menu-row:hover,
   z-index: 122;
 }
 
+/* Running cost for this chat, read from Gyro's usage ledger. */
+.gyro-composer-session-cost {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  font-size: 10px;
+  gap: 5px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.gyro-composer-session-cost em {
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: 5px;
+  font-size: 9px;
+  font-style: normal;
+  opacity: 0.85;
+  padding: 1px 4px;
+}
+
+@media (max-width: 620px) {
+  .gyro-composer-session-cost em {
+    display: none;
+  }
+}
+
 /* Chat slash command menu */
 .gyro-composer-shell:has(.gyro-composer-slash-menu) {
   z-index: 123;
@@ -22577,44 +23097,16 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-text);
   display: flex;
   flex-direction: column;
+  gap: 1px;
   left: 8px;
   max-height: min(288px, calc(100vh - 40px));
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   position: absolute;
   right: 8px;
-  width: min(370px, calc(100% - 16px));
+  width: min(300px, calc(100% - 16px));
   z-index: 140;
-}
-
-.gyro-composer-slash-menu-title,
-.gyro-composer-slash-menu-hint {
-  align-items: center;
-  color: var(--gyro-faint);
-  display: flex;
-  font-size: 9px;
-  justify-content: space-between;
-  letter-spacing: 0.02em;
-  padding: 3px 6px 5px;
-}
-
-.gyro-composer-slash-menu-title span {
-  color: var(--gyro-muted);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.gyro-composer-slash-menu-title small {
-  font-size: 9px;
-}
-
-.gyro-composer-slash-menu-items {
-  display: grid;
-  flex: 1 1 auto;
-  gap: 1px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .gyro-composer-slash-menu button {
@@ -22625,10 +23117,10 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-muted);
   display: grid;
   font: inherit;
-  gap: 7px;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  min-height: 36px;
-  padding: 4px 6px;
+  gap: 8px;
+  grid-template-columns: 14px auto minmax(0, 1fr) auto;
+  min-height: 28px;
+  padding: 3px 6px;
   text-align: left;
   width: 100%;
 }
@@ -22643,44 +23135,63 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-text);
 }
 
-.gyro-composer-slash-menu button > span {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.gyro-composer-slash-menu button strong {
-  color: var(--gyro-text);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.gyro-composer-slash-menu button small {
+.gyro-composer-slash-menu button > span:not([class]) {
   color: var(--gyro-faint);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.2;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.gyro-composer-slash-menu button code {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 5px;
-  color: var(--gyro-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  padding: 2px 4px;
+.gyro-composer-slash-hint-mark {
+  align-items: center;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 50%;
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: 8px;
+  font-weight: 700;
+  height: 13px;
+  justify-content: center;
+  line-height: 1;
+  width: 13px;
 }
 
-.gyro-composer-slash-menu-hint {
-  border-top: 1px solid var(--gyro-premium-hairline-soft);
-  gap: 10px;
-  justify-content: flex-start;
-  margin-top: 3px;
-  padding: 5px 6px 2px;
+.gyro-composer-slash-menu button:hover .gyro-composer-slash-hint-mark,
+.gyro-composer-slash-menu button.is-selected .gyro-composer-slash-hint-mark {
+  border-color: color-mix(in srgb, var(--gyro-accent) 55%, transparent);
+  color: var(--gyro-accent);
+}
+
+.gyro-composer-slash-hint-bubble {
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgb(0 0 0 / 26%);
+  color: var(--gyro-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  padding: 7px 9px;
+  pointer-events: none;
+  position: fixed;
+  transform: translateY(-50%);
+  width: 216px;
+  z-index: 200;
+}
+
+:root[data-theme="light"] .gyro-composer-slash-hint-bubble {
+  background: #ffffff;
+  border-color: #d5d9e0;
+  box-shadow: 0 12px 30px rgb(31 41 55 / 16%);
+}
+
+.gyro-composer-slash-menu button code {
+  color: var(--gyro-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 :root[data-theme="light"] .gyro-composer-slash-menu {
@@ -22695,10 +23206,6 @@ button.gyro-account-menu-row:hover,
     max-height: min(244px, calc(100vh - 32px));
     right: 4px;
     width: calc(100% - 8px);
-  }
-
-  .gyro-composer-slash-menu-hint {
-    display: none;
   }
 }
 
