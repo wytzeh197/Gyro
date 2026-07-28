@@ -1,4 +1,6 @@
+use crate::council::CouncilConfig;
 use crate::paths::GyroPaths;
+use crate::usage::UsageGuardConfig;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
@@ -105,6 +107,10 @@ pub struct GyroConfig {
     pub account_session: AccountSessionState,
     pub model_providers: Vec<ModelProviderConfig>,
     pub command_profiles: Vec<CommandProfile>,
+    #[serde(default)]
+    pub council: CouncilConfig,
+    #[serde(default)]
+    pub usage_guard: UsageGuardConfig,
 }
 
 impl Default for GyroConfig {
@@ -117,6 +123,8 @@ impl Default for GyroConfig {
             full_access: false,
             account_oidc: AccountOidcConfig::default(),
             account_session: AccountSessionState::default(),
+            council: CouncilConfig::default(),
+            usage_guard: UsageGuardConfig::default(),
             model_providers: vec![
                 ModelProviderConfig {
                     id: "openai".into(),
@@ -254,6 +262,7 @@ impl GyroConfig {
         let mut config: Self = serde_json::from_str(&raw)
             .with_context(|| format!("parse {}", paths.config_path.display()))?;
         config.normalize_legacy_state();
+        config.council = std::mem::take(&mut config.council).normalized();
         Ok(config)
     }
 
