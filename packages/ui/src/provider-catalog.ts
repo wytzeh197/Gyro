@@ -30,6 +30,19 @@ export const CLAUDE_REASONING_EFFORTS: ReasoningEffort[] = [
   "max",
 ];
 
+/**
+ * The levels Grok models offer for `--reasoning-effort`.
+ *
+ * The CLI's flag parser accepts more words than this, but each model publishes
+ * its own selectable set and rejects the rest at turn time. Grok's shipped
+ * models list low, medium, and high only.
+ */
+export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+];
+
 type ProviderCatalogEntry = ModelProviderConfig & {
   capabilities: ProviderCapabilities;
   defaultModelId: string;
@@ -224,6 +237,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "grok-4.5",
     selectedModelId: "grok-4.5",
+    selectedReasoningEffort: "high",
     capabilities: {
       executionKind: "acp-cli",
       executable: true,
@@ -239,12 +253,16 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Grok 4.5",
         description: "xAI's coding-capable model through Grok Build.",
         contextWindowTokens: 131_072,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: GROK_REASONING_EFFORTS,
       },
       {
         id: "grok-4.3",
         displayName: "Grok 4.3",
         description: "General xAI model for chat and reasoning.",
         contextWindowTokens: 131_072,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: GROK_REASONING_EFFORTS,
       },
     ],
     effort: "medium",

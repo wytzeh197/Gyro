@@ -30,6 +30,7 @@ const MUTATION_APPROVAL_TTL_HOURS: i64 = 24;
 const MAX_PROVIDER_MUTATION_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PROVIDER_MUTATION_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const PROVIDER_MUTATION_JOURNAL_SCHEMA: &str = "gyro.provider-mutation-journal.v1";
+const PROVIDER_MUTATION_APPLIED_MARKER_SCHEMA: &str = "gyro.provider-mutation-applied.v1";
 const MAX_PROVIDER_MUTATION_JOURNAL_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -119,6 +120,12 @@ pub struct PendingProviderMutationCommit {
 impl PendingProviderMutationCommit {
     pub fn result(&self) -> &ProviderMutationResult {
         &self.result
+    }
+
+    /// Record that the applied decision was durably logged so recovery can
+    /// finish cleanup without depending on a capped session-event window.
+    pub fn mark_applied(&self) -> Result<()> {
+        write_provider_mutation_applied_marker(&self.journal_path, &self.journal)
     }
 
     pub fn finalize(self) -> Result<ProviderMutationResult> {
@@ -1209,6 +1216,64 @@ fn provider_mutation_journal_path(journal_dir: &Path, transaction_id: Uuid) -> R
     Ok(journal_dir.join(format!("transaction-{transaction_id}.json")))
 }
 
+fn provider_mutation_applied_marker_path(journal_path: &Path) -> PathBuf {
+    journal_path.with_extension("applied")
+}
+
+fn write_provider_mutation_applied_marker(
+    journal_path: &Path,
+    journal: &ProviderMutationJournal,
+) -> Result<()> {
+    let path = provider_mutation_applied_marker_path(journal_path);
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("provider mutation applied marker has no parent"))?;
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schema": PROVIDER_MUTATION_APPLIED_MARKER_SCHEMA,
+        "journalId": journal.id,
+        "sessionId": journal.session_id,
+        "approvalId": journal.approval_id,
+        "appliedAt": Utc::now().to_rfc3339(),
+    }))?;
+    let temporary = parent.join(format!(".applied-{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.flush()?;
+        file.sync_all()?;
+        // Replace any previous marker from a partial earlier attempt.
+        if path.exists() {
+            fs::remove_file(&path)?;
+        }
+        fs::rename(&temporary, &path)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.with_context(|| format!("write provider mutation applied marker {}", path.display()))
+}
+
+fn provider_mutation_applied_marker_exists(journal_path: &Path) -> bool {
+    let path = provider_mutation_applied_marker_path(journal_path);
+    match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("schema")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|schema| schema == PROVIDER_MUTATION_APPLIED_MARKER_SCHEMA)
+            })
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
 fn write_provider_mutation_journal(path: &Path, journal: &ProviderMutationJournal) -> Result<()> {
     let parent = path
         .parent()
@@ -1240,6 +1305,15 @@ fn remove_provider_mutation_journal(path: &Path) -> Result<()> {
     if path.exists() {
         fs::remove_file(path)
             .with_context(|| format!("remove mutation journal {}", path.display()))?;
+    }
+    let marker = provider_mutation_applied_marker_path(path);
+    if marker.exists() {
+        fs::remove_file(&marker).with_context(|| {
+            format!(
+                "remove mutation applied marker {}",
+                marker.display()
+            )
+        })?;
     }
     if let Some(parent) = path.parent() {
         fs::File::open(parent)?.sync_all()?;
@@ -1302,6 +1376,16 @@ fn quarantine_provider_mutation_journal(path: &Path) -> Result<PathBuf> {
             quarantined.display()
         )
     })?;
+    let marker = provider_mutation_applied_marker_path(path);
+    if marker.exists() {
+        let marker_name = marker
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("transaction.applied");
+        let quarantined_marker =
+            parent.join(format!("quarantined-{marker_name}-{}", Uuid::new_v4()));
+        let _ = fs::rename(&marker, &quarantined_marker);
+    }
     fs::File::open(parent)?.sync_all()?;
     Ok(quarantined)
 }
@@ -1381,7 +1465,10 @@ fn recover_provider_mutation_journal(path: &Path, store: &SessionStore) -> Resul
         ));
     }
     validate_provider_mutation_journal(&journal)?;
-    let applied = provider_mutation_approval_was_applied(store, &journal)?;
+    // Prefer the fsynced applied marker so recovery does not depend on the
+    // capped JSONL event window after a long-running session.
+    let applied = provider_mutation_applied_marker_exists(path)
+        || provider_mutation_approval_was_applied(store, &journal)?;
     if applied {
         finalize_provider_mutation_journal(&journal)?;
     } else {
@@ -2160,6 +2247,7 @@ mod tests {
                 }),
             )
             .unwrap();
+        pending.mark_applied().unwrap();
         pending.finalize().unwrap();
 
         assert_eq!(
@@ -2269,6 +2357,7 @@ mod tests {
                 }),
             )
             .unwrap();
+        pending.mark_applied().unwrap();
         drop(pending);
 
         let recovered = recover_provider_mutation_transactions(&journals, &store).unwrap();
@@ -2290,6 +2379,67 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(".gyro-")
         }));
+    }
+
+    #[test]
+    fn recovery_finalizes_from_applied_marker_without_event_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let journals = paths.mutation_journals_dir.clone();
+        let store = SessionStore::open(paths).unwrap();
+        let session = store
+            .create_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "marker recovery without events",
+            )
+            .unwrap();
+        let approval_id = Uuid::new_v4();
+        fs::write(temp.path().join("file.txt"), "before\n").unwrap();
+        let transaction = prepare_provider_mutation_transaction(
+            temp.path(),
+            &[provider_change(
+                "file.txt",
+                "update",
+                "@@ -1 +1 @@\n-before\n+after\n",
+                None,
+            )],
+        )
+        .unwrap();
+        let pending = begin_provider_mutation_transaction(
+            &transaction,
+            &journals,
+            ProviderMutationJournalContext {
+                session_id: session.id,
+                approval_id,
+            },
+        )
+        .unwrap();
+        // No applied event is recorded. The durable marker alone must keep the
+        // committed workspace changes after a crash before finalize.
+        pending.mark_applied().unwrap();
+        drop(pending);
+
+        let recovered = recover_provider_mutation_transactions(&journals, &store).unwrap();
+
+        assert_eq!(recovered.finalized, 1);
+        assert_eq!(recovered.rolled_back, 0);
+        assert_eq!(
+            fs::read_to_string(temp.path().join("file.txt")).unwrap(),
+            "after\n"
+        );
+        assert!(provider_mutation_journal_paths(&journals)
+            .unwrap()
+            .is_empty());
+        assert!(!journals
+            .read_dir()
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                == Some("applied")));
     }
 
     #[test]

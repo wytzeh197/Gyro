@@ -1180,6 +1180,7 @@ export type WorkbenchAction =
   | { type: "open-tool-panel"; tab?: WorkbenchPaneTab }
   | { type: "close-tool-panel" }
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
+  | { type: "set-default-workspace-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "set-density"; density: WorkbenchDensity }
   | { type: "set-menu-bar-visible"; visible: boolean }
@@ -1482,13 +1483,13 @@ export function createInitialWorkbenchState(
     github: defaultGithubState(),
   };
 
+  const preferences = normalizeWorkbenchPreferences(overrides.preferences);
   return {
     activeDestination: "workspace",
     activeWorkspaceLayout: "thread",
     lastSessionsLayout: "thread",
     activePaneTab: "diff",
     isToolPanelOpen: false,
-    workspaceMode: "local",
     terminalTemplate: 4,
     selectedTaskId: undefined,
     diffReview,
@@ -1516,7 +1517,10 @@ export function createInitialWorkbenchState(
       },
       languageServers: overrides.ide?.languageServers ?? [],
     },
-    preferences: normalizeWorkbenchPreferences(overrides.preferences),
+    preferences,
+    // Prefer an explicit override; otherwise honor the saved new-chat default.
+    workspaceMode:
+      overrides.workspaceMode ?? preferences.defaultWorkspaceMode,
     selectedTerminalPaneId:
       overrides.selectedTerminalPaneId ?? terminalPanes[0]?.id ?? "",
     terminalPanes,
@@ -1607,6 +1611,15 @@ export function workbenchReducer(
           state.activeWorkspaceLayout === "thread"
             ? false
             : state.isToolPanelOpen,
+      };
+    case "set-default-workspace-mode":
+      return {
+        ...state,
+        workspaceMode: action.mode,
+        preferences: {
+          ...state.preferences,
+          defaultWorkspaceMode: action.mode,
+        },
       };
     case "set-theme":
       return {
@@ -3862,6 +3875,8 @@ function normalizeWorkbenchPreferences(
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
+    defaultWorkspaceMode:
+      preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:

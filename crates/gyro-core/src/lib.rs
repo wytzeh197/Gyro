@@ -3,6 +3,7 @@ pub mod automations;
 pub mod capabilities;
 pub mod cli_path;
 pub mod config;
+pub mod council;
 pub mod diff;
 pub mod doctor;
 pub mod execution;
@@ -20,6 +21,7 @@ pub mod provider_registry;
 pub mod provider_stream;
 pub mod security;
 pub mod sessions;
+pub mod usage;
 pub mod worktrees;
 
 pub use account::{
@@ -45,6 +47,18 @@ pub use cli_path::{augmented_gui_path, user_cli_paths};
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
     ModelProviderConfig,
+};
+pub use council::{
+    barrier_decision, build_synthesizer_user_prompt, built_in_council_presets,
+    council_capability_allowed, council_run_dir, ensure_council_run_dir, final_run_status,
+    parse_council_synthesis, read_council_run_manifest, read_seat_artifact, resolve_ready_seats,
+    seat_label_map, successful_seat_answers, validate_seat_count, write_council_run_manifest,
+    write_council_snapshot, write_seat_artifact, write_synthesis_artifact, CouncilAttachmentRef,
+    CouncilBarrierDecision, CouncilConfig, CouncilContextSnapshot, CouncilDisagreement,
+    CouncilDisagreementPosition, CouncilPreset, CouncilRun, CouncilRunStatus, CouncilRunTotals,
+    CouncilSeat, CouncilSeatAnswer, CouncilSeatStatus, CouncilSynthesis, CouncilToolPolicy,
+    CouncilUniqueInsight, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, COUNCIL_SCHEMA_V1,
+    DEFAULT_SEAT_TIMEOUT_SECONDS, DEFAULT_SYNTHESIZER_TIMEOUT_SECONDS, SYNTHESIZER_SYSTEM_PROMPT,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
@@ -112,6 +126,13 @@ pub use sessions::{
     CreateSessionContext, MutationProposal, MutationProposalOperation, MutationProposalStatus,
     ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
     SessionWorkspaceMode,
+};
+pub use usage::{
+    budget_decision, budget_state, estimate_tokens, exceeds_call_ceiling, guard_decision,
+    provider_usage_totals_since, recent_usage, session_usage_totals, usage_totals_since,
+    BudgetLevel, BudgetState, GuardVerdict, PauseReason, PauseScope, PauseState, RecentUsage,
+    UsageBudget, UsageEntry, UsageGuardConfig, UsageOrigin, UsageOriginTotals, UsageOutcome,
+    UsageTokens, UsageTotals,
 };
 pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,
