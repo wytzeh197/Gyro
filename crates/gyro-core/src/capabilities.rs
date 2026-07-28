@@ -176,6 +176,8 @@ pub enum CapabilityApprovalDecision {
 pub enum CapabilityRunMode {
     Normal,
     Plan,
+    /// Advisory Model Council: no tools; frozen snapshot only.
+    Council,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -309,6 +311,11 @@ impl CapabilityPolicySnapshot {
     }
 
     pub fn access_for(&self, class: CapabilityClass) -> CapabilityAccess {
+        // Council seats are advisory-only: deny every capability so they cannot
+        // pull live workspace state beyond the frozen snapshot.
+        if self.mode == CapabilityRunMode::Council {
+            return CapabilityAccess::Deny;
+        }
         // Plan mode is an allowlist: only classes that change nothing outside
         // Gyro survive it, so any class added later is denied until listed here.
         if self.mode == CapabilityRunMode::Plan
@@ -842,6 +849,31 @@ mod tests {
         // ...while pushing and opening pull requests never do.
         assert_eq!(
             snapshot.access_for(CapabilityClass::GithubWrite),
+            CapabilityAccess::Deny
+        );
+    }
+
+    #[test]
+    fn council_mode_denies_every_capability_class() {
+        let mut policy = ProjectCapabilityPolicy::defaults("/tmp/project");
+        for value in policy.classes.values_mut() {
+            *value = CapabilityAccess::Allow;
+        }
+        let snapshot = CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Council);
+        assert_eq!(
+            snapshot.access_for(CapabilityClass::WorkspaceInspect),
+            CapabilityAccess::Deny
+        );
+        assert_eq!(
+            snapshot.access_for(CapabilityClass::WorkspaceSensitiveRead),
+            CapabilityAccess::Deny
+        );
+        assert_eq!(
+            snapshot.access_for(CapabilityClass::TerminalExecute),
+            CapabilityAccess::Deny
+        );
+        assert_eq!(
+            snapshot.access_for(CapabilityClass::GithubInspect),
             CapabilityAccess::Deny
         );
     }

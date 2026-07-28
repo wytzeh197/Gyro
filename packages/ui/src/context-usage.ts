@@ -25,6 +25,9 @@ export type ComposerContextUsage = {
   label: string;
   modelLabel: string;
   percent: number;
+  /** Raw counts, for callers that must do arithmetic rather than render text. */
+  usedTokens: number;
+  contextWindowTokens: number;
   percentLabel: string;
   remainingLabel: string;
   source: "estimated" | "reported";
@@ -228,10 +231,12 @@ export function estimateComposerContextUsage(
     : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
 
   return {
+    contextWindowTokens,
     detail,
     label: `${modelLabel} context: ${usedLabel} used, ${remainingLabel} remaining of ${windowLabel} tokens (${percentLabel})`,
     modelLabel,
     percent,
+    usedTokens,
     percentLabel,
     remainingLabel,
     source: isReported ? "reported" : "estimated",

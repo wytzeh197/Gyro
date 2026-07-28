@@ -51,6 +51,7 @@ import {
   Paperclip,
   PauseCircle,
   Pin,
+  Pause as PauseIcon,
   Play,
   Plus,
   RefreshCw,
@@ -67,6 +68,7 @@ import {
   TriangleAlert,
   Trash2,
   UserCircle,
+  Users,
   Video,
   Wrench,
   X,
@@ -90,6 +92,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import { structuredCommentaryBlocks } from "./chat-commentary";
@@ -110,6 +113,11 @@ import {
   type ComposerLimitWindow,
 } from "./context-usage";
 import {
+  estimateTurnCost,
+  summarizeSessionCost,
+  summarizeUsageSafety,
+} from "./usage-ledger";
+import {
   createGlobalSearchTarget,
   GlobalSearchRanker,
   normalizedGlobalSearchText,
@@ -127,6 +135,13 @@ import {
   workspaceSearchGlobs,
   workspaceSearchGlobText,
 } from "./workspace-search";
+import {
+  workspaceModeDetail,
+  workspaceModeLabel,
+  workspaceModePopoverLabel,
+  workspaceModeShortLabel,
+  workspaceModeTechnicalHint,
+} from "./workspace-mode";
 import type {
   AppDestination,
   Automation,
@@ -139,6 +154,10 @@ import type {
   ChatPaneRef,
   ChatProjectLayout,
   ChatMode,
+  CouncilActionRequest,
+  CouncilResponsePayload,
+  CouncilSeatSummary,
+  CouncilSynthesis,
   ChatSidePanelId,
   CliLaunchPreset,
   CommandProfile,
@@ -172,6 +191,8 @@ import type {
   ProviderId,
   ProviderModel,
   ProviderUsageState,
+  SessionUsageTotals,
+  UsageSafetySnapshot,
   ProviderReadiness,
   ProviderHandoff,
   ProviderSession,
@@ -227,6 +248,12 @@ import {
   selectedModelLabel,
   selectedReasoningEffort,
 } from "./provider-catalog";
+import {
+  councilPreflightLabel,
+  normalizedCouncilConfig,
+  readyCouncilProviders,
+  resolveCouncilSeatRequests,
+} from "./council";
 
 type BrowserScreenshotAction = "capture" | "reveal";
 import { shouldShowSidebarUpdate, updateSidebarLabel } from "./update-state";
@@ -593,6 +620,12 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     label: "Approval budget",
     detail: "Guard file edits and command escalation",
     keywords: "permissions strict",
+  },
+  {
+    section: "providers",
+    label: "Model Council",
+    detail: "Parallel multi-provider synthesis for high-stakes decisions",
+    keywords: "council multi model ensemble synthesize preset",
   },
   {
     section: "providers",
@@ -3850,6 +3883,19 @@ function SessionSidebarRow({
     session.providerLabel ??
     session.providerId ??
     "No model saved";
+  const isAgentWorkspace = session.workspaceMode === "worktree";
+  const isCliOrigin = session.origin === "cli";
+  const badgeLabels = [
+    isAgentWorkspace ? "Isolated agent workspace" : undefined,
+    isCliOrigin ? "Started from CLI" : undefined,
+  ].filter(Boolean);
+  const ariaTitle = [
+    session.title,
+    session.summary,
+    ...badgeLabels,
+  ]
+    .filter(Boolean)
+    .join(". ");
 
   return (
     <div
@@ -3862,6 +3908,7 @@ function SessionSidebarRow({
         isOpen ? "is-open" : "",
         isDragging ? "is-dragging" : "",
         isMenuOpen ? "is-menu-open" : "",
+        isAgentWorkspace ? "is-agent-workspace" : "",
       ].join(" ")}
       aria-grabbed={onDragStart ? Boolean(isDragging) : undefined}
       draggable={Boolean(onDragStart)}
@@ -3869,18 +3916,18 @@ function SessionSidebarRow({
       onDragStart={onDragStart}
     >
       <button
-        aria-label={
-          session.summary
-            ? `${session.title}. ${session.summary}`
-            : session.title
-        }
+        aria-label={ariaTitle}
         className={
           sessionProviderId
             ? "gyro-sidebar-thread-main has-model-logo"
             : "gyro-sidebar-thread-main"
         }
         onClick={onSelect}
-        title={session.summary ?? session.title}
+        title={
+          [session.summary ?? session.title, ...badgeLabels]
+            .filter(Boolean)
+            .join(" · ")
+        }
         type="button"
       >
         {sessionProviderId ? (
@@ -3888,7 +3935,31 @@ function SessionSidebarRow({
             <ProviderLogo providerId={sessionProviderId} />
           </span>
         ) : null}
-        <span>{session.title}</span>
+        <span className="gyro-sidebar-thread-title">
+          <span>{session.title}</span>
+          {isAgentWorkspace || isCliOrigin ? (
+            <span className="gyro-session-badges" aria-hidden="true">
+              {isAgentWorkspace ? (
+                <span
+                  className="gyro-session-badge is-agent-workspace"
+                  title="Agent workspace — private branch under Gyro"
+                >
+                  <GitBranch size={10} />
+                  Isolated
+                </span>
+              ) : null}
+              {isCliOrigin ? (
+                <span
+                  className="gyro-session-badge is-cli"
+                  title="Started from the gyro CLI"
+                >
+                  <Terminal size={10} />
+                  CLI
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
         <small
           aria-label={isSending ? "Chat working" : undefined}
           className={
@@ -4466,9 +4537,10 @@ export function WorkspaceHeader({
                   className={workspaceMode === mode ? "is-active" : ""}
                   key={mode}
                   onClick={() => onWorkspaceModeChange(mode)}
+                  title={workspaceModeTechnicalHint(mode)}
                   type="button"
                 >
-                  {mode}
+                  {workspaceModeShortLabel(mode)}
                 </button>
               ))}
             </div>
@@ -4549,7 +4621,7 @@ export function ChatUtilityBar({
       <div className="gyro-chat-context" data-tauri-drag-region>
         <strong>{sessionTitle ?? "Chat"}</strong>
         <span>
-          {workspaceName(workspacePath)} · {workspaceMode}
+          {workspaceName(workspacePath)} · {workspaceModeLabel(workspaceMode)}
         </span>
       </div>
       <div className="gyro-chat-tools" aria-label="Chat tools">
@@ -4960,7 +5032,13 @@ type ChatSurfaceProps = {
   workspaceContext?: WorkspaceContextSnapshot;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
+  providerStatuses?: ProviderStatus[];
   providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
+  /** What this chat has spent, from Gyro's own usage ledger. */
+  sessionUsage?: SessionUsageTotals;
+  /** The current hold on runs and every configured budget. */
+  usageSafety?: UsageSafetySnapshot;
+  onResumeUsage?: () => void;
   terminalPanes?: TerminalPane[];
   diffReview?: DiffReview;
   sourceControl?: SourceControlState;
@@ -5021,6 +5099,9 @@ type ChatSurfaceProps = {
   onStopChat?: () => void;
   onCloseChat?: () => void;
   onContinueChat?: () => void;
+  onCouncilAction?: (
+    action: CouncilActionRequest,
+  ) => void | Promise<string | void>;
   onSend: (message: string) => void;
   onComposerAction?: (action: string) => void;
   onMutationApprovalAction?: (
@@ -5072,6 +5153,9 @@ export function ChatSurface({
   config,
   providerReadiness,
   providerUsageByProvider,
+  sessionUsage,
+  usageSafety,
+  onResumeUsage,
   terminalPanes,
   diffReview,
   sourceControl,
@@ -5105,6 +5189,7 @@ export function ChatSurface({
   isTiled = false,
   isBranchLoading,
   maxDraftLength,
+  providerStatuses,
   onDraftChange,
   onRemoveAttachment,
   onEditQueuedMessage,
@@ -5115,6 +5200,7 @@ export function ChatSurface({
   onStopChat,
   onCloseChat,
   onContinueChat,
+  onCouncilAction,
   onSend,
   onComposerAction,
   onMutationApprovalAction,
@@ -5436,6 +5522,7 @@ export function ChatSurface({
           <ChatEvent
             event={event}
             key={event.id}
+            onCouncilAction={onCouncilAction}
             onMutationApprovalAction={onMutationApprovalAction}
             onProviderApprovalAction={onProviderApprovalAction}
             onProviderStatusAction={onProviderStatusAction}
@@ -5452,6 +5539,7 @@ export function ChatSurface({
             key={turn.id}
             onLoadChangeDiff={onLoadChangeDiff}
             onOpenChanges={() => onOpenToolPanel?.("diff")}
+            onCouncilAction={onCouncilAction}
             onMutationApprovalAction={onMutationApprovalAction}
             onProviderApprovalAction={onProviderApprovalAction}
             onProviderStatusAction={onProviderStatusAction}
@@ -5476,6 +5564,8 @@ export function ChatSurface({
     [
       onMutationApprovalAction,
       onComposerAction,
+      onCouncilAction,
+      onContinueChat,
       onLoadChangeDiff,
       onOpenToolPanel,
       onProviderApprovalAction,
@@ -5570,6 +5660,10 @@ export function ChatSurface({
               <span>What should we work on?</span>
             )}
           </h1>
+          <p className="gyro-chat-start-trust">
+            Local project · your agent CLI · Gyro asks before commands and file
+            edits
+          </p>
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -5587,6 +5681,7 @@ export function ChatSurface({
             isBranchLoading={isBranchLoading}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
+            providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
             limitWindows={composerLimits}
             savedProjects={savedProjects}
@@ -5604,6 +5699,15 @@ export function ChatSurface({
               turn.user ? [turn.user.message] : [],
             )}
             contextUsage={contextUsage}
+            sessionUsage={sessionUsage}
+            usageSafety={usageSafety}
+            onResumeUsage={onResumeUsage}
+          />
+          <ChatStartDifferentiators
+            hasProject={Boolean(startProjectLabel)}
+            hasReadyProvider={hasSelectedProvider}
+            workspaceMode={workspaceMode}
+            onAction={(action) => onComposerAction?.(action)}
           />
           {showOnboardingSteps ? (
             <OnboardingSteps
@@ -5650,7 +5754,7 @@ export function ChatSurface({
       disabled: true,
       detail: "Fixed for this chat",
       icon: workspaceMode === "worktree" ? GitBranch : Laptop,
-      label: workspaceMode === "worktree" ? "Worktree" : "Local",
+      label: workspaceModeLabel(workspaceMode),
     },
     {
       action:
@@ -5659,10 +5763,13 @@ export function ChatSurface({
           : "start-new-chat-mode:worktree",
       detail:
         workspaceMode === "local"
-          ? "Create an isolated branch"
-          : "Choose a folder for a local chat",
+          ? "Private branch; main project stays untouched"
+          : "Choose a folder for a shared-folder chat",
       icon: workspaceMode === "local" ? GitPullRequest : Laptop,
-      label: workspaceMode === "local" ? "New worktree chat" : "New local chat",
+      label:
+        workspaceMode === "local"
+          ? "New agent workspace chat"
+          : "New shared-folder chat",
     },
   ];
   const threadWorkspaceItems: ComposerPopoverItem[] = [
@@ -5679,8 +5786,7 @@ export function ChatSurface({
       sectionLabel: index === 0 ? "Branch" : undefined,
     })),
   ];
-  const workspaceModeLabel =
-    workspaceMode === "worktree" ? "Worktree" : "Local";
+  const modeLabel = workspaceModeLabel(workspaceMode);
 
   return (
     <div
@@ -5690,6 +5796,7 @@ export function ChatSurface({
         isTiled ? "is-tiled" : "",
         activeRailPanel ? "has-environment" : "",
         activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : "",
+        workspaceMode === "worktree" ? "is-agent-workspace" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -5699,12 +5806,22 @@ export function ChatSurface({
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
           <strong>{sessionTitle ?? "Gyro session"}</strong>
+          {workspaceMode === "worktree" ? (
+            <span
+              className="gyro-thread-mode-badge is-agent-workspace"
+              title={workspaceModeTechnicalHint("worktree")}
+            >
+              <GitBranch aria-hidden="true" size={11} />
+              Agent workspace
+              {worktreeName ? <em>{worktreeName}</em> : null}
+            </span>
+          ) : null}
         </div>
         <div className="gyro-thread-topbar-actions">
           <div className="gyro-thread-pills" ref={threadContextMenuRef}>
             <div className="gyro-thread-context-control is-workspace-context">
               <button
-                aria-label={`Workspace: ${workspaceName(workspacePath)}, branch ${branchLabel}, ${workspaceModeLabel}`}
+                aria-label={`Workspace: ${workspaceName(workspacePath)}, branch ${branchLabel}, ${modeLabel}`}
                 aria-controls={
                   activeThreadContextMenu === "workspace"
                     ? "gyro-thread-workspace-menu"
@@ -5712,7 +5829,13 @@ export function ChatSurface({
                 }
                 aria-expanded={activeThreadContextMenu === "workspace"}
                 aria-haspopup="menu"
-                className="gyro-thread-pill-button gyro-thread-workspace-context-button"
+                className={[
+                  "gyro-thread-pill-button",
+                  "gyro-thread-workspace-context-button",
+                  workspaceMode === "worktree" ? "is-agent-workspace" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 onClick={() => {
                   setActiveThreadContextMenu((current) =>
                     current === "workspace" ? null : "workspace",
@@ -5722,7 +5845,7 @@ export function ChatSurface({
                   }
                 }}
                 type="button"
-                title={`${workspaceName(workspacePath)} / ${branchLabel} / ${workspaceModeLabel}`}
+                title={`${workspaceName(workspacePath)} / ${branchLabel} / ${modeLabel}`}
               >
                 <GitBranch aria-hidden="true" size={13} />
                 <em className="gyro-thread-context-branch">{branchLabel}</em>
@@ -5836,6 +5959,7 @@ export function ChatSurface({
             isSending={isComposerSending}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
+            providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
             limitWindows={composerLimits}
             savedProjects={savedProjects}
@@ -5852,6 +5976,9 @@ export function ChatSurface({
               turn.user ? [turn.user.message] : [],
             )}
             contextUsage={contextUsage}
+            sessionUsage={sessionUsage}
+            usageSafety={usageSafety}
+            onResumeUsage={onResumeUsage}
             showContextRow={false}
             popoverPlacement="up"
             variant="hero"
@@ -13283,7 +13410,9 @@ type SettingsSurfaceProps = {
   density?: WorkbenchDensity;
   showMenuBarIcon?: boolean;
   modelFollow?: ModelFollowMode;
+  defaultWorkspaceMode?: WorkbenchMode;
   onModelFollowChange?: (mode: ModelFollowMode) => void;
+  onDefaultWorkspaceModeChange?: (mode: WorkbenchMode) => void;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onDensityChange?: (density: WorkbenchDensity) => void;
@@ -13512,7 +13641,9 @@ export function SettingsSurface({
   density = "compact",
   showMenuBarIcon = true,
   modelFollow = "peek",
+  defaultWorkspaceMode = "local",
   onModelFollowChange,
+  onDefaultWorkspaceModeChange,
   activeSection = "general",
   onThemeChange,
   onDensityChange,
@@ -14007,6 +14138,72 @@ export function SettingsSurface({
                 );
               })}
             </div>
+            <SettingsGroup label="Model Council">
+              <SettingsRow
+                label="Enable Council mode"
+                detail="Parallel multi-provider answers with synthesis for high-stakes coding decisions."
+              >
+                <SettingsSwitch
+                  label="Enable Council mode"
+                  checked={normalizedCouncilConfig(config.council).enabled}
+                  onChange={(checked) =>
+                    onConfigChange?.({
+                      ...config,
+                      council: {
+                        ...normalizedCouncilConfig(config.council),
+                        enabled: checked,
+                      },
+                    })
+                  }
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Default preset"
+                detail="Which council membership to use when you enable Council mode."
+              >
+                <select
+                  aria-label="Default Council preset"
+                  onChange={(event) =>
+                    onConfigChange?.({
+                      ...config,
+                      council: {
+                        ...normalizedCouncilConfig(config.council),
+                        defaultPresetId: event.target.value,
+                      },
+                    })
+                  }
+                  value={normalizedCouncilConfig(config.council).defaultPresetId}
+                >
+                  {normalizedCouncilConfig(config.council).presets.map(
+                    (preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </SettingsRow>
+              <SettingsRow
+                label="Synthesize on partial"
+                detail="When one seat fails, still synthesize from the seats that finished."
+              >
+                <SettingsSwitch
+                  label="Synthesize on partial"
+                  checked={
+                    normalizedCouncilConfig(config.council).synthesizeOnPartial
+                  }
+                  onChange={(checked) =>
+                    onConfigChange?.({
+                      ...config,
+                      council: {
+                        ...normalizedCouncilConfig(config.council),
+                        synthesizeOnPartial: checked,
+                      },
+                    })
+                  }
+                />
+              </SettingsRow>
+            </SettingsGroup>
           </SettingsSection>
         ) : null}
 
@@ -14091,6 +14288,23 @@ export function SettingsSurface({
               </SettingsRow>
             </SettingsGroup>
             <SettingsGroup label="Workspace protection">
+              <SettingsRow
+                label="New chats start in"
+                detail="Shared folder edits the project you opened. Agent workspace gives the agent a private branch under Gyro so main stays untouched."
+              >
+                <select
+                  aria-label="Default workspace mode for new chats"
+                  onChange={(event) => {
+                    const mode =
+                      event.target.value === "worktree" ? "worktree" : "local";
+                    onDefaultWorkspaceModeChange?.(mode);
+                  }}
+                  value={defaultWorkspaceMode}
+                >
+                  <option value="local">Shared folder</option>
+                  <option value="worktree">Agent workspace</option>
+                </select>
+              </SettingsRow>
               <SettingsRow
                 label="Workspace boundary"
                 value="Current folder"
@@ -14805,10 +15019,11 @@ type ComposerPopoverItem = {
 type ComposerSlashCommand = {
   command: string;
   label: string;
-  detail: string;
   icon: IconComponent;
   action?: string;
   popover?: Extract<ComposerPopoverId, "approval" | "provider">;
+  /** Plain-language explainer shown when hovering the row's "?" marker. */
+  hint?: string;
 };
 
 function branchPopoverItems({
@@ -14871,7 +15086,7 @@ function branchPopoverItems({
       {
         active: true,
         disabled: true,
-        detail: "This isolated chat keeps its worktree branch",
+        detail: "Agent workspace keeps this private branch for the chat",
         icon: GitBranch,
         label: branchName,
       },
@@ -15396,11 +15611,11 @@ function providerApprovalCopy(
   const base = isAnthropic
     ? {
         title: providerTitle,
-        gatedLabel: "Ask Before Executing",
+        gatedLabel: "Review every change",
         gatedDetail: "Claude asks before tools and edits",
-        autoLabel: "Auto Approve",
+        autoLabel: "Allow inside project",
         autoDetail: "Claude can work without prompts inside its boundary",
-        directLabel: "Full Access",
+        directLabel: "Full access — no prompts",
         directDetail: "Claude can use Git, network, and user tools directly",
         commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
         commandDetail: "Claude tool calls use the backend command policy.",
@@ -15409,11 +15624,11 @@ function providerApprovalCopy(
       }
     : {
         title: providerTitle,
-        gatedLabel: "Ask Before Executing",
+        gatedLabel: "Review every change",
         gatedDetail: `${agentName} asks before commands and file edits`,
-        autoLabel: "Auto Approve",
+        autoLabel: "Allow inside project",
         autoDetail: `${agentName} works without prompts inside its provider boundary`,
-        directLabel: "Full Access",
+        directLabel: "Full access — no prompts",
         directDetail: `${agentName} can use Git, network, and user tools directly`,
         commandValue: config.requireCommandApproval ? "Ask" : "Allow",
         commandDetail: "Codex command execution uses the backend policy.",
@@ -15451,6 +15666,7 @@ function Composer({
   workspaceMode = "local",
   config,
   providerReadiness,
+  providerStatuses,
   providerUsage,
   limitWindows = [],
   onComposerAction,
@@ -15459,6 +15675,9 @@ function Composer({
   sessionGoal,
   promptHistory = [],
   contextUsage,
+  sessionUsage,
+  usageSafety,
+  onResumeUsage,
   isGoalComposerActive = false,
   savedProjects = [],
   surfaceControls,
@@ -15486,6 +15705,7 @@ function Composer({
   workspaceMode?: WorkbenchMode;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
+  providerStatuses?: ProviderStatus[];
   providerUsage?: ProviderUsageState;
   limitWindows?: ComposerLimitWindow[];
   onComposerAction?: (action: string) => void;
@@ -15500,6 +15720,10 @@ function Composer({
   sessionGoal?: SessionGoal;
   promptHistory?: string[];
   contextUsage?: ComposerContextUsage;
+  /** Ledger totals for this chat, shown as the running cost line. */
+  sessionUsage?: SessionUsageTotals;
+  usageSafety?: UsageSafetySnapshot;
+  onResumeUsage?: () => void;
   isGoalComposerActive?: boolean;
   savedProjects?: Array<{
     path: string;
@@ -15531,6 +15755,13 @@ function Composer({
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
+  // Hover explainer for a slash command. Positioned fixed against the "?"
+  // marker so it can escape the menu's own scroll clipping.
+  const [slashHint, setSlashHint] = useState<{
+    text: string;
+    top: number;
+    left: number;
+  }>();
   const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const providerPickerRef = useRef<HTMLDivElement | null>(null);
   // Scoped to the open control (its trigger plus panel) rather than the whole
@@ -15599,10 +15830,25 @@ function Composer({
   const isStopAction = Boolean(
     !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
   );
-  const workspaceModeLabel =
-    workspaceMode === "worktree" ? "Worktree" : "Local";
+  const modeChipLabel = workspaceModeLabel(workspaceMode);
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
-  const canSubmitChat = canSendChat(hasReadyProvider, workspacePath);
+  const councilResolution = useMemo(() => {
+    if (chatMode !== "council") {
+      return undefined;
+    }
+    return resolveCouncilSeatRequests(
+      config,
+      readyCouncilProviders(config, providerStatuses),
+    );
+  }, [chatMode, config, providerStatuses]);
+  const councilEnabled = config.council?.enabled !== false;
+  const canSubmitChat =
+    chatMode === "council"
+      ? councilEnabled &&
+        !councilResolution?.error &&
+        (councilResolution?.seats.length ?? 0) >= 2 &&
+        hasUserWorkspace
+      : canSendChat(hasReadyProvider, workspacePath);
   const canSubmitComposer = isGoalComposerActive || canSubmitChat;
   const projectLabel = composerProjectLabel(workspacePath);
   const savedProjectItems: ComposerPopoverItem[] = savedProjects
@@ -15726,6 +15972,11 @@ function Composer({
       label: "Plan",
     },
     {
+      action: "set-chat-mode-council",
+      icon: Users,
+      label: "Council",
+    },
+    {
       action: "add-goal",
       icon: Goal,
       label: "Goal",
@@ -15735,79 +15986,83 @@ function Composer({
     {
       action: "add-goal",
       command: "/goal",
-      detail: sessionGoal?.text
-        ? "Edit the outcome for this chat"
-        : "Define the outcome for this chat",
+      hint: "Say what a good result looks like, and Gyro keeps it in mind for the whole chat.",
       icon: Goal,
       label: sessionGoal?.text ? "Edit goal" : "Set goal",
     },
-    chatMode === "plan"
+    chatMode === "plan" || chatMode === "council"
       ? {
           action: "set-chat-mode-normal",
           command: "/normal",
-          detail: "Return to regular agent execution",
+          hint: "Go back to the usual way of working, where Gyro just does what you ask.",
           icon: Play,
           label: "Normal mode",
         }
       : {
           action: "set-chat-mode-plan",
           command: "/plan",
-          detail: "Explore and plan without changing files",
+          hint: "Gyro works out the steps and shows them to you first. Nothing on your computer changes until you agree.",
           icon: LockKeyhole,
           label: "Plan mode",
         },
+    ...(chatMode === "council"
+      ? []
+      : [
+          {
+            action: "set-chat-mode-council" as const,
+            command: "/council",
+            hint: "Asks several AI models the same question at the same time, then hands you one combined answer.",
+            icon: Users,
+            label: "Council mode",
+          },
+        ]),
     {
       action: "attach-editor-snapshot",
       command: "/editor",
-      detail: "Capture an immutable snapshot of the current editor",
+      hint: "Sends a copy of the file you have open, exactly as it looks right now.",
       icon: FileCode2,
       label: "Attach editor snapshot",
     },
     {
       action: "select-image",
       command: "/image",
-      detail: "Attach an image to your next message",
       icon: ImagePlus,
       label: "Attach image",
     },
     {
       action: "select-video",
       command: "/video",
-      detail: "Attach a video to your next message",
       icon: Video,
       label: "Attach video",
     },
     {
       action: "select-file",
       command: "/file",
-      detail: "Attach a file from the workspace",
       icon: Paperclip,
       label: "Attach file",
     },
     {
       action: "select-folder",
       command: "/folder",
-      detail: "Choose the workspace for this chat",
+      hint: "Pick the project folder this chat is allowed to work in.",
       icon: Folder,
       label: "Choose folder",
     },
     {
       action: "search-workspace",
       command: "/search",
-      detail: "Find a command or workspace file",
       icon: Search,
       label: "Search workspace",
     },
     {
       command: "/model",
-      detail: "Choose a provider and model",
       icon: Bot,
       label: "Choose model",
       popover: "provider",
     },
     {
       command: "/permissions",
-      detail: "Choose whether Gyro asks before acting",
+      hint: "Choose how often Gyro checks with you before it does something.",
       icon: ShieldCheck,
       label: "Change permissions",
       popover: "approval",
@@ -15815,11 +16070,59 @@ function Composer({
     {
       action: "new-chat",
       command: "/new",
-      detail: "Start a fresh chat in this workspace",
       icon: Edit3,
       label: "New chat",
     },
   ];
+  // What this chat has spent so far, from Gyro's ledger rather than from a
+  // provider's own reporting — so it is present even for the CLIs that report
+  // no counts at all.
+  const sessionCost = useMemo(
+    () => summarizeSessionCost(sessionUsage),
+    [sessionUsage],
+  );
+  // What the next send is about to buy. A Council send is its seats plus a
+  // synthesis, so the multiplier is disclosed before Enter commits it.
+  const councilSeatCount = councilResolution?.seats.length;
+  const turnCost = useMemo(
+    () =>
+      estimateTurnCost({
+        chatMode: chatMode ?? "normal",
+        contextTokens: contextUsage?.usedTokens ?? 0,
+        reasoningEffort: providerReasoningEffort,
+        seatCount: councilSeatCount,
+        sessionTotals: sessionUsage,
+      }),
+    [
+      chatMode,
+      contextUsage?.usedTokens,
+      councilSeatCount,
+      providerReasoningEffort,
+      sessionUsage,
+    ],
+  );
+  // An expensive send is armed once and sent on the second press, so quota is
+  // never committed by a single keystroke.
+  const [isCostConfirmPending, setIsCostConfirmPending] = useState(false);
+  const needsCostConfirm = !isGoalComposerActive && turnCost.needsConfirm;
+  useEffect(() => {
+    setIsCostConfirmPending(false);
+  }, [chatMode, councilSeatCount, providerReasoningEffort]);
+  const requestSend = () => {
+    if (needsCostConfirm && !isCostConfirmPending) {
+      setIsCostConfirmPending(true);
+      return;
+    }
+    setIsCostConfirmPending(false);
+    onSend();
+  };
+  const costPreviewTitle = `Each seat carries this chat's context, and the synthesizer then reads their answers. Estimated total for one send: ${turnCost.label}.`;
+  // Why runs are stopped, or which budget is about to stop them. A pause
+  // outranks a budget warning: the banner explains the block, not every number.
+  const safetyNotice = useMemo(
+    () => summarizeUsageSafety(usageSafety),
+    [usageSafety],
+  );
   const slashMatch = isGoalComposerActive ? null : draft.match(/^\/([^\s/]*)$/);
   const slashQuery = slashMatch?.[1]?.toLocaleLowerCase();
   const filteredSlashCommands =
@@ -15868,7 +16171,25 @@ function Composer({
       onComposerAction?.(action);
     }
   };
+  const showSlashHint = (text: string, marker: HTMLElement) => {
+    const rect = marker.getBoundingClientRect();
+    const width = 216;
+    const gap = 8;
+    const fitsRight = rect.right + gap + width <= window.innerWidth - 8;
+    setSlashHint({
+      left: fitsRight
+        ? rect.right + gap
+        : Math.max(8, rect.left - gap - width),
+      text,
+      // Centred on the marker, but kept clear of the viewport edges.
+      top: Math.min(
+        Math.max(rect.top + rect.height / 2, 44),
+        window.innerHeight - 44,
+      ),
+    });
+  };
   const runSlashCommand = (command: ComposerSlashCommand) => {
+    setSlashHint(undefined);
     setIsSlashMenuDismissed(true);
     setHistoryIndex(undefined);
     onDraftChange("");
@@ -15917,6 +16238,7 @@ function Composer({
 
   useEffect(() => {
     setActiveSlashCommandIndex(0);
+    setSlashHint(undefined);
   }, [slashQuery]);
 
   useEffect(() => {
@@ -15991,56 +16313,149 @@ function Composer({
           ))}
         </div>
       ) : null}
+      {chatMode === "council" && councilResolution ? (
+        <div
+          className={[
+            "gyro-council-preflight",
+            councilResolution.error || !councilEnabled ? "is-blocked" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          role="status"
+        >
+          <Users size={13} />
+          <span>
+            {!councilEnabled
+              ? "Model Council is disabled in Settings → Providers."
+              : councilPreflightLabel(councilResolution)}
+          </span>
+          {councilResolution.seats.length > 0 ? (
+            <span className="gyro-council-preflight-seats">
+              {councilResolution.seats.map((seat) => (
+                <span className="gyro-council-preflight-chip" key={seat.providerId}>
+                  {seat.providerLabel ?? seat.providerId}
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {councilResolution.seats.length > 0 && !councilResolution.error ? (
+            <span className="gyro-council-preflight-cost" title={costPreviewTitle}>
+              {turnCost.label}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {safetyNotice ? (
+        <div
+          className={`gyro-composer-safety-notice is-${safetyNotice.tone}`}
+          role="status"
+        >
+          {safetyNotice.tone === "paused" ? (
+            <PauseIcon aria-hidden="true" size={14} />
+          ) : (
+            <Gauge aria-hidden="true" size={14} />
+          )}
+          <span>
+            <strong>{safetyNotice.title}</strong>
+            {safetyNotice.detail ? <small>{safetyNotice.detail}</small> : null}
+          </span>
+          {safetyNotice.canResume && onResumeUsage ? (
+            <button onClick={onResumeUsage} type="button">
+              Resume
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {isCostConfirmPending ? (
+        <div className="gyro-composer-cost-confirm" role="alertdialog">
+          <Gauge aria-hidden="true" size={14} />
+          <span>
+            <strong>{turnCost.label}</strong>
+            <small>{turnCost.confirmReason}</small>
+          </span>
+          <button
+            className="gyro-composer-cost-confirm-cancel"
+            onClick={() => setIsCostConfirmPending(false)}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="gyro-composer-cost-confirm-send"
+            onClick={requestSend}
+            type="button"
+          >
+            Send anyway
+          </button>
+        </div>
+      ) : null}
       {isSlashMenuOpen ? (
         <div
           aria-label="Chat commands"
           className="gyro-composer-slash-menu"
           id={`${popoverBaseId}-slash-menu`}
+          onScroll={() => setSlashHint(undefined)}
           role="menu"
         >
-          <div className="gyro-composer-slash-menu-title">
-            <span>Commands</span>
-            <small>Type to filter</small>
-          </div>
-          <div className="gyro-composer-slash-menu-items">
-            {filteredSlashCommands.map((command, index) => {
-              const Icon = command.icon;
-              return (
-                <button
-                  aria-current={
-                    index === selectedSlashCommandIndex ? "true" : undefined
-                  }
-                  className={
-                    index === selectedSlashCommandIndex ? "is-selected" : ""
-                  }
-                  id={`${popoverBaseId}-slash-command-${index}`}
-                  key={command.command}
-                  onClick={() => runSlashCommand(command)}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onPointerEnter={() => setActiveSlashCommandIndex(index)}
-                  ref={(element) => {
-                    slashCommandRefs.current[index] = element;
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Icon size={15} />
-                  <span>
-                    <strong>{command.label}</strong>
-                    <small>{command.detail}</small>
-                  </span>
-                  <code>{command.command}</code>
-                </button>
-              );
-            })}
-          </div>
-          <div className="gyro-composer-slash-menu-hint">
-            <span>↑↓ Navigate</span>
-            <span>↵ Select</span>
-            <span>Esc Close</span>
-          </div>
+          {filteredSlashCommands.map((command, index) => {
+            const Icon = command.icon;
+            return (
+              <button
+                aria-current={
+                  index === selectedSlashCommandIndex ? "true" : undefined
+                }
+                className={
+                  index === selectedSlashCommandIndex ? "is-selected" : ""
+                }
+                id={`${popoverBaseId}-slash-command-${index}`}
+                key={command.command}
+                onClick={() => runSlashCommand(command)}
+                onPointerDown={(event) => event.preventDefault()}
+                onPointerEnter={() => setActiveSlashCommandIndex(index)}
+                ref={(element) => {
+                  slashCommandRefs.current[index] = element;
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Icon size={14} />
+                <code>{command.command}</code>
+                <span>{command.label}</span>
+                {command.hint ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="gyro-composer-slash-hint-mark"
+                      onPointerEnter={(event) =>
+                        showSlashHint(command.hint ?? "", event.currentTarget)
+                      }
+                      onPointerLeave={() => setSlashHint(undefined)}
+                    >
+                      ?
+                    </span>
+                    <span className="gyro-sr-only">{command.hint}</span>
+                  </>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
+      {/* Portalled to the body: the hero composer carries a drop-shadow
+          filter, which would otherwise become the containing block for this
+          fixed bubble and offset it by the composer's own position. */}
+      {isSlashMenuOpen && slashHint
+        ? createPortal(
+            <div
+              className="gyro-composer-slash-hint-bubble"
+              role="tooltip"
+              style={{ left: slashHint.left, top: slashHint.top }}
+            >
+              {slashHint.text}
+            </div>,
+            document.body,
+          )
+        : null}
       <textarea
         ref={composerTextareaRef}
         aria-label={isGoalComposerActive ? "Set session goal" : "Message Gyro"}
@@ -16145,16 +16560,18 @@ function Composer({
             setActivePopover(null);
             if (canSubmitComposer && draft.trim().length > 0) {
               setHistoryIndex(undefined);
-              onSend();
+              requestSend();
             }
           }
         }}
         placeholder={
           isGoalComposerActive
             ? "Define the outcome for this chat"
-            : variant === "hero"
-              ? "Describe a task or attach images"
-              : "Ask for follow-up changes or attach images"
+            : chatMode === "council"
+              ? "Ask for architecture, review, or alternatives — models answer in parallel"
+              : variant === "hero"
+                ? "Describe a task or attach images"
+                : "Ask for follow-up changes or attach images"
         }
         value={draft}
       />
@@ -16282,6 +16699,23 @@ function Composer({
           >
             <LockKeyhole size={13} />
             <span className="gyro-composer-label">Plan</span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : chatMode === "council" ? (
+          <button
+            aria-label="Remove Council mode"
+            aria-pressed="true"
+            className="gyro-composer-chip is-council"
+            onClick={() => onComposerAction?.("set-chat-mode-normal")}
+            title="Remove Council mode — multi-model parallel answers with synthesis"
+            type="button"
+          >
+            <Users size={13} />
+            <span className="gyro-composer-label">Council</span>
             <X
               aria-hidden="true"
               className="gyro-composer-chip-remove"
@@ -16477,7 +16911,7 @@ function Composer({
               onStop?.();
               return;
             }
-            onSend();
+            requestSend();
           }}
           title={
             isStopAction
@@ -16571,13 +17005,23 @@ function Composer({
             }
           >
             <button
-              className="gyro-composer-chip"
+              className={[
+                "gyro-composer-chip",
+                workspaceMode === "worktree" ? "is-agent-workspace" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => togglePopover("workspace-mode")}
+              title={workspaceModeTechnicalHint(workspaceMode)}
               type="button"
               {...menuProps("workspace-mode")}
             >
-              <Laptop size={14} />
-              {workspaceModeLabel}
+              {workspaceMode === "worktree" ? (
+                <GitBranch size={14} />
+              ) : (
+                <Laptop size={14} />
+              )}
+              {modeChipLabel}
               <ChevronDown size={13} />
             </button>
             {activePopover === "workspace-mode" ? (
@@ -16587,23 +17031,27 @@ function Composer({
                   {
                     action: "set-workspace-mode:local",
                     active: workspaceMode === "local",
-                    detail: "Run against the current workspace",
+                    detail: workspaceModeDetail("local"),
                     icon: Laptop,
-                    label: "Work locally",
+                    label: workspaceModePopoverLabel("local"),
                   },
                   {
                     action: "set-workspace-mode:worktree",
                     active: workspaceMode === "worktree",
-                    detail: workspacePath
-                      ? "Create an isolated worktree when the chat starts"
-                      : "Choose a workspace first",
+                    detail: workspaceModeDetail("worktree", {
+                      hasWorkspace: hasUserWorkspace,
+                    }),
                     icon: GitBranch,
-                    label: "Use worktree",
+                    label: workspaceModePopoverLabel("worktree"),
+                    trailingLabel:
+                      hasUserWorkspace && workspaceMode !== "worktree"
+                        ? "Recommended"
+                        : undefined,
                   },
                 ]}
                 onAction={runPopoverAction}
                 placement="down"
-                title="Workspace mode"
+                title="Where the agent works"
               />
             ) : null}
           </div>
@@ -16631,6 +17079,19 @@ function Composer({
               />
             ) : null}
           </div>
+          {sessionCost && !sessionCost.isEmpty ? (
+            <span
+              className="gyro-composer-session-cost"
+              role="status"
+              title={sessionCost.title}
+            >
+              <Gauge aria-hidden="true" size={12} />
+              <span>{sessionCost.label}</span>
+              {sessionCost.estimateNote ? (
+                <em>{sessionCost.estimateNote}</em>
+              ) : null}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -16677,12 +17138,16 @@ function ComposerMediaPreview({ attachment }: { attachment: ChatAttachment }) {
 
 const ChatEvent = memo(function ChatEvent({
   event,
+  onCouncilAction,
   onMutationApprovalAction,
   onProviderApprovalAction,
   onProviderStatusAction,
   onReusePrompt,
 }: {
   event: SessionEvent;
+  onCouncilAction?: (
+    action: CouncilActionRequest,
+  ) => void | Promise<string | void>;
   onMutationApprovalAction?: (
     proposalId: string,
     decision: "approve" | "reject",
@@ -16830,7 +17295,7 @@ const ChatEvent = memo(function ChatEvent({
           </div>
         )}
         {isAssistant ? (
-          <AssistantResponse event={event} />
+          <AssistantResponse event={event} onCouncilAction={onCouncilAction} />
         ) : isUser ? (
           <div className="gyro-user-message-bubble">
             <TranscriptAttachments event={event} />
@@ -17513,6 +17978,7 @@ function ChatTurn({
   isActive,
   onLoadChangeDiff,
   onOpenChanges,
+  onCouncilAction,
   onMutationApprovalAction,
   onProviderApprovalAction,
   onProviderStatusAction,
@@ -17541,6 +18007,9 @@ function ChatTurn({
     decision: "approve" | "reject" | "allow-project",
   ) => void;
   onProviderStatusAction?: (action: string, event: SessionEvent) => void;
+  onCouncilAction?: (
+    action: CouncilActionRequest,
+  ) => void | Promise<string | void>;
   onReusePrompt?: (message: string) => void;
   onContinueChat?: () => void;
   onOpenPlan?: () => void;
@@ -17701,6 +18170,7 @@ function ChatTurn({
                     <AssistantResponse
                       actions={artifactActions}
                       event={responseEvent}
+                      onCouncilAction={onCouncilAction}
                     />
                   )}
                 </div>
@@ -18447,10 +18917,15 @@ const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
 function AssistantResponse({
   actions,
   event,
+  onCouncilAction,
 }: {
   actions?: ChatArtifactActions;
   event: SessionEvent;
+  onCouncilAction?: (
+    action: CouncilActionRequest,
+  ) => void | Promise<string | void>;
 }) {
+  const council = useMemo(() => councilResponseFromEvent(event), [event]);
   // Repair glued stream blocks (`repo.Gyro is…`) so the final answer reads as
   // separate paragraphs rather than one thick run-on line.
   const visibleMessage = structuredCommentaryBlocks(
@@ -18471,6 +18946,15 @@ function AssistantResponse({
     () => (shouldUsePlainText ? [] : assistantResponseBlocks(visibleMessage)),
     [shouldUsePlainText, visibleMessage],
   );
+  if (council) {
+    return (
+      <CouncilResponseCard
+        event={event}
+        onCouncilAction={onCouncilAction}
+        payload={council}
+      />
+    );
+  }
   const body = shouldUsePlainText ? (
     <p className="gyro-response-streaming-text">{visibleMessage}</p>
   ) : (
@@ -18493,6 +18977,287 @@ function AssistantResponse({
           type="button"
         >
           <Copy size={15} />
+        </button>
+      </footer>
+    </div>
+  );
+}
+
+function councilResponseFromEvent(
+  event: SessionEvent,
+): CouncilResponsePayload | undefined {
+  const payload = recordFromUnknown(event.payload);
+  if (!payload || stringFromRecord(payload, "kind") !== "council-response") {
+    return undefined;
+  }
+  const councilRunId = stringFromRecord(payload, "councilRunId");
+  if (!councilRunId) {
+    return undefined;
+  }
+  const seatsRaw = Array.isArray(payload.seats) ? payload.seats : [];
+  const seats: CouncilSeatSummary[] = [];
+  for (const item of seatsRaw) {
+    const record = recordFromUnknown(item);
+    if (!record) continue;
+    const id = stringFromRecord(record, "id");
+    const providerId = stringFromRecord(record, "providerId");
+    const providerLabel =
+      stringFromRecord(record, "providerLabel") ?? providerId;
+    if (!id || !providerId || !providerLabel) {
+      continue;
+    }
+    seats.push({
+      id,
+      providerId,
+      providerLabel,
+      modelId: stringFromRecord(record, "modelId") ?? null,
+      status: stringFromRecord(record, "status") ?? "done",
+      durationMs:
+        typeof record.durationMs === "number" ? record.durationMs : undefined,
+      error: stringFromRecord(record, "error") ?? null,
+      artifactPath: stringFromRecord(record, "artifactPath") ?? null,
+      outputPreview: stringFromRecord(record, "outputPreview") ?? null,
+    });
+  }
+
+  return {
+    kind: "council-response",
+    councilRunId,
+    status: stringFromRecord(payload, "status") ?? "done",
+    presetId: stringFromRecord(payload, "presetId") ?? null,
+    seats,
+    synthesis: (payload.synthesis as CouncilSynthesis | null | undefined) ?? null,
+    totals: (payload.totals as CouncilResponsePayload["totals"]) ?? null,
+    manifestPath: stringFromRecord(payload, "manifestPath") ?? null,
+    retry: payload.retry === true,
+  };
+}
+
+function CouncilResponseCard({
+  event,
+  payload,
+  onCouncilAction,
+}: {
+  event: SessionEvent;
+  payload: CouncilResponsePayload;
+  onCouncilAction?: (
+    action: CouncilActionRequest,
+  ) => void | Promise<string | void>;
+}) {
+  const [expandedSeatId, setExpandedSeatId] = useState<string | null>(null);
+  const [seatBodies, setSeatBodies] = useState<Record<string, string>>({});
+  const [loadingSeatId, setLoadingSeatId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const markdown =
+    payload.synthesis?.userEditedMarkdown ??
+    payload.synthesis?.unifiedMarkdown ??
+    event.message;
+  const blocks = useMemo(
+    () =>
+      markdown.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS
+        ? []
+        : assistantResponseBlocks(markdown),
+    [markdown],
+  );
+  const succeeded = payload.seats.filter((seat) => seat.status === "done").length;
+  const failed = payload.seats.length - succeeded;
+  const wallMs = payload.totals?.wallDurationMs;
+
+  const loadSeat = async (seat: CouncilSeatSummary) => {
+    if (seatBodies[seat.id] || !onCouncilAction) {
+      setExpandedSeatId((current) => (current === seat.id ? null : seat.id));
+      return;
+    }
+    if (seat.outputPreview && !seat.artifactPath) {
+      setSeatBodies((current) => ({
+        ...current,
+        [seat.id]: seat.outputPreview ?? "",
+      }));
+      setExpandedSeatId(seat.id);
+      return;
+    }
+    setLoadingSeatId(seat.id);
+    try {
+      const full = await onCouncilAction({
+        type: "load-seat",
+        councilRunId: payload.councilRunId,
+        sessionId: event.sessionId,
+        seatId: seat.id,
+      });
+      const text =
+        typeof full === "string" && full.trim().length > 0
+          ? full
+          : (seat.outputPreview ?? seat.error ?? "No seat output available.");
+      setSeatBodies((current) => ({ ...current, [seat.id]: text }));
+      setExpandedSeatId(seat.id);
+    } finally {
+      setLoadingSeatId(null);
+    }
+  };
+
+  const runAction = async (key: string, action: CouncilActionRequest) => {
+    if (!onCouncilAction) return;
+    setBusyAction(key);
+    try {
+      await onCouncilAction(action);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  return (
+    <div className="gyro-response gyro-council-response">
+      <header className="gyro-council-header">
+        <div className="gyro-council-title-row">
+          <Users size={15} />
+          <strong>Model Council</strong>
+          <span className={`gyro-council-status is-${payload.status}`}>
+            {payload.status}
+          </span>
+          {payload.retry ? <span className="gyro-council-badge">re-synth</span> : null}
+        </div>
+        <p className="gyro-council-meta">
+          {succeeded} of {payload.seats.length} seats succeeded
+          {failed > 0 ? ` · ${failed} failed` : ""}
+          {typeof wallMs === "number" ? ` · ${(wallMs / 1000).toFixed(1)}s wall` : ""}
+          {payload.presetId ? ` · ${payload.presetId}` : ""}
+        </p>
+        {payload.status === "partial" ? (
+          <p className="gyro-council-banner" role="status">
+            Partial council — synthesis used available seats. Expand seats below
+            for full answers.
+          </p>
+        ) : null}
+        {!payload.synthesis ? (
+          <p className="gyro-council-banner is-warn" role="status">
+            Synthesis unavailable. Individual seat answers are shown below.
+          </p>
+        ) : null}
+      </header>
+
+      <div className="gyro-council-seats" aria-label="Council seats">
+        {payload.seats.map((seat) => {
+          const expanded = expandedSeatId === seat.id;
+          const body = seatBodies[seat.id] ?? seat.outputPreview ?? seat.error ?? "";
+          return (
+            <div
+              className={[
+                "gyro-council-seat",
+                `is-${seat.status}`,
+                expanded ? "is-expanded" : "",
+              ].join(" ")}
+              key={seat.id}
+            >
+              <button
+                className="gyro-council-seat-header"
+                onClick={() => void loadSeat(seat)}
+                type="button"
+              >
+                <span className="gyro-council-seat-label">
+                  {seat.providerLabel}
+                  {seat.modelId ? ` · ${seat.modelId}` : ""}
+                </span>
+                <span className="gyro-council-seat-status">{seat.status}</span>
+                {typeof seat.durationMs === "number" ? (
+                  <span className="gyro-council-seat-latency">
+                    {(seat.durationMs / 1000).toFixed(1)}s
+                  </span>
+                ) : null}
+                <ChevronDown
+                  className={expanded ? "is-open" : ""}
+                  size={14}
+                />
+              </button>
+              {expanded ? (
+                <div className="gyro-council-seat-body">
+                  {loadingSeatId === seat.id ? (
+                    <p className="gyro-muted">Loading seat output…</p>
+                  ) : (
+                    <pre className="gyro-council-seat-output">{body}</pre>
+                  )}
+                  <div className="gyro-council-seat-actions">
+                    <button
+                      disabled={busyAction !== null}
+                      onClick={() =>
+                        void runAction(`promote-${seat.id}`, {
+                          type: "promote-seat",
+                          councilRunId: payload.councilRunId,
+                          seat,
+                          fullText: body,
+                        })
+                      }
+                      type="button"
+                    >
+                      Promote as baseline
+                    </button>
+                    <button
+                      onClick={() => copyAssistantResponse(body)}
+                      type="button"
+                    >
+                      Copy seat
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="gyro-response-body">
+        {blocks.length === 0 ? (
+          <p className="gyro-response-streaming-text">{markdown}</p>
+        ) : (
+          blocks.map((block, index) => (
+            <AssistantResponseBlockView
+              block={block}
+              key={`${block.kind}-${index}`}
+            />
+          ))
+        )}
+      </div>
+
+      {payload.synthesis?.parseWarnings?.length ? (
+        <p className="gyro-council-banner is-warn">
+          {payload.synthesis.parseWarnings.join(" ")}
+        </p>
+      ) : null}
+
+      <footer className="gyro-response-actions gyro-council-actions">
+        <button
+          aria-label="Copy synthesis"
+          onClick={() => copyAssistantResponse(markdown)}
+          title="Copy synthesis"
+          type="button"
+        >
+          <Copy size={15} />
+        </button>
+        <button
+          disabled={busyAction !== null}
+          onClick={() =>
+            void runAction("continue", {
+              type: "continue-as-run",
+              markdown,
+              councilRunId: payload.councilRunId,
+            })
+          }
+          type="button"
+        >
+          Continue as run
+        </button>
+        <button
+          disabled={busyAction !== null || succeeded === 0}
+          onClick={() =>
+            void runAction("resynth", {
+              type: "resynthesize",
+              councilRunId: payload.councilRunId,
+              sessionId: event.sessionId,
+            })
+          }
+          type="button"
+        >
+          {busyAction === "resynth" ? "Re-synthesizing…" : "Re-synthesize"}
         </button>
       </footer>
     </div>
@@ -19365,6 +20130,98 @@ function IdeRailTabs({
           >
             <Icon size={15} />
             {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChatStartDifferentiators({
+  hasProject,
+  hasReadyProvider,
+  workspaceMode,
+  onAction,
+}: {
+  hasProject: boolean;
+  hasReadyProvider: boolean;
+  workspaceMode: WorkbenchMode;
+  onAction: (action: string) => void;
+}) {
+  const cards: Array<{
+    action: string;
+    detail: string;
+    icon: IconComponent;
+    label: string;
+    primary?: boolean;
+  }> = [];
+
+  if (!hasProject) {
+    cards.push({
+      action: "select-workspace",
+      detail: "Pick the local folder Gyro should work in",
+      icon: Folder,
+      label: "Open project",
+      primary: true,
+    });
+  } else if (!hasReadyProvider) {
+    cards.push({
+      action: "open-providers",
+      detail: "Use Codex, Claude, Kimi, or Grok you already pay for",
+      icon: Bot,
+      label: "Connect an agent",
+      primary: true,
+    });
+  }
+
+  if (hasProject && workspaceMode !== "worktree") {
+    cards.push({
+      action: "set-workspace-mode:worktree",
+      detail: "Private branch under Gyro — main stays untouched",
+      icon: GitBranch,
+      label: "Use agent workspace",
+      primary: !hasReadyProvider ? false : cards.length === 0,
+    });
+  }
+
+  if (hasProject && hasReadyProvider) {
+    cards.push({
+      action: "set-approval-gated",
+      detail: "Commands and file edits wait for you first",
+      icon: ShieldCheck,
+      label: "Review every change",
+    });
+  }
+
+  if (cards.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-label="What makes Gyro different"
+      className="gyro-chat-start-pillars"
+    >
+      {cards.slice(0, 3).map((card) => {
+        const Icon = card.icon;
+        return (
+          <button
+            className={
+              card.primary
+                ? "gyro-chat-start-pillar is-primary"
+                : "gyro-chat-start-pillar"
+            }
+            key={card.action + card.label}
+            onClick={() => onAction(card.action)}
+            type="button"
+          >
+            <span className="gyro-chat-start-pillar-icon" aria-hidden="true">
+              <Icon size={15} />
+            </span>
+            <span>
+              <strong>{card.label}</strong>
+              <small>{card.detail}</small>
+            </span>
           </button>
         );
       })}

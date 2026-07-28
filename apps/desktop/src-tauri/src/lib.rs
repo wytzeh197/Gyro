@@ -4,35 +4,41 @@ use gyro_core::augmented_gui_path;
 #[cfg(test)]
 use gyro_core::user_cli_paths;
 use gyro_core::{
-    apply_provider_mutation_transaction_with_cancellation, begin_provider_mutation_transaction,
-    create_worktree, decide_mutation_proposal,
+    apply_provider_mutation_transaction_with_cancellation, barrier_decision,
+    begin_provider_mutation_transaction, build_synthesizer_user_prompt, council_run_dir,
+    create_worktree, decide_mutation_proposal, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
         request_desktop_provider_capability, versions_compatible, AppNotification,
         DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
-    logout_account as account_logout, mutation_approval_payload,
+    logout_account as account_logout, mutation_approval_payload, parse_council_synthesis,
     prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
     prepare_provider_text_replacement_transaction, provider_descriptor,
     recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
-    run_kimi_acp, start_account_login as account_start_login,
-    stored_account_session as account_stored_session, AccountSessionState, AppNotificationKind,
-    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
+    run_kimi_acp, seat_label_map, start_account_login as account_start_login,
+    stored_account_session as account_stored_session, successful_seat_answers,
+    write_council_run_manifest, write_council_snapshot, write_seat_artifact,
+    write_synthesis_artifact, AccountSessionState, AppNotificationKind, Automation,
+    AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
     CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
     CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
     CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
-    CapabilityRunMode, CapabilityStatus, CreateAutomationRequest, CreateSessionContext,
-    ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths,
-    HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest,
-    MutationDecision, MutationProposal, PendingProviderMutationCommit,
-    PreparedProviderMutationTransaction, ProjectCapabilityGrant, ProjectCapabilityPolicy,
-    ProviderCapabilitySupport, ProviderDiagnosticsPayload, ProviderExecutionKind,
-    ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
-    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
-    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
-    WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    CapabilityRunMode, CapabilityStatus, CouncilAttachmentRef, CouncilBarrierDecision,
+    CouncilContextSnapshot, CouncilRun, CouncilRunStatus, CouncilSeat, CouncilSeatStatus,
+    CouncilToolPolicy, CreateAutomationRequest, CreateSessionContext, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest, MutationDecision,
+    MutationProposal, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
+    ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
+    ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
+    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
+    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
+    SessionOrigin, SessionStore, SessionWorkspaceMode, UsageEntry, UsageOrigin, UsageOutcome,
+    UsageTokens, UsageTotals, WorkspaceContextSnapshot,
+    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -113,6 +119,7 @@ const WORKSPACE_TREE_MAX_CACHE_AGE: Duration = Duration::from_secs(30);
 const WORKSPACE_CHANGE_DEBOUNCE: Duration = Duration::from_millis(250);
 const WORKSPACE_PREPARATION_CACHE_AGE: Duration = Duration::from_secs(2);
 const MAX_WORKSPACE_WATCH_CACHES: usize = 8;
+const MAX_WORKSPACE_PREPARATION_CACHES: usize = MAX_WORKSPACE_WATCH_CACHES;
 const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
 const MAX_WORKSPACE_SEARCH_FALLBACK_BYTES: u64 = 64 * 1024 * 1024;
@@ -1130,6 +1137,7 @@ enum ChatMode {
     #[default]
     Normal,
     Plan,
+    Council,
 }
 
 fn default_true() -> bool {
@@ -1351,6 +1359,9 @@ struct ProviderChatStreamEvent {
 struct ProviderRunnerOutput {
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
+    /// What this call billed, for the usage ledger. Absent when the provider
+    /// reported nothing, in which case the ledger falls back to an estimate.
+    billed_usage: Option<ProviderContextUsage>,
     rate_limits: Vec<ProviderRateLimitWindow>,
     response: String,
     resume_cursor: Option<ProviderResumeCursor>,
@@ -2495,7 +2506,9 @@ where
         let Some(automation) = store.get_automation(automation_id).map_err(to_string)? else {
             continue;
         };
-        if automation.lease_owner.is_none() && automation.last_run_at == Some(now) {
+        // Lease ownership cleared by recovery is enough signal; exact timestamp
+        // equality with the recovery clock is fragile under store rounding.
+        if automation.lease_owner.is_none() {
             on_recovered(&automation);
         }
     }
@@ -2684,6 +2697,11 @@ fn execute_claimed_automation(
             .flags
             .lock()
             .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err(format!(
+                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+            ));
+        }
         flags.insert(session_id.clone(), control);
     }
     app.state::<AutomationSchedulerControl>()
@@ -2709,7 +2727,7 @@ fn execute_claimed_automation(
         attachments: Vec::new(),
         workspace_context: None,
     };
-    let result = run_provider_chat_blocking(app.clone(), request)
+    let result = run_provider_chat_blocking(app.clone(), request, UsageOrigin::Automation)
         .map(|response| response.assistant_event.message);
     app.state::<AutomationSchedulerControl>()
         .unregister(automation.id);
@@ -2875,8 +2893,12 @@ fn read_session_events_from_store(
         .iter()
         .filter_map(event_mutation_proposal_id)
         .collect::<HashSet<_>>();
-    for proposal in store.list_pending_mutation_proposals(session_id)? {
+    // Only surface proposals that have never been written into the event log.
+    // Long sessions can age approval events out of the recent window; without
+    // this gate every reopen would re-append the same pending approvals.
+    for proposal in store.list_unsurfaced_pending_mutation_proposals(session_id)? {
         if represented_proposals.contains(&proposal.id) {
+            let _ = store.mark_mutation_proposal_surfaced(proposal.id);
             continue;
         }
         let recovered = store.append_event_with_turn_id(
@@ -2886,6 +2908,7 @@ fn read_session_events_from_store(
             mutation_approval_payload(&proposal, None),
             proposal.turn_id,
         )?;
+        let _ = store.mark_mutation_proposal_surfaced(proposal.id);
         events.push(recovered);
     }
     Ok(events)
@@ -2971,7 +2994,7 @@ async fn run_provider_chat(
     }
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        run_provider_chat_blocking(worker_app, request)
+        run_provider_chat_blocking(worker_app, request, UsageOrigin::Chat)
     })
     .await
     .map_err(|error| format!("provider chat worker failed: {error}"));
@@ -2999,9 +3022,1073 @@ async fn stop_provider_chat(
     Ok(())
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CouncilSeatRequest {
+    provider_id: String,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CouncilChatRequest {
+    session_id: String,
+    message: String,
+    turn_id: Option<String>,
+    #[serde(default)]
+    preset_id: Option<String>,
+    seats: Vec<CouncilSeatRequest>,
+    synthesizer_provider_id: String,
+    synthesizer_provider_label: Option<String>,
+    synthesizer_model_id: Option<String>,
+    synthesizer_model_label: Option<String>,
+    workspace_path: Option<String>,
+    #[serde(default)]
+    attachments: Vec<ChatAttachmentRequest>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    require_command_approval: bool,
+    #[serde(default)]
+    #[allow(dead_code)]
+    require_file_edit_approval: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CouncilChatResponse {
+    council_run: CouncilRun,
+    assistant_event: SessionEvent,
+    status_event: SessionEvent,
+    session: Option<Session>,
+}
+
+#[tauri::command]
+async fn run_council_chat(
+    app: tauri::AppHandle,
+    mut request: CouncilChatRequest,
+) -> Result<CouncilChatResponse, String> {
+    request.message = validate_chat_message(&request.message)?;
+    let seat_count = request.seats.len();
+    if seat_count < COUNCIL_MIN_SEATS || seat_count > COUNCIL_MAX_SEATS {
+        return Err(format!(
+            "council requires between {COUNCIL_MIN_SEATS} and {COUNCIL_MAX_SEATS} seats (got {seat_count})"
+        ));
+    }
+    let session_id = request.session_id.clone();
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&session_id) {
+            return Err("a provider turn is already running for this session".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err(format!(
+                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+            ));
+        }
+        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
+    }
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_council_chat_blocking(worker_app, request)
+    })
+    .await
+    .map_err(|error| format!("council chat worker failed: {error}"));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&session_id));
+    result?
+}
+
+fn run_council_chat_blocking(
+    app: tauri::AppHandle,
+    request: CouncilChatRequest,
+) -> Result<CouncilChatResponse, String> {
+    let store = open_store()?;
+    let session_uuid = parse_uuid(&request.session_id)?;
+    let session = store
+        .get_session(session_uuid)
+        .map_err(to_string)?
+        .ok_or_else(|| "council chat session no longer exists".to_string())?;
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    let config = GyroConfig::load(&paths).map_err(to_string)?;
+    if !config.council.enabled {
+        return Err("Model Council is disabled in settings".into());
+    }
+
+    let parent_turn_id = request
+        .turn_id
+        .as_deref()
+        .map(parse_uuid)
+        .transpose()?
+        .unwrap_or_else(Uuid::new_v4);
+    let started_at = chrono::Utc::now();
+
+    let snapshot = CouncilContextSnapshot {
+        id: Uuid::new_v4(),
+        prompt: request.message.clone(),
+        project_key: Some(session.workspace_path.display().to_string()),
+        workspace_path: request
+            .workspace_path
+            .clone()
+            .or_else(|| Some(session.workspace_path.display().to_string())),
+        attachments: request
+            .attachments
+            .iter()
+            .map(|attachment| CouncilAttachmentRef {
+                id: attachment.id.clone(),
+                name: Some(attachment.name.clone()),
+                path: Some(attachment.path.clone()),
+                kind: Some(attachment.kind.clone()),
+            })
+            .collect(),
+        git_summary: None,
+        created_at: started_at,
+    };
+
+    let mut seats: Vec<CouncilSeat> = request
+        .seats
+        .iter()
+        .map(|seat| {
+            let provider_label = seat
+                .provider_label
+                .clone()
+                .unwrap_or_else(|| seat.provider_id.clone());
+            CouncilSeat {
+                id: Uuid::new_v4(),
+                council_run_id: Uuid::nil(),
+                run_id: Uuid::new_v4(),
+                provider_id: seat.provider_id.clone(),
+                provider_label,
+                model_id: seat.model_id.clone(),
+                model_label: seat.model_label.clone(),
+                status: CouncilSeatStatus::Queued,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+                raw_output: None,
+                artifact_path: None,
+                error: None,
+            }
+        })
+        .collect();
+
+    let mut council_run = CouncilRun::new(
+        session_uuid,
+        snapshot.clone(),
+        seats.clone(),
+        request.preset_id.clone(),
+        CouncilToolPolicy::None,
+        Some(request.synthesizer_provider_id.clone()),
+        request.synthesizer_model_id.clone(),
+    )
+    .map_err(to_string)?;
+    seats = council_run.seats.clone();
+
+    let run_dir = council_run_dir(&paths.sessions_dir, session_uuid, council_run.id);
+    write_council_snapshot(&run_dir, &snapshot).map_err(to_string)?;
+    write_council_run_manifest(&run_dir, &council_run).map_err(to_string)?;
+
+    store
+        .append_event_with_turn_id(
+            session_uuid,
+            SessionEventKind::CouncilRunStarted,
+            format!(
+                "Council started with {} seats",
+                council_run.seats.len()
+            ),
+            serde_json::json!({
+                "councilRunId": council_run.id,
+                "presetId": council_run.preset_id,
+                "seatProviderIds": council_run.seats.iter().map(|s| &s.provider_id).collect::<Vec<_>>(),
+                "snapshotId": snapshot.id,
+                "synthesizerProviderId": request.synthesizer_provider_id,
+            }),
+            Some(parent_turn_id),
+        )
+        .map_err(to_string)?;
+
+    council_run.status = CouncilRunStatus::Running;
+    council_run.updated_at = chrono::Utc::now();
+
+    // Fan-out seats in parallel. Each seat opens its own store connection.
+    let seat_jobs: Vec<(CouncilSeat, ProviderChatRequest)> = seats
+        .iter()
+        .map(|seat| {
+            let seat_request = ProviderChatRequest {
+                session_id: request.session_id.clone(),
+                message: request.message.clone(),
+                turn_id: Some(seat.run_id.to_string()),
+                provider_id: seat.provider_id.clone(),
+                provider_label: Some(seat.provider_label.clone()),
+                model_id: seat.model_id.clone(),
+                model_label: seat.model_label.clone(),
+                reasoning_effort: None,
+                require_command_approval: true,
+                require_file_edit_approval: true,
+                full_access: false,
+                suggest_title: false,
+                workspace_path: request
+                    .workspace_path
+                    .clone()
+                    .or_else(|| Some(session.workspace_path.display().to_string())),
+                mode: ChatMode::Council,
+                goal: None,
+                plan: None,
+                attachments: request.attachments.clone(),
+                workspace_context: None,
+            };
+            (seat.clone(), seat_request)
+        })
+        .collect();
+
+    let seat_results: Vec<(Uuid, Result<String, String>, u128)> = std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for (seat, seat_request) in seat_jobs {
+            let app = app.clone();
+            let session_id_str = request.session_id.clone();
+            let council_run_id = council_run.id;
+            handles.push(scope.spawn(move || {
+                let seat_id = seat.id;
+                let seat_started = Instant::now();
+                if let Ok(store) = open_store() {
+                    let _ = store.append_event_with_turn_id(
+                        session_uuid,
+                        SessionEventKind::CouncilSeatStarted,
+                        format!("Council seat started: {}", seat.provider_label),
+                        serde_json::json!({
+                            "councilRunId": council_run_id,
+                            "seatId": seat.id,
+                            "runId": seat.run_id,
+                            "providerId": seat.provider_id,
+                            "modelId": seat.model_id,
+                        }),
+                        Some(parent_turn_id),
+                    );
+                }
+                emit_provider_chat_event(
+                    &app,
+                    &seat_request,
+                    "started",
+                    Some(HarnessRunStatus::Running),
+                    None,
+                    Some(format!("Council seat running: {}", seat.provider_label)),
+                    None,
+                );
+                if provider_chat_cancelled(&app, &session_id_str) {
+                    return (
+                        seat_id,
+                        Err("chat cancelled by user".into()),
+                        seat_started.elapsed().as_millis(),
+                    );
+                }
+                let store = match open_store() {
+                    Ok(store) => store,
+                    Err(error) => {
+                        return (seat_id, Err(error), seat_started.elapsed().as_millis());
+                    }
+                };
+                let result = run_provider_chat_with_retry(&store, &app, &seat_request, None, UsageContext::seat(seat_id))
+                    .map(|output| {
+                        let text = output.response.trim().to_string();
+                        if text.is_empty() {
+                            Err("council seat returned an empty response".to_string())
+                        } else {
+                            Ok(text)
+                        }
+                    })
+                    .unwrap_or_else(|error| {
+                        Err(gyro_core::security::redact_secrets(&error.to_string()))
+                    });
+                (seat_id, result, seat_started.elapsed().as_millis())
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle.join().unwrap_or_else(|_| {
+                    (
+                        Uuid::nil(),
+                        Err("council seat worker panicked".into()),
+                        0,
+                    )
+                })
+            })
+            .collect()
+    });
+
+    let cancelled = provider_chat_cancelled(&app, &request.session_id);
+    let mut result_by_id: HashMap<Uuid, (Result<String, String>, u128)> = HashMap::new();
+    for (seat_id, result, duration_ms) in seat_results {
+        result_by_id.insert(seat_id, (result, duration_ms));
+    }
+
+    for seat in &mut council_run.seats {
+        let completed_at = chrono::Utc::now();
+        seat.started_at = Some(started_at);
+        seat.completed_at = Some(completed_at);
+        let (result, duration_ms) = result_by_id
+            .remove(&seat.id)
+            .unwrap_or_else(|| (Err("council seat did not report a result".into()), 0));
+        seat.duration_ms = Some(duration_ms);
+        match result {
+            Ok(text) => {
+                let path = write_seat_artifact(&run_dir, seat.id, &text).map_err(to_string)?;
+                seat.raw_output = Some(text);
+                seat.artifact_path = Some(path.display().to_string());
+                seat.status = CouncilSeatStatus::Done;
+                seat.error = None;
+                let summary: String = seat
+                    .raw_output
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .take(280)
+                    .collect();
+                let _ = store.append_event_with_turn_id(
+                    session_uuid,
+                    SessionEventKind::CouncilSeatCompleted,
+                    format!("Council seat completed: {}", seat.provider_label),
+                    serde_json::json!({
+                        "councilRunId": council_run.id,
+                        "seatId": seat.id,
+                        "status": "done",
+                        "durationMs": duration_ms,
+                        "outputSummary": summary,
+                        "artifactPath": seat.artifact_path,
+                    }),
+                    Some(parent_turn_id),
+                );
+            }
+            Err(error) => {
+                let status = if error.contains("chat cancelled by user") {
+                    CouncilSeatStatus::Cancelled
+                } else {
+                    CouncilSeatStatus::Failed
+                };
+                seat.status = status;
+                seat.error = Some(error.clone());
+                let _ = store.append_event_with_turn_id(
+                    session_uuid,
+                    SessionEventKind::CouncilSeatFailed,
+                    format!("Council seat failed: {}", seat.provider_label),
+                    serde_json::json!({
+                        "councilRunId": council_run.id,
+                        "seatId": seat.id,
+                        "error": error,
+                    }),
+                    Some(parent_turn_id),
+                );
+            }
+        }
+    }
+
+    write_council_run_manifest(&run_dir, &council_run).map_err(to_string)?;
+
+    let decision = barrier_decision(
+        &council_run.seats,
+        config.council.synthesize_on_partial,
+        cancelled,
+    );
+
+    let mut synthesis_ok = false;
+    match decision {
+        CouncilBarrierDecision::Synthesize { .. } => {
+            council_run.status = CouncilRunStatus::Synthesizing;
+            council_run.updated_at = chrono::Utc::now();
+            write_council_run_manifest(&run_dir, &council_run).map_err(to_string)?;
+            let _ = store.append_event_with_turn_id(
+                session_uuid,
+                SessionEventKind::CouncilSynthesisStarted,
+                "Council synthesis started",
+                serde_json::json!({
+                    "councilRunId": council_run.id,
+                    "synthesizerProviderId": request.synthesizer_provider_id,
+                }),
+                Some(parent_turn_id),
+            );
+
+            let answers = successful_seat_answers(&council_run.seats);
+            let synth_user = build_synthesizer_user_prompt(&request.message, &answers);
+            let synth_message = format!(
+                "{SYNTHESIZER_SYSTEM_PROMPT}\n\n---\n\n{synth_user}"
+            );
+            let synth_run_id = Uuid::new_v4();
+            let synth_request = ProviderChatRequest {
+                session_id: request.session_id.clone(),
+                message: synth_message,
+                turn_id: Some(synth_run_id.to_string()),
+                provider_id: request.synthesizer_provider_id.clone(),
+                provider_label: request
+                    .synthesizer_provider_label
+                    .clone()
+                    .or_else(|| Some(request.synthesizer_provider_id.clone())),
+                model_id: request.synthesizer_model_id.clone(),
+                model_label: request.synthesizer_model_label.clone(),
+                reasoning_effort: None,
+                require_command_approval: true,
+                require_file_edit_approval: true,
+                full_access: false,
+                suggest_title: false,
+                workspace_path: request
+                    .workspace_path
+                    .clone()
+                    .or_else(|| Some(session.workspace_path.display().to_string())),
+                mode: ChatMode::Council,
+                goal: None,
+                plan: None,
+                attachments: Vec::new(),
+                workspace_context: None,
+            };
+            emit_provider_chat_event(
+                &app,
+                &synth_request,
+                "started",
+                Some(HarnessRunStatus::Running),
+                None,
+                Some("Council synthesizing…".into()),
+                None,
+            );
+            let synth_started = Instant::now();
+            let synth_result = if provider_chat_cancelled(&app, &request.session_id) {
+                Err("chat cancelled by user".to_string())
+            } else {
+                run_provider_chat_with_retry(
+                    &store,
+                    &app,
+                    &synth_request,
+                    None,
+                    UsageContext::new(UsageOrigin::CouncilSynthesis),
+                )
+                    .map(|output| output.response)
+                    .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
+            };
+            let synth_duration = synth_started.elapsed().as_millis();
+            match synth_result {
+                Ok(raw) => {
+                    let labels = seat_label_map(&council_run.seats);
+                    let mut synthesis = parse_council_synthesis(
+                        &raw,
+                        &request.synthesizer_provider_id,
+                        request.synthesizer_model_id.clone(),
+                        Some(synth_run_id),
+                        &labels,
+                    );
+                    synthesis.started_at = Some(chrono::Utc::now());
+                    synthesis.completed_at = Some(chrono::Utc::now());
+                    synthesis.duration_ms = Some(synth_duration);
+                    let path = write_synthesis_artifact(&run_dir, &synthesis.unified_markdown)
+                        .map_err(to_string)?;
+                    synthesis.artifact_path = Some(path.display().to_string());
+                    council_run.synthesis = Some(synthesis.clone());
+                    synthesis_ok = true;
+                    let _ = store.append_event_with_turn_id(
+                        session_uuid,
+                        SessionEventKind::CouncilSynthesisCompleted,
+                        "Council synthesis completed",
+                        serde_json::json!({
+                            "councilRunId": council_run.id,
+                            "synthesizerProviderId": request.synthesizer_provider_id,
+                            "durationMs": synth_duration,
+                            "artifactPath": synthesis.artifact_path,
+                            "recommendation": synthesis.recommendation.chars().take(400).collect::<String>(),
+                        }),
+                        Some(parent_turn_id),
+                    );
+                }
+                Err(error) => {
+                    let _ = store.append_event_with_turn_id(
+                        session_uuid,
+                        SessionEventKind::CouncilSynthesisCompleted,
+                        "Council synthesis failed",
+                        serde_json::json!({
+                            "councilRunId": council_run.id,
+                            "error": error,
+                        }),
+                        Some(parent_turn_id),
+                    );
+                }
+            }
+        }
+        CouncilBarrierDecision::Cancelled => {
+            council_run.status = CouncilRunStatus::Cancelled;
+            council_run.cancelled_at = Some(chrono::Utc::now());
+        }
+        CouncilBarrierDecision::FailNoSuccessfulSeats => {
+            // Either zero successes or partial without synthesize_on_partial.
+            if council_run.seats_succeeded() == 0 {
+                council_run.status = CouncilRunStatus::Failed;
+            }
+        }
+    }
+
+    let cancelled = cancelled || provider_chat_cancelled(&app, &request.session_id);
+    council_run.status = final_run_status(&council_run.seats, synthesis_ok, cancelled);
+    council_run.updated_at = chrono::Utc::now();
+    council_run.recompute_totals();
+    write_council_run_manifest(&run_dir, &council_run).map_err(to_string)?;
+
+    let _ = store.append_event_with_turn_id(
+        session_uuid,
+        SessionEventKind::CouncilRunCompleted,
+        format!("Council {}", council_run.status.as_str()),
+        serde_json::json!({
+            "councilRunId": council_run.id,
+            "status": council_run.status.as_str(),
+            "totals": council_run.totals,
+        }),
+        Some(parent_turn_id),
+    );
+
+    let assistant_markdown = council_run
+        .synthesis
+        .as_ref()
+        .map(|synthesis| {
+            synthesis
+                .user_edited_markdown
+                .clone()
+                .unwrap_or_else(|| synthesis.unified_markdown.clone())
+        })
+        .unwrap_or_else(|| render_council_seats_fallback(&council_run));
+
+    let seat_summaries: Vec<serde_json::Value> = council_run
+        .seats
+        .iter()
+        .map(|seat| {
+            serde_json::json!({
+                "id": seat.id,
+                "providerId": seat.provider_id,
+                "providerLabel": seat.provider_label,
+                "modelId": seat.model_id,
+                "status": seat.status.as_str(),
+                "durationMs": seat.duration_ms,
+                "error": seat.error,
+                "artifactPath": seat.artifact_path,
+                "outputPreview": seat.raw_output.as_ref().map(|text| text.chars().take(400).collect::<String>()),
+            })
+        })
+        .collect();
+
+    let assistant_payload = serde_json::json!({
+        "schema": gyro_core::HARNESS_SCHEMA_V1,
+        "kind": "council-response",
+        "runKind": "council-run",
+        "runId": parent_turn_id,
+        "councilRunId": council_run.id,
+        "status": council_run.status.as_str(),
+        "presetId": council_run.preset_id,
+        "seats": seat_summaries,
+        "synthesis": council_run.synthesis,
+        "totals": council_run.totals,
+        "manifestPath": run_dir.join("run.json").display().to_string(),
+    });
+
+    let assistant_event = store
+        .append_event_with_turn_id(
+            session_uuid,
+            SessionEventKind::AssistantMessage,
+            assistant_markdown,
+            assistant_payload,
+            Some(parent_turn_id),
+        )
+        .map_err(to_string)?;
+
+    let harness_status = match council_run.status {
+        CouncilRunStatus::Done | CouncilRunStatus::Partial => HarnessRunStatus::Done,
+        CouncilRunStatus::Cancelled => HarnessRunStatus::Cancelled,
+        _ => HarnessRunStatus::Failed,
+    };
+
+    let status_event = store
+        .append_event_with_turn_id(
+            session_uuid,
+            SessionEventKind::SystemEvent,
+            format!("Council {}", council_run.status.as_str()),
+            serde_json::json!({
+                "schema": gyro_core::HARNESS_SCHEMA_V1,
+                "kind": "provider-run",
+                "runId": parent_turn_id,
+                "status": harness_status.as_str(),
+                "councilRunId": council_run.id,
+            }),
+            Some(parent_turn_id),
+        )
+        .map_err(to_string)?;
+
+    let phase = match council_run.status {
+        CouncilRunStatus::Cancelled => "cancelled",
+        CouncilRunStatus::Failed => "failed",
+        _ => "completed",
+    };
+    let synth_request_for_emit = ProviderChatRequest {
+        session_id: request.session_id.clone(),
+        message: request.message.clone(),
+        turn_id: Some(parent_turn_id.to_string()),
+        provider_id: request.synthesizer_provider_id.clone(),
+        provider_label: request.synthesizer_provider_label.clone(),
+        model_id: request.synthesizer_model_id.clone(),
+        model_label: request.synthesizer_model_label.clone(),
+        reasoning_effort: None,
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: request.workspace_path.clone(),
+        mode: ChatMode::Council,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+    };
+    emit_provider_chat_event(
+        &app,
+        &synth_request_for_emit,
+        phase,
+        Some(harness_status),
+        None,
+        Some(format!("Council {}", council_run.status.as_str())),
+        if matches!(
+            council_run.status,
+            CouncilRunStatus::Failed | CouncilRunStatus::Cancelled
+        ) {
+            Some(format!("Council {}", council_run.status.as_str()))
+        } else {
+            None
+        },
+    );
+
+    let refreshed = store.get_session(session_uuid).map_err(to_string)?;
+    if matches!(
+        council_run.status,
+        CouncilRunStatus::Failed | CouncilRunStatus::Cancelled
+    ) && council_run.seats_succeeded() == 0
+    {
+        return Err(format!(
+            "council failed: {}",
+            council_run
+                .seats
+                .iter()
+                .find_map(|seat| seat.error.clone())
+                .unwrap_or_else(|| "no successful seats".into())
+        ));
+    }
+
+    Ok(CouncilChatResponse {
+        council_run,
+        assistant_event,
+        status_event,
+        session: refreshed,
+    })
+}
+
+fn render_council_seats_fallback(run: &CouncilRun) -> String {
+    let mut out = String::from("## Council seats\n\n");
+    out.push_str(
+        "Synthesis was unavailable. Individual seat answers are shown below.\n\n",
+    );
+    for seat in &run.seats {
+        out.push_str(&format!(
+            "### {} ({})\n\n",
+            seat.provider_label, seat.status.as_str()
+        ));
+        if let Some(error) = &seat.error {
+            out.push_str(&format!("Error: {error}\n\n"));
+        }
+        if let Some(text) = &seat.raw_output {
+            out.push_str(text.trim());
+            out.push_str("\n\n");
+        }
+    }
+    out
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadCouncilArtifactRequest {
+    session_id: String,
+    council_run_id: String,
+    /// `seat` | `synthesis` | `manifest`
+    kind: String,
+    seat_id: Option<String>,
+}
+
+#[tauri::command]
+async fn read_council_artifact(
+    request: ReadCouncilArtifactRequest,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let session_id = parse_uuid(&request.session_id)?;
+        let council_run_id = parse_uuid(&request.council_run_id)?;
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        let run_dir = council_run_dir(&paths.sessions_dir, session_id, council_run_id);
+        match request.kind.as_str() {
+            "manifest" => {
+                let path = run_dir.join("run.json");
+                fs::read_to_string(&path).map_err(to_string)
+            }
+            "synthesis" => {
+                let path = run_dir.join("synthesis.md");
+                fs::read_to_string(&path).map_err(to_string)
+            }
+            "seat" => {
+                let seat_id = request
+                    .seat_id
+                    .as_deref()
+                    .ok_or_else(|| "seatId is required for seat artifacts".to_string())?;
+                let seat_uuid = parse_uuid(seat_id)?;
+                let path = run_dir.join(format!("seat-{seat_uuid}.md"));
+                fs::read_to_string(&path).map_err(to_string)
+            }
+            other => Err(format!("unsupported council artifact kind `{other}`")),
+        }
+    })
+    .await
+    .map_err(|error| format!("council artifact worker failed: {error}"))?
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RetryCouncilSynthesisRequest {
+    session_id: String,
+    council_run_id: String,
+    turn_id: Option<String>,
+    synthesizer_provider_id: Option<String>,
+    synthesizer_provider_label: Option<String>,
+    synthesizer_model_id: Option<String>,
+    synthesizer_model_label: Option<String>,
+    workspace_path: Option<String>,
+}
+
+#[tauri::command]
+async fn retry_council_synthesis(
+    app: tauri::AppHandle,
+    request: RetryCouncilSynthesisRequest,
+) -> Result<CouncilChatResponse, String> {
+    let session_id = request.session_id.clone();
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&session_id) {
+            return Err("a provider turn is already running for this session".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err(format!(
+                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+            ));
+        }
+        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
+    }
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        retry_council_synthesis_blocking(worker_app, request)
+    })
+    .await
+    .map_err(|error| format!("council re-synthesis worker failed: {error}"));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&session_id));
+    result?
+}
+
+fn retry_council_synthesis_blocking(
+    app: tauri::AppHandle,
+    request: RetryCouncilSynthesisRequest,
+) -> Result<CouncilChatResponse, String> {
+    let store = open_store()?;
+    let session_uuid = parse_uuid(&request.session_id)?;
+    let council_run_id = parse_uuid(&request.council_run_id)?;
+    let session = store
+        .get_session(session_uuid)
+        .map_err(to_string)?
+        .ok_or_else(|| "council session no longer exists".to_string())?;
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    let run_dir = council_run_dir(&paths.sessions_dir, session_uuid, council_run_id);
+    let mut council_run = gyro_core::read_council_run_manifest(&run_dir).map_err(to_string)?;
+
+    // Reload seat bodies from artifacts when missing from the manifest.
+    for seat in &mut council_run.seats {
+        if seat.raw_output.is_none() && seat.status == CouncilSeatStatus::Done {
+            if let Ok(body) = gyro_core::read_seat_artifact(&run_dir, seat.id) {
+                seat.raw_output = Some(body);
+            }
+        }
+    }
+
+    let answers = successful_seat_answers(&council_run.seats);
+    if answers.is_empty() {
+        return Err("no successful council seats to re-synthesize".into());
+    }
+
+    let synth_provider = request
+        .synthesizer_provider_id
+        .clone()
+        .or(council_run.synthesizer_provider_id.clone())
+        .ok_or_else(|| "synthesizer provider is required".to_string())?;
+    let synth_model = request
+        .synthesizer_model_id
+        .clone()
+        .or(council_run.synthesizer_model_id.clone());
+    let synth_label = request
+        .synthesizer_provider_label
+        .clone()
+        .unwrap_or_else(|| synth_provider.clone());
+
+    let parent_turn_id = request
+        .turn_id
+        .as_deref()
+        .map(parse_uuid)
+        .transpose()?
+        .unwrap_or_else(Uuid::new_v4);
+
+    let synth_user = build_synthesizer_user_prompt(&council_run.snapshot.prompt, &answers);
+    let synth_message = format!("{SYNTHESIZER_SYSTEM_PROMPT}\n\n---\n\n{synth_user}");
+    let synth_run_id = Uuid::new_v4();
+    let synth_request = ProviderChatRequest {
+        session_id: request.session_id.clone(),
+        message: synth_message,
+        turn_id: Some(synth_run_id.to_string()),
+        provider_id: synth_provider.clone(),
+        provider_label: Some(synth_label.clone()),
+        model_id: synth_model.clone(),
+        model_label: request.synthesizer_model_label.clone(),
+        reasoning_effort: None,
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: request
+            .workspace_path
+            .clone()
+            .or_else(|| Some(session.workspace_path.display().to_string())),
+        mode: ChatMode::Council,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+    };
+
+    let _ = store.append_event_with_turn_id(
+        session_uuid,
+        SessionEventKind::CouncilSynthesisStarted,
+        "Council re-synthesis started",
+        serde_json::json!({
+            "councilRunId": council_run.id,
+            "synthesizerProviderId": synth_provider,
+            "retry": true,
+        }),
+        Some(parent_turn_id),
+    );
+
+    council_run.status = CouncilRunStatus::Synthesizing;
+    council_run.updated_at = chrono::Utc::now();
+    write_council_run_manifest(&run_dir, &council_run).map_err(to_string)?;
+
+    emit_provider_chat_event(
+        &app,
+        &synth_request,
+        "started",
+        Some(HarnessRunStatus::Running),
+        None,
+        Some("Council re-synthesizing…".into()),
+        None,
+    );
+
+    let synth_started = Instant::now();
+    let synth_result = if provider_chat_cancelled(&app, &request.session_id) {
+        Err("chat cancelled by user".to_string())
+    } else {
+        run_provider_chat_with_retry(
+            &store,
+            &app,
+            &synth_request,
+            None,
+            UsageContext::new(UsageOrigin::CouncilResynthesis),
+        )
+            .map(|output| output.response)
+            .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
+    };
+    let synth_duration = synth_started.elapsed().as_millis();
+    let cancelled = provider_chat_cancelled(&app, &request.session_id);
+
+    let synthesis_ok = match synth_result {
+        Ok(raw) => {
+            let labels = seat_label_map(&council_run.seats);
+            let mut synthesis = parse_council_synthesis(
+                &raw,
+                &synth_provider,
+                synth_model.clone(),
+                Some(synth_run_id),
+                &labels,
+            );
+            synthesis.started_at = Some(chrono::Utc::now());
+            synthesis.completed_at = Some(chrono::Utc::now());
+            synthesis.duration_ms = Some(synth_duration);
+            let path =
+                write_synthesis_artifact(&run_dir, &synthesis.unified_markdown).map_err(to_string)?;
+            synthesis.artifact_path = Some(path.display().to_string());
+            council_run.synthesis = Some(synthesis.clone());
+            let _ = store.append_event_with_turn_id(
+                session_uuid,
+                SessionEventKind::CouncilSynthesisCompleted,
+                "Council re-synthesis completed",
+                serde_json::json!({
+                    "councilRunId": council_run.id,
+                    "synthesizerProviderId": synth_provider,
+                    "durationMs": synth_duration,
+                    "artifactPath": synthesis.artifact_path,
+                    "retry": true,
+                }),
+                Some(parent_turn_id),
+            );
+            true
+        }
+        Err(error) => {
+            let _ = store.append_event_with_turn_id(
+                session_uuid,
+                SessionEventKind::CouncilSynthesisCompleted,
+                "Council re-synthesis failed",
+                serde_json::json!({
+                    "councilRunId": council_run.id,
+                    "error": error,
+                    "retry": true,
+                }),
+                Some(parent_turn_id),
+            );
+            false
+        }
+    };
+
+    council_run.synthesizer_provider_id = Some(synth_provider.clone());
+    council_run.synthesizer_model_id = synth_model.clone();
+    council_run.status = final_run_status(&council_run.seats, synthesis_ok, cancelled);
+    council_run.updated_at = chrono::Utc::now();
+    council_run.recompute_totals();
+    write_council_run_manifest(&run_dir, &council_run).map_err(to_string)?;
+
+    let assistant_markdown = council_run
+        .synthesis
+        .as_ref()
+        .map(|synthesis| {
+            synthesis
+                .user_edited_markdown
+                .clone()
+                .unwrap_or_else(|| synthesis.unified_markdown.clone())
+        })
+        .unwrap_or_else(|| render_council_seats_fallback(&council_run));
+
+    let seat_summaries: Vec<serde_json::Value> = council_run
+        .seats
+        .iter()
+        .map(|seat| {
+            serde_json::json!({
+                "id": seat.id,
+                "providerId": seat.provider_id,
+                "providerLabel": seat.provider_label,
+                "modelId": seat.model_id,
+                "status": seat.status.as_str(),
+                "durationMs": seat.duration_ms,
+                "error": seat.error,
+                "artifactPath": seat.artifact_path,
+                "outputPreview": seat.raw_output.as_ref().map(|text| text.chars().take(400).collect::<String>()),
+            })
+        })
+        .collect();
+
+    let assistant_payload = serde_json::json!({
+        "schema": gyro_core::HARNESS_SCHEMA_V1,
+        "kind": "council-response",
+        "runKind": "council-run",
+        "runId": parent_turn_id,
+        "councilRunId": council_run.id,
+        "status": council_run.status.as_str(),
+        "presetId": council_run.preset_id,
+        "seats": seat_summaries,
+        "synthesis": council_run.synthesis,
+        "totals": council_run.totals,
+        "manifestPath": run_dir.join("run.json").display().to_string(),
+        "retry": true,
+    });
+
+    let assistant_event = store
+        .append_event_with_turn_id(
+            session_uuid,
+            SessionEventKind::AssistantMessage,
+            assistant_markdown,
+            assistant_payload,
+            Some(parent_turn_id),
+        )
+        .map_err(to_string)?;
+
+    let harness_status = match council_run.status {
+        CouncilRunStatus::Done | CouncilRunStatus::Partial => HarnessRunStatus::Done,
+        CouncilRunStatus::Cancelled => HarnessRunStatus::Cancelled,
+        _ => HarnessRunStatus::Failed,
+    };
+    let status_event = store
+        .append_event_with_turn_id(
+            session_uuid,
+            SessionEventKind::SystemEvent,
+            format!("Council {}", council_run.status.as_str()),
+            serde_json::json!({
+                "schema": gyro_core::HARNESS_SCHEMA_V1,
+                "kind": "provider-run",
+                "runId": parent_turn_id,
+                "status": harness_status.as_str(),
+                "councilRunId": council_run.id,
+                "retry": true,
+            }),
+            Some(parent_turn_id),
+        )
+        .map_err(to_string)?;
+
+    emit_provider_chat_event(
+        &app,
+        &synth_request,
+        if synthesis_ok { "completed" } else { "failed" },
+        Some(harness_status),
+        None,
+        Some(format!("Council {}", council_run.status.as_str())),
+        if synthesis_ok {
+            None
+        } else {
+            Some("Council re-synthesis failed".into())
+        },
+    );
+
+    if !synthesis_ok {
+        return Err("council re-synthesis failed".into());
+    }
+
+    let refreshed = store.get_session(session_uuid).map_err(to_string)?;
+    Ok(CouncilChatResponse {
+        council_run,
+        assistant_event,
+        status_event,
+        session: refreshed,
+    })
+}
+
+/// Run one chat turn to completion.
+///
+/// `origin` says whether this is an interactive turn or an unattended
+/// automation run. The usage ledger keeps them apart so a schedule cannot
+/// quietly outspend the person at the keyboard.
 fn run_provider_chat_blocking(
     app: tauri::AppHandle,
     mut request: ProviderChatRequest,
+    origin: UsageOrigin,
 ) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&request.session_id)?;
@@ -3082,7 +4169,7 @@ fn run_provider_chat_blocking(
     let binding = store
         .get_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
-    let runner_output = match run_provider_chat_with_retry(&store, &app, &request, binding) {
+    let runner_output = match run_provider_chat_with_retry(&store, &app, &request, binding, UsageContext::new(origin)) {
         Ok(response) => response,
         Err(error) => {
             let error = gyro_core::security::redact_secrets(&error.to_string());
@@ -3489,10 +4576,10 @@ fn bind_provider_capability_context(
     let policy = store
         .get_project_capability_policy(&workspace_key)
         .map_err(to_string)?;
-    let mode = if request.mode == ChatMode::Plan {
-        CapabilityRunMode::Plan
-    } else {
-        CapabilityRunMode::Normal
+    let mode = match request.mode {
+        ChatMode::Plan => CapabilityRunMode::Plan,
+        ChatMode::Council => CapabilityRunMode::Council,
+        ChatMode::Normal => CapabilityRunMode::Normal,
     };
     let persisted_context = store
         .read_recent_events(
@@ -3727,13 +4814,17 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
     let mut context = Vec::new();
     context.push(format!(
         "Gyro chat mode: {}.",
-        if request.mode == ChatMode::Plan {
-            "plan"
-        } else {
-            "normal"
+        match request.mode {
+            ChatMode::Plan => "plan",
+            ChatMode::Council => "council",
+            ChatMode::Normal => "normal",
         }
     ));
-    if gyro_core::provider_capability_support(&request.provider_id).available {
+    if request.mode == ChatMode::Council {
+        context.push(
+            "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
+        );
+    } else if gyro_core::provider_capability_support(&request.provider_id).available {
         context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context to inspect the user-visible editor state, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
         if let Some(workspace_context) = request.workspace_context.as_ref() {
             context.push(format!(
@@ -4387,7 +5478,85 @@ fn merge_renderer_config(mut incoming: GyroConfig, persisted: &GyroConfig) -> Gy
     // settings write must not redirect refresh tokens or forge a signed-in user.
     incoming.account_oidc = persisted.account_oidc.clone();
     incoming.account_session = persisted.account_session.clone();
+    // Usage guards are owned natively: the pause has its own command, and
+    // nothing in Settings edits budgets yet. A renderer save that omitted the
+    // block would otherwise fill it from serde defaults, silently resuming a
+    // paused Gyro and erasing every budget. When Settings can edit these, this
+    // needs to become a field-by-field merge rather than a wholesale keep.
+    incoming.usage_guard = persisted.usage_guard.clone();
     incoming
+}
+
+/// The current hold and every budget, for the UI to show and act on.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageSafetySnapshot {
+    pause: gyro_core::PauseState,
+    /// Only budgets with a cap. An unconfigured provider has nothing to show.
+    budgets: Vec<gyro_core::BudgetState>,
+}
+
+#[tauri::command]
+async fn get_usage_safety_snapshot() -> Result<UsageSafetySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        let config = GyroConfig::load(&paths).map_err(to_string)?;
+        let store = open_store()?;
+        let now = chrono::Utc::now();
+        let mut budgets = Vec::new();
+        for budget in config
+            .usage_guard
+            .budgets
+            .iter()
+            .filter(|budget| budget.max_tokens > 0)
+        {
+            match store.budget_state(budget, now) {
+                Ok(state) => budgets.push(state),
+                Err(error) => eprintln!(
+                    "budget for {} could not be measured: {}",
+                    budget.provider_id,
+                    gyro_core::security::redact_secrets(&error.to_string())
+                ),
+            }
+        }
+        // An expired auto-resume is not a pause, and the UI should not show one.
+        let pause = if config.usage_guard.pause.is_active_at(now) {
+            config.usage_guard.pause.clone()
+        } else {
+            gyro_core::PauseState::default()
+        };
+        Ok(UsageSafetySnapshot { budgets, pause })
+    })
+    .await
+    .map_err(|error| format!("usage safety worker failed: {error}"))?
+}
+
+/// Hold or resume every provider run.
+///
+/// Separate from `save_config` so a pause survives an unrelated settings write,
+/// and so stopping runs is a single call rather than a read-modify-write of the
+/// whole config from the renderer.
+#[tauri::command]
+async fn set_usage_paused(
+    paused: bool,
+    scope: Option<gyro_core::PauseScope>,
+) -> Result<bool, String> {
+    let scope = scope.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        GyroConfig::update(&paths, |persisted| {
+            persisted.usage_guard.pause = if paused {
+                gyro_core::PauseState::manual(scope)
+            } else {
+                gyro_core::PauseState::default()
+            };
+            Ok(())
+        })
+        .map_err(to_string)?;
+        Ok(paused)
+    })
+    .await
+    .map_err(|error| format!("usage pause worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -4821,6 +5990,7 @@ impl WorkspacePreparationManager {
             .lock()
             .map_err(|_| "workspace preparation state is unavailable".to_string())?;
         loop {
+            prune_workspace_preparation_completed(&mut state);
             if let Some((completed_at, cached)) = state.completed.get(&root) {
                 if completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE {
                     let mut cached = cached.clone();
@@ -4847,9 +6017,27 @@ impl WorkspacePreparationManager {
             state
                 .completed
                 .insert(root, (Instant::now(), snapshot.clone()));
+            prune_workspace_preparation_completed(&mut state);
         }
         state_changed.notify_all();
         result
+    }
+}
+
+fn prune_workspace_preparation_completed(state: &mut WorkspacePreparationState) {
+    state.completed.retain(|_, (completed_at, _)| {
+        completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE
+    });
+    while state.completed.len() > MAX_WORKSPACE_PREPARATION_CACHES {
+        let oldest = state
+            .completed
+            .iter()
+            .min_by_key(|(_, (completed_at, _))| *completed_at)
+            .map(|(path, _)| path.clone());
+        let Some(path) = oldest else {
+            break;
+        };
+        state.completed.remove(&path);
     }
 }
 
@@ -5200,6 +6388,11 @@ async fn resolve_provider_approval(
         }
     };
     if let Some(commit) = pending_mutation {
+        if let Err(error) = commit.mark_applied() {
+            eprintln!(
+                "Gyro could not write the durable applied marker before cleanup: {error}"
+            );
+        }
         if let Err(error) = commit.finalize() {
             eprintln!("Gyro deferred provider mutation cleanup until restart: {error}");
         }
@@ -7096,6 +8289,7 @@ fn create_file_mutation_proposal_impl(
         payload,
         turn_id,
     )?;
+    let _ = store.mark_mutation_proposal_surfaced(proposal.id);
     Ok(proposal)
 }
 
@@ -8689,6 +9883,22 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
     .map_err(|error| format!("provider auth worker failed: {error}"))?
 }
 
+/// What one chat has cost, read from Gyro's own ledger.
+///
+/// Unlike `get_provider_usage`, this answers for every provider: it counts what
+/// Gyro observed rather than what a CLI is willing to report, so Kimi, xAI, and
+/// Gemini sessions get a number too — flagged as estimated where they must be.
+#[tauri::command]
+async fn get_session_usage_totals(session_id: String) -> Result<UsageTotals, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_uuid = parse_uuid(&session_id)?;
+        store.session_usage_totals(session_uuid).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("session usage worker failed: {error}"))?
+}
+
 #[tauri::command]
 async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || get_provider_usage_blocking(&provider_id))
@@ -9240,15 +10450,245 @@ fn terminal_command_path(command: &str) -> String {
     command.into()
 }
 
+/// Which action a provider call belongs to, for the usage ledger.
+///
+/// Carried as a parameter rather than read off the request so that every call
+/// site has to name what it is spending on: one composer keypress can become a
+/// chat turn, four Council seats, and a synthesis, and a ledger that cannot
+/// tell them apart cannot answer where the quota went.
+#[derive(Clone, Copy, Debug)]
+struct UsageContext {
+    origin: UsageOrigin,
+    seat_id: Option<Uuid>,
+}
+
+impl UsageContext {
+    fn new(origin: UsageOrigin) -> Self {
+        Self {
+            origin,
+            seat_id: None,
+        }
+    }
+
+    fn seat(seat_id: Uuid) -> Self {
+        Self {
+            origin: UsageOrigin::CouncilSeat,
+            seat_id: Some(seat_id),
+        }
+    }
+}
+
+/// Append one provider call to the usage ledger.
+///
+/// Best-effort on purpose: a ledger write that fails must never turn a
+/// completed provider turn into an error the user sees.
+fn record_provider_usage(
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+    usage_context: UsageContext,
+    output: Option<&ProviderRunnerOutput>,
+    outcome: UsageOutcome,
+    wall_ms: u64,
+) {
+    let Ok(session_id) = parse_uuid(&request.session_id) else {
+        return;
+    };
+    let tokens = output
+        .and_then(|output| output.billed_usage.as_ref())
+        .map(|usage| {
+            UsageTokens::measured(
+                usage.input_tokens,
+                usage.cached_input_tokens,
+                usage.output_tokens,
+                usage.reasoning_output_tokens,
+                usage.total_tokens,
+            )
+        })
+        .filter(|tokens| !tokens.is_empty())
+        // Kimi, xAI, and Gemini report no counts at all. An estimate keeps them
+        // on the ledger instead of reading as free, and is marked as one.
+        .unwrap_or_else(|| {
+            UsageTokens::estimated(
+                request.message.chars().count(),
+                output.map_or(0, |output| output.response.chars().count()),
+            )
+        });
+    let entry = UsageEntry {
+        session_id,
+        turn_id: request
+            .turn_id
+            .as_deref()
+            .and_then(|turn_id| parse_uuid(turn_id).ok()),
+        seat_id: usage_context.seat_id,
+        provider_id: request.provider_id.clone(),
+        model_id: request.model_id.clone(),
+        reasoning_effort: request.reasoning_effort.clone(),
+        origin: usage_context.origin,
+        outcome,
+        tokens,
+        wall_ms,
+        retry_count: output.map_or(0, |output| output.retry_count),
+    };
+    if let Err(error) = store.record_usage(&entry) {
+        eprintln!(
+            "provider call completed but its usage was not recorded: {}",
+            gyro_core::security::redact_secrets(&error.to_string())
+        );
+    }
+}
+
+/// Refuse a call that the usage guards say must not start.
+///
+/// Checked here rather than at each caller so no provider path can be added
+/// that skips it. The counts come from the ledger, so the guards cover the
+/// providers that report no usage of their own.
+/// Refuse a call the provider's budget cannot pay for.
+///
+/// Exhausting a budget also pauses Gyro with an expiry, so the block survives a
+/// restart and lifts by itself once the rolling window frees up — the user is
+/// told which provider ran out rather than meeting a silent failure.
+fn usage_budget_block(
+    store: &SessionStore,
+    config: &gyro_core::UsageGuardConfig,
+    origin: UsageOrigin,
+    provider_id: &str,
+) -> Option<String> {
+    let budget = config
+        .budgets
+        .iter()
+        .find(|budget| budget.provider_id == provider_id && budget.max_tokens > 0)?;
+    let state = match store.budget_state(budget, chrono::Utc::now()) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!(
+                "usage budgets could not be measured, allowing this run: {}",
+                gyro_core::security::redact_secrets(&error.to_string())
+            );
+            return None;
+        }
+    };
+    let gyro_core::GuardVerdict::Block(reason) = gyro_core::budget_decision(&state, origin) else {
+        return None;
+    };
+    if state.level == gyro_core::BudgetLevel::Exhausted {
+        if let Err(error) = pause_for_exhausted_budget(&state) {
+            eprintln!(
+                "budget was exhausted but the pause was not recorded: {}",
+                gyro_core::security::redact_secrets(&error.to_string())
+            );
+        }
+    }
+    Some(reason)
+}
+
+fn pause_for_exhausted_budget(state: &gyro_core::BudgetState) -> anyhow::Result<()> {
+    let paths = GyroPaths::for_current_user()?;
+    GyroConfig::update(&paths, |persisted| {
+        // A manual pause outranks an automatic one: it has no expiry, and
+        // replacing it would resume work the user stopped on purpose.
+        if matches!(
+            persisted.usage_guard.pause.reason,
+            Some(gyro_core::PauseReason::Manual)
+        ) && persisted.usage_guard.pause.active
+        {
+            return Ok(());
+        }
+        persisted.usage_guard.pause = gyro_core::PauseState::budget_exhausted(
+            &state.provider_id,
+            state.window_resets_at,
+        );
+        Ok(())
+    })
+}
+
+fn usage_guard_block(
+    store: &SessionStore,
+    origin: UsageOrigin,
+    provider_id: &str,
+) -> Option<String> {
+    let config = GyroPaths::for_current_user()
+        .ok()
+        .and_then(|paths| GyroConfig::load(&paths).ok())
+        .map(|config| config.usage_guard)
+        .unwrap_or_default();
+    if config.pause.is_active_at(chrono::Utc::now()) {
+        // A pause must hold even if the ledger cannot be read.
+        if let gyro_core::GuardVerdict::Block(reason) =
+            gyro_core::guard_decision(&config, origin, gyro_core::RecentUsage::default())
+        {
+            return Some(reason);
+        }
+    }
+    if !config.enabled {
+        return None;
+    }
+    if let Some(reason) = usage_budget_block(store, &config, origin, provider_id) {
+        return Some(reason);
+    }
+    let since = chrono::Utc::now() - chrono::Duration::minutes(i64::from(config.window_minutes.max(1)));
+    // A ledger the guard cannot read is not evidence of safety, but blocking on
+    // a read failure would strand the user with no way to work. The call runs
+    // and the failure is logged.
+    let recent = match store.recent_usage(since) {
+        Ok(recent) => recent,
+        Err(error) => {
+            eprintln!(
+                "usage guards could not read the ledger, allowing this run: {}",
+                gyro_core::security::redact_secrets(&error.to_string())
+            );
+            return None;
+        }
+    };
+    match gyro_core::guard_decision(&config, origin, recent) {
+        gyro_core::GuardVerdict::Block(reason) => Some(reason),
+        gyro_core::GuardVerdict::Allow => None,
+    }
+}
+
 fn run_provider_chat_with_retry(
     store: &SessionStore,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
+    usage_context: UsageContext,
 ) -> anyhow::Result<ProviderRunnerOutput> {
-    run_provider_chat_with_retry_using(store, request, binding, |resume_cursor| {
+    if let Some(reason) = usage_guard_block(store, usage_context.origin, &request.provider_id) {
+        anyhow::bail!(reason);
+    }
+    let started = Instant::now();
+    let result = run_provider_chat_with_retry_using(store, request, binding, |resume_cursor| {
         run_provider_chat_once(app, request, resume_cursor)
-    })
+    });
+    let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    match result.as_ref() {
+        Ok(output) => record_provider_usage(
+            store,
+            request,
+            usage_context,
+            Some(output),
+            UsageOutcome::Done,
+            wall_ms,
+        ),
+        // A failed or cancelled run still burned whatever it burned before it
+        // stopped, so it is recorded rather than dropped.
+        Err(error) => record_provider_usage(
+            store,
+            request,
+            usage_context,
+            None,
+            if is_provider_cancellation(&error.to_string()) {
+                UsageOutcome::Cancelled
+            } else {
+                UsageOutcome::Failed
+            },
+            wall_ms,
+        ),
+    }
+    result
+}
+
+fn is_provider_cancellation(error: &str) -> bool {
+    error.to_ascii_lowercase().contains("cancelled")
 }
 
 fn run_provider_chat_with_retry_using<F>(
@@ -9609,6 +11049,9 @@ fn run_kimi_acp_chat(
     Ok(ProviderRunnerOutput {
         activities,
         context_usage: None,
+        // ACP publishes no token counts either, so the ledger estimates this
+        // call rather than claiming a measurement it was never given.
+        billed_usage: None,
         // ACP publishes no plan limits, so Kimi, Gemini, and Grok report none.
         rate_limits: Vec::new(),
         response: response.clone(),
@@ -9716,6 +11159,7 @@ fn run_openai_codex_chat(
             return Ok(ProviderRunnerOutput {
                 activities: provider_activities_for_response(output.activities, &response),
                 context_usage: output.context_usage,
+                billed_usage: output.billed_usage,
                 rate_limits: output.rate_limits,
                 response,
                 resume_cursor: provider_session_id
@@ -9741,6 +11185,7 @@ fn run_openai_codex_chat(
             return Ok(ProviderRunnerOutput {
                 activities: provider_activities_for_response(output.activities, &stdout),
                 context_usage: output.context_usage,
+                billed_usage: output.billed_usage,
                 rate_limits: output.rate_limits,
                 response: stdout,
                 resume_cursor: provider_session_id
@@ -10206,6 +11651,9 @@ fn run_openai_codex_app_server_chat(
         let response_chars = response.chars().count();
         Ok(ProviderRunnerOutput {
             activities: provider_activities_for_response(activities, &response),
+            // Codex app-server reports the turn's running total, so the same
+            // reading answers both "how full" and "what it billed".
+            billed_usage: context_usage.clone(),
             context_usage,
             rate_limits: Vec::new(),
             response,
@@ -10238,12 +11686,13 @@ fn codex_app_server_policy(
         && full_access
         && !require_command_approval
         && !require_file_edit_approval;
-    let approval_policy = if *mode == ChatMode::Plan || require_command_approval {
+    let advisory = matches!(mode, ChatMode::Plan | ChatMode::Council);
+    let approval_policy = if advisory || require_command_approval {
         "untrusted"
     } else {
         "on-request"
     };
-    if *mode == ChatMode::Plan || require_file_edit_approval {
+    if advisory || require_file_edit_approval {
         return (
             approval_policy,
             "read-only",
@@ -11175,6 +12624,7 @@ fn run_anthropic_claude_chat(
         return Ok(ProviderRunnerOutput {
             activities: provider_activities_for_response(output.activities, &response),
             context_usage: output.context_usage,
+            billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
             response,
             resume_cursor: Some(ProviderResumeCursor {
@@ -11367,7 +12817,9 @@ fn claude_chat_args(
             "--strict-mcp-config".into(),
         ]);
     }
-    if *mode == ChatMode::Plan {
+    if matches!(mode, ChatMode::Plan | ChatMode::Council) {
+        // Plan and Council are non-mutating. Council is stricter at the Gyro
+        // capability gate (deny-all); Claude plan mode is the closest CLI knob.
         args.push("--permission-mode".into());
         args.push("plan".into());
         args.push("--allowedTools".into());
@@ -11465,6 +12917,7 @@ fn capability_mcp_env(
             match bound.policy.mode {
                 CapabilityRunMode::Normal => "normal",
                 CapabilityRunMode::Plan => "plan",
+                CapabilityRunMode::Council => "council",
             }
             .into(),
         ),
@@ -12305,6 +13758,17 @@ fn claude_reasoning_effort_arg(reasoning_effort: Option<&str>) -> Option<String>
     matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max").then_some(effort)
 }
 
+/// The `grok --reasoning-effort <level>` value for a requested reasoning effort.
+///
+/// Grok's models publish `low`, `medium`, and `high` as their selectable
+/// levels. The flag parser also accepts words like `xhigh` and `max`, but the
+/// model rejects them once the turn starts, so a level carried over from a
+/// GPT or Claude session is dropped here and Grok keeps its own default.
+fn grok_reasoning_effort_arg(reasoning_effort: Option<&str>) -> Option<String> {
+    let effort = reasoning_effort?.trim().to_ascii_lowercase();
+    matches!(effort.as_str(), "low" | "medium" | "high").then_some(effort)
+}
+
 fn append_provider_status_event(
     store: &SessionStore,
     session_id: Uuid,
@@ -12414,6 +13878,11 @@ fn provider_turn_has_unfinished_attempt(
     session_id: Uuid,
     turn_id: Uuid,
 ) -> anyhow::Result<bool> {
+    // Prefer the durable turn-status index so a long session cannot hide a
+    // still-running attempt behind the recent-event read window.
+    if let Some(status) = store.latest_provider_status_for_turn(session_id, turn_id)? {
+        return Ok(status == "running");
+    }
     let last_status = store
         .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)?
         .into_iter()
@@ -12715,6 +14184,13 @@ fn push_bounded(
 struct StreamingCommandOutput {
     activities: Vec<ProviderActivity>,
     context_usage: Option<ProviderContextUsage>,
+    /// What the run billed, as opposed to what the context now holds.
+    ///
+    /// The usage ledger wants the turn-wide total: a turn that called tools
+    /// made several requests and paid for each. `context_usage` deliberately
+    /// prefers the per-request reading because it answers a different question
+    /// — how full the window is — so the billing figure is kept apart.
+    billed_usage: Option<ProviderContextUsage>,
     rate_limits: Vec<ProviderRateLimitWindow>,
     status_success: bool,
     status_label: String,
@@ -12735,6 +14211,20 @@ struct StreamingCommandState {
     /// Once a per-request reading has landed, a turn-wide one must not replace
     /// it.
     context_usage_is_per_request: bool,
+    /// The per-call token ceiling, read once and kept for the run. Zero is
+    /// "no ceiling"; `None` means it has not been read yet.
+    resolved_token_ceiling: Option<u64>,
+    /// Whether the per-call token ceiling already stopped this run.
+    ///
+    /// Latched so a stream that keeps arriving after the cancel does not
+    /// re-trigger the stop on every frame.
+    token_ceiling_tripped: bool,
+    /// The turn-wide total, kept for the usage ledger.
+    ///
+    /// Unlike `context_usage` this is never displaced by a per-request
+    /// reading: spend is the sum of every request the run made, so a turn that
+    /// used tools legitimately bills past the context window.
+    billed_usage: Option<ProviderContextUsage>,
     /// Newest reading per window id. A run can announce the same window more
     /// than once, and only the last reading describes where the plan stands.
     rate_limits: Vec<ProviderRateLimitWindow>,
@@ -12768,6 +14258,9 @@ impl StreamingCommandState {
             activities: Vec::new(),
             context_usage: None,
             context_usage_is_per_request: false,
+            resolved_token_ceiling: None,
+            token_ceiling_tripped: false,
+            billed_usage: None,
             rate_limits: Vec::new(),
             stdout_text: String::new(),
             stdout_text_chars: 0,
@@ -12803,6 +14296,13 @@ impl StreamingCommandState {
     /// and the per-request frames are the only ones whose counts describe what
     /// the window actually holds, so each contributes what it alone knows.
     fn apply_claude_context_usage(&mut self, frame: ClaudeUsageFrame, usage: ProviderContextUsage) {
+        // The ledger takes the turn-wide total when the run reports one, and
+        // otherwise accumulates the per-request readings, so a tool-using turn
+        // is billed for every request it made rather than only the last.
+        match frame {
+            ClaudeUsageFrame::Turn => self.billed_usage = Some(usage.clone()),
+            ClaudeUsageFrame::Request => self.accumulate_billed_usage(&usage),
+        }
         match frame {
             ClaudeUsageFrame::Request => {
                 let carried_window = self
@@ -12827,6 +14327,33 @@ impl StreamingCommandState {
                 }
             }
         }
+    }
+
+    /// Add one request's usage to the run's billed total.
+    ///
+    /// Used only until a turn-wide total arrives, which replaces the sum
+    /// outright because the provider counted it authoritatively.
+    fn accumulate_billed_usage(&mut self, usage: &ProviderContextUsage) {
+        let Some(current) = self.billed_usage.as_mut() else {
+            self.billed_usage = Some(usage.clone());
+            return;
+        };
+        fn add(target: &mut Option<u64>, value: Option<u64>) {
+            if let Some(value) = value {
+                *target = Some(target.unwrap_or_default().saturating_add(value));
+            }
+        }
+        add(&mut current.input_tokens, usage.input_tokens);
+        add(&mut current.cached_input_tokens, usage.cached_input_tokens);
+        add(&mut current.output_tokens, usage.output_tokens);
+        add(
+            &mut current.reasoning_output_tokens,
+            usage.reasoning_output_tokens,
+        );
+        add(&mut current.total_tokens, usage.total_tokens);
+        current.model_context_window = usage
+            .model_context_window
+            .or(current.model_context_window);
     }
 
     fn push_activity(&mut self, mut activity: ProviderActivity) -> Option<ProviderActivity> {
@@ -13084,6 +14611,7 @@ fn run_streaming_command(
     Ok(StreamingCommandOutput {
         activities: stream_state.activities,
         context_usage: stream_state.context_usage,
+        billed_usage: stream_state.billed_usage,
         rate_limits: stream_state.rate_limits,
         status_success: outcome.succeeded(),
         status_label,
@@ -13105,6 +14633,54 @@ fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) -> bool {
         .is_some_and(|control| control.cancellation.is_cancelled())
 }
 
+/// Cut a call short once it has billed past the per-call ceiling.
+///
+/// A turn that keeps growing is the shape of a runaway loop, and waiting for
+/// the provider to stop it means paying for the whole thing first. The run is
+/// cancelled through the same path the user's stop button uses, so the partial
+/// response is still saved and the spend is still recorded.
+fn enforce_call_token_ceiling(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    stream_state: &mut StreamingCommandState,
+) {
+    if stream_state.token_ceiling_tripped {
+        return;
+    }
+    let Some(billed) = stream_state
+        .billed_usage
+        .as_ref()
+        .and_then(|usage| usage.total_tokens)
+    else {
+        return;
+    };
+    // Resolved once per run: this is reached for every streamed frame after the
+    // first usage reading, and re-reading config from disk each time would put
+    // a file read in the middle of the stream loop.
+    let ceiling = *stream_state.resolved_token_ceiling.get_or_insert_with(|| {
+        let guard = GyroPaths::for_current_user()
+            .ok()
+            .and_then(|paths| GyroConfig::load(&paths).ok())
+            .map(|config| config.usage_guard)
+            .unwrap_or_default();
+        if guard.enabled {
+            guard.max_tokens_per_call
+        } else {
+            0
+        }
+    });
+    if ceiling == 0 || billed <= ceiling {
+        return;
+    }
+    stream_state.token_ceiling_tripped = true;
+    eprintln!("provider call passed the {ceiling} token ceiling at {billed}; stopping it");
+    if let Ok(flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        if let Some(control) = flags.get(&request.session_id) {
+            control.cancellation.cancel();
+        }
+    }
+}
+
 fn handle_provider_stdout_line(
     line: &str,
     app: &tauri::AppHandle,
@@ -13119,11 +14695,15 @@ fn handle_provider_stdout_line(
         stream_state.provider_session_id = extract_provider_session_id(&value);
     }
     if let Some(context_usage) = provider_context_usage_from_codex_exec(&value) {
+        // Codex reports the turn's running total, so the newest reading is both
+        // what the window holds and what the turn billed.
+        stream_state.billed_usage = Some(context_usage.clone());
         stream_state.context_usage = Some(context_usage);
         stream_state.context_usage_is_per_request = false;
     } else if let Some((frame, context_usage)) = provider_context_usage_from_claude_stream(&value) {
         stream_state.apply_claude_context_usage(frame, context_usage);
     }
+    enforce_call_token_ceiling(app, request, stream_state);
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(&value) {
         merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
     }
@@ -13868,10 +15448,7 @@ fn build_grok_acp_program_args(
         args.push("-m".into());
         args.push(model.into());
     }
-    if let Some(effort) = reasoning_effort
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-    {
+    if let Some(effort) = grok_reasoning_effort_arg(reasoning_effort) {
         args.push("--reasoning-effort".into());
         args.push(effort.into());
     }
@@ -14320,14 +15897,18 @@ fn capability_access_for_call(
     scope_value: &str,
 ) -> CapabilityAccess {
     let snapshot_access = bound.policy.access_for(class);
-    let current_access = if bound.policy.mode == CapabilityRunMode::Plan
+    let current_access = if bound.policy.mode == CapabilityRunMode::Council {
+        CapabilityAccess::Deny
+    } else if bound.policy.mode == CapabilityRunMode::Plan
         && !matches!(
             class,
             CapabilityClass::WorkspaceInspect
                 | CapabilityClass::WorkspaceSensitiveRead
                 | CapabilityClass::IdeReveal
                 | CapabilityClass::BrowserInspect
-        ) {
+                | CapabilityClass::GithubInspect
+        )
+    {
         CapabilityAccess::Deny
     } else {
         current.access_for(class)
@@ -15421,6 +17002,12 @@ fn handle_desktop_provider_capability_request(
             "Plan mode cannot create Workspace edit proposals.".into(),
         );
     }
+    if bound.policy.mode == CapabilityRunMode::Council {
+        return fail(
+            "council-mode-advisory-only",
+            "Council seats cannot use tools or mutate the workspace.".into(),
+        );
+    }
     let class = match effective_capability_class(request.capability_id, &request.arguments) {
         Ok(class) => class,
         Err(error) => return fail("invalid-arguments", error.to_string()),
@@ -15639,6 +17226,7 @@ impl DesktopProviderCapabilityContext {
         let mode = match desktop_permission_env("GYRO_CAPABILITY_MODE")?.as_str() {
             "normal" => CapabilityRunMode::Normal,
             "plan" => CapabilityRunMode::Plan,
+            "council" => CapabilityRunMode::Council,
             _ => anyhow::bail!("invalid provider capability mode"),
         };
         Ok(Self {
@@ -16138,6 +17726,9 @@ pub fn run() {
             let paths = GyroPaths::for_current_user()?;
             let store = SessionStore::open(paths.clone())?;
             recover_provider_mutation_transactions(&paths.mutation_journals_dir, &store)?;
+            if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
+                *pool = Some(store);
+            }
             start_cli_ipc_listener(app.handle().clone());
             start_automation_scheduler(app.handle().clone());
             Ok(())
@@ -16182,6 +17773,9 @@ pub fn run() {
             get_project_capability_policy,
             get_provider_capability_support,
             get_provider_usage,
+            get_session_usage_totals,
+            get_usage_safety_snapshot,
+            set_usage_paused,
             git_commit,
             git_branches,
             git_checkout_branch,
@@ -16232,6 +17826,9 @@ pub fn run() {
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
+            read_council_artifact,
+            retry_council_synthesis,
+            run_council_chat,
             run_provider_chat,
             save_config,
             save_project_capability_policy,
@@ -16267,6 +17864,12 @@ pub fn run() {
         if run_event_wakes_automation_scheduler(&event) {
             app.state::<AutomationSchedulerControl>().wake();
         }
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
+            drain_backend_resources_on_quit(app);
+        }
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
             has_visible_windows,
@@ -16280,6 +17883,49 @@ pub fn run() {
             }
         }
     });
+}
+
+fn drain_backend_resources_on_quit(app: &tauri::AppHandle) {
+    // Best-effort drain on true quit. Window hide on macOS is intentional and
+    // must keep the automation scheduler and terminals alive.
+    if let Ok(mut flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        for control in flags.values() {
+            control.cancellation.cancel();
+        }
+        flags.clear();
+    }
+    app.state::<AutomationSchedulerControl>().wake();
+    let terminal_ids = app
+        .state::<TerminalProcessManager>()
+        .processes
+        .lock()
+        .ok()
+        .map(|processes| processes.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for pane_id in terminal_ids {
+        let _ = app.state::<TerminalProcessManager>().stop(&pane_id);
+        let _ = app.state::<TerminalProcessManager>().close(&pane_id);
+    }
+    let language_server_ids = app
+        .state::<LanguageServerManager>()
+        .processes
+        .lock()
+        .ok()
+        .map(|processes| processes.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for server_id in language_server_ids {
+        let _ = app.state::<LanguageServerManager>().stop(&server_id);
+    }
+    let debug_adapter_ids = app
+        .state::<DebugAdapterManager>()
+        .processes
+        .lock()
+        .ok()
+        .map(|processes| processes.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for adapter_id in debug_adapter_ids {
+        let _ = app.state::<DebugAdapterManager>().stop(&adapter_id);
+    }
 }
 
 fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
@@ -16307,14 +17953,107 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn open_store() -> Result<SessionStore, String> {
-    let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    SessionStore::open(paths).map_err(to_string)
+/// Process-local SQLite connection reuse. Concurrent callers may open an extra
+/// short-lived connection; idle handles return to the pool on drop.
+static SESSION_STORE_POOL: Mutex<Option<SessionStore>> = Mutex::new(None);
+static AUTOMATION_STORE_POOL: Mutex<Option<AutomationStore>> = Mutex::new(None);
+
+struct SessionStoreLease {
+    store: Option<SessionStore>,
 }
 
-fn open_automation_store() -> Result<AutomationStore, String> {
+impl std::ops::Deref for SessionStoreLease {
+    type Target = SessionStore;
+
+    fn deref(&self) -> &Self::Target {
+        self.store
+            .as_ref()
+            .expect("session store lease is active")
+    }
+}
+
+impl AsRef<SessionStore> for SessionStoreLease {
+    fn as_ref(&self) -> &SessionStore {
+        self.store
+            .as_ref()
+            .expect("session store lease is active")
+    }
+}
+
+impl Drop for SessionStoreLease {
+    fn drop(&mut self) {
+        if let Some(store) = self.store.take() {
+            if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
+                if pool.is_none() {
+                    *pool = Some(store);
+                }
+            }
+        }
+    }
+}
+
+struct AutomationStoreLease {
+    store: Option<AutomationStore>,
+}
+
+impl std::ops::Deref for AutomationStoreLease {
+    type Target = AutomationStore;
+
+    fn deref(&self) -> &Self::Target {
+        self.store
+            .as_ref()
+            .expect("automation store lease is active")
+    }
+}
+
+impl AsRef<AutomationStore> for AutomationStoreLease {
+    fn as_ref(&self) -> &AutomationStore {
+        self.store
+            .as_ref()
+            .expect("automation store lease is active")
+    }
+}
+
+impl Drop for AutomationStoreLease {
+    fn drop(&mut self) {
+        if let Some(store) = self.store.take() {
+            if let Ok(mut pool) = AUTOMATION_STORE_POOL.lock() {
+                if pool.is_none() {
+                    *pool = Some(store);
+                }
+            }
+        }
+    }
+}
+
+fn open_store() -> Result<SessionStoreLease, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    AutomationStore::open(paths).map_err(to_string)
+    if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
+        if let Some(store) = pool.take() {
+            return Ok(SessionStoreLease {
+                store: Some(store),
+            });
+        }
+    }
+    let store = SessionStore::open(paths).map_err(to_string)?;
+    Ok(SessionStoreLease {
+        store: Some(store),
+    })
+}
+
+fn open_automation_store() -> Result<AutomationStoreLease, String> {
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    if let Ok(mut pool) = AUTOMATION_STORE_POOL.lock() {
+        if let Some(store) = pool.take() {
+            return Ok(AutomationStoreLease {
+                store: Some(store),
+            });
+        }
+    }
+    let store = AutomationStore::open(paths).map_err(to_string)?;
+    Ok(AutomationStoreLease {
+        store: Some(store),
+    })
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, String> {
@@ -18673,6 +20412,21 @@ while True:
                 "stdio",
             ]
         );
+        // Grok publishes low/medium/high; a level carried over from GPT or
+        // Claude is dropped rather than sent for the model to reject.
+        assert_eq!(
+            grok_reasoning_effort_arg(Some("Medium")),
+            Some("medium".into())
+        );
+        assert_eq!(grok_reasoning_effort_arg(Some("xhigh")), None);
+        assert_eq!(grok_reasoning_effort_arg(Some("max")), None);
+        assert_eq!(grok_reasoning_effort_arg(Some("ultra")), None);
+        assert_eq!(grok_reasoning_effort_arg(None), None);
+        assert!(
+            !build_grok_acp_program_args(Some("grok-4.5"), Some("ultra"))
+                .iter()
+                .any(|arg| arg == "--reasoning-effort")
+        );
         let minimal = build_grok_acp_program_args(None, None);
         let minimal_str: Vec<String> = minimal
             .iter()
@@ -19142,6 +20896,7 @@ while True:
                 Ok(ProviderRunnerOutput {
                     activities: Vec::new(),
                     context_usage: None,
+                    billed_usage: None,
                     rate_limits: Vec::new(),
                     response: "Recovered".into(),
                     resume_cursor: None,
