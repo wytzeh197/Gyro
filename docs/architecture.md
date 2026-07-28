@@ -24,9 +24,13 @@ store.
 `gyro-core` owns:
 
 - User data paths.
-- Session metadata in SQLite.
-- Append-only JSONL session event logs.
-- Durable event appends followed by SQLite metadata updates, plus bounded tail reads for long sessions.
+- Session metadata in SQLite (WAL, process-local connection reuse in the
+  desktop app, schema versioning to avoid re-migration on every open).
+- Append-only JSONL session event logs with per-event fsync; JSONL is the source
+  of truth for chat history, while SQLite indexes sessions, turn status, and
+  mutation proposals.
+- Durable event appends followed by SQLite metadata updates, plus bounded tail
+  reads for long sessions.
 - Config loading and saving.
 - Approval policy.
 - Secret redaction.
@@ -102,9 +106,15 @@ Important files:
 gyro.sqlite3          Session metadata
 config.json           Local user config
 sessions/*.jsonl      Append-only session event logs
+mutation-journals/    In-flight multi-file apply journals and applied markers
 worktrees/            Gyro-managed isolated Git worktrees
 gyro.sock             Runtime-only CLI-to-app socket
 ```
+
+Multi-file provider applies write a journal, commit files, record an applied
+event, fsync a sibling `.applied` marker, then finalize. Startup recovery prefers
+the marker over a capped event-window scan so a long session cannot cause a
+false rollback after commit.
 
 Gyro does not write metadata into user repositories by default. A future optional `gyro.toml` may define workspace-specific policies.
 

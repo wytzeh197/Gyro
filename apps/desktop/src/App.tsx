@@ -48,6 +48,9 @@ import {
   workspacePathExcluded,
   normalizedChatProjectKey,
   normalizedConfig,
+  normalizedCouncilConfig,
+  readyCouncilProviders,
+  resolveCouncilSeatRequests,
   parseProviderHealthOutput,
   parseGyroWorkspaceFile,
   workspaceCommandForKeybinding,
@@ -77,6 +80,8 @@ import {
   type ChatAttachment,
   type ChatGridState,
   type ChatMode,
+  type CouncilActionRequest,
+  type CouncilRun,
   type ChatPaneRef,
   type ChatSidePanelId,
   type CliLaunchPreset,
@@ -110,6 +115,8 @@ import {
   type ProjectCapabilityPolicy,
   type ProviderId,
   type ProviderUsageState,
+  type SessionUsageTotals,
+  type UsageSafetySnapshot,
   type ProviderHandoff,
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
@@ -263,6 +270,13 @@ type ProviderChatResponse = {
   session?: Session | null;
   sessionTitle?: string | null;
   statusEvent: SessionEvent;
+};
+
+type CouncilChatInvokeResponse = {
+  councilRun: CouncilRun;
+  assistantEvent: SessionEvent;
+  statusEvent: SessionEvent;
+  session?: Session | null;
 };
 
 type DiagnosticsExportResult = {
@@ -751,6 +765,14 @@ export function App() {
   const [providerUsageByProvider, setProviderUsageByProvider] = useState<
     Partial<Record<ProviderId, ProviderUsageState>>
   >({});
+  // What each chat has spent, read from Gyro's usage ledger. Unlike the
+  // provider quota windows above, this covers every provider, including the
+  // ones whose CLIs report no token counts at all.
+  const [sessionUsageById, setSessionUsageById] = useState<
+    Record<string, SessionUsageTotals>
+  >({});
+  // Whether runs are held, and how close each budget is to its cap.
+  const [usageSafety, setUsageSafety] = useState<UsageSafetySnapshot>();
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const providerUsageRequestRef = useRef<Partial<Record<ProviderId, number>>>(
     {},
@@ -1043,6 +1065,59 @@ export function App() {
   const activeSessionGoal = activeSessionId
     ? persistedActiveSessionGoal
     : pendingNewChatGoal;
+  const activeSessionUsage = activeSessionId
+    ? sessionUsageById[activeSessionId]
+    : undefined;
+  // Re-read the ledger when a chat opens and after each run lands, so the cost
+  // line accounts for the turn that just finished — including the Council
+  // seats and synthesis a single send can fan out into.
+  // Keyed on completed provider responses rather than on every event: a single
+  // turn streams dozens of activity events, and re-querying the ledger for each
+  // one would put a round-trip in the middle of the stream.
+  const activeSessionCallCount = useMemo(
+    () =>
+      activeSessionId
+        ? (sessionEventsById[activeSessionId] ?? []).filter(
+            (event) => event.kind === "assistant-message",
+          ).length
+        : 0,
+    [activeSessionId, sessionEventsById],
+  );
+  useEffect(() => {
+    if (!activeSessionId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const totals = await invoke<SessionUsageTotals>(
+          "get_session_usage_totals",
+          { sessionId: activeSessionId },
+        );
+        if (cancelled) return;
+        setSessionUsageById((current) => ({
+          ...current,
+          [activeSessionId]: totals,
+        }));
+      } catch {
+        // A ledger read that fails must never disturb the chat it describes.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionCallCount, activeSessionId]);
+  const refreshUsageSafety = useCallback(async () => {
+    try {
+      setUsageSafety(
+        await invoke<UsageSafetySnapshot>("get_usage_safety_snapshot"),
+      );
+    } catch {
+      // Preview builds have no backend; the banner simply stays hidden.
+    }
+  }, []);
+  useEffect(() => {
+    void refreshUsageSafety();
+  }, [activeSessionCallCount, refreshUsageSafety]);
+
   const activeChatMode = activeSessionId
     ? persistedActiveChatMode
     : pendingNewChatMode;
@@ -1213,6 +1288,19 @@ export function App() {
     },
     [],
   );
+
+  const resumeUsage = useCallback(async () => {
+    try {
+      await invoke("set_usage_paused", { paused: false });
+      await refreshUsageSafety();
+    } catch (error) {
+      notify(
+        "provider",
+        "Could not resume",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }, [notify, refreshUsageSafety]);
   const recoveryNoticeShownRef = useRef(false);
   useEffect(() => {
     if (recoveryNoticeShownRef.current) return;
@@ -1627,7 +1715,7 @@ export function App() {
       options: { notifySuccess?: boolean } = {},
     ) => {
       const shouldNotifySuccess = options.notifySuccess ?? true;
-      const normalizedNextConfig = normalizedConfig(nextConfig);
+      const normalizedNextConfig = withCouncilConfig(nextConfig);
       configRef.current = normalizedNextConfig;
       setConfig(normalizedNextConfig);
       safeSetLocalStorage(
@@ -2249,6 +2337,18 @@ export function App() {
     [setEventsForSession],
   );
 
+  const applyCouncilChatResponse = useCallback(
+    (sessionId: string, response?: CouncilChatInvokeResponse) => {
+      if (!response) return;
+      applyProviderChatResponse(sessionId, {
+        assistantEvent: response.assistantEvent,
+        statusEvent: response.statusEvent,
+        session: response.session,
+      });
+    },
+    [applyProviderChatResponse],
+  );
+
   const updateSessionTitle = useCallback(
     async (
       sessionId: string,
@@ -2355,10 +2455,10 @@ export function App() {
     }
     try {
       const nextConfig = await invoke<GyroConfig>("load_config");
-      setConfig(normalizedConfig(nextConfig));
+      setConfig(withCouncilConfig(nextConfig));
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
     } catch {
-      setConfig(EMPTY_CONFIG);
+      setConfig(withCouncilConfig(EMPTY_CONFIG));
       setActiveProfileId("shell");
     }
   }, []);
@@ -2525,7 +2625,7 @@ export function App() {
       if (workbench.workspaceMode === "worktree") {
         notify(
           "command-failed",
-          "Worktree branch is fixed",
+          "Agent workspace branch is fixed",
           "Start a local chat to switch the shared workspace branch.",
         );
         return;
@@ -2593,7 +2693,7 @@ export function App() {
       if (workbench.workspaceMode === "worktree") {
         notify(
           "command-failed",
-          "Worktree branch is fixed",
+          "Agent workspace branch is fixed",
           "Start a local chat to create a branch in the shared workspace.",
         );
         return;
@@ -2671,7 +2771,7 @@ export function App() {
       if (!root || !worktree) {
         notify(
           "command-failed",
-          "Worktree unavailable",
+          "Agent workspace unavailable",
           "Refresh the branch menu and try again.",
         );
         return;
@@ -2684,7 +2784,7 @@ export function App() {
       if (busySession) {
         notify(
           "command-failed",
-          "Worktree is busy",
+          "Agent workspace is busy",
           `Wait for ${busySession.title} to finish before removing it.`,
         );
         return;
@@ -2702,7 +2802,7 @@ export function App() {
           request: { workspacePath: root, branch },
         });
         setBranchCatalog(catalog);
-        notify("terminal", "Worktree removed", branch);
+        notify("terminal", "Agent workspace removed", branch);
       } catch (error) {
         notify("command-failed", "Could not remove worktree", String(error));
         await refreshWorkspaceBranches(root);
@@ -4815,7 +4915,17 @@ export function App() {
         type: "complete-onboarding-step",
         step: "first-session",
       });
-      notify("terminal", "Session created", session.title);
+      if (shouldCreateWorktree) {
+        notify(
+          "terminal",
+          "Agent workspace ready",
+          session.branch
+            ? `${session.branch} — main project stays untouched.`
+            : "Private branch under Gyro — main project stays untouched.",
+        );
+      } else {
+        notify("terminal", "Session created", session.title);
+      }
     } catch {
       const session = createPreviewSession(
         sessionLayout,
@@ -6585,20 +6695,25 @@ export function App() {
     async (mode: ChatMode) => {
       if (!activeSessionId) {
         setPendingNewChatMode(mode);
-        if (mode === "plan") {
+        if (mode === "plan" || mode === "council") {
           setPendingNewChatGoal(undefined);
         }
         return true;
       }
 
-      const shouldClearGoal = mode === "plan" && Boolean(activeSessionGoal);
+      const shouldClearGoal =
+        (mode === "plan" || mode === "council") && Boolean(activeSessionGoal);
       const shouldChangeMode = activeChatMode !== mode;
       if (!shouldClearGoal && !shouldChangeMode) {
         return true;
       }
 
       const modeMessage =
-        mode === "plan" ? "Plan mode enabled" : "Normal mode enabled";
+        mode === "plan"
+          ? "Plan mode enabled"
+          : mode === "council"
+            ? "Council mode enabled"
+            : "Normal mode enabled";
       if (!isTauriRuntime()) {
         const now = new Date().toISOString();
         setEvents((current) => [
@@ -6665,9 +6780,9 @@ export function App() {
           dispatchWorkbench({ type: "close-tool-panel" });
           notify(
             "terminal",
-            nextMode === "worktree" ? "Worktree mode" : "Local mode",
+            nextMode === "worktree" ? "Agent workspace" : "Shared folder",
             nextMode === "worktree"
-              ? "New runs will create an isolated worktree branch."
+              ? "New runs get a private branch. Your main project stays untouched."
               : "New runs will use the current workspace branch.",
           );
         };
@@ -6675,7 +6790,7 @@ export function App() {
           notify(
             "terminal",
             "Choose a workspace",
-            "Worktree mode needs a repo or folder before the chat starts.",
+            "Agent workspace needs a Git repository or folder before the chat starts.",
           );
           void openWorkspace().then((selected) => {
             if (selected) {
@@ -6932,10 +7047,15 @@ export function App() {
           });
           break;
         case "set-chat-mode-plan":
+        case "set-chat-mode-council":
         case "set-chat-mode-normal":
           {
-            const mode: ChatMode = action.endsWith("plan") ? "plan" : "normal";
-            if (mode === "plan") {
+            const mode: ChatMode = action.endsWith("plan")
+              ? "plan"
+              : action.endsWith("council")
+                ? "council"
+                : "normal";
+            if (mode === "plan" || mode === "council") {
               setIsGoalComposerActive(false);
             }
             void changeChatMode(mode);
@@ -6984,6 +7104,7 @@ export function App() {
           }
           break;
         case "select-model":
+        case "open-providers":
           dispatchWorkbench({
             type: "select-destination",
             destination: "providers",
@@ -7209,7 +7330,29 @@ export function App() {
         void openWorkspace();
         return false;
       }
-      if (!checkProviderReadiness("chat", sessionModel.providerId)) {
+      const isCouncilTurn = turnMode === "council";
+      if (
+        !isCouncilTurn &&
+        !checkProviderReadiness("chat", sessionModel.providerId)
+      ) {
+        return false;
+      }
+      if (isCouncilTurn && config.council?.enabled === false) {
+        notify(
+          "command-failed",
+          "Council disabled",
+          "Enable Model Council in settings to use this mode.",
+        );
+        return false;
+      }
+      const councilResolution = isCouncilTurn
+        ? resolveCouncilSeatRequests(
+            config,
+            readyCouncilProviders(config, workbench.providerStatuses),
+          )
+        : null;
+      if (isCouncilTurn && councilResolution?.error) {
+        notify("command-failed", "Council not ready", councilResolution.error);
         return false;
       }
       const retryTurnId = overrideContext?.retryTurnId;
@@ -7393,13 +7536,16 @@ export function App() {
               }),
             );
           }
-          if (turnMode === "plan") {
+          if (turnMode === "plan" || turnMode === "council") {
             contextEvents.push(
               await invoke<SessionEvent>("append_chat_context_event", {
                 sessionId: persistedSession.id,
                 eventKind: "chat-mode-changed",
-                message: "Plan mode enabled",
-                payload: { mode: "plan" },
+                message:
+                  turnMode === "council"
+                    ? "Council mode enabled"
+                    : "Plan mode enabled",
+                payload: { mode: turnMode },
               }),
             );
           }
@@ -7446,35 +7592,62 @@ export function App() {
             });
           }
           persistedChatTurnIdsRef.current.add(turnId);
-          const providerResponse = await invoke<ProviderChatResponse>(
-            "run_provider_chat",
-            {
-              request: {
-                sessionId: persistedSession.id,
-                message,
-                turnId,
-                providerId:
-                  sessionModel.providerId ??
-                  selectedProvider?.id ??
-                  config.selectedProviderId,
-                providerLabel:
-                  sessionModel.providerLabel ?? selectedProvider?.displayName,
-                modelId: sessionModel.modelId,
-                modelLabel: sessionModel.modelLabel,
-                reasoningEffort: sessionModel.reasoningEffort,
-                requireCommandApproval,
-                requireFileEditApproval,
-                fullAccess,
-                mode: turnMode,
-                goal: turnGoal?.text ? turnGoal : undefined,
-                plan: turnPlan.items.length ? turnPlan : undefined,
-                attachments: persistedTurnAttachments,
-                suggestTitle: shouldSuggestTitle,
-                workspacePath: persistedSession.workspacePath,
+          if (isCouncilTurn && councilResolution) {
+            const councilResponse = await invoke<CouncilChatInvokeResponse>(
+              "run_council_chat",
+              {
+                request: {
+                  sessionId: persistedSession.id,
+                  message,
+                  turnId,
+                  presetId: councilResolution.presetId,
+                  seats: councilResolution.seats,
+                  synthesizerProviderId:
+                    councilResolution.synthesizerProviderId,
+                  synthesizerProviderLabel:
+                    councilResolution.synthesizerProviderLabel,
+                  synthesizerModelId: councilResolution.synthesizerModelId,
+                  synthesizerModelLabel:
+                    councilResolution.synthesizerModelLabel,
+                  workspacePath: persistedSession.workspacePath,
+                  attachments: persistedTurnAttachments,
+                  requireCommandApproval: true,
+                  requireFileEditApproval: true,
+                },
               },
-            },
-          );
-          applyProviderChatResponse(persistedSession.id, providerResponse);
+            );
+            applyCouncilChatResponse(persistedSession.id, councilResponse);
+          } else {
+            const providerResponse = await invoke<ProviderChatResponse>(
+              "run_provider_chat",
+              {
+                request: {
+                  sessionId: persistedSession.id,
+                  message,
+                  turnId,
+                  providerId:
+                    sessionModel.providerId ??
+                    selectedProvider?.id ??
+                    config.selectedProviderId,
+                  providerLabel:
+                    sessionModel.providerLabel ?? selectedProvider?.displayName,
+                  modelId: sessionModel.modelId,
+                  modelLabel: sessionModel.modelLabel,
+                  reasoningEffort: sessionModel.reasoningEffort,
+                  requireCommandApproval,
+                  requireFileEditApproval,
+                  fullAccess,
+                  mode: turnMode,
+                  goal: turnGoal?.text ? turnGoal : undefined,
+                  plan: turnPlan.items.length ? turnPlan : undefined,
+                  attachments: persistedTurnAttachments,
+                  suggestTitle: shouldSuggestTitle,
+                  workspacePath: persistedSession.workspacePath,
+                },
+              },
+            );
+            applyProviderChatResponse(persistedSession.id, providerResponse);
+          }
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
           setPendingNewChatGoal(undefined);
@@ -7600,35 +7773,61 @@ export function App() {
             },
           });
         }
-        const providerResponse = await invoke<ProviderChatResponse>(
-          "run_provider_chat",
-          {
-            request: {
-              sessionId: activeSessionId,
-              message,
-              turnId,
-              providerId:
-                sessionModel.providerId ??
-                selectedProvider?.id ??
-                config.selectedProviderId,
-              providerLabel:
-                sessionModel.providerLabel ?? selectedProvider?.displayName,
-              modelId: sessionModel.modelId,
-              modelLabel: sessionModel.modelLabel,
-              reasoningEffort: sessionModel.reasoningEffort,
-              requireCommandApproval,
-              requireFileEditApproval,
-              fullAccess,
-              mode: turnMode,
-              goal: turnGoal?.text ? turnGoal : undefined,
-              plan: turnPlan.items.length ? turnPlan : undefined,
-              attachments: turnAttachments,
-              suggestTitle: shouldSuggestTitle,
-              workspacePath: chatWorkspacePath,
+        if (isCouncilTurn && councilResolution) {
+          const councilResponse = await invoke<CouncilChatInvokeResponse>(
+            "run_council_chat",
+            {
+              request: {
+                sessionId: activeSessionId,
+                message,
+                turnId,
+                presetId: councilResolution.presetId,
+                seats: councilResolution.seats,
+                synthesizerProviderId: councilResolution.synthesizerProviderId,
+                synthesizerProviderLabel:
+                  councilResolution.synthesizerProviderLabel,
+                synthesizerModelId: councilResolution.synthesizerModelId,
+                synthesizerModelLabel:
+                  councilResolution.synthesizerModelLabel,
+                workspacePath: chatWorkspacePath,
+                attachments: turnAttachments,
+                requireCommandApproval: true,
+                requireFileEditApproval: true,
+              },
             },
-          },
-        );
-        applyProviderChatResponse(activeSessionId, providerResponse);
+          );
+          applyCouncilChatResponse(activeSessionId, councilResponse);
+        } else {
+          const providerResponse = await invoke<ProviderChatResponse>(
+            "run_provider_chat",
+            {
+              request: {
+                sessionId: activeSessionId,
+                message,
+                turnId,
+                providerId:
+                  sessionModel.providerId ??
+                  selectedProvider?.id ??
+                  config.selectedProviderId,
+                providerLabel:
+                  sessionModel.providerLabel ?? selectedProvider?.displayName,
+                modelId: sessionModel.modelId,
+                modelLabel: sessionModel.modelLabel,
+                reasoningEffort: sessionModel.reasoningEffort,
+                requireCommandApproval,
+                requireFileEditApproval,
+                fullAccess,
+                mode: turnMode,
+                goal: turnGoal?.text ? turnGoal : undefined,
+                plan: turnPlan.items.length ? turnPlan : undefined,
+                attachments: turnAttachments,
+                suggestTitle: shouldSuggestTitle,
+                workspacePath: chatWorkspacePath,
+              },
+            },
+          );
+          applyProviderChatResponse(activeSessionId, providerResponse);
+        }
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
         optimisticEventsRef.current.delete(activeSessionId);
@@ -7674,6 +7873,7 @@ export function App() {
       activeChatMode,
       activeSessionGoal,
       activeSessionPlan,
+      applyCouncilChatResponse,
       applyProviderChatResponse,
       chatMessageQueues,
       checkProviderReadiness,
@@ -7689,7 +7889,154 @@ export function App() {
       setEventsForSession,
       updateSessionTitle,
       workbench.ide.sourceControl,
+      workbench.providerStatuses,
       workbench.workspaceMode,
+      workspacePath,
+    ],
+  );
+
+  const handleCouncilAction = useCallback(
+    async (action: CouncilActionRequest): Promise<string | void> => {
+      if (action.type === "load-seat") {
+        if (!isTauriRuntime()) {
+          return undefined;
+        }
+        try {
+          return await invoke<string>("read_council_artifact", {
+            request: {
+              sessionId: action.sessionId,
+              councilRunId: action.councilRunId,
+              kind: "seat",
+              seatId: action.seatId,
+            },
+          });
+        } catch (error) {
+          notify("command-failed", "Seat load failed", String(error));
+          return undefined;
+        }
+      }
+
+      if (action.type === "continue-as-run") {
+        await changeChatMode("normal");
+        const message = [
+          "Implement the Council recommendation below. Prefer the adoption steps and call out any risks before mutating files.",
+          "",
+          action.markdown.trim(),
+        ].join("\n");
+        void sendDraft(message);
+        notify(
+          "terminal",
+          "Continuing from Council",
+          "Normal mode — implementing the synthesized recommendation.",
+        );
+        return;
+      }
+
+      if (action.type === "promote-seat") {
+        const providerId = action.seat.providerId;
+        if (isProviderId(providerId)) {
+          await persistConfig({
+            ...config,
+            selectedProviderId: providerId as ProviderId,
+          });
+          if (activeSessionId) {
+            void saveSessionModel(activeSessionId, {
+              providerId: providerId as ProviderId,
+              providerLabel: action.seat.providerLabel,
+              modelId: action.seat.modelId ?? undefined,
+              modelLabel: action.seat.modelId ?? undefined,
+            });
+          }
+        }
+        await changeChatMode("normal");
+        const body =
+          action.fullText?.trim() || action.seat.outputPreview?.trim() || "";
+        const message = [
+          `Adopt this answer from ${action.seat.providerLabel} as the baseline. Continue from here.`,
+          "",
+          body,
+        ]
+          .join("\n")
+          .trim();
+        if (message) {
+          updateActiveChatDraft(message);
+        }
+        notify(
+          "terminal",
+          "Seat promoted",
+          `${action.seat.providerLabel} is the baseline. Review the draft and send when ready.`,
+        );
+        return;
+      }
+
+      if (action.type === "resynthesize") {
+        if (!isTauriRuntime()) {
+          notify(
+            "command-failed",
+            "Re-synthesize unavailable",
+            "Live provider re-synthesis requires the desktop app.",
+          );
+          return;
+        }
+        const sessionId = action.sessionId || activeSessionId;
+        if (!sessionId) {
+          notify(
+            "command-failed",
+            "Re-synthesize failed",
+            "No active session.",
+          );
+          return;
+        }
+        setSessionSending(sessionId, true);
+        try {
+          const resolution = resolveCouncilSeatRequests(
+            config,
+            readyCouncilProviders(config, workbench.providerStatuses),
+          );
+          const response = await invoke<CouncilChatInvokeResponse>(
+            "retry_council_synthesis",
+            {
+              request: {
+                sessionId,
+                councilRunId: action.councilRunId,
+                turnId: createTurnId(),
+                synthesizerProviderId: resolution.synthesizerProviderId,
+                synthesizerProviderLabel: resolution.synthesizerProviderLabel,
+                synthesizerModelId: resolution.synthesizerModelId,
+                synthesizerModelLabel: resolution.synthesizerModelLabel,
+                workspacePath:
+                  activeSession?.workspacePath ?? workspacePath ?? undefined,
+              },
+            },
+          );
+          applyCouncilChatResponse(sessionId, response);
+          await refreshEvents(sessionId);
+          notify(
+            "terminal",
+            "Council re-synthesized",
+            "Updated synthesis ready.",
+          );
+        } catch (error) {
+          notify("command-failed", "Re-synthesize failed", String(error));
+        } finally {
+          setSessionSending(sessionId, false);
+        }
+      }
+    },
+    [
+      activeSession?.workspacePath,
+      activeSessionId,
+      applyCouncilChatResponse,
+      changeChatMode,
+      config,
+      notify,
+      persistConfig,
+      refreshEvents,
+      saveSessionModel,
+      sendDraft,
+      setSessionSending,
+      updateActiveChatDraft,
+      workbench.providerStatuses,
       workspacePath,
     ],
   );
@@ -10606,7 +10953,7 @@ export function App() {
               }
             : provider,
         );
-        return normalizedConfig({
+        return withCouncilConfig({
           ...current,
           selectedProviderId: activeSession.providerId,
           modelProviders: providers,
@@ -11603,6 +11950,8 @@ export function App() {
         : pendingNewChatGoal;
     const paneMode =
       pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
+    const paneSessionUsage =
+      pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
     const panePanel = chatPanelByPaneId[pane.paneId];
     const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
     const queue =
@@ -11645,6 +11994,9 @@ export function App() {
         onLoadModelFocusPeek={loadModelFocusPeek}
         onOpenModelFocus={openModelFocus}
         providerUsageByProvider={providerUsageByProvider}
+        sessionUsage={paneSessionUsage}
+        usageSafety={usageSafety}
+        onResumeUsage={() => void resumeUsage()}
         attachments={chatAttachments[paneDraftKey] ?? []}
         chatMode={paneMode}
         diffReview={workbench.diffReview}
@@ -11706,6 +12058,7 @@ export function App() {
           }
         }}
         onContinueChat={() => requestSend("Continue")}
+        onCouncilAction={handleCouncilAction}
         onCloseChat={() => {
           const projectKey = normalizedChatProjectKey(pane.workspacePath);
           const paneLayout = chatGrid.layouts[projectKey];
@@ -11801,6 +12154,7 @@ export function App() {
         onToggleEnvironmentRail={() => togglePanePanel("environment")}
         onTogglePlanPanel={() => togglePanePanel("plan")}
         providerReadiness={workbench.providerReadiness}
+        providerStatuses={workbench.providerStatuses}
         queuedMessages={queue.map((item) => ({
           attachmentCount: item.context.attachments?.length ?? 0,
           hasFailed: item.status === "failed",
@@ -12025,6 +12379,9 @@ export function App() {
                     onLoadModelFocusPeek={loadModelFocusPeek}
                     onOpenModelFocus={openModelFocus}
                     providerUsageByProvider={providerUsageByProvider}
+                    sessionUsage={activeSessionUsage}
+                    usageSafety={usageSafety}
+                    onResumeUsage={() => void resumeUsage()}
                     capabilityActivities={
                       activeSessionId
                         ? Object.values(
@@ -12067,6 +12424,7 @@ export function App() {
                     onReusePrompt={updateActiveChatDraft}
                     onStopChat={stopActiveChat}
                     onContinueChat={() => void sendDraft("Continue")}
+                    onCouncilAction={handleCouncilAction}
                     onOpenToolPanel={openToolPanel}
                     onToggleToolPanel={toggleChatToolPanel}
                     onPlanItemStatusChange={changePlanItemStatus}
@@ -12098,6 +12456,7 @@ export function App() {
                       dispatchWorkbench({ type: "toggle-chat-plan" })
                     }
                     providerReadiness={workbench.providerReadiness}
+                    providerStatuses={workbench.providerStatuses}
                     queuedMessages={activeQueuedChatMessages.map((item) => ({
                       attachmentCount: item.context.attachments?.length ?? 0,
                       hasFailed: item.status === "failed",
@@ -12433,6 +12792,10 @@ export function App() {
               : undefined
           }
           themeMode={workbench.preferences.theme}
+          defaultWorkspaceMode={workbench.preferences.defaultWorkspaceMode}
+          onDefaultWorkspaceModeChange={(mode) =>
+            dispatchWorkbench({ type: "set-default-workspace-mode", mode })
+          }
           updateState={updater.state}
           workspaceContributions={workbench.ide.contributions}
           workspaceKeybindings={workbench.preferences.workspaceKeybindings}
@@ -12558,6 +12921,9 @@ export function App() {
           capabilityPolicy={activeCapabilityPolicy}
           config={config}
           providerUsageByProvider={providerUsageByProvider}
+          sessionUsage={activeSessionUsage}
+          usageSafety={usageSafety}
+          onResumeUsage={() => void resumeUsage()}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
           draftResetToken={draftResetToken}
@@ -12586,6 +12952,7 @@ export function App() {
           onReusePrompt={updateActiveChatDraft}
           onStopChat={stopActiveChat}
           onContinueChat={() => void sendDraft("Continue")}
+          onCouncilAction={handleCouncilAction}
           onOpenToolPanel={openToolPanel}
           onToggleToolPanel={toggleChatToolPanel}
           onPlanItemStatusChange={changePlanItemStatus}
@@ -12619,6 +12986,7 @@ export function App() {
             dispatchWorkbench({ type: "toggle-chat-plan" })
           }
           providerReadiness={workbench.providerReadiness}
+          providerStatuses={workbench.providerStatuses}
           queuedMessages={activeQueuedChatMessages.map((item) => ({
             attachmentCount: item.context.attachments?.length ?? 0,
             hasFailed: item.status === "failed",
@@ -13311,21 +13679,29 @@ function formatTerminalDelta(value: string) {
   return value.replace(/\r?\n/g, "\r\n");
 }
 
+function withCouncilConfig(config: GyroConfig): GyroConfig {
+  const base = normalizedConfig(config);
+  return {
+    ...base,
+    council: normalizedCouncilConfig(base.council ?? config.council),
+  };
+}
+
 function loadPreviewConfig(): GyroConfig {
   const stored = readBoundedLocalStorage(
     PREVIEW_CONFIG_STORAGE_KEY,
     MAX_STORED_PREVIEW_CONFIG_CHARS,
   );
   if (!stored) {
-    return normalizedConfig(EMPTY_CONFIG);
+    return withCouncilConfig(EMPTY_CONFIG);
   }
   try {
-    return normalizedConfig({
+    return withCouncilConfig({
       ...EMPTY_CONFIG,
       ...(JSON.parse(stored) as Partial<GyroConfig>),
     });
   } catch {
-    return normalizedConfig(EMPTY_CONFIG);
+    return withCouncilConfig(EMPTY_CONFIG);
   }
 }
 
@@ -13678,8 +14054,10 @@ function isGenericSessionTitle(title: string) {
     "Desktop session",
     "New chat",
     "Worktree session",
+    "Agent workspace",
     "CLI workspace",
     "Worktree CLI workspace",
+    "Agent workspace CLI",
   ].includes(title.trim());
 }
 
@@ -14531,7 +14909,8 @@ function deriveChatMode(events: SessionEvent[]): ChatMode {
       continue;
     }
     const value = stringFromRecord(recordFromUnknown(event.payload), "mode");
-    mode = value === "plan" ? "plan" : "normal";
+    mode =
+      value === "plan" ? "plan" : value === "council" ? "council" : "normal";
   }
   return mode;
 }
@@ -15514,10 +15893,10 @@ function createPreviewSession(
   const defaultTitle =
     layout === "terminal-grid"
       ? mode === "worktree"
-        ? "Worktree CLI workspace"
+        ? "Agent workspace CLI"
         : "CLI workspace"
       : mode === "worktree"
-        ? "Worktree session"
+        ? "Agent workspace"
         : "Desktop session";
   return {
     id: sessionId,
@@ -15548,7 +15927,7 @@ async function createTauriThreadSession(
   const shouldCreateWorktree = mode === "worktree" && workspace.length > 0;
   const title =
     normalizeSessionTitleInput(titleOverride ?? "") ??
-    (shouldCreateWorktree ? "Worktree session" : "Desktop session");
+    (shouldCreateWorktree ? "Agent workspace" : "Desktop session");
   const metadata = workspaceRunMetadata(
     shouldCreateWorktree ? "worktree" : "local",
     `${title}-${Date.now()}`,

@@ -1,0 +1,297 @@
+import type {
+  BudgetState,
+  SessionUsageTotals,
+  UsageOriginTotals,
+  UsageSafetySnapshot,
+} from "./types";
+
+/** The session cost line, as the chat surface renders it. */
+export type SessionCostSummary = {
+  /** `1.2M tokens across 14 calls`. */
+  label: string;
+  /** `4 council seats · 1 synthesis`, or undefined when there is nothing to split. */
+  breakdown?: string;
+  /** Set when any part of the total was estimated rather than reported. */
+  estimateNote?: string;
+  /** Full sentence for the tooltip, including the estimate caveat. */
+  title: string;
+  /** Whether the surface should render anything at all. */
+  isEmpty: boolean;
+};
+
+function trimTrailingZeros(value: string) {
+  return value.includes(".") ? value.replace(/\.?0+$/, "") : value;
+}
+
+/**
+ * Compact token counts, matching the composer context meter's unit choice so
+ * the two never disagree about what "1.2M" means.
+ */
+export function formatTokenCount(tokens: number) {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  if (tokens >= 999_500) {
+    const millions = (tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 2);
+    return `${trimTrailingZeros(millions)}M`;
+  }
+  if (tokens >= 1_000) {
+    const thousands = (tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1);
+    return `${trimTrailingZeros(thousands)}K`;
+  }
+  return String(Math.round(tokens));
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/**
+ * The breakdown, biggest spender first.
+ *
+ * A chat that only ever ran ordinary turns has nothing to explain, so a lone
+ * `chat` origin is left out rather than restating the call count.
+ */
+function breakdownLabel(byOrigin: UsageOriginTotals[]) {
+  const meaningful = byOrigin.filter((entry) => entry.calls > 0);
+  if (meaningful.length <= 1 && meaningful[0]?.origin === "chat") {
+    return undefined;
+  }
+  return meaningful
+    .map((entry) => `${entry.label.toLocaleLowerCase()} ${entry.calls}`)
+    .join(" · ");
+}
+
+/**
+ * Turn a session's ledger totals into the one line the chat surface shows.
+ *
+ * Measured and estimated calls are never blended into a single confident
+ * number: when any call was estimated, the line says so. An unmeasured
+ * provider is counted, but it is not presented as if it had been measured.
+ */
+export function summarizeSessionCost(
+  totals: SessionUsageTotals | undefined,
+): SessionCostSummary {
+  if (!totals || totals.calls === 0) {
+    return {
+      isEmpty: true,
+      label: "No provider calls yet",
+      title: "This chat has not spent anything yet.",
+    };
+  }
+
+  const tokenLabel = formatTokenCount(totals.totalTokens);
+  const label = `${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
+  const breakdown = breakdownLabel(totals.byOrigin);
+  const estimateNote =
+    totals.estimatedCalls > 0
+      ? totals.measuredCalls > 0
+        ? `${totals.estimatedCalls} estimated`
+        : "estimated"
+      : undefined;
+
+  const titleParts = [
+    `This chat: ${tokenLabel} tokens across ${pluralize(totals.calls, "provider call")}.`,
+  ];
+  if (breakdown) {
+    titleParts.push(`Breakdown: ${breakdown}.`);
+  }
+  if (estimateNote) {
+    titleParts.push(
+      totals.measuredCalls > 0
+        ? `${totals.estimatedCalls} of those calls came from providers that report no token counts, so their share is estimated.`
+        : "This provider reports no token counts, so the total is estimated.",
+    );
+  }
+
+  return {
+    breakdown,
+    estimateNote,
+    isEmpty: false,
+    label,
+    title: titleParts.join(" "),
+  };
+}
+
+/**
+ * Whether a single turn's spend is worth flagging.
+ *
+ * Used by the composer to notice a turn that cost far more than this chat's
+ * norm — the first signal that something is running away.
+ */
+export function isOutsizedTurn(
+  turnTokens: number,
+  totals: SessionUsageTotals | undefined,
+) {
+  if (!totals || totals.calls < 3 || turnTokens <= 0) return false;
+  const average = totals.totalTokens / totals.calls;
+  return average > 0 && turnTokens > average * 3;
+}
+
+/** The banner shown when Gyro is holding runs or a budget is running out. */
+export type UsageSafetyNotice = {
+  tone: "paused" | "warning";
+  title: string;
+  detail?: string;
+  /** Whether the user can lift this themselves right now. */
+  canResume: boolean;
+};
+
+function budgetHeadline(budget: BudgetState) {
+  const used = formatTokenCount(budget.usedTokens);
+  const cap = formatTokenCount(budget.maxTokens);
+  const estimate = budget.hasEstimates ? ", partly estimated" : "";
+  return `${budget.providerId}: ${budget.percent}% of budget used (${used} of ${cap}${estimate})`;
+}
+
+/**
+ * Turn the pause and the budgets into the one thing worth saying.
+ *
+ * A pause outranks a budget warning, and the worst budget outranks the rest:
+ * the banner exists to explain why work stopped, not to list every number.
+ */
+export function summarizeUsageSafety(
+  snapshot: UsageSafetySnapshot | undefined,
+): UsageSafetyNotice | undefined {
+  if (!snapshot) return undefined;
+
+  const { pause } = snapshot;
+  if (pause.active) {
+    const isBudget = pause.reason?.kind === "budgetExhausted";
+    const resumesAt = pause.autoResumeAt
+      ? new Date(pause.autoResumeAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : undefined;
+    return {
+      canResume: true,
+      detail: isBudget
+        ? resumesAt
+          ? `Runs resume on their own at ${resumesAt}, or resume now to keep going.`
+          : "Resume to keep going."
+        : undefined,
+      title:
+        pause.scope === "automations"
+          ? "Automations are paused. Chat still runs."
+          : isBudget && pause.reason?.kind === "budgetExhausted"
+            ? `Paused: the ${pause.reason.providerId} budget is spent.`
+            : "Gyro is paused.",
+      tone: "paused",
+    };
+  }
+
+  const worst = [...snapshot.budgets]
+    .filter((budget) => budget.level === "throttle" || budget.level === "notify")
+    .sort((left, right) => right.percent - left.percent)[0];
+  if (!worst) return undefined;
+
+  return {
+    canResume: false,
+    detail:
+      worst.level === "throttle"
+        ? "Council runs and automations are on hold until it frees up. Ordinary turns still work."
+        : undefined,
+    title: budgetHeadline(worst),
+    tone: "warning",
+  };
+}
+
+/** What one press of the send button is about to buy. */
+export type TurnCostEstimate = {
+  /** Provider calls this send will make. A Council turn is its seats plus one. */
+  calls: number;
+  /** Estimated tokens across those calls. */
+  tokens: number;
+  /** `5×` — how this compares with an ordinary single-model turn. */
+  multiplier: number;
+  /** `5 calls · ~900K tokens · 5× a normal turn`. */
+  label: string;
+  /** Whether the user should have to agree before this is spent. */
+  needsConfirm: boolean;
+  /** Plain-language reason, shown on the confirm. */
+  confirmReason?: string;
+};
+
+/**
+ * Tokens above which a single send is large enough to be worth confirming even
+ * when a chat has no history to compare it against.
+ */
+const LARGE_TURN_TOKENS = 400_000;
+
+/** Effort levels that multiply reasoning tokens hardest. */
+const EXPENSIVE_EFFORTS = new Set(["max", "ultra"]);
+
+/**
+ * Estimate what a send will cost, and decide whether to ask first.
+ *
+ * The multiplier is the part that goes unnoticed: a Council send is its seats
+ * plus a synthesis, so one keypress buys five calls at the current context
+ * size. Confirmation is required when the send is large in absolute terms,
+ * when it pairs fan-out with the most expensive effort levels, or when it
+ * dwarfs what this chat has been spending per call so far.
+ */
+export function estimateTurnCost({
+  chatMode,
+  contextTokens,
+  reasoningEffort,
+  seatCount,
+  sessionTotals,
+}: {
+  chatMode: "normal" | "plan" | "council";
+  /** Tokens the next call will carry, from the composer's context meter. */
+  contextTokens: number;
+  reasoningEffort?: string;
+  /** Council seats resolved for this turn. */
+  seatCount?: number;
+  sessionTotals?: SessionUsageTotals;
+}): TurnCostEstimate {
+  const seats = chatMode === "council" ? Math.max(0, seatCount ?? 0) : 0;
+  // Seats each carry the frozen context; the synthesizer then reads their
+  // answers, which is smaller but not free.
+  const calls = seats > 0 ? seats + 1 : 1;
+  const perCallTokens = Math.max(0, Math.round(contextTokens));
+  const tokens =
+    seats > 0
+      ? perCallTokens * seats + Math.round(perCallTokens * 0.4)
+      : perCallTokens;
+  const multiplier = calls;
+
+  const isExpensiveEffort = Boolean(
+    reasoningEffort && EXPENSIVE_EFFORTS.has(reasoningEffort),
+  );
+  const averagePerCall =
+    sessionTotals && sessionTotals.calls > 0
+      ? sessionTotals.totalTokens / sessionTotals.calls
+      : 0;
+  const dwarfsHistory =
+    (sessionTotals?.calls ?? 0) >= 3 &&
+    averagePerCall > 0 &&
+    tokens > averagePerCall * 3;
+
+  let confirmReason: string | undefined;
+  if (seats > 0 && isExpensiveEffort) {
+    confirmReason = `${calls} models at ${reasoningEffort} effort is the most expensive turn Gyro can run.`;
+  } else if (tokens >= LARGE_TURN_TOKENS && calls > 1) {
+    confirmReason = `This one send runs ${calls} provider calls, about ${formatTokenCount(tokens)} tokens.`;
+  } else if (dwarfsHistory) {
+    confirmReason = `This send is about ${Math.round(tokens / averagePerCall)}× what a call in this chat has been costing.`;
+  } else if (tokens >= LARGE_TURN_TOKENS * 2) {
+    confirmReason = `This send carries about ${formatTokenCount(tokens)} tokens.`;
+  }
+
+  const labelParts = [
+    `${calls} ${calls === 1 ? "call" : "calls"}`,
+    `~${formatTokenCount(tokens)} tokens`,
+  ];
+  if (multiplier > 1) {
+    labelParts.push(`${multiplier}× a normal turn`);
+  }
+
+  return {
+    calls,
+    confirmReason,
+    label: labelParts.join(" · "),
+    multiplier,
+    needsConfirm: Boolean(confirmReason),
+    tokens,
+  };
+}
