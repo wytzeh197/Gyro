@@ -515,17 +515,28 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
     const authStatus =
       savedProvider?.authStatus ??
       (savedProvider?.enabled ? "connected" : catalogProvider.authStatus);
+    const authMode =
+      savedProvider?.authMode === "cli" ||
+      savedProvider?.authMode === "env" ||
+      savedProvider?.authMode === "sdk"
+        ? savedProvider.authMode
+        : catalogProvider.authMode;
 
     return {
       ...catalogProvider,
       ...savedProvider,
-      apiKeyRef: savedProvider?.apiKeyRef ?? catalogProvider.apiKeyRef,
-      authMode:
-        savedProvider?.authMode === "cli" ||
-        savedProvider?.authMode === "env" ||
-        savedProvider?.authMode === "sdk"
-          ? savedProvider.authMode
-          : catalogProvider.authMode,
+      // Where a credential lives follows the auth mode, so a CLI-auth provider
+      // takes the catalog's ref rather than whatever an older release saved.
+      // xAI was once env-key based, and its stale `provider-env:XAI_API_KEY`
+      // otherwise outlived the switch to CLI sign-in: the provider card claimed
+      // an environment variable held the key while the same card said the Grok
+      // CLI owned the session, and the `provider-env:` prefix steers the health
+      // check toward reading an env var instead of the CLI login.
+      apiKeyRef:
+        authMode === "cli"
+          ? catalogProvider.apiKeyRef
+          : (savedProvider?.apiKeyRef ?? catalogProvider.apiKeyRef),
+      authMode,
       authStatus,
       capabilities: catalogProvider.capabilities,
       baseUrl: savedProvider?.baseUrl ?? catalogProvider.baseUrl,

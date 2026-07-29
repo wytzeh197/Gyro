@@ -1,5 +1,6 @@
 import type {
   BudgetState,
+  ProviderLedgerSummary,
   SessionUsageTotals,
   UsageOriginTotals,
   UsageSafetySnapshot,
@@ -124,6 +125,67 @@ export function isOutsizedTurn(
   if (!totals || totals.calls < 3 || turnTokens <= 0) return false;
   const average = totals.totalTokens / totals.calls;
   return average > 0 && turnTokens > average * 3;
+}
+
+/** One measured window in the Usage Limits panel. */
+export type LedgerWindowView = {
+  id: "day" | "week";
+  label: string;
+  /** Always present: the proportion this window has used of its limit. */
+  percent: number;
+  /** `41%`, or `<1%` when spend has started but rounds to nothing. */
+  percentLabel: string;
+  /** `412K of 2M` — the numbers behind the percentage. */
+  detail: string;
+  /** Whether the limit is a configured budget rather than the reference. */
+  hasBudget: boolean;
+  /** Where the spend went, biggest first, already labelled. */
+  origins: Array<{ label: string; tokens: string; share: number }>;
+  isEstimated: boolean;
+};
+
+/**
+ * Turn a provider's ledger totals into the two windows Settings shows.
+ *
+ * Works for every provider, including the ones whose CLIs report no allowance:
+ * the numbers come from what Gyro observed, and an estimated window says so
+ * rather than presenting itself as measured.
+ */
+export function ledgerWindows(
+  summary: ProviderLedgerSummary | undefined,
+): LedgerWindowView[] {
+  if (!summary) return [];
+  const reference = Math.max(1, summary.dailyReferenceTokens);
+  return (
+    [
+      { days: 1, id: "day", label: "Last 24 hours", totals: summary.day },
+      { days: 7, id: "week", label: "Last 7 days", totals: summary.week },
+    ] as const
+  ).map(({ days, id, label, totals }) => {
+    const biggest = totals.byOrigin[0]?.totalTokens ?? 0;
+    // A configured budget is the real limit and only covers its own window;
+    // otherwise the daily reference is scaled to the window being shown.
+    const hasBudget = Boolean(summary.budget && id === "day");
+    const limit = hasBudget
+      ? Math.max(1, summary.budget?.maxTokens ?? 1)
+      : reference * days;
+    const percent = Math.min(100, Math.round((totals.totalTokens / limit) * 100));
+    return {
+      detail: `${formatTokenCount(totals.totalTokens)} of ${formatTokenCount(limit)}`,
+      hasBudget,
+      id,
+      isEstimated: totals.estimatedCalls > 0,
+      label,
+      origins: totals.byOrigin.slice(0, 4).map((origin) => ({
+        label: origin.label,
+        share: biggest > 0 ? Math.round((origin.totalTokens / biggest) * 100) : 0,
+        tokens: formatTokenCount(origin.totalTokens),
+      })),
+      percent,
+      percentLabel:
+        totals.totalTokens > 0 && percent === 0 ? "<1%" : `${percent}%`,
+    };
+  });
 }
 
 /** The banner shown when Gyro is holding runs or a budget is running out. */
