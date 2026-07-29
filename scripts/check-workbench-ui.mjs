@@ -248,6 +248,9 @@ const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
+const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
+const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
+const desktopIndexSource = readRepoFile("apps/desktop/index.html");
 const menuBarStyleSource = readRepoFile("apps/desktop/src/menu-bar.css");
 const menuBarRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/menu_bar.rs",
@@ -272,6 +275,22 @@ expect(
     ) &&
     menuBarRustSource.includes("16.0 + 72.0 + content + 44.0"),
   "The macOS menu-bar popover should use bounded rows that match its native window-height calculation.",
+);
+expect(
+  desktopMainSource.includes("EarlyShell") &&
+    desktopMainSource.includes('import("./App")') &&
+    !desktopIndexSource.includes("gyro-boot") &&
+    !desktopIndexSource.includes("Loading the desktop shell") &&
+    desktopRustSource.includes("warm_desktop_shell") &&
+    appSource.includes('"warm_desktop_shell"') &&
+    appSource.includes("isShellOptimizing") &&
+    surfaceSource.includes("isShellOptimizing") &&
+    surfaceSource.includes("gyro-shell-optimizing") &&
+    surfaceSource.includes("Optimizing Gyro") &&
+    styleSource.includes(".gyro-shell-optimizing-spinner") &&
+    surfaceSource.includes("shellReady") &&
+    appSource.includes("shellReady={!isShellOptimizing}"),
+  "Desktop should paint chat immediately, warm the shell in the background, and show a minimal Optimizing Gyro indicator.",
 );
 expect(
   !surfaceSource.includes("gyro-chat-pane-frame-actions") &&
@@ -394,9 +413,12 @@ expect(
 expect(
   cssRules(styleSource, ".gyro-chat-message-queue").some(
     (rule) =>
-      rule.includes("max-width: 820px") &&
-      rule.includes("width: min(820px, 100%)"),
-  ),
+      rule.includes("max-width: var(--gyro-composer-width)") &&
+      rule.includes("width: min(var(--gyro-composer-width), 100%)"),
+  ) &&
+    cssRules(styleSource, ".gyro-chat-composer-dock").some((rule) =>
+      rule.includes("--gyro-composer-width: var(--gyro-chat-content-width)"),
+    ),
   "The chat message queue should match the composer width.",
 );
 expect(
@@ -1913,7 +1935,7 @@ state = workbenchReducer(state, {
 });
 expect(
   state.browserPreview.status === "loading" &&
-    state.browserPreview.verificationMessage === "Checking local preview" &&
+    state.browserPreview.verificationMessage === "Loading…" &&
     appSource.includes('invoke<BrowserPreviewCheck>("check_browser_preview"') &&
     tauriSource.includes("check_browser_preview_blocking"),
   "Browser preview navigation should verify reachability before claiming success.",
@@ -3777,7 +3799,9 @@ expect(
     surfaceSource.includes("requestAnimationFrame") &&
     surfaceSource.includes("appShellRef.current?.style.setProperty") &&
     styleSource.includes(".gyro-ide-sidebar-resizer") &&
-    styleSource.includes("grid-template-columns 180ms") &&
+    styleSource.includes(
+      "grid-template-columns var(--gyro-premium-motion-slow)",
+    ) &&
     styleSource.includes("will-change: grid-template-columns") &&
     surfaceSource.includes('label="Sessions"') &&
     surfaceSource.includes('label="Workspace"') &&
@@ -4330,7 +4354,16 @@ expect(
     surfaceSource.includes('variant="hero"') &&
     surfaceSource.includes("constrainToParent={Boolean(activeRailPanel)}") &&
     surfaceSource.includes('constrainToParent ? "stretch" : "center"') &&
-    surfaceSource.includes("width: constrainToParent") &&
+    surfaceSource.includes(
+      'isHero && constrainToParent ? "is-constrained" : ""',
+    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-composer-dock .gyro-composer-shell.is-hero.is-constrained",
+    ).some(
+      (rule) =>
+        rule.includes("max-width: none") && rule.includes("width: 100%"),
+    ) &&
     surfaceSource.includes("showContextRow={false}") &&
     surfaceSource.includes(
       "const shouldShowContextRow = showContextRow ?? isHero",
@@ -4350,7 +4383,7 @@ expect(
     surfaceSource.includes("event.preventDefault()") &&
     styleSource.includes("--gyro-chat-content-width: 772px") &&
     styleSource.includes("max-width: var(--gyro-chat-content-width)") &&
-    styleSource.includes("border-radius: 21px") &&
+    styleSource.includes("border-radius: 20px") &&
     styleSource.includes("color: #ff8a3d") &&
     styleSource.includes(
       ".gyro-chat-start .gyro-composer-shell:focus-within .gyro-composer-bar",
@@ -4547,15 +4580,19 @@ expect(
     surfaceSource.includes("gyroLogoTransparentLight") &&
     surfaceSource.includes("gyro-chat-start-brand-word") &&
     surfaceSource.includes('style={{ width: "min(860px, 100%)" }}') &&
-    surfaceSource.includes('"min(820px, 100%)"') &&
+    // The composer measure lives in one token now, not in an inline style that
+    // silently outranked the stylesheet.
+    !surfaceSource.includes('"min(820px, 100%)"') &&
+    styleSource.includes("--gyro-composer-width: 820px") &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr)") &&
     styleSource.includes("width: min(860px, 100%)") &&
     !surfaceSource.includes("calc(100vw - 96px)") &&
-    styleSource.includes("width: min(820px, 100%)") &&
+    styleSource.includes("width: min(var(--gyro-composer-width), 100%)") &&
     surfaceSource.includes("What should we do in ") &&
     surfaceSource.includes("Choose folder") &&
+    surfaceSource.includes("canSendChat(hasReadyProvider, workspacePath)") &&
     surfaceSource.includes(
-      "const canSubmitChat = canSendChat(hasReadyProvider, workspacePath)",
+      "const canSubmitComposer = isGoalComposerActive || canSubmitChat",
     ) &&
     surfaceSource.includes(
       "if (canSubmitComposer && draft.trim().length > 0)",
@@ -4565,6 +4602,7 @@ expect(
     ) &&
     surfaceSource.includes("Choose a folder before sending") &&
     surfaceSource.includes("Connect a provider before sending") &&
+    surfaceSource.includes("resolveCleanMachinePath") &&
     surfaceSource.includes("branchLabel") &&
     surfaceSource.includes('action: "select-file"') &&
     surfaceSource.includes('action: "select-folder"') &&
@@ -4572,6 +4610,24 @@ expect(
     surfaceSource.includes("New worktree branch") &&
     surfaceSource.includes("Select folder") &&
     surfaceSource.includes("Change folder") &&
+    // Workspace-mode picker: card rows with full copy, badge (not trailing
+    // "Recommended" that collides with truncated labels in a narrow menu).
+    surfaceSource.includes('className="gyro-workspace-mode-picker"') &&
+    surfaceSource.includes('kind: "workspace-mode"') &&
+    // Labels + optional Recommended only — no redundant title or detail rows.
+    !surfaceSource.includes('title="Where the agent works"') &&
+    surfaceSource.includes('badge:') &&
+    !surfaceSource.includes(
+      'trailingLabel:\n                      hasUserWorkspace && workspaceMode !== "worktree"',
+    ) &&
+    styleSource.includes(".gyro-workspace-mode-picker") &&
+    styleSource.includes(".gyro-composer-menu-badge") &&
+    !styleSource.includes(".gyro-composer-menu-icon-tile") &&
+    workspaceModeSource.includes('"Agent workspace"') &&
+    workspaceModeSource.includes('"Project folder"') &&
+    !workspaceModeSource.includes('"Shared folder"') &&
+    !workspaceModeSource.includes("Work in shared folder") &&
+    !workspaceModeSource.includes("Use agent workspace") &&
     appSource.includes('action === "new-chat-select-workspace"') &&
     appSource.includes('action === "new-local-chat-select-workspace"') &&
     appSource.includes('action.startsWith("start-new-chat-mode:")') &&
@@ -4859,12 +4915,33 @@ expect(
     surfaceSource.includes(
       "active: isConnected && provider.id === config.selectedProviderId",
     ) &&
+    // Clean-machine path: disconnected providers start login instead of a
+    // dead "Unavailable" label that leaves send blocked without a next step.
     surfaceSource.includes(
-      'trailingLabel: isConnected ? undefined : "Unavailable"',
+      'trailingLabel: isConnected ? undefined : "Connect"',
+    ) &&
+    surfaceSource.includes("`connect-provider:${provider.id}`") &&
+    // Every provider row (Connect or open models) keeps its brand mark —
+    // never gate providerId on auth, or disconnected rows fall back to KeyRound.
+    surfaceSource.includes("providerId: provider.id") &&
+    !surfaceSource.includes(
+      "providerId: isConnected ? provider.id : undefined",
     ) &&
     surfaceSource.includes("showChevron: isConnected") &&
-    surfaceSource.includes("disabled: !isConnected") &&
-    surfaceSource.includes("item.providerId && !item.disabled") &&
+    surfaceSource.includes("disabled: false") &&
+    // Connected providers list first (A–Z); disconnected stay muted, not recolored.
+    surfaceSource.includes("left.authStatus === \"connected\" ? 0 : 1") &&
+    surfaceSource.includes("left.displayName.localeCompare(right.displayName") &&
+    surfaceSource.includes("disconnected: !isConnected") &&
+    styleSource.includes(".is-provider.is-disconnected") &&
+    styleSource.includes("opacity: 0.58") &&
+    // Sticky model flyout: only connected hover opens/switches the models
+    // panel (with a settle delay), so a 1ms graze of Connect rows cannot
+    // collapse models before the pointer arrives.
+    surfaceSource.includes("previewConnectedProviderModels") &&
+    surfaceSource.includes('authStatus === "connected"') &&
+    surfaceSource.includes("clearModelFlyoutPreviewTimer") &&
+    surfaceSource.includes("modelFlyoutPreviewTimerRef") &&
     surfaceSource.includes(
       "modelPickerProvider.id === config.selectedProviderId",
     ) &&
@@ -4875,24 +4952,17 @@ expect(
     styleSource.includes(".gyro-composer-menu-trailing") &&
     styleSource.includes(".gyro-composer-menu-item.is-provider:disabled") &&
     styleSource.includes(".gyro-provider-picker.has-flyout") &&
-    styleSource.includes('.gyro-provider-picker[data-flyout-side="right"]') &&
-    styleSource.includes("left: calc(100% + 4px)") &&
-    styleSource.includes('.gyro-provider-picker[data-flyout-side="left"]') &&
-    styleSource.includes("top: 0 !important") &&
-    styleSource.includes("bottom: auto !important") &&
-    styleSource.includes('.gyro-provider-picker[data-flyout-vertical="up"]') &&
-    styleSource.includes("bottom: 0 !important") &&
+    styleSource.includes(".gyro-provider-model-flyout") &&
+    styleSource.includes("margin-left: 2px") &&
     styleSource.includes(".gyro-composer-menu-item.is-effort") &&
     styleSource.includes(".gyro-composer-menu-item.has-no-icon") &&
-    styleSource.includes("max-height: none !important") &&
-    styleSource.includes("overflow: visible !important") &&
     surfaceSource.includes("getBoundingClientRect") &&
     surfaceSource.includes("?.scrollHeight ?? 420") &&
     surfaceSource.includes("availableRight < modelFlyoutWidth + 8") &&
     surfaceSource.includes("rect.top + modelFlyoutHeight") &&
     surfaceSource.includes("data-flyout-vertical={modelFlyoutVertical}") &&
     !surfaceSource.includes('title="Model & effort"'),
-  "Provider picker should stay anchored and flip its model flyout horizontally or vertically when the viewport requires it.",
+  "Provider picker should keep a sticky model flyout while selecting models.",
 );
 expect(
   surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
@@ -5402,7 +5472,6 @@ for (const className of [
   "gyro-sidebar-mode-group",
   "gyro-diff-tree-directory",
   "gyro-git-action-strip",
-  "gyro-composer-readiness",
   "gyro-sidebar-section-toggle",
   "gyro-sidebar-more-button",
   "gyro-session-actions",
@@ -5544,7 +5613,7 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 7px") &&
+    styleSource.includes("--gyro-premium-radius-md: 8px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
     styleSource.includes("--gyro-app: #101010") &&
     styleSource.includes("--gyro-pane: #121212") &&
@@ -5639,7 +5708,9 @@ expect(
       (rule) => rule.includes("top: 48px") && rule.includes("right: 0"),
     ) &&
     workspaceRailFoundation.includes("pointer-events: none") &&
-    workspaceRailFoundation.includes("visibility 0s linear 180ms") &&
+    workspaceRailFoundation.includes(
+      "visibility 0s linear var(--gyro-premium-motion-slow)",
+    ) &&
     workspaceRailFoundation.includes(
       "@media (prefers-reduced-motion: reduce)",
     ) &&
@@ -6065,7 +6136,9 @@ expect(
     ) &&
     styleSource.includes("overscroll-behavior: contain") &&
     surfaceSource.includes('className="gyro-sidebar-more-button"') &&
-    surfaceSource.includes('{isExpanded ? "less" : "more"}'),
+    surfaceSource.includes(
+      '{isExpanded ? "Show less" : `${hiddenCount} more`}',
+    ),
   "The sidebar project list should scroll under a fixed project title and keep the collapse button reachable.",
 );
 

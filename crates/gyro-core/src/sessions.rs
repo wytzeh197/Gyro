@@ -301,21 +301,25 @@ impl SessionStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
         reject_unsafe_private_file(&paths.database_path)?;
-        let conn = Connection::open(&paths.database_path)
+        let conn = crate::sqlite::open_private_database(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
-        // Shared app + CLI writers need a longer busy window under WAL.
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        // NORMAL is safe with WAL for power-loss of recent index updates. JSONL
-        // event fsync remains the durability bar for chat history.
-        conn.execute_batch(
-            "pragma foreign_keys = on;
-             pragma journal_mode = wal;
-             pragma synchronous = normal;",
-        )?;
         let store = Self { paths, conn };
         store.initialize()?;
         Ok(store)
+    }
+
+    /// Run planner maintenance and a passive WAL checkpoint. Used by desktop
+    /// shell warm-up so the first interactive list/read is already tuned.
+    pub fn maintain(&self) -> Result<()> {
+        crate::sqlite::optimize_connection(&self.conn);
+        crate::sqlite::checkpoint_wal_passive(&self.conn);
+        Ok(())
+    }
+
+    /// Cheap corruption probe for warm-up / doctor.
+    pub fn quick_check(&self) -> Result<()> {
+        crate::sqlite::quick_check(&self.conn)
     }
 
     pub fn paths(&self) -> &GyroPaths {
@@ -443,12 +447,27 @@ impl SessionStore {
     }
 
     pub fn list_sessions(&self) -> Result<Vec<Session>> {
-        let mut stmt = self.conn.prepare(
+        self.list_sessions_limited(None)
+    }
+
+    /// List sessions newest-first. `limit` caps the result for UI shells that
+    /// only need the recent set (sidebar / warm-up).
+    pub fn list_sessions_limited(&self, limit: Option<usize>) -> Result<Vec<Session>> {
+        let sql = if limit.is_some() {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
              , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
-             from sessions order by updated_at desc",
-        )?;
-        let rows = stmt.query_map([], row_to_session)?;
+             from sessions order by updated_at desc limit ?1"
+        } else {
+            "select id, title, workspace_path, origin, created_at, updated_at, events_path
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at
+             from sessions order by updated_at desc"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = if let Some(limit) = limit {
+            stmt.query_map(params![limit as i64], row_to_session)?
+        } else {
+            stmt.query_map([], row_to_session)?
+        };
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
@@ -1084,9 +1103,7 @@ impl SessionStore {
             )
         }) {
             if let Err(error) = self.record_turn_message_index(session_id, turn_id, &event) {
-                eprintln!(
-                    "session event was saved but its turn index was not updated: {error}"
-                );
+                eprintln!("session event was saved but its turn index was not updated: {error}");
             }
         }
         if let Some(turn_id) = event.turn_id {
@@ -1312,6 +1329,12 @@ impl SessionStore {
              create index if not exists idx_sessions_updated_at
              on sessions(updated_at desc);
 
+             create index if not exists idx_sessions_workspace_path
+             on sessions(workspace_path);
+
+             create index if not exists idx_sessions_provider_id
+             on sessions(provider_id);
+
              create table if not exists provider_session_bindings (
                session_id text not null,
                provider_id text not null,
@@ -1394,11 +1417,7 @@ impl SessionStore {
             .query_row(
                 "select event_id, message, created_at from session_turn_messages
                  where session_id = ?1 and turn_id = ?2 and kind = ?3",
-                params![
-                    session_id.to_string(),
-                    turn_id.to_string(),
-                    kind.as_str()
-                ],
+                params![session_id.to_string(), turn_id.to_string(), kind.as_str()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
