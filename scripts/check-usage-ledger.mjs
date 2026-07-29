@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   estimateTurnCost,
+  ledgerWindows,
   formatTokenCount,
   isOutsizedTurn,
   summarizeSessionCost,
@@ -284,5 +285,86 @@ assert.match(throttled.title, /anthropic: 94% of budget used/);
 assert.match(throttled.title, /partly estimated/);
 assert.match(throttled.detail, /Ordinary turns still work/);
 assert.equal(throttled.canResume, false);
+
+// Every provider gets a percentage, including the four whose CLIs expose no
+// quota endpoint — a share of the local reference when no budget is set.
+assert.deepEqual(ledgerWindows(undefined), []);
+
+const windows = ledgerWindows({
+  providerId: "xai",
+  dailyReferenceTokens: 2_000_000,
+  day: totals({
+    calls: 3,
+    estimatedCalls: 3,
+    totalTokens: 500_000,
+    byOrigin: [
+      { origin: "chat", label: "Chat", calls: 2, totalTokens: 380_000 },
+      {
+        origin: "automation",
+        label: "Automations",
+        calls: 1,
+        totalTokens: 120_000,
+      },
+    ],
+  }),
+  week: totals({ calls: 9, measuredCalls: 9, totalTokens: 1_400_000 }),
+});
+assert.equal(windows.length, 2);
+// 500K of a 2M day.
+assert.equal(windows[0].percentLabel, "25%");
+assert.equal(windows[0].detail, "500K of 2M");
+assert.equal(windows[0].hasBudget, false);
+// The week scales the daily reference rather than reusing it flat.
+assert.equal(windows[1].detail, "1.4M of 14M");
+assert.equal(windows[1].percentLabel, "10%");
+// A provider that reports nothing is estimated, and says so.
+assert.equal(windows[0].isEstimated, true);
+assert.equal(windows[1].isEstimated, false);
+// Origin bars are relative to the biggest spender, not to the window total.
+assert.equal(windows[0].origins[0].share, 100);
+assert.equal(windows[0].origins[1].share, 32);
+
+// A configured budget replaces the reference for its own window only.
+const budgeted = ledgerWindows({
+  providerId: "anthropic",
+  dailyReferenceTokens: 2_000_000,
+  day: totals({ calls: 4, totalTokens: 900_000 }),
+  week: totals({ calls: 20, totalTokens: 2_000_000 }),
+  budget: {
+    providerId: "anthropic",
+    usedTokens: 900_000,
+    maxTokens: 1_000_000,
+    percent: 90,
+    level: "throttle",
+    windowHours: 24,
+    windowResetsAt: "2026-07-30T00:00:00.000Z",
+    hasEstimates: false,
+  },
+});
+assert.equal(budgeted[0].hasBudget, true);
+assert.equal(budgeted[0].percentLabel, "90%");
+assert.equal(budgeted[0].detail, "900K of 1M");
+assert.equal(budgeted[1].hasBudget, false);
+
+// Spend that rounds to nothing still reads as spend, and nothing exceeds 100%.
+const tiny = ledgerWindows({
+  providerId: "kimi",
+  dailyReferenceTokens: 2_000_000,
+  day: totals({ calls: 1, totalTokens: 400 }),
+  week: totals({ calls: 400, totalTokens: 99_000_000 }),
+});
+assert.equal(tiny[0].percentLabel, "<1%");
+assert.equal(tiny[1].percent, 100);
+
+// An idle provider reads 0%, not a blank card.
+const idle = ledgerWindows({
+  providerId: "gemini",
+  dailyReferenceTokens: 2_000_000,
+  day: totals(),
+  week: totals(),
+});
+assert.equal(idle[0].percentLabel, "0%");
+assert.equal(idle[0].detail, "0 of 2M");
+assert.deepEqual(idle[0].origins, []);
 
 console.log("usage ledger checks passed");

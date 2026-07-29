@@ -7,11 +7,11 @@ import type { WorkbenchMode } from "./types";
  * so isolation reads as “agent’s own workspace” rather than Git jargon.
  */
 export function workspaceModeLabel(mode: WorkbenchMode = "local"): string {
-  return mode === "worktree" ? "Agent workspace" : "Shared folder";
+  return mode === "worktree" ? "Agent workspace" : "Project folder";
 }
 
 export function workspaceModeShortLabel(mode: WorkbenchMode = "local"): string {
-  return mode === "worktree" ? "Isolated" : "Shared";
+  return mode === "worktree" ? "Isolated" : "Project";
 }
 
 export function workspaceModeDetail(
@@ -21,13 +21,13 @@ export function workspaceModeDetail(
   if (mode === "worktree") {
     return options?.hasWorkspace === false
       ? "Choose a Git repository first"
-      : "Private branch under Gyro; your main folder stays untouched";
+      : "Private branch; main folder stays untouched";
   }
-  return "Agent works in the project folder you opened";
+  return "Edits apply in the project you opened";
 }
 
 export function workspaceModeToastTitle(mode: WorkbenchMode): string {
-  return mode === "worktree" ? "Agent workspace" : "Shared folder";
+  return mode === "worktree" ? "Agent workspace" : "Project folder";
 }
 
 export function workspaceModeToastDetail(mode: WorkbenchMode): string {
@@ -37,7 +37,8 @@ export function workspaceModeToastDetail(mode: WorkbenchMode): string {
 }
 
 export function workspaceModePopoverLabel(mode: WorkbenchMode): string {
-  return mode === "worktree" ? "Use agent workspace" : "Work in shared folder";
+  // Match the composer chip labels so the menu reads as two clear modes.
+  return mode === "worktree" ? "Agent workspace" : "Project folder";
 }
 
 /** Technical term kept for tooltips and secondary detail only. */

@@ -1664,7 +1664,7 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           workspacePanelHeight: Math.min(
-            1_200,
+            4_000,
             Math.max(140, Math.round(action.height)),
           ),
         },
@@ -3439,7 +3439,7 @@ export function workbenchReducer(
           captureStatus: "idle",
           captureError: undefined,
           latestCapture: undefined,
-          verificationMessage: "Checking local preview",
+          verificationMessage: "Loading…",
         },
       };
     }
@@ -3466,7 +3466,7 @@ export function workbenchReducer(
           captureStatus: "idle",
           captureError: undefined,
           latestCapture: undefined,
-          verificationMessage: "Reloading local preview",
+          verificationMessage: "Loading…",
         },
       };
     case "browser-device":
@@ -3891,7 +3891,7 @@ function normalizeWorkbenchPreferences(
       typeof preferences?.workspacePanelHeight === "number" &&
       Number.isFinite(preferences.workspacePanelHeight)
         ? Math.min(
-            1_200,
+            4_000,
             Math.max(140, Math.round(preferences.workspacePanelHeight)),
           )
         : 280,
@@ -4477,7 +4477,7 @@ function defaultBrowserPreview() {
     captureError: undefined,
     latestCapture: undefined,
     status: "idle" as const,
-    verificationMessage: "No preview loaded",
+    verificationMessage: "Ready · localhost:3000",
   };
 }
 
@@ -4572,7 +4572,7 @@ function browserHistoryState(
       captureStatus: "idle",
       captureError: undefined,
       latestCapture: undefined,
-      verificationMessage: "Checking history target",
+      verificationMessage: "Loading…",
     },
   };
 }

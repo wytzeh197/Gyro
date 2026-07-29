@@ -5,10 +5,59 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
+
+/// Process-local config cache keyed by absolute path + mtime. Desktop and CLI
+/// both re-read config on many UI actions; skipping identical disk parses is a
+/// large win on cold interaction paths without risking stale writes (save clears).
+#[derive(Clone)]
+struct ConfigCacheEntry {
+    path: PathBuf,
+    mtime: Option<SystemTime>,
+    config: GyroConfig,
+}
+
+static CONFIG_CACHE: Mutex<Option<ConfigCacheEntry>> = Mutex::new(None);
+
+fn config_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|meta| meta.modified()).ok()
+}
+
+fn read_config_cache(path: &Path) -> Option<GyroConfig> {
+    let guard = CONFIG_CACHE.lock().ok()?;
+    let entry = guard.as_ref()?;
+    if entry.path != path {
+        return None;
+    }
+    let mtime = config_mtime(path);
+    if entry.mtime != mtime {
+        return None;
+    }
+    Some(entry.config.clone())
+}
+
+fn write_config_cache(path: &Path, config: &GyroConfig) {
+    let Ok(mut guard) = CONFIG_CACHE.lock() else {
+        return;
+    };
+    *guard = Some(ConfigCacheEntry {
+        path: path.to_path_buf(),
+        mtime: config_mtime(path),
+        config: config.clone(),
+    });
+}
+
+#[allow(dead_code)]
+fn clear_config_cache() {
+    if let Ok(mut guard) = CONFIG_CACHE.lock() {
+        *guard = None;
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -239,12 +288,19 @@ fn default_automatic_update_checks() -> bool {
 
 impl GyroConfig {
     pub fn load(paths: &GyroPaths) -> Result<Self> {
-        Self::load_unlocked(paths)
+        if let Some(cached) = read_config_cache(&paths.config_path) {
+            return Ok(cached);
+        }
+        let config = Self::load_unlocked(paths)?;
+        write_config_cache(&paths.config_path, &config);
+        Ok(config)
     }
 
     fn load_unlocked(paths: &GyroPaths) -> Result<Self> {
         let Some(file) = open_config_for_read(&paths.config_path)? else {
-            return Ok(Self::default());
+            let config = Self::default();
+            write_config_cache(&paths.config_path, &config);
+            return Ok(config);
         };
         let mut bytes = Vec::new();
         file.take((MAX_CONFIG_BYTES + 1) as u64)
@@ -290,7 +346,9 @@ impl GyroConfig {
                 MAX_CONFIG_BYTES
             ));
         }
-        atomic_write_private_config(&paths.config_path, &bytes)
+        atomic_write_private_config(&paths.config_path, &bytes)?;
+        write_config_cache(&paths.config_path, self);
+        Ok(())
     }
 
     fn normalize_legacy_state(&mut self) {
@@ -626,6 +684,56 @@ mod tests {
         assert_eq!(profile.provider_id, None);
         assert_eq!(profile.default_model, None);
         assert_eq!(profile.readiness, CommandProfileReadiness::Waiting);
+    }
+
+    #[test]
+    fn a_budget_survives_the_round_trip_through_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+
+        GyroConfig::update(&paths, |config| {
+            crate::usage::set_provider_budget(
+                &mut config.usage_guard.budgets,
+                "anthropic",
+                1_000_000,
+                None,
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        let reloaded = GyroConfig::load(&paths).unwrap();
+        let budget = reloaded
+            .usage_guard
+            .budgets
+            .iter()
+            .find(|budget| budget.provider_id == "anthropic")
+            .expect("budget persisted");
+        assert_eq!(budget.max_tokens, 1_000_000);
+        assert_eq!(budget.window_hours, 24);
+        assert_eq!(budget.throttle_percent, 90);
+        // Guards a user never touched still carry their defaults.
+        assert!(reloaded.usage_guard.enabled);
+        assert!(!reloaded.usage_guard.pause.active);
+        assert_eq!(reloaded.usage_guard.daily_reference_tokens, 2_000_000);
+
+        // Clearing it removes the entry rather than storing a zero cap.
+        GyroConfig::update(&paths, |config| {
+            crate::usage::set_provider_budget(
+                &mut config.usage_guard.budgets,
+                "anthropic",
+                0,
+                None,
+            );
+            Ok(())
+        })
+        .unwrap();
+        assert!(GyroConfig::load(&paths)
+            .unwrap()
+            .usage_guard
+            .budgets
+            .is_empty());
     }
 
     #[test]
