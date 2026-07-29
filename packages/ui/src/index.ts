@@ -177,6 +177,7 @@ export type {
   UsageGuardConfig,
   UsageBudget,
   UsageSafetySnapshot,
+  ProviderLedgerSummary,
   PauseState,
   PauseScope,
   PauseReason,
@@ -233,6 +234,18 @@ export {
   sanitizeStoredChatGridState,
 } from "./workbench-state";
 export {
+  CLEAN_MACHINE_PRIMARY_PROVIDERS,
+  preferredCleanMachineConnectProvider,
+  resolveCleanMachinePath,
+} from "./clean-machine-path";
+export type {
+  CleanMachinePath,
+  CleanMachinePathInput,
+  CleanMachineStep,
+  CleanMachineStepId,
+  CleanMachineStepStatus,
+} from "./clean-machine-path";
+export {
   defaultModelLabel,
   getProviderCatalogEntry,
   getProviderModel,
@@ -256,6 +269,8 @@ export {
 } from "./provider-catalog";
 export {
   councilPreflightLabel,
+  COUNCIL_COMING_SOON,
+  COUNCIL_COMING_SOON_LABEL,
   defaultCouncilConfig,
   defaultCouncilPreset,
   DEFAULT_COUNCIL_PRESETS,

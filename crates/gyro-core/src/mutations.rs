@@ -1308,12 +1308,8 @@ fn remove_provider_mutation_journal(path: &Path) -> Result<()> {
     }
     let marker = provider_mutation_applied_marker_path(path);
     if marker.exists() {
-        fs::remove_file(&marker).with_context(|| {
-            format!(
-                "remove mutation applied marker {}",
-                marker.display()
-            )
-        })?;
+        fs::remove_file(&marker)
+            .with_context(|| format!("remove mutation applied marker {}", marker.display()))?;
     }
     if let Some(parent) = path.parent() {
         fs::File::open(parent)?.sync_all()?;
@@ -2435,11 +2431,7 @@ mod tests {
             .read_dir()
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .any(|entry| entry
-                .path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                == Some("applied")));
+            .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("applied")));
     }
 
     #[test]

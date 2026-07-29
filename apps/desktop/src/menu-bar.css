@@ -172,7 +172,7 @@
 }
 
 .gyro-menu-bar-header strong {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: -0.012em;
   line-height: 19px;
@@ -182,7 +182,7 @@
 .gyro-menu-bar-idle small,
 .gyro-menu-bar-outcome small {
   color: var(--menu-muted);
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 16px;
 }
 
@@ -287,7 +287,7 @@
 }
 
 .gyro-menu-bar-job-copy strong {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 610;
   letter-spacing: -0.006em;
   line-height: 18px;
@@ -298,7 +298,7 @@
 
 .gyro-menu-bar-job-copy small {
   color: var(--menu-muted);
-  font-size: 10.5px;
+  font-size: 10px;
   line-height: 15px;
   max-width: 100%;
   overflow: hidden;
@@ -331,7 +331,7 @@
 
 .gyro-menu-bar-job-meta small {
   color: var(--menu-muted);
-  font-size: 10.5px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -433,7 +433,7 @@
 .gyro-menu-bar-footer button {
   border-radius: 8px;
   cursor: pointer;
-  font-size: 10.5px;
+  font-size: 10px;
   line-height: 16px;
   min-height: 30px;
   padding: 7px 9px;

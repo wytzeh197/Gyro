@@ -249,6 +249,14 @@ pub struct UsageGuardConfig {
     /// Tokens one call may bill before it is stopped. Zero disables it.
     #[serde(default = "default_max_tokens_per_call")]
     pub max_tokens_per_call: u64,
+    /// Denominator for the usage percentages when no budget is configured.
+    ///
+    /// A percentage needs something to be a percentage *of*. Only Codex
+    /// publishes an allowance, so without this the other providers could show
+    /// spend but never a proportion. This is a display reference, not a limit:
+    /// nothing is blocked by it, and a real budget overrides it.
+    #[serde(default = "default_daily_reference_tokens")]
+    pub daily_reference_tokens: u64,
     /// Council re-syntheses allowed in the window.
     ///
     /// Re-running a synthesis is a full provider call each time, and it is the
@@ -281,6 +289,10 @@ fn default_max_resyntheses_per_window() -> u32 {
     3
 }
 
+fn default_daily_reference_tokens() -> u64 {
+    2_000_000
+}
+
 impl Default for UsageGuardConfig {
     fn default() -> Self {
         Self {
@@ -292,6 +304,7 @@ impl Default for UsageGuardConfig {
             max_unattended_calls_per_window: default_max_unattended_calls_per_window(),
             max_tokens_per_call: default_max_tokens_per_call(),
             max_resyntheses_per_window: default_max_resyntheses_per_window(),
+            daily_reference_tokens: default_daily_reference_tokens(),
         }
     }
 }
@@ -421,6 +434,43 @@ fn default_notify_percent() -> u8 {
 
 fn default_throttle_percent() -> u8 {
     90
+}
+
+/// Set, replace, or clear one provider's budget.
+///
+/// A zero cap removes the budget rather than storing a limit of nothing, and a
+/// provider never ends up with two: the old entry is dropped before the new one
+/// lands, so repeated edits cannot accumulate duplicates that disagree.
+pub fn set_provider_budget(
+    budgets: &mut Vec<UsageBudget>,
+    provider_id: &str,
+    max_tokens: u64,
+    window_hours: Option<u32>,
+) {
+    let existing = budgets
+        .iter()
+        .find(|budget| budget.provider_id == provider_id)
+        .cloned();
+    budgets.retain(|budget| budget.provider_id != provider_id);
+    if max_tokens == 0 {
+        return;
+    }
+    budgets.push(UsageBudget {
+        provider_id: provider_id.to_string(),
+        window_hours: window_hours
+            .or_else(|| existing.as_ref().map(|budget| budget.window_hours))
+            .unwrap_or_else(default_budget_window_hours)
+            .max(1),
+        max_tokens,
+        // Thresholds carry over from an existing budget so changing the cap
+        // does not quietly reset how early it warns.
+        notify_percent: existing
+            .as_ref()
+            .map_or_else(default_notify_percent, |budget| budget.notify_percent),
+        throttle_percent: existing
+            .as_ref()
+            .map_or_else(default_throttle_percent, |budget| budget.throttle_percent),
+    });
 }
 
 /// How close a budget is to its cap.
@@ -960,6 +1010,58 @@ mod tests {
         // A manual pause has no expiry and waits for the user.
         assert!(PauseState::manual(PauseScope::All)
             .is_active_at(Utc::now() + chrono::Duration::days(365)));
+    }
+
+    #[test]
+    fn setting_a_budget_replaces_rather_than_accumulates() {
+        let mut budgets = Vec::new();
+        set_provider_budget(&mut budgets, "anthropic", 1_000_000, None);
+        set_provider_budget(&mut budgets, "openai", 2_000_000, Some(12));
+        assert_eq!(budgets.len(), 2);
+
+        // Editing the cap keeps one entry and its window.
+        set_provider_budget(&mut budgets, "openai", 5_000_000, None);
+        let openai: Vec<_> = budgets
+            .iter()
+            .filter(|budget| budget.provider_id == "openai")
+            .collect();
+        assert_eq!(openai.len(), 1);
+        assert_eq!(openai[0].max_tokens, 5_000_000);
+        assert_eq!(openai[0].window_hours, 12);
+        assert_eq!(openai[0].notify_percent, 70);
+
+        // Thresholds a user tuned survive a later cap change.
+        if let Some(budget) = budgets
+            .iter_mut()
+            .find(|budget| budget.provider_id == "openai")
+        {
+            budget.notify_percent = 50;
+        }
+        set_provider_budget(&mut budgets, "openai", 6_000_000, None);
+        assert_eq!(
+            budgets
+                .iter()
+                .find(|budget| budget.provider_id == "openai")
+                .map(|budget| budget.notify_percent),
+            Some(50)
+        );
+
+        // Zero clears it, and leaves other providers alone.
+        set_provider_budget(&mut budgets, "openai", 0, None);
+        assert!(!budgets.iter().any(|budget| budget.provider_id == "openai"));
+        assert!(budgets
+            .iter()
+            .any(|budget| budget.provider_id == "anthropic"));
+
+        // A window of zero would divide the ledger by nothing.
+        set_provider_budget(&mut budgets, "kimi", 100, Some(0));
+        assert_eq!(
+            budgets
+                .iter()
+                .find(|budget| budget.provider_id == "kimi")
+                .map(|budget| budget.window_hours),
+            Some(1)
+        );
     }
 
     #[test]
