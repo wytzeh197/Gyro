@@ -36,9 +36,9 @@ use gyro_core::{
     ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
     ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
     SessionOrigin, SessionStore, SessionWorkspaceMode, UsageEntry, UsageOrigin, UsageOutcome,
-    UsageTokens, UsageTotals, WorkspaceContextSnapshot,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
+    UsageTokens, UsageTotals, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
+    CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    SYNTHESIZER_SYSTEM_PROMPT,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -3295,18 +3295,24 @@ fn run_council_chat_blocking(
                         return (seat_id, Err(error), seat_started.elapsed().as_millis());
                     }
                 };
-                let result = run_provider_chat_with_retry(&store, &app, &seat_request, None, UsageContext::seat(seat_id))
-                    .map(|output| {
-                        let text = output.response.trim().to_string();
-                        if text.is_empty() {
-                            Err("council seat returned an empty response".to_string())
-                        } else {
-                            Ok(text)
-                        }
-                    })
-                    .unwrap_or_else(|error| {
-                        Err(gyro_core::security::redact_secrets(&error.to_string()))
-                    });
+                let result = run_provider_chat_with_retry(
+                    &store,
+                    &app,
+                    &seat_request,
+                    None,
+                    UsageContext::seat(seat_id),
+                )
+                .map(|output| {
+                    let text = output.response.trim().to_string();
+                    if text.is_empty() {
+                        Err("council seat returned an empty response".to_string())
+                    } else {
+                        Ok(text)
+                    }
+                })
+                .unwrap_or_else(|error| {
+                    Err(gyro_core::security::redact_secrets(&error.to_string()))
+                });
                 (seat_id, result, seat_started.elapsed().as_millis())
             }));
         }
@@ -3314,11 +3320,7 @@ fn run_council_chat_blocking(
             .into_iter()
             .map(|handle| {
                 handle.join().unwrap_or_else(|_| {
-                    (
-                        Uuid::nil(),
-                        Err("council seat worker panicked".into()),
-                        0,
-                    )
+                    (Uuid::nil(), Err("council seat worker panicked".into()), 0)
                 })
             })
             .collect()
@@ -3417,9 +3419,7 @@ fn run_council_chat_blocking(
 
             let answers = successful_seat_answers(&council_run.seats);
             let synth_user = build_synthesizer_user_prompt(&request.message, &answers);
-            let synth_message = format!(
-                "{SYNTHESIZER_SYSTEM_PROMPT}\n\n---\n\n{synth_user}"
-            );
+            let synth_message = format!("{SYNTHESIZER_SYSTEM_PROMPT}\n\n---\n\n{synth_user}");
             let synth_run_id = Uuid::new_v4();
             let synth_request = ProviderChatRequest {
                 session_id: request.session_id.clone(),
@@ -3467,8 +3467,8 @@ fn run_council_chat_blocking(
                     None,
                     UsageContext::new(UsageOrigin::CouncilSynthesis),
                 )
-                    .map(|output| output.response)
-                    .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
+                .map(|output| output.response)
+                .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
             };
             let synth_duration = synth_started.elapsed().as_millis();
             match synth_result {
@@ -3690,13 +3690,12 @@ fn run_council_chat_blocking(
 
 fn render_council_seats_fallback(run: &CouncilRun) -> String {
     let mut out = String::from("## Council seats\n\n");
-    out.push_str(
-        "Synthesis was unavailable. Individual seat answers are shown below.\n\n",
-    );
+    out.push_str("Synthesis was unavailable. Individual seat answers are shown below.\n\n");
     for seat in &run.seats {
         out.push_str(&format!(
             "### {} ({})\n\n",
-            seat.provider_label, seat.status.as_str()
+            seat.provider_label,
+            seat.status.as_str()
         ));
         if let Some(error) = &seat.error {
             out.push_str(&format!("Error: {error}\n\n"));
@@ -3720,9 +3719,7 @@ struct ReadCouncilArtifactRequest {
 }
 
 #[tauri::command]
-async fn read_council_artifact(
-    request: ReadCouncilArtifactRequest,
-) -> Result<String, String> {
+async fn read_council_artifact(request: ReadCouncilArtifactRequest) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let session_id = parse_uuid(&request.session_id)?;
         let council_run_id = parse_uuid(&request.council_run_id)?;
@@ -3916,8 +3913,8 @@ fn retry_council_synthesis_blocking(
             None,
             UsageContext::new(UsageOrigin::CouncilResynthesis),
         )
-            .map(|output| output.response)
-            .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
+        .map(|output| output.response)
+        .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
     };
     let synth_duration = synth_started.elapsed().as_millis();
     let cancelled = provider_chat_cancelled(&app, &request.session_id);
@@ -3935,8 +3932,8 @@ fn retry_council_synthesis_blocking(
             synthesis.started_at = Some(chrono::Utc::now());
             synthesis.completed_at = Some(chrono::Utc::now());
             synthesis.duration_ms = Some(synth_duration);
-            let path =
-                write_synthesis_artifact(&run_dir, &synthesis.unified_markdown).map_err(to_string)?;
+            let path = write_synthesis_artifact(&run_dir, &synthesis.unified_markdown)
+                .map_err(to_string)?;
             synthesis.artifact_path = Some(path.display().to_string());
             council_run.synthesis = Some(synthesis.clone());
             let _ = store.append_event_with_turn_id(
@@ -4169,7 +4166,13 @@ fn run_provider_chat_blocking(
     let binding = store
         .get_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
-    let runner_output = match run_provider_chat_with_retry(&store, &app, &request, binding, UsageContext::new(origin)) {
+    let runner_output = match run_provider_chat_with_retry(
+        &store,
+        &app,
+        &request,
+        binding,
+        UsageContext::new(origin),
+    ) {
         Ok(response) => response,
         Err(error) => {
             let error = gyro_core::security::redact_secrets(&error.to_string());
@@ -5411,6 +5414,78 @@ fn load_config_blocking() -> Result<GyroConfig, String> {
     GyroConfig::load(&paths).map_err(to_string)
 }
 
+/// Warm local storage so the desktop shell can open the chat UI immediately
+/// while this work finishes. The frontend keeps non-essential actions gated
+/// until this returns successfully.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WarmDesktopShellReport {
+    ready: bool,
+    session_count: usize,
+    provider_count: usize,
+    /// How many pooled SQLite handles were opened during warm-up.
+    session_pool_warmed: usize,
+    automation_pool_warmed: usize,
+    /// Milliseconds spent in the blocking warm-up worker.
+    elapsed_ms: u64,
+    /// Result of `pragma quick_check` (`ok` or error text). Best-effort.
+    integrity: String,
+}
+
+#[tauri::command]
+async fn warm_desktop_shell() -> Result<WarmDesktopShellReport, String> {
+    tauri::async_runtime::spawn_blocking(warm_desktop_shell_blocking)
+        .await
+        .map_err(|error| format!("desktop shell warm worker failed: {error}"))?
+}
+
+fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
+    let started = std::time::Instant::now();
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    paths.ensure().map_err(to_string)?;
+
+    // Config first so provider count is available even if store warm fails later.
+    let config = GyroConfig::load(&paths).map_err(to_string)?;
+
+    // Integrity + index maintenance on a dedicated handle, then prefill pools so
+    // the first interactive list_sessions / create_session is already hot.
+    let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+    let integrity = match store.quick_check() {
+        Ok(()) => "ok".to_string(),
+        Err(error) => {
+            // Surface corruption without hard-failing warm-up: the UI can still
+            // open, and doctor/repair paths can dig deeper.
+            eprintln!("gyro desktop shell: sqlite quick_check reported: {error}");
+            error.to_string()
+        }
+    };
+    store.maintain().map_err(to_string)?;
+    let sessions = store
+        .list_sessions_limited(Some(200))
+        .map_err(to_string)?;
+    // Return this handle into the pool via Drop semantics by wrapping lease.
+    {
+        let _lease = SessionStoreLease {
+            store: Some(store),
+        };
+    }
+
+    let (session_pool_warmed, automation_pool_warmed) = warm_store_pools(&paths)?;
+
+    Ok(WarmDesktopShellReport {
+        // Warm-up completed far enough for the shell to unlock. Integrity is
+        // reported separately so corruption can be diagnosed without trapping
+        // the user on the optimizing gate forever.
+        ready: true,
+        session_count: sessions.len(),
+        provider_count: config.model_providers.len(),
+        session_pool_warmed,
+        automation_pool_warmed,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        integrity,
+    })
+}
+
 #[tauri::command]
 async fn get_account_session() -> Result<AccountSessionState, String> {
     tauri::async_runtime::spawn_blocking(get_account_session_blocking)
@@ -5478,13 +5553,66 @@ fn merge_renderer_config(mut incoming: GyroConfig, persisted: &GyroConfig) -> Gy
     // settings write must not redirect refresh tokens or forge a signed-in user.
     incoming.account_oidc = persisted.account_oidc.clone();
     incoming.account_session = persisted.account_session.clone();
-    // Usage guards are owned natively: the pause has its own command, and
-    // nothing in Settings edits budgets yet. A renderer save that omitted the
-    // block would otherwise fill it from serde defaults, silently resuming a
-    // paused Gyro and erasing every budget. When Settings can edit these, this
-    // needs to become a field-by-field merge rather than a wholesale keep.
+    // Usage guards are owned natively. Settings edits them through
+    // `set_provider_budget` and `set_usage_paused` rather than by saving the
+    // whole config, so the renderer never has a guard block worth trusting: a
+    // save that omitted it would fill it from serde defaults, silently
+    // resuming a paused Gyro and erasing every budget.
     incoming.usage_guard = persisted.usage_guard.clone();
     incoming
+}
+
+/// What one provider has spent, measured by Gyro rather than reported by it.
+///
+/// Settings previously had nothing to show for providers without a quota
+/// endpoint — four of the five. The ledger covers all of them, so a provider
+/// that reports no allowance still has a spend figure, flagged when it rests
+/// on estimates.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderLedgerSummary {
+    provider_id: String,
+    /// Rolling 24 hours.
+    day: UsageTotals,
+    /// Rolling 7 days.
+    week: UsageTotals,
+    /// Present only when a budget is configured for this provider.
+    budget: Option<gyro_core::BudgetState>,
+    /// Daily denominator for the percentages when no budget is set.
+    daily_reference_tokens: u64,
+}
+
+#[tauri::command]
+async fn get_provider_usage_ledger(provider_id: String) -> Result<ProviderLedgerSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let now = chrono::Utc::now();
+        let day = store
+            .provider_usage_totals_since(&provider_id, now - chrono::Duration::hours(24))
+            .map_err(to_string)?;
+        let week = store
+            .provider_usage_totals_since(&provider_id, now - chrono::Duration::days(7))
+            .map_err(to_string)?;
+        let guard = GyroPaths::for_current_user()
+            .ok()
+            .and_then(|paths| GyroConfig::load(&paths).ok())
+            .map(|config| config.usage_guard)
+            .unwrap_or_default();
+        let budget = guard
+            .budgets
+            .iter()
+            .find(|budget| budget.provider_id == provider_id && budget.max_tokens > 0)
+            .and_then(|budget| store.budget_state(budget, now).ok());
+        Ok(ProviderLedgerSummary {
+            budget,
+            daily_reference_tokens: guard.daily_reference_tokens,
+            day,
+            provider_id,
+            week,
+        })
+    })
+    .await
+    .map_err(|error| format!("provider usage ledger worker failed: {error}"))?
 }
 
 /// The current hold and every budget, for the UI to show and act on.
@@ -5529,6 +5657,35 @@ async fn get_usage_safety_snapshot() -> Result<UsageSafetySnapshot, String> {
     })
     .await
     .map_err(|error| format!("usage safety worker failed: {error}"))?
+}
+
+/// Set or clear one provider's spend budget.
+///
+/// Its own command rather than part of `save_config`: the guard block is
+/// preserved natively on a renderer save so an unrelated settings write cannot
+/// erase budgets or resume a pause, which means budgets need an explicit door.
+/// A zero cap removes the budget rather than storing a limit of nothing.
+#[tauri::command]
+async fn set_provider_budget(
+    provider_id: String,
+    max_tokens: u64,
+    window_hours: Option<u32>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        GyroConfig::update(&paths, |persisted| {
+            gyro_core::set_provider_budget(
+                &mut persisted.usage_guard.budgets,
+                &provider_id,
+                max_tokens,
+                window_hours,
+            );
+            Ok(())
+        })
+        .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("budget worker failed: {error}"))?
 }
 
 /// Hold or resume every provider run.
@@ -6025,9 +6182,9 @@ impl WorkspacePreparationManager {
 }
 
 fn prune_workspace_preparation_completed(state: &mut WorkspacePreparationState) {
-    state.completed.retain(|_, (completed_at, _)| {
-        completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE
-    });
+    state
+        .completed
+        .retain(|_, (completed_at, _)| completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE);
     while state.completed.len() > MAX_WORKSPACE_PREPARATION_CACHES {
         let oldest = state
             .completed
@@ -6389,9 +6546,7 @@ async fn resolve_provider_approval(
     };
     if let Some(commit) = pending_mutation {
         if let Err(error) = commit.mark_applied() {
-            eprintln!(
-                "Gyro could not write the durable applied marker before cleanup: {error}"
-            );
+            eprintln!("Gyro could not write the durable applied marker before cleanup: {error}");
         }
         if let Err(error) = commit.finalize() {
             eprintln!("Gyro deferred provider mutation cleanup until restart: {error}");
@@ -10593,10 +10748,8 @@ fn pause_for_exhausted_budget(state: &gyro_core::BudgetState) -> anyhow::Result<
         {
             return Ok(());
         }
-        persisted.usage_guard.pause = gyro_core::PauseState::budget_exhausted(
-            &state.provider_id,
-            state.window_resets_at,
-        );
+        persisted.usage_guard.pause =
+            gyro_core::PauseState::budget_exhausted(&state.provider_id, state.window_resets_at);
         Ok(())
     })
 }
@@ -10625,7 +10778,8 @@ fn usage_guard_block(
     if let Some(reason) = usage_budget_block(store, &config, origin, provider_id) {
         return Some(reason);
     }
-    let since = chrono::Utc::now() - chrono::Duration::minutes(i64::from(config.window_minutes.max(1)));
+    let since =
+        chrono::Utc::now() - chrono::Duration::minutes(i64::from(config.window_minutes.max(1)));
     // A ledger the guard cannot read is not evidence of safety, but blocking on
     // a read failure would strand the user with no way to work. The call runs
     // and the failure is logged.
@@ -14351,9 +14505,7 @@ impl StreamingCommandState {
             usage.reasoning_output_tokens,
         );
         add(&mut current.total_tokens, usage.total_tokens);
-        current.model_context_window = usage
-            .model_context_window
-            .or(current.model_context_window);
+        current.model_context_window = usage.model_context_window.or(current.model_context_window);
     }
 
     fn push_activity(&mut self, mut activity: ProviderActivity) -> Option<ProviderActivity> {
@@ -17726,8 +17878,11 @@ pub fn run() {
             let paths = GyroPaths::for_current_user()?;
             let store = SessionStore::open(paths.clone())?;
             recover_provider_mutation_transactions(&paths.mutation_journals_dir, &store)?;
+            let _ = store.maintain();
             if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
-                *pool = Some(store);
+                if pool.len() < SESSION_STORE_POOL_CAPACITY {
+                    pool.push(store);
+                }
             }
             start_cli_ipc_listener(app.handle().clone());
             start_automation_scheduler(app.handle().clone());
@@ -17775,7 +17930,9 @@ pub fn run() {
             get_provider_usage,
             get_session_usage_totals,
             get_usage_safety_snapshot,
+            get_provider_usage_ledger,
             set_usage_paused,
+            set_provider_budget,
             git_commit,
             git_branches,
             git_checkout_branch,
@@ -17803,6 +17960,7 @@ pub fn run() {
             list_workspace_files,
             list_workspace_tree,
             load_config,
+            warm_desktop_shell,
             logout_account,
             lsp_request,
             lsp_start,
@@ -17953,10 +18111,13 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Process-local SQLite connection reuse. Concurrent callers may open an extra
-/// short-lived connection; idle handles return to the pool on drop.
-static SESSION_STORE_POOL: Mutex<Option<SessionStore>> = Mutex::new(None);
-static AUTOMATION_STORE_POOL: Mutex<Option<AutomationStore>> = Mutex::new(None);
+/// Process-local SQLite connection pools. Concurrent commands borrow a handle
+/// and return it on drop. Extra connections beyond capacity are discarded so
+/// the pool stays small (one DB file, several WAL readers/writers).
+const SESSION_STORE_POOL_CAPACITY: usize = 4;
+const AUTOMATION_STORE_POOL_CAPACITY: usize = 2;
+static SESSION_STORE_POOL: Mutex<Vec<SessionStore>> = Mutex::new(Vec::new());
+static AUTOMATION_STORE_POOL: Mutex<Vec<AutomationStore>> = Mutex::new(Vec::new());
 
 struct SessionStoreLease {
     store: Option<SessionStore>,
@@ -17966,17 +18127,13 @@ impl std::ops::Deref for SessionStoreLease {
     type Target = SessionStore;
 
     fn deref(&self) -> &Self::Target {
-        self.store
-            .as_ref()
-            .expect("session store lease is active")
+        self.store.as_ref().expect("session store lease is active")
     }
 }
 
 impl AsRef<SessionStore> for SessionStoreLease {
     fn as_ref(&self) -> &SessionStore {
-        self.store
-            .as_ref()
-            .expect("session store lease is active")
+        self.store.as_ref().expect("session store lease is active")
     }
 }
 
@@ -17984,8 +18141,8 @@ impl Drop for SessionStoreLease {
     fn drop(&mut self) {
         if let Some(store) = self.store.take() {
             if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
-                if pool.is_none() {
-                    *pool = Some(store);
+                if pool.len() < SESSION_STORE_POOL_CAPACITY {
+                    pool.push(store);
                 }
             }
         }
@@ -18018,8 +18175,8 @@ impl Drop for AutomationStoreLease {
     fn drop(&mut self) {
         if let Some(store) = self.store.take() {
             if let Ok(mut pool) = AUTOMATION_STORE_POOL.lock() {
-                if pool.is_none() {
-                    *pool = Some(store);
+                if pool.len() < AUTOMATION_STORE_POOL_CAPACITY {
+                    pool.push(store);
                 }
             }
         }
@@ -18029,31 +18186,53 @@ impl Drop for AutomationStoreLease {
 fn open_store() -> Result<SessionStoreLease, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
-        if let Some(store) = pool.take() {
-            return Ok(SessionStoreLease {
-                store: Some(store),
-            });
+        if let Some(store) = pool.pop() {
+            return Ok(SessionStoreLease { store: Some(store) });
         }
     }
     let store = SessionStore::open(paths).map_err(to_string)?;
-    Ok(SessionStoreLease {
-        store: Some(store),
-    })
+    Ok(SessionStoreLease { store: Some(store) })
 }
 
 fn open_automation_store() -> Result<AutomationStoreLease, String> {
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     if let Ok(mut pool) = AUTOMATION_STORE_POOL.lock() {
-        if let Some(store) = pool.take() {
-            return Ok(AutomationStoreLease {
-                store: Some(store),
-            });
+        if let Some(store) = pool.pop() {
+            return Ok(AutomationStoreLease { store: Some(store) });
         }
     }
     let store = AutomationStore::open(paths).map_err(to_string)?;
-    Ok(AutomationStoreLease {
-        store: Some(store),
-    })
+    Ok(AutomationStoreLease { store: Some(store) })
+}
+
+/// Prefill idle pooled connections so the first user actions after warm-up do
+/// not pay SQLite open + schema ensure latency.
+fn warm_store_pools(paths: &GyroPaths) -> Result<(usize, usize), String> {
+    let mut session_warmed = 0usize;
+    let mut automation_warmed = 0usize;
+    {
+        let mut pool = SESSION_STORE_POOL
+            .lock()
+            .map_err(|_| "session store pool lock poisoned".to_string())?;
+        while pool.len() < SESSION_STORE_POOL_CAPACITY {
+            let store = SessionStore::open(paths.clone()).map_err(to_string)?;
+            store.maintain().map_err(to_string)?;
+            pool.push(store);
+            session_warmed += 1;
+        }
+    }
+    {
+        let mut pool = AUTOMATION_STORE_POOL
+            .lock()
+            .map_err(|_| "automation store pool lock poisoned".to_string())?;
+        while pool.len() < AUTOMATION_STORE_POOL_CAPACITY {
+            let store = AutomationStore::open(paths.clone()).map_err(to_string)?;
+            store.maintain().map_err(to_string)?;
+            pool.push(store);
+            automation_warmed += 1;
+        }
+    }
+    Ok((session_warmed, automation_warmed))
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, String> {

@@ -476,6 +476,7 @@ const responses: Record<string, unknown> = {
   task_discover: [],
   test_discover: [],
   github_status: { available: false },
+  get_provider_usage: { providerId: "anthropic", windows: [], fetchedAt: NOW },
   get_notification_permission: "granted",
   get_project_capability_policy: { commands: "ask", fileEdits: "ask" },
   update_capability_ide_evidence: null,

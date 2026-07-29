@@ -3,7 +3,7 @@ import {
   isProviderRuntimeUsable,
   providerDefaultModelId,
   providersForConfig,
-} from "./provider-catalog";
+} from "./provider-catalog.ts";
 import type {
   CouncilConfig,
   CouncilPreset,
@@ -12,6 +12,19 @@ import type {
   ProviderId,
   ProviderStatus,
 } from "./types";
+
+/**
+ * Council is built but not released, so nothing may start a council run.
+ *
+ * The engine, presets, and synthesis stay in the tree — this is a freeze, not a
+ * removal. It gates every entry point rather than each surface deciding for
+ * itself, so Council cannot become reachable again by accident. Flip this to
+ * `false` to unfreeze; nothing else needs to change.
+ */
+export const COUNCIL_COMING_SOON: boolean = true;
+
+/** Shown wherever a frozen Council entry point is still visible. */
+export const COUNCIL_COMING_SOON_LABEL = "Coming soon";
 
 export const DEFAULT_COUNCIL_PRESETS: CouncilPreset[] = [
   {
@@ -53,7 +66,8 @@ export function defaultCouncilConfig(): CouncilConfig {
     seatTimeoutSeconds: 300,
     synthesizerTimeoutSeconds: 180,
     synthesizeOnPartial: true,
-    enabled: true,
+    // Off while frozen, so a fresh install has no reachable council run.
+    enabled: !COUNCIL_COMING_SOON,
   };
 }
 
@@ -90,7 +104,9 @@ export function normalizedCouncilConfig(
     seatTimeoutSeconds: council.seatTimeoutSeconds || 300,
     synthesizerTimeoutSeconds: council.synthesizerTimeoutSeconds || 180,
     synthesizeOnPartial: council.synthesizeOnPartial !== false,
-    enabled: council.enabled !== false,
+    // The freeze outranks whatever was persisted: an install that enabled
+    // Council before it was frozen must not stay enabled after upgrading.
+    enabled: COUNCIL_COMING_SOON ? false : council.enabled !== false,
   };
 }
 

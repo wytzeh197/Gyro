@@ -1612,6 +1612,24 @@ export type BudgetState = {
   hasEstimates: boolean;
 };
 
+/**
+ * What one provider has spent, measured by Gyro rather than reported by it.
+ *
+ * Available for every provider, including the four whose CLIs expose no quota
+ * endpoint at all.
+ */
+export type ProviderLedgerSummary = {
+  providerId: string;
+  /** Rolling 24 hours. */
+  day: SessionUsageTotals;
+  /** Rolling 7 days. */
+  week: SessionUsageTotals;
+  /** Present only when a budget is configured for this provider. */
+  budget?: BudgetState;
+  /** Denominator for the percentages when no budget is configured. */
+  dailyReferenceTokens: number;
+};
+
 /** The current hold and every configured budget, as the UI reads them. */
 export type UsageSafetySnapshot = {
   pause: PauseState;
