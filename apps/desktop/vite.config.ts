@@ -14,6 +14,8 @@ export default defineConfig({
     warmup: {
       clientFiles: [
         "./src/main.tsx",
+        "./src/early-shell.tsx",
+        "./src/early-shell.css",
         "./src/App.tsx",
         "../../packages/ui/src/index.ts",
         "../../packages/ui/src/surfaces.tsx",

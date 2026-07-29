@@ -73,7 +73,10 @@ end-to-end exit gate.
   permission is inspectable and testable from Settings without a startup prompt;
   stop verdicts fail closed and atomically complete schedules, and background
   outcomes emit privacy-safe native notices only when access is granted.
-- Provider onboarding still needs clean-machine acceptance coverage.
+- Provider onboarding clean-machine path is codified in
+  [`docs/clean-machine-path.md`](docs/clean-machine-path.md) with automated
+  state-machine coverage (`scripts/check-clean-machine-path.mjs`). Authenticated
+  Codex/Claude clean-account walks remain for release proof.
 - LSP and DAP discovery exists, but lifecycle management is not production
   ready.
 - Browser preview automatically captures bounded, redacted console/page errors and private retained PNG screenshots for loopback previews; installed screenshot acceptance remains.

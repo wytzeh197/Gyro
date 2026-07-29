@@ -178,20 +178,18 @@ impl AutomationStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
         reject_unsafe_private_file(&paths.database_path)?;
-        let conn = Connection::open(&paths.database_path)
+        let conn = crate::sqlite::open_private_database(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        // NORMAL is safe with WAL for this local automation index. JSONL session
-        // durability is handled separately by the session store.
-        conn.execute_batch(
-            "pragma foreign_keys = on;
-             pragma journal_mode = wal;
-             pragma synchronous = normal;",
-        )?;
         let store = Self { conn };
         store.initialize()?;
         Ok(store)
+    }
+
+    pub fn maintain(&self) -> Result<()> {
+        crate::sqlite::optimize_connection(&self.conn);
+        crate::sqlite::checkpoint_wal_passive(&self.conn);
+        Ok(())
     }
 
     pub fn list_automations(&self) -> Result<Vec<Automation>> {
@@ -775,7 +773,13 @@ impl AutomationStore {
              );
 
 	             create index if not exists idx_automations_updated_at
-	             on automations(updated_at desc);",
+	             on automations(updated_at desc);
+
+                 create index if not exists idx_automations_next_run_at
+                 on automations(next_run_at);
+
+                 create index if not exists idx_automations_status_lease
+                 on automations(status, lease_expires_at);",
         )?;
         self.ensure_column("lease_owner", "text")?;
         self.ensure_column("lease_expires_at", "text")?;

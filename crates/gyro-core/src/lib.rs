@@ -21,6 +21,7 @@ pub mod provider_registry;
 pub mod provider_stream;
 pub mod security;
 pub mod sessions;
+pub mod sqlite;
 pub mod usage;
 pub mod worktrees;
 
@@ -127,12 +128,17 @@ pub use sessions::{
     ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
     SessionWorkspaceMode,
 };
+pub use sqlite::{
+    checkpoint_wal_passive, configure_connection, is_busy_error, open_private_database,
+    optimize_connection, quick_check, with_busy_retry, with_busy_retry_n, DEFAULT_BUSY_RETRIES,
+    DEFAULT_BUSY_TIMEOUT,
+};
 pub use usage::{
     budget_decision, budget_state, estimate_tokens, exceeds_call_ceiling, guard_decision,
-    provider_usage_totals_since, recent_usage, session_usage_totals, usage_totals_since,
-    BudgetLevel, BudgetState, GuardVerdict, PauseReason, PauseScope, PauseState, RecentUsage,
-    UsageBudget, UsageEntry, UsageGuardConfig, UsageOrigin, UsageOriginTotals, UsageOutcome,
-    UsageTokens, UsageTotals,
+    provider_usage_totals_since, recent_usage, session_usage_totals, set_provider_budget,
+    usage_totals_since, BudgetLevel, BudgetState, GuardVerdict, PauseReason, PauseScope,
+    PauseState, RecentUsage, UsageBudget, UsageEntry, UsageGuardConfig, UsageOrigin,
+    UsageOriginTotals, UsageOutcome, UsageTokens, UsageTotals,
 };
 pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,
