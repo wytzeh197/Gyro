@@ -101,7 +101,6 @@ import {
   type HarnessRunStatus,
   type IdeAiToolCall,
   type IdeAssistantAction,
-  type IdeAssistantReply,
   type IdeAssistantRequest,
   type LanguageServerState,
   type MenuBarOutcome,
@@ -1316,7 +1315,10 @@ export function App() {
         "get_provider_usage_ledger",
         { providerId },
       );
-      setProviderLedgerById((current) => ({ ...current, [providerId]: summary }));
+      setProviderLedgerById((current) => ({
+        ...current,
+        [providerId]: summary,
+      }));
     } catch {
       // Settings falls back to the reference denominator.
     }
@@ -4325,23 +4327,55 @@ export function App() {
     void refreshGithub(workspaceActionRoot);
   }, [refreshGithub, workspaceActionRoot]);
 
+  // Read git as soon as we know the workspace root. Session preparation also
+  // reports a status, but Workspace can be opened with no active chat, and
+  // without this the panel keeps the empty default and claims Git is not ready.
+  useEffect(() => {
+    if (!workspaceActionRoot) {
+      return;
+    }
+    refreshIdeSourceControl(workspaceActionRoot);
+  }, [refreshIdeSourceControl, workspaceActionRoot]);
+
   // While a run is queued or in progress its state is stale the moment we read
   // it, so poll — but only while the user is actually looking at Source Control.
   const hasActiveGithubRun = workbench.ide.github.runs.some(
     (run) => run.state === "queued" || run.state === "in-progress",
   );
-  const watchingGithub =
+  const isSourceControlVisible =
     workbench.activeDestination === "workspace" &&
     workbench.ide.activeView === "source-control";
+
+  // Edits made outside Gyro — another editor, a terminal, a rebase — never
+  // reach the file-edit refresh, so re-read while the panel is on screen.
   useEffect(() => {
-    if (!workspaceActionRoot || !hasActiveGithubRun || !watchingGithub) {
+    if (!workspaceActionRoot || !isSourceControlVisible) {
+      return;
+    }
+    refreshIdeSourceControl(workspaceActionRoot);
+    const timer = window.setInterval(() => {
+      refreshIdeSourceControl(workspaceActionRoot);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [refreshIdeSourceControl, isSourceControlVisible, workspaceActionRoot]);
+  useEffect(() => {
+    if (
+      !workspaceActionRoot ||
+      !hasActiveGithubRun ||
+      !isSourceControlVisible
+    ) {
       return;
     }
     const timer = window.setInterval(() => {
       void refreshGithub(workspaceActionRoot);
     }, 15_000);
     return () => window.clearInterval(timer);
-  }, [hasActiveGithubRun, refreshGithub, watchingGithub, workspaceActionRoot]);
+  }, [
+    hasActiveGithubRun,
+    refreshGithub,
+    isSourceControlVisible,
+    workspaceActionRoot,
+  ]);
 
   /** Select a workflow run and load its jobs. */
   const selectGithubRun = useCallback(
@@ -5114,52 +5148,62 @@ export function App() {
     workspacePath,
   ]);
 
-  const startNewChat = useCallback(() => {
-    suppressSessionAutoSelectRef.current = true;
-    const projectPath = activeSession?.workspacePath ?? workspacePath;
-    const projectKey = normalizedChatProjectKey(projectPath);
-    const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY;
-    const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
-      layout.slots.some(
-        (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
-      ),
-    );
-    if (projectKey && projectPath) {
-      dispatchChatGrid({
-        type: "select-pane",
-        projectKey,
-        mode: "replace",
-        pane: {
-          paneId: `draft:${projectKey}`,
-          kind: "draft",
-          draftKey,
-          workspacePath: projectPath,
-        },
-      });
-    }
-    setIsStartingFirstTurn(false);
-    activeSessionIdRef.current = undefined;
-    setActiveSessionId(undefined);
-    setChatDrafts((current) => ({
-      ...current,
-      ...(activeSessionId ? { [activeSessionId]: "" } : {}),
-      ...(hasExistingDraft ? {} : { [draftKey]: "" }),
-    }));
-    setChatAttachments((current) => ({
-      ...current,
-      ...(activeSessionId ? { [activeSessionId]: [] } : {}),
-      ...(hasExistingDraft ? {} : { [draftKey]: [] }),
-    }));
-    setDraftResetToken((token) => token + 1);
-    dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
-    dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
-    dispatchWorkbench({ type: "close-tool-panel" });
-  }, [
-    activeSession?.workspacePath,
-    activeSessionId,
-    chatGrid.layouts,
-    workspacePath,
-  ]);
+  const startNewChat = useCallback(
+    (options: { keepLayout?: boolean } = {}) => {
+      suppressSessionAutoSelectRef.current = true;
+      const projectPath = activeSession?.workspacePath ?? workspacePath;
+      const projectKey = normalizedChatProjectKey(projectPath);
+      const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY;
+      const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
+        layout.slots.some(
+          (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
+        ),
+      );
+      if (projectKey && projectPath) {
+        dispatchChatGrid({
+          type: "select-pane",
+          projectKey,
+          mode: "replace",
+          pane: {
+            paneId: `draft:${projectKey}`,
+            kind: "draft",
+            draftKey,
+            workspacePath: projectPath,
+          },
+        });
+      }
+      setIsStartingFirstTurn(false);
+      activeSessionIdRef.current = undefined;
+      setActiveSessionId(undefined);
+      setChatDrafts((current) => ({
+        ...current,
+        ...(activeSessionId ? { [activeSessionId]: "" } : {}),
+        ...(hasExistingDraft ? {} : { [draftKey]: "" }),
+      }));
+      setChatAttachments((current) => ({
+        ...current,
+        ...(activeSessionId ? { [activeSessionId]: [] } : {}),
+        ...(hasExistingDraft ? {} : { [draftKey]: [] }),
+      }));
+      setDraftResetToken((token) => token + 1);
+      dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
+      // Starting a chat from the AI view keeps the code layout: the chat is
+      // already visible in the sidebar.
+      if (!options.keepLayout) {
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "thread",
+        });
+      }
+      dispatchWorkbench({ type: "close-tool-panel" });
+    },
+    [
+      activeSession?.workspacePath,
+      activeSessionId,
+      chatGrid.layouts,
+      workspacePath,
+    ],
+  );
 
   const acknowledgeFinishedChat = useCallback((sessionId: string) => {
     setFinishedMenuBarOutcomes((current) =>
@@ -5175,7 +5219,12 @@ export function App() {
   }, []);
 
   const selectSession = useCallback(
-    (sessionId: string) => {
+    (
+      sessionId: string,
+      // The AI view hosts a chat inside the code layout, so switching sessions
+      // from there must not send the user to the thread surface.
+      options: { keepLayout?: boolean } = {},
+    ) => {
       acknowledgeFinishedChat(sessionId);
       suppressSessionAutoSelectRef.current = false;
       const session = sessions.find((item) => item.id === sessionId);
@@ -5190,7 +5239,12 @@ export function App() {
       }
       setActiveSessionId(sessionId);
       dispatchWorkbench({ type: "set-chat-panel" });
-      dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
+      if (!options.keepLayout) {
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "thread",
+        });
+      }
     },
     [acknowledgeFinishedChat, sessions],
   );
@@ -6185,7 +6239,9 @@ export function App() {
         // credentials. Health is a secondary signal for first-time Connect, but
         // not during forced repair: status commands can still claim a stale
         // stored login is healthy.
-        const completeProviderLogin = async (source: "login-exit" | "health") => {
+        const completeProviderLogin = async (
+          source: "login-exit" | "health",
+        ) => {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
           if (source === "login-exit") {
@@ -6203,7 +6259,9 @@ export function App() {
           });
           notify(
             "provider",
-            source === "login-exit" ? "Provider signed in" : "Provider verified",
+            source === "login-exit"
+              ? "Provider signed in"
+              : "Provider verified",
             providerId === "openai" && source === "health"
               ? "OpenAI is available through your local ChatGPT/Codex login."
               : providerLabel,
@@ -6241,10 +6299,7 @@ export function App() {
               hasForegroundJob: progress.hasForegroundJob ?? undefined,
             });
             if (progress.output) setTerminalOutput(progress.output);
-            if (
-              progress.exitCode !== null &&
-              progress.exitCode !== undefined
-            ) {
+            if (progress.exitCode !== null && progress.exitCode !== undefined) {
               if (progress.exitCode === 0) {
                 return completeProviderLogin("login-exit");
               }
@@ -7576,10 +7631,15 @@ export function App() {
 
       if (!activeSessionId) {
         setIsStartingFirstTurn(true);
-        dispatchWorkbench({
-          type: "select-workspace-layout",
-          layout: "thread",
-        });
+        // A first message opens the thread layout so the new chat is visible —
+        // except when it was sent from the AI view, where the chat is already
+        // on screen and switching would throw the user out of their code.
+        if (activeWorkspaceLayoutRef.current !== "code") {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "thread",
+          });
+        }
         dispatchWorkbench({ type: "close-tool-panel" });
         dispatchWorkbench({ type: "set-chat-panel" });
         const session = createPreviewSession(
@@ -7984,8 +8044,7 @@ export function App() {
                 synthesizerProviderLabel:
                   councilResolution.synthesizerProviderLabel,
                 synthesizerModelId: councilResolution.synthesizerModelId,
-                synthesizerModelLabel:
-                  councilResolution.synthesizerModelLabel,
+                synthesizerModelLabel: councilResolution.synthesizerModelLabel,
                 workspacePath: chatWorkspacePath,
                 attachments: turnAttachments,
                 requireCommandApproval: true,
@@ -9321,50 +9380,6 @@ export function App() {
   const setEditorSelection = useCallback((selection?: EditorSelection) => {
     dispatchWorkbench({ type: "ide-set-selection", selection });
   }, []);
-
-  /**
-   * The assistant's reply to the last Workspace-initiated request.
-   *
-   * Reads the same session events the Sessions surface renders, narrowed to the
-   * turn the Workspace started, so the answer appears next to the code it is
-   * about while it streams.
-   */
-  const workspaceAssistantReply = useMemo<IdeAssistantReply | undefined>(() => {
-    const request = workbench.ide.lastAssistantRequest;
-    if (!request?.turnId) {
-      return undefined;
-    }
-    const turnEvents =
-      sessionEventsById[request.sessionId ?? activeSessionId ?? ""];
-    if (!turnEvents) {
-      return undefined;
-    }
-    const text = turnEvents
-      .filter(
-        (event) =>
-          event.kind === "assistant-message" &&
-          (turnIdFromSessionEvent(event) ?? event.turnId) === request.turnId,
-      )
-      .map((event) => event.message)
-      .join("\n")
-      .trim();
-    const turn =
-      workbench.activeTurn?.id === request.turnId
-        ? workbench.activeTurn
-        : undefined;
-    return {
-      turnId: request.turnId,
-      text,
-      // No turn and no text yet means the run has not reported back; once text
-      // exists without a live turn, the reply is complete.
-      status: turn?.status ?? (text ? "done" : "queued"),
-    };
-  }, [
-    activeSessionId,
-    sessionEventsById,
-    workbench.activeTurn,
-    workbench.ide.lastAssistantRequest,
-  ]);
 
   const runEditorAssistantAction = useCallback(
     (action: IdeAssistantAction, instruction: string) => {
@@ -12427,8 +12442,143 @@ export function App() {
     );
   };
 
+  // The workspace chat lives in the AI sidebar view — the same surface the
+  // Sessions destination renders, at sidebar width.
+  // Recent chats for the project the workspace is on, newest first, so the AI
+  // view can switch chats without the Sessions sidebar.
+  const workspaceChatSwitcher = {
+    chats: sessions
+      .filter(
+        (session) =>
+          normalizedChatProjectKey(session.workspacePath) ===
+          currentChatProjectKey,
+      )
+      .slice(0, 8)
+      .map((session) => ({
+        id: session.id,
+        title: session.title || "Untitled chat",
+        meta: session.branch,
+      })),
+    activeChatId: activeSessionId,
+    onSelect: (sessionId: string) =>
+      selectSession(sessionId, { keepLayout: true }),
+    onNewChat: () => startNewChat({ keepLayout: true }),
+  };
+
+  const renderWorkspaceChat = () => (
+    <ChatSurface
+      chatSwitcher={workspaceChatSwitcher}
+      activeChatPanel={activeChatPanel}
+      browserPreview={workbench.browserPreview}
+      capabilityPolicy={activeCapabilityPolicy}
+      config={config}
+      modelFocus={
+        workbench.modelFocus?.sessionId === activeSessionId
+          ? workbench.modelFocus
+          : undefined
+      }
+      modelFollow={workbench.preferences.modelFollow}
+      onLoadModelFocusPeek={loadModelFocusPeek}
+      onOpenModelFocus={openModelFocus}
+      providerUsageByProvider={providerUsageByProvider}
+      sessionUsage={activeSessionUsage}
+      usageSafety={usageSafety}
+      onResumeUsage={() => void resumeUsage()}
+      capabilityActivities={
+        activeSessionId
+          ? Object.values(capabilityRunsBySessionId[activeSessionId] ?? {})
+          : []
+      }
+      attachments={activeChatAttachments}
+      chatMode={activeChatMode}
+      diffReview={workbench.diffReview}
+      draftResetToken={draftResetToken}
+      draft={activeChatDraft}
+      events={events}
+      branchName={
+        workbench.workspaceMode === "local"
+          ? (branchCatalog?.current ?? activeSession?.branch)
+          : activeSession?.branch
+      }
+      branchCatalog={branchCatalog}
+      isEnvironmentRailOpen={activeChatPanel === "environment"}
+      isGoalComposerActive={isGoalComposerActive}
+      isComposerSending={isActiveSessionSending}
+      shellReady={!isShellOptimizing}
+      isBranchLoading={isBranchLoading}
+      isToolPanelOpen={workbench.isToolPanelOpen}
+      isTiled
+      maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
+      onAttachMediaFiles={attachDroppedMedia}
+      onComposerAction={handleComposerAction}
+      onDraftChange={updateActiveChatDraft}
+      onRemoveAttachment={removeChatAttachment}
+      onReusePrompt={updateActiveChatDraft}
+      onStopChat={stopActiveChat}
+      onContinueChat={() => void sendDraft("Continue")}
+      onCouncilAction={handleCouncilAction}
+      onOpenToolPanel={openToolPanel}
+      onToggleToolPanel={toggleChatToolPanel}
+      onPlanItemStatusChange={changePlanItemStatus}
+      onPlanAction={changePlan}
+      onPlanDecision={handlePlanDecision}
+      planEditorRequest={planEditorRequest}
+      onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
+      onGoalAction={changeGoal}
+      onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+      onLoadChangeDiff={loadInlineChangeDiff}
+      onEditQueuedMessage={editQueuedChatMessage}
+      onRemoveQueuedMessage={removeQueuedChatMessage}
+      onSteerQueuedMessage={steerQueuedChatMessage}
+      onMutationApprovalAction={handleMutationApprovalAction}
+      onProviderApprovalAction={handleProviderApprovalAction}
+      onProviderStatusAction={handleProviderStatusAction}
+      onSend={sendDraft}
+      onToggleEnvironmentRail={() =>
+        dispatchWorkbench({
+          type: "toggle-chat-environment-rail",
+        })
+      }
+      onTogglePlanPanel={() => dispatchWorkbench({ type: "toggle-chat-plan" })}
+      providerReadiness={workbench.providerReadiness}
+      providerStatuses={workbench.providerStatuses}
+      queuedMessages={activeQueuedChatMessages.map((item) => ({
+        attachmentCount: item.context.attachments?.length ?? 0,
+        hasFailed: item.status === "failed",
+        id: item.id,
+        isDispatching: item.status === "sending",
+        message: item.message,
+      }))}
+      savedProjects={savedProjects}
+      sessionModel={{
+        modelLabel: activeSession?.modelLabel,
+        providerId: activeSession?.providerId,
+        providerLabel: activeSession?.providerLabel,
+        reasoningEffort: activeSession?.reasoningEffort,
+      }}
+      sessionPlan={activeSessionPlan}
+      sessionGoal={activeSessionGoal}
+      sessionSummary={activeSession?.summary}
+      sessionTitle={activeSession?.title}
+      sourceControl={workbench.ide.sourceControl}
+      terminalPanes={workbench.terminalPanes}
+      turnSourceControlBaselines={turnSourceControlBaselines}
+      worktreeName={activeSession?.worktreeName}
+      workspaceMode={workbench.workspaceMode}
+      workspacePath={activeSession?.workspacePath ?? workspacePath}
+      workspaceContext={
+        workspaceContextSnapshot &&
+        normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
+          normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
+          ? workspaceContextSnapshot
+          : undefined
+      }
+    />
+  );
+
   return (
     <AppChrome
+      renderAiChat={renderWorkspaceChat}
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
       activeSessionId={sidebarActiveSessionId}
@@ -12665,7 +12815,7 @@ export function App() {
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
                     isComposerSending={isActiveSessionSending}
-          shellReady={!isShellOptimizing}
+                    shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
                     maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
@@ -12838,128 +12988,6 @@ export function App() {
                   dispatchWorkbench({ type: "set-browser-url", url })
                 }
                 onAssistantAction={runEditorAssistantAction}
-                assistantReply={workspaceAssistantReply}
-                renderAssistantChat={() => (
-                  <ChatSurface
-                    activeChatPanel={activeChatPanel}
-                    browserPreview={workbench.browserPreview}
-                    capabilityPolicy={activeCapabilityPolicy}
-                    config={config}
-                    modelFocus={
-                      workbench.modelFocus?.sessionId === activeSessionId
-                        ? workbench.modelFocus
-                        : undefined
-                    }
-                    modelFollow={workbench.preferences.modelFollow}
-                    onLoadModelFocusPeek={loadModelFocusPeek}
-                    onOpenModelFocus={openModelFocus}
-                    providerUsageByProvider={providerUsageByProvider}
-                    sessionUsage={activeSessionUsage}
-                    usageSafety={usageSafety}
-                    onResumeUsage={() => void resumeUsage()}
-                    capabilityActivities={
-                      activeSessionId
-                        ? Object.values(
-                            capabilityRunsBySessionId[activeSessionId] ?? {},
-                          )
-                        : []
-                    }
-                    attachments={activeChatAttachments}
-                    chatMode={activeChatMode}
-                    diffReview={workbench.diffReview}
-                    draftResetToken={draftResetToken}
-                    draft={activeChatDraft}
-                    events={events}
-                    branchName={
-                      workbench.workspaceMode === "local"
-                        ? (branchCatalog?.current ?? activeSession?.branch)
-                        : activeSession?.branch
-                    }
-                    branchCatalog={branchCatalog}
-                    isEnvironmentRailOpen={activeChatPanel === "environment"}
-                    isGoalComposerActive={isGoalComposerActive}
-                    isComposerSending={isActiveSessionSending}
-          shellReady={!isShellOptimizing}
-                    isBranchLoading={isBranchLoading}
-                    isToolPanelOpen={workbench.isToolPanelOpen}
-                    isTiled
-                    maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
-                    onAttachMediaFiles={attachDroppedMedia}
-                    onComposerAction={handleComposerAction}
-                    onDraftChange={updateActiveChatDraft}
-                    onRemoveAttachment={removeChatAttachment}
-                    onReusePrompt={updateActiveChatDraft}
-                    onStopChat={stopActiveChat}
-                    onContinueChat={() => void sendDraft("Continue")}
-                    onCouncilAction={handleCouncilAction}
-                    onOpenToolPanel={openToolPanel}
-                    onToggleToolPanel={toggleChatToolPanel}
-                    onPlanItemStatusChange={changePlanItemStatus}
-                    onPlanAction={changePlan}
-                    onPlanDecision={handlePlanDecision}
-                    planEditorRequest={planEditorRequest}
-                    onPlanEditorRequestHandled={() =>
-                      setPlanEditorRequest(undefined)
-                    }
-                    onGoalAction={changeGoal}
-                    onCancelGoalComposer={() => setIsGoalComposerActive(false)}
-                    onLoadChangeDiff={loadInlineChangeDiff}
-                    onEditQueuedMessage={editQueuedChatMessage}
-                    onRemoveQueuedMessage={removeQueuedChatMessage}
-                    onSteerQueuedMessage={steerQueuedChatMessage}
-                    onMutationApprovalAction={handleMutationApprovalAction}
-                    onProviderApprovalAction={handleProviderApprovalAction}
-                    onProviderStatusAction={handleProviderStatusAction}
-                    onSend={sendDraft}
-                    onToggleEnvironmentRail={() =>
-                      dispatchWorkbench({
-                        type: "toggle-chat-environment-rail",
-                      })
-                    }
-                    onTogglePlanPanel={() =>
-                      dispatchWorkbench({ type: "toggle-chat-plan" })
-                    }
-                    providerReadiness={workbench.providerReadiness}
-                    providerStatuses={workbench.providerStatuses}
-                    queuedMessages={activeQueuedChatMessages.map((item) => ({
-                      attachmentCount: item.context.attachments?.length ?? 0,
-                      hasFailed: item.status === "failed",
-                      id: item.id,
-                      isDispatching: item.status === "sending",
-                      message: item.message,
-                    }))}
-                    savedProjects={savedProjects}
-                    sessionModel={{
-                      modelLabel: activeSession?.modelLabel,
-                      providerId: activeSession?.providerId,
-                      providerLabel: activeSession?.providerLabel,
-                      reasoningEffort: activeSession?.reasoningEffort,
-                    }}
-                    sessionPlan={activeSessionPlan}
-                    sessionGoal={activeSessionGoal}
-                    sessionSummary={activeSession?.summary}
-                    sessionTitle={activeSession?.title}
-                    sourceControl={workbench.ide.sourceControl}
-                    terminalPanes={workbench.terminalPanes}
-                    turnSourceControlBaselines={turnSourceControlBaselines}
-                    worktreeName={activeSession?.worktreeName}
-                    workspaceMode={workbench.workspaceMode}
-                    workspacePath={
-                      activeSession?.workspacePath ?? workspacePath
-                    }
-                    workspaceContext={
-                      workspaceContextSnapshot &&
-                      normalizeProjectPath(
-                        workspaceContextSnapshot.workspaceKey,
-                      ) ===
-                        normalizeProjectPath(
-                          activeSession?.workspacePath ?? workspacePath,
-                        )
-                        ? workspaceContextSnapshot
-                        : undefined
-                    }
-                  />
-                )}
                 onCommentDiff={(path) =>
                   dispatchWorkbench({ type: "add-diff-comment", path })
                 }

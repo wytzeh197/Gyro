@@ -1111,7 +1111,6 @@ export type IdeLayoutState = {
   splitDirection: "right" | "down";
   minimapEnabled: boolean;
   restoreOnLaunch: boolean;
-  rightAssistantOpen: boolean;
 };
 
 export type WorkspaceSearchQuery = {

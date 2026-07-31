@@ -383,15 +383,16 @@ expect(
 );
 expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
-    surfaceSource.includes('className="gyro-sidebar-scm-directory"') &&
-    surfaceSource.includes('className="gyro-sidebar-scm-state"') &&
+    surfaceSource.includes("gyro-sidebar-scm-directory") &&
+    surfaceSource.includes("gyro-sidebar-scm-state is-") &&
     surfaceSource.includes('className="gyro-sidebar-scm-stage"') &&
     surfaceSource.includes('className="gyro-sidebar-scm-discard"') &&
     surfaceSource.includes("function workspaceParentFolder") &&
     cssRules(styleSource, ".gyro-sidebar-scm-row").some(
       (rule) =>
-        rule.includes("grid-template-columns: minmax(0, 1fr) auto 24px 24px") &&
-        rule.includes("min-height: 30px"),
+        rule.includes(
+          "grid-template-columns: 16px minmax(0, 1fr) 24px 24px 18px",
+        ) && rule.includes("min-height: 30px"),
     ) &&
     cssRules(styleSource, ".gyro-sidebar-scm-discard").some((rule) =>
       rule.includes("opacity: 0"),
@@ -400,6 +401,44 @@ expect(
       rule.includes("grid-template-columns"),
     ),
   "Workspace Source Control files should use compact single-line rows with stable actions.",
+);
+
+// Source Control reads the way VS Code's does: staged and unstaged changes in
+// their own collapsible groups, each row carrying a language-coloured icon and
+// a git decoration letter.
+expect(
+  surfaceSource.includes("function ScmChangeGroup") &&
+    surfaceSource.includes('title="Staged Changes"') &&
+    surfaceSource.includes("gyro-sidebar-scm-file-icon is-") &&
+    surfaceSource.includes("function scmFileBadge") &&
+    surfaceSource.includes("function scmStateDecoration") &&
+    cssRules(styleSource, ".gyro-scm-panel").some((rule) =>
+      rule.includes("--gyro-scm-modified"),
+    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-scm-panel .gyro-sidebar-scm-row .gyro-sidebar-scm-state.is-deleted",
+    ).some((rule) => rule.includes("var(--gyro-scm-deleted)")) &&
+    styleSource.includes(".gyro-sidebar-scm-filename.is-gone"),
+  "Source Control should group staged and unstaged changes with coloured file icons and git decoration letters.",
+);
+
+// The activity rail carries the change count, capped at 99+, and the panel
+// refreshes itself so that count reflects the repository rather than the last
+// edit Gyro happened to make.
+expect(
+  surfaceSource.includes("function activityBadgeLabel") &&
+    surfaceSource.includes('count > 99 ? "99+" : String(count)') &&
+    surfaceSource.includes("function sourceControlRailBadge") &&
+    surfaceSource.includes("gyro-activity-rail-badge") &&
+    cssRules(styleSource, ".gyro-activity-rail-badge").some(
+      (rule) =>
+        rule.includes("background: var(--gyro-accent)") &&
+        rule.includes("position: absolute"),
+    ) &&
+    appSource.includes("isSourceControlVisible") &&
+    /refreshIdeSourceControl\(workspaceActionRoot\)/.test(appSource),
+  "The Source Control rail icon should badge the change count, and status should refresh from the workspace root.",
 );
 expect(
   cssRules(styleSource, ".gyro-settings-topbar").some((rule) =>
@@ -2290,7 +2329,6 @@ const restoredIde = sanitizeStoredIdeState(
       splitDirection: "down",
       minimapEnabled: false,
       restoreOnLaunch: true,
-      rightAssistantOpen: false,
     },
   },
   ideHydrationBase,
@@ -2308,7 +2346,6 @@ expect(
     restoredIde.layout.activeGroupId === "group-side" &&
     restoredIde.layout.splitDirection === "down" &&
     restoredIde.layout.minimapEnabled === false &&
-    restoredIde.layout.rightAssistantOpen === false &&
     restoredIde.layout.groups[1]?.panes[0]?.id === "group-side-pane" &&
     restoredIde.buffers["src/main.ts"]?.content === "unsaved" &&
     restoredIde.buffers["src/main.ts"]?.status === "dirty" &&
@@ -2340,7 +2377,6 @@ const rejectedStoredIde = sanitizeStoredIdeState(
       splitDirection: "right",
       minimapEnabled: true,
       restoreOnLaunch: true,
-      rightAssistantOpen: true,
     },
   },
   ideHydrationBase,
@@ -4616,7 +4652,7 @@ expect(
     surfaceSource.includes('kind: "workspace-mode"') &&
     // Labels + optional Recommended only — no redundant title or detail rows.
     !surfaceSource.includes('title="Where the agent works"') &&
-    surfaceSource.includes('badge:') &&
+    surfaceSource.includes("badge:") &&
     !surfaceSource.includes(
       'trailingLabel:\n                      hasUserWorkspace && workspaceMode !== "worktree"',
     ) &&
@@ -4930,8 +4966,10 @@ expect(
     surfaceSource.includes("showChevron: isConnected") &&
     surfaceSource.includes("disabled: false") &&
     // Connected providers list first (A–Z); disconnected stay muted, not recolored.
-    surfaceSource.includes("left.authStatus === \"connected\" ? 0 : 1") &&
-    surfaceSource.includes("left.displayName.localeCompare(right.displayName") &&
+    surfaceSource.includes('left.authStatus === "connected" ? 0 : 1') &&
+    surfaceSource.includes(
+      "left.displayName.localeCompare(right.displayName",
+    ) &&
     surfaceSource.includes("disconnected: !isConnected") &&
     styleSource.includes(".is-provider.is-disconnected") &&
     styleSource.includes("opacity: 0.58") &&
@@ -5378,7 +5416,7 @@ expect(
 expect(
   surfaceSource.includes("function EditorGroupPane") &&
     surfaceSource.includes('aria-label="Split editor down"') &&
-    surfaceSource.includes('aria-label="Editor AI companion"') &&
+    surfaceSource.includes('aria-label="Toggle chat"') &&
     surfaceSource.includes("gyro-sidebar-explorer-toolbar") &&
     surfaceSource.includes('aria-label="New file"') &&
     surfaceSource.includes('aria-label="Source control message"') &&
@@ -5409,7 +5447,7 @@ expect(
     tauriSource.includes("impl LanguageServerManager") &&
     tauriSource.includes("spawn_lsp_message_reader") &&
     styleSource.includes(".gyro-editor-groups.is-split-right") &&
-    styleSource.includes(".gyro-ide-assistant-composer") &&
+    styleSource.includes(".gyro-sidebar-ai-chat") &&
     surfaceSource.includes('role="tree"') &&
     surfaceSource.includes('role="treeitem"') &&
     surfaceSource.includes('event.key === "ArrowRight"') &&

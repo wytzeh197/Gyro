@@ -5,8 +5,11 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Atom,
+  Binary,
   Blocks,
   Bot,
+  Braces,
   CalendarClock,
   Camera,
   Check,
@@ -17,10 +20,13 @@ import {
   Command,
   Copy,
   CornerDownRight,
+  Database,
   Download,
   Edit3,
+  FileArchive,
   FileCode2,
   FileText,
+  FileType,
   Folder,
   Gauge,
   GitBranch,
@@ -30,7 +36,9 @@ import {
   Goal,
   GripVertical,
   HardDrive,
+  Hash,
   HelpCircle,
+  Image as ImageIcon,
   ImagePlus,
   KeyRound,
   Laptop,
@@ -314,6 +322,33 @@ function restingSidebarWidth() {
  * `triggerRef` when the button that opens the surface sits outside that
  * subtree, so pressing the trigger toggles instead of dismiss-then-reopen.
  */
+/**
+ * Chat switcher glyph: two left-aligned rules, the upper one longer. Reads as
+ * "a list of chats" without borrowing the hamburger's meaning.
+ */
+function ChatSwitcherIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      viewBox="0 0 16 16"
+      width={size}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect fill="currentColor" height="1.8" rx="0.9" width="12" x="2" y="5" />
+      <rect
+        fill="currentColor"
+        height="1.8"
+        rx="0.9"
+        width="7.5"
+        x="2"
+        y="9.2"
+      />
+    </svg>
+  );
+}
+
 function useOutsidePointerDismiss<T extends HTMLElement>(
   isOpen: boolean,
   onDismiss: () => void,
@@ -452,6 +487,11 @@ type AppChromeProps = {
   onWorkspaceSidebarHiddenChange?: (hidden: boolean) => void;
   onWorkspaceSidebarWidthChange?: (width?: number) => void;
   onRetryWorkspacePreparation?: () => void;
+  /**
+   * The AI view is the workspace's chat: the sidebar renders the same
+   * ChatSurface the Sessions destination does, at sidebar width.
+   */
+  renderAiChat?: () => ReactNode;
   children: ReactNode;
 };
 
@@ -827,8 +867,39 @@ function settingsSearchResults(query: string) {
     .map(({ entry }) => entry);
 }
 
+/**
+ * Pending work on a view container, shown as a count on its rail icon.
+ * `description` carries the phrasing for assistive tech ("12 changes").
+ */
+type ActivityRailBadge = { count: number; description: string };
+
+/** VS Code caps its activity bar badges at 99; anything more reads "99+". */
+function activityBadgeLabel(count: number) {
+  return count > 99 ? "99+" : String(count);
+}
+
+/**
+ * Badge the Source Control icon with the number of change rows, counting the
+ * staged and unstaged sides separately exactly as the panel lists them.
+ */
+function sourceControlRailBadge(
+  sourceControl?: SourceControlState,
+): Partial<Record<IdeViewId, ActivityRailBadge>> | undefined {
+  const count = sourceControl?.available ? sourceControl.files.length : 0;
+  if (count === 0) {
+    return undefined;
+  }
+  return {
+    "source-control": {
+      count,
+      description: `${count} change${count === 1 ? "" : "s"}`,
+    },
+  };
+}
+
 function WorkspaceActivityRail({
   activeView,
+  badges,
   hasWorkspace,
   isVisible,
   isSidebarHidden,
@@ -838,6 +909,7 @@ function WorkspaceActivityRail({
   onToggleSidebar,
 }: {
   activeView: IdeViewId;
+  badges?: Partial<Record<IdeViewId, ActivityRailBadge>>;
   hasWorkspace: boolean;
   isVisible: boolean;
   isSidebarHidden: boolean;
@@ -851,9 +923,20 @@ function WorkspaceActivityRail({
     const Icon = workspaceShellIcons[view.icon];
     const isActive = activeView === view.id;
     const isDisabled = view.requiresWorkspace && !hasWorkspace;
+    const badge = badges?.[view.id];
+    const badgeCount = isDisabled ? 0 : (badge?.count ?? 0);
+    const badgeDescription = badgeCount === 0 ? undefined : badge?.description;
+    const railLabel = badgeDescription
+      ? `${view.label}, ${badgeDescription}`
+      : view.label;
+    const railTitle = isDisabled
+      ? `Open a project to use ${view.label}`
+      : badgeDescription
+        ? `${view.label} — ${badgeDescription}`
+        : view.label;
     return (
       <button
-        aria-label={view.label}
+        aria-label={railLabel}
         aria-pressed={isActive && !isSidebarHidden}
         className={isActive ? "is-active" : ""}
         disabled={isDisabled}
@@ -874,11 +957,16 @@ function WorkspaceActivityRail({
           }
           onSelectView?.(view.id);
         }}
-        title={isDisabled ? `Open a project to use ${view.label}` : view.label}
+        title={railTitle}
         tabIndex={isVisible ? undefined : -1}
         type="button"
       >
         <Icon size={18} />
+        {badgeCount > 0 ? (
+          <span aria-hidden="true" className="gyro-activity-rail-badge">
+            {activityBadgeLabel(badgeCount)}
+          </span>
+        ) : null}
       </button>
     );
   };
@@ -990,6 +1078,7 @@ export function AppChrome({
   onWorkspaceSidebarWidthChange,
   workspacePreparation,
   onRetryWorkspacePreparation,
+  renderAiChat,
   children,
 }: AppChromeProps) {
   const isIdeSurface =
@@ -998,9 +1087,7 @@ export function AppChrome({
   // Workspace (code) always keeps the sidebar. Hide/show only exists on
   // Sessions and other non-IDE shells — the restore control never landed
   // cleanly under the traffic lights in Workspace.
-  const isSidebarHidden = isIdeSurface
-    ? false
-    : localSidebarHidden;
+  const isSidebarHidden = isIdeSurface ? false : localSidebarHidden;
   const setIsSidebarHidden = useCallback(
     (next: boolean | ((current: boolean) => boolean)) => {
       if (isIdeSurface) {
@@ -1064,6 +1151,18 @@ export function AppChrome({
     (session) => session.id === activeSessionId,
   );
   const ideSidebarMaximumWidth = ideSidebarMinimumWidth * 2;
+  /**
+   * The AI view holds a full chat, which needs more room than a file tree.
+   * Widen for it unless the user has already dragged the sidebar wider.
+   */
+  const AI_VIEW_SIDEBAR_WIDTH = 360;
+  const effectiveIdeSidebarWidth =
+    ide?.activeView === "ai"
+      ? Math.min(
+          Math.max(ideSidebarWidth, AI_VIEW_SIDEBAR_WIDTH),
+          Math.max(ideSidebarMaximumWidth, AI_VIEW_SIDEBAR_WIDTH),
+        )
+      : ideSidebarWidth;
   const showSidebarUpdate = updateState
     ? shouldShowSidebarUpdate(updateState)
     : false;
@@ -1289,13 +1388,14 @@ export function AppChrome({
       data-workspace-activity-rail={isIdeSurface ? "visible" : "hidden"}
       style={
         {
-          "--gyro-ide-sidebar-width": `${ideSidebarWidth}px`,
+          "--gyro-ide-sidebar-width": `${effectiveIdeSidebarWidth}px`,
         } as CSSProperties
       }
       ref={appShellRef}
     >
       <WorkspaceActivityRail
         activeView={ide?.activeView ?? "explorer"}
+        badges={sourceControlRailBadge(ide?.sourceControl)}
         hasWorkspace={Boolean(workspacePath)}
         isSidebarCollapsible={false}
         isSidebarHidden={false}
@@ -1357,6 +1457,7 @@ export function AppChrome({
             />
           ) : (
             <WorkspaceSidebarContent
+              renderAiChat={renderAiChat}
               activeDestination={activeDestination}
               activePaneTab={activePaneTab}
               activeSession={activeSession}
@@ -1443,22 +1544,6 @@ export function AppChrome({
           {activeDestination !== "settings" && !isIdeSurface ? (
             <div className="gyro-sidebar-footer">
               <div className="gyro-sidebar-footer-row">
-                {isShellOptimizing ? (
-                  <span
-                    className="gyro-shell-optimizing"
-                    role="status"
-                    aria-live="polite"
-                    title="Warming local storage and providers"
-                  >
-                    <span
-                      className="gyro-shell-optimizing-spinner"
-                      aria-hidden="true"
-                    />
-                    <em>Optimizing Gyro</em>
-                  </span>
-                ) : (
-                  <span className="gyro-shell-optimizing is-spacer" aria-hidden="true" />
-                )}
                 <button
                   className="gyro-account-button"
                   disabled={isShellOptimizing}
@@ -1484,6 +1569,25 @@ export function AppChrome({
                     <strong>Settings</strong>
                   </span>
                 </button>
+                {isShellOptimizing ? (
+                  <span
+                    className="gyro-shell-optimizing"
+                    role="status"
+                    aria-live="polite"
+                    title="Warming local storage and providers"
+                  >
+                    <span
+                      className="gyro-shell-optimizing-spinner"
+                      aria-hidden="true"
+                    />
+                    <em>Optimizing Gyro</em>
+                  </span>
+                ) : (
+                  <span
+                    className="gyro-shell-optimizing is-spacer"
+                    aria-hidden="true"
+                  />
+                )}
               </div>
             </div>
           ) : null}
@@ -1900,6 +2004,288 @@ function SettingsSidebarContent({
   );
 }
 
+type ScmFileBadge = { icon: IconComponent; tone: string };
+
+/**
+ * Language badge for a source control row: the icon and the colour tone the
+ * Explorer would use for the same file, so a change list reads by colour first
+ * and by name second — the way VS Code's Source Control view does.
+ */
+const SCM_BADGE_REACT: ScmFileBadge = { icon: Atom, tone: "react" };
+const SCM_BADGE_BINARY: ScmFileBadge = { icon: Binary, tone: "binary" };
+const SCM_BADGE_JSON: ScmFileBadge = { icon: Braces, tone: "json" };
+const SCM_BADGE_STYLESHEET: ScmFileBadge = { icon: Hash, tone: "css" };
+
+const SCM_BADGE_BY_EXTENSION: Record<string, ScmFileBadge> = {
+  tsx: SCM_BADGE_REACT,
+  jsx: SCM_BADGE_REACT,
+  ts: { icon: FileCode2, tone: "typescript" },
+  mts: { icon: FileCode2, tone: "typescript" },
+  cts: { icon: FileCode2, tone: "typescript" },
+  js: { icon: FileCode2, tone: "javascript" },
+  mjs: { icon: FileCode2, tone: "javascript" },
+  cjs: { icon: FileCode2, tone: "javascript" },
+  json: SCM_BADGE_JSON,
+  jsonc: SCM_BADGE_JSON,
+  css: SCM_BADGE_STYLESHEET,
+  scss: SCM_BADGE_STYLESHEET,
+  sass: SCM_BADGE_STYLESHEET,
+  less: SCM_BADGE_STYLESHEET,
+  html: { icon: FileCode2, tone: "html" },
+  htm: { icon: FileCode2, tone: "html" },
+  vue: { icon: FileCode2, tone: "vue" },
+  svelte: { icon: FileCode2, tone: "html" },
+  md: { icon: FileText, tone: "markdown" },
+  mdx: { icon: FileText, tone: "markdown" },
+  txt: { icon: FileText, tone: "default" },
+  rs: { icon: FileCode2, tone: "rust" },
+  go: { icon: FileCode2, tone: "go" },
+  py: { icon: FileCode2, tone: "python" },
+  rb: { icon: FileCode2, tone: "ruby" },
+  swift: { icon: FileCode2, tone: "swift" },
+  java: { icon: FileCode2, tone: "java" },
+  kt: { icon: FileCode2, tone: "java" },
+  c: { icon: FileCode2, tone: "cpp" },
+  h: { icon: FileCode2, tone: "cpp" },
+  cpp: { icon: FileCode2, tone: "cpp" },
+  hpp: { icon: FileCode2, tone: "cpp" },
+  toml: { icon: Settings, tone: "config" },
+  yaml: { icon: Settings, tone: "config" },
+  yml: { icon: Settings, tone: "config" },
+  ini: { icon: Settings, tone: "config" },
+  conf: { icon: Settings, tone: "config" },
+  env: { icon: Settings, tone: "config" },
+  sh: { icon: Terminal, tone: "shell" },
+  bash: { icon: Terminal, tone: "shell" },
+  zsh: { icon: Terminal, tone: "shell" },
+  fish: { icon: Terminal, tone: "shell" },
+  png: { icon: ImageIcon, tone: "image" },
+  jpg: { icon: ImageIcon, tone: "image" },
+  jpeg: { icon: ImageIcon, tone: "image" },
+  gif: { icon: ImageIcon, tone: "image" },
+  webp: { icon: ImageIcon, tone: "image" },
+  avif: { icon: ImageIcon, tone: "image" },
+  svg: { icon: ImageIcon, tone: "image" },
+  ico: { icon: ImageIcon, tone: "image" },
+  icns: { icon: ImageIcon, tone: "image" },
+  woff: { icon: FileType, tone: "font" },
+  woff2: { icon: FileType, tone: "font" },
+  ttf: { icon: FileType, tone: "font" },
+  otf: { icon: FileType, tone: "font" },
+  zip: { icon: FileArchive, tone: "archive" },
+  gz: { icon: FileArchive, tone: "archive" },
+  tar: { icon: FileArchive, tone: "archive" },
+  dmg: { icon: FileArchive, tone: "archive" },
+  sql: { icon: Database, tone: "data" },
+  db: { icon: Database, tone: "data" },
+  sqlite: { icon: Database, tone: "data" },
+  csv: { icon: Database, tone: "data" },
+  bin: SCM_BADGE_BINARY,
+  wasm: SCM_BADGE_BINARY,
+};
+
+function scmFileBadge(path: string): ScmFileBadge {
+  const name = path.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
+  if (
+    name.endsWith(".lock") ||
+    name.endsWith("-lock.json") ||
+    name.endsWith("-lock.yaml")
+  ) {
+    return { icon: LockKeyhole, tone: "lock" };
+  }
+  const extension = name.includes(".") ? (name.split(".").at(-1) ?? "") : "";
+  return (
+    SCM_BADGE_BY_EXTENSION[extension] ?? { icon: FileText, tone: "default" }
+  );
+}
+
+/**
+ * Letter and colour tone per resource state, mirroring VS Code's git
+ * decorations: M amber, A/U/R mint, D and conflicts red.
+ */
+const SCM_STATE_DECORATIONS: Record<
+  SourceControlFile["state"],
+  { letter: string; tone: string; label: string }
+> = {
+  modified: { letter: "M", tone: "modified", label: "Modified" },
+  added: { letter: "A", tone: "added", label: "Added" },
+  deleted: { letter: "D", tone: "deleted", label: "Deleted" },
+  renamed: { letter: "R", tone: "renamed", label: "Renamed" },
+  untracked: { letter: "U", tone: "untracked", label: "Untracked" },
+  conflicted: { letter: "C", tone: "conflicted", label: "Conflict" },
+  staged: { letter: "S", tone: "staged", label: "Staged" },
+};
+
+function scmStateDecoration(state: SourceControlFile["state"]) {
+  return SCM_STATE_DECORATIONS[state] ?? SCM_STATE_DECORATIONS.modified;
+}
+
+/** Cap per group so a huge working tree cannot stall the sidebar. */
+const SCM_GROUP_LIMIT = 60;
+
+/**
+ * One VS Code-style change group — "Staged Changes" or "Changes" — with a
+ * collapsible header, a count, group actions, and colour-coded rows.
+ */
+function ScmChangeGroup({
+  actions,
+  className,
+  collapsed,
+  emptyCopy,
+  files,
+  onDiscardFile,
+  onOpenDiff,
+  onToggleCollapsed,
+  onToggleSelected,
+  onToggleStage,
+  selectedPaths,
+  title,
+}: {
+  actions?: ReactNode;
+  className?: string;
+  collapsed: boolean;
+  emptyCopy?: string;
+  files: SourceControlFile[];
+  onDiscardFile?: (path: string) => void | Promise<void>;
+  onOpenDiff?: (path: string, staged: boolean) => void;
+  onToggleCollapsed: () => void;
+  onToggleSelected: (path: string) => void;
+  onToggleStage?: (path: string, staged: boolean) => void | Promise<void>;
+  selectedPaths: Set<string>;
+  title: string;
+}) {
+  const visible = files.slice(0, SCM_GROUP_LIMIT);
+  const hidden = files.length - visible.length;
+  return (
+    <>
+      <div
+        className={
+          className
+            ? `gyro-sidebar-scm-group-label ${className}`
+            : "gyro-sidebar-scm-group-label"
+        }
+      >
+        <button
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+          className="gyro-sidebar-scm-group-toggle"
+          onClick={onToggleCollapsed}
+          type="button"
+        >
+          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+        </button>
+        <span className="gyro-scm-label-text">{title}</span>
+        <small className="gyro-sidebar-scm-count">{files.length}</small>
+        {actions ? (
+          <div className="gyro-sidebar-scm-batch-actions">{actions}</div>
+        ) : (
+          <span />
+        )}
+      </div>
+      {collapsed ? null : (
+        <>
+          {visible.map((file) => {
+            const parentFolder = workspaceParentFolder(file.path);
+            const decoration = scmStateDecoration(file.state);
+            const badge = scmFileBadge(file.path);
+            const BadgeIcon = badge.icon;
+            const isGone = file.state === "deleted" || file.state === "renamed";
+            return (
+              <div
+                className="gyro-sidebar-scm-row"
+                data-state={file.state}
+                key={`${file.path}:${file.staged}`}
+              >
+                <input
+                  aria-label={`Select ${file.path}`}
+                  checked={selectedPaths.has(file.path)}
+                  onChange={() => onToggleSelected(file.path)}
+                  type="checkbox"
+                />
+                <button
+                  aria-label={`Open diff for ${file.path}`}
+                  className="gyro-sidebar-scm-identity"
+                  onClick={() => onOpenDiff?.(file.path, file.staged)}
+                  title={`${file.path} — ${decoration.label}${
+                    file.staged ? ", staged" : ""
+                  }`}
+                  type="button"
+                >
+                  <BadgeIcon
+                    aria-hidden="true"
+                    className={`gyro-sidebar-scm-file-icon is-${badge.tone}`}
+                    size={13}
+                  />
+                  <span
+                    className={
+                      isGone
+                        ? "gyro-sidebar-scm-filename is-gone"
+                        : "gyro-sidebar-scm-filename"
+                    }
+                  >
+                    {workspaceName(file.path)}
+                  </span>
+                  {parentFolder ? (
+                    <small
+                      className={
+                        isGone
+                          ? "gyro-sidebar-scm-directory is-gone"
+                          : "gyro-sidebar-scm-directory"
+                      }
+                    >
+                      {parentFolder}
+                    </small>
+                  ) : null}
+                </button>
+                <button
+                  aria-label={`Discard changes in ${file.path}`}
+                  className="gyro-sidebar-scm-discard"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Discard all local changes in ${file.path}? This cannot be undone.`,
+                      )
+                    ) {
+                      void onDiscardFile?.(file.path);
+                    }
+                  }}
+                  title="Discard changes"
+                  type="button"
+                >
+                  <Trash2 size={11} />
+                </button>
+                <button
+                  aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
+                  className="gyro-sidebar-scm-stage"
+                  onClick={() => void onToggleStage?.(file.path, file.staged)}
+                  title={file.staged ? "Unstage changes" : "Stage changes"}
+                  type="button"
+                >
+                  {file.staged ? <Minus size={12} /> : <Plus size={12} />}
+                </button>
+                <small
+                  className={`gyro-sidebar-scm-state is-${decoration.tone}`}
+                  title={decoration.label}
+                >
+                  {decoration.letter}
+                </small>
+              </div>
+            );
+          })}
+          {hidden > 0 ? (
+            <div className="gyro-sidebar-mini-copy">
+              {hidden} more file{hidden === 1 ? "" : "s"} not shown
+            </div>
+          ) : null}
+          {files.length === 0 && emptyCopy ? (
+            <div className="gyro-sidebar-mini-copy">{emptyCopy}</div>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
 function WorkspaceSidebarContent({
   sessions,
   commandProfiles,
@@ -1976,8 +2362,10 @@ function WorkspaceSidebarContent({
   onToggleWorkspacePreparation,
   onCloseWorkspacePreparation,
   onRetryWorkspacePreparation,
+  renderAiChat,
   workspacePreparationRef,
 }: {
+  renderAiChat?: () => ReactNode;
   sessions: Session[];
   commandProfiles: CommandProfile[];
   savedProjects: Array<{ path: string; label: string }>;
@@ -2157,6 +2545,40 @@ function WorkspaceSidebarContent({
   const [selectedSourceControlPaths, setSelectedSourceControlPaths] = useState<
     Set<string>
   >(() => new Set());
+  const [collapsedScmGroups, setCollapsedScmGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleScmGroup = useCallback((group: string) => {
+    setCollapsedScmGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }, []);
+  const toggleSourceControlSelection = useCallback((path: string) => {
+    setSelectedSourceControlPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+  const sourceControlFiles = ide?.sourceControl.files;
+  const stagedSourceControlFiles = useMemo(
+    () =>
+      (sourceControlFiles ?? [])
+        .filter((file) => file.staged)
+        .sort((first, second) => first.path.localeCompare(second.path)),
+    [sourceControlFiles],
+  );
+  const unstagedSourceControlFiles = useMemo(
+    () =>
+      (sourceControlFiles ?? [])
+        .filter((file) => !file.staged)
+        .sort((first, second) => first.path.localeCompare(second.path)),
+    [sourceControlFiles],
+  );
   const [debugAdapterCommand, setDebugAdapterCommand] = useState("lldb-dap");
   const visibleFiles = useMemo(
     () =>
@@ -2891,11 +3313,20 @@ function WorkspaceSidebarContent({
               >
                 <Search size={14} />
                 <input
-                  aria-label="Search workspace"
-                  onChange={(event) =>
-                    setSidebarSearchDraft(event.target.value)
-                  }
-                  placeholder="Search files"
+                  // This view greps file contents; finding a file by name is
+                  // the palette's job, so the copy has to separate the two.
+                  aria-label="Search in files"
+                  onChange={(event) => {
+                    const draft = event.target.value;
+                    setSidebarSearchDraft(draft);
+                    // An empty box means an empty result list: matches from the
+                    // previous query must not outlive the query itself.
+                    if (!draft.trim()) {
+                      setSelectedReplacePaths(new Set());
+                      onRunWorkspaceSearch?.({ query: "" });
+                    }
+                  }}
+                  placeholder="Search in files"
                   value={sidebarSearchDraft}
                 />
                 <button
@@ -3055,43 +3486,48 @@ function WorkspaceSidebarContent({
                 <div className="gyro-sidebar-scm-group-label">
                   <span className="gyro-scm-label-text">Repository</span>
                 </div>
-                <div className="gyro-sidebar-scm-repository">
-                  <HardDrive size={12} aria-hidden="true" />
-                  <strong title={workspacePath}>
-                    {workspaceName(workspacePath)}
-                  </strong>
-                  <button
-                    aria-label="Refresh source control"
-                    onClick={onRefreshSourceControl}
-                    title="Refresh"
-                    type="button"
-                  >
-                    <RefreshCw size={12} />
-                  </button>
+                {/* Repository and branch read as one line: what you are in,
+                    and where in it. They stack again when the sidebar is too
+                    narrow to hold both names. */}
+                <div className="gyro-sidebar-scm-head">
+                  <div className="gyro-sidebar-scm-repository">
+                    <HardDrive size={12} aria-hidden="true" />
+                    <strong title={workspacePath}>
+                      {workspaceName(workspacePath)}
+                    </strong>
+                    <button
+                      aria-label="Refresh source control"
+                      onClick={onRefreshSourceControl}
+                      title="Refresh"
+                      type="button"
+                    >
+                      <RefreshCw size={12} />
+                    </button>
+                  </div>
+                  <ScmBranchPicker
+                    branchCatalog={branchCatalog}
+                    currentBranch={
+                      ide?.sourceControl.branch ?? branchCatalog?.current
+                    }
+                    disabled={isBranchLoading}
+                    error={
+                      ide?.sourceControl.error ??
+                      branchCatalog?.error ??
+                      (ide?.sourceControl.available === false
+                        ? "Git is not ready for this workspace."
+                        : undefined)
+                    }
+                    isLoading={isBranchLoading}
+                    onCreateBranch={() =>
+                      onCreateWorkspaceBranch?.(
+                        ide?.sourceControl.branch ?? branchCatalog?.current,
+                      )
+                    }
+                    onSelectBranch={(branch) =>
+                      onSelectWorkspaceBranch?.(branch)
+                    }
+                  />
                 </div>
-                <ScmBranchPicker
-                  branchCatalog={branchCatalog}
-                  currentBranch={
-                    ide?.sourceControl.branch ?? branchCatalog?.current
-                  }
-                  disabled={isBranchLoading}
-                  error={
-                    ide?.sourceControl.error ??
-                    branchCatalog?.error ??
-                    (ide?.sourceControl.available === false
-                      ? "Git is not ready for this workspace."
-                      : undefined)
-                  }
-                  isLoading={isBranchLoading}
-                  onCreateBranch={() =>
-                    onCreateWorkspaceBranch?.(
-                      ide?.sourceControl.branch ?? branchCatalog?.current,
-                    )
-                  }
-                  onSelectBranch={(branch) =>
-                    onSelectWorkspaceBranch?.(branch)
-                  }
-                />
                 <form
                   className="gyro-sidebar-commit-form"
                   onSubmit={(event) => {
@@ -3109,7 +3545,13 @@ function WorkspaceSidebarContent({
                     onChange={(event) =>
                       setSourceControlMessage(event.target.value)
                     }
-                    placeholder="Message (Ctrl+Enter to commit)"
+                    placeholder={`Message (${
+                      isMacPlatform() ? "⌘Enter" : "Ctrl+Enter"
+                    } to commit${
+                      ide?.sourceControl.branch
+                        ? ` on "${ide.sourceControl.branch}"`
+                        : ""
+                    })`}
                     value={sourceControlMessage}
                     onKeyDown={(event) => {
                       if (
@@ -3123,11 +3565,7 @@ function WorkspaceSidebarContent({
                   <div className="gyro-sidebar-commit-actions">
                     <button
                       className="is-secondary"
-                      disabled={
-                        !(ide?.sourceControl.files ?? []).some(
-                          (file) => !file.staged,
-                        )
-                      }
+                      disabled={unstagedSourceControlFiles.length === 0}
                       onClick={() => void onStageAllSourceControl?.()}
                       title="Stage all changes"
                       type="button"
@@ -3137,96 +3575,23 @@ function WorkspaceSidebarContent({
                     <button
                       disabled={
                         !sourceControlMessage.trim() ||
-                        (!(ide?.sourceControl.files ?? []).some(
-                          (file) => file.staged,
-                        ) &&
-                          !(ide?.sourceControl.files ?? []).some(
-                            (file) => !file.staged,
-                          ))
+                        (stagedSourceControlFiles.length === 0 &&
+                          unstagedSourceControlFiles.length === 0)
                       }
                       type="submit"
                       title={
-                        (ide?.sourceControl.files ?? []).some(
-                          (file) => file.staged,
-                        )
+                        stagedSourceControlFiles.length > 0
                           ? "Commit staged changes"
                           : "Stage all changes and commit"
                       }
                     >
-                      {(ide?.sourceControl.files ?? []).some(
-                        (file) => file.staged,
-                      )
+                      <Check size={13} />
+                      {stagedSourceControlFiles.length > 0
                         ? "Commit"
                         : "Commit all"}
                     </button>
                   </div>
                 </form>
-                <div className="gyro-sidebar-scm-group-label is-changes">
-                  <span className="gyro-scm-label-text">Changes</span>
-                  <small>{ide?.sourceControl.files.length ?? 0}</small>
-                  <div className="gyro-sidebar-scm-batch-actions">
-                    <button
-                      aria-label="Select all source control changes"
-                      disabled={(ide?.sourceControl.files.length ?? 0) === 0}
-                      onClick={() =>
-                        setSelectedSourceControlPaths(
-                          new Set(
-                            (ide?.sourceControl.files ?? []).map(
-                              (file) => file.path,
-                            ),
-                          ),
-                        )
-                      }
-                      title="Select all"
-                      type="button"
-                    >
-                      <ListChecks size={11} />
-                    </button>
-                    <button
-                      aria-label="Stage selected source control changes"
-                      disabled={selectedSourceControlPaths.size === 0}
-                      onClick={async () => {
-                        const selected = (
-                          ide?.sourceControl.files ?? []
-                        ).filter(
-                          (file) =>
-                            selectedSourceControlPaths.has(file.path) &&
-                            !file.staged,
-                        );
-                        for (const file of selected) {
-                          await onToggleSourceControlFile?.(file.path, false);
-                        }
-                        onRefreshSourceControl?.();
-                      }}
-                      title="Stage selected"
-                      type="button"
-                    >
-                      <Plus size={11} />
-                    </button>
-                    <button
-                      aria-label="Discard selected source control changes"
-                      disabled={selectedSourceControlPaths.size === 0}
-                      onClick={async () => {
-                        if (
-                          !window.confirm(
-                            `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
-                          )
-                        ) {
-                          return;
-                        }
-                        for (const path of selectedSourceControlPaths) {
-                          await onDiscardSourceControlFile?.(path);
-                        }
-                        setSelectedSourceControlPaths(new Set());
-                        onRefreshSourceControl?.();
-                      }}
-                      title="Discard selected"
-                      type="button"
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                </div>
                 {ide?.sourceControl.error ? (
                   <div className="gyro-sidebar-mini-copy is-error">
                     {ide.sourceControl.error}
@@ -3238,116 +3603,114 @@ function WorkspaceSidebarContent({
                     Git is not ready for this workspace.
                   </div>
                 ) : null}
-                {(ide?.sourceControl.files ?? []).length > 0 ? (
-                  [...(ide?.sourceControl.files ?? [])]
-                    .sort(
-                      (first, second) =>
-                        Number(second.staged) - Number(first.staged) ||
-                        first.path.localeCompare(second.path),
-                    )
-                    .slice(0, 60)
-                    .map((file) => {
-                      const parentFolder = workspaceParentFolder(file.path);
-                      const stateLabel = file.staged ? "staged" : file.state;
-                      const stateDecoration = file.staged
-                        ? "S"
-                        : file.state === "untracked"
-                          ? "U"
-                          : file.state === "deleted"
-                            ? "D"
-                            : file.state === "added"
-                              ? "A"
-                              : file.state === "renamed"
-                                ? "R"
-                                : file.state === "conflicted"
-                                  ? "!"
-                                  : "M";
-                      return (
-                        <div
-                          className="gyro-sidebar-scm-row"
-                          key={`${file.path}:${file.staged}`}
-                        >
-                          <input
-                            aria-label={`Select ${file.path}`}
-                            checked={selectedSourceControlPaths.has(file.path)}
-                            onChange={() =>
-                              setSelectedSourceControlPaths((current) => {
-                                const next = new Set(current);
-                                if (next.has(file.path)) next.delete(file.path);
-                                else next.add(file.path);
-                                return next;
-                              })
-                            }
-                            type="checkbox"
-                          />
-                          <button
-                            aria-label={`Open diff for ${file.path}`}
-                            className="gyro-sidebar-scm-identity"
-                            onClick={() =>
-                              onOpenSourceControlDiff?.(
-                                file.path,
-                                file.staged,
-                              )
-                            }
-                            title={file.path}
-                            type="button"
-                          >
-                            <span className="gyro-sidebar-scm-filename">
-                              {workspaceName(file.path)}
-                            </span>
-                            {parentFolder ? (
-                              <small className="gyro-sidebar-scm-directory">
-                                {parentFolder}
-                              </small>
-                            ) : null}
-                          </button>
-                          <small
-                            className="gyro-sidebar-scm-state"
-                            title={stateLabel}
-                          >
-                            {stateDecoration}
-                          </small>
-                          <button
-                            aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
-                            className="gyro-sidebar-scm-stage"
-                            onClick={() =>
-                              onToggleSourceControlFile?.(
-                                file.path,
-                                file.staged,
-                              )
-                            }
-                            title={file.staged ? "Unstage" : "Stage"}
-                            type="button"
-                          >
-                            {file.staged ? (
-                              <Minus size={12} />
-                            ) : (
-                              <Plus size={12} />
-                            )}
-                          </button>
-                          <button
-                            aria-label={`Discard changes in ${file.path}`}
-                            className="gyro-sidebar-scm-discard"
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  `Discard all local changes in ${file.path}? This cannot be undone.`,
-                                )
-                              ) {
-                                onDiscardSourceControlFile?.(file.path);
-                              }
-                            }}
-                            title="Discard"
-                            type="button"
-                          >
-                            <Trash2 size={11} />
-                          </button>
-                        </div>
-                      );
-                    })
-                ) : ide?.sourceControl.available !== false ? (
-                  <div className="gyro-sidebar-mini-copy">No changes</div>
+                {stagedSourceControlFiles.length > 0 ? (
+                  <ScmChangeGroup
+                    actions={
+                      <button
+                        aria-label="Unstage all staged changes"
+                        onClick={async () => {
+                          for (const file of stagedSourceControlFiles) {
+                            await onToggleSourceControlFile?.(file.path, true);
+                          }
+                          onRefreshSourceControl?.();
+                        }}
+                        title="Unstage all"
+                        type="button"
+                      >
+                        <Minus size={11} />
+                      </button>
+                    }
+                    className="is-staged"
+                    collapsed={collapsedScmGroups.has("staged")}
+                    files={stagedSourceControlFiles}
+                    onDiscardFile={onDiscardSourceControlFile}
+                    onOpenDiff={onOpenSourceControlDiff}
+                    onToggleCollapsed={() => toggleScmGroup("staged")}
+                    onToggleSelected={toggleSourceControlSelection}
+                    onToggleStage={onToggleSourceControlFile}
+                    selectedPaths={selectedSourceControlPaths}
+                    title="Staged Changes"
+                  />
                 ) : null}
+                <ScmChangeGroup
+                  actions={
+                    <>
+                      <button
+                        aria-label="Select all source control changes"
+                        disabled={unstagedSourceControlFiles.length === 0}
+                        onClick={() =>
+                          setSelectedSourceControlPaths(
+                            new Set(
+                              unstagedSourceControlFiles.map(
+                                (file) => file.path,
+                              ),
+                            ),
+                          )
+                        }
+                        title="Select all"
+                        type="button"
+                      >
+                        <ListChecks size={11} />
+                      </button>
+                      <button
+                        aria-label="Stage selected source control changes"
+                        disabled={selectedSourceControlPaths.size === 0}
+                        onClick={async () => {
+                          const selected = unstagedSourceControlFiles.filter(
+                            (file) => selectedSourceControlPaths.has(file.path),
+                          );
+                          for (const file of selected) {
+                            await onToggleSourceControlFile?.(file.path, false);
+                          }
+                          onRefreshSourceControl?.();
+                        }}
+                        title="Stage selected"
+                        type="button"
+                      >
+                        <Plus size={11} />
+                      </button>
+                      <button
+                        aria-label="Discard selected source control changes"
+                        disabled={selectedSourceControlPaths.size === 0}
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          for (const path of selectedSourceControlPaths) {
+                            await onDiscardSourceControlFile?.(path);
+                          }
+                          setSelectedSourceControlPaths(new Set());
+                          onRefreshSourceControl?.();
+                        }}
+                        title="Discard selected"
+                        type="button"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </>
+                  }
+                  className="is-changes"
+                  collapsed={collapsedScmGroups.has("changes")}
+                  emptyCopy={
+                    ide?.sourceControl.available === false
+                      ? undefined
+                      : stagedSourceControlFiles.length > 0
+                        ? "Everything else is staged"
+                        : "No changes"
+                  }
+                  files={unstagedSourceControlFiles}
+                  onDiscardFile={onDiscardSourceControlFile}
+                  onOpenDiff={onOpenSourceControlDiff}
+                  onToggleCollapsed={() => toggleScmGroup("changes")}
+                  onToggleSelected={toggleSourceControlSelection}
+                  onToggleStage={onToggleSourceControlFile}
+                  selectedPaths={selectedSourceControlPaths}
+                  title="Changes"
+                />
                 <GithubSidebarPanel
                   github={ide?.github}
                   branch={ide?.sourceControl.branch}
@@ -3510,36 +3873,44 @@ function WorkspaceSidebarContent({
           ) : null}
 
           {activeIdeView === "ai" ? (
-            <SidebarSection
-              grow
-              meta={String(ide?.aiToolCalls.length ?? 0)}
-              title="AI"
-            >
-              <div className="gyro-sidebar-mini-copy">
-                Editor AI can read selected code, open tabs, diffs, terminal
-                snapshots, and browser state. File edits still route through
-                visible diff approval.
+            renderAiChat ? (
+              // The workspace's only chat lives here now: the same ChatSurface
+              // the Sessions destination renders, at sidebar width.
+              <div className="gyro-sidebar-ai-chat gyro-ide-assistant-chat">
+                {renderAiChat()}
               </div>
-              {ide?.lastAssistantRequest ? (
-                <SidebarDestinationRow
-                  icon={Bot}
-                  isActive
-                  label={ide.lastAssistantRequest.action.replaceAll("-", " ")}
-                  meta={ide.lastAssistantRequest.path ?? "workspace"}
-                  onClick={() => onOpenToolPanel("diff")}
-                />
-              ) : null}
-              {(ide?.aiToolCalls ?? []).slice(0, 10).map((toolCall) => (
-                <SidebarDestinationRow
-                  icon={Sparkles}
-                  isActive={toolCall.status === "running"}
-                  key={toolCall.id}
-                  label={toolCall.name}
-                  meta={toolCall.status}
-                  onClick={() => onOpenToolPanel("output")}
-                />
-              ))}
-            </SidebarSection>
+            ) : (
+              <SidebarSection
+                grow
+                meta={String(ide?.aiToolCalls.length ?? 0)}
+                title="AI"
+              >
+                <div className="gyro-sidebar-mini-copy">
+                  Editor AI can read selected code, open tabs, diffs, terminal
+                  snapshots, and browser state. File edits still route through
+                  visible diff approval.
+                </div>
+                {ide?.lastAssistantRequest ? (
+                  <SidebarDestinationRow
+                    icon={Bot}
+                    isActive
+                    label={ide.lastAssistantRequest.action.replaceAll("-", " ")}
+                    meta={ide.lastAssistantRequest.path ?? "workspace"}
+                    onClick={() => onOpenToolPanel("diff")}
+                  />
+                ) : null}
+                {(ide?.aiToolCalls ?? []).slice(0, 10).map((toolCall) => (
+                  <SidebarDestinationRow
+                    icon={Sparkles}
+                    isActive={toolCall.status === "running"}
+                    key={toolCall.id}
+                    label={toolCall.name}
+                    meta={toolCall.status}
+                    onClick={() => onOpenToolPanel("output")}
+                  />
+                ))}
+              </SidebarSection>
+            )
           ) : null}
 
           {workspacePath ? (
@@ -5239,6 +5610,17 @@ type ChatSurfaceProps = {
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
   worktreeName?: string;
+  /**
+   * Recent chats for this project plus a way to start a new one, surfaced from
+   * the chat title. Only the workspace AI view passes this: the Sessions
+   * surface already lists chats in its own sidebar.
+   */
+  chatSwitcher?: {
+    chats: Array<{ id: string; title: string; meta?: string }>;
+    activeChatId?: string;
+    onSelect: (sessionId: string) => void;
+    onNewChat: () => void;
+  };
   workspaceMode?: WorkbenchMode;
   showOnboardingSteps?: boolean;
   isEnvironmentRailOpen?: boolean;
@@ -5343,6 +5725,7 @@ export function ChatSurface({
   branchName,
   branchCatalog,
   worktreeName,
+  chatSwitcher,
   workspaceMode = "local",
   showOnboardingSteps = false,
   activeChatPanel,
@@ -5402,6 +5785,11 @@ export function ChatSurface({
   const threadContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
     activeThreadContextMenu !== null,
     () => setActiveThreadContextMenu(null),
+  );
+  const [isChatSwitcherOpen, setIsChatSwitcherOpen] = useState(false);
+  const chatSwitcherRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isChatSwitcherOpen,
+    () => setIsChatSwitcherOpen(false),
   );
   const [activePeek, setActivePeek] = useState<{
     focus: ModelFocus;
@@ -5955,6 +6343,72 @@ export function ChatSurface({
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
+          {chatSwitcher ? (
+            <div className="gyro-chat-switcher" ref={chatSwitcherRef}>
+              <button
+                aria-expanded={isChatSwitcherOpen}
+                aria-haspopup="menu"
+                aria-label="Recent chats"
+                className="gyro-chat-switcher-trigger"
+                onClick={() => setIsChatSwitcherOpen((open) => !open)}
+                title="Recent chats"
+                type="button"
+              >
+                <ChatSwitcherIcon />
+              </button>
+              {isChatSwitcherOpen ? (
+                <div className="gyro-chat-switcher-menu" role="menu">
+                  <button
+                    className="gyro-chat-switcher-item is-action"
+                    onClick={() => {
+                      setIsChatSwitcherOpen(false);
+                      chatSwitcher.onNewChat();
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Plus size={13} />
+                    New chat
+                  </button>
+                  {chatSwitcher.chats.length > 0 ? (
+                    <>
+                      <span className="gyro-chat-switcher-label">Recent</span>
+                      {chatSwitcher.chats.map((chat) => (
+                        <button
+                          aria-current={
+                            chat.id === chatSwitcher.activeChatId
+                              ? "true"
+                              : undefined
+                          }
+                          className={
+                            chat.id === chatSwitcher.activeChatId
+                              ? "gyro-chat-switcher-item is-active"
+                              : "gyro-chat-switcher-item"
+                          }
+                          key={chat.id}
+                          onClick={() => {
+                            setIsChatSwitcherOpen(false);
+                            chatSwitcher.onSelect(chat.id);
+                          }}
+                          role="menuitem"
+                          title={chat.title}
+                          type="button"
+                        >
+                          <MessageSquare size={13} />
+                          <span>{chat.title}</span>
+                          {chat.meta ? <small>{chat.meta}</small> : null}
+                        </button>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="gyro-chat-switcher-empty">
+                      No other chats in this project
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           {workspaceMode === "worktree" ? (
             <span
@@ -8430,12 +8884,6 @@ type IdeSurfaceProps = {
   onEditorRevert?: (path: string) => void;
   onEditorSelectionChange?: (selection?: EditorSelection) => void;
   onAssistantAction?: (action: IdeAssistantAction, instruction: string) => void;
-  assistantReply?: IdeAssistantReply;
-  /**
-   * When set, the AI companion rail renders this chat (Sessions ChatSurface)
-   * instead of the legacy mini ask-about-file form.
-   */
-  renderAssistantChat?: () => ReactNode;
   renderEditor?: (props: {
     buffer?: EditorBuffer;
     fileContent?: WorkspaceFileContent;
@@ -8517,8 +8965,6 @@ export function IdeSurface({
   onEditorRevert,
   onEditorSelectionChange,
   onAssistantAction,
-  assistantReply,
-  renderAssistantChat,
   renderEditor,
   terminalOutput,
   activePaneTab,
@@ -8567,7 +9013,6 @@ export function IdeSurface({
     ? ide.layout.groups
     : [fallbackGroup];
   const activeGroupId = ide?.layout.activeGroupId ?? editorGroups[0]?.id;
-  const [assistantDraft, setAssistantDraft] = useState("");
 
   if (!workspacePath) {
     return (
@@ -8728,10 +9173,9 @@ export function IdeSurface({
                     effectiveMinimapEnabled ??
                     ide?.layout.minimapEnabled !== false
                   }
-                  assistantOpen={ide?.layout.rightAssistantOpen === true}
+                  assistantOpen={ide?.activeView === "ai"}
                   onActivate={() => onSelectEditorGroup?.(group.id)}
                   onAssistantAction={onAssistantAction}
-                  assistantReply={assistantReply}
                   onCloseGroup={() => onCloseEditorGroup?.(group.id)}
                   onCloseTab={(path) => onCloseEditorTab?.(path, group.id)}
                   onEditorChange={onEditorChange}
@@ -8764,135 +9208,6 @@ export function IdeSurface({
               );
             })}
           </div>
-        ) : null}
-        {!showEmbeddedPanel && ide?.layout.rightAssistantOpen ? (
-          <aside
-            className={[
-              "gyro-ide-assistant",
-              renderAssistantChat ? "is-session-chat" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            aria-label={renderAssistantChat ? "Chat" : "Editor AI companion"}
-          >
-            <header>
-              <div>
-                <MessageSquare size={15} />
-                <strong>{renderAssistantChat ? "Chat" : "AI Companion"}</strong>
-              </div>
-              <button
-                aria-label={
-                  renderAssistantChat ? "Close chat" : "Close AI companion"
-                }
-                onClick={onToggleAssistant}
-                type="button"
-              >
-                <X size={14} />
-              </button>
-            </header>
-            {renderAssistantChat ? (
-              <div className="gyro-ide-assistant-chat">
-                {renderAssistantChat()}
-              </div>
-            ) : (
-              <>
-                <div className="gyro-ide-assistant-context">
-                  <span>Context</span>
-                  <strong>{selectedPath ?? "No active file"}</strong>
-                  <small>
-                    {editorSelection?.text
-                      ? `${editorSelection.text.length} selected characters`
-                      : `${editorTabs?.length ?? 0} open files`}
-                  </small>
-                </div>
-                <div className="gyro-ide-assistant-history">
-                  {ide.lastAssistantRequest ? (
-                    <div>
-                      <Sparkles size={14} />
-                      <span>
-                        {ide.lastAssistantRequest.action.replaceAll("-", " ")}
-                      </span>
-                      <small>
-                        {assistantReply
-                          ? assistantReply.status
-                          : "sent to the session"}
-                      </small>
-                    </div>
-                  ) : (
-                    <p>Ask about the active file or selected code.</p>
-                  )}
-                  {ide.aiToolCalls.slice(-4).map((toolCall) => (
-                    <div key={toolCall.id}>
-                      <Activity size={14} />
-                      <span>{toolCall.name}</span>
-                      <small>{toolCall.status}</small>
-                    </div>
-                  ))}
-                  {assistantReply ? (
-                    <div className="gyro-ide-assistant-reply">
-                      {assistantReply.text ? (
-                        <p>{assistantReply.text}</p>
-                      ) : (
-                        <p className="is-pending">
-                          {assistantReply.status === "failed"
-                            ? "The provider did not return a reply."
-                            : "Waiting for the model…"}
-                        </p>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-                <form
-                  className="gyro-ide-assistant-composer"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const instruction = assistantDraft.trim();
-                    if (!instruction) {
-                      return;
-                    }
-                    onAssistantAction?.(
-                      editorSelection?.text
-                        ? "explain-selection"
-                        : "ask-about-file",
-                      instruction,
-                    );
-                    setAssistantDraft("");
-                  }}
-                >
-                  <textarea
-                    aria-label="Ask AI about editor context"
-                    onChange={(event) => setAssistantDraft(event.target.value)}
-                    placeholder="Ask about this code"
-                    rows={4}
-                    value={assistantDraft}
-                  />
-                  <div>
-                    <button
-                      disabled={!selectedPath || !assistantDraft.trim()}
-                      type="submit"
-                    >
-                      <Sparkles size={14} />
-                      Ask
-                    </button>
-                    <button
-                      disabled={!editorSelection?.text}
-                      onClick={() =>
-                        onAssistantAction?.(
-                          "fix-selection",
-                          assistantDraft.trim() ||
-                            "Fix the selected code and propose a reviewable diff.",
-                        )
-                      }
-                      type="button"
-                    >
-                      <Edit3 size={14} />
-                      Propose fix
-                    </button>
-                  </div>
-                </form>
-              </>
-            )}
-          </aside>
         ) : null}
         {showEmbeddedPanel ? (
           <section
@@ -9074,7 +9389,6 @@ type EditorGroupPaneProps = {
   onEditorRevert?: (path: string) => void;
   onEditorSelectionChange?: (selection?: EditorSelection) => void;
   onAssistantAction?: (action: IdeAssistantAction, instruction: string) => void;
-  assistantReply?: IdeAssistantReply;
   renderEditor?: IdeSurfaceProps["renderEditor"];
 };
 
@@ -9108,7 +9422,6 @@ function EditorGroupPane({
   onEditorRevert,
   onEditorSelectionChange,
   onAssistantAction,
-  assistantReply,
   renderEditor,
 }: EditorGroupPaneProps) {
   const canSave = activeBuffer?.status === "dirty";
@@ -9293,10 +9606,7 @@ function EditorGroupPane({
           )}
         </div>
         <div
-          className={[
-            "gyro-editor-ai-bar",
-            !activePath ? "is-file-empty" : "",
-          ]
+          className={["gyro-editor-ai-bar", !activePath ? "is-file-empty" : ""]
             .filter(Boolean)
             .join(" ")}
           aria-label="Editor AI actions"
@@ -12190,9 +12500,7 @@ function ScmBranchPicker({
           </button>
           {branches.length === 0 ? (
             <div className="gyro-scm-branch-empty">
-              {branchCatalog?.error ??
-                error ??
-                "No local branches found."}
+              {branchCatalog?.error ?? error ?? "No local branches found."}
             </div>
           ) : (
             branches.map((branch) => {
@@ -12973,12 +13281,12 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
   },
   {
     id: "search-files",
-    label: "Search files",
-    meta: "Search workspace content",
+    label: "Search in files",
+    meta: "Find text across the workspace",
     destination: "workspace",
     layout: "code",
     icon: Search,
-    keywords: "code find",
+    keywords: "code find text grep contents",
     shortcut: { mac: "⇧⌘F", other: "Ctrl Shift F" },
   },
   {
@@ -13462,7 +13770,7 @@ export function CommandPaletteOverlay({
               mode === "commands"
                 ? "Search commands"
                 : mode === "files"
-                  ? "Search files"
+                  ? "Search files by name"
                   : "Search files, projects, sessions, and actions"
             }
             onChange={(event) => onQueryChange?.(event.target.value)}
@@ -17786,12 +18094,11 @@ function Composer({
                         ? "Recommended"
                         : undefined,
                     // Only surface a detail when isolation can't run yet.
-                    detail:
-                      hasUserWorkspace
-                        ? undefined
-                        : workspaceModeDetail("worktree", {
-                            hasWorkspace: false,
-                          }),
+                    detail: hasUserWorkspace
+                      ? undefined
+                      : workspaceModeDetail("worktree", {
+                          hasWorkspace: false,
+                        }),
                     icon: GitBranch,
                     kind: "workspace-mode",
                     label: workspaceModePopoverLabel("worktree"),

@@ -5460,14 +5460,10 @@ fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {
         }
     };
     store.maintain().map_err(to_string)?;
-    let sessions = store
-        .list_sessions_limited(Some(200))
-        .map_err(to_string)?;
+    let sessions = store.list_sessions_limited(Some(200)).map_err(to_string)?;
     // Return this handle into the pool via Drop semantics by wrapping lease.
     {
-        let _lease = SessionStoreLease {
-            store: Some(store),
-        };
+        let _lease = SessionStoreLease { store: Some(store) };
     }
 
     let (session_pool_warmed, automation_pool_warmed) = warm_store_pools(&paths)?;
@@ -8864,14 +8860,7 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
             let _record = parts.next();
             let xy = parts.next().unwrap_or("..");
             let path = parts.nth(6).unwrap_or_default().to_string();
-            status.files.push(SourceControlFile {
-                path,
-                original_path: None,
-                state: git_state_from_xy(xy),
-                staged: xy.chars().next().is_some_and(|value| value != '.'),
-                additions: 0,
-                deletions: 0,
-            });
+            push_git_status_sides(&mut status.files, xy, path, None);
         } else if line.starts_with("2 ") {
             let mut parts = line.split_whitespace();
             let _record = parts.next();
@@ -8885,14 +8874,7 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
             let mut paths = rest.split('\t');
             let path = paths.next().unwrap_or_default().to_string();
             let original_path = paths.next().map(ToOwned::to_owned);
-            status.files.push(SourceControlFile {
-                path,
-                original_path,
-                state: "renamed".into(),
-                staged: xy.chars().next().is_some_and(|value| value != '.'),
-                additions: 0,
-                deletions: 0,
-            });
+            push_git_status_sides(&mut status.files, xy, path, original_path);
         } else if line.starts_with("u ") {
             let path = line
                 .split_whitespace()
@@ -9078,17 +9060,48 @@ fn untracked_text_additions(
     (lines, false, bytes.len())
 }
 
-fn git_state_from_xy(xy: &str) -> String {
-    if xy.contains('D') {
-        "deleted"
-    } else if xy.contains('A') {
-        "added"
-    } else if xy.contains('R') {
-        "renamed"
-    } else if xy.contains('U') {
-        "conflicted"
-    } else {
-        "modified"
+/// Porcelain v2 reports two statuses per file: X for the index and Y for the
+/// working tree. A file can carry both — staged edits plus newer unstaged ones
+/// — so each side becomes its own row, which is how VS Code lists the file
+/// under both "Staged Changes" and "Changes".
+fn push_git_status_sides(
+    files: &mut Vec<SourceControlFile>,
+    xy: &str,
+    path: String,
+    original_path: Option<String>,
+) {
+    let mut codes = xy.chars();
+    let index = codes.next().unwrap_or('.');
+    let worktree = codes.next().unwrap_or('.');
+    if index != '.' {
+        files.push(SourceControlFile {
+            path: path.clone(),
+            original_path: original_path.clone(),
+            state: git_state_from_code(index),
+            staged: true,
+            additions: 0,
+            deletions: 0,
+        });
+    }
+    if worktree != '.' || index == '.' {
+        files.push(SourceControlFile {
+            path,
+            original_path,
+            state: git_state_from_code(worktree),
+            staged: false,
+            additions: 0,
+            deletions: 0,
+        });
+    }
+}
+
+fn git_state_from_code(code: char) -> String {
+    match code {
+        'D' => "deleted",
+        'A' => "added",
+        'R' | 'C' => "renamed",
+        'U' => "conflicted",
+        _ => "modified",
     }
     .into()
 }
@@ -22331,6 +22344,36 @@ while True:
         let unavailable = git_status_impl(folder.path().to_str().unwrap()).unwrap();
         assert!(!unavailable.available);
         assert_eq!((unavailable.additions, unavailable.deletions), (0, 0));
+    }
+
+    #[test]
+    fn git_status_parser_splits_index_and_worktree_sides() {
+        let status = parse_git_status_v2(
+            "# branch.head main\n\
+             1 MM N... 100644 100644 100644 aaaa bbbb src/app.rs\n\
+             1 D. N... 100644 000000 000000 aaaa bbbb docs/old.md\n\
+             1 .M N... 100644 100644 100644 aaaa bbbb site/app.js\n",
+        );
+        let staged = status
+            .files
+            .iter()
+            .filter(|file| file.staged)
+            .map(|file| (file.path.as_str(), file.state.as_str()))
+            .collect::<Vec<_>>();
+        let unstaged = status
+            .files
+            .iter()
+            .filter(|file| !file.staged)
+            .map(|file| (file.path.as_str(), file.state.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            staged,
+            vec![("src/app.rs", "modified"), ("docs/old.md", "deleted")]
+        );
+        assert_eq!(
+            unstaged,
+            vec![("src/app.rs", "modified"), ("site/app.js", "modified")]
+        );
     }
 
     #[test]
