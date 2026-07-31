@@ -151,14 +151,15 @@ do not require a product release by themselves.
    appropriate hardware.
 5. Complete the clean-user Gatekeeper and updater acceptance checks. Publish
    the draft as a non-prerelease only when every check passes.
-6. Confirm the Cloudflare Pages site and `/releases/latest` show the new version and that
-   updater metadata resolves. The `release.published` workflow then validates
-   the CLI Formula on Apple Silicon and Intel before updating the tap.
+6. Confirm the Cloudflare Worker site (`pnpm site:deploy`) and
+   `/releases/latest` show the new version and that updater metadata resolves.
+   The `release.published` workflow then validates the CLI Formula on Apple
+   Silicon and Intel before updating the tap.
 7. If the prior latest release is defective, mark its title and first release
    paragraph as superseded only after the replacement is live. Link to the
    fixed release; never replace the old assets in place.
 
-After the Cloudflare Pages deployment is verified, set the GitHub repository homepage to
+After the usegyro.io deployment is verified, set the GitHub repository homepage to
 `https://usegyro.io/` and keep repository topics aligned with the
 public product description.
 

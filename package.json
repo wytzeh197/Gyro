@@ -27,6 +27,7 @@
     "release:cli:finalize": "node scripts/finalize-cli-release.mjs",
     "site:build": "node scripts/build-download-site.mjs",
     "site:check": "node scripts/check-download-site.mjs",
+    "site:deploy": "node scripts/build-download-site.mjs && npx --yes wrangler@4 deploy --config site/wrangler.toml",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs",
     "test": "pnpm test:reliability && pnpm -r test",
     "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs && node --experimental-strip-types scripts/check-menu-bar-state.mjs && node --experimental-strip-types scripts/check-global-search.mjs && node --experimental-strip-types scripts/check-chat-timeline.mjs && node --experimental-strip-types scripts/check-usage-ledger.mjs && node --experimental-strip-types scripts/check-provider-identity.mjs && node --experimental-strip-types scripts/check-council-freeze.mjs && node --experimental-strip-types scripts/check-clean-machine-path.mjs",
