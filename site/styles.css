@@ -1,4 +1,35 @@
 /*
+ * Inter carries the interface and body; Inter Tight carries display type, where
+ * its tighter fit keeps large headlines from falling apart. Both are the latin
+ * variable subsets, served from this origin — the CSP has no font-src, so it
+ * falls back to default-src 'self' and a webfont CDN would be blocked outright.
+ * SIL OFL 1.1; see assets/ATTRIBUTIONS.md.
+ */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("assets/fonts/inter-latin.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("assets/fonts/inter-tight-latin.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+/*
  * Dark is the default theme for every visitor. The header toggle writes
  * `data-theme="light"` onto the root element and persists the choice; theme.js
  * applies it before first paint so there is no flash.
@@ -32,17 +63,38 @@
   --notice-bg: #241512;
   --notice-line: rgba(255, 113, 80, 0.32);
   --notice-text: #ffb49b;
+  --add: #6cc38a;
+  --remove: #d97b6c;
+  --add-wash: rgba(108, 195, 138, 0.11);
+  --remove-wash: rgba(217, 123, 108, 0.1);
   --mark-filter: none;
   --icon-filter: invert(1);
+  /*
+   * The one piece of texture on the page: a dot field behind the hero copy,
+   * ending exactly on the hero's hairline. It is an inline SVG rather than a
+   * repeating gradient because gradients are ruled out here, and it carries its
+   * own colour per theme since a data URI cannot read a custom property.
+   */
+  --dot-field: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1' cy='1' r='1' fill='%23ffffff' fill-opacity='0.075'/%3E%3C/svg%3E");
   --shell: min(1152px, calc(100% - 48px));
   --grid-columns: 12;
   --grid-gap: clamp(16px, 1.7vw, 24px);
   --radius: 18px;
   --header-height: 64px;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  --display:
+    "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Helvetica, Arial, sans-serif;
+  font-family: var(--sans);
   font-synthesis: none;
+  /* Inter's contextual alternates fix the spacing around quotes and slashes. */
+  font-feature-settings:
+    "cv05" 1,
+    "cv11" 1,
+    "calt" 1;
 }
 
 :root[data-theme="light"] {
@@ -73,8 +125,13 @@
   --notice-bg: #fff5f1;
   --notice-line: rgba(240, 90, 52, 0.28);
   --notice-text: #8b3823;
+  --add: #2f7d4f;
+  --remove: #a9412f;
+  --add-wash: rgba(47, 125, 79, 0.09);
+  --remove-wash: rgba(169, 65, 47, 0.08);
   --mark-filter: invert(1);
   --icon-filter: none;
+  --dot-field: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1' cy='1' r='1' fill='%23171714' fill-opacity='0.065'/%3E%3C/svg%3E");
 }
 
 * {
@@ -126,6 +183,36 @@ a {
 code,
 pre {
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/*
+ * :root sets Inter's own feature settings, and every element inherits them —
+ * including the ones set in the monospace stack, where cv05 and cv11 mean
+ * nothing and "calt" switches on SF Mono's ligatures. That fused the pair of
+ * hyphens in `node --test` into a single long dash and misprinted the command.
+ * Monospace here is standing in for a terminal, so it has to render literally.
+ */
+code,
+pre,
+.eyebrow,
+.kicker,
+.release-kicker,
+.detail-label,
+.hero-badge,
+.surface-index,
+.agent-badge,
+.cost-figure,
+.product-stage figcaption,
+.mock-bar-meta,
+.mock-steps span,
+.mock-delta,
+.mock-files li,
+.mock-body-term,
+.mock-mono,
+.mock-diff-lines,
+.mock-review-note {
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
 }
 
 code {
@@ -254,7 +341,7 @@ pre {
   left: 13px;
   height: 1px;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--text);
   content: "";
   opacity: 0.9;
 }
@@ -273,10 +360,11 @@ pre {
   color: var(--bg) !important;
 }
 
+/* The background is restated because `.site-header nav a:hover` matches this
+ * link too, and would otherwise repaint the solid pill as a quiet nav item. */
 .site-header .nav-download:hover {
-  border-color: var(--orange-dark);
-  background: var(--orange-dark);
-  color: #fff !important;
+  background: var(--text);
+  box-shadow: 0 8px 20px var(--shadow-lift);
   transform: translateY(-1px);
 }
 
@@ -318,13 +406,37 @@ pre {
   padding: 104px 0 72px;
 }
 
+/*
+ * The dot field is inset from the left so it never sits directly under the
+ * headline, and it stops on the hairline below — a bounded rectangle rather
+ * than a wash that needs fading out at the edges.
+ */
 .hero-head {
+  position: relative;
+  /* The headline is sized off this width, not the viewport — see .hero h1. */
+  container-type: inline-size;
   padding-bottom: 42px;
   border-bottom: 1px solid var(--line);
 }
 
+.hero-head::before {
+  position: absolute;
+  z-index: -1;
+  top: -26px;
+  right: -18px;
+  bottom: 0;
+  left: 38%;
+  background-image: var(--dot-field);
+  content: "";
+}
+
+/*
+ * The copy runs the full width of the shell so the headline can carry the whole
+ * column. The lede sets its own, narrower measure below — a wide headline over
+ * a shorter paragraph is the shape here, not a single block of justified text.
+ */
 .hero-copy {
-  max-width: 660px;
+  max-width: none;
 }
 
 /*
@@ -350,12 +462,56 @@ pre {
   gap: 9px;
 }
 
-.eyebrow span {
+.eyebrow span,
+.hero-badge-dot {
   width: 7px;
   height: 7px;
+  flex: none;
   border-radius: 999px;
-  background: var(--orange);
+  background: var(--text);
   animation: pulse 2.6s ease-in-out infinite;
+}
+
+/*
+ * The claim the page opens on, so it is drawn as an object rather than set as
+ * another line of quiet label type: a hairline pill that reads at a glance and
+ * still sits below the headline in weight.
+ */
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 22px;
+  padding: 7px 15px 7px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/*
+ * A short rule in front of every section label, so the bands below the hero all
+ * open on the same mark. It is drawn in the same grey as the label rather than
+ * the brand colour: repeated down the page, a coloured mark stops reading as an
+ * accent and starts reading as decoration.
+ */
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.kicker::before {
+  width: 16px;
+  height: 2px;
+  flex: none;
+  background: var(--quiet);
+  content: "";
 }
 
 @keyframes pulse {
@@ -369,21 +525,44 @@ pre {
   }
 }
 
+/*
+ * Display type is Inter Tight, which is already narrow, so the tracking here is
+ * lighter than the old system-font values — pushing further closes the counters.
+ */
 .hero h1,
 .page-hero h1 {
   margin: 0;
+  font-family: var(--display);
   font-size: 56px;
-  line-height: 1.02;
-  letter-spacing: -0.055em;
+  font-weight: 640;
+  line-height: 1.03;
+  letter-spacing: -0.036em;
   overflow-wrap: normal;
   word-break: normal;
 }
 
+/*
+ * The homepage headline carries the whole hook, so it runs the full width of
+ * the column on one line.
+ *
+ * The size comes from cqw — one percent of .hero-head — rather than vw, so it
+ * tracks the shell it has to fill instead of the viewport. vw would include the
+ * scrollbar on the platforms that reserve space for one, and the headline would
+ * overrun its column and drop a ragged second line. 6.1cqw leaves the sentence
+ * at about 83% of the column, which keeps it on one line with room to breathe
+ * at the right rather than running the full measure.
+ */
+.hero h1 {
+  max-width: none;
+  font-size: min(70px, 6.1cqw);
+  letter-spacing: -0.04em;
+}
+
 .hero-lede {
-  max-width: 620px;
+  max-width: 640px;
   margin: 20px 0 0;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.55;
 }
 
@@ -412,6 +591,8 @@ pre {
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease,
     color 160ms ease;
 }
 
@@ -420,13 +601,15 @@ pre {
   border-color: var(--text);
   background: var(--text);
   color: var(--bg);
+  box-shadow: 0 6px 18px var(--shadow-card);
 }
 
+/* Lift, not a colour change: the primary button is the one solid shape on the
+ * page, and recolouring it on hover was the loudest use of the brand orange. */
 .button-primary:hover,
 .button-download:hover {
-  border-color: var(--orange-dark);
-  background: var(--orange-dark);
-  color: #fff;
+  box-shadow: 0 12px 28px var(--shadow-lift);
+  transform: translateY(-1px);
 }
 
 .button-secondary:hover,
@@ -441,6 +624,22 @@ pre {
 
 .button-primary img {
   filter: var(--mark-filter);
+}
+
+/*
+ * Optical centring, not box centring. The Apple mark's ink fills its viewBox
+ * top to bottom, but its centre of mass sits 2.12 units below the centre of a
+ * 24-unit box — the leaf is a thin detached shape while the body is solid — so
+ * centring the box makes the mark sit visibly low against the label beside it.
+ * The nudge takes it two thirds of the way from the box centre to the centre of
+ * mass, which lands it on the cap-height band of the text. Damped rather than
+ * full, because the leaf still reads as part of the silhouette.
+ *
+ * Only the inline use needs this. In the download cards the mark sits above its
+ * heading rather than beside it, where the vertical relationship does not read.
+ */
+.button .mark-apple {
+  transform: translateY(-1.5px);
 }
 
 .button-quiet:disabled {
@@ -463,15 +662,12 @@ pre {
   margin: 64px 0 0;
 }
 
-.product-stage picture {
+.product-stage-frame {
   display: block;
   padding: clamp(10px, 1.6vw, 22px);
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--stage);
-}
-
-.product-stage picture {
   box-shadow: 0 30px 70px var(--shadow-stage);
 }
 
@@ -483,10 +679,26 @@ pre {
   box-shadow: 0 10px 30px var(--shadow-card);
 }
 
+/* Dark is the default site theme; show the light shot only after the toggle. */
+.product-stage .hero-shot-light {
+  display: none;
+}
+
+:root[data-theme="light"] .product-stage .hero-shot-dark {
+  display: none;
+}
+
+:root[data-theme="light"] .product-stage .hero-shot-light {
+  display: block;
+}
+
 .product-stage figcaption {
   margin-top: 16px;
   color: var(--quiet);
+  font-family: var(--mono);
   font-size: 13px;
+  letter-spacing: 0.04em;
+  text-align: center;
 }
 
 .product-section,
@@ -494,7 +706,13 @@ pre {
   padding: 76px 0;
 }
 
-.byo-section {
+/*
+ * Every band below the hero opens on a hairline. It is the only separator the
+ * page uses, so the rhythm stays flat and the sections read as one column.
+ */
+.premise,
+.product-section,
+.agents-section {
   padding: 76px 0;
   border-top: 1px solid var(--line);
 }
@@ -536,11 +754,14 @@ pre {
 
 .section-heading h2,
 .download-heading h2,
-.compact-heading h2 {
+.compact-heading h2,
+.premise h2 {
   margin: 0;
+  font-family: var(--display);
   font-size: 40px;
-  line-height: 1.08;
-  letter-spacing: -0.045em;
+  font-weight: 640;
+  line-height: 1.1;
+  letter-spacing: -0.028em;
   overflow-wrap: normal;
   word-break: normal;
 }
@@ -550,6 +771,110 @@ pre {
   margin: 14px 0 0;
   color: var(--muted);
   font-size: 16px;
+}
+
+/*
+ * It reads top to bottom in two beats: the claim, then the three costs side by
+ * side. An earlier version set the claim and the costs as two columns of a
+ * 12-column grid, but the costs always ran taller than the claim, which left a
+ * long empty left margin beside them.
+ *
+ * Each cost carries a small figure of the surface it describes. They are drawn
+ * in the same markup language as the mockups below, but held well under them in
+ * size and colour: this band is still an argument, and the sentence under each
+ * figure is what makes it. They also set up the surfaces section as the answer,
+ * since these are the same three panes with the context torn out.
+ */
+.premise h2 {
+  max-width: 660px;
+}
+
+.premise-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--grid-gap);
+  margin: 46px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.premise-list li {
+  padding-top: 18px;
+  border-top: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.premise-list li p {
+  margin: 0;
+}
+
+/*
+ * A fixed height rather than a minimum: it is what keeps the three dashed slots
+ * on one line and the three sentences under them on one baseline, whichever
+ * figure happens to carry the most content.
+ */
+.cost-figure {
+  display: flex;
+  height: 120px;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  margin: 16px 0 15px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cost-line {
+  overflow: hidden;
+  color: var(--quiet);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-prompt {
+  color: var(--quiet);
+}
+
+.cost-add {
+  color: var(--add);
+}
+
+.cost-remove {
+  color: var(--remove);
+}
+
+.cost-bubble {
+  align-self: flex-start;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/*
+ * The missing piece, cut identically out of each figure and pinned to the
+ * bottom so the three slots line up across the row however tall the content
+ * above them runs.
+ *
+ * Selector carries the parent so it outweighs the `.premise-list li p` margin
+ * reset above, which is two elements deep and would otherwise zero the auto
+ * margin and leave each slot floating wherever its content happened to end.
+ */
+.cost-figure .cost-gap {
+  height: 30px;
+  margin-top: auto;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
 }
 
 /*
@@ -572,7 +897,7 @@ pre {
   align-items: start;
   gap: clamp(24px, 5vw, 72px);
   min-width: 0;
-  padding: 48px 0 48px 62px;
+  padding: 44px 0 44px 62px;
 }
 
 .surface-card + .surface-card {
@@ -591,17 +916,17 @@ pre {
 }
 
 .surface-card:first-child::before {
-  top: 58px;
+  top: 54px;
 }
 
 .surface-card:last-child::before {
   bottom: auto;
-  height: 58px;
+  height: 54px;
 }
 
 .surface-index {
   position: absolute;
-  top: 46px;
+  top: 42px;
   left: 0;
   display: grid;
   width: 31px;
@@ -609,250 +934,446 @@ pre {
   place-items: center;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: var(--bg);
-  color: var(--accent);
+  background: var(--surface-soft);
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 13px;
 }
 
 .surface-copy {
   min-width: 0;
-  padding-top: 40px;
+  padding-top: 34px;
 }
 
 .surface-copy h3 {
   margin: 0 0 12px;
-  font-size: 28px;
-  line-height: 1.1;
-  letter-spacing: -0.04em;
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 640;
+  line-height: 1.14;
+  letter-spacing: -0.024em;
 }
 
 .surface-copy p {
+  max-width: 36ch;
   margin: 0;
   color: var(--muted);
   font-size: 16px;
 }
 
-/*
- * Drawn figures, not screenshots: each one states the mechanic behind a
- * surface, and they stay sharp at any size and in either theme.
- */
-.surface-visual,
-.figure {
+.surface-visual {
   min-width: 0;
   margin: 0;
 }
 
-.figure svg {
-  display: block;
+/*
+ * ---------------------------------------------------------------------------
+ * Product mockups
+ *
+ * Each surface is drawn in markup rather than photographed. It stays sharp at
+ * any pixel density, follows the theme token for token, and cannot drift out of
+ * date behind a screenshot pipeline. The whole block carries role="img" and a
+ * single aria-label, so assistive tech gets one description instead of a pile
+ * of disconnected fragments.
+ * ---------------------------------------------------------------------------
+ */
+.mock {
+  overflow: hidden;
   width: 100%;
-  max-width: 620px;
-  height: auto;
-  overflow: visible;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 44px var(--shadow-card);
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: none;
 }
 
-.figure figcaption {
-  margin-top: 16px;
+.mock-bar {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.mock-bar-title {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mock-bar-meta {
+  margin-left: auto;
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.mock-tab {
+  padding: 4px 10px;
+  border-radius: 7px;
+  color: var(--quiet);
+}
+
+.mock-tab.is-active {
+  background: var(--chip);
+  color: var(--text);
+  font-weight: 620;
+}
+
+/*
+ * minmax(0, 1fr) rather than the default auto column: a grid track sized to its
+ * content will not shrink below it, so a long line of code would push the diff
+ * out past the panel instead of being clipped by it.
+ */
+.mock-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px 14px;
+}
+
+/* 01 — the thread */
+.mock-ask {
+  max-width: 84%;
+  justify-self: end;
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--chip);
+  color: var(--text);
+}
+
+.mock-run {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mock-run-label {
+  color: var(--muted);
+}
+
+.mock-steps {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mock-steps span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface-soft);
   color: var(--quiet);
   font-family: var(--mono);
   font-size: 13px;
 }
 
-/* Shared figure vocabulary. */
-.fig-rule {
-  stroke: var(--line-strong);
-  stroke-width: 1;
-}
-
-.fig-hair {
-  stroke: var(--line);
-  stroke-width: 1;
-}
-
-.fig-panel {
-  fill: var(--surface-raised);
-  stroke: var(--line);
-  stroke-width: 1;
-}
-
-.fig-fill {
-  fill: var(--surface-soft);
-}
-
-.fig-ink {
-  fill: var(--text);
-}
-
-.fig-muted {
-  fill: var(--quiet);
-}
-
-.fig-accent {
-  fill: var(--accent);
-}
-
-.fig-accent-line {
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  fill: none;
-}
-
-.fig-label {
-  fill: var(--muted);
-  font-family: var(--mono);
-  font-size: 14px;
-}
-
-.fig-strong {
-  fill: var(--text);
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.fig-add {
-  fill: #4f9e6a;
-}
-
-.fig-remove {
-  fill: #b4574a;
-}
-
-:root[data-theme="light"] .fig-add {
-  fill: #2f7d4f;
-}
-
-:root[data-theme="light"] .fig-remove {
-  fill: #a9412f;
-}
-
-/*
- * "Bring your own": one line drawn down the middle of the section as you
- * scroll, bending gently left and right. Each bend carries an agent mark, and
- * the three words sit far out at the page edges, clear of the line. Scroll
- * position drives it (see app.js) — nothing is pinned and nothing autoplays.
- */
-.byo-stage {
-  position: relative;
-  width: 100%;
-  margin: 30px 0 0;
-  color: var(--quiet);
-}
-
-/*
- * The line and its marks live in a narrow centred column; the words are
- * positioned against the stage, so they reach the full shell width.
- */
-.byo-track {
-  position: relative;
-  width: clamp(220px, 26vw, 320px);
-  margin: 0 auto;
-  aspect-ratio: 400 / 1160;
-}
-
-.byo-line {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.byo-word {
-  position: absolute;
+.mock-say {
   margin: 0;
-  transform: translateY(-50%);
-  color: var(--text);
-  font-size: clamp(30px, 4.4vw, 52px);
-  font-weight: 720;
-  letter-spacing: -0.05em;
-  line-height: 1;
-  white-space: nowrap;
+  color: var(--muted);
 }
 
-.byo-word-top {
-  right: 0;
-  top: 12%;
+.mock-card {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-raised);
 }
 
-.byo-word-middle {
-  left: 0;
-  top: 50%;
+.mock-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line);
 }
 
-.byo-word-bottom {
-  right: 0;
-  top: 88%;
+.mock-card-title {
+  font-weight: 620;
 }
 
-.byo-nodes {
+.mock-delta {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.mock-files {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/*
- * One slot per bend, matching the path's viewBox coordinates. These live here
- * rather than in a style attribute because the site's CSP sets style-src
- * 'self', which blocks inline styles outright.
- */
-.byo-node {
-  position: absolute;
+.mock-files li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  transform: translate(-50%, -50%);
+  gap: 10px;
+  padding: 8px 13px;
+  font-family: var(--mono);
+  font-size: 13px;
 }
 
-.byo-n1 {
-  left: 72.5%;
-  top: 6.9%;
+.mock-files li + li {
+  border-top: 1px solid var(--line);
 }
 
-.byo-n2 {
-  left: 27.5%;
-  top: 20.7%;
+/* min-width: 0 or the flex item refuses to shrink and widens the whole page. */
+.mock-path {
+  overflow: hidden;
+  min-width: 0;
+  margin-right: auto;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.byo-n3 {
-  left: 72.5%;
-  top: 34.5%;
+.mock-add {
+  color: var(--add);
 }
 
-.byo-n4 {
-  left: 27.5%;
-  top: 48.3%;
+.mock-remove {
+  color: var(--remove);
 }
 
-.byo-n5 {
-  left: 72.5%;
-  top: 62.1%;
+/* 02 — the terminal and its gate */
+.mock-body-term {
+  gap: 3px;
+  padding: 14px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 13px;
 }
 
-.byo-n6 {
-  left: 27.5%;
-  top: 75.9%;
+.mock-body-term p {
+  margin: 0;
 }
 
-.byo-n7 {
-  left: 72.5%;
-  top: 89.7%;
-}
-
-.byo-mark {
-  display: grid;
-  flex: none;
-  width: 58px;
-  height: 58px;
-  place-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--surface-raised);
+.mock-cmd {
   color: var(--text);
 }
 
-.byo-mark svg {
-  width: 30px;
-  height: 30px;
+.mock-prompt {
+  color: var(--quiet);
+}
+
+.mock-pass {
+  color: var(--add);
+}
+
+.mock-out {
+  color: var(--quiet);
+}
+
+.mock-gate {
+  margin-top: 13px;
+  padding: 12px 13px;
+  border: 1px solid var(--notice-line);
+  border-radius: 11px;
+  background: var(--notice-bg);
+}
+
+.mock-gate-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mock-gate-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.mock-gate-title {
+  color: var(--notice-text);
+  font-family: var(--sans);
+  font-weight: 620;
+}
+
+.mock-gate-cmd {
+  margin: 9px 0 12px;
+  color: var(--text);
+}
+
+.mock-gate-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.mock-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.mock-btn.is-primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+/* 03 — the diff */
+.mock-mono {
+  font-family: var(--mono);
+  font-weight: 500;
+}
+
+.mock-body-diff {
+  gap: 0;
+  padding: 0;
+}
+
+.mock-diff-lines {
+  margin: 0;
+  padding: 10px 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  list-style: none;
+}
+
+/*
+ * The code is set `pre` so its indentation survives, which means a long line
+ * would otherwise push the document wider than the viewport and take the whole
+ * page's horizontal scroll with it. The row clips and the code shrinks instead;
+ * a flex child needs min-width: 0 before it will agree to do that.
+ */
+.mock-diff-lines li {
+  display: flex;
+  overflow: hidden;
+  padding: 1px 14px;
+  color: var(--muted);
+  white-space: pre;
+}
+
+.mock-diff-lines code {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.mock-ln {
+  width: 18px;
+  flex: none;
+  margin-right: 12px;
+  color: var(--quiet);
+  text-align: right;
+}
+
+/*
+ * The gutter marker. Removed lines keep their old numbering and added lines
+ * take the new, so without a + or − in front the two runs of line numbers read
+ * as a mistake rather than as a diff.
+ */
+.mock-mk {
+  width: 9px;
+  flex: none;
+  margin-right: 6px;
+  color: var(--quiet);
+}
+
+.mock-diff-lines .is-add .mock-mk {
+  color: var(--add);
+}
+
+.mock-diff-lines .is-remove .mock-mk {
+  color: var(--remove);
+}
+
+.mock-diff-lines .is-add {
+  background: var(--add-wash);
+  color: var(--text);
+}
+
+.mock-diff-lines .is-remove {
+  background: var(--remove-wash);
+  color: var(--muted);
+}
+
+.mock-review {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.mock-review-note {
+  margin-right: auto;
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/*
+ * The agents read as a plain roster. The point is how ordinary the list is —
+ * these are the CLIs already on the reader's machine — so nothing here is
+ * animated or staged.
+ */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-tile {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.agent-tile:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+/* The mark sits in a chip of its own, which keeps five different logos, drawn
+ * at five different weights, reading as one row. */
+.agent-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.agent-name {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.012em;
 }
 
 /*
@@ -862,69 +1383,35 @@ pre {
  * no brand colour at all, so Codex, Grok and Kimi stay on --text and flip with
  * the theme, which is how those three are meant to be shown.
  */
-.byo-n1 .byo-mark {
+.agent-claude .agent-mark {
   color: #d97757;
 }
 
 /* The accent dot above Kimi's K, picked out from the rest of the mark. */
-.byo-kimi-dot {
+.agent-kimi-dot {
   fill: #3b82f6;
 }
 
-/* Not wired up yet, so the mark is stated more quietly than the rest. */
-.byo-node-soon .byo-mark {
+/* Not wired up yet, so these two are stated more quietly than the rest. */
+.agent-tile.is-soon {
   border-style: dashed;
+}
+
+.agent-tile.is-soon .agent-mark,
+.agent-tile.is-soon .agent-name {
   color: var(--quiet);
 }
 
-/*
- * The badge sits to the left of its mark on both sides, so it never lands on
- * the same edge as "your" or "own." out at the margins.
- */
-.byo-badge {
-  position: absolute;
-  right: calc(100% + 12px);
-  padding: 3px 10px;
-  border: 1px solid var(--line);
+.agent-badge {
+  margin-left: auto;
+  padding: 3px 9px;
   border-radius: 999px;
-  background: var(--bg);
+  background: var(--surface-soft);
   color: var(--quiet);
+  font-family: var(--mono);
   font-size: 13px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/*
- * Everything is visible by default, so the section still reads with JavaScript
- * off or motion reduced. app.js sets data-driven, which hands control of the
- * reveal to scroll position.
- */
-[data-byo][data-driven] [data-byo-item] {
-  opacity: 0;
-  transition:
-    opacity 520ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-[data-byo][data-driven] .byo-word[data-byo-item] {
-  transform: translateY(calc(-50% + 18px));
-}
-
-[data-byo][data-driven] .byo-node[data-byo-item] {
-  transform: translate(-50%, -50%) scale(0.86);
-}
-
-[data-byo][data-driven] [data-byo-item][data-shown] {
-  opacity: 1;
-}
-
-[data-byo][data-driven] .byo-word[data-byo-item][data-shown] {
-  transform: translateY(-50%);
-}
-
-[data-byo][data-driven] .byo-node[data-byo-item][data-shown] {
-  transform: translate(-50%, -50%) scale(1);
 }
 
 .text-link,
@@ -944,7 +1431,7 @@ pre {
 .detail-content a:hover,
 .legal-copy a:hover {
   color: var(--text);
-  text-decoration-color: var(--orange);
+  text-decoration-color: var(--text);
 }
 
 .download-section {
@@ -961,6 +1448,10 @@ pre {
   max-width: 680px;
   margin: 0 auto 42px;
   text-align: center;
+}
+
+.download-heading .kicker {
+  justify-content: center;
 }
 
 .download-stack {
@@ -1215,38 +1706,59 @@ pre {
   margin-top: 24px;
 }
 
+/*
+ * Install page uses one centered column so the mark, title, lede, and download
+ * card share the same measure. A wider hero with a narrower card made the lede
+ * look off-center (max-width 680 inside max-width 760 without a reliable auto
+ * margin win against .page-hero).
+ */
 .install-hero {
-  max-width: 760px;
-  padding: 96px 0 52px;
+  width: min(520px, var(--shell));
+  max-width: 520px;
+  padding: 88px 0 36px;
   text-align: center;
 }
 
 .install-hero-mark {
-  width: 46px;
-  height: 46px;
-  margin: 0 auto 22px;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 20px;
   filter: var(--mark-filter);
 }
 
 .install-hero .kicker {
-  margin: 0 0 17px;
-  color: var(--orange-soft);
+  justify-content: center;
+  margin: 0 0 16px;
+}
+
+.install-hero h1 {
+  font-size: clamp(40px, 5.2vw, 52px);
+  letter-spacing: -0.038em;
 }
 
 .install-hero > p:not(.kicker) {
-  margin-inline: auto;
+  max-width: none;
+  margin: 16px auto 0;
+  font-size: 17px;
 }
 
 .install-download {
-  padding: 0 0 64px;
+  padding: 0 0 72px;
   scroll-margin-top: 80px;
 }
 
+/*
+ * .download-stack sets width: min(100%, 460px) for the homepage widget. The
+ * full install card needs its own measure so it lines up with .install-hero.
+ */
+.download-stack.download-stack-full,
 .download-stack-full {
-  max-width: 760px;
+  width: min(100%, 520px);
+  max-width: 520px;
   min-width: 0;
-  padding: 30px;
+  padding: 28px;
   margin-inline: auto;
+  box-shadow: 0 18px 48px var(--shadow-drop);
 }
 
 .download-stack-full > * {
@@ -1262,22 +1774,22 @@ pre {
 .architecture-selector-large {
   width: 100%;
   min-inline-size: 0;
-  margin-top: 24px;
+  margin-top: 8px;
 }
 
 .architecture-selector-large .segmented-control {
-  gap: 8px;
-  padding: 7px;
+  gap: 6px;
+  padding: 6px;
 }
 
 .architecture-selector-large .segmented-control label {
-  min-height: 76px;
+  min-height: 72px;
   align-content: center;
   border: 1px solid transparent;
 }
 
 .architecture-selector-large .segmented-control span {
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .architecture-announcement {
@@ -1291,7 +1803,8 @@ pre {
 
 .download-stack-full > .button-download {
   width: 100%;
-  margin-top: 18px;
+  min-height: 48px;
+  margin-top: 4px;
 }
 
 .release-details {
@@ -1397,19 +1910,43 @@ pre {
   min-height: 64px;
   align-items: center;
   justify-content: space-between;
+  gap: 20px;
   cursor: pointer;
   font-weight: 700;
   list-style: none;
+  transition: color 160ms ease;
+}
+
+.detail-list summary:hover {
+  color: var(--muted);
 }
 
 .detail-list summary::-webkit-details-marker {
   display: none;
 }
 
+/* The marker is drawn as a control rather than a bare glyph, so the row reads
+ * as something you can open. */
 .detail-list summary::after {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   color: var(--quiet);
   content: "+";
-  font-size: 19px;
+  font-size: 16px;
+  line-height: 1;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.detail-list summary:hover::after {
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 .detail-list details[open] summary::after {
@@ -1623,11 +2160,19 @@ pre {
   animation-delay: 280ms;
 }
 
-.surface-card,
-.surface-card:hover,
-.agent-card:hover {
+/*
+ * The agent roster is the only thing on the page that responds to a pointer.
+ * The surfaces are rows on a spine, not cards, so they stay put.
+ */
+.agent-tile {
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.agent-tile:not(.is-soon):hover {
   border-color: var(--line-strong);
-  transform: translateY(-2px);
+  background: var(--surface-raised);
 }
 
 @media (max-width: 900px) {
@@ -1660,6 +2205,12 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  /* Two of the three costs sit side by side; the third takes the next row. */
+  .premise-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 26px var(--grid-gap);
+  }
+
   .surface-card {
     gap: 26px;
     padding-left: 46px;
@@ -1668,6 +2219,10 @@ pre {
   .surface-copy {
     min-height: 0;
     padding-top: 34px;
+  }
+
+  .surface-copy p {
+    max-width: none;
   }
 
   .version-rail,
@@ -1690,63 +2245,47 @@ pre {
 }
 
 @media (max-width: 720px) {
-  /* The line needs height and margin to read; below this it becomes a stack. */
-  .byo-stage {
-    display: flex;
+  /*
+   * The mockups are the one thing on the page that cannot simply reflow: they
+   * are miniature interfaces, and squeezing them past this width turns the
+   * columns to mush. So they scale down as a whole instead of rewrapping.
+   */
+  .mock {
+    font-size: 13px;
+  }
+
+  .mock-ask {
+    max-width: 100%;
+  }
+
+  .mock-run {
     flex-wrap: wrap;
-    align-items: baseline;
-    gap: 10px;
-    width: 100%;
-    margin-top: 6px;
-  }
-
-  .byo-line {
-    display: none;
-  }
-
-  .byo-track {
-    width: 100%;
-    aspect-ratio: auto;
-  }
-
-  .byo-word,
-  .byo-node {
-    position: static;
-    transform: none;
-  }
-
-  /* The stacked "Bring your own." words crowd the heading on phones. */
-  .byo-word {
-    display: none;
-  }
-
-  .byo-nodes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px 12px;
-    width: 100%;
-    margin-top: 18px;
-  }
-
-  .byo-node {
-    flex: 0 0 auto;
-    width: 80px;
-    flex-direction: column;
-    align-items: center;
     gap: 8px;
-    text-align: center;
   }
 
-  .byo-mark {
-    width: 54px;
-    height: 54px;
+  .mock-steps {
+    margin-left: 0;
   }
 
-  .byo-badge {
-    position: static;
-    padding: 3px 8px;
-    line-height: 1.3;
-    white-space: normal;
+  .mock-diff-lines li {
+    padding-inline: 11px;
+  }
+
+  .agent-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .agent-tile {
+    min-height: 58px;
+    padding: 0 13px;
+  }
+
+  .agent-name {
+    font-size: 14px;
+  }
+
+  .agent-badge {
+    padding: 2px 7px;
   }
 
   :root {
@@ -1794,18 +2333,37 @@ pre {
   }
 
   .install-hero {
-    padding: 76px 0 42px;
+    width: var(--shell);
+    max-width: none;
+    padding: 72px 0 28px;
   }
 
   .install-hero-mark {
-    width: 40px;
-    height: 40px;
-    margin-bottom: 19px;
+    width: 42px;
+    height: 42px;
+    margin-bottom: 18px;
+  }
+
+  .install-hero h1 {
+    font-size: 40px;
   }
 
   .hero h1,
   .page-hero h1 {
     font-size: 40px;
+  }
+
+  /*
+   * The dot field is dropped rather than shrunk: at this width the copy fills
+   * the column, so there is nothing left for it to sit beside.
+   */
+  .hero-head::before {
+    display: none;
+  }
+
+  .hero-badge {
+    padding: 6px 13px 6px 11px;
+    letter-spacing: 0.06em;
   }
 
   .hero-lede,
@@ -1817,9 +2375,17 @@ pre {
     margin-top: 48px;
   }
 
+  .premise,
   .product-section,
+  .agents-section,
   .help-section {
     padding: 56px 0;
+  }
+
+  .premise-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+    margin-top: 34px;
   }
 
   .section-heading {
@@ -1828,11 +2394,12 @@ pre {
 
   .section-heading h2,
   .download-heading h2,
-  .compact-heading h2 {
+  .compact-heading h2,
+  .premise h2 {
     font-size: 32px;
   }
 
-  .product-stage picture {
+  .product-stage-frame {
     border-radius: 14px;
   }
 
@@ -1866,8 +2433,18 @@ pre {
     font-size: 22px;
   }
 
+  /*
+   * Too narrow for one line, so the headline goes back to two. The column
+   * itself puts the break between the two sentences — the first fits, the
+   * first plus one more word does not — so there is no measure to set here.
+   * An earlier fixed max-width was cut for a shorter headline and broke this
+   * one across three lines, mid-phrase.
+   *
+   * The size stays 34px down to about 345px of column and only shrinks below
+   * that, which is where the first sentence would otherwise stop fitting.
+   */
   .hero h1 {
-    font-size: 34px;
+    font-size: min(34px, 9.9cqw);
   }
 
   .hero-head {
@@ -1901,7 +2478,10 @@ pre {
     text-align: left;
   }
 
+  .download-stack.download-stack-full,
   .download-stack-full {
+    width: 100%;
+    max-width: none;
     padding: 22px;
   }
 
@@ -1974,8 +2554,20 @@ pre {
   }
 }
 
+/*
+ * These values were written against the light palette only, which left dark
+ * mode — the default for every first visit — raising near-black secondary text
+ * on a near-black page. Each theme carries its own high-contrast set now.
+ */
 @media (prefers-contrast: more) {
   :root {
+    --muted: #dcded9;
+    --quiet: #bcbfb9;
+    --line: rgba(255, 255, 255, 0.3);
+    --line-strong: rgba(255, 255, 255, 0.52);
+  }
+
+  :root[data-theme="light"] {
     --muted: #41433f;
     --quiet: #555852;
     --line: rgba(23, 23, 20, 0.28);
