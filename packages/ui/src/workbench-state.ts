@@ -539,7 +539,6 @@ function defaultIdeLayout(): WorkbenchState["ide"]["layout"] {
     splitDirection: "right",
     minimapEnabled: true,
     restoreOnLaunch: true,
-    rightAssistantOpen: true,
   };
 }
 
@@ -567,10 +566,6 @@ export function sanitizeStoredIdeState(
       base.layout.minimapEnabled,
     ),
     restoreOnLaunch,
-    rightAssistantOpen: storedBoolean(
-      storedLayout?.rightAssistantOpen,
-      base.layout.rightAssistantOpen,
-    ),
   };
   const activeView =
     isIdeViewId(ide.activeView) && ide.activeView !== "settings"
@@ -1105,10 +1100,22 @@ function nextEditorGroupId(layout: WorkbenchState["ide"]["layout"]) {
   return `group-${index}`;
 }
 
+/**
+ * One decoration per path. Git reports the index and the working tree
+ * separately, so a partly staged file arrives twice; the Explorer shows a
+ * single badge, and the working-tree side is the one the user is editing.
+ */
 function decorationsFromSourceControl(
   sourceControl: SourceControlState,
 ): WorkbenchState["ide"]["fileDecorations"] {
-  return sourceControl.files.map((file) => ({
+  const byPath = new Map<string, SourceControlState["files"][number]>();
+  for (const file of sourceControl.files) {
+    const existing = byPath.get(file.path);
+    if (!existing || (existing.staged && !file.staged)) {
+      byPath.set(file.path, file);
+    }
+  }
+  return [...byPath.values()].map((file) => ({
     path: file.path,
     badge:
       file.state === "modified"
@@ -1519,8 +1526,7 @@ export function createInitialWorkbenchState(
     },
     preferences,
     // Prefer an explicit override; otherwise honor the saved new-chat default.
-    workspaceMode:
-      overrides.workspaceMode ?? preferences.defaultWorkspaceMode,
+    workspaceMode: overrides.workspaceMode ?? preferences.defaultWorkspaceMode,
     selectedTerminalPaneId:
       overrides.selectedTerminalPaneId ?? terminalPanes[0]?.id ?? "",
     terminalPanes,
@@ -2305,16 +2311,14 @@ export function workbenchReducer(
           },
         },
       };
+    // The AI view is the chat. Toggling from the editor selects it rather
+    // than opening a second surface beside the one already on screen.
     case "ide-toggle-assistant":
       return {
         ...state,
         ide: {
           ...state.ide,
-          activeView: "ai",
-          layout: {
-            ...state.ide.layout,
-            rightAssistantOpen: !state.ide.layout.rightAssistantOpen,
-          },
+          activeView: state.ide.activeView === "ai" ? "explorer" : "ai",
         },
       };
     case "ide-upsert-buffer": {
