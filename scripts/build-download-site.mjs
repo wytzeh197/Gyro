@@ -41,6 +41,11 @@ const files = [
   ["site/theme.js", "theme.js"],
   ["site/changelog.js", "changelog.js"],
   ["site/release-utils.js", "release-utils.js"],
+  ["site/assets/fonts/inter-latin.woff2", "assets/fonts/inter-latin.woff2"],
+  [
+    "site/assets/fonts/inter-tight-latin.woff2",
+    "assets/fonts/inter-tight-latin.woff2",
+  ],
   ["site/assets/gyro-logo.png", "assets/gyro-logo.png"],
   ["site/assets/gyro-mark.png", "assets/gyro-mark.png"],
   ["site/assets/apple.svg", "assets/apple.svg"],
@@ -55,6 +60,18 @@ const files = [
   [
     "site/assets/screenshots/hero-2400.webp",
     "assets/screenshots/hero-2400.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-light-600.webp",
+    "assets/screenshots/hero-light-600.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-light-1200.webp",
+    "assets/screenshots/hero-light-1200.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-light-2400.webp",
+    "assets/screenshots/hero-light-2400.webp",
   ],
 ];
 
