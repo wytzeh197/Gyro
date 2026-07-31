@@ -213,7 +213,26 @@ const config = {
   ],
 };
 
+/**
+ * A mixed working tree: staged and unstaged sides, several languages, and a
+ * deletion, so the Source Control groups and their colours all show up in a
+ * capture.
+ */
 const changedFiles = [
+  {
+    path: "src/sync.js",
+    state: "modified",
+    staged: true,
+    additions: 24,
+    deletions: 6,
+  },
+  {
+    path: "src/legacy/retry.js",
+    state: "deleted",
+    staged: true,
+    additions: 0,
+    deletions: 41,
+  },
   {
     path: "src/sync.js",
     state: "modified",
@@ -233,6 +252,34 @@ const changedFiles = [
     state: "added",
     staged: false,
     additions: 18,
+    deletions: 0,
+  },
+  {
+    path: "src/app.tsx",
+    state: "modified",
+    staged: false,
+    additions: 9,
+    deletions: 2,
+  },
+  {
+    path: "src/theme.css",
+    state: "modified",
+    staged: false,
+    additions: 12,
+    deletions: 3,
+  },
+  {
+    path: "package.json",
+    state: "modified",
+    staged: false,
+    additions: 2,
+    deletions: 0,
+  },
+  {
+    path: "docs/notes.md",
+    state: "untracked",
+    staged: false,
+    additions: 15,
     deletions: 0,
   },
 ];
@@ -434,12 +481,12 @@ const terminalPanes = [
   },
 ];
 
+// `GitBranchCatalog.branches` is a list of names — the picker renders each
+// entry directly, so objects here crash the branch menu.
 const branches = {
+  available: true,
   current: "main",
-  branches: [
-    { name: "main", isCurrent: true, isRemote: false },
-    { name: "sync-retry-guard", isCurrent: false, isRemote: false },
-  ],
+  branches: ["main", "sync-retry-guard"],
   worktrees: [],
 };
 
@@ -466,10 +513,29 @@ const responses: Record<string, unknown> = {
   list_sessions: sessions,
   read_session_events: chatEvents,
   git_status: sourceControl,
+  // Staging commands answer with the status the app re-renders from, so the
+  // harness keeps showing a populated panel instead of emptying it.
+  git_stage: sourceControl,
+  git_unstage: sourceControl,
+  git_discard: sourceControl,
   git_diff: { stdout: diff, stderr: "", exitCode: 0 },
   git_branches: branches,
   list_workspace_tree: workspaceTree,
   watch_workspace: workspaceTree,
+  search_workspace: [
+    {
+      path: "src/sync.js",
+      lineNumber: 12,
+      line: "  async drain() {",
+      ranges: [{ startColumn: 9, endColumn: 14 }],
+    },
+    {
+      path: "src/queue/backoff.js",
+      lineNumber: 3,
+      line: "export function backoff(attempt) {",
+      ranges: [{ startColumn: 17, endColumn: 24 }],
+    },
+  ],
   prepare_workspace: preparation,
   restore_terminal_panes: scene === "cli" ? terminalPanes : [],
   create_terminal_pane: terminalPanes[0],

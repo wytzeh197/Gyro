@@ -282,9 +282,7 @@ pub fn built_in_council_presets() -> Vec<CouncilPreset> {
         CouncilPreset {
             id: "cheap-local".into(),
             name: "Cheap + local council".into(),
-            description: Some(
-                "Lower-cost and local-capable seats when available.".into(),
-            ),
+            description: Some("Lower-cost and local-capable seats when available.".into()),
             seat_provider_ids: vec!["kimi".into(), "gemini".into()],
             seat_model_ids: BTreeMap::new(),
             synthesizer_provider_id: "kimi".into(),
@@ -510,7 +508,9 @@ impl CouncilRun {
 
     pub fn recompute_totals(&mut self) {
         let wall_duration_ms = if self.updated_at >= self.created_at {
-            (self.updated_at - self.created_at).num_milliseconds().max(0) as u128
+            (self.updated_at - self.created_at)
+                .num_milliseconds()
+                .max(0) as u128
         } else {
             0
         };
@@ -830,10 +830,19 @@ pub fn parse_council_synthesis(
         return synthesis;
     }
 
-    let mut warnings = vec!["Synthesizer output was not valid structured JSON; used markdown section fallback.".into()];
+    let mut warnings = vec![
+        "Synthesizer output was not valid structured JSON; used markdown section fallback.".into(),
+    ];
     let recommendation = section_body(trimmed, &["recommendation"]).unwrap_or_default();
-    let agreement = bullets_from(section_body(trimmed, &["agreement"]).as_deref().unwrap_or(""));
-    let unique_raw = section_body(trimmed, &["unique insights", "unique-insights", "uniqueinsights"]);
+    let agreement = bullets_from(
+        section_body(trimmed, &["agreement"])
+            .as_deref()
+            .unwrap_or(""),
+    );
+    let unique_raw = section_body(
+        trimmed,
+        &["unique insights", "unique-insights", "uniqueinsights"],
+    );
     let risks_raw = section_body(trimmed, &["risks & tests", "risks and tests", "risks"]);
     let adoption_raw = section_body(trimmed, &["adoption", "adoption steps"]);
     let disagreements_raw = section_body(trimmed, &["disagreements", "disagreement"]);
@@ -1071,7 +1080,9 @@ fn section_body(markdown: &str, titles: &[&str]) -> Option<String> {
 }
 
 fn has_any_section(markdown: &str) -> bool {
-    markdown.lines().any(|line| line.trim_start().starts_with("## "))
+    markdown
+        .lines()
+        .any(|line| line.trim_start().starts_with("## "))
 }
 
 fn normalize_heading(value: &str) -> String {
@@ -1197,10 +1208,7 @@ fn render_unified_markdown(synthesis: &CouncilSynthesis) -> String {
     }
     out.push_str("\n## Unique insights\n\n");
     for item in &synthesis.unique_insights {
-        let label = item
-            .seat_label
-            .clone()
-            .unwrap_or_else(|| "Seat".into());
+        let label = item.seat_label.clone().unwrap_or_else(|| "Seat".into());
         out.push_str(&format!("- {label}: {}\n", item.insight));
     }
     out.push_str("\n## Risks & tests\n\n");
@@ -1243,10 +1251,7 @@ mod tests {
             .unwrap();
         let ready = vec!["openai".to_string(), "xai".to_string()];
         let seats = resolve_ready_seats(&preset, &ready, 4);
-        assert_eq!(
-            seats,
-            vec!["openai".to_string(), "xai".to_string()]
-        );
+        assert_eq!(seats, vec!["openai".to_string(), "xai".to_string()]);
     }
 
     #[test]
@@ -1452,8 +1457,12 @@ Ship advisory council first.
     #[test]
     fn council_denies_all_capabilities() {
         use crate::capabilities::CapabilityClass;
-        assert!(!council_capability_allowed(CapabilityClass::WorkspaceInspect));
-        assert!(!council_capability_allowed(CapabilityClass::TerminalExecute));
+        assert!(!council_capability_allowed(
+            CapabilityClass::WorkspaceInspect
+        ));
+        assert!(!council_capability_allowed(
+            CapabilityClass::TerminalExecute
+        ));
         assert!(!council_capability_allowed(CapabilityClass::GithubWrite));
     }
 

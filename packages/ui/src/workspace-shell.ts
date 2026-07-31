@@ -173,8 +173,8 @@ export const workspaceCommandRegistry: readonly WorkspaceCommandDefinition[] = [
   },
   {
     id: "search-files",
-    label: "View: Search Workspace",
-    description: "Search project content",
+    label: "View: Search in Files",
+    description: "Find text across the workspace",
     icon: "search",
     keywords: "code find text",
     destination: "workspace",
