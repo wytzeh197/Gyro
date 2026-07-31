@@ -21,6 +21,15 @@ The Gyro logo and product screenshots are part of the Gyro project. The site
 screenshots were captured from a local, isolated demo repository with a fake
 local provider and contain no customer, account, or private repository data.
 
+## Typefaces
+
+- `fonts/inter-latin.woff2` is Inter, and `fonts/inter-tight-latin.woff2` is
+  Inter Tight. Both are the latin variable subsets as published by Google Fonts,
+  vendored here so the site loads no font CDN. Inter is designed by Rasmus
+  Andersson and distributed under the SIL Open Font License 1.1.
+  Source: https://github.com/rsms/inter
+  License: https://github.com/rsms/inter/blob/master/LICENSE.txt
+
 ## Agent marks
 
 The Kimi and Grok marks on the homepage come from

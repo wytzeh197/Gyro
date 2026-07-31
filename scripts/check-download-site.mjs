@@ -186,31 +186,59 @@ for (const [name, html] of Object.entries(pages)) {
 }
 
 containsAll(pages.home, "Homepage", [
-  "Chat, CLI, and IDE. One place.",
-  "Stop switching tools for one coding task.",
+  "Stop switching tools. Say it once.",
+  "Public alpha",
+  "Chat, CLI, and review in one session — on the agent CLIs you",
   "Open source · No account · No analytics",
+  "Every tool switch costs you the context.",
+  "A terminal that never saw the ask.",
+  "A chat that never saw the run.",
+  "A diff that never saw the reasoning.",
+  'class="premise-list"',
   "One task. Three connected surfaces.",
   "Direct the work.",
   "Run it locally.",
   "Review every change.",
+  "nothing summarized away",
   "assets/gyro-mark.png",
   'class="spine"',
   'class="surface-card"',
-  'class="surface-visual figure"',
-  'class="byo-stage"',
+  'class="surface-visual"',
+  'class="mock mock-chat"',
+  'class="mock mock-terminal"',
+  'class="mock mock-diff"',
+  "Bring your own.",
   "Use what you already paid for",
-  "data-byo-path",
-  "fig. 01",
+  'class="agent-grid"',
   "assets/screenshots/hero-600.webp",
   "assets/screenshots/hero-1200.webp",
   "assets/screenshots/hero-2400.webp",
+  "assets/screenshots/hero-light-600.webp",
+  "assets/screenshots/hero-light-1200.webp",
+  "assets/screenshots/hero-light-2400.webp",
   "assets/social-preview.png",
   "Download Gyro for macOS.",
-  "The local workspace that keeps chat, CLI, and code together.",
+  "Install it, point it at a repo, and keep working.",
+  "Requires an agent CLI",
+  "Download DMG",
   "DMG · Apple Silicon &amp; Intel",
   "Install guide",
+  "Do I need Claude, Codex, or another agent CLI first?",
   "data-download-surface",
 ]);
+
+// Each mockup stands in for a real interface, so it has to read as one image to
+// assistive tech rather than as a scatter of unrelated labels.
+for (const mock of ["mock mock-chat", "mock mock-terminal", "mock mock-diff"]) {
+  const index = pages.home.indexOf(`class="${mock}"`);
+  check(
+    index !== -1 &&
+      /^[^>]*role="img"[^>]*aria-label="/s.test(
+        pages.home.slice(index, pages.home.indexOf(">", index)),
+      ),
+    `Mockup ${mock} must carry role="img" and an aria-label`,
+  );
+}
 
 check(
   (pages.home.match(/data-download-surface/g) ?? []).length === 1,
@@ -235,11 +263,17 @@ check(
 );
 check(
   !/assets\/screenshots\/(chat|cli|workspace)-/.test(allHtml),
-  "Only the hero may use a product screenshot; the surfaces use drawn figures",
+  "Only the hero may use a product screenshot; the surfaces are drawn in markup",
 );
+// The surfaces must stay image-free: a screenshot there would go stale behind
+// the app, and would not follow the theme.
+const spineStart = pages.home.indexOf('<ol class="spine">');
+const spineEnd = pages.home.indexOf("</ol>", spineStart);
 check(
-  (pages.home.match(/<svg/g) ?? []).length >= 3,
-  "Homepage must draw its own surface figures",
+  spineStart !== -1 &&
+    spineEnd !== -1 &&
+    !pages.home.slice(spineStart, spineEnd).includes("<img"),
+  "Surface mockups must be built from markup, not screenshots",
 );
 
 containsAll(pages.install, "Install page", [
@@ -308,13 +342,18 @@ containsAll(css, "Shared CSS", [
   "grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr))",
   "grid-template-columns: minmax(260px, 32%) minmax(0, 68%)",
   ".surface-index",
-  ".byo-stage",
-  ".byo-word",
+  ".premise-list",
+  ".cost-figure",
+  ".cost-gap",
+  ".mock-gate",
+  ".mock-diff-lines",
+  ".agent-grid",
   ':root[data-theme="light"]',
   ".theme-toggle",
   "--mono:",
+  "--sans:",
+  "--display:",
   ".spine",
-  ".figure",
   ".changelog-layout",
   ".version-rail nav",
   ".legal-layout",
@@ -327,9 +366,34 @@ containsAll(css, "Shared CSS", [
   "@media (prefers-contrast: more)",
 ]);
 
+// Both webfonts are served from this origin. There is no font-src in the CSP,
+// so it falls back to default-src 'self' and any CDN would be blocked.
+for (const font of ["inter-latin.woff2", "inter-tight-latin.woff2"]) {
+  check(
+    css.includes(`url("assets/fonts/${font}")`),
+    `Shared CSS must serve ${font} from this origin`,
+  );
+  check(
+    pages.home.includes(`href="assets/fonts/${font}"`),
+    `Homepage must preload ${font}`,
+  );
+}
 check(
-  app.includes("startBringYourOwn") && app.includes("prefers-reduced-motion"),
-  "The zigzag reveal must be scroll-driven and skip when motion is reduced",
+  (css.match(/@font-face/g) ?? []).length === 2,
+  "Shared CSS must declare exactly the two self-hosted faces",
+);
+check(
+  /font-display:\s*swap/.test(css),
+  "Webfaces must use font-display: swap so text paints before they arrive",
+);
+
+// The high-contrast override started life as a light-theme-only palette, which
+// left dark mode — the default — with near-black text on a near-black page.
+check(
+  /@media \(prefers-contrast: more\) \{[\s\S]*?:root\[data-theme="light"\]/.test(
+    css,
+  ),
+  "The high-contrast override must carry a set for each theme",
 );
 
 containsAll(app, "Download runtime", [
@@ -372,9 +436,12 @@ containsAll(buildScript, "Site builder", [
   "site/release-utils.js",
   '"site/theme.js", "theme.js"',
   "site/changelog.js",
+  "site/assets/fonts/inter-latin.woff2",
+  "site/assets/fonts/inter-tight-latin.woff2",
   "site/assets/gyro-mark.png",
   "site/assets/social-preview.png",
   "site/assets/screenshots/hero-2400.webp",
+  "site/assets/screenshots/hero-light-2400.webp",
   'writeFileSync(resolve(outputRoot, ".nojekyll")',
 ]);
 
@@ -455,9 +522,12 @@ check(
 );
 
 const screenshotSpecs = [
-  ["site/assets/screenshots/hero-600.webp", 600, 480],
-  ["site/assets/screenshots/hero-1200.webp", 1200, 960],
-  ["site/assets/screenshots/hero-2400.webp", 2400, 1920],
+  ["site/assets/screenshots/hero-600.webp", 600, 338],
+  ["site/assets/screenshots/hero-1200.webp", 1200, 675],
+  ["site/assets/screenshots/hero-2400.webp", 2400, 1350],
+  ["site/assets/screenshots/hero-light-600.webp", 600, 338],
+  ["site/assets/screenshots/hero-light-1200.webp", 1200, 675],
+  ["site/assets/screenshots/hero-light-2400.webp", 2400, 1350],
 ];
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));

@@ -10,16 +10,16 @@
     <meta name="referrer" content="same-origin" />
     <meta
       name="description"
-      content="Gyro puts chat, CLI, and IDE in one local macOS workspace, across the coding agents you already use."
+      content="Gyro is a local macOS workspace that keeps chat, a real CLI, and full review in one session — driving the agent CLIs you already pay for."
     />
     <meta name="theme-color" content="#0c0c0c" />
     <meta
       property="og:title"
-      content="Gyro — chat, CLI, and IDE in one place"
+      content="Gyro — Stop switching tools. Say it once."
     />
     <meta
       property="og:description"
-      content="Stop switching tools for one coding task. Keep the conversation, commands, code, diffs, and approvals together."
+      content="Chat, a real CLI, and full review in one local macOS workspace — driving the agent CLIs you already pay for."
     />
     <meta
       property="og:image"
@@ -28,8 +28,22 @@
     <meta property="og:url" content="https://usegyro.io/" />
     <meta property="og:type" content="website" />
     <link rel="canonical" href="https://usegyro.io/" />
-    <title>Gyro — Chat, CLI, and IDE in one place</title>
+    <title>Gyro — Chat, CLI, and review in one place</title>
     <link rel="icon" href="assets/gyro-logo.png" />
+    <link
+      rel="preload"
+      href="assets/fonts/inter-tight-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="assets/fonts/inter-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <script src="theme.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="app.js"></script>
@@ -95,17 +109,24 @@
       <section class="hero section-shell" aria-labelledby="hero-title">
         <div class="hero-head">
           <div class="hero-copy">
-            <p class="eyebrow">
-              <span aria-hidden="true"></span> Public alpha · macOS 14+
+            <p class="hero-badge">
+              <span class="hero-badge-dot" aria-hidden="true"></span>
+              Public alpha
             </p>
-            <h1 id="hero-title">Chat, CLI, and IDE. One place.</h1>
+            <h1 id="hero-title">Stop switching tools. Say it once.</h1>
             <p class="hero-lede">
-              Stop switching tools for one coding task. One workspace, one
-              context, on the agent CLIs you already pay for.
+              Chat, CLI, and review in one session — on the agent CLIs you
+              already pay for.
             </p>
             <div class="hero-actions">
               <a class="button button-primary" href="#download">
-                <img src="assets/apple.svg" alt="" width="17" height="17" />
+                <img
+                  class="mark-apple"
+                  src="assets/apple.svg"
+                  alt=""
+                  width="17"
+                  height="17"
+                />
                 Download for macOS
               </a>
               <a
@@ -123,8 +144,9 @@
         </div>
 
         <figure class="product-stage">
-          <picture>
+          <div class="product-stage-frame">
             <img
+              class="hero-shot hero-shot-dark"
               src="assets/screenshots/hero-1200.webp"
               srcset="
                 assets/screenshots/hero-600.webp   600w,
@@ -137,12 +159,77 @@
                 1152px
               "
               width="1200"
-              height="960"
-              alt="Gyro showing a completed agent run beside its session list"
+              height="675"
+              alt="Gyro workspace with sessions sidebar and empty chat ready for a task"
             />
-          </picture>
+            <img
+              class="hero-shot hero-shot-light"
+              src="assets/screenshots/hero-light-1200.webp"
+              srcset="
+                assets/screenshots/hero-light-600.webp   600w,
+                assets/screenshots/hero-light-1200.webp 1200w,
+                assets/screenshots/hero-light-2400.webp 2400w
+              "
+              sizes="
+                (max-width: 640px) calc(100vw - 32px),
+                (max-width: 1200px) calc(100vw - 48px),
+                1152px
+              "
+              width="1200"
+              height="675"
+              alt="Gyro workspace with sessions sidebar and empty chat ready for a task"
+            />
+          </div>
           <figcaption>One window. Full context.</figcaption>
         </figure>
+      </section>
+
+      <section class="premise section-shell" aria-labelledby="premise-title">
+        <p class="kicker">The problem</p>
+        <h2 id="premise-title">Every tool switch costs you the context.</h2>
+        <!--
+          The same slot is cut out of all three figures. That is the argument of
+          this band: it is one missing piece, not three separate problems.
+        -->
+        <ul class="premise-list">
+          <li>
+            <div
+              class="cost-figure"
+              role="img"
+              aria-label="A terminal that has run the tests and passed them, with an empty slot where the request behind them should be."
+            >
+              <p class="cost-line">
+                <span class="cost-prompt">$</span> node --test
+              </p>
+              <p class="cost-line cost-add">✓ 2 passed</p>
+              <span class="cost-gap"></span>
+            </div>
+            <p>A terminal that never saw the ask.</p>
+          </li>
+          <li>
+            <div
+              class="cost-figure"
+              role="img"
+              aria-label="A chat asking whether the change is covered, with an empty slot where the command that actually ran should be."
+            >
+              <p class="cost-bubble">Is the retry covered by a test?</p>
+              <span class="cost-gap"></span>
+            </div>
+            <p>A chat that never saw the run.</p>
+          </li>
+          <li>
+            <div
+              class="cost-figure"
+              role="img"
+              aria-label="A diff replacing the unbounded retry loop, with an empty slot where the reasoning behind it should be."
+            >
+              <p class="cost-line cost-remove">− for (;;) {</p>
+              <p class="cost-line cost-add">+ for (let n = 0; …) {</p>
+              <span class="cost-gap"></span>
+            </div>
+            <p>A diff that never saw the reasoning.</p>
+          </li>
+        </ul>
       </section>
 
       <section
@@ -161,76 +248,74 @@
             <span class="surface-index" aria-hidden="true">01</span>
             <div class="surface-copy">
               <h3>Direct the work.</h3>
-              <p>Ask once. See what it searched, ran, and changed.</p>
+              <p>
+                Ask once. Watch it search, run, and edit — every step in the
+                open, nothing summarized away.
+              </p>
             </div>
-            <figure class="surface-visual figure">
-              <svg
-                viewBox="0 0 520 236"
+            <div class="surface-visual">
+              <!--
+                The surfaces are drawn in markup rather than photographed. They
+                stay sharp at any density, follow the theme, and never fall out
+                of date with a screenshot pipeline.
+              -->
+              <div
+                class="mock mock-chat"
                 role="img"
-                aria-label="A request enters a run; the run is a track of search, edit, and test steps ending in three changed files"
+                aria-label="A Gyro chat thread: the request, a six-minute run showing its search, edit, and test steps, and a card listing three changed files with 73 lines added and 6 removed."
               >
-                <rect
-                  class="fig-panel"
-                  x="0.5"
-                  y="0.5"
-                  width="519"
-                  height="47"
-                  rx="10"
-                />
-                <text class="fig-label" x="18" y="30">
-                  Bound the retry loop
-                </text>
-                <circle class="fig-accent" cx="497" cy="24" r="4" />
-
-                <path class="fig-hair" d="M32 48 V 78" />
-
-                <rect
-                  class="fig-fill"
-                  x="32"
-                  y="78"
-                  width="130"
-                  height="30"
-                  rx="6"
-                />
-                <rect
-                  class="fig-fill"
-                  x="170"
-                  y="78"
-                  width="180"
-                  height="30"
-                  rx="6"
-                />
-                <rect
-                  class="fig-fill"
-                  x="358"
-                  y="78"
-                  width="130"
-                  height="30"
-                  rx="6"
-                />
-                <text class="fig-label" x="46" y="98">search</text>
-                <text class="fig-label" x="184" y="98">edit</text>
-                <text class="fig-label" x="372" y="98">test</text>
-
-                <path class="fig-hair" d="M32 120 H 488" />
-                <path class="fig-rule" d="M32 116 V 124 M488 116 V 124" />
-                <text class="fig-label" x="238" y="142">6m 1s</text>
-
-                <rect
-                  class="fig-panel"
-                  x="0.5"
-                  y="164.5"
-                  width="519"
-                  height="71"
-                  rx="10"
-                />
-                <text class="fig-strong" x="18" y="192">3 files changed</text>
-                <text class="fig-add" x="18" y="218">+73</text>
-                <text class="fig-remove" x="62" y="218">−6</text>
-                <path class="fig-accent-line" d="M470 190 l8 8 l14 -16" />
-              </svg>
-              <figcaption>fig. 01 — one run, fully accounted for</figcaption>
-            </figure>
+                <div class="mock-bar">
+                  <span class="mock-bar-title"
+                    >Bound the sync queue retries</span
+                  >
+                  <span class="mock-bar-meta">main</span>
+                </div>
+                <div class="mock-body">
+                  <p class="mock-ask">
+                    The sync queue retries forever when the server returns 503.
+                    Add a bounded retry with backoff, and cover it with a test.
+                  </p>
+                  <div class="mock-run">
+                    <span class="mock-run-label">Worked for 6m 1s</span>
+                    <span class="mock-steps">
+                      <span>search</span>
+                      <span>edit</span>
+                      <span>test</span>
+                    </span>
+                  </div>
+                  <p class="mock-say">
+                    Capped it at 5 attempts with exponential backoff, and
+                    surfaced the last error instead of swallowing it.
+                  </p>
+                  <div class="mock-card">
+                    <div class="mock-card-head">
+                      <span class="mock-card-title">Edited 3 files</span>
+                      <span class="mock-delta">
+                        <span class="mock-add">+73</span>
+                        <span class="mock-remove">−6</span>
+                      </span>
+                    </div>
+                    <ul class="mock-files">
+                      <li>
+                        <span class="mock-path">src/sync.js</span>
+                        <span class="mock-add">+24</span>
+                        <span class="mock-remove">−6</span>
+                      </li>
+                      <li>
+                        <span class="mock-path">src/sync.test.js</span>
+                        <span class="mock-add">+31</span>
+                        <span class="mock-remove">−0</span>
+                      </li>
+                      <li>
+                        <span class="mock-path">src/queue/backoff.js</span>
+                        <span class="mock-add">+18</span>
+                        <span class="mock-remove">−0</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
           </li>
 
           <li class="surface-card">
@@ -238,336 +323,253 @@
             <div class="surface-copy">
               <h3>Run it locally.</h3>
               <p>
-                Real terminals. Your agent runs behind an approval gate, not a
-                raw prompt.
+                Real PTY terminals, not a sandbox. Commands from the agent stop
+                at an approval gate you control.
               </p>
             </div>
-            <figure class="surface-visual figure">
-              <svg
-                viewBox="0 0 520 236"
+            <div class="surface-visual">
+              <div
+                class="mock mock-terminal"
                 role="img"
-                aria-label="A command from the agent stops at an approval gate until it is allowed through to the shell"
+                aria-label="A terminal pane running the test suite, with an approval gate holding the agent's next command until it is allowed once, always allowed, or denied."
               >
-                <rect
-                  class="fig-panel"
-                  x="0.5"
-                  y="26.5"
-                  width="150"
-                  height="86"
-                  rx="10"
-                />
-                <text class="fig-label" x="18" y="56">agent</text>
-                <rect
-                  class="fig-fill"
-                  x="18"
-                  y="70"
-                  width="114"
-                  height="10"
-                  rx="5"
-                />
-                <rect
-                  class="fig-fill"
-                  x="18"
-                  y="88"
-                  width="78"
-                  height="10"
-                  rx="5"
-                />
-
-                <path class="fig-hair" d="M150 69 H 232" />
-                <path class="fig-accent-line" d="M222 63 l8 6 l-8 6" />
-
-                <path class="fig-rule" d="M244 8 V 130 M276 8 V 130" />
-                <rect class="fig-fill" x="244" y="52" width="32" height="34" />
-                <text class="fig-label" x="212" y="156">approval</text>
-
-                <path
-                  class="fig-hair"
-                  d="M288 69 H 370"
-                  stroke-dasharray="4 5"
-                />
-
-                <rect
-                  class="fig-panel"
-                  x="369.5"
-                  y="26.5"
-                  width="150"
-                  height="86"
-                  rx="10"
-                />
-                <text class="fig-label" x="388" y="56">shell</text>
-                <rect
-                  class="fig-fill"
-                  x="388"
-                  y="70"
-                  width="114"
-                  height="10"
-                  rx="5"
-                />
-                <rect
-                  class="fig-fill"
-                  x="388"
-                  y="88"
-                  width="52"
-                  height="10"
-                  rx="5"
-                />
-
-                <rect
-                  class="fig-panel"
-                  x="0.5"
-                  y="180.5"
-                  width="519"
-                  height="55"
-                  rx="10"
-                />
-                <circle class="fig-accent" cx="26" cy="208" r="4" />
-                <text class="fig-label" x="42" y="213">
-                  npm test — held for approval
-                </text>
-              </svg>
-              <figcaption>fig. 02 — nothing runs unasked</figcaption>
-            </figure>
+                <div class="mock-bar">
+                  <span class="mock-tab is-active">Shell</span>
+                  <span class="mock-tab">Agent</span>
+                  <span class="mock-bar-meta">gyro@local</span>
+                </div>
+                <div class="mock-body mock-body-term">
+                  <p class="mock-cmd">
+                    <span class="mock-prompt">$</span> node --test
+                  </p>
+                  <p class="mock-pass">✓ syncs every queued note</p>
+                  <p class="mock-pass">✓ retries a temporary send failure</p>
+                  <p class="mock-out">tests 2 · pass 2 · fail 0 · 102ms</p>
+                  <div class="mock-gate">
+                    <div class="mock-gate-head">
+                      <span class="mock-gate-dot" aria-hidden="true"></span>
+                      <span class="mock-gate-title">Approval required</span>
+                    </div>
+                    <p class="mock-gate-cmd">git commit -am "bound retries"</p>
+                    <div class="mock-gate-actions">
+                      <span class="mock-btn is-primary">Allow once</span>
+                      <span class="mock-btn">Always</span>
+                      <span class="mock-btn">Deny</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </li>
 
           <li class="surface-card">
             <span class="surface-index" aria-hidden="true">03</span>
             <div class="surface-copy">
               <h3>Review every change.</h3>
-              <p>Every diff in view before anything lands.</p>
+              <p>
+                Every hunk in view before it lands. Keep the change, or throw it
+                away without leaving the session.
+              </p>
             </div>
-            <figure class="surface-visual figure">
-              <svg
-                viewBox="0 0 520 236"
+            <div class="surface-visual">
+              <div
+                class="mock mock-diff"
                 role="img"
-                aria-label="Three changed files, each with a bar showing how many lines were added and removed"
+                aria-label="A diff of src/sync.js showing the unbounded retry loop replaced by a bounded loop with exponential backoff, with keep and discard controls."
               >
-                <path class="fig-hair" d="M0 34 H 520" />
-
-                <text class="fig-label" x="0" y="70">src/sync.js</text>
-                <rect
-                  class="fig-add"
-                  x="300"
-                  y="59"
-                  width="120"
-                  height="10"
-                  rx="5"
-                />
-                <rect
-                  class="fig-remove"
-                  x="424"
-                  y="59"
-                  width="30"
-                  height="10"
-                  rx="5"
-                />
-                <text class="fig-label" x="470" y="70">24</text>
-                <path class="fig-hair" d="M0 90 H 520" />
-
-                <text class="fig-label" x="0" y="126">src/sync.test.js</text>
-                <rect
-                  class="fig-add"
-                  x="300"
-                  y="115"
-                  width="155"
-                  height="10"
-                  rx="5"
-                />
-                <text class="fig-label" x="470" y="126">31</text>
-                <path class="fig-hair" d="M0 146 H 520" />
-
-                <text class="fig-label" x="0" y="182">
-                  src/queue/backoff.js
-                </text>
-                <rect
-                  class="fig-add"
-                  x="300"
-                  y="171"
-                  width="90"
-                  height="10"
-                  rx="5"
-                />
-                <text class="fig-label" x="470" y="182">18</text>
-                <path class="fig-rule" d="M0 202 H 520" />
-
-                <text class="fig-strong" x="0" y="228">3 files</text>
-                <text class="fig-add" x="404" y="228">+73</text>
-                <text class="fig-remove" x="470" y="228">−6</text>
-              </svg>
-              <figcaption>fig. 03 — read it before you keep it</figcaption>
-            </figure>
+                <div class="mock-bar">
+                  <span class="mock-bar-title mock-mono">src/sync.js</span>
+                  <span class="mock-delta">
+                    <span class="mock-add">+24</span>
+                    <span class="mock-remove">−6</span>
+                  </span>
+                </div>
+                <div class="mock-body mock-body-diff">
+                  <!--
+                    Every space inside <code> is rendered: the rows are set `white-space:
+                    pre` so the code keeps its nesting. prettier-ignore stops the formatter
+                    wrapping a long row onto the next source line, which would then show up
+                    as that line’s own source indentation.
+                  -->
+                  <!-- prettier-ignore -->
+                  <ol class="mock-diff-lines">
+                    <li><span class="mock-ln">6</span><span class="mock-mk"></span><code>  const item = queue.shift();</code></li>
+                    <li class="is-remove"><span class="mock-ln">7</span><span class="mock-mk">−</span><code>  for (;;) {</code></li>
+                    <li class="is-remove"><span class="mock-ln">8</span><span class="mock-mk">−</span><code>    try {</code></li>
+                    <li class="is-remove"><span class="mock-ln">9</span><span class="mock-mk">−</span><code>      return await send(item);</code></li>
+                    <li class="is-add"><span class="mock-ln">7</span><span class="mock-mk">+</span><code>  for (let n = 0; n &lt;= MAX_RETRIES; n += 1) {</code></li>
+                    <li class="is-add"><span class="mock-ln">8</span><span class="mock-mk">+</span><code>    try { return await send(item); }</code></li>
+                    <li class="is-add"><span class="mock-ln">9</span><span class="mock-mk">+</span><code>    catch (error) {</code></li>
+                    <li class="is-add"><span class="mock-ln">10</span><span class="mock-mk">+</span><code>      if (n === MAX_RETRIES) throw error;</code></li>
+                    <li class="is-add"><span class="mock-ln">11</span><span class="mock-mk">+</span><code>      await wait(2 ** n * 100);</code></li>
+                    <li class="is-add"><span class="mock-ln">12</span><span class="mock-mk">+</span><code>    }</code></li>
+                    <li><span class="mock-ln">13</span><span class="mock-mk"></span><code>  }</code></li>
+                  </ol>
+                  <div class="mock-review">
+                    <span class="mock-review-note">3 files · 1 of 3</span>
+                    <span class="mock-btn is-primary">Keep</span>
+                    <span class="mock-btn">Discard</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </li>
         </ol>
       </section>
 
       <section
-        class="byo-section section-shell"
+        class="agents-section section-shell"
         id="agents"
         aria-labelledby="agents-title"
       >
-        <header class="section-heading">
+        <header class="section-heading compact-heading">
           <p class="kicker">Agents</p>
-          <h2 id="agents-title">Use what you already paid for</h2>
+          <h2 id="agents-title">Bring your own.</h2>
+          <p>
+            Use what you already paid for. Gyro drives the CLI installed on your
+            Mac, on your existing plan — no Gyro key, no proxy, no markup.
+          </p>
         </header>
 
-        <div class="byo-stage" data-byo>
-          <p class="byo-word byo-word-top" data-byo-item="0.08">Bring</p>
-          <p class="byo-word byo-word-middle" data-byo-item="0.46">your</p>
-          <p class="byo-word byo-word-bottom" data-byo-item="0.84">own.</p>
-
-          <div class="byo-track">
-            <svg class="byo-line" viewBox="0 0 400 1160" aria-hidden="true">
-              <path
-                data-byo-path
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                d="M290 16 L290 80 C290 160 110 160 110 240 C110 320 290 320 290 400 C290 480 110 480 110 560 C110 640 290 640 290 720 C290 800 110 800 110 880 C110 960 290 960 290 1040 L290 1104"
-              />
-            </svg>
-
-            <ul class="byo-nodes">
-              <li class="byo-node byo-n1" data-byo-item="0.07">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="30"
-                    height="30"
-                    fill="currentColor"
-                    role="img"
-                    aria-label="Claude Code"
+        <ul class="agent-grid">
+          <li class="agent-tile agent-claude">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"
+                ></path>
+              </svg>
+            </span>
+            <span class="agent-name">Claude Code</span>
+          </li>
+          <li class="agent-tile">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 256 260"
+                width="25"
+                height="25"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M239.184 106.203a64.72 64.72 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.72 64.72 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.67 64.67 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.77 64.77 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483m-97.56 136.338a48.4 48.4 0 0 1-31.105-11.255l1.535-.87l51.67-29.825a8.6 8.6 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601M37.158 197.93a48.35 48.35 0 0 1-5.781-32.589l1.534.921l51.722 29.826a8.34 8.34 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803M23.549 85.38a48.5 48.5 0 0 1 25.58-21.333v61.39a8.29 8.29 0 0 0 4.195 7.316l62.874 36.272l-21.845 12.636a.82.82 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405zm179.466 41.695l-63.08-36.63L161.73 77.86a.82.82 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.54 8.54 0 0 0-4.4-7.213m21.742-32.69l-1.535-.922l-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.72.72 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391zM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87l-51.67 29.825a8.6 8.6 0 0 0-4.246 7.367zm11.868-25.58L128.067 97.3l28.188 16.218v32.434l-28.086 16.218l-28.188-16.218z"
+                ></path>
+              </svg>
+            </span>
+            <span class="agent-name">Codex</span>
+          </li>
+          <li class="agent-tile">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="url(#agent-gemini)"
+                aria-hidden="true"
+              >
+                <!--
+                  Gemini's spark, carrying its violet-to-blue gradient. The axis
+                  runs from the left point to the right one, which is how Google
+                  renders the mark.
+                -->
+                <defs>
+                  <linearGradient
+                    id="agent-gemini"
+                    x1="0"
+                    y1="7"
+                    x2="24"
+                    y2="17"
+                    gradientUnits="userSpaceOnUse"
                   >
-                    <path
-                      d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"
-                    ></path>
-                  </svg>
-                </span>
-              </li>
-              <li class="byo-node byo-n2" data-byo-item="0.21">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 256 260"
-                    width="29"
-                    height="29"
-                    fill="currentColor"
-                    role="img"
-                    aria-label="ChatGPT"
-                  >
-                    <path
-                      d="M239.184 106.203a64.72 64.72 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.72 64.72 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.67 64.67 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.77 64.77 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483m-97.56 136.338a48.4 48.4 0 0 1-31.105-11.255l1.535-.87l51.67-29.825a8.6 8.6 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601M37.158 197.93a48.35 48.35 0 0 1-5.781-32.589l1.534.921l51.722 29.826a8.34 8.34 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803M23.549 85.38a48.5 48.5 0 0 1 25.58-21.333v61.39a8.29 8.29 0 0 0 4.195 7.316l62.874 36.272l-21.845 12.636a.82.82 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405zm179.466 41.695l-63.08-36.63L161.73 77.86a.82.82 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.54 8.54 0 0 0-4.4-7.213m21.742-32.69l-1.535-.922l-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.72.72 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391zM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87l-51.67 29.825a8.6 8.6 0 0 0-4.246 7.367zm11.868-25.58L128.067 97.3l28.188 16.218v32.434l-28.086 16.218l-28.188-16.218z"
-                    ></path>
-                  </svg>
-                </span>
-              </li>
-              <li class="byo-node byo-n3" data-byo-item="0.34">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="30"
-                    height="30"
-                    fill="url(#byo-gemini)"
-                    role="img"
-                    aria-label="Gemini CLI"
-                  >
-                    <!--
-                      Gemini's spark, carrying its violet-to-blue gradient. The
-                      axis runs from the left point to the right one, which is
-                      how Google renders the mark.
-                    -->
-                    <defs>
-                      <linearGradient
-                        id="byo-gemini"
-                        x1="0"
-                        y1="7"
-                        x2="24"
-                        y2="17"
-                        gradientUnits="userSpaceOnUse"
-                      >
-                        <stop offset="0" stop-color="#9061c4" />
-                        <stop offset="0.5" stop-color="#5b83d8" />
-                        <stop offset="1" stop-color="#2e93e3" />
-                      </linearGradient>
-                    </defs>
-                    <path
-                      d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
-                    ></path>
-                  </svg>
-                </span>
-              </li>
-              <li class="byo-node byo-n4" data-byo-item="0.48">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="30"
-                    height="30"
-                    fill="currentColor"
-                    fill-rule="evenodd"
-                    role="img"
-                    aria-label="Grok Build"
-                  >
-                    <path
-                      d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"
-                    ></path>
-                  </svg>
-                </span>
-              </li>
-              <li class="byo-node byo-n5" data-byo-item="0.62">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="30"
-                    height="30"
-                    fill="currentColor"
-                    fill-rule="evenodd"
-                    role="img"
-                    aria-label="Kimi Code"
-                  >
-                    <path
-                      class="byo-kimi-dot"
-                      d="M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z"
-                    ></path>
-                    <path
-                      d="M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z"
-                    ></path>
-                  </svg>
-                </span>
-              </li>
-              <li class="byo-node byo-n6 byo-node-soon" data-byo-item="0.76">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="30"
-                    height="30"
-                    fill="currentColor"
-                    role="img"
-                    aria-label="Cursor"
-                  >
-                    <path
-                      d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"
-                    ></path>
-                  </svg>
-                </span>
-                <span class="byo-badge">Coming soon</span>
-              </li>
-              <li class="byo-node byo-n7 byo-node-soon" data-byo-item="0.90">
-                <span class="byo-mark">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="30"
-                    height="30"
-                    fill="currentColor"
-                    role="img"
-                    aria-label="OpenCode"
-                  >
-                    <path d="M22 24H2V0h20zM17 4.8H7v14.4h10z"></path>
-                  </svg>
-                </span>
-                <span class="byo-badge">Coming soon</span>
-              </li>
-            </ul>
-          </div>
-        </div>
+                    <stop offset="0" stop-color="#9061c4" />
+                    <stop offset="0.5" stop-color="#5b83d8" />
+                    <stop offset="1" stop-color="#2e93e3" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
+                ></path>
+              </svg>
+            </span>
+            <span class="agent-name">Gemini CLI</span>
+          </li>
+          <li class="agent-tile">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="currentColor"
+                fill-rule="evenodd"
+                aria-hidden="true"
+              >
+                <path
+                  d="M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"
+                ></path>
+              </svg>
+            </span>
+            <span class="agent-name">Grok Build</span>
+          </li>
+          <li class="agent-tile">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="currentColor"
+                fill-rule="evenodd"
+                aria-hidden="true"
+              >
+                <path
+                  class="agent-kimi-dot"
+                  d="M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z"
+                ></path>
+                <path
+                  d="M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z"
+                ></path>
+              </svg>
+            </span>
+            <span class="agent-name">Kimi Code</span>
+          </li>
+          <li class="agent-tile is-soon">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"
+                ></path>
+              </svg>
+            </span>
+            <span class="agent-name">Cursor</span>
+            <span class="agent-badge">Soon</span>
+          </li>
+          <li class="agent-tile is-soon">
+            <span class="agent-mark">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M22 24H2V0h20zM17 4.8H7v14.4h10z"></path>
+              </svg>
+            </span>
+            <span class="agent-name">OpenCode</span>
+            <span class="agent-badge">Soon</span>
+          </li>
+        </ul>
       </section>
 
       <section
@@ -579,12 +581,13 @@
           <header class="download-heading">
             <p class="kicker">Download</p>
             <h2 id="download-title">Download Gyro for macOS.</h2>
-            <p>The local workspace that keeps chat, CLI, and code together.</p>
+            <p>Install it, point it at a repo, and keep working.</p>
           </header>
 
           <div class="download-stack" data-download-surface>
             <p class="download-platform-note">
-              macOS 14 or later · Choose Apple Silicon or Intel
+              macOS 14 or later · Apple Silicon or Intel · Requires an agent CLI
+              you install separately
             </p>
 
             <article class="macos-card">
@@ -628,7 +631,7 @@
                 data-role="download-link"
                 href="https://github.com/wytzeh197/Gyro/releases/latest"
               >
-                <span data-role="download-label">Open GitHub Releases</span>
+                <span data-role="download-label">Download DMG</span>
               </a>
 
               <p class="asset-meta" data-role="asset-meta">
@@ -675,12 +678,34 @@
         </header>
         <div class="detail-list">
           <details>
+            <summary>Is it ready for production work?</summary>
+            <div class="detail-content">
+              <p>
+                Not yet. Install it only if you are comfortable testing software
+                that can read files and run commands.
+              </p>
+              <a href="changelog/">See what shipped</a>
+            </div>
+          </details>
+          <details>
             <summary>Do I need a Gyro account or API key?</summary>
             <div class="detail-content">
               <p>
                 No. Each agent CLI signs in through its own provider login on
                 your Mac, and Gyro uses that session.
               </p>
+            </div>
+          </details>
+          <details>
+            <summary>
+              Do I need Claude, Codex, or another agent CLI first?
+            </summary>
+            <div class="detail-content">
+              <p>
+                Yes. Install and sign in to at least one supported agent CLI
+                yourself. Gyro does not install them.
+              </p>
+              <a href="install/">Read the install guide</a>
             </div>
           </details>
           <details>
@@ -697,8 +722,8 @@
             <summary>Does Gyro replace my terminal?</summary>
             <div class="detail-content">
               <p>
-                No. These are real PTY terminals. A governed pane adds the
-                approval policy on top of the CLI you already run.
+                No. You get real PTY shells. Optional approval gates sit on top
+                of the CLI you already run — Allow once, Always, or Deny.
               </p>
             </div>
           </details>
@@ -710,16 +735,6 @@
                 no telemetry, and this site loads no analytics.
               </p>
               <a href="privacy/">Privacy &amp; Legal</a>
-            </div>
-          </details>
-          <details>
-            <summary>Is it ready for production work?</summary>
-            <div class="detail-content">
-              <p>
-                Not yet. Install it only if you are comfortable testing software
-                that can read files and run commands.
-              </p>
-              <a href="changelog/">See what shipped</a>
             </div>
           </details>
         </div>
