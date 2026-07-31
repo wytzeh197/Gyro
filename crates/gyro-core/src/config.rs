@@ -25,7 +25,9 @@ struct ConfigCacheEntry {
 static CONFIG_CACHE: Mutex<Option<ConfigCacheEntry>> = Mutex::new(None);
 
 fn config_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|meta| meta.modified()).ok()
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
 }
 
 fn read_config_cache(path: &Path) -> Option<GyroConfig> {
