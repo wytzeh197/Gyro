@@ -14,6 +14,15 @@ coverage/
 /artifacts/
 /release-assets/
 
+# Local tool / deploy state (never commit credentials or account metadata).
+.wrangler/
+.claude/settings.local.json
+*.pem
+*.p12
+*.pfx
+id_rsa*
+*.mobileprovision
+
 target/
 
 apps/desktop/src-tauri/target/
