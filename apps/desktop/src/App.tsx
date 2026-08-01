@@ -880,6 +880,15 @@ export function App() {
     isTauriRuntime(),
   );
   const suppressSessionAutoSelectRef = useRef(true);
+  // Sessions whose chat pane the user closed.
+  //
+  // Closing a pane is otherwise undone the moment anything makes that session
+  // active again: the pane-sync effect below treats "the active session has a
+  // pane" as an invariant and re-creates one, which is why a closed chat
+  // disappears and then reappears on its own. A session leaves this set as soon
+  // as a pane for it exists again, so the mark never outlives the next
+  // deliberate open.
+  const closedChatPaneSessionsRef = useRef(new Set<string>());
   const ingestedSessionEventIds = useRef(new Set<string>());
   const refreshedFileActivityKeysRef = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
@@ -1209,7 +1218,18 @@ export function App() {
             type: "remove-session-pane",
             sessionId: pane.sessionId,
           });
+        } else if (pane?.kind === "session") {
+          // A session that is on screen is open, however it got there — a
+          // sidebar click, a drop, a restored layout. Clearing the mark here
+          // rather than at each of those call sites means a new way to open a
+          // chat cannot forget to un-close it.
+          closedChatPaneSessionsRef.current.delete(pane.sessionId);
         }
+      }
+    }
+    for (const sessionId of [...closedChatPaneSessionsRef.current]) {
+      if (!sessionById.has(sessionId)) {
+        closedChatPaneSessionsRef.current.delete(sessionId);
       }
     }
     const layout = chatGrid.activeProjectKey
@@ -1221,7 +1241,14 @@ export function App() {
         (pane) =>
           pane?.kind === "session" && pane.sessionId === activeSessionId,
       );
-      if (requestedSession && !requestedPane) {
+      // Not for a chat the user just closed. This branch exists so a session
+      // made active without a pane — the auto-select on startup, mainly — still
+      // gets one; applied to a closed pane it just puts the window back.
+      if (
+        requestedSession &&
+        !requestedPane &&
+        !closedChatPaneSessionsRef.current.has(activeSessionId)
+      ) {
         dispatchChatGrid({
           type: "select-pane",
           projectKey: normalizedChatProjectKey(requestedSession.workspacePath),
@@ -1848,7 +1875,11 @@ export function App() {
         if (current || suppressSessionAutoSelectRef.current) {
           return current;
         }
-        return nextVisibleSessions[0]?.id;
+        // Skipping the closed ones matters as much as picking a session at all:
+        // landing on one the user closed opens its pane straight back up.
+        return nextVisibleSessions.find(
+          (session) => !closedChatPaneSessionsRef.current.has(session.id),
+        )?.id;
       });
       setWorkspacePath(
         (current) => current ?? nextVisibleSessions[0]?.workspacePath,
@@ -7913,7 +7944,7 @@ export function App() {
           optimisticEventsRef.current.delete(persistedSession.id);
         } catch (error) {
           const errorMessage = String(error);
-          const wasCancelled = errorMessage.includes("chat cancelled by user");
+          const wasCancelled = isProviderStop(errorMessage);
           if (!wasCancelled)
             dispatchWorkbench({
               type: "set-provider-readiness",
@@ -7936,7 +7967,7 @@ export function App() {
             wasCancelled ? "terminal" : "command-failed",
             wasCancelled ? "Turn stopped" : "Message fallback",
             wasCancelled
-              ? "The provider process was cancelled"
+              ? providerStopDetail(errorMessage)
               : "Chat stayed local",
           );
         } finally {
@@ -8089,7 +8120,7 @@ export function App() {
         optimisticEventsRef.current.delete(activeSessionId);
       } catch (error) {
         const errorMessage = String(error);
-        const wasCancelled = errorMessage.includes("chat cancelled by user");
+        const wasCancelled = isProviderStop(errorMessage);
         if (!wasCancelled)
           dispatchWorkbench({
             type: "set-provider-readiness",
@@ -8109,9 +8140,7 @@ export function App() {
         notify(
           wasCancelled ? "terminal" : "command-failed",
           wasCancelled ? "Turn stopped" : "Message fallback",
-          wasCancelled
-            ? "The provider process was cancelled"
-            : "Chat stayed local",
+          wasCancelled ? providerStopDetail(errorMessage) : "Chat stayed local",
         );
       } finally {
         setSessionSending(activeSessionId, false);
@@ -12314,6 +12343,9 @@ export function App() {
         onCloseChat={() => {
           const projectKey = normalizedChatProjectKey(pane.workspacePath);
           const paneLayout = chatGrid.layouts[projectKey];
+          if (pane.kind === "session") {
+            closedChatPaneSessionsRef.current.add(pane.sessionId);
+          }
           const nextPane =
             paneLayout?.slots.find(
               (candidate) =>
@@ -16542,6 +16574,27 @@ function providerStatusPayload(
     status,
     turnId,
   };
+}
+
+// Kept in step with `PROVIDER_STOP_MARKER` in the Tauri crate, which every stop
+// message opens with so a stop can be told from a genuine failure.
+const PROVIDER_STOP_MARKER = "chat cancelled by";
+const PROVIDER_SELF_STOP_MARKER = "chat cancelled by Gyro: ";
+
+function isProviderStop(errorMessage: string) {
+  return errorMessage.includes(PROVIDER_STOP_MARKER);
+}
+
+// What to tell someone about a turn that stopped. Gyro stops turns of its own
+// accord — at the per-call token ceiling, for one — so a stop is not always
+// something the person did. Reporting every one of them as "cancelled" and
+// nothing further is how a ceiling stop reads as the app breaking for no reason.
+function providerStopDetail(errorMessage: string) {
+  const at = errorMessage.indexOf(PROVIDER_SELF_STOP_MARKER);
+  if (at < 0) {
+    return "The provider process was stopped";
+  }
+  return `Gyro stopped this turn: ${errorMessage.slice(at + PROVIDER_SELF_STOP_MARKER.length)}`;
 }
 
 function providerStatusMessage(

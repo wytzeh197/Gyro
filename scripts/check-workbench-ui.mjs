@@ -4992,11 +4992,14 @@ expect(
     styleSource.includes(".gyro-provider-picker.has-flyout") &&
     styleSource.includes(".gyro-provider-model-flyout") &&
     styleSource.includes("margin-left: 2px") &&
+    styleSource.includes("left: 100% !important") &&
     styleSource.includes(".gyro-composer-menu-item.is-effort") &&
     styleSource.includes(".gyro-composer-menu-item.has-no-icon") &&
     surfaceSource.includes("getBoundingClientRect") &&
     surfaceSource.includes("?.scrollHeight ?? 420") &&
-    surfaceSource.includes("availableRight < modelFlyoutWidth + 8") &&
+    surfaceSource.includes('data-flyout-side="right"') &&
+    surfaceSource.includes("modelFlyoutShiftX") &&
+    surfaceSource.includes("overflowRight") &&
     surfaceSource.includes("rect.top + modelFlyoutHeight") &&
     surfaceSource.includes("data-flyout-vertical={modelFlyoutVertical}") &&
     !surfaceSource.includes('title="Model & effort"'),

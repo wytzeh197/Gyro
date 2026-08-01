@@ -7156,6 +7156,11 @@ function ChatSurfaceControls({
           aria-label="Close chat"
           className="gyro-chat-surface-button"
           onClick={onCloseChat}
+          // The grid slot focuses its pane on pointerdown, which for this button
+          // means focusing the pane on the way to closing it — making the chat
+          // being closed the active session, and costing the previously focused
+          // pane its focus once the close goes through.
+          onPointerDown={(event) => event.stopPropagation()}
           title="Close chat"
           type="button"
         >
@@ -16672,12 +16677,12 @@ function Composer({
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
-  const [modelFlyoutSide, setModelFlyoutSide] = useState<"left" | "right">(
-    "right",
-  );
   const [modelFlyoutVertical, setModelFlyoutVertical] = useState<"down" | "up">(
     "down",
   );
+  // Pixels to shift the whole picker left so models stay on-screen (right of
+  // providers) without clipping the viewport edge.
+  const [modelFlyoutShiftX, setModelFlyoutShiftX] = useState(0);
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
@@ -17236,25 +17241,46 @@ function Composer({
   });
   const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up");
 
+  // Models always open to the right of the provider list. If that would clip
+  // the viewport, nudge the whole picker left just enough to fit. Flip up
+  // only when the panel would run off the bottom.
   useEffect(() => {
     if (!modelPickerProvider || !providerPickerRef.current) {
-      setModelFlyoutSide("right");
       setModelFlyoutVertical("down");
+      setModelFlyoutShiftX(0);
       return;
     }
-    const rect = providerPickerRef.current.getBoundingClientRect();
-    const modelFlyoutWidth = 208;
-    const modelFlyoutHeight =
-      providerPickerRef.current.querySelector<HTMLElement>(
-        ".gyro-provider-model-flyout",
-      )?.scrollHeight ?? 420;
-    const availableRight = window.innerWidth - rect.right;
-    const availableLeft = rect.left;
-    setModelFlyoutSide(
-      availableRight < modelFlyoutWidth + 8 && availableLeft > availableRight
-        ? "left"
-        : "right",
+    const picker = providerPickerRef.current;
+    const control =
+      picker.offsetParent instanceof HTMLElement
+        ? picker.offsetParent
+        : picker.parentElement;
+    const flyout = picker.querySelector<HTMLElement>(
+      ".gyro-provider-model-flyout",
     );
+    const modelFlyoutWidth =
+      flyout?.offsetWidth ?? Math.min(176, window.innerWidth * 0.42);
+    const modelFlyoutHeight = flyout?.scrollHeight ?? 420;
+    const edgePad = 8;
+    const gap = 2;
+
+    if (control) {
+      // data-align="end" with right:0 pins the picker to the control's right.
+      // Measure from that natural position so shift is stable across renders.
+      const controlRect = control.getBoundingClientRect();
+      const unshiftedRight = controlRect.right;
+      const unshiftedFlyoutRight = unshiftedRight + gap + modelFlyoutWidth;
+      const overflowRight = unshiftedFlyoutRight - (window.innerWidth - edgePad);
+      const unshiftedLeft = unshiftedRight - picker.offsetWidth;
+      const maxShift = Math.max(0, unshiftedLeft - edgePad);
+      setModelFlyoutShiftX(
+        overflowRight > 0
+          ? Math.min(Math.ceil(overflowRight), maxShift)
+          : 0,
+      );
+    }
+
+    const rect = picker.getBoundingClientRect();
     setModelFlyoutVertical(
       rect.top + modelFlyoutHeight > window.innerHeight - 16 ? "up" : "down",
     );
@@ -17862,12 +17888,17 @@ function Composer({
                 .filter(Boolean)
                 .join(" ")}
               data-align="end"
-              data-flyout-side={modelFlyoutSide}
+              data-flyout-side="right"
               data-flyout-vertical={modelFlyoutVertical}
               data-placement={providerPopoverPlacement}
               id={`${popoverBaseId}-provider`}
               onPointerEnter={clearModelFlyoutPreviewTimer}
               ref={providerPickerRef}
+              style={
+                modelFlyoutShiftX > 0
+                  ? { right: modelFlyoutShiftX }
+                  : undefined
+              }
             >
               <ComposerPopover
                 className="gyro-provider-picker-menu"

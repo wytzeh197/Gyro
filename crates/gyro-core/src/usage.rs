@@ -633,9 +633,35 @@ pub fn guard_decision(
     GuardVerdict::Allow
 }
 
-/// Whether a call that has already billed this much should be cut short.
-pub fn exceeds_call_ceiling(config: &UsageGuardConfig, billed_tokens: u64) -> bool {
-    config.enabled && config.max_tokens_per_call > 0 && billed_tokens > config.max_tokens_per_call
+/// What one call has spent for the purposes of the per-call ceiling.
+///
+/// Deliberately not the billed total. Every request in a turn re-sends the
+/// whole conversation, and providers report those re-sent tokens as input on
+/// each one, so the billed total counts the same context once per tool call: a
+/// measured turn here billed 567,771 input tokens of which 565,389 were the
+/// conversation being read again. A ceiling measured against that number is
+/// not catching runaway turns, it is catching tool use, and it cuts off
+/// ordinary work after a couple of minutes.
+///
+/// Cached input is context the call already had. Only fresh input -- tool
+/// results, new prompt content -- and generated output are work this call did,
+/// and a call that keeps producing those is the runaway the ceiling is for.
+pub fn call_ceiling_tokens(
+    input_tokens: Option<u64>,
+    cached_input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+) -> u64 {
+    input_tokens
+        .unwrap_or_default()
+        .saturating_sub(cached_input_tokens.unwrap_or_default())
+        .saturating_add(output_tokens.unwrap_or_default())
+}
+
+/// Whether a call that has spent this much should be cut short.
+///
+/// Takes the figure from [`call_ceiling_tokens`], not a billed total.
+pub fn exceeds_call_ceiling(config: &UsageGuardConfig, spent_tokens: u64) -> bool {
+    config.enabled && config.max_tokens_per_call > 0 && spent_tokens > config.max_tokens_per_call
 }
 
 /// Ledger counts for the guard window.
@@ -691,7 +717,18 @@ pub fn ensure_usage_schema(conn: &Connection) -> Result<()> {
          on usage_ledger(occurred_at desc);
 
          create index if not exists idx_usage_ledger_provider_window
-         on usage_ledger(provider_id, occurred_at desc);",
+         on usage_ledger(provider_id, occurred_at desc);
+
+         create table if not exists provider_rate_limits (
+           provider_id text not null,
+           window_id text not null,
+           label text not null,
+           status text not null,
+           used_percent integer,
+           resets_at text,
+           observed_at text not null,
+           primary key (provider_id, window_id)
+         );",
     )?;
     Ok(())
 }
@@ -830,6 +867,95 @@ pub fn provider_usage_totals_since(
         "provider_id = ?1 and occurred_at >= ?2",
         &[&provider_id, &since],
     )
+}
+
+/// A plan limit as a provider last described it.
+///
+/// Separate from the ledger above: the ledger counts what Gyro observed, this
+/// records what the provider claimed about its own allowance. Kept per window
+/// rather than appended, because only the newest reading is ever useful.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRateLimitRecord {
+    pub window_id: String,
+    pub label: String,
+    /// `ok`, `warning`, or `exhausted`.
+    pub status: String,
+    /// Absent for providers that name a window without measuring it.
+    pub used_percent: Option<i32>,
+    pub resets_at: Option<String>,
+    /// When Gyro last heard this, so a stale reading can be shown as one.
+    pub observed_at: String,
+}
+
+/// Keep the newest reading for each window a provider named.
+pub fn record_provider_rate_limits(
+    conn: &Connection,
+    provider_id: &str,
+    windows: &[ProviderRateLimitRecord],
+) -> Result<()> {
+    for window in windows {
+        conn.execute(
+            "insert into provider_rate_limits (
+               provider_id, window_id, label, status, used_percent, resets_at,
+               observed_at
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             on conflict(provider_id, window_id) do update set
+               label = excluded.label,
+               status = excluded.status,
+               used_percent = excluded.used_percent,
+               resets_at = excluded.resets_at,
+               observed_at = excluded.observed_at",
+            params![
+                provider_id,
+                window.window_id,
+                window.label,
+                window.status,
+                window.used_percent,
+                window.resets_at,
+                window.observed_at,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// The last reading for each of a provider's windows, expired ones dropped.
+///
+/// A window past its reset time has rolled over, so the stored status describes
+/// an allowance that no longer exists. Returning it would be worse than
+/// returning nothing: an exhausted window would keep reading as exhausted into
+/// the fresh one. Those rows are deleted on the way past.
+pub fn provider_rate_limits(
+    conn: &Connection,
+    provider_id: &str,
+    now: DateTime<Utc>,
+) -> Result<Vec<ProviderRateLimitRecord>> {
+    let now = now.to_rfc3339();
+    conn.execute(
+        "delete from provider_rate_limits
+         where provider_id = ?1 and resets_at is not null and resets_at <= ?2",
+        params![provider_id, now],
+    )?;
+    let mut stmt = conn.prepare(
+        "select window_id, label, status, used_percent, resets_at, observed_at
+         from provider_rate_limits
+         where provider_id = ?1
+         order by observed_at desc",
+    )?;
+    let rows = stmt
+        .query_map(params![provider_id], |row| {
+            Ok(ProviderRateLimitRecord {
+                window_id: row.get(0)?,
+                label: row.get(1)?,
+                status: row.get(2)?,
+                used_percent: row.get(3)?,
+                resets_at: row.get(4)?,
+                observed_at: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -1226,6 +1352,34 @@ mod tests {
         assert!(!exceeds_call_ceiling(&off, u64::MAX));
     }
 
+    /// The counts here are a real turn that Gyro stopped as a runaway: a
+    /// tool-using answer that re-read its own conversation on every request.
+    /// Measured as billed it passes any sane ceiling; measured as work it is
+    /// ten thousand tokens.
+    #[test]
+    fn a_conversation_read_back_on_every_request_is_not_work_the_call_did() {
+        let spent = call_ceiling_tokens(Some(567_771), Some(565_389), Some(8_008));
+        assert_eq!(spent, 10_390);
+        assert!(!exceeds_call_ceiling(&UsageGuardConfig::default(), spent));
+    }
+
+    /// A call that keeps generating is what the ceiling is for, and it still
+    /// trips with no cached input to discount.
+    #[test]
+    fn a_call_that_keeps_generating_still_trips_the_ceiling() {
+        let config = UsageGuardConfig {
+            max_tokens_per_call: 1_000,
+            ..UsageGuardConfig::default()
+        };
+        assert!(exceeds_call_ceiling(
+            &config,
+            call_ceiling_tokens(Some(400), None, Some(900))
+        ));
+        // Cached input can exceed the reported input when a provider counts the
+        // two separately. Saturating there keeps it from wrapping into a trip.
+        assert_eq!(call_ceiling_tokens(Some(10), Some(4_000), Some(7)), 7);
+    }
+
     #[test]
     fn re_synthesis_has_its_own_budget() {
         let config = UsageGuardConfig::default();
@@ -1319,6 +1473,98 @@ mod tests {
                 .expect("future totals")
                 .calls,
             0
+        );
+    }
+
+    fn window(window_id: &str, status: &str, resets_at: Option<&str>) -> ProviderRateLimitRecord {
+        ProviderRateLimitRecord {
+            window_id: window_id.into(),
+            label: format!("{window_id} limit"),
+            status: status.into(),
+            used_percent: None,
+            resets_at: resets_at.map(str::to_string),
+            observed_at: Utc::now().to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn rate_limit_readings_survive_the_session_that_saw_them() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let resets = (now + chrono::Duration::hours(3)).to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("five-hour", "ok", Some(&resets))],
+        )
+        .expect("record windows");
+
+        let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].window_id, "five-hour");
+        assert_eq!(stored[0].status, "ok");
+
+        // A second provider's windows are never mixed in.
+        assert!(provider_rate_limits(&conn, "openai", now)
+            .expect("read other provider")
+            .is_empty());
+    }
+
+    #[test]
+    fn a_newer_reading_replaces_the_window_it_describes() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let resets = (now + chrono::Duration::hours(3)).to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("five-hour", "ok", Some(&resets))],
+        )
+        .expect("record first");
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("five-hour", "exhausted", Some(&resets))],
+        )
+        .expect("record second");
+
+        let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].status, "exhausted");
+    }
+
+    #[test]
+    fn a_window_past_its_reset_is_dropped_rather_than_shown_stale() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let expired = (now - chrono::Duration::minutes(1)).to_rfc3339();
+        let live = (now + chrono::Duration::days(2)).to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[
+                window("five-hour", "exhausted", Some(&expired)),
+                window("weekly", "ok", Some(&live)),
+            ],
+        )
+        .expect("record windows");
+
+        let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].window_id, "weekly");
+    }
+
+    #[test]
+    fn a_window_without_a_reset_time_is_kept() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        record_provider_rate_limits(&conn, "anthropic", &[window("five-hour", "warning", None)])
+            .expect("record windows");
+        assert_eq!(
+            provider_rate_limits(&conn, "anthropic", now)
+                .expect("read windows")
+                .len(),
+            1
         );
     }
 }

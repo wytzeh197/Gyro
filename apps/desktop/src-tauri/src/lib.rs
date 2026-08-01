@@ -367,6 +367,14 @@ enum ProviderApprovalDecision {
 
 struct ProviderRunControl {
     cancellation: CancellationToken,
+    /// Why this run was stopped, recorded beside the token that stopped it.
+    ///
+    /// The token only carries "stopped". Without the reason next to it, a
+    /// ceiling Gyro enforced and a person pressing stop reach the chat as the
+    /// same bare "was cancelled", and the advice offered is a retry -- which is
+    /// the one thing that cannot work against a ceiling the retry will hit
+    /// again.
+    stop_reason: Mutex<Option<ProviderStopReason>>,
     next_event_sequence: AtomicU64,
     approval_nonce: String,
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
@@ -377,12 +385,62 @@ impl Default for ProviderRunControl {
     fn default() -> Self {
         Self {
             cancellation: CancellationToken::default(),
+            stop_reason: Mutex::new(None),
             next_event_sequence: AtomicU64::new(0),
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
         }
     }
+}
+
+/// The phrase every stop message opens with.
+///
+/// A stop travels the rest of the way as an error string, and several places
+/// have to tell one from a genuine failure. They match this rather than the
+/// whole sentence so the sentence stays free to say what actually happened.
+const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProviderStopReason {
+    User,
+    /// Gyro cut the call short against the per-call token ceiling.
+    CallTokenCeiling {
+        spent: u64,
+        ceiling: u64,
+    },
+}
+
+impl ProviderStopReason {
+    fn message(&self) -> String {
+        match self {
+            Self::User => format!("{PROVIDER_STOP_MARKER} user"),
+            Self::CallTokenCeiling { spent, ceiling } => format!(
+                "{PROVIDER_STOP_MARKER} Gyro: this turn spent {spent} tokens of new input and output, \
+                 past the {ceiling} token per-call ceiling."
+            ),
+        }
+    }
+}
+
+/// Note why a run is being stopped, then stop it.
+///
+/// The reason is written before the token is cancelled so the run thread, which
+/// can observe the cancellation on its very next poll, never finds a stopped
+/// run with nothing to say about it.
+fn stop_provider_run(app: &tauri::AppHandle, session_id: &str, reason: ProviderStopReason) -> bool {
+    let manager = app.state::<ProviderCancellationManager>();
+    let Ok(flags) = manager.flags.lock() else {
+        return false;
+    };
+    let Some(control) = flags.get(session_id) else {
+        return false;
+    };
+    if let Ok(mut stop_reason) = control.stop_reason.lock() {
+        stop_reason.get_or_insert(reason);
+    }
+    control.cancellation.cancel();
+    true
 }
 
 #[derive(Default)]
@@ -1325,6 +1383,25 @@ struct ProviderResumeCursor {
     session_id: String,
 }
 
+/// What a run learned about the provider's own conversation before it ended.
+///
+/// A runner only returns a cursor when it produced an answer, so a turn that is
+/// stopped or fails used to throw its provider session away — and on a
+/// session's first turn there was no earlier binding to fall back on, which
+/// made every retry replay the conversation from nothing. The runner records
+/// the cursor here the moment the CLI acknowledges the session, so
+/// [`run_provider_chat_with_retry_using`] can persist it even when the run
+/// never reached an answer.
+///
+/// Only set once the provider has acknowledged the session in its own output.
+/// A conversation the CLI never wrote cannot be resumed, and a binding pointing
+/// at one is worse than no binding at all: it turns a retry that would have
+/// worked into a resume failure.
+#[derive(Debug, Default)]
+struct ProviderRunAttempt {
+    resume_cursor: Option<ProviderResumeCursor>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderChatStreamEvent {
@@ -1422,22 +1499,13 @@ struct ProviderAdapterDescriptor {
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ProviderUsageWindow {
-    id: String,
-    label: String,
-    used_percent: i32,
-    resets_at: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 struct ProviderUsageSnapshot {
     provider_id: String,
-    windows: Vec<ProviderUsageWindow>,
+    windows: Vec<ProviderRateLimitWindow>,
     fetched_at: String,
 }
 
-/// A plan limit a provider reported while answering, rather than on request.
+/// One of a provider's plan limits, however Gyro came to hear about it.
 ///
 /// Codex answers `account/rateLimits/read` with a used percentage. Claude Code
 /// has no equivalent command and instead announces limits on the chat stream,
@@ -1445,6 +1513,9 @@ struct ProviderUsageSnapshot {
 /// spent. `used_percent` is therefore optional: a bar that invented a fill for
 /// the providers that do not measure one would be indistinguishable from a
 /// measured bar, and wrong in the case that matters — near the limit.
+///
+/// Both sources land in this one type so a window means the same thing to the
+/// composer whether it was polled, streamed, or replayed from the store.
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct ProviderRateLimitWindow {
@@ -3007,19 +3078,10 @@ async fn run_provider_chat(
 }
 
 #[tauri::command]
-async fn stop_provider_chat(
-    session_id: String,
-    manager: tauri::State<'_, ProviderCancellationManager>,
-) -> Result<(), String> {
-    let flags = manager
-        .flags
-        .lock()
-        .map_err(|_| "provider cancellation state is unavailable")?;
-    let flag = flags
-        .get(&session_id)
-        .ok_or_else(|| "no provider turn is running for this session".to_string())?;
-    flag.cancellation.cancel();
-    Ok(())
+async fn stop_provider_chat(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    stop_provider_run(&app, &session_id, ProviderStopReason::User)
+        .then_some(())
+        .ok_or_else(|| "no provider turn is running for this session".to_string())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3285,7 +3347,7 @@ fn run_council_chat_blocking(
                 if provider_chat_cancelled(&app, &session_id_str) {
                     return (
                         seat_id,
-                        Err("chat cancelled by user".into()),
+                        Err(provider_stop_message(&app, &session_id_str)),
                         seat_started.elapsed().as_millis(),
                     );
                 }
@@ -3370,7 +3432,7 @@ fn run_council_chat_blocking(
                 );
             }
             Err(error) => {
-                let status = if error.contains("chat cancelled by user") {
+                let status = if error.contains(PROVIDER_STOP_MARKER) {
                     CouncilSeatStatus::Cancelled
                 } else {
                     CouncilSeatStatus::Failed
@@ -3458,7 +3520,7 @@ fn run_council_chat_blocking(
             );
             let synth_started = Instant::now();
             let synth_result = if provider_chat_cancelled(&app, &request.session_id) {
-                Err("chat cancelled by user".to_string())
+                Err(provider_stop_message(&app, &request.session_id))
             } else {
                 run_provider_chat_with_retry(
                     &store,
@@ -3904,7 +3966,7 @@ fn retry_council_synthesis_blocking(
 
     let synth_started = Instant::now();
     let synth_result = if provider_chat_cancelled(&app, &request.session_id) {
-        Err("chat cancelled by user".to_string())
+        Err(provider_stop_message(&app, &request.session_id))
     } else {
         run_provider_chat_with_retry(
             &store,
@@ -4176,7 +4238,7 @@ fn run_provider_chat_blocking(
         Ok(response) => response,
         Err(error) => {
             let error = gyro_core::security::redact_secrets(&error.to_string());
-            let status = if error.contains("chat cancelled by user") {
+            let status = if error.contains(PROVIDER_STOP_MARKER) {
                 HarnessRunStatus::Cancelled
             } else if adapter.kind == ProviderAdapterKind::ReadinessOnly {
                 HarnessRunStatus::Blocked
@@ -10074,11 +10136,98 @@ async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot
         .map_err(|error| format!("provider usage worker failed: {error}"))?
 }
 
+/// The plan windows Gyro can state for a provider right now.
+///
+/// Codex is asked directly, because it answers. Every other provider is served
+/// from the store, where the windows it named while answering were kept. That is
+/// what makes a limit survive the session that heard it: without it, a provider
+/// that only speaks mid-answer has nothing to say until the first turn of a new
+/// session finishes, and the composer shows an empty pair of bars.
 fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    if provider_id != "openai" {
-        return Err("this provider does not expose a supported quota source".into());
+    if provider_id == "openai" {
+        let snapshot = fetch_codex_provider_usage(provider_id)?;
+        // A poll is the freshest reading there is, so it is worth keeping for
+        // the next session to open with rather than re-polling from blank.
+        remember_provider_rate_limits(provider_id, &snapshot.windows);
+        return Ok(snapshot);
     }
+    stored_provider_usage(provider_id)
+}
 
+/// Replay a provider's last known windows, expired ones already dropped.
+fn stored_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
+    let store = open_store()?;
+    let windows = store
+        .provider_rate_limits(provider_id, chrono::Utc::now())
+        .map_err(to_string)?;
+    Ok(ProviderUsageSnapshot {
+        provider_id: provider_id.into(),
+        fetched_at: windows
+            .iter()
+            .map(|window| window.observed_at.clone())
+            .max()
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+        windows: windows
+            .into_iter()
+            .map(|window| ProviderRateLimitWindow {
+                id: window.window_id,
+                label: window.label,
+                status: window.status,
+                used_percent: window.used_percent,
+                resets_at: window.resets_at,
+            })
+            .collect(),
+    })
+}
+
+/// Keep the newest reading for each window, so the next session starts informed.
+///
+/// Best-effort by design: a limit Gyro could not write down must never be the
+/// reason a provider call or its usage row fails.
+fn remember_provider_rate_limits(provider_id: &str, windows: &[ProviderRateLimitWindow]) {
+    if windows.is_empty() {
+        return;
+    }
+    match open_store() {
+        Ok(store) => remember_provider_rate_limits_in(&store, provider_id, windows),
+        Err(error) => warn_unrecorded_rate_limits(&error),
+    }
+}
+
+/// The same, for callers already holding the store open.
+fn remember_provider_rate_limits_in(
+    store: &SessionStore,
+    provider_id: &str,
+    windows: &[ProviderRateLimitWindow],
+) {
+    if windows.is_empty() {
+        return;
+    }
+    let observed_at = chrono::Utc::now().to_rfc3339();
+    let records = windows
+        .iter()
+        .map(|window| gyro_core::ProviderRateLimitRecord {
+            window_id: window.id.clone(),
+            label: window.label.clone(),
+            status: window.status.clone(),
+            used_percent: window.used_percent,
+            resets_at: window.resets_at.clone(),
+            observed_at: observed_at.clone(),
+        })
+        .collect::<Vec<_>>();
+    if let Err(error) = store.record_provider_rate_limits(provider_id, &records) {
+        warn_unrecorded_rate_limits(&error.to_string());
+    }
+}
+
+fn warn_unrecorded_rate_limits(error: &str) {
+    eprintln!(
+        "provider reported a plan limit that was not recorded: {}",
+        gyro_core::security::redact_secrets(error)
+    );
+}
+
+fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
     let mut process = command_with_gui_path("codex");
     process
         .args(["app-server", "--stdio"])
@@ -10268,7 +10417,7 @@ fn codex_app_server_result(response: &serde_json::Value) -> Result<serde_json::V
 
 fn provider_usage_windows_from_codex(
     snapshot: &CodexRateLimitSnapshot,
-) -> Vec<ProviderUsageWindow> {
+) -> Vec<ProviderRateLimitWindow> {
     let mut windows = Vec::new();
     let mut seen = HashSet::new();
     for (window, fallback_id, fallback_label) in [
@@ -10286,10 +10435,19 @@ fn provider_usage_windows_from_codex(
         if !seen.insert(id) {
             continue;
         }
-        windows.push(ProviderUsageWindow {
+        let used_percent = window.used_percent.clamp(0, 100);
+        windows.push(ProviderRateLimitWindow {
             id: id.into(),
             label: label.into(),
-            used_percent: window.used_percent.clamp(0, 100),
+            // Codex reports a level, not a state, so the state is read off the
+            // level. The thresholds match the ones the composer colours by.
+            status: match used_percent {
+                100 => "exhausted",
+                80..=99 => "warning",
+                _ => "ok",
+            }
+            .into(),
+            used_percent: Some(used_percent),
             resets_at: window
                 .resets_at
                 .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
@@ -10658,6 +10816,11 @@ fn record_provider_usage(
     outcome: UsageOutcome,
     wall_ms: u64,
 ) {
+    // Before the early return below: a run can name a plan limit and still fail
+    // to produce a usable session id, and that reading is the one worth keeping.
+    if let Some(output) = output {
+        remember_provider_rate_limits_in(store, &request.provider_id, &output.rate_limits);
+    }
     let Ok(session_id) = parse_uuid(&request.session_id) else {
         return;
     };
@@ -10823,9 +10986,10 @@ fn run_provider_chat_with_retry(
         anyhow::bail!(reason);
     }
     let started = Instant::now();
-    let result = run_provider_chat_with_retry_using(store, request, binding, |resume_cursor| {
-        run_provider_chat_once(app, request, resume_cursor)
-    });
+    let result =
+        run_provider_chat_with_retry_using(store, request, binding, |resume_cursor, attempt| {
+            run_provider_chat_once(app, request, resume_cursor, attempt)
+        });
     let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     match result.as_ref() {
         Ok(output) => record_provider_usage(
@@ -10855,7 +11019,7 @@ fn run_provider_chat_with_retry(
 }
 
 fn is_provider_cancellation(error: &str) -> bool {
-    error.to_ascii_lowercase().contains("cancelled")
+    error.contains(PROVIDER_STOP_MARKER)
 }
 
 fn run_provider_chat_with_retry_using<F>(
@@ -10865,12 +11029,16 @@ fn run_provider_chat_with_retry_using<F>(
     mut run_once: F,
 ) -> anyhow::Result<ProviderRunnerOutput>
 where
-    F: FnMut(Option<&ProviderResumeCursor>) -> anyhow::Result<ProviderRunnerOutput>,
+    F: FnMut(
+        Option<&ProviderResumeCursor>,
+        &mut ProviderRunAttempt,
+    ) -> anyhow::Result<ProviderRunnerOutput>,
 {
     let binding_cursor = binding
         .as_ref()
         .and_then(provider_resume_cursor_from_binding);
-    match run_once(binding_cursor.as_ref()) {
+    let mut attempt = ProviderRunAttempt::default();
+    match run_once(binding_cursor.as_ref(), &mut attempt) {
         Ok(mut output) => {
             output.resumed = binding_cursor.is_some();
             Ok(output)
@@ -10884,17 +11052,44 @@ where
             ))
         }
         Err(error) => {
-            if let Some(binding) = binding {
-                let _ = store.upsert_provider_session_binding(
-                    binding.session_id,
-                    binding.provider_id,
-                    binding.model_id,
-                    binding.model_label,
-                    binding.reasoning_effort,
-                    binding.resume_cursor_json,
-                    "failed",
-                    Some(gyro_core::security::redact_secrets(&error.to_string())),
-                );
+            let last_error = Some(gyro_core::security::redact_secrets(&error.to_string()));
+            match binding {
+                Some(binding) => {
+                    let _ = store.upsert_provider_session_binding(
+                        binding.session_id,
+                        binding.provider_id,
+                        binding.model_id,
+                        binding.model_label,
+                        binding.reasoning_effort,
+                        binding.resume_cursor_json,
+                        "failed",
+                        last_error,
+                    );
+                }
+                // A session's first turn has no binding to carry forward, so
+                // the cursor this run created is the only record that the
+                // provider conversation exists. Dropping it is what made a
+                // stopped first turn restart from nothing on every retry.
+                None => {
+                    let cursor_json = attempt
+                        .resume_cursor
+                        .as_ref()
+                        .and_then(|cursor| serde_json::to_value(cursor).ok());
+                    if let (Some(cursor_json), Ok(session_id)) =
+                        (cursor_json, parse_uuid(&request.session_id))
+                    {
+                        let _ = store.upsert_provider_session_binding(
+                            session_id,
+                            request.provider_id.clone(),
+                            request.model_id.clone(),
+                            request.model_label.clone(),
+                            request.reasoning_effort.clone(),
+                            cursor_json,
+                            "failed",
+                            last_error,
+                        );
+                    }
+                }
             }
             Err(error)
         }
@@ -10905,10 +11100,17 @@ fn run_provider_chat_once(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
+    attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     match provider_adapter_for(&request.provider_id).kind {
-        ProviderAdapterKind::OpenAiCodex => run_openai_codex_chat(app, request, resume_cursor),
-        ProviderAdapterKind::AnthropicClaude => run_anthropic_claude_chat(app, request, resume_cursor),
+        ProviderAdapterKind::OpenAiCodex => {
+            run_openai_codex_chat(app, request, resume_cursor, attempt)
+        }
+        ProviderAdapterKind::AnthropicClaude => {
+            run_anthropic_claude_chat(app, request, resume_cursor, attempt)
+        }
+        // The ACP runners only learn their session id from the completed run,
+        // so there is nothing to record before one finishes.
         ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor),
         ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
             "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
@@ -11247,6 +11449,7 @@ fn run_openai_codex_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
+    attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     if request.reasoning_effort.is_some()
         && codex_reasoning_effort_arg(
@@ -11266,7 +11469,7 @@ fn run_openai_codex_chat(
         || request.require_file_edit_approval
         || !request.full_access
     {
-        return run_openai_codex_app_server_chat(app, request, resume_cursor);
+        return run_openai_codex_app_server_chat(app, request, resume_cursor, attempt);
     }
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
@@ -11301,19 +11504,25 @@ fn run_openai_codex_chat(
     audit_provider_chat_args(&request.provider_id, &args)?;
     process.args(args);
 
-    let output =
-        run_streaming_command(
-            process,
-            Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
-            Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
-            app,
-            request,
+    let mut observed_session_id = None;
+    let output = run_streaming_command(
+        process,
+        Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+        Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+        app,
+        request,
+        &mut observed_session_id,
+    );
+    attempt.resume_cursor = observed_session_id.map(|session_id| ProviderResumeCursor {
+        kind: "codex-session".into(),
+        session_id,
+    });
+    let output = output.map_err(|error| {
+        provider_run_failure(
+            error,
+            "Could not complete OpenAI through Codex CLI. Run `codex login` in Terminal if needed, then try again.",
         )
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "Could not complete OpenAI through Codex CLI. Run `codex login` in Terminal if needed, then try again. {error}"
-            )
-        })?;
+    })?;
     let last_message_result =
         read_bounded_optional_text_file(&output_path, MAX_CHAT_RESPONSE_BYTES);
     let _ = fs::remove_file(&output_path);
@@ -11405,6 +11614,7 @@ fn run_openai_codex_app_server_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
+    attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let contextual_message = provider_context_message(request);
@@ -11516,6 +11726,12 @@ fn run_openai_codex_app_server_chat(
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?
             .to_string();
+        // The thread exists from here on, so a turn that is stopped or fails
+        // below still leaves a cursor the retry can resume.
+        attempt.resume_cursor = Some(ProviderResumeCursor {
+            kind: "codex-session".into(),
+            session_id: thread_id.clone(),
+        });
 
         let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
         for attachment in request
@@ -11574,7 +11790,7 @@ fn run_openai_codex_app_server_chat(
                 break;
             }
             if provider_chat_cancelled(app, &request.session_id) {
-                anyhow::bail!("chat cancelled by user");
+                anyhow::bail!("{}", provider_stop_message(app, &request.session_id));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -12352,7 +12568,7 @@ fn wait_for_provider_approval_with_transaction(
                 "cancelled",
                 "Provider approval cancelled",
             )?;
-            anyhow::bail!("chat cancelled by user");
+            anyhow::bail!("{}", provider_stop_message(app, &context.session_id));
         }
     }
 }
@@ -12714,6 +12930,7 @@ fn run_anthropic_claude_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
+    attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let contextual_message = provider_context_message(request);
@@ -12752,19 +12969,30 @@ fn run_anthropic_claude_chat(
     audit_provider_chat_args(&request.provider_id, &args)?;
     process.args(args);
 
-    let output =
-        run_streaming_command(
-            process,
-            Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
-            Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
-            app,
-            request,
+    let mut observed_session_id = None;
+    let output = run_streaming_command(
+        process,
+        Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+        Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+        app,
+        request,
+        &mut observed_session_id,
+    );
+    // Recorded before the error is propagated: a stopped turn is exactly the
+    // case where the cursor has to outlive the run. Claude Code writes the
+    // conversation to disk before it announces the session id, so an id that
+    // reached the stream is one `--resume` can load; an id Gyro only generated
+    // is not.
+    attempt.resume_cursor = observed_session_id.map(|session_id| ProviderResumeCursor {
+        kind: "claude-session".into(),
+        session_id,
+    });
+    let output = output.map_err(|error| {
+        provider_run_failure(
+            error,
+            "Could not complete Anthropic through Claude Code. Run `claude auth login` in Terminal if needed, then try again.",
         )
-        .map_err(|error| {
-                anyhow::anyhow!(
-                    "Could not complete Anthropic through Claude Code. Run `claude auth login` in Terminal if needed, then try again. {error}"
-                )
-            })?;
+    })?;
     if output.status_success {
         // Falling back to raw stdout is only sane when the CLI printed prose.
         // Claude Code prints a JSON stream, so the same fallback answered a
@@ -14074,6 +14302,19 @@ fn provider_turn_has_unfinished_attempt(
 
 fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
     let normalized = error.to_ascii_lowercase();
+    // Checked first: a stop is not a failure, and every branch below reads it
+    // as one. The ceiling case in particular must not be offered a plain retry,
+    // which would run into the same ceiling and stop in the same place.
+    if error.contains(PROVIDER_STOP_MARKER) {
+        return if normalized.contains("per-call ceiling") {
+            (
+                "spend-ceiling",
+                "Gyro stopped this turn at its per-call token ceiling. Ask for a smaller piece of the work, or raise `usageGuard.maxTokensPerCall` in config.json.",
+            )
+        } else {
+            ("stopped", "You stopped this turn. Send again to continue.")
+        };
+    }
     // Checked first: an argument failure is definitive, and it is the one class
     // where retrying cannot possibly help. Reporting it as a generic retry is
     // what left an unusable provider looking like a flaky one.
@@ -14711,12 +14952,21 @@ impl StreamingCommandState {
 const PROVIDER_CHAT_MAX_RUNTIME_SECS: u64 = 24 * 60 * 60;
 const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
 
+/// Run a provider CLI, streaming its output into the live surfaces.
+///
+/// `observed_session_id` receives the provider's own session id as soon as the
+/// stream reports one, and is written even when the run is stopped, times out,
+/// or exits non-zero. That is what lets a turn which never produced an answer
+/// still leave behind a cursor a retry can resume from. It stays `None` when
+/// the CLI died before acknowledging the session — the case where no resumable
+/// conversation exists yet.
 fn run_streaming_command(
     command: Command,
     max_runtime: Duration,
     inactivity_timeout: Duration,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
+    observed_session_id: &mut Option<String>,
 ) -> anyhow::Result<StreamingCommandOutput> {
     let run_control = app
         .state::<ProviderCancellationManager>()
@@ -14750,8 +15000,22 @@ fn run_streaming_command(
         handle_provider_stdout_line(&line, app, request, &mut stream_state);
     }
     stream_state.flush_pending_delta(app, request, true);
+    // Published before the termination checks below, so a stopped or timed-out
+    // run reports the session it started rather than losing it to the bail.
+    observed_session_id.clone_from(&stream_state.provider_session_id);
     match outcome.termination {
-        ExecutionTermination::Cancelled => anyhow::bail!("chat cancelled by user"),
+        // Nothing else can read the reason back: the token is shared, but the
+        // sentence describing why it was cancelled only exists here.
+        ExecutionTermination::Cancelled => anyhow::bail!(
+            "{}",
+            run_control
+                .stop_reason
+                .lock()
+                .ok()
+                .and_then(|reason| *reason)
+                .unwrap_or(ProviderStopReason::User)
+                .message()
+        ),
         ExecutionTermination::TimedOut => {
             anyhow::bail!(
                 "provider reached the maximum runtime of {} seconds",
@@ -14789,6 +15053,35 @@ fn run_streaming_command(
     })
 }
 
+/// Wrap a run failure with the provider's sign-in hint, unless it was a stop.
+///
+/// The hint earns its place on a run that died on its own, where a lapsed CLI
+/// login is the usual cause. On a stop it is noise: being told to sign in again
+/// because the turn was stopped buries the one line that says what happened.
+fn provider_run_failure(error: anyhow::Error, hint: &str) -> anyhow::Error {
+    if error.to_string().contains(PROVIDER_STOP_MARKER) {
+        return error;
+    }
+    anyhow::anyhow!("{hint} {error}")
+}
+
+/// The sentence describing why this session's run was stopped.
+///
+/// For the callers that notice a cancelled token themselves rather than through
+/// `run_command`. They have to report the same reason the run thread would, or
+/// a ceiling Gyro enforced reaches the chat as something the person did.
+fn provider_stop_message(app: &tauri::AppHandle, session_id: &str) -> String {
+    let manager = app.state::<ProviderCancellationManager>();
+    manager
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session_id).cloned())
+        .and_then(|control| control.stop_reason.lock().ok().and_then(|reason| *reason))
+        .unwrap_or(ProviderStopReason::User)
+        .message()
+}
+
 fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) -> bool {
     app.state::<ProviderCancellationManager>()
         .flags
@@ -14798,12 +15091,17 @@ fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) -> bool {
         .is_some_and(|control| control.cancellation.is_cancelled())
 }
 
-/// Cut a call short once it has billed past the per-call ceiling.
+/// Cut a call short once it has spent past the per-call ceiling.
 ///
-/// A turn that keeps growing is the shape of a runaway loop, and waiting for
+/// A turn that keeps generating is the shape of a runaway loop, and waiting for
 /// the provider to stop it means paying for the whole thing first. The run is
-/// cancelled through the same path the user's stop button uses, so the partial
-/// response is still saved and the spend is still recorded.
+/// cancelled through the same path the user's stop button uses, and the spend
+/// is still recorded.
+///
+/// Measured against [`gyro_core::call_ceiling_tokens`] rather than the billed
+/// total. The billed total counts the conversation once per request the turn
+/// made, so measuring the ceiling against it stopped ordinary tool-using
+/// answers after two or three minutes and reported them as runaways.
 fn enforce_call_token_ceiling(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -14812,11 +15110,13 @@ fn enforce_call_token_ceiling(
     if stream_state.token_ceiling_tripped {
         return;
     }
-    let Some(billed) = stream_state
-        .billed_usage
-        .as_ref()
-        .and_then(|usage| usage.total_tokens)
-    else {
+    let Some(spent) = stream_state.billed_usage.as_ref().map(|usage| {
+        gyro_core::call_ceiling_tokens(
+            usage.input_tokens,
+            usage.cached_input_tokens,
+            usage.output_tokens,
+        )
+    }) else {
         return;
     };
     // Resolved once per run: this is reached for every streamed frame after the
@@ -14834,16 +15134,16 @@ fn enforce_call_token_ceiling(
             0
         }
     });
-    if ceiling == 0 || billed <= ceiling {
+    if ceiling == 0 || spent <= ceiling {
         return;
     }
     stream_state.token_ceiling_tripped = true;
-    eprintln!("provider call passed the {ceiling} token ceiling at {billed}; stopping it");
-    if let Ok(flags) = app.state::<ProviderCancellationManager>().flags.lock() {
-        if let Some(control) = flags.get(&request.session_id) {
-            control.cancellation.cancel();
-        }
-    }
+    eprintln!("provider call passed the {ceiling} token ceiling at {spent}; stopping it");
+    stop_provider_run(
+        app,
+        &request.session_id,
+        ProviderStopReason::CallTokenCeiling { spent, ceiling },
+    );
 }
 
 fn handle_provider_stdout_line(
@@ -15593,7 +15893,12 @@ fn is_stale_resume_error(error: &str) -> bool {
         || normalized.contains("unknown")
         || normalized.contains("missing")
         || normalized.contains("expired")
-        || normalized.contains("could not resume");
+        || normalized.contains("could not resume")
+        // Claude Code's own wording for a session id it cannot load: "No
+        // conversation found with session ID: <id>". It reads as a match for
+        // "found" rather than "not found", so without this the cursor was
+        // never cleared and every retry failed the same way.
+        || normalized.contains("no conversation");
     resume_identity && missing_identity
 }
 
@@ -18956,7 +19261,8 @@ mod tests {
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].id, "weekly");
         assert_eq!(windows[0].label, "Weekly window");
-        assert_eq!(windows[0].used_percent, 29);
+        assert_eq!(windows[0].used_percent, Some(29));
+        assert_eq!(windows[0].status, "ok");
         assert!(windows[0]
             .resets_at
             .as_deref()
@@ -18985,8 +19291,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["five-hour", "weekly"]
         );
-        assert_eq!(windows[0].used_percent, 100);
-        assert_eq!(windows[1].used_percent, 0);
+        assert_eq!(windows[0].used_percent, Some(100));
+        assert_eq!(windows[1].used_percent, Some(0));
+        // A clamped level still has to describe itself honestly.
+        assert_eq!(windows[0].status, "exhausted");
+        assert_eq!(windows[1].status, "ok");
     }
 
     #[test]
@@ -19007,10 +19316,13 @@ mod tests {
 
         assert_eq!(snapshot.provider_id, "openai");
         assert!(!snapshot.windows.is_empty());
+        // A window a provider named but did not measure reports no percentage,
+        // which is a reading in its own right rather than a failure.
         assert!(snapshot
             .windows
             .iter()
-            .all(|window| (0..=100).contains(&window.used_percent)));
+            .filter_map(|window| window.used_percent)
+            .all(|used_percent| (0..=100).contains(&used_percent)));
     }
 
     #[test]
@@ -20950,6 +21262,46 @@ while True:
         assert_eq!(provider_failure_recovery("provider crashed").0, "retry");
     }
 
+    /// A stop is not a failure, and the two stops do not have the same fix.
+    ///
+    /// The ceiling stop is the one that matters: it used to arrive as a bare
+    /// "was cancelled" advising a retry, which ran into the same ceiling and
+    /// stopped in the same place. It has to name the ceiling instead.
+    #[test]
+    fn a_stopped_turn_is_told_apart_from_a_failed_one() {
+        let (kind, message) = provider_failure_recovery(&ProviderStopReason::User.message());
+        assert_eq!(kind, "stopped");
+        assert!(message.contains("Send again"), "unhelpful: {message}");
+
+        let ceiling = ProviderStopReason::CallTokenCeiling {
+            spent: 2_400_000,
+            ceiling: 2_000_000,
+        };
+        let (kind, message) = provider_failure_recovery(&ceiling.message());
+        assert_eq!(kind, "spend-ceiling");
+        assert!(message.contains("maxTokensPerCall"), "unhelpful: {message}");
+        // The figures belong in the error itself, so the chat can say how far
+        // past the ceiling the turn got rather than only that it passed one.
+        assert!(ceiling.message().contains("2400000"));
+        assert!(ceiling.message().contains("2000000"));
+
+        for stop in [ProviderStopReason::User, ceiling] {
+            assert!(is_provider_cancellation(&stop.message()));
+            // The sign-in hint every runner wraps a dead run in is wrong here:
+            // nothing about a stop is fixed by signing in again.
+            let wrapped = provider_run_failure(
+                anyhow::anyhow!("{}", stop.message()),
+                "Could not complete Anthropic through Claude Code.",
+            );
+            assert_eq!(wrapped.to_string(), stop.message());
+        }
+
+        // A run that died on its own still gets the hint.
+        let failed = provider_run_failure(anyhow::anyhow!("exit status: 1"), "Sign in again.");
+        assert_eq!(failed.to_string(), "Sign in again. exit status: 1");
+        assert!(!is_provider_cancellation(&failed.to_string()));
+    }
+
     #[test]
     fn expired_sign_ins_are_recovered_by_signing_in_again() {
         // Both lines are what `claude` actually emits on a dead login: the
@@ -21079,8 +21431,11 @@ while True:
             workspace_context: None,
         };
         let mut attempts = Vec::new();
-        let error =
-            run_provider_chat_with_retry_using(&store, &request, Some(binding), |resume_cursor| {
+        let error = run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            Some(binding),
+            |resume_cursor, _attempt| {
                 attempts.push(resume_cursor.map(|cursor| cursor.session_id.clone()));
                 if resume_cursor.is_some() {
                     anyhow::bail!("Could not resume session: not found");
@@ -21096,8 +21451,9 @@ while True:
                     resumed: false,
                     output_summary: None,
                 })
-            })
-            .unwrap_err();
+            },
+        )
+        .unwrap_err();
 
         assert_eq!(attempts, vec![Some("stale-provider-session".into())]);
         assert!(error
@@ -21107,6 +21463,126 @@ while True:
             .get_provider_session_binding(session.id, "openai")
             .unwrap()
             .is_none());
+    }
+
+    /// A session's first turn is the case `provider_failure_recovery` used to
+    /// lie about: with no earlier binding to fall back on, a stopped turn threw
+    /// away the provider session it had just created, and "Gyro will preserve
+    /// the conversation context" meant replaying from nothing.
+    #[test]
+    fn stopped_first_turn_persists_its_provider_cursor_for_the_retry() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "first turn stop")
+            .unwrap();
+        let request = provider_chat_request_for(&session, temp.path(), "anthropic");
+
+        // The turn is stopped after Claude Code acknowledged the session, so
+        // the run knows a resumable conversation exists.
+        let stop = run_provider_chat_with_retry_using(&store, &request, None, |_, attempt| {
+            attempt.resume_cursor = Some(ProviderResumeCursor {
+                kind: "claude-session".into(),
+                session_id: "claude-first-turn".into(),
+            });
+            anyhow::bail!("{}", ProviderStopReason::User.message())
+        })
+        .unwrap_err();
+        assert!(is_provider_cancellation(&stop.to_string()));
+
+        let binding = store
+            .get_provider_session_binding(session.id, "anthropic")
+            .unwrap()
+            .expect("a stopped first turn must leave a resumable binding");
+        assert_eq!(binding.status, "failed");
+        assert_eq!(
+            provider_resume_cursor_from_binding(&binding)
+                .map(|cursor| cursor.session_id)
+                .as_deref(),
+            Some("claude-first-turn")
+        );
+
+        // The retry now resumes that conversation instead of starting a new one.
+        let mut resumed_from = None;
+        run_provider_chat_with_retry_using(
+            &store,
+            &request,
+            Some(binding),
+            |resume_cursor, _attempt| {
+                resumed_from = resume_cursor.map(|cursor| cursor.session_id.clone());
+                Ok(ProviderRunnerOutput {
+                    activities: Vec::new(),
+                    context_usage: None,
+                    billed_usage: None,
+                    rate_limits: Vec::new(),
+                    response: "Continued".into(),
+                    resume_cursor: None,
+                    retry_count: 0,
+                    resumed: false,
+                    output_summary: None,
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(resumed_from.as_deref(), Some("claude-first-turn"));
+    }
+
+    /// The guard on the fix. Claude Code writes its session file before it
+    /// announces the session id, so a run killed before that announcement has
+    /// no conversation on disk. Binding one anyway would turn a retry that
+    /// works today into `--resume` failing on a session that never existed.
+    #[test]
+    fn a_run_that_never_reached_the_provider_leaves_no_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "early stop")
+            .unwrap();
+        let request = provider_chat_request_for(&session, temp.path(), "anthropic");
+
+        run_provider_chat_with_retry_using(&store, &request, None, |_, _attempt| {
+            anyhow::bail!("{}", ProviderStopReason::User.message())
+        })
+        .unwrap_err();
+
+        assert!(store
+            .get_provider_session_binding(session.id, "anthropic")
+            .unwrap()
+            .is_none());
+
+        // And if a cursor ever does point at a conversation the CLI never
+        // wrote, Claude Code's own wording has to read as a stale cursor so the
+        // retry clears it instead of failing the same way forever.
+        assert!(is_stale_resume_error(
+            "No conversation found with session ID: 350b1bb9-d560-4f27-b851-37554f139fcc"
+        ));
+    }
+
+    fn provider_chat_request_for(
+        session: &Session,
+        workspace: &Path,
+        provider_id: &str,
+    ) -> ProviderChatRequest {
+        ProviderChatRequest {
+            session_id: session.id.to_string(),
+            message: "explain this repo".into(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: provider_id.into(),
+            provider_label: Some("Anthropic".into()),
+            model_id: Some("claude-opus-5".into()),
+            model_label: Some("Opus 5".into()),
+            reasoning_effort: None,
+            require_command_approval: false,
+            require_file_edit_approval: false,
+            full_access: true,
+            suggest_title: false,
+            workspace_path: Some(workspace.display().to_string()),
+            mode: ChatMode::Normal,
+            goal: None,
+            plan: None,
+            attachments: Vec::new(),
+            workspace_context: None,
+        }
     }
 
     #[test]
