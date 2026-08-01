@@ -11195,28 +11195,23 @@ textarea:focus-visible {
 }
 
 .gyro-provider-picker {
-  /* Top-align so the models panel is only as tall as its items, not stretched
-     to the full provider list height. */
-  align-items: flex-start;
-  display: flex;
-  /* Providers first, models always to their right. Zero gap so the pointer can
-     travel from a provider row into models without a dead strip between panels. */
-  flex-direction: row;
-  gap: 0;
-  max-width: min(360px, calc(100vw - 24px));
+  /* Provider list stays fixed under the chip. Models are absolutely positioned
+     beside it so opening a flyout never shoves the provider list sideways. */
+  display: block;
+  max-width: min(156px, calc(100vw - 24px));
   overflow: visible;
   position: absolute;
+  width: 156px;
   z-index: 44;
 }
 
-/* Provider list alone stays compact; with models open, sit side-by-side and
-   grow left from the chip so the models panel fits on the right of providers. */
 .gyro-provider-picker:not(.has-flyout) {
   width: 156px;
 }
 
+/* Raise stacking when models are open so the flyout clears neighboring chips. */
 .gyro-provider-picker.has-flyout {
-  width: auto;
+  z-index: 45;
 }
 
 .gyro-provider-picker[data-placement="up"] {
@@ -11232,8 +11227,7 @@ textarea:focus-visible {
 }
 
 .gyro-provider-picker[data-align="end"] {
-  /* Grow left from the model chip. Providers sit further left; models sit
-     immediately to their right, still on-screen. */
+  /* Anchor to the model chip; provider list stays put when models open. */
   right: 0;
 }
 
@@ -11246,23 +11240,43 @@ textarea:focus-visible {
 }
 
 .gyro-provider-picker-menu {
-  flex: 0 0 auto;
   width: 156px;
 }
 
 .gyro-provider-model-flyout {
+  /* Always dock to the right of the provider list, sized to its own rows —
+     never stretched to the taller provider panel (that made 2-model lists
+     look like giant empty cards). */
+  align-content: start !important;
   bottom: auto !important;
-  flex: 0 0 auto;
-  height: fit-content !important;
-  left: auto !important;
+  height: max-content !important;
+  left: 100% !important;
   max-height: min(340px, calc(100vh - 32px)) !important;
   /* Nudge toward the provider list so the hit target feels continuous. */
   margin-left: 2px;
+  min-height: 0 !important;
   overflow-y: auto !important;
-  position: static !important;
+  position: absolute !important;
   right: auto !important;
-  top: auto !important;
+  top: 0 !important;
   width: min(176px, 42vw) !important;
+  z-index: 1;
+}
+
+.gyro-provider-picker[data-flyout-vertical="up"] .gyro-provider-model-flyout {
+  bottom: 0 !important;
+  top: auto !important;
+}
+
+/* Dense single-line model rows — same visual weight as provider rows. */
+.gyro-provider-model-flyout .gyro-composer-menu-item.is-model {
+  align-self: start;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.gyro-provider-model-flyout .gyro-composer-menu-item.is-model.has-no-icon {
+  grid-template-columns: minmax(0, 1fr) 14px;
 }
 
 .gyro-effort-picker {

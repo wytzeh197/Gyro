@@ -1538,6 +1538,24 @@ impl SessionStore {
         crate::usage::provider_usage_totals_since(&self.conn, provider_id, since)
     }
 
+    /// Keep the newest plan-limit reading for each window a provider named.
+    pub fn record_provider_rate_limits(
+        &self,
+        provider_id: &str,
+        windows: &[crate::usage::ProviderRateLimitRecord],
+    ) -> Result<()> {
+        crate::usage::record_provider_rate_limits(&self.conn, provider_id, windows)
+    }
+
+    /// The last plan-limit reading for each of a provider's live windows.
+    pub fn provider_rate_limits(
+        &self,
+        provider_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<crate::usage::ProviderRateLimitRecord>> {
+        crate::usage::provider_rate_limits(&self.conn, provider_id, now)
+    }
+
     fn ensure_provider_binding_column(&self, column_name: &str, definition: &str) -> Result<()> {
         let mut stmt = self
             .conn
