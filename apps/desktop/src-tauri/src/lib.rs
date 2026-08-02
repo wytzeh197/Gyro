@@ -401,6 +401,16 @@ impl Default for ProviderRunControl {
 /// whole sentence so the sentence stays free to say what actually happened.
 const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
 
+/// The sentence a turn is closed with when Gyro exited while it was running.
+///
+/// Written by startup reconciliation rather than by the run itself, which by
+/// definition never got to report anything. It doubles as the classifier for
+/// the matching recovery hint, so it is matched exactly instead of by keyword:
+/// the words in it ("running", "closed") are ordinary enough to appear in a
+/// provider's own failure text.
+const PROVIDER_INTERRUPTED_MARKER: &str =
+    "Gyro closed while this turn was running, so it never finished.";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderStopReason {
     User,
@@ -4162,23 +4172,41 @@ fn run_provider_chat_blocking(
     validate_chat_context(&request)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
     let run_id = turn_id.unwrap_or_else(Uuid::new_v4);
+    // Checked before any of the work below: this send is about to be refused,
+    // and scanning the workspace, binding a capability context, and persisting
+    // a snapshot for it are all wasted. Running the check first also means a
+    // refused send no longer leaves a bound capability context behind it.
+    let turn_status = store
+        .latest_provider_status_for_turn(session_id, run_id)
+        .map_err(to_string)?;
+    if provider_turn_has_unfinished_attempt(&store, session_id, run_id).map_err(to_string)? {
+        return Err(
+            "this turn has an unfinished provider attempt; start a new turn to avoid replaying tools"
+                .into(),
+        );
+    }
     bind_provider_capability_context(&app, &store, &request, run_id)?;
     let workspace_context = active_provider_capability_context(&app, &request.session_id)
         .map_err(to_string)?
         .workspace_context;
     request.workspace_context = Some(workspace_context.clone());
-    let context_already_persisted = store
-        .read_recent_events(session_id, 256)
-        .map_err(to_string)?
-        .iter()
-        .any(|event| {
-            event.turn_id == Some(run_id)
-                && event
-                    .payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("workspace-context")
-        });
+    // A turn that has never reported a status has never run, so it cannot have
+    // persisted context yet. That is every ordinary send, and it used to pay
+    // for a tail read and 256 event parses to be told so; only a retry of an
+    // existing turn actually has something to find.
+    let context_already_persisted = turn_status.is_some()
+        && store
+            .read_recent_events(session_id, 256)
+            .map_err(to_string)?
+            .iter()
+            .any(|event| {
+                event.turn_id == Some(run_id)
+                    && event
+                        .payload
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("workspace-context")
+            });
     if !context_already_persisted {
         store
             .append_event_with_turn_id(
@@ -4193,12 +4221,6 @@ fn run_provider_chat_blocking(
                 Some(run_id),
             )
             .map_err(to_string)?;
-    }
-    if provider_turn_has_unfinished_attempt(&store, session_id, run_id).map_err(to_string)? {
-        return Err(
-            "this turn has an unfinished provider attempt; start a new turn to avoid replaying tools"
-                .into(),
-        );
     }
     let attempt_id = Uuid::new_v4();
     let started_at = chrono::Utc::now();
@@ -4890,16 +4912,13 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if gyro_core::provider_capability_support(&request.provider_id).available {
-        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context to inspect the user-visible editor state, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
-        if let Some(workspace_context) = request.workspace_context.as_ref() {
-            context.push(format!(
-                "Turn Workspace context revision {}: active file {}, active view {}, selection {}. Call gyro_workspace_get_context for the typed snapshot or to detect newer visible state.",
-                workspace_context.revision,
-                workspace_context.active_path.as_deref().unwrap_or("none"),
-                workspace_context.active_view.as_deref().unwrap_or("none"),
-                if workspace_context.selection.is_some() { "attached" } else { "none" },
-            ));
-        }
+        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
+        // The file the user happens to have open in Workspace is not context.
+        // Only what the user attaches from the composer, or names in the
+        // message, puts a file in front of the model.
+        context.push(
+            "Gyro does not attach the user's open editor file, tab list, selection, or unsaved buffer to the turn. Work from the message and its attachments, and read files with the Workspace tools when you need them.".into(),
+        );
     }
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
@@ -11583,14 +11602,12 @@ fn run_openai_codex_chat(
         anyhow::bail!("OpenAI finished, but Codex did not return a chat response.");
     }
 
-    let mut combined = String::new();
-    combined.push_str(&output.stdout);
-    combined.push_str(&output.stderr);
-    let combined = gyro_core::security::redact_secrets(combined.trim());
-    if combined.is_empty() {
+    let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
+    let stderr = gyro_core::security::redact_secrets(output.stderr.trim());
+    if stdout.is_empty() && stderr.is_empty() {
         anyhow::bail!("OpenAI through Codex exited with {}", output.status_label);
     }
-    anyhow::bail!("{}", truncate_error_detail(&combined));
+    anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
 }
 
 fn read_bounded_optional_text_file(path: &Path, max_bytes: usize) -> anyhow::Result<String> {
@@ -13037,18 +13054,20 @@ fn run_anthropic_claude_chat(
         });
     }
 
-    let combined =
-        gyro_core::security::redact_secrets(format!("{}{}", output.stdout, output.stderr).trim());
-    if let Some(detail) = claude_login_failure(&combined) {
+    let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
+    let stderr = gyro_core::security::redact_secrets(output.stderr.trim());
+    // Still matched across both streams: Claude Code reports a rejected sign-in
+    // inside the stream rather than on stderr.
+    if let Some(detail) = claude_login_failure(&format!("{stdout}{stderr}")) {
         anyhow::bail!("{detail}");
     }
-    if combined.is_empty() {
+    if stdout.is_empty() && stderr.is_empty() {
         anyhow::bail!(
             "Anthropic through Claude exited with {}",
             output.status_label
         );
     }
-    anyhow::bail!("{}", truncate_error_detail(&combined));
+    anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
 }
 
 /// Claude Code reports a rejected sign-in inside its stream-json output rather
@@ -14300,6 +14319,127 @@ fn provider_turn_has_unfinished_attempt(
     Ok(last_status.as_deref() == Some("running"))
 }
 
+/// Close out turns whose provider run died with a previous Gyro process.
+///
+/// `session_turn_status` is written when a run starts and rewritten when it
+/// ends, so a crash, a force-quit, or an update that replaced the binary
+/// mid-turn leaves a `running` row with no process behind it. Nothing reaps it
+/// later, and [`provider_turn_has_unfinished_attempt`] refuses every further
+/// attempt on a turn that still reads as running — so one interrupted send made
+/// that turn permanently unsendable, and the chat could not be picked back up.
+///
+/// Startup is the one moment where no run can be in flight, which is what makes
+/// the sweep safe: every row is finished, it just never got to say so. Each is
+/// closed with a `failed` status event carrying the interrupted recovery hint,
+/// which restores Retry and replaces a spinner that would never stop.
+///
+/// The provider identity is copied from the turn's own last status event so the
+/// closing event renders like the one it replaces. A turn whose events have
+/// aged past the read window still gets closed, just with a bare payload — the
+/// status row is what blocks the retry, and clearing it is the point.
+fn reconcile_interrupted_provider_turns(store: &SessionStore) -> anyhow::Result<usize> {
+    let running = store.list_running_turns()?;
+    if running.is_empty() {
+        return Ok(0);
+    }
+    let mut turns_by_session: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for (session_id, turn_id) in running {
+        turns_by_session
+            .entry(session_id)
+            .or_default()
+            .push(turn_id);
+    }
+    let mut closed = 0usize;
+    for (session_id, turn_ids) in turns_by_session {
+        // Read once per session rather than once per turn: a session that was
+        // killed repeatedly can hold several of these.
+        let events = match store.read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ) {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("could not read events for interrupted session {session_id}: {error}");
+                Vec::new()
+            }
+        };
+        for turn_id in turn_ids {
+            let payload = interrupted_provider_status_payload(&events, turn_id);
+            let provider_label = payload
+                .get("providerLabel")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Provider")
+                .to_string();
+            match store.append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                provider_chat_status_message(&HarnessRunStatus::Failed, &provider_label),
+                payload,
+                Some(turn_id),
+            ) {
+                // The append is what rewrites the status row, through the same
+                // payload indexing every other status event uses.
+                Ok(_) => closed += 1,
+                Err(error) => {
+                    eprintln!("could not close interrupted turn {turn_id}: {error}");
+                }
+            }
+        }
+    }
+    Ok(closed)
+}
+
+/// The closing payload for an interrupted turn, shaped like the run's own.
+fn interrupted_provider_status_payload(
+    events: &[SessionEvent],
+    turn_id: Uuid,
+) -> serde_json::Value {
+    let previous = events
+        .iter()
+        .filter(|event| event.turn_id == Some(turn_id))
+        .filter(|event| {
+            event
+                .payload
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("provider-status")
+        })
+        .next_back()
+        .and_then(|event| event.payload.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let mut payload = serde_json::Value::Object(previous);
+    let (recovery_kind, recovery_message) = provider_failure_recovery(PROVIDER_INTERRUPTED_MARKER);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "kind".into(),
+            serde_json::Value::String("provider-status".into()),
+        );
+        object.insert(
+            "status".into(),
+            serde_json::Value::String(HarnessRunStatus::Failed.as_str().into()),
+        );
+        object.insert(
+            "error".into(),
+            serde_json::Value::String(PROVIDER_INTERRUPTED_MARKER.into()),
+        );
+        object.insert(
+            "recoveryKind".into(),
+            serde_json::Value::String(recovery_kind.into()),
+        );
+        object.insert(
+            "recoveryMessage".into(),
+            serde_json::Value::String(recovery_message.into()),
+        );
+        object.insert(
+            "turnId".into(),
+            serde_json::Value::String(turn_id.to_string()),
+        );
+        object.insert(
+            "completedAt".into(),
+            serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+        );
+    }
+    payload
+}
+
 fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
     let normalized = error.to_ascii_lowercase();
     // Checked first: a stop is not a failure, and every branch below reads it
@@ -14314,6 +14454,15 @@ fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
         } else {
             ("stopped", "You stopped this turn. Send again to continue.")
         };
+    }
+    // An interrupted turn never reached the provider's own error handling, so
+    // none of the keyword branches below can say anything true about it. It is
+    // also the one failure that is always worth sending again.
+    if error.contains(PROVIDER_INTERRUPTED_MARKER) {
+        return (
+            "interrupted",
+            "Gyro closed while this turn was running. Send it again to continue the conversation.",
+        );
     }
     // Checked first: an argument failure is definitive, and it is the one class
     // where retrying cannot possibly help. Reporting it as a generic retry is
@@ -15875,8 +16024,85 @@ fn provider_output_summary(
     ))
 }
 
+/// Whether an error means the stored provider cursor is dead.
+///
+/// A true stale-resume error is one short sentence from the CLI. A failed
+/// stream-json run, however, arrives here as its entire transcript: every frame
+/// carries a session id, which is one half of the test below, and any tool that
+/// touched a missing path contributes "no such file", which is the other. Read
+/// together across thousands of unrelated characters they looked exactly like a
+/// dead cursor, so an ordinary failure cleared the binding and the conversation
+/// it pointed at could no longer be resumed.
+///
+/// Classifying sentence by sentence is what keeps the two halves from meeting.
 fn is_stale_resume_error(error: &str) -> bool {
-    let normalized = error.to_ascii_lowercase();
+    error
+        .lines()
+        .filter_map(provider_error_sentence)
+        .any(|sentence| is_stale_resume_sentence(&sentence))
+}
+
+/// The part of one output line that could be the CLI reporting an error.
+///
+/// Plain text is taken as written. A JSON frame contributes only its error
+/// message, and only when it carries one — a transcript frame has no business
+/// being tested for a dead cursor just because it names the session it belongs
+/// to.
+fn provider_error_sentence(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    if !line.starts_with('{') {
+        return Some(line.to_string());
+    }
+    let frame = serde_json::from_str::<serde_json::Value>(line).ok()?;
+    let error = frame.get("error")?;
+    if let Some(message) = error.as_str() {
+        return Some(message.to_string());
+    }
+    error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+/// The reportable failure from a stream-json run's output.
+///
+/// Both supported CLIs print a JSON transcript on stdout and their own
+/// diagnostics on stderr, so concatenating the two and truncating stored the
+/// first few thousand characters of the conversation as the reason the
+/// conversation failed. That is unreadable in the timeline, and it is worse
+/// than unreadable to the classifiers: [`provider_failure_recovery`] and
+/// [`is_stale_resume_error`] both match keywords, and a long enough transcript
+/// contains every keyword either of them looks for.
+///
+/// The CLI's own diagnostics come first, then error frames from the stream, and
+/// only then the transcript — by which point it is the only thing left to say.
+fn provider_stream_failure_detail(stdout: &str, stderr: &str) -> String {
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        return truncate_error_detail(stderr);
+    }
+    let frame_errors = stdout
+        .lines()
+        .filter_map(provider_error_sentence)
+        .filter(|sentence| !sentence.trim().is_empty())
+        .collect::<Vec<_>>();
+    if !frame_errors.is_empty() {
+        return truncate_error_detail(&frame_errors.join("\n"));
+    }
+    truncate_error_detail(stdout.trim())
+}
+
+fn is_stale_resume_sentence(sentence: &str) -> bool {
+    // Long enough for any CLI's error sentence, short enough that a pasted
+    // transcript or a file dump cannot qualify as one.
+    const MAX_RESUME_ERROR_SENTENCE_CHARS: usize = 400;
+    if sentence.chars().count() > MAX_RESUME_ERROR_SENTENCE_CHARS {
+        return false;
+    }
+    let normalized = sentence.to_ascii_lowercase();
     // Grok ACP returns bare "Method not found" when session/resume is not
     // implemented — treat that as a dead cursor so Retry starts clean.
     if normalized.contains("method not found")
@@ -18196,6 +18422,14 @@ pub fn run() {
             let paths = GyroPaths::for_current_user()?;
             let store = SessionStore::open(paths.clone())?;
             recover_provider_mutation_transactions(&paths.mutation_journals_dir, &store)?;
+            // Not fatal: a session whose turn cannot be closed is one session
+            // that still needs a new turn, which is strictly better than
+            // refusing to start the app over it.
+            match reconcile_interrupted_provider_turns(&store) {
+                Ok(0) => {}
+                Ok(closed) => eprintln!("closed {closed} turn(s) interrupted by an earlier exit"),
+                Err(error) => eprintln!("could not reconcile interrupted turns: {error}"),
+            }
             let _ = store.maintain();
             if let Ok(mut pool) = SESSION_STORE_POOL.lock() {
                 if pool.len() < SESSION_STORE_POOL_CAPACITY {
@@ -20892,6 +21126,119 @@ while True:
         assert!(is_stale_resume_error("missing thread for provider"));
         assert!(is_stale_resume_error("Method not found"));
         assert!(!is_stale_resume_error("rate limit exceeded"));
+        // Claude Code's own wording, which reads as "found" rather than "not
+        // found" and needs its own clause to classify.
+        assert!(is_stale_resume_error(
+            "No conversation found with session ID: 019f707c-bfec-71d1-88bb-248537d625bb"
+        ));
+    }
+
+    #[test]
+    fn a_failed_transcript_is_not_read_as_a_dead_cursor() {
+        // Every frame names its session, and a tool that touched a missing path
+        // supplies "no such file". Matched across the whole blob these two read
+        // as a stale cursor, and clearing the binding over it is what lost the
+        // conversation a retry was supposed to resume.
+        let transcript = concat!(
+            r#"{"type":"system","subtype":"init","session_id":"019f707c-bfec-71d1-88bb-248537d625bb","tools":["Bash"]}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"cat: config.toml: No such file or directory"}]}}"#,
+            "\n",
+            r#"{"type":"result","subtype":"error_during_execution"}"#,
+        );
+        assert!(is_stale_resume_error("session not found"));
+        assert!(!is_stale_resume_error(transcript));
+    }
+
+    #[test]
+    fn a_stale_cursor_still_classifies_beside_transcript_noise() {
+        // The sentence arrives on stderr, after the stream has already printed
+        // frames. Per-line classification has to still find it.
+        let output = concat!(
+            r#"{"type":"system","subtype":"init","session_id":"019f707c-bfec-71d1-88bb-248537d625bb"}"#,
+            "\n",
+            "No conversation found with session ID: 019f707c-bfec-71d1-88bb-248537d625bb",
+        );
+        assert!(is_stale_resume_error(output));
+    }
+
+    #[test]
+    fn stream_failures_report_the_cli_error_not_the_transcript() {
+        let transcript = concat!(
+            r#"{"type":"system","subtype":"init","session_id":"abc","tools":["Bash"]}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}"#,
+        );
+        // stderr is the CLI speaking for itself and outranks the transcript.
+        assert_eq!(
+            provider_stream_failure_detail(transcript, "Error: credit balance is too low"),
+            "Error: credit balance is too low"
+        );
+        // With no stderr, an error frame in the stream is next.
+        let with_error_frame = format!(
+            "{transcript}\n{}",
+            r#"{"type":"error","error":{"message":"model gpt-5.6-sol is not supported"}}"#
+        );
+        assert_eq!(
+            provider_stream_failure_detail(&with_error_frame, ""),
+            "model gpt-5.6-sol is not supported"
+        );
+        // Only when the stream says nothing about the failure does the
+        // transcript stand in for it.
+        assert_eq!(
+            provider_stream_failure_detail(transcript, ""),
+            transcript.trim()
+        );
+    }
+
+    #[test]
+    fn an_interrupted_turn_is_closed_so_the_chat_can_be_picked_back_up() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "chat session")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Claude is working",
+                serde_json::json!({
+                    "kind": "provider-status",
+                    "status": "running",
+                    "providerId": "anthropic",
+                    "providerLabel": "Claude",
+                    "modelId": "sonnet",
+                    "turnId": turn_id.to_string(),
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        // This is the state a force-quit leaves behind, and it refused every
+        // further attempt on the turn.
+        assert!(provider_turn_has_unfinished_attempt(&store, session.id, turn_id).unwrap());
+
+        assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 1);
+
+        assert!(!provider_turn_has_unfinished_attempt(&store, session.id, turn_id).unwrap());
+        let closing = store
+            .read_recent_events(session.id, 32)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.turn_id == Some(turn_id))
+            .next_back()
+            .expect("the interrupted turn is closed with an event");
+        assert_eq!(closing.payload["status"], "failed");
+        assert_eq!(closing.payload["recoveryKind"], "interrupted");
+        // The closing event keeps the run's identity so it renders like the one
+        // it replaces rather than as an anonymous failure.
+        assert_eq!(closing.payload["providerLabel"], "Claude");
+        assert_eq!(closing.payload["modelId"], "sonnet");
+        assert_eq!(closing.message, "Claude send needs attention");
+
+        // A second startup has nothing left to close.
+        assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 0);
     }
 
     #[test]

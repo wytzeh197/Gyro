@@ -958,6 +958,15 @@ export function App() {
     [activeSessionId, sessions],
   );
   const activeWorkspaceRoot = activeSession?.workspacePath ?? workspacePath;
+  // Browser focus splits the code route into editor + preview rows. It has to
+  // track whether the preview panel is actually rendered: leaving the pane tab
+  // on "browser" after closing the panel used to keep the split, so the editor
+  // stayed pinned at ~32% height with an empty gap where the preview would be.
+  const isBrowserFocusLayout =
+    workbench.activeWorkspaceLayout === "code" &&
+    workbench.activePaneTab === "browser" &&
+    workbench.isToolPanelOpen &&
+    Boolean(activeWorkspaceRoot);
   const workspaceRoots = useMemo(
     () =>
       workspaceFolderPaths(
@@ -3344,44 +3353,24 @@ export function App() {
     if (!root) return undefined;
     const contextPath = (path?: string) =>
       path ? workspaceContextRelativePath(path, root) : undefined;
-    const activeBuffer = workbench.ide.activePath
-      ? workbench.ide.buffers[workbench.ide.activePath]
-      : undefined;
     const activeOutput = workbench.ide.outputChannels.find(
       (channel) => channel.id === workbench.ide.activeOutputChannelId,
     );
+    // Deliberately no active path, open tabs, selection, or buffer content:
+    // opening a file in Workspace must never become chat context on its own.
+    // The file reaches a turn only when the user attaches it from the composer
+    // "+" menu, or presses one of the editor AI actions, which both spell the
+    // file out in the message they send.
     return {
       schema: "gyro.workspace-context.v1",
       workspaceKey: root,
       revision: Date.now(),
       capturedAt: new Date().toISOString(),
-      activePath: contextPath(workbench.ide.activePath),
-      activeView: workbench.ide.activeView,
-      visibleTabs: workbench.ide.tabs
-        .map((tab) => contextPath(tab.path))
-        .filter((path): path is string => Boolean(path))
-        .slice(0, 64),
-      selection:
-        workbench.ide.selection &&
-        contextPath(workbench.ide.selection.path) ===
-          contextPath(workbench.ide.activePath)
-          ? {
-              ...workbench.ide.selection,
-              path: contextPath(workbench.ide.selection.path) ?? "",
-              text: workbench.ide.selection.text.slice(0, 16_000),
-            }
-          : undefined,
-      buffers: activeBuffer
-        ? [
-            {
-              path: contextPath(activeBuffer.path) ?? activeBuffer.path,
-              dirty: activeBuffer.content !== activeBuffer.savedContent,
-              contentHash: workspaceContextContentHash(activeBuffer.content),
-              diskHash: activeBuffer.contentHash,
-              content: activeBuffer.content.slice(0, 48_000),
-            },
-          ]
-        : [],
+      activePath: undefined,
+      activeView: undefined,
+      visibleTabs: [],
+      selection: undefined,
+      buffers: [],
       diagnostics: workbench.ide.diagnostics
         .filter(
           (diagnostic) =>
@@ -3403,7 +3392,16 @@ export function App() {
           }
         : undefined,
     };
-  }, [selectedFile, workbench.ide, workspaceRoots]);
+    // Narrow deps so a cursor move or a keystroke no longer mints a new
+    // revision and re-pushes IDE evidence over IPC.
+  }, [
+    selectedFile,
+    workbench.ide.activeOutputChannelId,
+    workbench.ide.diagnostics,
+    workbench.ide.outputChannels,
+    workbench.ide.testTree,
+    workspaceRoots,
+  ]);
 
   useEffect(() => {
     const root = workspaceRootForPath(workspaceRoots, selectedFile);
@@ -12463,13 +12461,6 @@ export function App() {
         worktreeName={paneSession?.worktreeName}
         workspaceMode={workbench.workspaceMode}
         workspacePath={pane.workspacePath}
-        workspaceContext={
-          workspaceContextSnapshot &&
-          normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
-            normalizeProjectPath(pane.workspacePath)
-            ? workspaceContextSnapshot
-            : undefined
-        }
       />
     );
   };
@@ -12598,13 +12589,6 @@ export function App() {
       worktreeName={activeSession?.worktreeName}
       workspaceMode={workbench.workspaceMode}
       workspacePath={activeSession?.workspacePath ?? workspacePath}
-      workspaceContext={
-        workspaceContextSnapshot &&
-        normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
-          normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
-          ? workspaceContextSnapshot
-          : undefined
-      }
     />
   );
 
@@ -12735,13 +12719,8 @@ export function App() {
           className={[
             "gyro-workspace-route",
             `is-${activeWorkspaceLayout}`,
-            activeWorkspaceLayout === "code" &&
-            workbench.activePaneTab === "browser"
-              ? "is-browser-focus"
-              : "",
-            activeWorkspaceLayout === "code" &&
-            workbench.activePaneTab === "browser" &&
-            !selectedFile
+            isBrowserFocusLayout ? "is-browser-focus" : "",
+            isBrowserFocusLayout && !selectedFile
               ? "is-browser-focus-empty-editor"
               : "",
           ]
@@ -12927,17 +12906,6 @@ export function App() {
                     workspacePath={
                       activeSession?.workspacePath ?? workspacePath
                     }
-                    workspaceContext={
-                      workspaceContextSnapshot &&
-                      normalizeProjectPath(
-                        workspaceContextSnapshot.workspaceKey,
-                      ) ===
-                        normalizeProjectPath(
-                          activeSession?.workspacePath ?? workspacePath,
-                        )
-                        ? workspaceContextSnapshot
-                        : undefined
-                    }
                   />
                 ) : null}
               </ChatGridSurface>
@@ -12952,6 +12920,7 @@ export function App() {
             <section className="gyro-workspace-primary" aria-label="Workspace">
               <IdeSurface
                 activePaneTab={workbench.activePaneTab}
+                isToolPanelOpen={workbench.isToolPanelOpen}
                 browserPreview={workbench.browserPreview}
                 diffReview={workbench.diffReview}
                 activeBuffer={activeEditorBuffer}
@@ -13467,7 +13436,6 @@ export function App() {
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
-          workspaceContext={workspaceContextSnapshot}
         />
       ) : null}
       {modelStandardPrompt ? (
@@ -15685,15 +15653,6 @@ function workspaceContextRelativePath(path: string, root: string) {
   return normalizedPath.startsWith(prefix)
     ? normalizedPath.slice(prefix.length)
     : normalizedPath;
-}
-
-function workspaceContextContentHash(content: string) {
-  let hash = 2_166_136_261;
-  for (let index = 0; index < content.length; index += 1) {
-    hash ^= content.charCodeAt(index);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return `editor-${(hash >>> 0).toString(16).padStart(8, "0")}-${content.length}`;
 }
 
 function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {

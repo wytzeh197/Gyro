@@ -8,7 +8,6 @@ import {
   Atom,
   Binary,
   Blocks,
-  Bot,
   Braces,
   CalendarClock,
   Camera,
@@ -232,7 +231,6 @@ import type {
   WorkbenchTurn,
   WorkspaceFile,
   WorkspaceFileContent,
-  WorkspaceContextSnapshot,
   WorkspaceLayoutId,
   WorkspacePreparationProgress,
   WorkspaceSearchQuery,
@@ -278,7 +276,7 @@ import { shouldShowSidebarUpdate, updateSidebarLabel } from "./update-state";
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
 const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
-  ai: Bot,
+  ai: Sparkles,
   browser: Globe2,
   diff: GitPullRequest,
   explorer: FileText,
@@ -3892,7 +3890,7 @@ function WorkspaceSidebarContent({
                 </div>
                 {ide?.lastAssistantRequest ? (
                   <SidebarDestinationRow
-                    icon={Bot}
+                    icon={Sparkles}
                     isActive
                     label={ide.lastAssistantRequest.action.replaceAll("-", " ")}
                     meta={ide.lastAssistantRequest.path ?? "workspace"}
@@ -5562,7 +5560,6 @@ type ChatSurfaceProps = {
     reasoningEffort?: ReasoningEffort;
   };
   workspacePath?: string;
-  workspaceContext?: WorkspaceContextSnapshot;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
   providerStatuses?: ProviderStatus[];
@@ -5695,7 +5692,6 @@ export function ChatSurface({
   sessionSummary,
   sessionModel,
   workspacePath,
-  workspaceContext,
   config,
   providerReadiness,
   providerUsageByProvider,
@@ -6233,7 +6229,6 @@ export function ChatSurface({
             variant="hero"
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
-            workspaceContext={workspaceContext}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
@@ -6570,7 +6565,6 @@ export function ChatSurface({
             shellReady={shellReady}
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
-            workspaceContext={workspaceContext}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
@@ -8901,6 +8895,7 @@ type IdeSurfaceProps = {
   }) => ReactNode;
   terminalOutput: string;
   activePaneTab: WorkbenchPaneTab;
+  isToolPanelOpen?: boolean;
   terminalPanes?: TerminalPane[];
   selectedTerminalPaneId?: string;
   terminalTemplate?: TerminalTemplate;
@@ -8973,6 +8968,7 @@ export function IdeSurface({
   renderEditor,
   terminalOutput,
   activePaneTab,
+  isToolPanelOpen = false,
   terminalPanes,
   selectedTerminalPaneId,
   terminalTemplate,
@@ -9156,7 +9152,9 @@ export function IdeSurface({
                       ?.relativePath ?? groupPath
                   }
                   browserFocusEmpty={
-                    activePaneTab === "browser" && !selectedPath
+                    activePaneTab === "browser" &&
+                    isToolPanelOpen &&
+                    !selectedPath
                   }
                   fileContent={
                     fileContent?.path === groupPath ? fileContent : undefined
@@ -9628,7 +9626,7 @@ function EditorGroupPane({
             title="Ask about file"
             type="button"
           >
-            <Bot size={13} />
+            <Sparkles size={13} />
             <span>Ask</span>
           </button>
           <button
@@ -13316,7 +13314,7 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
     destination: "workspace",
     layout: "terminal-grid",
     toolTab: "terminal",
-    icon: Bot,
+    icon: Sparkles,
   },
   {
     id: "run-claude",
@@ -13325,7 +13323,7 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
     destination: "workspace",
     layout: "terminal-grid",
     toolTab: "terminal",
-    icon: Bot,
+    icon: Sparkles,
   },
   {
     id: "split-terminal",
@@ -16590,7 +16588,6 @@ function Composer({
   onStop,
   worktreeName,
   workspacePath,
-  workspaceContext,
   workspaceMode = "local",
   config,
   providerReadiness,
@@ -16631,7 +16628,6 @@ function Composer({
   onStop?: () => void;
   worktreeName?: string;
   workspacePath?: string;
-  workspaceContext?: WorkspaceContextSnapshot;
   workspaceMode?: WorkbenchMode;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
@@ -16683,6 +16679,12 @@ function Composer({
   // Pixels to shift the whole picker left so models stay on-screen (right of
   // providers) without clipping the viewport edge.
   const [modelFlyoutShiftX, setModelFlyoutShiftX] = useState(0);
+  // Where the models open relative to the provider list. The Workspace AI
+  // sidebar is narrower than the two lists side by side, so the flyout flips
+  // to the left, and stacks above the list when neither side fits.
+  const [modelFlyoutSide, setModelFlyoutSide] = useState<
+    "right" | "left" | "stacked"
+  >("right");
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
@@ -16916,7 +16918,7 @@ function Composer({
           active: isConnected && provider.id === config.selectedProviderId,
           disabled: false,
           disconnected: !isConnected,
-          icon: Bot,
+          icon: Sparkles,
           kind: "provider" as const,
           label: provider.displayName,
           providerId: provider.id,
@@ -17078,7 +17080,7 @@ function Composer({
     },
     {
       command: "/model",
-      icon: Bot,
+      icon: Sparkles,
       label: "Choose model",
       popover: "provider",
     },
@@ -17241,13 +17243,15 @@ function Composer({
   });
   const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up");
 
-  // Models always open to the right of the provider list. If that would clip
-  // the viewport, nudge the whole picker left just enough to fit. Flip up
-  // only when the panel would run off the bottom.
+  // Models open to the right of the provider list. If that would clip, nudge
+  // the whole picker left just enough to fit, and flip the flyout to the left
+  // of the list when even that is not enough. Flip up only when the panel
+  // would run off the bottom.
   useEffect(() => {
     if (!modelPickerProvider || !providerPickerRef.current) {
       setModelFlyoutVertical("down");
       setModelFlyoutShiftX(0);
+      setModelFlyoutSide("right");
       return;
     }
     const picker = providerPickerRef.current;
@@ -17263,6 +17267,12 @@ function Composer({
     const modelFlyoutHeight = flyout?.scrollHeight ?? 420;
     const edgePad = 8;
     const gap = 2;
+    // The composer is not always the window's full width. In the Workspace AI
+    // sidebar it sits inside a panel that clips its overflow, so the viewport
+    // is the wrong bound — measuring against it let the flyout render past the
+    // sidebar and get cut in half by the editor next to it.
+    const bounds = clippingBounds(picker);
+    let side: "right" | "left" | "stacked" = "right";
 
     if (control) {
       // data-align="end" with right:0 pins the picker to the control's right.
@@ -17270,20 +17280,35 @@ function Composer({
       const controlRect = control.getBoundingClientRect();
       const unshiftedRight = controlRect.right;
       const unshiftedFlyoutRight = unshiftedRight + gap + modelFlyoutWidth;
-      const overflowRight = unshiftedFlyoutRight - (window.innerWidth - edgePad);
+      const overflowRight = unshiftedFlyoutRight - (bounds.right - edgePad);
       const unshiftedLeft = unshiftedRight - picker.offsetWidth;
-      const maxShift = Math.max(0, unshiftedLeft - edgePad);
-      setModelFlyoutShiftX(
-        overflowRight > 0
-          ? Math.min(Math.ceil(overflowRight), maxShift)
-          : 0,
-      );
+      const maxShift = Math.max(0, unshiftedLeft - (bounds.left + edgePad));
+      const shift =
+        overflowRight > 0 ? Math.min(Math.ceil(overflowRight), maxShift) : 0;
+      setModelFlyoutShiftX(shift);
+      // Shifting only helps while the picker still has room to travel. Once it
+      // is against the left edge and models would still overhang, open them on
+      // the other side of the list instead of letting them clip.
+      const fitsRight = overflowRight - shift <= 0;
+      const fitsLeft =
+        unshiftedLeft - shift - gap - modelFlyoutWidth >= bounds.left + edgePad;
+      // The Workspace AI sidebar is narrower than list plus flyout together,
+      // so neither side can hold them. Stack the models over the list there
+      // rather than docking a panel that has nowhere to go.
+      side = fitsRight ? "right" : fitsLeft ? "left" : "stacked";
+      setModelFlyoutSide(side);
     }
 
     const rect = picker.getBoundingClientRect();
-    setModelFlyoutVertical(
-      rect.top + modelFlyoutHeight > window.innerHeight - 16 ? "up" : "down",
-    );
+    // Docked beside the list the flyout shares its top edge, so it runs out of
+    // room below that. Stacked it starts past the list instead, and only the
+    // room left over decides which way it goes.
+    const flyoutTop = side === "stacked" ? rect.bottom + gap : rect.top;
+    const fitsBelow = flyoutTop + modelFlyoutHeight <= bounds.bottom - 16;
+    const fitsAbove =
+      (side === "stacked" ? rect.top - gap : rect.bottom) - modelFlyoutHeight >=
+      bounds.top + 16;
+    setModelFlyoutVertical(!fitsBelow && fitsAbove ? "up" : "down");
   }, [modelPickerProvider]);
 
   useEffect(() => {
@@ -17633,26 +17658,6 @@ function Composer({
         value={draft}
       />
       <div className="gyro-composer-bar">
-        {workspaceContext?.activePath ? (
-          <span
-            className="gyro-composer-chip"
-            title={`Live Workspace context · ${workspaceContext.activePath}`}
-          >
-            <FileCode2 size={14} />
-            <span className="gyro-composer-label">
-              {workspaceName(workspaceContext.activePath)}
-              {workspaceContext.selection?.text
-                ? ` · ${workspaceContext.selection.text.length} selected`
-                : workspaceContext.buffers.some(
-                      (buffer) =>
-                        buffer.path === workspaceContext.activePath &&
-                        buffer.dirty,
-                    )
-                  ? " · unsaved"
-                  : ""}
-            </span>
-          </span>
-        ) : null}
         {hasSelectedProvider || isHero ? (
           <>
             <div
@@ -17888,16 +17893,14 @@ function Composer({
                 .filter(Boolean)
                 .join(" ")}
               data-align="end"
-              data-flyout-side="right"
+              data-flyout-side={modelFlyoutSide}
               data-flyout-vertical={modelFlyoutVertical}
               data-placement={providerPopoverPlacement}
               id={`${popoverBaseId}-provider`}
               onPointerEnter={clearModelFlyoutPreviewTimer}
               ref={providerPickerRef}
               style={
-                modelFlyoutShiftX > 0
-                  ? { right: modelFlyoutShiftX }
-                  : undefined
+                modelFlyoutShiftX > 0 ? { right: modelFlyoutShiftX } : undefined
               }
             >
               <ComposerPopover
@@ -18369,7 +18372,7 @@ const ChatEvent = memo(function ChatEvent({
       ].join(" ")}
     >
       <div className="gyro-message-avatar">
-        {isUser ? <UserCircle size={17} /> : <Bot size={17} />}
+        {isUser ? <UserCircle size={17} /> : <Sparkles size={17} />}
       </div>
       <div
         className={isUser ? "gyro-user-message-content" : undefined}
@@ -21191,7 +21194,7 @@ function IdeRailTabs({
     label: string;
     icon: IconComponent;
   }> = [
-    { id: "agent", label: "Agent", icon: Bot },
+    { id: "agent", label: "Agent", icon: Sparkles },
     { id: "diff", label: "Diff", icon: GitPullRequest },
     { id: "terminal", label: "Terminal", icon: Terminal },
     { id: "browser", label: "Browser", icon: Globe2 },
@@ -21367,6 +21370,46 @@ function workspaceName(path?: string) {
     return "No workspace";
   }
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+/// The rectangle a popover actually has to stay inside.
+///
+/// An overflow-clipped ancestor, not the viewport, is what cuts a flyout off:
+/// the Workspace AI sidebar panel is `overflow: hidden`, so anything the
+/// composer opens past its right edge is simply not drawn. Walk up to the
+/// nearest such ancestor and use it; fall back to the viewport when the
+/// composer really does own the full width.
+function clippingBounds(element: HTMLElement) {
+  const viewport = {
+    left: 0,
+    right: window.innerWidth,
+    top: 0,
+    bottom: window.innerHeight,
+  };
+  for (
+    let node = element.parentElement;
+    node && node !== document.body;
+    node = node.parentElement
+  ) {
+    const style = window.getComputedStyle(node);
+    const clips = [style.overflowX, style.overflowY].some(
+      (value) => value !== "visible",
+    );
+    if (!clips) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      continue;
+    }
+    return {
+      left: Math.max(viewport.left, rect.left),
+      right: Math.min(viewport.right, rect.right),
+      top: Math.max(viewport.top, rect.top),
+      bottom: Math.min(viewport.bottom, rect.bottom),
+    };
+  }
+  return viewport;
 }
 
 function workspaceParentFolder(path?: string) {

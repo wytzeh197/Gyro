@@ -20,6 +20,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # Compared against scripts/workbench-smoke-baseline.json, so this fails
+      # only on a check that was passing when the baseline was recorded.
+      - run: pnpm smoke:workbench
       - run: pnpm release:check
       - run: pnpm site:check
 

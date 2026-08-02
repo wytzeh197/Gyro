@@ -528,7 +528,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceContext,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect the current editor, selection, buffers, diagnostics, tests, and output visible in Gyro Workspace.",
+        description: "Inspect the diagnostics, failing tests, and active output channel in Gyro Workspace. The user's open file, tab list, selection, and unsaved buffer are deliberately not reported here.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceList,
