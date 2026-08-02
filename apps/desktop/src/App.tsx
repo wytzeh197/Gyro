@@ -880,6 +880,15 @@ export function App() {
     isTauriRuntime(),
   );
   const suppressSessionAutoSelectRef = useRef(true);
+  // Sessions whose chat pane the user closed.
+  //
+  // Closing a pane is otherwise undone the moment anything makes that session
+  // active again: the pane-sync effect below treats "the active session has a
+  // pane" as an invariant and re-creates one, which is why a closed chat
+  // disappears and then reappears on its own. A session leaves this set as soon
+  // as a pane for it exists again, so the mark never outlives the next
+  // deliberate open.
+  const closedChatPaneSessionsRef = useRef(new Set<string>());
   const ingestedSessionEventIds = useRef(new Set<string>());
   const refreshedFileActivityKeysRef = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
@@ -949,6 +958,15 @@ export function App() {
     [activeSessionId, sessions],
   );
   const activeWorkspaceRoot = activeSession?.workspacePath ?? workspacePath;
+  // Browser focus splits the code route into editor + preview rows. It has to
+  // track whether the preview panel is actually rendered: leaving the pane tab
+  // on "browser" after closing the panel used to keep the split, so the editor
+  // stayed pinned at ~32% height with an empty gap where the preview would be.
+  const isBrowserFocusLayout =
+    workbench.activeWorkspaceLayout === "code" &&
+    workbench.activePaneTab === "browser" &&
+    workbench.isToolPanelOpen &&
+    Boolean(activeWorkspaceRoot);
   const workspaceRoots = useMemo(
     () =>
       workspaceFolderPaths(
@@ -1209,7 +1227,18 @@ export function App() {
             type: "remove-session-pane",
             sessionId: pane.sessionId,
           });
+        } else if (pane?.kind === "session") {
+          // A session that is on screen is open, however it got there — a
+          // sidebar click, a drop, a restored layout. Clearing the mark here
+          // rather than at each of those call sites means a new way to open a
+          // chat cannot forget to un-close it.
+          closedChatPaneSessionsRef.current.delete(pane.sessionId);
         }
+      }
+    }
+    for (const sessionId of [...closedChatPaneSessionsRef.current]) {
+      if (!sessionById.has(sessionId)) {
+        closedChatPaneSessionsRef.current.delete(sessionId);
       }
     }
     const layout = chatGrid.activeProjectKey
@@ -1221,7 +1250,14 @@ export function App() {
         (pane) =>
           pane?.kind === "session" && pane.sessionId === activeSessionId,
       );
-      if (requestedSession && !requestedPane) {
+      // Not for a chat the user just closed. This branch exists so a session
+      // made active without a pane — the auto-select on startup, mainly — still
+      // gets one; applied to a closed pane it just puts the window back.
+      if (
+        requestedSession &&
+        !requestedPane &&
+        !closedChatPaneSessionsRef.current.has(activeSessionId)
+      ) {
         dispatchChatGrid({
           type: "select-pane",
           projectKey: normalizedChatProjectKey(requestedSession.workspacePath),
@@ -1848,7 +1884,11 @@ export function App() {
         if (current || suppressSessionAutoSelectRef.current) {
           return current;
         }
-        return nextVisibleSessions[0]?.id;
+        // Skipping the closed ones matters as much as picking a session at all:
+        // landing on one the user closed opens its pane straight back up.
+        return nextVisibleSessions.find(
+          (session) => !closedChatPaneSessionsRef.current.has(session.id),
+        )?.id;
       });
       setWorkspacePath(
         (current) => current ?? nextVisibleSessions[0]?.workspacePath,
@@ -3313,44 +3353,24 @@ export function App() {
     if (!root) return undefined;
     const contextPath = (path?: string) =>
       path ? workspaceContextRelativePath(path, root) : undefined;
-    const activeBuffer = workbench.ide.activePath
-      ? workbench.ide.buffers[workbench.ide.activePath]
-      : undefined;
     const activeOutput = workbench.ide.outputChannels.find(
       (channel) => channel.id === workbench.ide.activeOutputChannelId,
     );
+    // Deliberately no active path, open tabs, selection, or buffer content:
+    // opening a file in Workspace must never become chat context on its own.
+    // The file reaches a turn only when the user attaches it from the composer
+    // "+" menu, or presses one of the editor AI actions, which both spell the
+    // file out in the message they send.
     return {
       schema: "gyro.workspace-context.v1",
       workspaceKey: root,
       revision: Date.now(),
       capturedAt: new Date().toISOString(),
-      activePath: contextPath(workbench.ide.activePath),
-      activeView: workbench.ide.activeView,
-      visibleTabs: workbench.ide.tabs
-        .map((tab) => contextPath(tab.path))
-        .filter((path): path is string => Boolean(path))
-        .slice(0, 64),
-      selection:
-        workbench.ide.selection &&
-        contextPath(workbench.ide.selection.path) ===
-          contextPath(workbench.ide.activePath)
-          ? {
-              ...workbench.ide.selection,
-              path: contextPath(workbench.ide.selection.path) ?? "",
-              text: workbench.ide.selection.text.slice(0, 16_000),
-            }
-          : undefined,
-      buffers: activeBuffer
-        ? [
-            {
-              path: contextPath(activeBuffer.path) ?? activeBuffer.path,
-              dirty: activeBuffer.content !== activeBuffer.savedContent,
-              contentHash: workspaceContextContentHash(activeBuffer.content),
-              diskHash: activeBuffer.contentHash,
-              content: activeBuffer.content.slice(0, 48_000),
-            },
-          ]
-        : [],
+      activePath: undefined,
+      activeView: undefined,
+      visibleTabs: [],
+      selection: undefined,
+      buffers: [],
       diagnostics: workbench.ide.diagnostics
         .filter(
           (diagnostic) =>
@@ -3372,7 +3392,16 @@ export function App() {
           }
         : undefined,
     };
-  }, [selectedFile, workbench.ide, workspaceRoots]);
+    // Narrow deps so a cursor move or a keystroke no longer mints a new
+    // revision and re-pushes IDE evidence over IPC.
+  }, [
+    selectedFile,
+    workbench.ide.activeOutputChannelId,
+    workbench.ide.diagnostics,
+    workbench.ide.outputChannels,
+    workbench.ide.testTree,
+    workspaceRoots,
+  ]);
 
   useEffect(() => {
     const root = workspaceRootForPath(workspaceRoots, selectedFile);
@@ -7913,7 +7942,7 @@ export function App() {
           optimisticEventsRef.current.delete(persistedSession.id);
         } catch (error) {
           const errorMessage = String(error);
-          const wasCancelled = errorMessage.includes("chat cancelled by user");
+          const wasCancelled = isProviderStop(errorMessage);
           if (!wasCancelled)
             dispatchWorkbench({
               type: "set-provider-readiness",
@@ -7936,7 +7965,7 @@ export function App() {
             wasCancelled ? "terminal" : "command-failed",
             wasCancelled ? "Turn stopped" : "Message fallback",
             wasCancelled
-              ? "The provider process was cancelled"
+              ? providerStopDetail(errorMessage)
               : "Chat stayed local",
           );
         } finally {
@@ -8089,7 +8118,7 @@ export function App() {
         optimisticEventsRef.current.delete(activeSessionId);
       } catch (error) {
         const errorMessage = String(error);
-        const wasCancelled = errorMessage.includes("chat cancelled by user");
+        const wasCancelled = isProviderStop(errorMessage);
         if (!wasCancelled)
           dispatchWorkbench({
             type: "set-provider-readiness",
@@ -8109,9 +8138,7 @@ export function App() {
         notify(
           wasCancelled ? "terminal" : "command-failed",
           wasCancelled ? "Turn stopped" : "Message fallback",
-          wasCancelled
-            ? "The provider process was cancelled"
-            : "Chat stayed local",
+          wasCancelled ? providerStopDetail(errorMessage) : "Chat stayed local",
         );
       } finally {
         setSessionSending(activeSessionId, false);
@@ -10063,6 +10090,155 @@ export function App() {
     }
   }, [notify, workbench.browserPreview.url]);
 
+  const sessionBrowserKey =
+    activeSessionId ??
+    (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
+  const sessionBrowserWorkspaceKey =
+    activeSession?.workspacePath ?? activeWorkspaceRoot ?? workspacePath ?? "";
+  const browserNativeHost = isTauriRuntime();
+  const browserOverlayOccluded =
+    isCommandPaletteOpen || Boolean(modelStandardPrompt);
+
+  const ensureSessionBrowser = useCallback(
+    async (url: string, bounds?: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null) => {
+      if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
+        return;
+      }
+      try {
+        await invoke("session_browser_open", {
+          request: {
+            sessionId: sessionBrowserKey,
+            workspaceKey: sessionBrowserWorkspaceKey,
+            url: normalizedPreviewUrl(url),
+            bounds: bounds ?? undefined,
+            visible: bounds != null,
+          },
+        });
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "ready",
+          message: `Native · ${normalizedPreviewUrl(url)}`,
+          nativeHost: true,
+        });
+      } catch (error) {
+        notify("command-failed", "Browser open failed", String(error));
+      }
+    },
+    [notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
+  );
+
+  const handleBrowserHostBoundsChange = useCallback(
+    async (
+      bounds: { x: number; y: number; width: number; height: number } | null,
+    ) => {
+      if (!isTauriRuntime()) return;
+      try {
+        if (!bounds || browserOverlayOccluded) {
+          await invoke("session_browser_set_visible", {
+            sessionId: sessionBrowserKey,
+            visible: false,
+          });
+          return;
+        }
+        await invoke("session_browser_set_bounds", {
+          sessionId: sessionBrowserKey,
+          bounds,
+        });
+        await invoke("session_browser_set_visible", {
+          sessionId: sessionBrowserKey,
+          visible: true,
+        });
+      } catch {
+        // Webview may not exist yet until the first navigate/open.
+      }
+    },
+    [browserOverlayOccluded, sessionBrowserKey],
+  );
+
+  const handleBrowserNavigate = useCallback(
+    (url: string) => {
+      const next = normalizedPreviewUrl(url);
+      dispatchWorkbench({ type: "browser-navigate", url: next });
+      void ensureSessionBrowser(next);
+    },
+    [ensureSessionBrowser],
+  );
+
+  const handleBrowserBack = useCallback(() => {
+    dispatchWorkbench({ type: "browser-back" });
+    if (isTauriRuntime()) {
+      void invoke("session_browser_history", {
+        sessionId: sessionBrowserKey,
+        direction: "back",
+      }).catch(() => undefined);
+    }
+  }, [sessionBrowserKey]);
+
+  const handleBrowserForward = useCallback(() => {
+    dispatchWorkbench({ type: "browser-forward" });
+    if (isTauriRuntime()) {
+      void invoke("session_browser_history", {
+        sessionId: sessionBrowserKey,
+        direction: "forward",
+      }).catch(() => undefined);
+    }
+  }, [sessionBrowserKey]);
+
+  const handleBrowserReload = useCallback(() => {
+    dispatchWorkbench({ type: "browser-reload" });
+    if (isTauriRuntime()) {
+      void invoke("session_browser_reload", {
+        sessionId: sessionBrowserKey,
+      }).catch(() => undefined);
+    }
+  }, [sessionBrowserKey]);
+
+  const toggleBrowserPanel = useCallback(() => {
+    dispatchWorkbench({ type: "toggle-chat-browser" });
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: Promise<(() => void) | undefined> = Promise.resolve(undefined);
+    try {
+      unlisten = listen<{ sessionId: string; url: string }>(
+        "session-browser-opened",
+        (event) => {
+          if (event.payload.sessionId !== activeSessionId) return;
+          dispatchWorkbench({
+            type: "browser-navigate",
+            url: event.payload.url,
+          });
+          dispatchWorkbench({ type: "set-chat-panel", panel: "browser" });
+          dispatchWorkbench({
+            type: "browser-status",
+            status: "ready",
+            message: `Native · ${event.payload.url}`,
+            nativeHost: true,
+          });
+        },
+      );
+    } catch {
+      unlisten = Promise.resolve(undefined);
+    }
+    return () => {
+      void unlisten.then((dispose) => dispose?.());
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !browserOverlayOccluded) return;
+    void invoke("session_browser_set_visible", {
+      sessionId: sessionBrowserKey,
+      visible: false,
+    }).catch(() => undefined);
+  }, [browserOverlayOccluded, sessionBrowserKey]);
+
   const captureBrowserPreview = useCallback(
     async (action: "capture" | "reveal" = "capture") => {
       if (action === "reveal") {
@@ -10089,15 +10265,41 @@ export function App() {
         return;
       }
       try {
-        const capture = await invoke<BrowserPreviewCapture>(
-          "capture_browser_preview",
-          {
-            request: {
-              device: workbench.browserPreview.device,
-              url: normalizedPreviewUrl(workbench.browserPreview.url),
+        // Prefer the live session webview; fall back to ephemeral loopback capture.
+        let capture: BrowserPreviewCapture | undefined;
+        try {
+          const snapshot = await invoke<{ url: string } | null>(
+            "session_browser_snapshot",
+            { sessionId: sessionBrowserKey },
+          );
+          if (snapshot) {
+            // Session screenshot is handled through the capability path for models;
+            // user-triggered capture still uses the existing loopback command when
+            // possible, otherwise navigates the live browser and reuses capture.
+            capture = await invoke<BrowserPreviewCapture>(
+              "capture_browser_preview",
+              {
+                request: {
+                  device: workbench.browserPreview.device,
+                  url: normalizedPreviewUrl(workbench.browserPreview.url),
+                },
+              },
+            );
+          }
+        } catch {
+          capture = undefined;
+        }
+        if (!capture) {
+          capture = await invoke<BrowserPreviewCapture>(
+            "capture_browser_preview",
+            {
+              request: {
+                device: workbench.browserPreview.device,
+                url: normalizedPreviewUrl(workbench.browserPreview.url),
+              },
             },
-          },
-        );
+          );
+        }
         dispatchWorkbench({
           type: "browser-capture-success",
           capture,
@@ -10113,6 +10315,7 @@ export function App() {
     },
     [
       notify,
+      sessionBrowserKey,
       workbench.browserPreview.device,
       workbench.browserPreview.latestCapture?.path,
       workbench.browserPreview.url,
@@ -10125,6 +10328,26 @@ export function App() {
     const timeout = window.setTimeout(() => controller.abort(), 4_000);
     let disposed = false;
     const url = normalizedPreviewUrl(workbench.browserPreview.url);
+
+    // Native host navigates itself; mark ready without the loopback-only probe.
+    if (isTauriRuntime() && browserNativeHost) {
+      void ensureSessionBrowser(url).finally(() => {
+        if (disposed) return;
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "ready",
+          message: `Native · ${url}`,
+          nativeHost: true,
+          diagnosticsSupported: true,
+          diagnosticsCaptured: false,
+        });
+      });
+      return () => {
+        disposed = true;
+        window.clearTimeout(timeout);
+        controller.abort();
+      };
+    }
 
     const verification = isTauriRuntime()
       ? invoke<BrowserPreviewCheck>("check_browser_preview", {
@@ -10187,7 +10410,12 @@ export function App() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [workbench.browserPreview.status, workbench.browserPreview.url]);
+  }, [
+    browserNativeHost,
+    ensureSessionBrowser,
+    workbench.browserPreview.status,
+    workbench.browserPreview.url,
+  ]);
 
   const createTask = useCallback(() => {
     const metadata = workspaceRunMetadata(
@@ -11986,6 +12214,8 @@ export function App() {
       activePaneTab={workbench.activePaneTab}
       activeProfileId={activeProfileId}
       browserPreview={workbench.browserPreview}
+      browserNativeHost={browserNativeHost}
+      browserOverlayOccluded={browserOverlayOccluded}
       cliLaunchPreset={workbench.preferences.cliLaunchPreset}
       diffReview={workbench.diffReview}
       terminalSourceControl={selectedTerminalSourceControl}
@@ -12014,16 +12244,15 @@ export function App() {
         })
       }
       onAddTerminalPane={addTerminalPane}
-      onBrowserBack={() => dispatchWorkbench({ type: "browser-back" })}
+      onBrowserBack={handleBrowserBack}
       onBrowserDeviceChange={(device) =>
         dispatchWorkbench({ type: "browser-device", device })
       }
-      onBrowserForward={() => dispatchWorkbench({ type: "browser-forward" })}
-      onBrowserNavigate={(url) =>
-        dispatchWorkbench({ type: "browser-navigate", url })
-      }
+      onBrowserForward={handleBrowserForward}
+      onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+      onBrowserNavigate={handleBrowserNavigate}
       onBrowserOpenExternal={openBrowserPreviewExternal}
-      onBrowserReload={() => dispatchWorkbench({ type: "browser-reload" })}
+      onBrowserReload={handleBrowserReload}
       onBrowserScreenshot={captureBrowserPreview}
       onBrowserUrlChange={(url) =>
         dispatchWorkbench({ type: "set-browser-url", url })
@@ -12226,6 +12455,22 @@ export function App() {
       <ChatSurface
         activeChatPanel={panePanel}
         browserPreview={workbench.browserPreview}
+        browserNativeHost={browserNativeHost}
+        browserOverlayOccluded={browserOverlayOccluded}
+        onBrowserBack={handleBrowserBack}
+        onBrowserDeviceChange={(device) =>
+          dispatchWorkbench({ type: "browser-device", device })
+        }
+        onBrowserForward={handleBrowserForward}
+        onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+        onBrowserNavigate={handleBrowserNavigate}
+        onBrowserOpenExternal={openBrowserPreviewExternal}
+        onBrowserReload={handleBrowserReload}
+        onBrowserScreenshot={captureBrowserPreview}
+        onBrowserUrlChange={(url) =>
+          dispatchWorkbench({ type: "set-browser-url", url })
+        }
+        onToggleBrowserPanel={() => togglePanePanel("browser")}
         capabilityActivities={
           pane.kind === "session"
             ? Object.values(capabilityRunsBySessionId[pane.sessionId] ?? {})
@@ -12314,6 +12559,9 @@ export function App() {
         onCloseChat={() => {
           const projectKey = normalizedChatProjectKey(pane.workspacePath);
           const paneLayout = chatGrid.layouts[projectKey];
+          if (pane.kind === "session") {
+            closedChatPaneSessionsRef.current.add(pane.sessionId);
+          }
           const nextPane =
             paneLayout?.slots.find(
               (candidate) =>
@@ -12431,13 +12679,6 @@ export function App() {
         worktreeName={paneSession?.worktreeName}
         workspaceMode={workbench.workspaceMode}
         workspacePath={pane.workspacePath}
-        workspaceContext={
-          workspaceContextSnapshot &&
-          normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
-            normalizeProjectPath(pane.workspacePath)
-            ? workspaceContextSnapshot
-            : undefined
-        }
       />
     );
   };
@@ -12470,6 +12711,22 @@ export function App() {
       chatSwitcher={workspaceChatSwitcher}
       activeChatPanel={activeChatPanel}
       browserPreview={workbench.browserPreview}
+      browserNativeHost={browserNativeHost}
+      browserOverlayOccluded={browserOverlayOccluded}
+      onBrowserBack={handleBrowserBack}
+      onBrowserDeviceChange={(device) =>
+        dispatchWorkbench({ type: "browser-device", device })
+      }
+      onBrowserForward={handleBrowserForward}
+      onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+      onBrowserNavigate={handleBrowserNavigate}
+      onBrowserOpenExternal={openBrowserPreviewExternal}
+      onBrowserReload={handleBrowserReload}
+      onBrowserScreenshot={captureBrowserPreview}
+      onBrowserUrlChange={(url) =>
+        dispatchWorkbench({ type: "set-browser-url", url })
+      }
+      onToggleBrowserPanel={toggleBrowserPanel}
       capabilityPolicy={activeCapabilityPolicy}
       config={config}
       modelFocus={
@@ -12566,13 +12823,6 @@ export function App() {
       worktreeName={activeSession?.worktreeName}
       workspaceMode={workbench.workspaceMode}
       workspacePath={activeSession?.workspacePath ?? workspacePath}
-      workspaceContext={
-        workspaceContextSnapshot &&
-        normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
-          normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
-          ? workspaceContextSnapshot
-          : undefined
-      }
     />
   );
 
@@ -12703,13 +12953,8 @@ export function App() {
           className={[
             "gyro-workspace-route",
             `is-${activeWorkspaceLayout}`,
-            activeWorkspaceLayout === "code" &&
-            workbench.activePaneTab === "browser"
-              ? "is-browser-focus"
-              : "",
-            activeWorkspaceLayout === "code" &&
-            workbench.activePaneTab === "browser" &&
-            !selectedFile
+            isBrowserFocusLayout ? "is-browser-focus" : "",
+            isBrowserFocusLayout && !selectedFile
               ? "is-browser-focus-empty-editor"
               : "",
           ]
@@ -12895,17 +13140,6 @@ export function App() {
                     workspacePath={
                       activeSession?.workspacePath ?? workspacePath
                     }
-                    workspaceContext={
-                      workspaceContextSnapshot &&
-                      normalizeProjectPath(
-                        workspaceContextSnapshot.workspaceKey,
-                      ) ===
-                        normalizeProjectPath(
-                          activeSession?.workspacePath ?? workspacePath,
-                        )
-                        ? workspaceContextSnapshot
-                        : undefined
-                    }
                   />
                 ) : null}
               </ChatGridSurface>
@@ -12920,6 +13154,7 @@ export function App() {
             <section className="gyro-workspace-primary" aria-label="Workspace">
               <IdeSurface
                 activePaneTab={workbench.activePaneTab}
+                isToolPanelOpen={workbench.isToolPanelOpen}
                 browserPreview={workbench.browserPreview}
                 diffReview={workbench.diffReview}
                 activeBuffer={activeEditorBuffer}
@@ -13435,7 +13670,6 @@ export function App() {
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
-          workspaceContext={workspaceContextSnapshot}
         />
       ) : null}
       {modelStandardPrompt ? (
@@ -15655,15 +15889,6 @@ function workspaceContextRelativePath(path: string, root: string) {
     : normalizedPath;
 }
 
-function workspaceContextContentHash(content: string) {
-  let hash = 2_166_136_261;
-  for (let index = 0; index < content.length; index += 1) {
-    hash ^= content.charCodeAt(index);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return `editor-${(hash >>> 0).toString(16).padStart(8, "0")}-${content.length}`;
-}
-
 function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
   return items.flatMap((item) => [
     ...(item.status === "failed" ? [item] : []),
@@ -16542,6 +16767,27 @@ function providerStatusPayload(
     status,
     turnId,
   };
+}
+
+// Kept in step with `PROVIDER_STOP_MARKER` in the Tauri crate, which every stop
+// message opens with so a stop can be told from a genuine failure.
+const PROVIDER_STOP_MARKER = "chat cancelled by";
+const PROVIDER_SELF_STOP_MARKER = "chat cancelled by Gyro: ";
+
+function isProviderStop(errorMessage: string) {
+  return errorMessage.includes(PROVIDER_STOP_MARKER);
+}
+
+// What to tell someone about a turn that stopped. Gyro stops turns of its own
+// accord — at the per-call token ceiling, for one — so a stop is not always
+// something the person did. Reporting every one of them as "cancelled" and
+// nothing further is how a ceiling stop reads as the app breaking for no reason.
+function providerStopDetail(errorMessage: string) {
+  const at = errorMessage.indexOf(PROVIDER_SELF_STOP_MARKER);
+  if (at < 0) {
+    return "The provider process was stopped";
+  }
+  return `Gyro stopped this turn: ${errorMessage.slice(at + PROVIDER_SELF_STOP_MARKER.length)}`;
 }
 
 function providerStatusMessage(

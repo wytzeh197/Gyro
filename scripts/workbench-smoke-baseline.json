@@ -1,0 +1,11 @@
+{
+  "knownFailures": [
+    "Branch controls should list real local branches, guard dirty checkouts, preserve worktree branches, and persist the active session branch.",
+    "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
+    "Completion-only edit summaries, composer overlays, light context pills, and Goal/Plan exclusivity should remain enforced.",
+    "First-install access gate removal or native account compatibility is missing.",
+    "Kimi should default to K3/Max while xAI and Gemini remain readiness-only.",
+    "Permission controls should expose ask, sandboxed auto-approval, and orange Full Access as distinct backend modes.",
+    "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly."
+  ]
+}
