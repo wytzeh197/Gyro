@@ -11,9 +11,8 @@ run Gyro:
 5. **Review a proposed edit** — approve or reject through Gyro's mutation
    transaction, not a free-floating terminal prompt.
 
-This is launch blocker 3 and the core of the v0.2 private-alpha gate in
-[ROADMAP.md](../ROADMAP.md). Signing and notarization remain a separate
-distribution gate.
+This is launch blocker 3 and the core of the v0.2 private-alpha gate.
+Signing and notarization remain a separate distribution gate.
 
 ## What the product enforces
 
