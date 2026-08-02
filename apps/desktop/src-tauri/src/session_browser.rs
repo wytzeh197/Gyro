@@ -11,9 +11,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Runtime, WebviewUrl,
-};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Runtime, WebviewUrl};
 use uuid::Uuid;
 
 const MAX_CONSOLE_ENTRIES: usize = 100;
@@ -251,8 +249,7 @@ impl SessionBrowserManager {
         sender: mpsc::Sender<Result<Value, String>>,
     ) -> Result<(), String> {
         self.with_slot_mut(session_id, |slot| {
-            slot.pending
-                .insert(call_id, PendingAgentCall { sender });
+            slot.pending.insert(call_id, PendingAgentCall { sender });
         })
     }
 
@@ -323,9 +320,7 @@ pub fn parse_navigable_url(raw: &str) -> Result<url::Url, String> {
     };
     let url = url::Url::parse(&candidate).map_err(|_| "invalid browser URL".to_string())?;
     if !browser_url_is_navigable(&url) {
-        return Err(
-            "browser URLs must be credential-free http or https with a host".into(),
-        );
+        return Err("browser URLs must be credential-free http or https with a host".into());
     }
     Ok(url)
 }
@@ -760,7 +755,10 @@ pub fn register_bridge_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri
             return;
         }
         if request.method() != tauri::http::Method::POST {
-            responder.respond(cors_response(405, br#"{"ok":false,"error":"method"}"#.to_vec()));
+            responder.respond(cors_response(
+                405,
+                br#"{"ok":false,"error":"method"}"#.to_vec(),
+            ));
             return;
         }
         let app = ctx.app_handle().clone();
@@ -956,7 +954,9 @@ pub fn open_session_browser<R: Runtime>(
         width: 1.0,
         height: 1.0,
     });
-    let visible = request.visible.unwrap_or(bounds.width >= 2.0 && bounds.height >= 2.0);
+    let visible = request
+        .visible
+        .unwrap_or(bounds.width >= 2.0 && bounds.height >= 2.0);
 
     let builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
         .initialization_script(script)
@@ -1252,15 +1252,16 @@ pub fn capture_session_browser_png<R: Runtime>(
                 let view: &WKWebView = &*platform.inner().cast();
                 let completion = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
                     let snapshot = (|| {
-                        let image = image
-                            .as_ref()
-                            .ok_or_else(|| "native browser snapshot returned no image".to_string())?;
+                        let image = image.as_ref().ok_or_else(|| {
+                            "native browser snapshot returned no image".to_string()
+                        })?;
                         let tiff = image.TIFFRepresentation().ok_or_else(|| {
                             "native browser snapshot could not be encoded".to_string()
                         })?;
-                        let bitmap = NSBitmapImageRep::imageRepWithData(&tiff).ok_or_else(|| {
-                            "native browser snapshot could not create a bitmap".to_string()
-                        })?;
+                        let bitmap =
+                            NSBitmapImageRep::imageRepWithData(&tiff).ok_or_else(|| {
+                                "native browser snapshot could not create a bitmap".to_string()
+                            })?;
                         let properties =
                             NSDictionary::<NSBitmapImageRepPropertyKey, AnyObject>::new();
                         let png = bitmap
@@ -1355,7 +1356,8 @@ pub async fn session_browser_snapshot(
     app: AppHandle,
     session_id: String,
 ) -> Result<Option<SessionBrowserSnapshot>, String> {
-    app.state::<SessionBrowserManager>().get_snapshot(&session_id)
+    app.state::<SessionBrowserManager>()
+        .get_snapshot(&session_id)
 }
 
 #[cfg(test)]
