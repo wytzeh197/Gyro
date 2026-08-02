@@ -25973,10 +25973,12 @@ button.gyro-account-menu-row:hover,
   padding-bottom: 7px;
 }
 
-/* Keep every composer action inside narrow and tiled chat panes. */
+/* Keep every composer action inside narrow and tiled chat panes.
+   Do not set min-width:0 here: with a column flex dock that used to center
+   its children, size containment plus a zero min-width let the shell collapse
+   to a one-character column. */
 .gyro-composer-shell.is-hero.has-provider {
   container-type: inline-size;
-  min-width: 0;
 }
 
 .gyro-composer-shell.is-hero.has-provider > .gyro-composer-bar {
@@ -27132,14 +27134,65 @@ button.gyro-account-menu-row:hover,
 /* A hero composer with no container opinion still gets the hero measure. When
    it is tiled into a pane it fills the pane instead. */
 .gyro-composer-shell.is-hero {
+  box-sizing: border-box;
   max-width: var(--gyro-composer-width);
+  min-width: min(100%, 280px);
   width: min(var(--gyro-composer-width), 100%);
 }
 
 .gyro-chat-start .gyro-composer-shell.is-hero.is-constrained,
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.is-constrained {
   max-width: none;
+  min-width: 0;
   width: 100%;
+}
+
+/* Thread dock: stretch the column, then center the shell by margin — not by
+   align-items:center. Center-alignment on a column flex plus container-type
+   size containment was letting the shell shrink to a one-character column
+   (placeholder stacked vertically with only the + control visible). */
+.gyro-chat-composer-dock {
+  align-items: stretch;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  width: 100%;
+}
+
+.gyro-chat-composer-dock > .gyro-composer-shell,
+.gyro-chat-composer-dock > .gyro-chat-message-queue,
+.gyro-chat-composer-dock > .gyro-model-focus-strip,
+.gyro-chat-composer-dock > .gyro-model-focus-peek,
+.gyro-chat-composer-dock > .gyro-plan-decision-card {
+  align-self: center;
+  box-sizing: border-box;
+  max-width: min(100%, var(--gyro-composer-width));
+  min-width: min(100%, 280px);
+  width: min(100%, var(--gyro-composer-width));
+}
+
+.gyro-chat-composer-dock > .gyro-composer-shell.is-hero,
+.gyro-chat-composer-dock > .gyro-composer-shell.is-hero.has-provider {
+  max-width: min(100%, var(--gyro-composer-width));
+  min-width: min(100%, 280px);
+  width: min(100%, var(--gyro-composer-width));
+}
+
+.gyro-chat-composer-dock > .gyro-composer-shell.is-hero > textarea,
+.gyro-chat-composer-dock
+  > .gyro-composer-shell.is-hero.has-provider
+  > textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Canvas must be two rows (transcript + dock). The older 46px/48px first track
+   assumed the topbar lived inside the canvas; it is a surface sibling now. */
+.gyro-chat-thread-canvas {
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 /* -- One column, top to bottom -------------------------------------------- */
