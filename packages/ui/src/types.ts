@@ -24,7 +24,7 @@ export type WorkbenchDensity = "comfortable" | "compact";
 
 export type WorkbenchMode = "local" | "worktree";
 
-export type ChatSidePanelId = "environment" | "plan";
+export type ChatSidePanelId = "environment" | "plan" | "browser";
 
 export type ChatMode = "normal" | "plan" | "council";
 
@@ -86,7 +86,18 @@ export type CapabilityId =
   | "browser-open"
   | "browser-inspect"
   | "browser-reload"
-  | "browser-screenshot";
+  | "browser-screenshot"
+  | "browser-navigate"
+  | "browser-back"
+  | "browser-forward"
+  | "browser-click"
+  | "browser-type"
+  | "browser-scroll"
+  | "browser-form-input"
+  | "browser-read-page"
+  | "browser-find"
+  | "browser-console"
+  | "browser-network";
 
 export type CapabilityClass =
   | "workspace-inspect"
@@ -530,6 +541,16 @@ export type BrowserPreview = {
   latestCapture?: BrowserPreviewCapture;
   status: BrowserPreviewStatus;
   verificationMessage: string;
+  /** When true, the page is rendered by a native child webview over the host rect. */
+  nativeHost?: boolean;
+  title?: string;
+};
+
+export type BrowserHostBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export type NotificationKind =

@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# Maintainer-local product notes (kept on disk, not published).
+/GOVERNANCE.md
+/ROADMAP.md
+
 node_modules/
 .pnpm-store/
 dist/

@@ -1221,6 +1221,7 @@ export type WorkbenchAction =
   | { type: "toggle-chat-environment-rail" }
   | { type: "set-chat-environment-rail"; open: boolean }
   | { type: "toggle-chat-plan" }
+  | { type: "toggle-chat-browser" }
   | { type: "set-chat-panel"; panel?: ChatSidePanelId }
   | { type: "ide-open-tab"; tab: EditorTab }
   | { type: "ide-close-tab"; path: string; groupId?: string }
@@ -1408,6 +1409,8 @@ export type WorkbenchAction =
       diagnostics?: BrowserPreview["diagnostics"];
       diagnosticsSupported?: boolean;
       diagnosticsCaptured?: boolean;
+      title?: string;
+      nativeHost?: boolean;
     }
   | {
       type: "set-provider-status";
@@ -1832,6 +1835,13 @@ export function workbenchReducer(
       return chatPanelState(
         state,
         state.preferences.activeChatPanel === "plan" ? "environment" : "plan",
+      );
+    case "toggle-chat-browser":
+      return chatPanelState(
+        state,
+        state.preferences.activeChatPanel === "browser"
+          ? undefined
+          : "browser",
       );
     case "set-chat-panel":
       return chatPanelState(state, action.panel);
@@ -3528,6 +3538,8 @@ export function workbenchReducer(
             state.browserPreview.diagnosticsCaptured,
           status: action.status,
           verificationMessage: action.message,
+          title: action.title ?? state.browserPreview.title,
+          nativeHost: action.nativeHost ?? state.browserPreview.nativeHost,
         },
       };
     case "set-provider-status":

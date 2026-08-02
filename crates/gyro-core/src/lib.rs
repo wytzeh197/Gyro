@@ -134,10 +134,11 @@ pub use sqlite::{
     DEFAULT_BUSY_TIMEOUT,
 };
 pub use usage::{
-    budget_decision, budget_state, estimate_tokens, exceeds_call_ceiling, guard_decision,
-    provider_usage_totals_since, recent_usage, session_usage_totals, set_provider_budget,
-    usage_totals_since, BudgetLevel, BudgetState, GuardVerdict, PauseReason, PauseScope,
-    PauseState, RecentUsage, UsageBudget, UsageEntry, UsageGuardConfig, UsageOrigin,
+    budget_decision, budget_state, call_ceiling_tokens, estimate_tokens, exceeds_call_ceiling,
+    guard_decision, provider_rate_limits, provider_usage_totals_since, recent_usage,
+    record_provider_rate_limits, session_usage_totals, set_provider_budget, usage_totals_since,
+    BudgetLevel, BudgetState, GuardVerdict, PauseReason, PauseScope, PauseState,
+    ProviderRateLimitRecord, RecentUsage, UsageBudget, UsageEntry, UsageGuardConfig, UsageOrigin,
     UsageOriginTotals, UsageOutcome, UsageTokens, UsageTotals,
 };
 pub use worktrees::{

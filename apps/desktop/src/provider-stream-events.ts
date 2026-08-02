@@ -233,16 +233,77 @@ export function mergePersistedAndOptimisticEvents(
       }
     }
   }
+  const timelineIndex = buildTimelineIndex(optimisticEvents);
   return limitSessionEventsForUi(
     merged.map((event) => {
-      const optimistic = optimisticEvents.find((candidate) =>
-        sameTimelineEvent(candidate, event),
-      );
+      const optimistic = findTimelineMatch(timelineIndex, event);
       return optimistic
         ? preserveFirstSeenTimelineMetadata(optimistic, event)
         : event;
     }),
   );
+}
+
+type TimelineMatch = { event: SessionEvent; index: number };
+
+type TimelineIndex = {
+  byId: Map<string, TimelineMatch>;
+  assistantByTurn: Map<string, TimelineMatch>;
+  activityByKey: Map<string, TimelineMatch>;
+};
+
+/// Index optimistic events by each rule `sameTimelineEvent` matches on.
+///
+/// It replaces a linear scan run once per persisted event, with payload parsing
+/// inside the comparison — quadratic in the render window, on the path every
+/// session open takes. A full window against a full set of optimistic events
+/// was on the order of a hundred thousand comparisons to place a handful of
+/// matches.
+///
+/// Each map keeps the earliest candidate and the lookup takes the earliest
+/// across all three, so the match is still the one `find` would have returned.
+export function buildTimelineIndex(events: SessionEvent[]): TimelineIndex {
+  const byId = new Map<string, TimelineMatch>();
+  const assistantByTurn = new Map<string, TimelineMatch>();
+  const activityByKey = new Map<string, TimelineMatch>();
+  events.forEach((event, index) => {
+    const match = { event, index };
+    if (!byId.has(event.id)) {
+      byId.set(event.id, match);
+    }
+    // `sameTimelineEvent` requires the candidate's own turn id before it will
+    // match on anything but the event id.
+    if (!event.turnId) {
+      return;
+    }
+    if (event.kind === "assistant-message") {
+      if (!assistantByTurn.has(event.turnId)) {
+        assistantByTurn.set(event.turnId, match);
+      }
+    } else if (isProviderActivityEvent(event)) {
+      const key = providerActivityKey(event);
+      if (!activityByKey.has(key)) {
+        activityByKey.set(key, match);
+      }
+    }
+  });
+  return { byId, assistantByTurn, activityByKey };
+}
+
+export function findTimelineMatch(index: TimelineIndex, event: SessionEvent) {
+  let earliest = index.byId.get(event.id);
+  if (event.turnId) {
+    const keyed =
+      event.kind === "assistant-message"
+        ? index.assistantByTurn.get(event.turnId)
+        : isProviderActivityEvent(event)
+          ? index.activityByKey.get(providerActivityKey(event))
+          : undefined;
+    if (keyed && (!earliest || keyed.index < earliest.index)) {
+      earliest = keyed;
+    }
+  }
+  return earliest?.event;
 }
 
 export function resetStreamingAssistantForRetry(
@@ -409,7 +470,11 @@ function providerActivityKey(event: SessionEvent) {
   return `${event.turnId ?? "turn"}:${String(payload?.activityId ?? payload?.label ?? event.id)}`;
 }
 
-function sameTimelineEvent(first: SessionEvent, second: SessionEvent) {
+/// The match rule `buildTimelineIndex` encodes.
+///
+/// Kept as the readable statement of the rule, and exported so the index can be
+/// checked against it directly rather than against a description of it.
+export function sameTimelineEvent(first: SessionEvent, second: SessionEvent) {
   if (first.id === second.id) {
     return true;
   }
@@ -500,36 +565,38 @@ export function applyProviderChatStreamActivity(
       },
     });
     const nextEvent = createEvent(eventId, activityId, label);
-    const existingIndex = items.findIndex((event) => event.id === eventId);
+    // Same reasoning as the assistant upsert: a live activity is at the end of
+    // the timeline, so scanning from the front walks the whole window to reach
+    // it on every frame the provider sends.
+    const existingIndex = items.findLastIndex((event) => event.id === eventId);
     if (existingIndex < 0) {
       return [...items, nextEvent];
     }
     if (streamEvent.activityKind === "commentary") {
       const continuationPrefix = `${eventId}-continuation-`;
-      const segmentIndices = items.reduce<number[]>((indices, event, index) => {
-        if (event.id === eventId || event.id.startsWith(continuationPrefix)) {
-          indices.push(index);
+      let previousText = "";
+      let lastSegmentIndex = existingIndex;
+      for (let index = 0; index < items.length; index += 1) {
+        const event = items[index];
+        if (
+          !event ||
+          (event.id !== eventId && !event.id.startsWith(continuationPrefix))
+        ) {
+          continue;
         }
-        return indices;
-      }, []);
-      const previousText = segmentIndices
-        .map((index) => {
-          const event = items[index];
-          const payload = event ? recordFromUnknown(event.payload) : undefined;
-          return typeof payload?.label === "string"
-            ? payload.label
-            : (event?.message ?? "");
-        })
-        .join("");
+        const payload = recordFromUnknown(event.payload);
+        previousText +=
+          typeof payload?.label === "string" ? payload.label : event.message;
+        lastSegmentIndex = index;
+      }
       const suffix = label.startsWith(previousText)
         ? label.slice(previousText.length)
         : "";
-      const lastSegmentIndex = segmentIndices.at(-1) ?? existingIndex;
-      const hasInterveningActivity = items
-        .slice(lastSegmentIndex + 1)
-        .some(
-          (event) => event.turnId === turnId && isProviderActivityEvent(event),
-        );
+      const hasInterveningActivity = hasActivityAfter(
+        items,
+        lastSegmentIndex,
+        turnId,
+      );
       if (suffix && hasInterveningActivity) {
         const continuationId = `${eventId}-continuation-${streamEvent.sequence}`;
         if (items.some((event) => event.id === continuationId)) {
@@ -648,7 +715,10 @@ export function upsertStreamingAssistantEvent(
   textDelta: string,
 ) {
   const eventId = `${streamEvent.sessionId}-assistant-${turnId}`;
-  const existingIndex = events.findIndex(
+  // Searched from the end: this runs on every flush of a live stream, and the
+  // event being appended to is the turn in progress — the last assistant
+  // message in the timeline, not the first.
+  const existingIndex = events.findLastIndex(
     (event) =>
       event.kind === "assistant-message" &&
       event.turnId === turnId &&
@@ -666,11 +736,7 @@ export function upsertStreamingAssistantEvent(
     // the answer, instead of gluing an entire turn into one bubble.
     const startsBlock =
       existing.message.length > 0 &&
-      events
-        .slice(existingIndex + 1)
-        .some(
-          (event) => event.turnId === turnId && isProviderActivityEvent(event),
-        );
+      hasActivityAfter(events, existingIndex, turnId);
     // Mirror the Rust stream separator: a text block that resumes after tools
     // must not glue onto the previous sentence when the provider omits a
     // leading newline (`edits.` + `Now the…` → `edits.Now the…`).
@@ -737,6 +803,27 @@ export function upsertStreamingAssistantEvent(
       },
     },
   ];
+}
+
+/// Whether the turn ran a tool after the event at `index`.
+///
+/// Written as a loop rather than `slice(index + 1).some(...)` because both this
+/// and its callers sit on the streaming path: the slice copied the tail of the
+/// timeline on every delta of every turn, purely to ask a yes/no question about
+/// it. At a 400-event render window and a flush every 80ms that is a few
+/// thousand discarded array slots per second of streaming.
+function hasActivityAfter(
+  events: SessionEvent[],
+  index: number,
+  turnId: string,
+) {
+  for (let cursor = index + 1; cursor < events.length; cursor += 1) {
+    const event = events[cursor];
+    if (event && event.turnId === turnId && isProviderActivityEvent(event)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function assistantMessageSegments(payload: Record<string, unknown>) {

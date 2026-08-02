@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import {
   applyProviderChatStreamActivity,
   applyProviderChatStreamDeltas,
+  buildTimelineIndex,
+  findTimelineMatch,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
+  sameTimelineEvent,
   separateStreamedTextBlock,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import { structuredCommentaryBlocks } from "../packages/ui/src/chat-commentary.ts";
@@ -33,10 +36,7 @@ assert.deepEqual(
   structuredCommentaryBlocks(
     "matches what Gyro actually is.**Gyro is a local-first workspace.**",
   ),
-  [
-    "matches what Gyro actually is.",
-    "**Gyro is a local-first workspace.**",
-  ],
+  ["matches what Gyro actually is.", "**Gyro is a local-first workspace.**"],
 );
 
 function streamEvent(sequence, phase = "delta", textDelta = `${sequence}`) {
@@ -647,6 +647,92 @@ assert.deepEqual(
   "an unsequenced event should follow the event it arrived behind",
 );
 
+// The timeline index replaced a linear `find(sameTimelineEvent)` per persisted
+// event. It has to answer identically for every event, including the ordering
+// rule that made the original correct: the earliest matching candidate wins,
+// whichever of the three rules it matched on.
+const timelineCandidates = [
+  {
+    id: "optimistic-activity",
+    sessionId: "session-1",
+    turnId: "turn-index",
+    createdAt: "2026-08-02T09:00:00.000Z",
+    kind: "system-event",
+    message: "Read config.toml",
+    payload: { kind: "provider-activity", activityId: "act-1" },
+  },
+  {
+    id: "optimistic-assistant",
+    sessionId: "session-1",
+    turnId: "turn-index",
+    createdAt: "2026-08-02T09:00:01.000Z",
+    kind: "assistant-message",
+    message: "streaming answer",
+    payload: { kind: "provider-stream" },
+  },
+  {
+    id: "shared-id",
+    sessionId: "session-1",
+    turnId: "turn-other",
+    createdAt: "2026-08-02T09:00:02.000Z",
+    kind: "system-event",
+    message: "Approve command",
+    payload: { kind: "provider-approval" },
+  },
+  // Later than the activity above but matching the same key, so it must lose to
+  // it — this is the case a per-rule lookup gets wrong.
+  {
+    id: "optimistic-activity-duplicate",
+    sessionId: "session-1",
+    turnId: "turn-index",
+    createdAt: "2026-08-02T09:00:03.000Z",
+    kind: "system-event",
+    message: "Read config.toml",
+    payload: { kind: "provider-activity", activityId: "act-1" },
+  },
+];
+const timelineProbes = [
+  ...timelineCandidates,
+  // Same turn and kind, different id: matches the assistant rule only.
+  {
+    id: "persisted-assistant",
+    sessionId: "session-1",
+    turnId: "turn-index",
+    createdAt: "2026-08-02T09:01:00.000Z",
+    kind: "assistant-message",
+    message: "durable answer",
+    payload: {},
+  },
+  // Same activity key, different id: matches the activity rule only.
+  {
+    id: "persisted-activity",
+    sessionId: "session-1",
+    turnId: "turn-index",
+    createdAt: "2026-08-02T09:01:01.000Z",
+    kind: "system-event",
+    message: "Read config.toml",
+    payload: { kind: "provider-activity", activityId: "act-1" },
+  },
+  // No turn id at all, and an id nothing carries: matches nothing.
+  {
+    id: "unmatched",
+    sessionId: "session-1",
+    createdAt: "2026-08-02T09:01:02.000Z",
+    kind: "user-message",
+    message: "hello",
+    payload: {},
+  },
+];
+const timelineIndex = buildTimelineIndex(timelineCandidates);
+for (const probe of timelineProbes) {
+  assert.equal(
+    findTimelineMatch(timelineIndex, probe)?.id,
+    timelineCandidates.find((candidate) => sameTimelineEvent(candidate, probe))
+      ?.id,
+    `the timeline index should match ${probe.id} the way a linear scan does`,
+  );
+}
+
 console.log(
-  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits, streamed text blocks).",
+  "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits, streamed text blocks, timeline index equivalence).",
 );

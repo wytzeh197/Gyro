@@ -242,5 +242,4 @@ signoff instead of a CLA.
 - [Security policy](SECURITY.md)
 - [Support](SUPPORT.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Governance](GOVERNANCE.md)
 - [Release process](docs/release.md)

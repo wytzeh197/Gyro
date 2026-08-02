@@ -8,7 +8,6 @@ import {
   Atom,
   Binary,
   Blocks,
-  Bot,
   Braces,
   CalendarClock,
   Camera,
@@ -78,7 +77,6 @@ import {
   UserCircle,
   Users,
   Video,
-  Wrench,
   X,
   XCircle,
 } from "lucide-react";
@@ -104,16 +102,14 @@ import { createPortal } from "react-dom";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import { structuredCommentaryBlocks } from "./chat-commentary";
+import { buildRunModel, elapsedMsBetween } from "./chat-run";
+import { ChatRun } from "./chat-run-view";
 import {
   ChatArtifacts,
   chatArtifactsFromEvent,
   type ChatArtifactActions,
 } from "./chat-artifacts";
-import {
-  chatTurnTimelineSections,
-  orderedChatTimelineEvents,
-  type ChatTurnTimelineSections,
-} from "./chat-timeline";
+import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
@@ -232,7 +228,6 @@ import type {
   WorkbenchTurn,
   WorkspaceFile,
   WorkspaceFileContent,
-  WorkspaceContextSnapshot,
   WorkspaceLayoutId,
   WorkspacePreparationProgress,
   WorkspaceSearchQuery,
@@ -278,7 +273,7 @@ import { shouldShowSidebarUpdate, updateSidebarLabel } from "./update-state";
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
 const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
-  ai: Bot,
+  ai: Sparkles,
   browser: Globe2,
   diff: GitPullRequest,
   explorer: FileText,
@@ -3892,7 +3887,7 @@ function WorkspaceSidebarContent({
                 </div>
                 {ide?.lastAssistantRequest ? (
                   <SidebarDestinationRow
-                    icon={Bot}
+                    icon={Sparkles}
                     isActive
                     label={ide.lastAssistantRequest.action.replaceAll("-", " ")}
                     meta={ide.lastAssistantRequest.path ?? "workspace"}
@@ -5562,7 +5557,6 @@ type ChatSurfaceProps = {
     reasoningEffort?: ReasoningEffort;
   };
   workspacePath?: string;
-  workspaceContext?: WorkspaceContextSnapshot;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
   providerStatuses?: ProviderStatus[];
@@ -5580,6 +5574,20 @@ type ChatSurfaceProps = {
     Record<string, { additions: number; deletions: number }>
   >;
   browserPreview?: BrowserPreview;
+  browserNativeHost?: boolean;
+  browserOverlayOccluded?: boolean;
+  onBrowserBack?: () => void;
+  onBrowserForward?: () => void;
+  onBrowserReload?: () => void;
+  onBrowserUrlChange?: (url: string) => void;
+  onBrowserNavigate?: (url: string) => void;
+  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserOpenExternal?: () => void;
+  onBrowserHostBoundsChange?: (
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ) => void;
+  onToggleBrowserPanel?: () => void;
   capabilityActivities?: CapabilityActivity[];
   capabilityPolicy?: ProjectCapabilityPolicy;
   modelFocus?: ModelFocus;
@@ -5695,7 +5703,6 @@ export function ChatSurface({
   sessionSummary,
   sessionModel,
   workspacePath,
-  workspaceContext,
   config,
   providerReadiness,
   providerUsageByProvider,
@@ -5707,6 +5714,18 @@ export function ChatSurface({
   sourceControl,
   turnSourceControlBaselines,
   browserPreview,
+  browserNativeHost = false,
+  browserOverlayOccluded = false,
+  onBrowserBack,
+  onBrowserForward,
+  onBrowserReload,
+  onBrowserUrlChange,
+  onBrowserNavigate,
+  onBrowserDeviceChange,
+  onBrowserScreenshot,
+  onBrowserOpenExternal,
+  onBrowserHostBoundsChange,
+  onToggleBrowserPanel,
   capabilityActivities = [],
   capabilityPolicy,
   modelFocus,
@@ -6138,6 +6157,8 @@ export function ChatSurface({
       activePanel={activeRailPanel}
       branchName={branchName}
       browserPreview={browserPreview}
+      browserNativeHost={browserNativeHost}
+      browserOverlayOccluded={browserOverlayOccluded}
       capabilityActivities={capabilityActivities}
       capabilityPolicy={capabilityPolicy}
       diffReview={diffReview}
@@ -6147,10 +6168,23 @@ export function ChatSurface({
       onGoalAction={onGoalAction}
       editorRequest={planEditorRequest}
       onEditorRequestHandled={onPlanEditorRequestHandled}
-      onClose={onToggleEnvironmentRail}
+      onClose={
+        activeRailPanel === "browser"
+          ? onToggleBrowserPanel
+          : onToggleEnvironmentRail
+      }
       onComposerAction={onComposerAction}
       onOpenToolPanel={onOpenToolPanel}
       onTogglePlanPanel={onTogglePlanPanel}
+      onBrowserBack={onBrowserBack}
+      onBrowserForward={onBrowserForward}
+      onBrowserReload={onBrowserReload}
+      onBrowserUrlChange={onBrowserUrlChange}
+      onBrowserNavigate={onBrowserNavigate}
+      onBrowserDeviceChange={onBrowserDeviceChange}
+      onBrowserScreenshot={onBrowserScreenshot}
+      onBrowserOpenExternal={onBrowserOpenExternal}
+      onBrowserHostBoundsChange={onBrowserHostBoundsChange}
       sessionPlan={sessionPlan}
       sessionGoal={sessionGoal}
       terminalPanes={terminalPanes}
@@ -6233,7 +6267,6 @@ export function ChatSurface({
             variant="hero"
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
-            workspaceContext={workspaceContext}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
@@ -6481,6 +6514,7 @@ export function ChatSurface({
             onToggleToolPanel={onToggleToolPanel}
             onToggleEnvironmentRail={onToggleEnvironmentRail}
             onTogglePlanPanel={onTogglePlanPanel}
+            onToggleBrowserPanel={onToggleBrowserPanel}
             planItemCount={sessionPlan?.items.length ?? 0}
           />
         </div>
@@ -6570,7 +6604,6 @@ export function ChatSurface({
             shellReady={shellReady}
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
-            workspaceContext={workspaceContext}
             worktreeName={worktreeName}
             onComposerAction={onComposerAction}
             sessionModel={sessionModel}
@@ -7072,6 +7105,7 @@ function ChatSurfaceControls({
   onToggleToolPanel,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
+  onToggleBrowserPanel,
   planItemCount,
 }: {
   activePanel?: ChatSidePanelId;
@@ -7081,6 +7115,7 @@ function ChatSurfaceControls({
   onToggleToolPanel?: () => void;
   onToggleEnvironmentRail?: () => void;
   onTogglePlanPanel?: () => void;
+  onToggleBrowserPanel?: () => void;
   planItemCount: number;
 }) {
   // Peripheral awareness: the surface holding the model's latest work gets a
@@ -7131,6 +7166,23 @@ function ChatSurfaceControls({
       </button>
       <button
         aria-label={
+          activePanel === "browser" ? "Close browser rail" : "Open browser rail"
+        }
+        aria-pressed={activePanel === "browser"}
+        className={[
+          "gyro-chat-surface-button",
+          activePanel === "browser" ? "is-active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onClick={onToggleBrowserPanel}
+        title="Browser"
+        type="button"
+      >
+        <Globe2 size={15} />
+      </button>
+      <button
+        aria-label={
           activePanel === "plan"
             ? "Close plan checklist"
             : "Open plan checklist"
@@ -7156,6 +7208,11 @@ function ChatSurfaceControls({
           aria-label="Close chat"
           className="gyro-chat-surface-button"
           onClick={onCloseChat}
+          // The grid slot focuses its pane on pointerdown, which for this button
+          // means focusing the pane on the way to closing it — making the chat
+          // being closed the active session, and costing the previously focused
+          // pane its focus once the close goes through.
+          onPointerDown={(event) => event.stopPropagation()}
           title="Close chat"
           type="button"
         >
@@ -7169,6 +7226,8 @@ function ChatSurfaceControls({
 function ChatSidePanel({
   activePanel,
   browserPreview,
+  browserNativeHost = false,
+  browserOverlayOccluded = false,
   capabilityActivities = [],
   capabilityPolicy,
   diffReview,
@@ -7182,6 +7241,15 @@ function ChatSidePanel({
   onComposerAction,
   onOpenToolPanel,
   onTogglePlanPanel,
+  onBrowserBack,
+  onBrowserForward,
+  onBrowserReload,
+  onBrowserUrlChange,
+  onBrowserNavigate,
+  onBrowserDeviceChange,
+  onBrowserScreenshot,
+  onBrowserOpenExternal,
+  onBrowserHostBoundsChange,
   sessionPlan,
   sessionGoal,
   terminalPanes = [],
@@ -7190,6 +7258,8 @@ function ChatSidePanel({
   activePanel: ChatSidePanelId;
   branchName?: string;
   browserPreview?: BrowserPreview;
+  browserNativeHost?: boolean;
+  browserOverlayOccluded?: boolean;
   capabilityActivities?: CapabilityActivity[];
   capabilityPolicy?: ProjectCapabilityPolicy;
   diffReview?: DiffReview;
@@ -7216,6 +7286,17 @@ function ChatSidePanel({
   onComposerAction?: (action: string) => void;
   onOpenToolPanel?: (tab: WorkbenchPaneTab) => void;
   onTogglePlanPanel?: () => void;
+  onBrowserBack?: () => void;
+  onBrowserForward?: () => void;
+  onBrowserReload?: () => void;
+  onBrowserUrlChange?: (url: string) => void;
+  onBrowserNavigate?: (url: string) => void;
+  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserOpenExternal?: () => void;
+  onBrowserHostBoundsChange?: (
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ) => void;
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
   promptHistory?: string[];
@@ -7299,6 +7380,48 @@ function ChatSidePanel({
     onClose?.();
     onOpenToolPanel?.(tab);
   };
+
+  if (activePanel === "browser") {
+    return (
+      <aside className="gyro-browser-rail" aria-label="Browser">
+        <header>
+          <div className="gyro-chat-tool-title">
+            <Globe2 aria-hidden="true" size={15} />
+            <div>
+              <strong>Browser</strong>
+              <span>
+                {browserPreview?.title?.trim() ||
+                  browserPreview?.url ||
+                  "Session browser"}
+              </span>
+            </div>
+          </div>
+          <button
+            aria-label="Close browser"
+            className="gyro-chat-tool-close"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={14} />
+          </button>
+        </header>
+        <BrowserPreviewSurface
+          browserPreview={browserPreview}
+          nativeHost={browserNativeHost}
+          overlayOccluded={browserOverlayOccluded}
+          onBack={onBrowserBack}
+          onDeviceChange={onBrowserDeviceChange}
+          onForward={onBrowserForward}
+          onHostBoundsChange={onBrowserHostBoundsChange}
+          onNavigate={onBrowserNavigate}
+          onOpenExternal={onBrowserOpenExternal}
+          onReload={onBrowserReload}
+          onScreenshot={onBrowserScreenshot}
+          onUrlChange={onBrowserUrlChange}
+        />
+      </aside>
+    );
+  }
 
   if (activePanel === "plan" && sessionPlan?.content) {
     return (
@@ -8896,6 +9019,7 @@ type IdeSurfaceProps = {
   }) => ReactNode;
   terminalOutput: string;
   activePaneTab: WorkbenchPaneTab;
+  isToolPanelOpen?: boolean;
   terminalPanes?: TerminalPane[];
   selectedTerminalPaneId?: string;
   terminalTemplate?: TerminalTemplate;
@@ -8968,6 +9092,7 @@ export function IdeSurface({
   renderEditor,
   terminalOutput,
   activePaneTab,
+  isToolPanelOpen = false,
   terminalPanes,
   selectedTerminalPaneId,
   terminalTemplate,
@@ -9151,7 +9276,9 @@ export function IdeSurface({
                       ?.relativePath ?? groupPath
                   }
                   browserFocusEmpty={
-                    activePaneTab === "browser" && !selectedPath
+                    activePaneTab === "browser" &&
+                    isToolPanelOpen &&
+                    !selectedPath
                   }
                   fileContent={
                     fileContent?.path === groupPath ? fileContent : undefined
@@ -9372,7 +9499,7 @@ type EditorGroupPaneProps = {
   fileLoadState: "idle" | "loading" | "ready" | "error";
   filesAvailable: boolean;
   minimapEnabled: boolean;
-  assistantOpen: boolean;
+  assistantOpen?: boolean;
   /** When Browser is focused and no file is open, de-emphasize editor chrome. */
   browserFocusEmpty?: boolean;
   onActivate: () => void;
@@ -9623,7 +9750,7 @@ function EditorGroupPane({
             title="Ask about file"
             type="button"
           >
-            <Bot size={13} />
+            <Sparkles size={13} />
             <span>Ask</span>
           </button>
           <button
@@ -10596,6 +10723,9 @@ function WorkbenchPaneContent({
   onBrowserDeviceChange,
   onBrowserScreenshot,
   onBrowserOpenExternal,
+  onBrowserHostBoundsChange,
+  browserNativeHost = false,
+  browserOverlayOccluded = false,
 }: {
   activePaneTab: WorkbenchPaneTab;
   profiles: CommandProfile[];
@@ -10607,6 +10737,8 @@ function WorkbenchPaneContent({
   terminalTemplate?: TerminalTemplate;
   diffReview?: DiffReview;
   browserPreview?: BrowserPreview;
+  browserNativeHost?: boolean;
+  browserOverlayOccluded?: boolean;
   ide?: IdeState;
   terminalOutput: string;
   terminalSourceControl?: SourceControlState;
@@ -10655,6 +10787,9 @@ function WorkbenchPaneContent({
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
   onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
   onBrowserOpenExternal?: () => void;
+  onBrowserHostBoundsChange?: (
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ) => void;
 }) {
   if (activePaneTab === "diff") {
     return (
@@ -10680,9 +10815,12 @@ function WorkbenchPaneContent({
       <BrowserPreviewSurface
         browserPreview={browserPreview}
         compact
+        nativeHost={browserNativeHost}
+        overlayOccluded={browserOverlayOccluded}
         onBack={onBrowserBack}
         onDeviceChange={onBrowserDeviceChange}
         onForward={onBrowserForward}
+        onHostBoundsChange={onBrowserHostBoundsChange}
         onNavigate={onBrowserNavigate}
         onOpenExternal={onBrowserOpenExternal}
         onReload={onBrowserReload}
@@ -10901,6 +11039,11 @@ type WorkspaceToolPanelProps = {
   onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
   onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
   onBrowserOpenExternal?: () => void;
+  onBrowserHostBoundsChange?: (
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ) => void;
+  browserNativeHost?: boolean;
+  browserOverlayOccluded?: boolean;
 };
 
 export function WorkspaceToolPanel({
@@ -10914,6 +11057,8 @@ export function WorkspaceToolPanel({
   terminalTemplate,
   diffReview,
   browserPreview,
+  browserNativeHost = false,
+  browserOverlayOccluded = false,
   ide,
   terminalOutput,
   terminalSourceControl,
@@ -10963,6 +11108,7 @@ export function WorkspaceToolPanel({
   onBrowserDeviceChange,
   onBrowserScreenshot,
   onBrowserOpenExternal,
+  onBrowserHostBoundsChange,
 }: WorkspaceToolPanelProps) {
   const [isResizing, setIsResizing] = useState(false);
   const dragMovedRef = useRef(false);
@@ -11173,11 +11319,14 @@ export function WorkspaceToolPanel({
         onBrowserBack={onBrowserBack}
         onBrowserDeviceChange={onBrowserDeviceChange}
         onBrowserForward={onBrowserForward}
+        onBrowserHostBoundsChange={onBrowserHostBoundsChange}
         onBrowserNavigate={onBrowserNavigate}
         onBrowserOpenExternal={onBrowserOpenExternal}
         onBrowserReload={onBrowserReload}
         onBrowserScreenshot={onBrowserScreenshot}
         onBrowserUrlChange={onBrowserUrlChange}
+        browserNativeHost={browserNativeHost}
+        browserOverlayOccluded={browserOverlayOccluded}
         onCommentDiff={onCommentDiff}
         onCloseTerminalPane={onCloseTerminalPane}
         onKillTerminalPane={onKillTerminalPane}
@@ -12923,6 +13072,8 @@ function renderDiffTreeNode({
 export function BrowserPreviewSurface({
   compact = false,
   browserPreview,
+  nativeHost = false,
+  overlayOccluded = false,
   onBack,
   onForward,
   onReload,
@@ -12931,9 +13082,14 @@ export function BrowserPreviewSurface({
   onDeviceChange,
   onScreenshot,
   onOpenExternal,
+  onHostBoundsChange,
 }: {
   compact?: boolean;
   browserPreview?: BrowserPreview;
+  /** When true, render a spacer host for a native child webview instead of an iframe. */
+  nativeHost?: boolean;
+  /** True when any app overlay is open — native webview should hide. */
+  overlayOccluded?: boolean;
   onBack?: () => void;
   onForward?: () => void;
   onReload?: () => void;
@@ -12942,6 +13098,9 @@ export function BrowserPreviewSurface({
   onDeviceChange?: (device: BrowserPreviewDevice) => void;
   onScreenshot?: (action?: BrowserScreenshotAction) => void;
   onOpenExternal?: () => void;
+  onHostBoundsChange?: (
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ) => void;
 }) {
   const preview =
     browserPreview ??
@@ -12962,16 +13121,66 @@ export function BrowserPreviewSurface({
   const canGoForward = preview.historyIndex < preview.history.length - 1;
   const [frameRevision, setFrameRevision] = useState(0);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const frameUrl = normalizedBrowserPreviewUrl(preview.url);
   const hasDiagnostics = preview.consoleErrors !== 0;
-  const canCapturePreview = isLoopbackBrowserPreviewUrl(frameUrl);
+  const useNativeHost = nativeHost || preview.nativeHost === true;
+  const canCapturePreview =
+    useNativeHost || isLoopbackBrowserPreviewUrl(frameUrl);
   const isLocalPreview = isLoopbackBrowserPreviewUrl(frameUrl);
+
+  useEffect(() => {
+    if (!useNativeHost || !onHostBoundsChange) {
+      return;
+    }
+    const element = hostRef.current;
+    if (!element) {
+      return;
+    }
+    const report = () => {
+      if (overlayOccluded) {
+        onHostBoundsChange(null);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) {
+        onHostBoundsChange(null);
+        return;
+      }
+      onHostBoundsChange({
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+    report();
+    const observer = new ResizeObserver(() => report());
+    observer.observe(element);
+    window.addEventListener("resize", report);
+    // Capture scroll on ancestors so rail scrolling repositions the webview.
+    window.addEventListener("scroll", report, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", report);
+      window.removeEventListener("scroll", report, true);
+      onHostBoundsChange(null);
+    };
+  }, [
+    useNativeHost,
+    onHostBoundsChange,
+    overlayOccluded,
+    compact,
+    preview.device,
+  ]);
 
   return (
     <div
       className={[
         "gyro-browser-preview",
         compact ? "is-compact" : "",
+        useNativeHost ? "is-native-host" : "",
+        overlayOccluded ? "is-occluded" : "",
         `is-device-${preview.device}`,
       ]
         .filter(Boolean)
@@ -13019,19 +13228,19 @@ export function BrowserPreviewSurface({
         >
           <Globe2 size={14} />
           <input
-            aria-label="Preview URL"
+            aria-label="Browser URL"
             onChange={(event) => onUrlChange?.(event.target.value)}
-            placeholder="http://localhost:3000"
+            placeholder="https://example.com"
             value={preview.url}
           />
           <small className={isLocalPreview ? "is-local" : "is-web"}>
-            {isLocalPreview ? "local" : "web"}
+            {useNativeHost ? "native" : isLocalPreview ? "local" : "web"}
           </small>
         </form>
         <div
           className="gyro-browser-actions"
           role="group"
-          aria-label="Preview actions"
+          aria-label="Browser actions"
         >
           <select
             aria-label="Device size"
@@ -13045,7 +13254,7 @@ export function BrowserPreviewSurface({
             <option value="mobile">Mobile</option>
           </select>
           <button
-            aria-label="Capture preview screenshot"
+            aria-label="Capture browser screenshot"
             className={`gyro-browser-capture-button${
               preview.captureStatus === "capturing" ? " is-capturing" : ""
             }`}
@@ -13058,14 +13267,14 @@ export function BrowserPreviewSurface({
                 ? "Capturing preview"
                 : canCapturePreview
                   ? "Capture screenshot"
-                  : "Screenshots are available for local previews"
+                  : "Screenshots require the native browser host"
             }
             type="button"
           >
             <Camera size={14} />
           </button>
           <button
-            aria-label="Open preview in browser"
+            aria-label="Open in system browser"
             className="gyro-browser-external-button"
             onClick={onOpenExternal}
             title="Open in system browser"
@@ -13080,12 +13289,21 @@ export function BrowserPreviewSurface({
           className={`gyro-browser-page is-${preview.device}`}
           data-device-label={deviceLabel(preview.device)}
         >
-          <iframe
-            key={`${frameUrl}:${frameRevision}`}
-            referrerPolicy="no-referrer"
-            src={frameUrl}
-            title="Local browser preview"
-          />
+          {useNativeHost ? (
+            <div
+              ref={hostRef}
+              aria-label="Native browser surface"
+              className="gyro-browser-native-host"
+              data-browser-host="true"
+            />
+          ) : (
+            <iframe
+              key={`${frameUrl}:${frameRevision}`}
+              referrerPolicy="no-referrer"
+              src={frameUrl}
+              title="Browser preview"
+            />
+          )}
         </div>
       </div>
       <div className="gyro-browser-statusbar">
@@ -13311,7 +13529,7 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
     destination: "workspace",
     layout: "terminal-grid",
     toolTab: "terminal",
-    icon: Bot,
+    icon: Sparkles,
   },
   {
     id: "run-claude",
@@ -13320,7 +13538,7 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
     destination: "workspace",
     layout: "terminal-grid",
     toolTab: "terminal",
-    icon: Bot,
+    icon: Sparkles,
   },
   {
     id: "split-terminal",
@@ -16448,7 +16666,36 @@ function ProviderLogo({ providerId }: { providerId: ProviderId }) {
     );
   }
 
-  const initials = providerId === "cursor" ? "Cu" : "Oc";
+  // Cursor and OpenCode marks from Simple Icons 16.27.1 (CC0-1.0), the same
+  // source the download site inlines. Both are monochrome, so currentColor
+  // carries them across themes.
+  if (providerId === "cursor") {
+    return (
+      <span
+        aria-hidden="true"
+        className="gyro-provider-logo is-cursor"
+        title="Cursor"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (providerId === "opencode") {
+    return (
+      <span
+        aria-hidden="true"
+        className="gyro-provider-logo is-opencode"
+        title="OpenCode"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M22 24H2V0h20zM17 4.8H7v14.4h10z" />
+        </svg>
+      </span>
+    );
+  }
 
   return (
     <span
@@ -16456,7 +16703,7 @@ function ProviderLogo({ providerId }: { providerId: ProviderId }) {
       className={`gyro-provider-logo is-${providerId}`}
       title={providerId}
     >
-      <span>{initials}</span>
+      <span>{String(providerId).slice(0, 2)}</span>
     </span>
   );
 }
@@ -16585,7 +16832,6 @@ function Composer({
   onStop,
   worktreeName,
   workspacePath,
-  workspaceContext,
   workspaceMode = "local",
   config,
   providerReadiness,
@@ -16626,7 +16872,6 @@ function Composer({
   onStop?: () => void;
   worktreeName?: string;
   workspacePath?: string;
-  workspaceContext?: WorkspaceContextSnapshot;
   workspaceMode?: WorkbenchMode;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
@@ -16672,12 +16917,18 @@ function Composer({
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
-  const [modelFlyoutSide, setModelFlyoutSide] = useState<"left" | "right">(
-    "right",
-  );
   const [modelFlyoutVertical, setModelFlyoutVertical] = useState<"down" | "up">(
     "down",
   );
+  // Pixels to shift the whole picker left so models stay on-screen (right of
+  // providers) without clipping the viewport edge.
+  const [modelFlyoutShiftX, setModelFlyoutShiftX] = useState(0);
+  // Where the models open relative to the provider list. The Workspace AI
+  // sidebar is narrower than the two lists side by side, so the flyout flips
+  // to the left, and stacks above the list when neither side fits.
+  const [modelFlyoutSide, setModelFlyoutSide] = useState<
+    "right" | "left" | "stacked"
+  >("right");
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
@@ -16911,7 +17162,7 @@ function Composer({
           active: isConnected && provider.id === config.selectedProviderId,
           disabled: false,
           disconnected: !isConnected,
-          icon: Bot,
+          icon: Sparkles,
           kind: "provider" as const,
           label: provider.displayName,
           providerId: provider.id,
@@ -17073,7 +17324,7 @@ function Composer({
     },
     {
       command: "/model",
-      icon: Bot,
+      icon: Sparkles,
       label: "Choose model",
       popover: "provider",
     },
@@ -17236,28 +17487,72 @@ function Composer({
   });
   const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up");
 
+  // Models open to the right of the provider list. If that would clip, nudge
+  // the whole picker left just enough to fit, and flip the flyout to the left
+  // of the list when even that is not enough. Flip up only when the panel
+  // would run off the bottom.
   useEffect(() => {
     if (!modelPickerProvider || !providerPickerRef.current) {
-      setModelFlyoutSide("right");
       setModelFlyoutVertical("down");
+      setModelFlyoutShiftX(0);
+      setModelFlyoutSide("right");
       return;
     }
-    const rect = providerPickerRef.current.getBoundingClientRect();
-    const modelFlyoutWidth = 208;
-    const modelFlyoutHeight =
-      providerPickerRef.current.querySelector<HTMLElement>(
-        ".gyro-provider-model-flyout",
-      )?.scrollHeight ?? 420;
-    const availableRight = window.innerWidth - rect.right;
-    const availableLeft = rect.left;
-    setModelFlyoutSide(
-      availableRight < modelFlyoutWidth + 8 && availableLeft > availableRight
-        ? "left"
-        : "right",
+    const picker = providerPickerRef.current;
+    const control =
+      picker.offsetParent instanceof HTMLElement
+        ? picker.offsetParent
+        : picker.parentElement;
+    const flyout = picker.querySelector<HTMLElement>(
+      ".gyro-provider-model-flyout",
     );
-    setModelFlyoutVertical(
-      rect.top + modelFlyoutHeight > window.innerHeight - 16 ? "up" : "down",
-    );
+    const modelFlyoutWidth =
+      flyout?.offsetWidth ?? Math.min(176, window.innerWidth * 0.42);
+    const modelFlyoutHeight = flyout?.scrollHeight ?? 420;
+    const edgePad = 8;
+    const gap = 2;
+    // The composer is not always the window's full width. In the Workspace AI
+    // sidebar it sits inside a panel that clips its overflow, so the viewport
+    // is the wrong bound — measuring against it let the flyout render past the
+    // sidebar and get cut in half by the editor next to it.
+    const bounds = clippingBounds(picker);
+    let side: "right" | "left" | "stacked" = "right";
+
+    if (control) {
+      // data-align="end" with right:0 pins the picker to the control's right.
+      // Measure from that natural position so shift is stable across renders.
+      const controlRect = control.getBoundingClientRect();
+      const unshiftedRight = controlRect.right;
+      const unshiftedFlyoutRight = unshiftedRight + gap + modelFlyoutWidth;
+      const overflowRight = unshiftedFlyoutRight - (bounds.right - edgePad);
+      const unshiftedLeft = unshiftedRight - picker.offsetWidth;
+      const maxShift = Math.max(0, unshiftedLeft - (bounds.left + edgePad));
+      const shift =
+        overflowRight > 0 ? Math.min(Math.ceil(overflowRight), maxShift) : 0;
+      setModelFlyoutShiftX(shift);
+      // Shifting only helps while the picker still has room to travel. Once it
+      // is against the left edge and models would still overhang, open them on
+      // the other side of the list instead of letting them clip.
+      const fitsRight = overflowRight - shift <= 0;
+      const fitsLeft =
+        unshiftedLeft - shift - gap - modelFlyoutWidth >= bounds.left + edgePad;
+      // The Workspace AI sidebar is narrower than list plus flyout together,
+      // so neither side can hold them. Stack the models over the list there
+      // rather than docking a panel that has nowhere to go.
+      side = fitsRight ? "right" : fitsLeft ? "left" : "stacked";
+      setModelFlyoutSide(side);
+    }
+
+    const rect = picker.getBoundingClientRect();
+    // Docked beside the list the flyout shares its top edge, so it runs out of
+    // room below that. Stacked it starts past the list instead, and only the
+    // room left over decides which way it goes.
+    const flyoutTop = side === "stacked" ? rect.bottom + gap : rect.top;
+    const fitsBelow = flyoutTop + modelFlyoutHeight <= bounds.bottom - 16;
+    const fitsAbove =
+      (side === "stacked" ? rect.top - gap : rect.bottom) - modelFlyoutHeight >=
+      bounds.top + 16;
+    setModelFlyoutVertical(!fitsBelow && fitsAbove ? "up" : "down");
   }, [modelPickerProvider]);
 
   useEffect(() => {
@@ -17607,26 +17902,6 @@ function Composer({
         value={draft}
       />
       <div className="gyro-composer-bar">
-        {workspaceContext?.activePath ? (
-          <span
-            className="gyro-composer-chip"
-            title={`Live Workspace context · ${workspaceContext.activePath}`}
-          >
-            <FileCode2 size={14} />
-            <span className="gyro-composer-label">
-              {workspaceName(workspaceContext.activePath)}
-              {workspaceContext.selection?.text
-                ? ` · ${workspaceContext.selection.text.length} selected`
-                : workspaceContext.buffers.some(
-                      (buffer) =>
-                        buffer.path === workspaceContext.activePath &&
-                        buffer.dirty,
-                    )
-                  ? " · unsaved"
-                  : ""}
-            </span>
-          </span>
-        ) : null}
         {hasSelectedProvider || isHero ? (
           <>
             <div
@@ -17868,6 +18143,9 @@ function Composer({
               id={`${popoverBaseId}-provider`}
               onPointerEnter={clearModelFlyoutPreviewTimer}
               ref={providerPickerRef}
+              style={
+                modelFlyoutShiftX > 0 ? { right: modelFlyoutShiftX } : undefined
+              }
             >
               <ComposerPopover
                 className="gyro-provider-picker-menu"
@@ -18338,7 +18616,7 @@ const ChatEvent = memo(function ChatEvent({
       ].join(" ")}
     >
       <div className="gyro-message-avatar">
-        {isUser ? <UserCircle size={17} /> : <Bot size={17} />}
+        {isUser ? <UserCircle size={17} /> : <Sparkles size={17} />}
       </div>
       <div
         className={isUser ? "gyro-user-message-content" : undefined}
@@ -19083,16 +19361,8 @@ function ChatTurn({
   const providerStatus = turn.statusEvent
     ? providerStatusFromEvent(turn.statusEvent)
     : undefined;
-  const wasInterrupted = Boolean(
-    !isActive &&
-    providerStatus &&
-    ["queued", "running", "waiting"].includes(providerStatus.status),
-  );
   const isRunning = isActive;
-  const [isThoughtCollapsed, setIsThoughtCollapsed] = useState(!isRunning);
-  useEffect(() => {
-    setIsThoughtCollapsed(!isRunning);
-  }, [isRunning]);
+  const startedAt = turn.runStartedAt ?? turn.startedAt;
   const completedAt = !isRunning
     ? (turn.completedAt ?? turn.statusEvent?.createdAt)
     : undefined;
@@ -19103,18 +19373,42 @@ function ChatTurn({
   const isPlanResponseTurn = Boolean(
     plan?.content && plan.sourceTurnId === turn.id,
   );
-  const {
-    files: changeSummaryItems,
-    response: responseEvent,
-    work: workTimelineItems,
-  } = chatTurnTimelineSections(turn.timelineEvents, { isRunning });
-  const canCollapseThought = !isRunning && workTimelineItems.length > 0;
-  const visibleWorkTimelineItems =
-    isRunning || !isThoughtCollapsed ? workTimelineItems : [];
-  const runStart = Date.parse(turn.runStartedAt ?? turn.startedAt);
-  const runOffsetLabels = runStepOffsetLabels(
-    runStart,
-    visibleWorkTimelineItems,
+  const runModel = buildRunModel(turn.timelineEvents, {
+    isRunning,
+    startedAt,
+    durationMs: turn.durationMs ?? elapsedMsBetween(startedAt, completedAt),
+    fileStats: (path) => {
+      const file = sourceControlFileForActivityPath(path, sourceControl);
+      return file
+        ? sourceControlFileDelta(
+            file,
+            sourceControlStatsForActivityPath(path, sourceControlBaseline),
+          )
+        : undefined;
+    },
+    status: providerStatus
+      ? {
+          status: providerStatus.status,
+          message: turn.statusEvent?.message,
+          error: providerStatus.error,
+          recoveryKind: providerStatus.recoveryKind,
+          recoveryMessage: providerStatus.recoveryMessage,
+        }
+      : undefined,
+  });
+  const responseEvent = runModel.response;
+  // A turn the provider never closed out can be resent; a cancelled one cannot
+  // be reconnected. Both decisions stay here because they need the status event
+  // the run model deliberately does not carry.
+  const canRetry =
+    runModel.phase.name === "interrupted" ||
+    providerStatus?.status === "failed" ||
+    providerStatus?.status === "cancelled";
+  const canReconnect = Boolean(
+    providerStatus &&
+    providerStatus.status !== "cancelled" &&
+    (providerStatus.status === "blocked" ||
+      providerNeedsSignIn(providerStatus.recoveryKind)),
   );
   return (
     <section className="gyro-chat-turn" data-turn-id={turn.id}>
@@ -19126,79 +19420,48 @@ function ChatTurn({
         />
       ) : null}
       <div className="gyro-chat-run">
-        <div className="gyro-chat-run-work">
-          <ChatRunHeader
-            completedAt={completedAt}
-            durationMs={turn.durationMs}
-            isCollapsed={isThoughtCollapsed}
-            isCollapsible={canCollapseThought}
-            isRunning={isRunning}
-            onToggle={() => setIsThoughtCollapsed((current) => !current)}
-            startedAt={turn.runStartedAt ?? turn.startedAt}
-          >
-            {!isRunning && hasResponse && onContinueChat ? (
+        <ChatRun
+          headerActions={
+            !isRunning && hasResponse && onContinueChat ? (
               <button onClick={onContinueChat} type="button">
                 Continue
               </button>
-            ) : null}
-          </ChatRunHeader>
-          {isRunning && turn.timelineEvents.length === 0 ? (
-            <div className="gyro-chat-run-thinking" role="status">
-              Thinking
-            </div>
-          ) : null}
-          {visibleWorkTimelineItems.length > 0 ? (
-            <div
-              className="gyro-chat-run-sequence is-work"
-              aria-label="Work timeline"
-            >
-              {visibleWorkTimelineItems.map((item, index) => {
-                return (
-                  <ChatRunStep
-                    key={
-                      item.kind === "activity-group" ? item.id : item.event.id
-                    }
-                    offsetLabel={runOffsetLabels[index]}
-                  >
-                    {item.kind === "activity-group" ? (
-                      <ProviderActivityGroup events={item.events} />
-                    ) : item.event.kind === "assistant-message" ? (
-                      <div className="gyro-chat-run-timeline is-narration">
-                        <article className="gyro-message is-assistant is-run-narration">
-                          <div>
-                            <RunNarration message={item.event.message} />
-                          </div>
-                        </article>
-                      </div>
-                    ) : mutationApprovalFromEvent(item.event) ||
-                      providerApprovalFromEvent(item.event) ||
-                      capabilityCallFromEvent(item.event) ? (
-                      <ChatEvent
-                        event={item.event}
-                        onMutationApprovalAction={onMutationApprovalAction}
-                        onProviderApprovalAction={onProviderApprovalAction}
-                      />
-                    ) : (
-                      <ProviderActivityRow
-                        event={item.event}
-                        onOpenChanges={onOpenChanges}
-                        sourceControl={sourceControl}
-                        sourceControlBaseline={sourceControlBaseline}
-                      />
-                    )}
-                  </ChatRunStep>
-                );
-              })}
-              {isRunning && responseEvent ? (
-                <ChatRunStep>
-                  <div className="gyro-chat-run-thinking" role="status">
-                    Finalizing
-                  </div>
-                </ChatRunStep>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+            ) : null
+          }
+          model={runModel}
+          onOpenChanges={onOpenChanges}
+          onReconnect={
+            canReconnect && turn.statusEvent
+              ? () =>
+                  onProviderStatusAction?.(
+                    "reconnect-provider",
+                    turn.statusEvent as SessionEvent,
+                  )
+              : undefined
+          }
+          onRetry={
+            canRetry && turn.statusEvent
+              ? () =>
+                  onProviderStatusAction?.(
+                    "retry-send",
+                    turn.statusEvent as SessionEvent,
+                  )
+              : undefined
+          }
+          reconnectLabel={
+            providerStatus?.status === "blocked"
+              ? "Reconnect"
+              : providerSignInLabel(providerStatus?.recoveryKind)
+          }
+          renderAsk={(event) => (
+            <ChatEvent
+              event={event}
+              onMutationApprovalAction={onMutationApprovalAction}
+              onProviderApprovalAction={onProviderApprovalAction}
+            />
+          )}
+          renderSay={(text) => renderAssistantInlineContent(text)}
+        />
         {responseEvent ? (
           <div
             className="gyro-chat-run-sequence is-response"
@@ -19233,263 +19496,9 @@ function ChatTurn({
             </div>
           </div>
         ) : null}
-        {providerStatus &&
-        (["failed", "blocked", "cancelled"].includes(providerStatus.status) ||
-          wasInterrupted) &&
-        turn.statusEvent ? (
-          <div className="gyro-chat-run-error">
-            <div>
-              <strong>
-                {wasInterrupted
-                  ? "Previous send was interrupted"
-                  : turn.statusEvent.message}
-              </strong>
-              {wasInterrupted ? (
-                <span>
-                  Gyro restarted or lost the provider process before this turn
-                  finished. Retry continues the same message.
-                </span>
-              ) : providerStatus.recoveryMessage || providerStatus.error ? (
-                <span>
-                  {providerStatus.recoveryMessage ?? providerStatus.error}
-                </span>
-              ) : null}
-            </div>
-            <div>
-              {providerStatus.status === "failed" ||
-              providerStatus.status === "cancelled" ||
-              wasInterrupted ? (
-                <button
-                  onClick={() =>
-                    onProviderStatusAction?.("retry-send", turn.statusEvent!)
-                  }
-                  type="button"
-                >
-                  Retry
-                </button>
-              ) : null}
-              {providerStatus.status !== "cancelled" &&
-              (providerStatus.status === "blocked" ||
-                providerNeedsSignIn(providerStatus.recoveryKind)) ? (
-                <button
-                  onClick={() =>
-                    onProviderStatusAction?.(
-                      "reconnect-provider",
-                      turn.statusEvent!,
-                    )
-                  }
-                  type="button"
-                >
-                  {providerStatus.status === "blocked"
-                    ? "Reconnect"
-                    : providerSignInLabel(providerStatus.recoveryKind)}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-        {!isRunning
-          ? changeSummaryItems.map((item) => (
-              <ChatTurnChangeSummary
-                changeSummary={chatTurnChangeSummary(
-                  item.events,
-                  sourceControl,
-                  sourceControlBaseline,
-                )}
-                isRunning={false}
-                key={item.id}
-                onLoadChangeDiff={onLoadChangeDiff}
-                onOpenChanges={onOpenChanges}
-              />
-            ))
-          : null}
       </div>
     </section>
   );
-}
-
-function ChangeSummaryFile({
-  additions,
-  deletions,
-  onLoadDiff,
-  path,
-}: {
-  additions?: number;
-  deletions?: number;
-  onLoadDiff?: (path: string) => Promise<string>;
-  path: string;
-}) {
-  const panelId = useId();
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [diffState, setDiffState] = useState<{
-    content?: string;
-    error?: string;
-    status: "idle" | "loading" | "ready" | "error";
-  }>({ status: "idle" });
-
-  const toggleDiff = () => {
-    const shouldExpand = !isExpanded;
-    setIsExpanded(shouldExpand);
-    if (!shouldExpand || diffState.status !== "idle") return;
-    if (!onLoadDiff) {
-      setDiffState({
-        error: "Inline diff is unavailable for this workspace.",
-        status: "error",
-      });
-      return;
-    }
-    setDiffState({ status: "loading" });
-    void onLoadDiff(path)
-      .then((content) =>
-        setDiffState({
-          content: content.trimEnd() || "No changes to display.",
-          status: "ready",
-        }),
-      )
-      .catch((error) =>
-        setDiffState({ error: String(error), status: "error" }),
-      );
-  };
-
-  return (
-    <div className="gyro-change-summary-file">
-      <button
-        aria-controls={panelId}
-        aria-expanded={isExpanded}
-        onClick={toggleDiff}
-        title={path}
-        type="button"
-      >
-        <span>{path}</span>
-        <small>
-          {additions !== undefined && deletions !== undefined ? (
-            <>
-              <em className="is-added">+{additions}</em>
-              <em className="is-removed">-{deletions}</em>
-            </>
-          ) : null}
-          {isExpanded ? (
-            <ChevronDown aria-hidden="true" size={13} />
-          ) : (
-            <ChevronRight aria-hidden="true" size={13} />
-          )}
-        </small>
-      </button>
-      {isExpanded ? (
-        <div className="gyro-change-summary-diff" id={panelId}>
-          {diffState.status === "loading" ? (
-            <div className="gyro-change-summary-diff-status" role="status">
-              Loading changes…
-            </div>
-          ) : diffState.status === "error" ? (
-            <div
-              className="gyro-change-summary-diff-status is-error"
-              role="alert"
-            >
-              {diffState.error}
-            </div>
-          ) : (
-            <div
-              aria-label={`Changes in ${path}`}
-              className="gyro-change-summary-diff-scroll"
-              role="region"
-              tabIndex={0}
-            >
-              <code>
-                {(diffState.content ?? "").split("\n").map((line, index) => (
-                  <span
-                    className={changeSummaryDiffLineClass(line)}
-                    key={`${index}:${line}`}
-                  >
-                    {line || " "}
-                  </span>
-                ))}
-              </code>
-            </div>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function changeSummaryDiffLineClass(line: string) {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "is-added";
-  if (line.startsWith("-") && !line.startsWith("---")) return "is-removed";
-  if (line.startsWith("@@")) return "is-hunk";
-  if (/^(diff --git|index |--- |\+\+\+ )/.test(line)) return "is-meta";
-  return undefined;
-}
-
-function ChatRunHeader({
-  children,
-  completedAt,
-  durationMs,
-  isCollapsed,
-  isCollapsible,
-  isRunning,
-  onToggle,
-  startedAt,
-}: {
-  children?: ReactNode;
-  completedAt?: string;
-  durationMs?: number;
-  isCollapsed: boolean;
-  isCollapsible: boolean;
-  isRunning: boolean;
-  onToggle: () => void;
-  startedAt: string;
-}) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!isRunning) {
-      return;
-    }
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [isRunning]);
-  const start = Date.parse(startedAt);
-  const end = completedAt ? Date.parse(completedAt) : now;
-  const elapsedSeconds =
-    !isRunning && durationMs !== undefined
-      ? Math.max(0, Math.round(durationMs / 1_000))
-      : Number.isFinite(start)
-        ? Math.max(0, Math.round((end - start) / 1_000))
-        : 0;
-  const label = `${isRunning ? "Working" : "Worked"} for ${formatThoughtDuration(elapsedSeconds)}`;
-  return (
-    <div className="gyro-chat-run-header">
-      {isCollapsible ? (
-        <button
-          aria-expanded={!isCollapsed}
-          className="gyro-chat-run-toggle"
-          onClick={onToggle}
-          type="button"
-        >
-          <span>{label}</span>
-          {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-        </button>
-      ) : (
-        <span>{label}</span>
-      )}
-      {children ? (
-        <div className="gyro-chat-run-controls">{children}</div>
-      ) : null}
-    </div>
-  );
-}
-
-function formatThoughtDuration(elapsedSeconds: number) {
-  const hours = Math.floor(elapsedSeconds / 3_600);
-  const minutes = Math.floor(elapsedSeconds / 60);
-  const seconds = elapsedSeconds % 60;
-  return [
-    hours > 0 ? `${hours}h` : undefined,
-    minutes % 60 > 0 ? `${minutes % 60}m` : undefined,
-    seconds > 0 || elapsedSeconds === 0 ? `${seconds}s` : undefined,
-  ]
-    .filter(Boolean)
-    .join(" ");
 }
 
 function formatMessageTime(value: string) {
@@ -19515,420 +19524,12 @@ function providerActivityPathsMatch(first: string, second: string) {
   );
 }
 
-function ProviderActivityRow({
-  count = 1,
-  event,
-  onOpenChanges,
-  sourceControl,
-  sourceControlBaseline,
-}: {
-  count?: number;
-  event: SessionEvent;
-  onOpenChanges?: () => void;
-  sourceControl?: SourceControlState;
-  sourceControlBaseline?: Record<
-    string,
-    { additions: number; deletions: number }
-  >;
-}) {
-  const activity = providerActivityFromEvent(event);
-  if (!activity) {
-    return null;
-  }
-  if (activity.kind === "commentary") {
-    return (
-      <article className="gyro-chat-run-commentary">
-        <div>
-          {structuredCommentaryBlocks(activity.label).map((block, index) => (
-            <p key={`${block}-${index}`}>
-              {renderAssistantInlineContent(block)}
-            </p>
-          ))}
-        </div>
-      </article>
-    );
-  }
-  const compactedLabel = humanizeProviderActivityLabel(
-    activity.kind,
-    activity.label,
-    count,
-  );
-  if (activity.kind === "file") {
-    const path = providerActivityFilePath(event);
-    const file = path
-      ? sourceControlFileForActivityPath(path, sourceControl)
-      : undefined;
-    const fileDelta = file
-      ? sourceControlFileDelta(
-          file,
-          sourceControlStatsForActivityPath(
-            path ?? file.path,
-            sourceControlBaseline,
-          ),
-        )
-      : undefined;
-    const statusLabel =
-      activity.status === "running"
-        ? "Editing"
-        : activity.status === "failed"
-          ? "Edit failed"
-          : "Edited";
-    return (
-      <button
-        className={`gyro-chat-run-activity is-file is-${activity.status}`}
-        onClick={onOpenChanges}
-        title={path ?? activity.label}
-        type="button"
-      >
-        <FileCode2 size={13} />
-        <span>
-          <strong>{statusLabel}</strong>
-          <code>{path ?? activity.label.replace(/^Updated\s+/, "")}</code>
-        </span>
-        {fileDelta ? (
-          <small>
-            <em className="is-added">+{fileDelta.additions}</em>
-            <em className="is-removed">-{fileDelta.deletions}</em>
-          </small>
-        ) : null}
-        {activity.status === "running" ? (
-          <CircleDashed className="is-spinning" size={12} />
-        ) : (
-          <ChevronRight size={12} />
-        )}
-      </button>
-    );
-  }
-  return (
-    <div
-      className={`gyro-chat-run-activity is-${activity.status}`}
-      title={
-        count > 1
-          ? `${compactedLabel}. Includes ${activity.label}`
-          : (activity.detail ?? activity.label)
-      }
-    >
-      {activity.kind === "command" ? (
-        <Terminal size={13} />
-      ) : activity.kind === "tool" ? (
-        <Wrench size={13} />
-      ) : activity.kind === "context" ? (
-        <Minimize2 size={13} />
-      ) : (
-        <Search size={13} />
-      )}
-      <span>{compactedLabel}</span>
-      {activity.status === "running" ? (
-        <CircleDashed className="is-spinning" size={12} />
-      ) : (
-        <ChevronRight size={12} />
-      )}
-    </div>
-  );
-}
-
-/**
- * One beat of a run. The marker carries the offset from the start of the turn,
- * so a six-minute run reads as a timeline instead of a single total.
- */
-function ChatRunStep({
-  children,
-  offsetLabel,
-}: {
-  children: ReactNode;
-  offsetLabel?: string;
-}) {
-  return (
-    <div className="gyro-chat-run-step">
-      <span aria-hidden={!offsetLabel} className="gyro-chat-run-step-time">
-        {offsetLabel ?? ""}
-      </span>
-      <div className="gyro-chat-run-step-body">{children}</div>
-    </div>
-  );
-}
-
-/**
- * The gutter reads as a clock, so it has to run forwards. An event's timestamp
- * is when the renderer first saw it, which is not always when the provider
- * ordered it, so each step is clamped to the one above it rather than allowed
- * to report an earlier second than the step before.
- */
-function runStepOffsetLabels(
-  runStart: number,
-  items: ChatTurnTimelineSections["work"],
-) {
-  let previousSeconds = 0;
-  return items.map((item) => {
-    const createdAt =
-      item.kind === "activity-group"
-        ? (item.events[0] as SessionEvent).createdAt
-        : item.event.createdAt;
-    const at = Date.parse(createdAt);
-    if (!Number.isFinite(runStart) || !Number.isFinite(at)) return undefined;
-    const seconds = Math.max(
-      previousSeconds,
-      Math.round((at - runStart) / 1_000),
-    );
-    previousSeconds = seconds;
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  });
-}
-
-function activitySpanLabel(events: SessionEvent[]) {
-  const first = Date.parse((events[0] as SessionEvent).createdAt);
-  const last = Date.parse((events.at(-1) as SessionEvent).createdAt);
-  if (!Number.isFinite(first) || !Number.isFinite(last)) return undefined;
-  const seconds = Math.round((last - first) / 1_000);
-  if (seconds < 2) return undefined;
-  return formatThoughtDuration(seconds);
-}
-
-function ProviderActivityGroup({ events }: { events: SessionEvent[] }) {
-  const activity = providerActivityFromEvent(events[0] as SessionEvent);
-  const [visibility, setVisibility] = useState<
-    "collapsed" | "preview" | "expanded"
-  >("collapsed");
-  if (!activity) return null;
-  const isOpen = visibility !== "collapsed";
-  const visibleEvents =
-    visibility === "expanded"
-      ? events
-      : visibility === "preview"
-        ? events.slice(0, 3)
-        : [];
-  // Claude-level work list: short collapsed labels ("Ran a command"), not raw
-  // MCP ids or "Used 3 tools" sparkle rows.
-  const label = humanizeProviderActivityLabel(
-    activity.kind,
-    activity.label,
-    events.length,
-  );
-  const Icon =
-    activity.kind === "command"
-      ? Terminal
-      : activity.kind === "search"
-        ? Search
-        : Wrench;
-  const span = activitySpanLabel(events);
-  return (
-    <section className="gyro-chat-run-activity-group">
-      <button
-        aria-expanded={isOpen}
-        className="gyro-chat-run-activity-group-toggle"
-        onClick={() =>
-          setVisibility((current) =>
-            current === "collapsed"
-              ? events.length > 3
-                ? "preview"
-                : "expanded"
-              : current === "preview"
-                ? "expanded"
-                : "collapsed",
-          )
-        }
-        type="button"
-      >
-        <Icon size={14} />
-        <span>{label}</span>
-        {span ? <small>{span}</small> : null}
-        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-      </button>
-      {isOpen ? (
-        <div className="gyro-chat-run-activity-group-items">
-          {visibleEvents.map((event) => (
-            <ProviderActivityRow event={event} key={event.id} />
-          ))}
-          {visibility === "preview" ? (
-            <span className="gyro-chat-run-activity-group-more">
-              {events.length - visibleEvents.length} more — click again to show
-              all
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ChatTurnChangeSummary({
-  changeSummary,
-  isRunning,
-  onLoadChangeDiff,
-  onOpenChanges,
-}: {
-  changeSummary: ReturnType<typeof chatTurnChangeSummary>;
-  isRunning: boolean;
-  onLoadChangeDiff?: (path: string) => Promise<string>;
-  onOpenChanges?: () => void;
-}) {
-  const fileCount = changeSummary.fileCount;
-  const action = isRunning ? "Editing" : "Edited";
-  const label = fileCount
-    ? `${action} ${fileCount} ${fileCount === 1 ? "file" : "files"}`
-    : `${action} files`;
-  return (
-    <section
-      aria-label={label}
-      aria-live="polite"
-      className={`gyro-chat-run-change-summary ${isRunning ? "is-running" : "is-complete"}`}
-    >
-      <header>
-        <span className="gyro-change-summary-icon">
-          <FileCode2 size={15} />
-        </span>
-        <div>
-          <strong>{label}</strong>
-          {changeSummary.hasStats ? (
-            <small>
-              <em className="is-added">+{changeSummary.additions}</em>
-              <em className="is-removed">-{changeSummary.deletions}</em>
-            </small>
-          ) : (
-            <small>Stats unavailable</small>
-          )}
-        </div>
-        {!isRunning ? (
-          <div className="gyro-change-summary-actions">
-            <button onClick={onOpenChanges} type="button">
-              Review
-            </button>
-          </div>
-        ) : null}
-      </header>
-      {changeSummary.fileChanges.length > 0 ? (
-        <div className="gyro-change-summary-files">
-          {changeSummary.fileChanges.map((file) => (
-            <ChangeSummaryFile
-              additions={file.additions}
-              deletions={file.deletions}
-              key={file.path}
-              onLoadDiff={onLoadChangeDiff}
-              path={file.path}
-            />
-          ))}
-        </div>
-      ) : (
-        <button
-          className="gyro-chat-run-live-files-review"
-          onClick={onOpenChanges}
-          type="button"
-        >
-          Changes are still syncing. Open Source Control
-        </button>
-      )}
-    </section>
-  );
-}
-
-function providerActivityFilePath(event: SessionEvent) {
-  const activity = providerActivityFromEvent(event);
-  if (!activity || activity.kind !== "file") {
-    return undefined;
-  }
-  const detail = activity.detail?.trim();
-  if (detail && detail !== "workspace files") {
-    return detail;
-  }
-  const labelPath = activity.label
-    .replace(/^(?:Editing|Edited|Updated)\s+/, "")
-    .trim();
-  return labelPath && !["file", "files", "workspace files"].includes(labelPath)
-    ? labelPath
-    : undefined;
-}
-
 function sourceControlFileForActivityPath(
   activityPath: string,
   sourceControl?: SourceControlState,
 ) {
   return sourceControl?.files.find((file) =>
     providerActivityPathsMatch(activityPath, file.path),
-  );
-}
-
-function chatTurnChangeSummary(
-  events: SessionEvent[],
-  sourceControl?: SourceControlState,
-  sourceControlBaseline?: Record<
-    string,
-    { additions: number; deletions: number }
-  >,
-) {
-  const activityPaths = events.reduce<string[]>((uniquePaths, event) => {
-    const path = providerActivityFilePath(event);
-    if (
-      path &&
-      !uniquePaths.some((existing) =>
-        providerActivityPathsMatch(path, existing),
-      )
-    ) {
-      uniquePaths.push(path);
-    }
-    return uniquePaths;
-  }, []);
-  const hasGenericFileActivity = events.some((event) => {
-    const activity = providerActivityFromEvent(event);
-    return activity?.kind === "file" && !providerActivityFilePath(event);
-  });
-  const inferredPaths = hasGenericFileActivity
-    ? (sourceControl?.files ?? [])
-        .filter((file) =>
-          sourceControlFileChangedSinceBaseline(file, sourceControlBaseline),
-        )
-        .map((file) => file.path)
-    : [];
-  const paths = [...activityPaths];
-  for (const path of inferredPaths) {
-    if (!paths.some((existing) => providerActivityPathsMatch(path, existing))) {
-      paths.push(path);
-    }
-  }
-  const files = paths
-    .map((path) => sourceControlFileForActivityPath(path, sourceControl))
-    .filter((file): file is SourceControlFile => Boolean(file));
-  const deltas = files.map((file) =>
-    sourceControlFileDelta(
-      file,
-      sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
-    ),
-  );
-  const fileChanges = paths.map((path) => {
-    const file = sourceControlFileForActivityPath(path, sourceControl);
-    const delta = file
-      ? sourceControlFileDelta(
-          file,
-          sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
-        )
-      : undefined;
-    return {
-      additions: delta?.additions,
-      deletions: delta?.deletions,
-      path: file?.path ?? path,
-    };
-  });
-  return {
-    additions: deltas.reduce((total, file) => total + file.additions, 0),
-    deletions: deltas.reduce((total, file) => total + file.deletions, 0),
-    hasStats: paths.length > 0 && files.length === paths.length,
-    fileChanges,
-    fileCount: Math.max(paths.length, hasGenericFileActivity ? 1 : 0),
-    paths,
-  };
-}
-
-function sourceControlFileChangedSinceBaseline(
-  file: SourceControlFile,
-  baseline?: Record<string, { additions: number; deletions: number }>,
-) {
-  if (!baseline) {
-    return true;
-  }
-  const previous = sourceControlStatsForActivityPath(file.path, baseline);
-  return (
-    !previous ||
-    previous.additions !== file.additions ||
-    previous.deletions !== file.deletions
   );
 }
 
@@ -20594,68 +20195,6 @@ function providerActivityFromEvent(event: SessionEvent) {
   };
 }
 
-/**
- * Claude-style work labels: short, human, collapsed by default.
- * Raw MCP / provider tool ids stay out of the summary row.
- */
-function humanizeProviderActivityLabel(
-  kind: string,
-  label: string,
-  count: number,
-) {
-  if (count > 1) {
-    if (kind === "command") return `Ran ${count} commands`;
-    if (kind === "search") return `Searched ${count} times`;
-    if (kind === "file") return `Edited ${count} files`;
-    return `Ran ${count} tools`;
-  }
-  if (kind === "command") return "Ran a command";
-  if (kind === "search") {
-    if (/^search(?:ed)?(?:\s|$|:)/i.test(label.trim())) return label;
-    return "Searched";
-  }
-  if (kind === "file")
-    return label.startsWith("Updated ") ? label : "Edited a file";
-  if (kind === "context") return "Compacted context";
-  const raw = label.trim();
-  if (
-    !raw ||
-    /^use_tool$/i.test(raw) ||
-    /^search_tool$/i.test(raw) ||
-    /^xai tool$/i.test(raw) ||
-    /^kimi tool$/i.test(raw) ||
-    /^grok tool$/i.test(raw) ||
-    /mcp__/i.test(raw) ||
-    /gyro_capabilities__/i.test(raw) ||
-    raw.length > 42
-  ) {
-    return "Used a tool";
-  }
-  // snake_case provider tool names → "Read" / "List dir" style is still noisy;
-  // keep short readable names only.
-  if (/^[a-z][a-z0-9_]*$/i.test(raw) && raw.includes("_")) {
-    return "Used a tool";
-  }
-  return raw;
-}
-
-/** Mid-run assistant prose — muted, glue-repaired, never the heavy final answer. */
-function RunNarration({ message }: { message: string }) {
-  const blocks = structuredCommentaryBlocks(
-    stripHiddenSessionTitleMarker(message),
-  );
-  if (blocks.length === 0) return null;
-  return (
-    <div className="gyro-run-narration">
-      {blocks.map((block, index) => (
-        <p key={`${index}-${block.slice(0, 24)}`}>
-          {renderAssistantInlineContent(block)}
-        </p>
-      ))}
-    </div>
-  );
-}
-
 function isHiddenSessionTitleActivity(event: SessionEvent) {
   const payload = eventPayloadRecord(event);
   return (
@@ -21160,7 +20699,7 @@ function IdeRailTabs({
     label: string;
     icon: IconComponent;
   }> = [
-    { id: "agent", label: "Agent", icon: Bot },
+    { id: "agent", label: "Agent", icon: Sparkles },
     { id: "diff", label: "Diff", icon: GitPullRequest },
     { id: "terminal", label: "Terminal", icon: Terminal },
     { id: "browser", label: "Browser", icon: Globe2 },
@@ -21336,6 +20875,46 @@ function workspaceName(path?: string) {
     return "No workspace";
   }
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+/// The rectangle a popover actually has to stay inside.
+///
+/// An overflow-clipped ancestor, not the viewport, is what cuts a flyout off:
+/// the Workspace AI sidebar panel is `overflow: hidden`, so anything the
+/// composer opens past its right edge is simply not drawn. Walk up to the
+/// nearest such ancestor and use it; fall back to the viewport when the
+/// composer really does own the full width.
+function clippingBounds(element: HTMLElement) {
+  const viewport = {
+    left: 0,
+    right: window.innerWidth,
+    top: 0,
+    bottom: window.innerHeight,
+  };
+  for (
+    let node = element.parentElement;
+    node && node !== document.body;
+    node = node.parentElement
+  ) {
+    const style = window.getComputedStyle(node);
+    const clips = [style.overflowX, style.overflowY].some(
+      (value) => value !== "visible",
+    );
+    if (!clips) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      continue;
+    }
+    return {
+      left: Math.max(viewport.left, rect.left),
+      right: Math.min(viewport.right, rect.right),
+      top: Math.max(viewport.top, rect.top),
+      bottom: Math.min(viewport.bottom, rect.bottom),
+    };
+  }
+  return viewport;
 }
 
 function workspaceParentFolder(path?: string) {
