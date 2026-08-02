@@ -9300,6 +9300,7 @@ export function IdeSurface({
                     effectiveMinimapEnabled ??
                     ide?.layout.minimapEnabled !== false
                   }
+                  assistantOpen={ide?.activeView === "ai"}
                   onActivate={() => onSelectEditorGroup?.(group.id)}
                   onAssistantAction={onAssistantAction}
                   onCloseGroup={() => onCloseEditorGroup?.(group.id)}
@@ -9317,6 +9318,8 @@ export function IdeSurface({
                     onSelectFile(path);
                   }}
                   onSplitEditorGroup={onSplitEditorGroup}
+                  onToggleAssistant={onToggleAssistant}
+                  onToggleMinimap={onToggleMinimap}
                   renderEditor={renderEditor}
                   revealTarget={
                     editorRevealTarget?.path === groupPath
@@ -9496,6 +9499,7 @@ type EditorGroupPaneProps = {
   fileLoadState: "idle" | "loading" | "ready" | "error";
   filesAvailable: boolean;
   minimapEnabled: boolean;
+  assistantOpen?: boolean;
   /** When Browser is focused and no file is open, de-emphasize editor chrome. */
   browserFocusEmpty?: boolean;
   onActivate: () => void;
@@ -9505,6 +9509,8 @@ type EditorGroupPaneProps = {
   onCloseTab?: (path: string) => void;
   onCloseGroup: () => void;
   onSplitEditorGroup?: (direction: "right" | "down") => void;
+  onToggleMinimap?: () => void;
+  onToggleAssistant?: () => void;
   onEditorChange?: (path: string, content: string) => void;
   onEditorSave?: (path: string) => void;
   onEditorRevert?: (path: string) => void;
@@ -9527,6 +9533,7 @@ function EditorGroupPane({
   fileLoadState,
   filesAvailable,
   minimapEnabled,
+  assistantOpen,
   browserFocusEmpty = false,
   onActivate,
   onSelectFile,
@@ -9535,6 +9542,8 @@ function EditorGroupPane({
   onCloseTab,
   onCloseGroup,
   onSplitEditorGroup,
+  onToggleMinimap,
+  onToggleAssistant,
   onEditorChange,
   onEditorSave,
   onEditorRevert,
@@ -9655,6 +9664,23 @@ function EditorGroupPane({
             type="button"
           >
             <PanelBottom size={14} />
+          </button>
+          <button
+            aria-label="Toggle minimap"
+            onClick={onToggleMinimap}
+            title="Toggle minimap"
+            type="button"
+          >
+            <Activity size={14} />
+          </button>
+          <button
+            aria-label="Toggle chat"
+            className={assistantOpen ? "is-active" : undefined}
+            onClick={onToggleAssistant}
+            title="Toggle chat"
+            type="button"
+          >
+            <MessageSquare size={14} />
           </button>
           <button
             aria-label="Revert file"

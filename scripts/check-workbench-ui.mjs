@@ -3171,7 +3171,7 @@ expect(
     surfaceSource.includes(
       'className="gyro-chat-run-timeline is-final-response"',
     ) &&
-    surfaceSource.includes('aria-label="Work timeline"') &&
+    runViewSource.includes('aria-label="Work timeline"') &&
     surfaceSource.includes("buildRunModel(") &&
     surfaceSource.includes(
       'isRunning ? "Assistant update" : "Final response"',
@@ -3948,10 +3948,10 @@ expect(
     appSource.includes("invoke<BrowserPreviewCapture>(") &&
     appSource.includes('"capture_browser_preview"') &&
     appSource.includes("browser-capture-success") &&
-    surfaceSource.includes('title="Local browser preview"') &&
-    surfaceSource.includes('aria-label="Capture preview screenshot"') &&
+    surfaceSource.includes('title="Browser preview"') &&
+    surfaceSource.includes('aria-label="Capture browser screenshot"') &&
     surfaceSource.includes("isLoopbackBrowserPreviewUrl") &&
-    surfaceSource.includes("Screenshots are available for local previews") &&
+    surfaceSource.includes("Screenshots require the native browser host") &&
     surfaceSource.includes('onScreenshot?.("reveal")') &&
     surfaceSource.includes("normalizedBrowserPreviewUrl") &&
     surfaceSource.includes("<iframe") &&
