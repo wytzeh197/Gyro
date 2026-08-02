@@ -243,10 +243,11 @@ const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
 const launchDocsSource = readRepoFile("docs/launch.md");
 const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
-const roadmapSource = readRepoFile("ROADMAP.md");
 const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
+const runSource = readRepoFile("packages/ui/src/chat-run.ts");
+const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
@@ -461,16 +462,25 @@ expect(
   "The chat message queue should match the composer width.",
 );
 expect(
-  styleSource.includes(
-    ':root[data-theme="light"] .gyro-chat-run-change-summary',
-  ) &&
-    styleSource.includes(
-      ':root[data-theme="light"] .gyro-change-summary-diff',
-    ) &&
-    styleSource.includes("background: #f8fafc") &&
-    styleSource.includes("background: #e7f3eb") &&
-    styleSource.includes("background: #f9e8ea"),
-  "Light-mode change summaries should use a clean code canvas and readable diff colors.",
+  (() => {
+    // The run rail earns light mode from the token flip rather than a parallel
+    // set of light rules. One override is allowed and it is optical (icon
+    // opacity); a second means a value went off-token.
+    const start = styleSource.indexOf("Run rail (gyro-run-*)");
+    if (start < 0) return false;
+    const rail = styleSource
+      .slice(styleSource.indexOf("*/", start))
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    return (
+      !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(
+        rail,
+      ) &&
+      (rail.match(/:root\[data-theme="light"\]/g) ?? []).length === 1 &&
+      rail.includes("var(--gyro-success)") &&
+      rail.includes("var(--gyro-premium-hairline-strong)")
+    );
+  })(),
+  "The run rail should be token-only so light mode falls out of the token flip.",
 );
 expect(
   surfaceSource.includes('className={[\n        "gyro-session-row"') &&
@@ -499,48 +509,50 @@ expect(
   "Linked screenshots should use a contained preview tray inside the composer.",
 );
 expect(
-  surfaceSource.includes("chatTurnTimelineSections(turn.timelineEvents)") &&
-    timelineSource.includes("export function chatTurnTimelineSections") &&
-    timelineSource.includes('kind: "file-summary"') &&
-    timelineSource.includes('kind: "activity-group"') &&
-    timelineSource.includes("const fileEvents: SessionEvent[] = []") &&
-    timelineSource.includes("id: `file-summary-${firstFileEvent.id}`") &&
-    timelineSource.includes("orderedChatTimelineEvents(events)") &&
-    surfaceSource.includes('className="gyro-chat-run-sequence is-work"') &&
-    surfaceSource.includes("function ProviderActivityGroup") &&
-    surfaceSource.includes('"collapsed" | "preview" | "expanded"') &&
-    surfaceSource.includes("events.slice(0, 3)") &&
-    surfaceSource.includes("click again to show") &&
-    surfaceSource.includes("function ChatTurnChangeSummary") &&
-    surfaceSource.includes("changeSummaryItems.map((item)") &&
-    surfaceSource.includes('aria-live="polite"') &&
-    surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
-    surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
-    styleSource.includes(".gyro-chat-run-activity-group-toggle") &&
-    styleSource.includes(".gyro-change-summary-actions"),
-  "Chat turns should preserve activity order and show one aggregate change summary only after completion.",
+  surfaceSource.includes("buildRunModel(turn.timelineEvents, {") &&
+    runSource.includes("export function buildRunModel") &&
+    runSource.includes("orderedChatTimelineEvents(") &&
+    runSource.includes("expandAssistantMessageSegments(") &&
+    // One item per step: the rail is flat, so nothing batches parallel calls
+    // into a collapsed group the way the old activity groups did.
+    runSource.includes(
+      '{ kind: "work"; id: string; at: string; item: WorkItem }',
+    ) &&
+    !runSource.includes("batchWorkSteps") &&
+    !runViewSource.includes('"collapsed" | "preview" | "expanded"') &&
+    // File edits stay inline on the rail and carry their own stats, rather than
+    // being hoisted into a summary card that only appeared after completion.
+    runViewSource.includes('className="gyro-run-row-stat"') &&
+    runSource.includes("fileStats?: (") &&
+    !surfaceSource.includes("changeSummaryItems"),
+  "Chat turns should build one flat run model, with file edits inline rather than hoisted into a completion-only summary.",
 );
 const chatTurnSource = surfaceSource.slice(
   surfaceSource.indexOf("function ChatTurn({"),
-  surfaceSource.indexOf("function ChangeSummaryFile({"),
+  surfaceSource.indexOf(
+    "function formatMessageTime(",
+    surfaceSource.indexOf("function ChatTurn({"),
+  ),
 );
 expect(
-  chatTurnSource.indexOf('aria-label="Final response"') <
-    chatTurnSource.indexOf("changeSummaryItems.map((item)"),
-  "Completed-turn file summaries should render after the final assistant response.",
+  chatTurnSource.includes("<ChatRun") &&
+    chatTurnSource.indexOf("<ChatRun") <
+      chatTurnSource.indexOf('aria-label="Final response"'),
+  "The run rail should render above the final response.",
 );
 expect(
-  chatTurnSource.includes('aria-label="Work timeline"') &&
-    chatTurnSource.indexOf('aria-label="Work timeline"') <
-      chatTurnSource.indexOf('aria-label="Final response"') &&
-    chatTurnSource.includes('item.event.kind === "assistant-message"') &&
-    chatTurnSource.includes("gyro-chat-run-timeline is-narration") &&
-    chatTurnSource.includes("offsetLabel={runOffsetLabel(runStart") &&
-    surfaceSource.includes("function ChatRunStep") &&
-    surfaceSource.includes("function runOffsetLabel") &&
-    styleSource.includes(".gyro-chat-run-step-time") &&
-    !chatTurnSource.includes("responseTimelineItems.map"),
-  "Mid-run narration should stay in the work timeline where it was spoken, with only the closing message rendered as the response.",
+  runViewSource.includes('aria-label="Work timeline"') &&
+    // Narration is a peer row on the rail, in the place it was spoken, and is
+    // the one label allowed to wrap rather than run off the thread.
+    runSource.includes(
+      '{ kind: "say"; id: string; at: string; text: string }',
+    ) &&
+    runViewSource.includes('step.kind === "say" && renderSay') &&
+    styleSource.includes(".gyro-run-row.is-say .gyro-run-row-label") &&
+    // No per-step clock: the rail is timestamp-free.
+    !styleSource.includes(".gyro-run-step-time") &&
+    !runViewSource.includes("offsetLabel"),
+  "Mid-run narration should stay on the rail where it was spoken, with no per-step timestamps.",
 );
 expect(
   surfaceSource.includes('label: "Suggested"') &&
@@ -816,11 +828,14 @@ expect(
     ) &&
     appSource.includes("attachments,") &&
     desktopRustSource.includes('"attachments": attachments') &&
-    surfaceSource.includes("Previous send was interrupted") &&
-    surfaceSource.includes("Retry continues the same message") &&
-    surfaceSource.includes(
-      'providerStatus.status === "cancelled" ||\n              wasInterrupted',
-    ) &&
+    runViewSource.includes("Previous send was interrupted") &&
+    runViewSource.includes("Retry continues the same message") &&
+    // A turn the provider never closed out is its own phase, so the rail can
+    // offer Retry without inferring interruption from a status string.
+    runSource.includes('{ name: "interrupted" }') &&
+    runSource.includes("INFLIGHT_STATUSES.includes(status.status)") &&
+    surfaceSource.includes('runModel.phase.name === "interrupted"') &&
+    surfaceSource.includes('onProviderStatusAction?.("retry-send"') &&
     tauriSource.includes("flags.contains_key(&session_id)") &&
     tauriSource.includes("a provider turn is already running for this session"),
   "Chat recovery should retry the same turn, recover interrupted runs, and reject concurrent provider sends.",
@@ -3148,33 +3163,34 @@ expect(
     appSource.includes("suggestTitle: shouldSuggestTitle") &&
     appSource.includes('kind: "provider-status"') &&
     surfaceSource.includes("function ChatTurn") &&
-    surfaceSource.includes("function ChatRunHeader") &&
-    surfaceSource.includes("function ProviderActivityRow") &&
+    runViewSource.includes("function RunHeader") &&
+    runViewSource.includes("function RunRow") &&
     surfaceSource.includes("timelineEvents: SessionEvent[]") &&
     surfaceSource.includes("turn.timelineEvents.push(event)") &&
-    surfaceSource.includes('className="gyro-chat-run-sequence is-work"') &&
+    runViewSource.includes('className="gyro-run-rail"') &&
     surfaceSource.includes(
       'className="gyro-chat-run-timeline is-final-response"',
     ) &&
     surfaceSource.includes('aria-label="Work timeline"') &&
-    surfaceSource.includes("chatTurnTimelineSections") &&
+    surfaceSource.includes("buildRunModel(") &&
     surfaceSource.includes(
       'isRunning ? "Assistant update" : "Final response"',
     ) &&
-    surfaceSource.includes('isRunning ? "Working" : "Worked"') &&
-    surfaceSource.includes("formatThoughtDuration") &&
+    runSource.includes("`Working for ${elapsedLabel}`") &&
+    runSource.includes("`Worked for ${elapsedLabel}`") &&
+    runSource.includes("export function formatRunDuration") &&
     surfaceSource.includes("formatMessageTime(event.createdAt)") &&
     surfaceSource.includes('aria-label="Copy message"') &&
-    surfaceSource.includes("`${hours}h`") &&
-    surfaceSource.includes("`${minutes % 60}m`") &&
-    surfaceSource.includes("`${seconds}s`") &&
-    surfaceSource.includes("chatTurnTimelineSections") &&
+    runSource.includes("`${hours}h`") &&
+    runSource.includes("`${minutes}m`") &&
+    runSource.includes("`${seconds}s`") &&
+    surfaceSource.includes("buildRunModel(") &&
     surfaceSource.includes("providerActivityPathsMatch") &&
-    surfaceSource.includes('if (activity.kind === "file")') &&
-    surfaceSource.includes("`Ran ${count} commands`") &&
-    surfaceSource.includes('activity.kind === "context"') &&
-    surfaceSource.includes("<Minimize2") &&
-    styleSource.includes(".gyro-chat-run-toggle") &&
+    runSource.includes('case "file":') &&
+    runSource.includes('label: "Ran command"') &&
+    runSource.includes('case "context":') &&
+    runViewSource.includes("context: Minimize2") &&
+    styleSource.includes(".gyro-run-header-toggle") &&
     styleSource.includes("max-width: min(78%, 720px)") &&
     styleSource.includes(".gyro-user-message-meta") &&
     styleSource.includes(".gyro-user-message-bubble") &&
@@ -3226,26 +3242,28 @@ expect(
     surfaceSource.includes("message.isDispatching") &&
     surfaceSource.includes("disabled={message.isDispatching}") &&
     !surfaceSource.includes("isRunning && onStopChat") &&
-    surfaceSource.includes('activity.kind === "commentary"') &&
-    surfaceSource.includes("gyro-chat-run-commentary") &&
-    surfaceSource.includes("providerActivityFilePath") &&
+    runSource.includes('case "commentary":') &&
+    runViewSource.includes("gyro-run-row-label") &&
+    runSource.includes("stripUpdatedPrefix") &&
     surfaceSource.includes("sourceControlFileForActivityPath") &&
-    surfaceSource.includes("chatTurnChangeSummary") &&
-    surfaceSource.includes("hasGenericFileActivity") &&
-    surfaceSource.includes("sourceControlFileChangedSinceBaseline") &&
+    runSource.includes("mergeFileChange") &&
+    runSource.includes("files: FileChange[]") &&
+    surfaceSource.includes("fileStats: (path)") &&
     surfaceSource.includes("sourceControlFileDelta") &&
     surfaceSource.includes("sourceControlStatsForActivityPath") &&
     surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
-    surfaceSource.includes("gyro-chat-run-change-summary") &&
-    surfaceSource.includes("files: changeSummaryItems,") &&
-    timelineSource.includes('item.kind !== "file-summary"') &&
-    surfaceSource.includes("changeSummaryItems.map((item)") &&
-    surfaceSource.includes('activity.kind === "file"') &&
-    surfaceSource.includes('activity.status === "running"') &&
-    timelineSource.includes('activityKind === "file"') &&
-    surfaceSource.includes('const action = isRunning ? "Editing" : "Edited"') &&
-    surfaceSource.includes('isRunning ? "is-running" : "is-complete"') &&
-    surfaceSource.includes("changeSummary.fileChanges.map((file)") &&
+    runViewSource.includes("gyro-run-row-stat") &&
+    runSource.includes("mergeFileChange(files, item)") &&
+    runSource.includes('item.kind === "file"') &&
+    runViewSource.includes("model.steps.map((step)") &&
+    runSource.includes('kind: "file"') &&
+    runSource.includes('status === "running"') &&
+    runSource.includes('text(payload, "activityKind")') &&
+    runSource.includes(
+      'return status === "failed" ? "Edit failed" : "Edited file"',
+    ) &&
+    runViewSource.includes('status === "running" ? "is-running" : ""') &&
+    runViewSource.includes("WORK_ICON[item.kind]") &&
     !surfaceSource.includes("Hide changed files") &&
     !surfaceSource.includes("Show changed files") &&
     !surfaceSource.includes("showAllFiles") &&
@@ -3270,7 +3288,7 @@ expect(
     surfaceSource.includes("isStreamingAssistantEvent") &&
     surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
     surfaceSource.includes('{ kind: "ordered-list"; items: string[] }') &&
-    surfaceSource.includes("structuredCommentaryBlocks(activity.label)") &&
+    runViewSource.includes("renderSay(step.text)") &&
     surfaceSource.includes("stripHiddenSessionTitleMarker") &&
     surfaceSource.includes("isHiddenSessionTitleActivity") &&
     surfaceSource.includes("const shouldUsePlainText") &&
@@ -3279,15 +3297,15 @@ expect(
     ) &&
     surfaceSource.includes("gyro-response-streaming-text") &&
     styleSource.includes(".gyro-response-streaming-text") &&
-    surfaceSource.includes("gyro-chat-run-thinking") &&
-    surfaceSource.includes("isRunning && turn.timelineEvents.length === 0") &&
-    styleSource.includes(".gyro-chat-run-header") &&
-    surfaceSource.includes("visibleWorkTimelineItems") &&
+    runViewSource.includes('<RunPulse label="Thinking"') &&
+    runSource.includes("steps.length === 0") &&
+    styleSource.includes(".gyro-run-header") &&
+    runViewSource.includes("showSteps && model.steps.length > 0") &&
     surfaceSource.includes("responseEvent") &&
-    styleSource.includes(".gyro-chat-run-activity") &&
-    styleSource.includes(".gyro-chat-run-activity.is-file") &&
-    styleSource.includes(".gyro-chat-run-change-summary") &&
-    styleSource.includes(".gyro-chat-run-timeline") &&
+    styleSource.includes(".gyro-run-row") &&
+    styleSource.includes(".gyro-run-row-stat .is-added") &&
+    styleSource.includes(".gyro-run-row-item") &&
+    styleSource.includes(".gyro-run-rail") &&
     styleSource.includes("@keyframes gyro-chat-composer-dock-enter") &&
     styleSource.includes("@keyframes gyro-chat-final-response-enter") &&
     surfaceSource.includes("isHiddenTranscriptEvent") &&
@@ -3981,11 +3999,9 @@ expect(
 );
 
 expect(
-  roadmapSource.includes("Private Alpha Exit Gate") &&
-    roadmapSource.includes("Partially implemented and still gated") &&
-    readinessAuditSource.includes("Functional Readiness Matrix") &&
+  readinessAuditSource.includes("Functional Readiness Matrix") &&
     readinessAuditSource.includes("Highest-Risk Gaps"),
-  "The roadmap should distinguish implemented foundations from private-alpha blockers.",
+  "The product readiness audit should distinguish implemented foundations from private-alpha blockers.",
 );
 expect(
   surfaceSource.includes('className="gyro-ide-project-empty"') &&
@@ -4377,7 +4393,7 @@ expect(
     surfaceSource.includes("sourceControl?.files.length") &&
     !surfaceSource.includes("gyro-thread-diff-pill") &&
     timelineSource.includes('kind: "file-summary"') &&
-    surfaceSource.includes("isRunning={isRunning}") &&
+    runViewSource.includes("isRunPhaseLive(model.phase)") &&
     surfaceSource.includes('onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
@@ -5250,8 +5266,8 @@ expect(
   timelineSource.includes("const fileEvents: SessionEvent[] = []") &&
     timelineSource.includes("fileEvents.push(event)") &&
     timelineSource.includes("const firstFileEvent = fileEvents[0]") &&
-    surfaceSource.includes('if (activity.kind === "file")') &&
-    surfaceSource.includes("changeSummaryItems.map((item)") &&
+    runSource.includes('case "file":') &&
+    runViewSource.includes("model.steps.map((step)") &&
     surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
@@ -6260,15 +6276,15 @@ expect(
   styleSource.includes("Codex-matched chat typography") &&
     styleSource.includes("font-size: 14px;\n  line-height: 1.5;") &&
     styleSource.includes(".gyro-user-message-bubble p") &&
-    styleSource.includes(".gyro-chat-run-commentary") &&
-    styleSource.includes("font-size: 13px;\n  line-height: 18px;") &&
-    styleSource.includes(".gyro-change-summary-file > button") &&
-    surfaceSource.includes("function ChangeSummaryFile") &&
-    surfaceSource.includes("aria-label={`Changes in ${path}`}") &&
-    surfaceSource.includes("changeSummary.fileChanges.map((file)") &&
-    !styleSource.includes(".gyro-change-summary-more") &&
-    styleSource.includes(".gyro-change-summary-diff-scroll") &&
-    styleSource.includes("max-height: min(420px, 48vh)"),
+    styleSource.includes(".gyro-run-row-detail") &&
+    styleSource.includes(".gyro-run-row-stat") &&
+    styleSource.includes(".gyro-run-row.is-actionable") &&
+    runViewSource.includes("function RunRow") &&
+    runViewSource.includes('aria-label="Work timeline"') &&
+    runViewSource.includes("WORK_ICON[item.kind]") &&
+    !styleSource.includes(".gyro-run-step-time") &&
+    styleSource.includes(".gyro-run-row-icon") &&
+    styleSource.includes(".gyro-run-row-detail"),
   "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
 );
 

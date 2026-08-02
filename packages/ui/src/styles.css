@@ -68,6 +68,7 @@
   --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.15);
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.04);
   --gyro-premium-focus: rgba(122, 167, 255, 0.34);
+  --gyro-scrim: rgba(0, 0, 0, 0.58);
   /* Corner ladder. Every literal radius in this sheet snaps to one of these
      steps, so 5/6/7 and 14/15/18 no longer read as three different corners. */
   --gyro-premium-radius-xs: 4px;
@@ -99,6 +100,8 @@
   --gyro-provider-kimi-logo: #fff;
   --gyro-provider-xai: #f6f2ea;
   --gyro-provider-gemini: #8bb8ff;
+  --gyro-provider-cursor: #f2efe9;
+  --gyro-provider-opencode: #f2efe9;
   --gyro-hero-heading: #f4f4f1;
   --gyro-hero-brand: #a0a0a0;
   --gyro-hero-composer: #1a1a1a;
@@ -736,11 +739,6 @@
   gap: 4px;
 }
 
-.gyro-chat-run-controls {
-  justify-content: flex-end;
-  min-height: 20px;
-}
-
 .gyro-transcript-attachments {
   padding-left: 0;
 }
@@ -818,6 +816,7 @@
   --gyro-premium-hairline-strong: rgba(23, 27, 34, 0.2);
   --gyro-premium-inset-highlight: rgba(255, 255, 255, 0.72);
   --gyro-premium-focus: rgba(53, 111, 214, 0.25);
+  --gyro-scrim: rgba(23, 27, 34, 0.34);
   --gyro-provider-openai: #0f8f72;
   --gyro-provider-openai-logo: #000;
   --gyro-provider-anthropic: #c15d12;
@@ -825,6 +824,8 @@
   --gyro-provider-kimi-logo: #000;
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
+  --gyro-provider-cursor: #1c2027;
+  --gyro-provider-opencode: #1c2027;
   --gyro-hero-heading: #181d25;
   --gyro-hero-brand: #667282;
   --gyro-hero-composer: #ffffff;
@@ -4001,7 +4002,7 @@ button.gyro-account-menu-row:hover {
   min-width: 0;
 }
 
-.gyro-editor-tabs button {
+.gyro-editor-tabs > button {
   align-items: center;
   background: transparent;
   border: 0;
@@ -4015,12 +4016,12 @@ button.gyro-account-menu-row:hover {
   padding: 0 10px;
 }
 
-.gyro-editor-tabs button.is-active {
+.gyro-editor-tabs > button.is-active {
   background: var(--gyro-code-bg);
   color: var(--gyro-text);
 }
 
-.gyro-editor-tabs button span {
+.gyro-editor-tabs > button span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5527,10 +5528,18 @@ button.gyro-account-menu-row:hover {
 
 .gyro-provider-logo.is-openai,
 .gyro-provider-logo.is-anthropic,
-.gyro-provider-logo.is-cursor,
-.gyro-provider-logo.is-gemini,
-.gyro-provider-logo.is-opencode {
+.gyro-provider-logo.is-gemini {
   color: #f0ece5;
+}
+
+/* Cursor and OpenCode publish monochrome marks, so like Grok they follow a
+   theme-flipping token rather than a fixed light ink. */
+.gyro-provider-logo.is-cursor {
+  color: var(--gyro-provider-cursor);
+}
+
+.gyro-provider-logo.is-opencode {
+  color: var(--gyro-provider-opencode);
 }
 
 /* Grok: monochrome mark that follows theme (dark ink on light, light on dark). */
@@ -5975,7 +5984,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-model-standard-overlay {
   align-items: center;
-  background: rgba(0, 0, 0, 0.58);
+  background: var(--gyro-scrim);
   display: grid;
   inset: 0;
   justify-items: center;
@@ -5984,14 +5993,16 @@ button.gyro-account-menu-row:hover {
   z-index: 32;
 }
 
+/* This is a modal, not a docked panel: it keeps its own elevation in both
+   themes rather than inheriting the flat-panel treatment further down. */
 .gyro-model-standard-card {
-  background: #202124;
-  border: 1px solid #34363b;
-  border-radius: 8px;
+  background: var(--gyro-premium-panel);
+  border: 1px solid var(--gyro-premium-line-soft);
+  border-radius: var(--gyro-premium-radius-md);
   box-shadow:
-    0 28px 88px rgba(0, 0, 0, 0.48),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  color: #f1eee9;
+    0 28px 88px var(--gyro-premium-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+  color: var(--gyro-premium-text);
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -6007,10 +6018,10 @@ button.gyro-account-menu-row:hover {
 
 .gyro-model-standard-icon {
   align-items: center;
-  background: #2b2d31;
-  border: 1px solid #3d4047;
-  border-radius: 8px;
-  color: #f1eee9;
+  background: var(--gyro-premium-control);
+  border: 1px solid var(--gyro-premium-line-soft);
+  border-radius: var(--gyro-premium-radius-md);
+  color: var(--gyro-premium-text);
   display: grid;
   height: 38px;
   justify-items: center;
@@ -6024,7 +6035,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-model-standard-head span,
 .gyro-model-standard-meta {
-  color: #969ba4;
+  color: var(--gyro-premium-faint);
   font-size: 11px;
   font-weight: 650;
 }
@@ -6037,16 +6048,19 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-model-standard-card p {
-  color: #c8c4bd;
+  color: var(--gyro-premium-muted);
   font-size: 13px;
   line-height: 1.5;
   margin: 0;
 }
 
+/* Sits on a tinted chip rather than the card, so it steps up from the faint
+   eyebrow tone to clear AA contrast against that chip. */
 .gyro-model-standard-meta {
-  background: #292a2e;
-  border: 1px solid #383a3f;
-  border-radius: 8px;
+  background: var(--gyro-premium-control);
+  border: 1px solid var(--gyro-premium-line-soft);
+  border-radius: var(--gyro-premium-radius-md);
+  color: var(--gyro-premium-muted);
   justify-self: start;
   padding: 5px 8px;
 }
@@ -7050,13 +7064,67 @@ textarea:focus-visible {
   padding: 14px;
 }
 
-.gyro-chat-surface:not(:has(.gyro-environment-rail)) {
+.gyro-chat-surface:not(:has(.gyro-environment-rail)):not(
+    :has(.gyro-browser-rail)
+  ):not(:has(.gyro-plan-rail)) {
   justify-items: center;
 }
 
-.gyro-chat-surface:has(.gyro-environment-rail) {
-  grid-template-columns: minmax(0, 1fr) 300px;
+.gyro-chat-surface:has(.gyro-environment-rail),
+.gyro-chat-surface:has(.gyro-browser-rail),
+.gyro-chat-surface:has(.gyro-plan-rail) {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
   gap: 12px;
+}
+
+.gyro-browser-rail {
+  align-self: stretch;
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
+  border-radius: 20px;
+  color: var(--gyro-text);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.gyro-browser-rail > header {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.gyro-browser-rail .gyro-browser-preview {
+  border: 1px solid var(--gyro-border);
+  border-radius: 14px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gyro-browser-native-host {
+  background: var(--gyro-app, #111214);
+  border: 0;
+  height: 100%;
+  min-height: 180px;
+  width: 100%;
+}
+
+.gyro-browser-preview.is-native-host .gyro-browser-frame {
+  padding: 0;
+}
+
+.gyro-browser-preview.is-native-host .gyro-browser-page {
+  max-width: none;
+  width: 100%;
+}
+
+.gyro-browser-preview.is-occluded .gyro-browser-native-host {
+  background: color-mix(in srgb, var(--gyro-surface) 80%, transparent);
 }
 
 .gyro-chat-surface.is-empty {
@@ -7398,17 +7466,18 @@ textarea:focus-visible {
 }
 
 .gyro-editor-tabs {
+  align-items: center;
   background: var(--gyro-surface);
   border-bottom: 1px solid var(--gyro-border);
   min-height: 34px;
 }
 
-.gyro-editor-tabs button {
+.gyro-editor-tabs > button {
   border-radius: 0;
   min-height: 34px;
 }
 
-.gyro-editor-tabs button .gyro-editor-tab-close {
+.gyro-editor-tabs > button .gyro-editor-tab-close {
   align-items: center;
   color: var(--gyro-muted);
   display: inline-flex;
@@ -7418,18 +7487,38 @@ textarea:focus-visible {
 .gyro-editor-tab-actions {
   align-items: center;
   display: flex;
+  flex: 0 0 auto;
   gap: 2px;
   margin-left: auto;
   padding-right: 6px;
 }
 
 .gyro-editor-tab-actions button {
+  align-items: center;
+  background: transparent;
   border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 26px;
+  justify-content: center;
+  margin: 0;
+  max-width: 28px;
   min-height: 26px;
+  min-width: 28px;
+  padding: 0;
   width: 28px;
 }
 
-.gyro-editor-tabs button.is-active {
+.gyro-editor-tab-actions button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  box-shadow: none;
+  color: var(--gyro-accent);
+}
+
+.gyro-editor-tabs > button.is-active {
   background: var(--gyro-pane);
   box-shadow: inset 0 -2px 0 var(--gyro-accent);
 }
@@ -9081,6 +9170,12 @@ textarea:focus-visible {
   color: var(--gyro-ide-foreground);
 }
 
+.gyro-workspace-route.is-code .gyro-editor-tab-actions button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  box-shadow: none;
+  color: var(--gyro-accent);
+}
+
 .gyro-workspace-route.is-code .gyro-editor-tabs > button.is-preview > span {
   font-style: italic;
 }
@@ -9886,7 +9981,7 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.gyro-editor-tabs button.is-active {
+.gyro-editor-tabs > button.is-active {
   box-shadow: inset 0 -1px 0 var(--gyro-accent);
 }
 
@@ -9914,22 +10009,41 @@ textarea:focus-visible {
 }
 
 .gyro-editor-tab-actions {
+  align-self: center;
   gap: 1px;
   margin-left: auto;
 }
 
 .gyro-editor-tabs .gyro-editor-tab-actions button {
-  border-radius: 4px;
+  border: 0;
+  border-radius: 5px;
+  box-shadow: none;
+  flex: 0 0 var(--gyro-ide-control-size);
   flex-basis: var(--gyro-ide-control-size);
   height: var(--gyro-ide-control-size);
   max-width: var(--gyro-ide-control-size);
   min-height: var(--gyro-ide-control-size);
   min-width: var(--gyro-ide-control-size);
+  padding: 0;
   width: var(--gyro-ide-control-size);
 }
 
 .gyro-editor-tabs .gyro-editor-tab-actions button:hover:not(:disabled) {
   background: var(--gyro-premium-control);
+  box-shadow: none;
+}
+
+.gyro-editor-tabs .gyro-editor-tab-actions button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  box-shadow: none;
+  color: var(--gyro-accent);
+}
+
+.gyro-editor-tabs
+  .gyro-editor-tab-actions
+  button.is-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-accent) 20%, transparent);
+  box-shadow: none;
 }
 
 .gyro-editor-contextbar {
@@ -14029,7 +14143,6 @@ body {
 .gyro-session-menu,
 .gyro-account-menu,
 .gyro-command-palette,
-.gyro-model-standard-card,
 .gyro-model-chip,
 .gyro-composer-shell {
   border-color: transparent;
@@ -15667,8 +15780,7 @@ body {
 .gyro-terminal-pane,
 .gyro-code-surface,
 .gyro-diff-main,
-.gyro-browser-frame,
-.gyro-model-standard-card {
+.gyro-browser-frame {
   border-color: transparent;
   box-shadow:
     0 8px 22px
@@ -15831,31 +15943,99 @@ textarea,
   color: inherit;
 }
 
+/* The brand tint mixes into the panel behind it, so these tiles stay light in
+   the light theme instead of punching a dark square into the surface. */
 .gyro-provider-icon:has(.gyro-provider-logo.is-openai),
 .gyro-model-standard-icon:has(.gyro-provider-logo.is-openai) {
-  background: color-mix(in srgb, var(--gyro-provider-openai) 10%, #202226);
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-openai) 10%,
+    var(--gyro-premium-panel-strong)
+  );
   box-shadow:
     inset 0 0 0 0.5px
       color-mix(in srgb, var(--gyro-provider-openai) 35%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
 .gyro-provider-icon:has(.gyro-provider-logo.is-anthropic),
 .gyro-model-standard-icon:has(.gyro-provider-logo.is-anthropic) {
-  background: color-mix(in srgb, var(--gyro-provider-anthropic) 13%, #202226);
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-anthropic) 13%,
+    var(--gyro-premium-panel-strong)
+  );
   box-shadow:
     inset 0 0 0 0.5px
       color-mix(in srgb, var(--gyro-provider-anthropic) 42%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
 .gyro-provider-icon:has(.gyro-provider-logo.is-gemini),
 .gyro-model-standard-icon:has(.gyro-provider-logo.is-gemini) {
-  background: color-mix(in srgb, var(--gyro-provider-gemini) 12%, #202226);
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-gemini) 12%,
+    var(--gyro-premium-panel-strong)
+  );
   box-shadow:
     inset 0 0 0 0.5px
       color-mix(in srgb, var(--gyro-provider-gemini) 34%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-provider-icon:has(.gyro-provider-logo.is-kimi),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-kimi) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-kimi) 11%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-kimi) 34%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+/* Grok's brand token flips near-white to near-ink across themes, so a lighter
+   mix keeps the monochrome mark clear of its own backdrop. */
+.gyro-provider-icon:has(.gyro-provider-logo.is-xai),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-xai) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-xai) 8%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-xai) 26%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-provider-icon:has(.gyro-provider-logo.is-cursor),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-cursor) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-cursor) 8%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-cursor) 26%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-provider-icon:has(.gyro-provider-logo.is-opencode),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-opencode) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-opencode) 8%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-opencode) 26%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
 .gyro-provider-model-picker button.is-active,
@@ -17661,7 +17841,6 @@ body,
 .gyro-terminal-pane,
 .gyro-code-surface,
 .gyro-browser-frame,
-.gyro-model-standard-card,
 .gyro-environment-rail,
 .gyro-plan-rail {
   background: var(--gyro-premium-panel);
@@ -17981,13 +18160,13 @@ textarea:focus-visible,
   overflow: hidden;
 }
 
-.gyro-editor-tabs button {
+.gyro-editor-tabs > button {
   border-color: var(--gyro-premium-hairline-soft);
   height: 34px;
   min-height: 34px;
 }
 
-.gyro-editor-tabs button.is-active {
+.gyro-editor-tabs > button.is-active {
   background: var(--gyro-pane);
   box-shadow: inset 0 -1px 0 var(--gyro-premium-accent);
   color: var(--gyro-premium-text);
@@ -18266,7 +18445,6 @@ textarea:focus-visible,
 .gyro-terminal-pane,
 .gyro-code-surface,
 .gyro-browser-frame,
-.gyro-model-standard-card,
 .gyro-environment-rail,
 .gyro-plan-rail,
 .gyro-settings-row,
@@ -19044,6 +19222,13 @@ textarea:focus-visible,
   width: 28px;
 }
 
+.gyro-editor-tabs .gyro-editor-tab-actions button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  box-shadow: none;
+  color: var(--gyro-accent);
+}
+
+/* Multi-group: keep split-right + close-group; hide split-down / revert / save. */
 .gyro-editor-groups:not([data-group-count="1"])
   .gyro-editor-tab-actions
   button:nth-child(2),
@@ -19052,10 +19237,7 @@ textarea:focus-visible,
   button:nth-child(3),
 .gyro-editor-groups:not([data-group-count="1"])
   .gyro-editor-tab-actions
-  button:nth-child(4),
-.gyro-editor-groups:not([data-group-count="1"])
-  .gyro-editor-tab-actions
-  button:nth-child(5) {
+  button:nth-child(4) {
   display: none;
 }
 
@@ -21048,23 +21230,6 @@ button.gyro-settings-row em::after {
   width: 100%;
 }
 
-.gyro-chat-run-work {
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
-}
-
-.gyro-chat-run-header {
-  animation: gyro-chat-content-reveal 220ms ease 160ms both;
-  align-items: center;
-  color: var(--gyro-faint);
-  display: flex;
-  font-size: 12px;
-  font-weight: 450;
-  gap: 5px;
-  letter-spacing: -0.01em;
-  min-height: 28px;
-  padding: 0 0 4px;
-}
-
 .gyro-chat-run-header svg {
   opacity: 0.72;
 }
@@ -21640,21 +21805,6 @@ button.gyro-settings-row em::after {
   display: none;
 }
 
-.gyro-chat-run-step {
-  display: grid;
-  gap: 0;
-  grid-template-columns: minmax(0, 1fr);
-  position: relative;
-}
-
-.gyro-chat-run-step-time {
-  display: none;
-}
-
-.gyro-chat-run-step-body {
-  min-width: 0;
-}
-
 .gyro-chat-run-timeline.is-narration > .gyro-message.is-assistant {
   animation: none;
   margin: 0;
@@ -21688,44 +21838,12 @@ button.gyro-settings-row em::after {
   margin: 0;
 }
 
-.gyro-chat-run-commentary {
-  animation: gyro-chat-content-reveal 220ms ease both;
-  color: var(--gyro-text);
-  font-size: 14px;
-  line-height: 1.58;
-  margin: 0;
-  max-width: 920px;
-}
-
 .gyro-chat-run-commentary p {
   margin: 0;
 }
 
 .gyro-chat-run-commentary p + p {
   margin-top: 9px;
-}
-
-.gyro-chat-run-activity-group {
-  display: grid;
-  gap: 5px;
-  max-width: 920px;
-}
-
-.gyro-chat-run-activity-group-toggle {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--gyro-faint);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 13px;
-  font-weight: 450;
-  gap: 6px;
-  justify-content: start;
-  letter-spacing: -0.01em;
-  line-height: 1.4;
-  min-height: 26px;
-  padding: 2px 0;
 }
 
 .gyro-chat-run-activity-group-toggle > small {
@@ -21738,89 +21856,8 @@ button.gyro-settings-row em::after {
   content: "· ";
 }
 
-.gyro-chat-run-activity-group-toggle:hover {
-  color: var(--gyro-text);
-}
-
-.gyro-chat-run-activity-group-items {
-  display: grid;
-  gap: 1px;
-  padding-left: 23px;
-}
-
-.gyro-chat-run-activity-group-items .gyro-chat-run-activity {
-  grid-template-columns: 14px minmax(0, 1fr) 14px;
-  max-width: 900px;
-  width: 100%;
-}
-
-.gyro-chat-run-activity-group-more {
-  color: var(--gyro-faint);
-  font-size: 11px;
-  line-height: 18px;
-  padding: 3px 0 2px 22px;
-}
-
-.gyro-chat-run-live-files-review {
-  background: transparent;
-  border: 0;
-  color: var(--gyro-faint);
-  cursor: pointer;
-  font-size: 12px;
-  justify-self: start;
-  margin-left: 23px;
-  padding: 4px 0;
-}
-
-.gyro-chat-run-live-files-review:hover {
-  color: var(--gyro-text);
-}
-
-.gyro-chat-run-activity {
-  animation: gyro-chat-content-reveal 200ms ease both;
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--gyro-faint);
-  display: grid;
-  font-size: 13px;
-  font-weight: 450;
-  gap: 7px;
-  grid-template-columns: 14px minmax(0, auto) 14px;
-  justify-content: start;
-  letter-spacing: -0.01em;
-  min-height: 26px;
-  padding: 2px 0;
-  text-align: left;
-}
-
-.gyro-chat-run-activity:nth-child(2) {
-  animation-delay: 45ms;
-}
-
-.gyro-chat-run-activity:nth-child(3) {
-  animation-delay: 90ms;
-}
-
-.gyro-chat-run-activity:nth-child(4) {
-  animation-delay: 135ms;
-}
-
-.gyro-chat-run-activity:hover {
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  color: var(--gyro-muted);
-}
-
 .gyro-chat-run-activity.is-running svg:last-child {
   animation: gyro-chat-activity-spin 1s linear infinite;
-}
-
-.gyro-chat-run-activity.is-file {
-  cursor: pointer;
-  grid-template-columns: 14px minmax(0, 1fr) auto 14px;
-  max-width: min(100%, 680px);
-  width: 100%;
 }
 
 .gyro-chat-run-activity.is-file > span {
@@ -21874,19 +21911,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-danger);
 }
 
-.gyro-chat-run-change-summary {
-  align-self: stretch;
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 10px;
-  color: var(--gyro-muted);
-  display: block;
-  font-size: 12px;
-  margin: 16px 0 2px;
-  overflow: hidden;
-  width: 100%;
-}
-
 .gyro-chat-run-change-summary > header {
   align-items: center;
   display: grid;
@@ -21894,17 +21918,6 @@ button.gyro-settings-row em::after {
   grid-template-columns: 34px minmax(0, 1fr) auto;
   min-height: 62px;
   padding: 10px 11px;
-}
-
-.gyro-change-summary-icon {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-app) 66%, transparent);
-  border-radius: 8px;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 34px;
-  justify-content: center;
-  width: 34px;
 }
 
 .gyro-chat-run-change-summary > header > div {
@@ -21923,12 +21936,6 @@ button.gyro-settings-row em::after {
   color: var(--gyro-faint);
 }
 
-.gyro-change-summary-actions {
-  align-items: center;
-  display: flex !important;
-  gap: 6px !important;
-}
-
 .gyro-change-summary-actions > button {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   border: 1px solid var(--gyro-premium-hairline-strong);
@@ -21941,11 +21948,6 @@ button.gyro-settings-row em::after {
 
 .gyro-change-summary-actions > button:hover {
   background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
-}
-
-.gyro-change-summary-files {
-  border-top: 1px solid var(--gyro-premium-hairline-strong);
-  display: grid;
 }
 
 .gyro-change-summary-file > button {
@@ -21988,28 +21990,6 @@ button.gyro-settings-row em::after {
   flex: 0 0 auto;
 }
 
-.gyro-change-summary-diff {
-  background: color-mix(in srgb, var(--gyro-app) 72%, #000);
-  border-bottom: 1px solid var(--gyro-premium-hairline-strong);
-}
-
-.gyro-change-summary-file:last-child .gyro-change-summary-diff {
-  border-bottom: 0;
-}
-
-.gyro-change-summary-diff-scroll {
-  max-height: min(420px, 48vh);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
-.gyro-change-summary-diff-scroll:focus-visible {
-  box-shadow: inset 0 0 0 2px
-    color-mix(in srgb, var(--gyro-premium-accent) 48%, transparent);
-  outline: 0;
-}
-
 .gyro-change-summary-diff-scroll code {
   display: block;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -22045,30 +22025,8 @@ button.gyro-settings-row em::after {
   color: var(--gyro-faint);
 }
 
-.gyro-change-summary-diff-status {
-  color: var(--gyro-muted);
-  min-height: 72px;
-  padding: 18px 12px;
-}
-
-.gyro-change-summary-diff-status.is-error {
-  color: var(--gyro-danger);
-}
-
-:root[data-theme="light"] .gyro-chat-run-change-summary {
-  background: #ffffff;
-  border-color: rgba(31, 41, 55, 0.16);
-  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.07);
-}
-
 :root[data-theme="light"] .gyro-chat-run-change-summary > header {
   background: linear-gradient(180deg, #ffffff, #f8fafc);
-}
-
-:root[data-theme="light"] .gyro-change-summary-icon {
-  background: #edf2f7;
-  box-shadow: inset 0 0 0 1px rgba(31, 41, 55, 0.06);
-  color: #526173;
 }
 
 :root[data-theme="light"] .gyro-change-summary-actions > button {
@@ -22086,10 +22044,6 @@ button.gyro-settings-row em::after {
   border-color: #aeb9c7;
 }
 
-:root[data-theme="light"] .gyro-change-summary-files {
-  border-top-color: #d6dde6;
-}
-
 :root[data-theme="light"] .gyro-change-summary-file > button {
   background: #fbfcfd;
   border-bottom-color: #e1e6ed;
@@ -22104,12 +22058,6 @@ button.gyro-settings-row em::after {
   > button {
   background: #eef2f6;
   border-bottom-color: #d6dde6;
-}
-
-:root[data-theme="light"] .gyro-change-summary-diff {
-  background: #f8fafc;
-  border-bottom-color: #d6dde6;
-  box-shadow: inset 0 1px 0 rgba(31, 41, 55, 0.04);
 }
 
 :root[data-theme="light"] .gyro-change-summary-diff-scroll code {
@@ -22145,13 +22093,6 @@ button.gyro-settings-row em::after {
   to {
     transform: rotate(360deg);
   }
-}
-
-.gyro-chat-run-thinking {
-  animation: gyro-chat-content-reveal 180ms ease 80ms both;
-  color: var(--gyro-faint);
-  font-size: 12px;
-  padding: 10px 0 3px;
 }
 
 .gyro-chat-run-timeline > .gyro-message.is-assistant {
@@ -22311,18 +22252,6 @@ button.gyro-settings-row em::after {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.gyro-chat-run-error {
-  align-items: start;
-  border-top: 1px solid color-mix(in srgb, var(--gyro-danger) 32%, transparent);
-  color: var(--gyro-danger);
-  display: flex;
-  font-size: 12px;
-  gap: 12px;
-  justify-content: space-between;
-  margin-top: 12px;
-  padding-top: 10px;
 }
 
 .gyro-chat-run-error strong,
@@ -22560,12 +22489,6 @@ button.gyro-settings-row em::after {
   background: rgba(255, 138, 61, 0.12);
   border-color: rgba(255, 138, 61, 0.24);
   color: #ff8a3d;
-}
-
-/* Keep the run action attached to its status line. */
-.gyro-chat-run-header .gyro-chat-run-controls {
-  margin-left: auto;
-  min-height: 24px;
 }
 
 .gyro-chat-run-header .gyro-chat-run-controls button {
@@ -22916,29 +22839,6 @@ button.gyro-account-menu-row:hover,
   width: fit-content;
 }
 
-.gyro-chat-run-toggle {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  display: inline-flex;
-  font: inherit;
-  gap: 5px;
-  min-height: 28px;
-  padding: 0;
-  text-align: left;
-}
-
-.gyro-chat-run-toggle:hover {
-  color: var(--gyro-muted);
-}
-
-.gyro-chat-run-toggle:focus-visible {
-  border-radius: 4px;
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 3px;
-}
-
 .gyro-chat-run-timeline.is-thought-process {
   overflow: hidden;
 }
@@ -23048,17 +22948,6 @@ button.gyro-account-menu-row:hover,
   pointer-events: auto;
 }
 
-.gyro-chat-run-work {
-  border-bottom-color: #303030;
-}
-
-.gyro-chat-run-header {
-  color: #a1a1a1;
-  font-size: 14px;
-  min-height: 36px;
-  padding: 0 0 7px;
-}
-
 :root[data-theme="dark"] .gyro-chat-surface:not(.is-empty),
 :root[data-theme="dark"] .gyro-chat-thread-canvas,
 :root[data-theme="dark"] .gyro-chat-transcript,
@@ -23074,10 +22963,6 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="light"] .gyro-user-message-meta,
 :root[data-theme="light"] .gyro-chat-run-header {
   color: #777777;
-}
-
-:root[data-theme="light"] .gyro-chat-run-work {
-  border-bottom-color: #d8d8d8;
 }
 
 /* Screenshot-driven chat surface corrections. */
@@ -23976,20 +23861,6 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-start .gyro-composer-shell.is-hero.has-provider > textarea {
   font-size: 14px;
   line-height: 20px;
-}
-
-.gyro-chat-run-commentary {
-  font-size: 14px;
-  line-height: 21px;
-}
-
-.gyro-chat-run-activity {
-  font-size: 13px;
-  line-height: 18px;
-}
-
-.gyro-chat-run-change-summary {
-  font-size: 13px;
 }
 
 .gyro-chat-run-change-summary > header strong {
@@ -26849,11 +26720,6 @@ button.gyro-account-menu-row:hover,
   margin-bottom: 14px;
 }
 
-.gyro-chat-surface.is-tiled .gyro-chat-run-error {
-  margin-top: 8px;
-  padding-top: 8px;
-}
-
 /* -- Composer ------------------------------------------------------------- */
 
 .gyro-chat-surface.is-tiled
@@ -28452,4 +28318,264 @@ button.gyro-account-menu-row:hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ==========================================================================
+   Run rail (gyro-run-*)
+   --------------------------------------------------------------------------
+   The rebuilt in-chat run timeline: a flat list of beats, no timestamps, no
+   grouping, no cards. Every value is a --gyro-* token so light mode falls out
+   of the token flip at :root[data-theme="light"]. The single light override at
+   the end of this block is optical, not chromatic — a second one means
+   something in here went off-token.
+   ========================================================================== */
+
+.gyro-run {
+  min-width: 0;
+  width: 100%;
+}
+
+.gyro-run-header {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: 12px;
+  font-weight: 450;
+  gap: 5px;
+  letter-spacing: -0.01em;
+  min-height: 28px;
+  padding: 0 0 2px;
+}
+
+.gyro-run-header-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 5px;
+  padding: 0;
+}
+
+.gyro-run-header-toggle:hover {
+  color: var(--gyro-muted);
+}
+
+.gyro-run-rail {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gyro-run-row-item {
+  position: relative;
+}
+
+/* The connector lives in the icon column and stops short of the last row, so
+   the list reads as a spine rather than a bordered container. */
+.gyro-run-row-item:not(:last-child)::after {
+  background: var(--gyro-premium-hairline-strong);
+  bottom: 0;
+  content: "";
+  left: 9px;
+  position: absolute;
+  top: 26px;
+  width: 1px;
+}
+
+.gyro-run-row {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: inherit;
+  display: grid;
+  font: inherit;
+  gap: 12px;
+  grid-template-columns: 19px minmax(0, 1fr);
+  padding: 7px 0;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-run-row.is-actionable {
+  cursor: pointer;
+}
+
+.gyro-run-row-icon {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: flex;
+  height: 15px;
+  justify-content: center;
+  opacity: 0.85;
+  /* Nudge the icon onto the text baseline without leaving the grid row. */
+  transform: translateY(2px);
+}
+
+.gyro-run-row-text {
+  align-items: baseline;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.gyro-run-row-label {
+  color: var(--gyro-muted);
+  flex: none;
+  font-size: 14px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+}
+
+/* A work label is two or three words and must never wrap away from its
+   description. Narration is a whole sentence, so it is the one label allowed to
+   shrink and run onto a second line instead of off the edge of the thread. */
+.gyro-run-row.is-say .gyro-run-row-label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.gyro-run-row-detail {
+  color: var(--gyro-faint);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-run-row.is-failed .gyro-run-row-label,
+.gyro-run-row.is-failed .gyro-run-row-icon {
+  color: var(--gyro-danger);
+}
+
+.gyro-run-row-stat {
+  display: flex;
+  flex: none;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  gap: 6px;
+}
+
+.gyro-run-row-stat em {
+  font-style: normal;
+}
+
+.gyro-run-row-stat .is-added {
+  color: var(--gyro-success);
+}
+
+.gyro-run-row-stat .is-removed {
+  color: var(--gyro-danger);
+}
+
+.gyro-run-row.is-running .gyro-run-row-icon {
+  animation: gyro-run-breathe 1.6s ease-in-out infinite;
+}
+
+.gyro-run-row:hover .gyro-run-row-detail {
+  color: var(--gyro-muted);
+}
+
+.gyro-run-pulse {
+  animation: gyro-run-breathe 1.6s ease-in-out infinite;
+  color: var(--gyro-faint);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  padding: 7px 0 7px 31px;
+}
+
+.gyro-run-problem {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 0 4px 31px;
+}
+
+.gyro-run-problem-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gyro-run-problem-text strong {
+  color: var(--gyro-danger);
+  font-size: 13px;
+  font-weight: 520;
+}
+
+.gyro-run-problem-text span {
+  color: var(--gyro-faint);
+  font-size: 13px;
+}
+
+.gyro-run-problem-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.gyro-run-problem-actions button {
+  background: none;
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 7px;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.gyro-run-problem-actions button:hover {
+  border-color: var(--gyro-premium-hairline-strong);
+  color: var(--gyro-text);
+}
+
+@keyframes gyro-run-breathe {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-run-row.is-running .gyro-run-row-icon,
+  .gyro-run-pulse {
+    animation: none;
+  }
+}
+
+/* The one legitimate per-theme value: low-opacity dark-on-light goes muddy
+   where light-on-dark stays crisp, so only the icon dimming is asymmetric. */
+:root[data-theme="light"] .gyro-run-row-icon {
+  opacity: 1;
+}
+
+.gyro-run-header-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.gyro-run-header-actions button {
+  background: none;
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: 7px;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+}
+
+.gyro-run-header-actions button:hover {
+  color: var(--gyro-text);
 }

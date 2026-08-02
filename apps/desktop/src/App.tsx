@@ -10090,6 +10090,155 @@ export function App() {
     }
   }, [notify, workbench.browserPreview.url]);
 
+  const sessionBrowserKey =
+    activeSessionId ??
+    (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
+  const sessionBrowserWorkspaceKey =
+    activeSession?.workspacePath ?? activeWorkspaceRoot ?? workspacePath ?? "";
+  const browserNativeHost = isTauriRuntime();
+  const browserOverlayOccluded =
+    isCommandPaletteOpen || Boolean(modelStandardPrompt);
+
+  const ensureSessionBrowser = useCallback(
+    async (url: string, bounds?: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    } | null) => {
+      if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
+        return;
+      }
+      try {
+        await invoke("session_browser_open", {
+          request: {
+            sessionId: sessionBrowserKey,
+            workspaceKey: sessionBrowserWorkspaceKey,
+            url: normalizedPreviewUrl(url),
+            bounds: bounds ?? undefined,
+            visible: bounds != null,
+          },
+        });
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "ready",
+          message: `Native · ${normalizedPreviewUrl(url)}`,
+          nativeHost: true,
+        });
+      } catch (error) {
+        notify("command-failed", "Browser open failed", String(error));
+      }
+    },
+    [notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
+  );
+
+  const handleBrowserHostBoundsChange = useCallback(
+    async (
+      bounds: { x: number; y: number; width: number; height: number } | null,
+    ) => {
+      if (!isTauriRuntime()) return;
+      try {
+        if (!bounds || browserOverlayOccluded) {
+          await invoke("session_browser_set_visible", {
+            sessionId: sessionBrowserKey,
+            visible: false,
+          });
+          return;
+        }
+        await invoke("session_browser_set_bounds", {
+          sessionId: sessionBrowserKey,
+          bounds,
+        });
+        await invoke("session_browser_set_visible", {
+          sessionId: sessionBrowserKey,
+          visible: true,
+        });
+      } catch {
+        // Webview may not exist yet until the first navigate/open.
+      }
+    },
+    [browserOverlayOccluded, sessionBrowserKey],
+  );
+
+  const handleBrowserNavigate = useCallback(
+    (url: string) => {
+      const next = normalizedPreviewUrl(url);
+      dispatchWorkbench({ type: "browser-navigate", url: next });
+      void ensureSessionBrowser(next);
+    },
+    [ensureSessionBrowser],
+  );
+
+  const handleBrowserBack = useCallback(() => {
+    dispatchWorkbench({ type: "browser-back" });
+    if (isTauriRuntime()) {
+      void invoke("session_browser_history", {
+        sessionId: sessionBrowserKey,
+        direction: "back",
+      }).catch(() => undefined);
+    }
+  }, [sessionBrowserKey]);
+
+  const handleBrowserForward = useCallback(() => {
+    dispatchWorkbench({ type: "browser-forward" });
+    if (isTauriRuntime()) {
+      void invoke("session_browser_history", {
+        sessionId: sessionBrowserKey,
+        direction: "forward",
+      }).catch(() => undefined);
+    }
+  }, [sessionBrowserKey]);
+
+  const handleBrowserReload = useCallback(() => {
+    dispatchWorkbench({ type: "browser-reload" });
+    if (isTauriRuntime()) {
+      void invoke("session_browser_reload", {
+        sessionId: sessionBrowserKey,
+      }).catch(() => undefined);
+    }
+  }, [sessionBrowserKey]);
+
+  const toggleBrowserPanel = useCallback(() => {
+    dispatchWorkbench({ type: "toggle-chat-browser" });
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: Promise<(() => void) | undefined> = Promise.resolve(undefined);
+    try {
+      unlisten = listen<{ sessionId: string; url: string }>(
+        "session-browser-opened",
+        (event) => {
+          if (event.payload.sessionId !== activeSessionId) return;
+          dispatchWorkbench({
+            type: "browser-navigate",
+            url: event.payload.url,
+          });
+          dispatchWorkbench({ type: "set-chat-panel", panel: "browser" });
+          dispatchWorkbench({
+            type: "browser-status",
+            status: "ready",
+            message: `Native · ${event.payload.url}`,
+            nativeHost: true,
+          });
+        },
+      );
+    } catch {
+      unlisten = Promise.resolve(undefined);
+    }
+    return () => {
+      void unlisten.then((dispose) => dispose?.());
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !browserOverlayOccluded) return;
+    void invoke("session_browser_set_visible", {
+      sessionId: sessionBrowserKey,
+      visible: false,
+    }).catch(() => undefined);
+  }, [browserOverlayOccluded, sessionBrowserKey]);
+
   const captureBrowserPreview = useCallback(
     async (action: "capture" | "reveal" = "capture") => {
       if (action === "reveal") {
@@ -10116,15 +10265,41 @@ export function App() {
         return;
       }
       try {
-        const capture = await invoke<BrowserPreviewCapture>(
-          "capture_browser_preview",
-          {
-            request: {
-              device: workbench.browserPreview.device,
-              url: normalizedPreviewUrl(workbench.browserPreview.url),
+        // Prefer the live session webview; fall back to ephemeral loopback capture.
+        let capture: BrowserPreviewCapture | undefined;
+        try {
+          const snapshot = await invoke<{ url: string } | null>(
+            "session_browser_snapshot",
+            { sessionId: sessionBrowserKey },
+          );
+          if (snapshot) {
+            // Session screenshot is handled through the capability path for models;
+            // user-triggered capture still uses the existing loopback command when
+            // possible, otherwise navigates the live browser and reuses capture.
+            capture = await invoke<BrowserPreviewCapture>(
+              "capture_browser_preview",
+              {
+                request: {
+                  device: workbench.browserPreview.device,
+                  url: normalizedPreviewUrl(workbench.browserPreview.url),
+                },
+              },
+            );
+          }
+        } catch {
+          capture = undefined;
+        }
+        if (!capture) {
+          capture = await invoke<BrowserPreviewCapture>(
+            "capture_browser_preview",
+            {
+              request: {
+                device: workbench.browserPreview.device,
+                url: normalizedPreviewUrl(workbench.browserPreview.url),
+              },
             },
-          },
-        );
+          );
+        }
         dispatchWorkbench({
           type: "browser-capture-success",
           capture,
@@ -10140,6 +10315,7 @@ export function App() {
     },
     [
       notify,
+      sessionBrowserKey,
       workbench.browserPreview.device,
       workbench.browserPreview.latestCapture?.path,
       workbench.browserPreview.url,
@@ -10152,6 +10328,26 @@ export function App() {
     const timeout = window.setTimeout(() => controller.abort(), 4_000);
     let disposed = false;
     const url = normalizedPreviewUrl(workbench.browserPreview.url);
+
+    // Native host navigates itself; mark ready without the loopback-only probe.
+    if (isTauriRuntime() && browserNativeHost) {
+      void ensureSessionBrowser(url).finally(() => {
+        if (disposed) return;
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "ready",
+          message: `Native · ${url}`,
+          nativeHost: true,
+          diagnosticsSupported: true,
+          diagnosticsCaptured: false,
+        });
+      });
+      return () => {
+        disposed = true;
+        window.clearTimeout(timeout);
+        controller.abort();
+      };
+    }
 
     const verification = isTauriRuntime()
       ? invoke<BrowserPreviewCheck>("check_browser_preview", {
@@ -10214,7 +10410,12 @@ export function App() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [workbench.browserPreview.status, workbench.browserPreview.url]);
+  }, [
+    browserNativeHost,
+    ensureSessionBrowser,
+    workbench.browserPreview.status,
+    workbench.browserPreview.url,
+  ]);
 
   const createTask = useCallback(() => {
     const metadata = workspaceRunMetadata(
@@ -12013,6 +12214,8 @@ export function App() {
       activePaneTab={workbench.activePaneTab}
       activeProfileId={activeProfileId}
       browserPreview={workbench.browserPreview}
+      browserNativeHost={browserNativeHost}
+      browserOverlayOccluded={browserOverlayOccluded}
       cliLaunchPreset={workbench.preferences.cliLaunchPreset}
       diffReview={workbench.diffReview}
       terminalSourceControl={selectedTerminalSourceControl}
@@ -12041,16 +12244,15 @@ export function App() {
         })
       }
       onAddTerminalPane={addTerminalPane}
-      onBrowserBack={() => dispatchWorkbench({ type: "browser-back" })}
+      onBrowserBack={handleBrowserBack}
       onBrowserDeviceChange={(device) =>
         dispatchWorkbench({ type: "browser-device", device })
       }
-      onBrowserForward={() => dispatchWorkbench({ type: "browser-forward" })}
-      onBrowserNavigate={(url) =>
-        dispatchWorkbench({ type: "browser-navigate", url })
-      }
+      onBrowserForward={handleBrowserForward}
+      onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+      onBrowserNavigate={handleBrowserNavigate}
       onBrowserOpenExternal={openBrowserPreviewExternal}
-      onBrowserReload={() => dispatchWorkbench({ type: "browser-reload" })}
+      onBrowserReload={handleBrowserReload}
       onBrowserScreenshot={captureBrowserPreview}
       onBrowserUrlChange={(url) =>
         dispatchWorkbench({ type: "set-browser-url", url })
@@ -12253,6 +12455,22 @@ export function App() {
       <ChatSurface
         activeChatPanel={panePanel}
         browserPreview={workbench.browserPreview}
+        browserNativeHost={browserNativeHost}
+        browserOverlayOccluded={browserOverlayOccluded}
+        onBrowserBack={handleBrowserBack}
+        onBrowserDeviceChange={(device) =>
+          dispatchWorkbench({ type: "browser-device", device })
+        }
+        onBrowserForward={handleBrowserForward}
+        onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+        onBrowserNavigate={handleBrowserNavigate}
+        onBrowserOpenExternal={openBrowserPreviewExternal}
+        onBrowserReload={handleBrowserReload}
+        onBrowserScreenshot={captureBrowserPreview}
+        onBrowserUrlChange={(url) =>
+          dispatchWorkbench({ type: "set-browser-url", url })
+        }
+        onToggleBrowserPanel={() => togglePanePanel("browser")}
         capabilityActivities={
           pane.kind === "session"
             ? Object.values(capabilityRunsBySessionId[pane.sessionId] ?? {})
@@ -12493,6 +12711,22 @@ export function App() {
       chatSwitcher={workspaceChatSwitcher}
       activeChatPanel={activeChatPanel}
       browserPreview={workbench.browserPreview}
+      browserNativeHost={browserNativeHost}
+      browserOverlayOccluded={browserOverlayOccluded}
+      onBrowserBack={handleBrowserBack}
+      onBrowserDeviceChange={(device) =>
+        dispatchWorkbench({ type: "browser-device", device })
+      }
+      onBrowserForward={handleBrowserForward}
+      onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
+      onBrowserNavigate={handleBrowserNavigate}
+      onBrowserOpenExternal={openBrowserPreviewExternal}
+      onBrowserReload={handleBrowserReload}
+      onBrowserScreenshot={captureBrowserPreview}
+      onBrowserUrlChange={(url) =>
+        dispatchWorkbench({ type: "set-browser-url", url })
+      }
+      onToggleBrowserPanel={toggleBrowserPanel}
       capabilityPolicy={activeCapabilityPolicy}
       config={config}
       modelFocus={

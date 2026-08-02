@@ -7,6 +7,7 @@ export type {
   AutomationTriageState,
   CommandProfile,
   AppDestination,
+  BrowserHostBounds,
   BrowserPreview,
   BrowserPreviewCapture,
   BrowserPreviewCaptureStatus,
