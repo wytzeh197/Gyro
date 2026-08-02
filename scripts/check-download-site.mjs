@@ -139,6 +139,7 @@ containsAll(headers, "Cloudflare Pages headers", [
   "Content-Security-Policy:",
   "Permissions-Policy:",
   "Referrer-Policy: same-origin",
+  "Strict-Transport-Security: max-age=",
   "X-Content-Type-Options: nosniff",
   "X-Frame-Options: DENY",
 ]);
