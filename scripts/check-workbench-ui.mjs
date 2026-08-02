@@ -4448,6 +4448,16 @@ expect(
     /\.gyro-chat-composer-dock \.gyro-composer-shell\.is-hero\.has-provider\s*\{[\s\S]*?max-width:\s*var\(--gyro-chat-content-width\);[\s\S]*?width:\s*min\(100%,\s*var\(--gyro-chat-content-width\)\);/.test(
       styleSource,
     ) &&
+    // Alpha 34.1: dock must stretch (not center) so the shell cannot collapse
+    // to a one-character column under size containment.
+    cssRules(styleSource, ".gyro-chat-composer-dock").some(
+      (rule) =>
+        rule.includes("align-items: stretch") && rule.includes("width: 100%"),
+    ) &&
+    styleSource.includes("min-width: min(100%, 280px)") &&
+    cssRules(styleSource, ".gyro-chat-thread-canvas").some((rule) =>
+      rule.includes("grid-template-rows: minmax(0, 1fr) auto"),
+    ) &&
     surfaceSource.includes("!event.shiftKey") &&
     surfaceSource.includes("event.preventDefault()") &&
     styleSource.includes("--gyro-chat-content-width: 772px") &&
