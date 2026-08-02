@@ -1146,6 +1146,38 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    /// Turns whose durable status is still `running`.
+    ///
+    /// Called at startup, where nothing can legitimately be in flight yet, so
+    /// every row this returns belongs to a run that died with its process. The
+    /// status is what [`latest_provider_status_for_turn`] reads to refuse a
+    /// second attempt on the same turn, so a row left behind by a crash or a
+    /// force-quit blocks that turn's retry for the rest of the session's life.
+    ///
+    /// [`latest_provider_status_for_turn`]: Self::latest_provider_status_for_turn
+    pub fn list_running_turns(&self) -> Result<Vec<(Uuid, Uuid)>> {
+        let mut statement = self.conn.prepare(
+            "select session_id, turn_id from session_turn_status
+             where status = 'running'
+             order by updated_at asc",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut turns = Vec::new();
+        for row in rows {
+            let (session_id, turn_id) = row?;
+            // A row whose ids no longer parse cannot be matched to a session,
+            // and there is nothing useful to do with it but skip it.
+            if let (Ok(session_id), Ok(turn_id)) =
+                (Uuid::parse_str(&session_id), Uuid::parse_str(&turn_id))
+            {
+                turns.push((session_id, turn_id));
+            }
+        }
+        Ok(turns)
+    }
+
     pub fn append_system_events_with_turn_id(
         &self,
         session_id: Uuid,

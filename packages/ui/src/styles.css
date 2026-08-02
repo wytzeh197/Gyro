@@ -11268,6 +11268,35 @@ textarea:focus-visible {
   top: auto !important;
 }
 
+/* Inside the Workspace AI sidebar there is no room to the right of the
+   provider list — the panel clips its overflow, so a right-docked flyout was
+   sliced in half by the editor beside it. Dock to the left instead. */
+.gyro-provider-picker[data-flyout-side="left"] .gyro-provider-model-flyout {
+  left: auto !important;
+  margin-left: 0;
+  margin-right: 2px;
+  right: 100% !important;
+}
+
+/* Narrower still than list plus flyout side by side (the AI sidebar is ~220px
+   against ~334px needed). Stack the models past the provider list at the
+   list's own width, on whichever side has the vertical room. */
+.gyro-provider-picker[data-flyout-side="stacked"] .gyro-provider-model-flyout {
+  bottom: auto !important;
+  left: 0 !important;
+  margin: 2px 0 0;
+  right: 0 !important;
+  top: 100% !important;
+  width: auto !important;
+}
+
+.gyro-provider-picker[data-flyout-side="stacked"][data-flyout-vertical="up"]
+  .gyro-provider-model-flyout {
+  bottom: 100% !important;
+  margin: 0 0 2px;
+  top: auto !important;
+}
+
 /* Dense single-line model rows — same visual weight as provider rows. */
 .gyro-provider-model-flyout .gyro-composer-menu-item.is-model {
   align-self: start;
