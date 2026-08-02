@@ -9723,11 +9723,8 @@ fn check_browser_preview_blocking(
 fn browser_preview_diagnostics_supported(url: &url::Url) -> bool {
     // Diagnostics for the ephemeral capture webview stay loopback-only.
     // Session browser navigation uses session_browser::browser_url_is_navigable.
-    session_browser::browser_url_is_navigable(url)
-        && session_browser::browser_url_is_loopback(url)
+    session_browser::browser_url_is_navigable(url) && session_browser::browser_url_is_loopback(url)
 }
-
-
 
 fn browser_preview_capture_script(prefix: &str) -> Result<String, String> {
     let prefix = serde_json::to_string(prefix).map_err(to_string)?;
@@ -16554,16 +16551,17 @@ fn require_model_browser_resource(
             .browsers
             .lock()
             .map_err(|_| anyhow::anyhow!("browser capability state is unavailable"))?;
-        let resource = browsers
-            .entry(bound.session_id.clone())
-            .or_insert_with(|| ModelBrowserResource {
-                resource_id: snapshot.resource_id.clone(),
-                session_id: bound.session_id.clone(),
-                turn_id: bound.turn_id.clone(),
-                call_id: Uuid::new_v4(),
-                workspace_key: bound.workspace_key.clone(),
-                url: snapshot.url.clone(),
-            });
+        let resource =
+            browsers
+                .entry(bound.session_id.clone())
+                .or_insert_with(|| ModelBrowserResource {
+                    resource_id: snapshot.resource_id.clone(),
+                    session_id: bound.session_id.clone(),
+                    turn_id: bound.turn_id.clone(),
+                    call_id: Uuid::new_v4(),
+                    workspace_key: bound.workspace_key.clone(),
+                    url: snapshot.url.clone(),
+                });
         resource.url = snapshot.url.clone();
         resource.resource_id = snapshot.resource_id.clone();
         return Ok(resource.clone());
@@ -16652,10 +16650,9 @@ fn capability_grant_scope(
             )?)?,
         )),
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => {
-            let url = session_browser::parse_navigable_url(capability_argument_string(
-                arguments, "url",
-            )?)
-            .map_err(anyhow::Error::msg)?;
+            let url =
+                session_browser::parse_navigable_url(capability_argument_string(arguments, "url")?)
+                    .map_err(anyhow::Error::msg)?;
             let origin = url.origin().ascii_serialization();
             Ok(("origin".into(), origin))
         }
@@ -17468,11 +17465,10 @@ fn execute_provider_capability(
             )
         }
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => {
-            let url = session_browser::parse_navigable_url(capability_argument_string(
-                arguments, "url",
-            )?)
-            .map_err(anyhow::Error::msg)?
-            .to_string();
+            let url =
+                session_browser::parse_navigable_url(capability_argument_string(arguments, "url")?)
+                    .map_err(anyhow::Error::msg)?
+                    .to_string();
             let snapshot = session_browser::open_session_browser(
                 app,
                 session_browser::SessionBrowserOpenRequest {
@@ -17520,8 +17516,9 @@ fn execute_provider_capability(
             } else {
                 "forward"
             };
-            let snapshot = session_browser::history_session_browser(app, &bound.session_id, direction)
-                .map_err(anyhow::Error::msg)?;
+            let snapshot =
+                session_browser::history_session_browser(app, &bound.session_id, direction)
+                    .map_err(anyhow::Error::msg)?;
             remember_model_browser_resource(app, bound, owned.call_id, &snapshot)?;
             let resource = CapabilityResourceRef {
                 id: snapshot.resource_id,
@@ -17600,14 +17597,8 @@ fn execute_provider_capability(
                 .map_err(anyhow::Error::msg)?;
             let paths = GyroPaths::for_current_user().map_err(anyhow::Error::msg)?;
             let created_at = chrono::Utc::now();
-            let capture = persist_browser_preview_capture(
-                &paths,
-                &png,
-                0,
-                0,
-                created_at,
-            )
-            .map_err(anyhow::Error::msg)?;
+            let capture = persist_browser_preview_capture(&paths, &png, 0, 0, created_at)
+                .map_err(anyhow::Error::msg)?;
             let resource = CapabilityResourceRef {
                 id: owned.resource_id,
                 kind: "browser".into(),
