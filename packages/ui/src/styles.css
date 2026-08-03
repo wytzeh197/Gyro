@@ -7071,9 +7071,14 @@ textarea:focus-visible {
 }
 
 .gyro-chat-surface:has(.gyro-environment-rail),
-.gyro-chat-surface:has(.gyro-browser-rail),
 .gyro-chat-surface:has(.gyro-plan-rail) {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
+  gap: 12px;
+}
+
+/* Browser stays docked on the right; column width follows the rail's explicit size. */
+.gyro-chat-surface:has(.gyro-browser-rail) {
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
 }
 
@@ -7082,65 +7087,73 @@ textarea:focus-visible {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-border);
   border-radius: 20px;
+  box-sizing: border-box;
   color: var(--gyro-text);
   display: grid;
+  flex: 0 0 auto;
   grid-template-rows: auto minmax(0, 1fr);
+  max-width: min(72vw, 900px);
   min-height: 0;
-  min-width: 0;
+  min-width: 280px;
   overflow: hidden;
   padding: 12px;
   position: relative;
-  touch-action: none;
-  transition: box-shadow 120ms ease;
-  will-change: transform;
   z-index: 2;
 }
 
-.gyro-browser-rail.is-floating {
-  box-shadow:
-    0 22px 54px color-mix(in srgb, #000 28%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  z-index: 8;
-}
-
-.gyro-browser-rail.is-dragging {
-  cursor: grabbing;
+.gyro-browser-rail.is-resizing {
   user-select: none;
-  z-index: 12;
 }
 
-.gyro-browser-rail > header,
-.gyro-browser-rail-drag-handle {
+.gyro-browser-rail > header {
   align-items: center;
   color: var(--gyro-muted);
-  cursor: grab;
   display: flex;
   gap: 8px;
   justify-content: space-between;
   margin-bottom: 10px;
 }
 
-.gyro-browser-rail.is-dragging > header,
-.gyro-browser-rail.is-dragging .gyro-browser-rail-drag-handle {
-  cursor: grabbing;
+/* Left-edge drag handle: pull left to grow the panel into the transcript. */
+.gyro-browser-rail-resize-handle {
+  background: transparent;
+  border: 0;
+  bottom: 12px;
+  cursor: col-resize;
+  left: 0;
+  padding: 0;
+  position: absolute;
+  top: 12px;
+  touch-action: none;
+  width: 10px;
+  z-index: 3;
 }
 
-.gyro-browser-rail-header-actions {
-  align-items: center;
-  display: inline-flex;
-  gap: 4px;
+.gyro-browser-rail-resize-handle > span {
+  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  border-radius: 999px;
+  display: block;
+  height: 36px;
+  left: 3px;
+  opacity: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease;
+  width: 3px;
 }
 
-.gyro-browser-rail-grip {
-  align-items: center;
-  color: var(--gyro-faint);
-  display: inline-flex;
-  opacity: 0.7;
-  padding: 4px;
-}
-
-.gyro-browser-rail-drag-handle:hover .gyro-browser-rail-grip {
+.gyro-browser-rail-resize-handle:hover > span,
+.gyro-browser-rail.is-resizing .gyro-browser-rail-resize-handle > span,
+.gyro-browser-rail-resize-handle:focus-visible > span {
+  background: color-mix(in srgb, var(--gyro-accent, #7aa2ff) 70%, transparent);
   opacity: 1;
+}
+
+.gyro-browser-rail-resize-handle:focus-visible {
+  outline: none;
 }
 
 .gyro-browser-rail .gyro-browser-preview {
