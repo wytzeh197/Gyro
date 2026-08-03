@@ -7383,7 +7383,7 @@ function ChatSidePanel({
 
   if (activePanel === "browser") {
     return (
-      <DraggableBrowserRail
+      <ResizableBrowserRail
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded}
         browserPreview={browserPreview}
@@ -13047,11 +13047,31 @@ function renderDiffTreeNode({
   );
 }
 
+const BROWSER_RAIL_DEFAULT_WIDTH = 380;
+const BROWSER_RAIL_MIN_WIDTH = 280;
+const BROWSER_RAIL_MAX_WIDTH = 900;
+const BROWSER_RAIL_WIDTH_KEY = "gyro.chat.browserRailWidth";
+
+function readBrowserRailWidth(): number {
+  if (typeof window === "undefined") {
+    return BROWSER_RAIL_DEFAULT_WIDTH;
+  }
+  const raw = window.localStorage.getItem(BROWSER_RAIL_WIDTH_KEY);
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return BROWSER_RAIL_DEFAULT_WIDTH;
+  }
+  return Math.min(
+    BROWSER_RAIL_MAX_WIDTH,
+    Math.max(BROWSER_RAIL_MIN_WIDTH, parsed),
+  );
+}
+
 /**
- * Chat-side browser card. Drag the header to float it over the transcript so
- * it is not locked to the right rail column.
+ * Chat-side browser card, docked on the right. Drag the left edge to widen
+ * or narrow it (into the transcript), not to free-float the panel.
  */
-function DraggableBrowserRail({
+function ResizableBrowserRail({
   browserPreview,
   browserNativeHost,
   browserOverlayOccluded,
@@ -13083,23 +13103,26 @@ function DraggableBrowserRail({
   ) => void;
 }) {
   const railRef = useRef<HTMLElement | null>(null);
-  const [offset, setOffset] = useState<{ x: number; y: number } | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{
+  const [width, setWidth] = useState(readBrowserRailWidth);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeRef = useRef<{
     pointerId: number;
     startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
+    startWidth: number;
   } | null>(null);
 
-  const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
-    // Only primary button / touch; ignore interactive chrome inside the header.
+  const clampWidth = useCallback((value: number, parentWidth?: number) => {
+    // Leave the transcript at least ~280px; cap by viewport and hard max.
+    const parentCap =
+      parentWidth !== undefined
+        ? Math.max(BROWSER_RAIL_MIN_WIDTH, parentWidth - 280)
+        : BROWSER_RAIL_MAX_WIDTH;
+    const max = Math.min(BROWSER_RAIL_MAX_WIDTH, parentCap);
+    return Math.min(max, Math.max(BROWSER_RAIL_MIN_WIDTH, Math.round(value)));
+  }, []);
+
+  const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) {
-      return;
-    }
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("button, a, input, select, textarea, [role='button']")) {
       return;
     }
     const rail = railRef.current;
@@ -13107,88 +13130,113 @@ function DraggableBrowserRail({
       return;
     }
     event.preventDefault();
-    const originX = offset?.x ?? 0;
-    const originY = offset?.y ?? 0;
-    dragRef.current = {
+    event.stopPropagation();
+    resizeRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
-      startY: event.clientY,
-      originX,
-      originY,
+      startWidth: rail.getBoundingClientRect().width,
     };
-    setIsDragging(true);
-    rail.setPointerCapture(event.pointerId);
+    setIsResizing(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const onDragMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const drag = dragRef.current;
+  const onResizeMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = resizeRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
     }
-    const parent = railRef.current?.offsetParent as HTMLElement | null;
-    const rail = railRef.current;
-    if (!parent || !rail) {
-      return;
-    }
-    const parentRect = parent.getBoundingClientRect();
-    const railRect = rail.getBoundingClientRect();
-    const nextX = drag.originX + (event.clientX - drag.startX);
-    const nextY = drag.originY + (event.clientY - drag.startY);
-    // Keep at least 48px of the card inside the chat surface.
-    const minX = -(railRect.width - 48);
-    const maxX = parentRect.width - 48;
-    const minY = 0;
-    const maxY = Math.max(0, parentRect.height - 48);
-    setOffset({
-      x: Math.min(maxX, Math.max(minX, nextX)),
-      y: Math.min(maxY, Math.max(minY, nextY)),
-    });
+    // Handle is on the left edge: drag left → wider, drag right → narrower.
+    const parent = railRef.current?.parentElement;
+    const parentWidth = parent?.getBoundingClientRect().width;
+    const delta = drag.startX - event.clientX;
+    setWidth(clampWidth(drag.startWidth + delta, parentWidth));
   };
 
-  const endDrag = (event: ReactPointerEvent<HTMLElement>) => {
-    const drag = dragRef.current;
+  const endResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = resizeRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
     }
-    dragRef.current = null;
-    setIsDragging(false);
+    resizeRef.current = null;
+    setIsResizing(false);
     try {
-      railRef.current?.releasePointerCapture(event.pointerId);
+      event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
       // Capture may already be released.
     }
-    // Native webview host bounds track layout; transform moves the card
-    // without a ResizeObserver event, so nudge a re-measure.
+    const next = clampWidth(
+      railRef.current?.getBoundingClientRect().width ?? width,
+      railRef.current?.parentElement?.getBoundingClientRect().width,
+    );
+    setWidth(next);
+    try {
+      window.localStorage.setItem(BROWSER_RAIL_WIDTH_KEY, String(next));
+    } catch {
+      // Private mode / blocked storage — width still works for the session.
+    }
+    // Native webview host bounds track layout width.
     window.dispatchEvent(new Event("resize"));
   };
 
   return (
     <aside
       aria-label="Browser"
-      className={[
-        "gyro-browser-rail",
-        offset ? "is-floating" : "",
-        isDragging ? "is-dragging" : "",
-      ]
+      className={["gyro-browser-rail", isResizing ? "is-resizing" : ""]
         .filter(Boolean)
         .join(" ")}
       ref={railRef}
-      style={
-        offset
-          ? {
-              transform: `translate(${offset.x}px, ${offset.y}px)`,
-            }
-          : undefined
-      }
+      style={{ width }}
     >
-      <header
-        className="gyro-browser-rail-drag-handle"
-        onPointerCancel={endDrag}
-        onPointerDown={beginDrag}
-        onPointerMove={onDragMove}
-        onPointerUp={endDrag}
-        title="Drag to move browser"
+      <button
+        aria-label="Resize browser panel. Drag left to enlarge, right to shrink."
+        aria-orientation="vertical"
+        aria-valuemax={BROWSER_RAIL_MAX_WIDTH}
+        aria-valuemin={BROWSER_RAIL_MIN_WIDTH}
+        aria-valuenow={width}
+        className="gyro-browser-rail-resize-handle"
+        onKeyDown={(event) => {
+          const parentWidth =
+            railRef.current?.parentElement?.getBoundingClientRect().width;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            setWidth((current) => {
+              const next = clampWidth(current + 24, parentWidth);
+              try {
+                window.localStorage.setItem(
+                  BROWSER_RAIL_WIDTH_KEY,
+                  String(next),
+                );
+              } catch {
+                // ignore
+              }
+              return next;
+            });
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            setWidth((current) => {
+              const next = clampWidth(current - 24, parentWidth);
+              try {
+                window.localStorage.setItem(
+                  BROWSER_RAIL_WIDTH_KEY,
+                  String(next),
+                );
+              } catch {
+                // ignore
+              }
+              return next;
+            });
+          }
+        }}
+        onPointerCancel={endResize}
+        onPointerDown={beginResize}
+        onPointerMove={onResizeMove}
+        onPointerUp={endResize}
+        title="Drag to resize"
+        type="button"
       >
+        <span />
+      </button>
+      <header>
         <div className="gyro-chat-tool-title">
           <Globe2 aria-hidden="true" size={15} />
           <div>
@@ -13200,19 +13248,14 @@ function DraggableBrowserRail({
             </span>
           </div>
         </div>
-        <div className="gyro-browser-rail-header-actions">
-          <span aria-hidden="true" className="gyro-browser-rail-grip">
-            <GripVertical size={14} />
-          </span>
-          <button
-            aria-label="Close browser"
-            className="gyro-chat-tool-close"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={14} />
-          </button>
-        </div>
+        <button
+          aria-label="Close browser"
+          className="gyro-chat-tool-close"
+          onClick={onClose}
+          type="button"
+        >
+          <X size={14} />
+        </button>
       </header>
       <BrowserPreviewSurface
         browserPreview={browserPreview}
