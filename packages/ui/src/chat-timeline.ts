@@ -171,7 +171,9 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
   });
 }
 
-function isNarrationEvent(item: InterleavedChatTimelineItem) {
+function isNarrationEvent(
+  item: InterleavedChatTimelineItem,
+): item is Extract<InterleavedChatTimelineItem, { kind: "event" }> {
   return item.kind === "event" && item.event.kind === "assistant-message";
 }
 
