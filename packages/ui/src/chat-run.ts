@@ -1,5 +1,6 @@
 import {
   isOrphanAssistantFragment,
+  isTransientStatusGreeting,
   peelAssistantPreambleBlocks,
   structuredCommentaryBlocks,
 } from "./chat-commentary.ts";
@@ -159,7 +160,11 @@ export function buildRunModel(
     }
     if (event.kind === "assistant-message") {
       const text = event.message.trim();
-      if (text && !isOrphanAssistantFragment(text)) {
+      if (
+        text &&
+        !isOrphanAssistantFragment(text) &&
+        !isTransientStatusGreeting(text)
+      ) {
         steps.push({ kind: "say", id: event.id, at: event.createdAt, text });
       }
       continue;
@@ -171,7 +176,11 @@ export function buildRunModel(
   // say steps so they stay under "Worked for …" instead of the response body.
   for (const preamble of closing?.preambles ?? []) {
     const text = preamble.message.trim();
-    if (text && !isOrphanAssistantFragment(text)) {
+    if (
+      text &&
+      !isOrphanAssistantFragment(text) &&
+      !isTransientStatusGreeting(text)
+    ) {
       steps.push({
         kind: "say",
         id: preamble.id,
@@ -185,10 +194,39 @@ export function buildRunModel(
     phase: runPhase(steps, closing?.response, options),
     startedAt:
       options.startedAt ?? visible[0]?.createdAt ?? new Date(0).toISOString(),
-    steps,
+    steps: coalesceAdjacentToolSteps(steps),
     files,
     response: closing?.response,
   };
+}
+
+/**
+ * Consecutive updates for the same tool (running → done, or repeated capability
+ * calls with the same name) collapse to one rail row so the timeline does not
+ * stack five "Used tool" lines for one workspace-context lookup.
+ */
+function coalesceAdjacentToolSteps(steps: RunStep[]): RunStep[] {
+  const coalesced: RunStep[] = [];
+  for (const step of steps) {
+    const previous = coalesced.at(-1);
+    if (
+      step.kind === "work" &&
+      step.item.kind === "tool" &&
+      previous?.kind === "work" &&
+      previous.item.kind === "tool" &&
+      toolIdentity(previous.item) === toolIdentity(step.item)
+    ) {
+      // Keep the latest status/label (failed wins over done only if last).
+      coalesced[coalesced.length - 1] = step;
+      continue;
+    }
+    coalesced.push(step);
+  }
+  return coalesced;
+}
+
+function toolIdentity(item: Extract<WorkItem, { kind: "tool" }>): string {
+  return `${item.server ?? ""}::${item.tool}`.toLowerCase();
 }
 
 type ClosingResponse = {
@@ -560,7 +598,11 @@ export function runRowText(step: RunStep): RunRowText {
       if (isGenericProviderToolLabel(description)) {
         return { label: "Used tool" };
       }
-      return { label: "Used tool", description };
+      // Prefer a clean tool name as the primary label when we have one.
+      if (description && !isRawToolPayload(description)) {
+        return { label: description };
+      }
+      return { label: "Used tool" };
     }
   }
 }
@@ -570,30 +612,105 @@ export function isGenericProviderToolLabel(value: string): boolean {
   return /^[A-Za-z][\w.+-]*\s+tool$/i.test(value.trim());
 }
 
+function isRawToolPayload(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    /"tool_name"\s*:/.test(trimmed) ||
+    /"toolName"\s*:/.test(trimmed)
+  );
+}
+
 function fileVerb(status: WorkStatus) {
   if (status === "running") return "Editing file";
   return status === "failed" ? "Edit failed" : "Edited file";
 }
 
-/** `mcp__github__create_issue` → `{ server: "github", tool: "create issue" }` */
+/**
+ * `mcp__github__create_issue` → `{ server: "github", tool: "create issue" }`
+ * Also unwraps JSON payloads like `{"tool_name":"gyro_capabilities__…"}` that
+ * some providers put in the activity label.
+ */
 export function splitToolName(raw: string): { tool: string; server?: string } {
-  const trimmed = raw.trim();
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(trimmed);
-  if (mcp) {
+  const extracted = extractToolNameFromRaw(raw);
+  const trimmed = extracted.trim();
+  const mcp = /^(?:mcp__)?(.+?)__(.+)$/.exec(trimmed);
+  if (mcp && !trimmed.includes(" ")) {
+    const server = mcp[1] as string;
+    const tool = mcp[2] as string;
+    // gyro_capabilities__gyro_workspace_get_context → Workspace context
+    if (/^gyro_capabilities$/i.test(server) || /^gyro$/i.test(server)) {
+      return { tool: humanizeCapabilityTool(tool) };
+    }
     return {
-      server: humanizeToolSegment(mcp[1] as string),
-      tool: humanizeToolSegment(mcp[2] as string),
+      server: humanizeToolSegment(server.replace(/^gyro_capabilities$/i, "gyro")),
+      tool: humanizeToolSegment(tool),
     };
   }
-  const capability = /^gyro_capabilities__(.+)$/.exec(trimmed);
+  const capability = /^gyro_capabilities__(.+)$/i.exec(trimmed);
   if (capability) {
-    return { tool: humanizeToolSegment(capability[1] as string) };
+    return { tool: humanizeCapabilityTool(capability[1] as string) };
+  }
+  if (/^gyro_[a-z0-9_]+$/i.test(trimmed)) {
+    return { tool: humanizeCapabilityTool(trimmed) };
   }
   // A name that is already prose ("Read surfaces.tsx") is left alone; only
   // machine identifiers get their separators opened up.
   return /^[a-z][a-z0-9_-]*$/i.test(trimmed)
     ? { tool: humanizeToolSegment(trimmed) }
     : { tool: trimmed };
+}
+
+function extractToolNameFromRaw(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      for (const key of ["tool_name", "toolName", "name", "tool", "id"]) {
+        const value = parsed[key];
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+      }
+    } catch {
+      // Keep the original string when it is not valid JSON.
+    }
+  }
+  // Nested JSON-ish: tool_name":"foo"
+  const embedded =
+    /"tool_name"\s*:\s*"([^"]+)"/.exec(trimmed) ??
+    /"toolName"\s*:\s*"([^"]+)"/.exec(trimmed);
+  if (embedded?.[1]) {
+    return embedded[1];
+  }
+  return trimmed;
+}
+
+/** `gyro_workspace_get_context` → `Workspace context` */
+function humanizeCapabilityTool(value: string): string {
+  let name = value.trim();
+  name = name.replace(/^(?:gyro_capabilities__|mcp__gyro_capabilities__)/i, "");
+  name = name.replace(/^gyro_/i, "");
+  // Known short labels for the tools users see every turn.
+  const known: Record<string, string> = {
+    workspace_get_context: "Workspace context",
+    workspace_search: "Workspace search",
+    workspace_read_file: "Read file",
+    workspace_list: "List workspace",
+    browser_navigate: "Browser navigate",
+    browser_snapshot: "Browser snapshot",
+    terminal_run: "Run terminal",
+  };
+  if (known[name]) {
+    return known[name] as string;
+  }
+  const human = humanizeToolSegment(name);
+  // Capitalize first letter for a tidy rail label.
+  return human ? human.charAt(0).toUpperCase() + human.slice(1) : human;
 }
 
 function humanizeToolSegment(value: string) {
