@@ -7383,43 +7383,21 @@ function ChatSidePanel({
 
   if (activePanel === "browser") {
     return (
-      <aside className="gyro-browser-rail" aria-label="Browser">
-        <header>
-          <div className="gyro-chat-tool-title">
-            <Globe2 aria-hidden="true" size={15} />
-            <div>
-              <strong>Browser</strong>
-              <span>
-                {browserPreview?.title?.trim() ||
-                  browserPreview?.url ||
-                  "Session browser"}
-              </span>
-            </div>
-          </div>
-          <button
-            aria-label="Close browser"
-            className="gyro-chat-tool-close"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={14} />
-          </button>
-        </header>
-        <BrowserPreviewSurface
-          browserPreview={browserPreview}
-          nativeHost={browserNativeHost}
-          overlayOccluded={browserOverlayOccluded}
-          onBack={onBrowserBack}
-          onDeviceChange={onBrowserDeviceChange}
-          onForward={onBrowserForward}
-          onHostBoundsChange={onBrowserHostBoundsChange}
-          onNavigate={onBrowserNavigate}
-          onOpenExternal={onBrowserOpenExternal}
-          onReload={onBrowserReload}
-          onScreenshot={onBrowserScreenshot}
-          onUrlChange={onBrowserUrlChange}
-        />
-      </aside>
+      <DraggableBrowserRail
+        browserNativeHost={browserNativeHost}
+        browserOverlayOccluded={browserOverlayOccluded}
+        browserPreview={browserPreview}
+        onBrowserBack={onBrowserBack}
+        onBrowserDeviceChange={onBrowserDeviceChange}
+        onBrowserForward={onBrowserForward}
+        onBrowserHostBoundsChange={onBrowserHostBoundsChange}
+        onBrowserNavigate={onBrowserNavigate}
+        onBrowserOpenExternal={onBrowserOpenExternal}
+        onBrowserReload={onBrowserReload}
+        onBrowserScreenshot={onBrowserScreenshot}
+        onBrowserUrlChange={onBrowserUrlChange}
+        onClose={onClose}
+      />
     );
   }
 
@@ -13066,6 +13044,191 @@ function renderDiffTreeNode({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Chat-side browser card. Drag the header to float it over the transcript so
+ * it is not locked to the right rail column.
+ */
+function DraggableBrowserRail({
+  browserPreview,
+  browserNativeHost,
+  browserOverlayOccluded,
+  onClose,
+  onBrowserBack,
+  onBrowserForward,
+  onBrowserReload,
+  onBrowserUrlChange,
+  onBrowserNavigate,
+  onBrowserDeviceChange,
+  onBrowserScreenshot,
+  onBrowserOpenExternal,
+  onBrowserHostBoundsChange,
+}: {
+  browserPreview?: BrowserPreview;
+  browserNativeHost?: boolean;
+  browserOverlayOccluded?: boolean;
+  onClose?: () => void;
+  onBrowserBack?: () => void;
+  onBrowserForward?: () => void;
+  onBrowserReload?: () => void;
+  onBrowserUrlChange?: (url: string) => void;
+  onBrowserNavigate?: (url: string) => void;
+  onBrowserDeviceChange?: (device: BrowserPreviewDevice) => void;
+  onBrowserScreenshot?: (action?: BrowserScreenshotAction) => void;
+  onBrowserOpenExternal?: () => void;
+  onBrowserHostBoundsChange?: (
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ) => void;
+}) {
+  const railRef = useRef<HTMLElement | null>(null);
+  const [offset, setOffset] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    // Only primary button / touch; ignore interactive chrome inside the header.
+    if (event.button !== 0) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button, a, input, select, textarea, [role='button']")) {
+      return;
+    }
+    const rail = railRef.current;
+    if (!rail) {
+      return;
+    }
+    event.preventDefault();
+    const originX = offset?.x ?? 0;
+    const originY = offset?.y ?? 0;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX,
+      originY,
+    };
+    setIsDragging(true);
+    rail.setPointerCapture(event.pointerId);
+  };
+
+  const onDragMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const parent = railRef.current?.offsetParent as HTMLElement | null;
+    const rail = railRef.current;
+    if (!parent || !rail) {
+      return;
+    }
+    const parentRect = parent.getBoundingClientRect();
+    const railRect = rail.getBoundingClientRect();
+    const nextX = drag.originX + (event.clientX - drag.startX);
+    const nextY = drag.originY + (event.clientY - drag.startY);
+    // Keep at least 48px of the card inside the chat surface.
+    const minX = -(railRect.width - 48);
+    const maxX = parentRect.width - 48;
+    const minY = 0;
+    const maxY = Math.max(0, parentRect.height - 48);
+    setOffset({
+      x: Math.min(maxX, Math.max(minX, nextX)),
+      y: Math.min(maxY, Math.max(minY, nextY)),
+    });
+  };
+
+  const endDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    setIsDragging(false);
+    try {
+      railRef.current?.releasePointerCapture(event.pointerId);
+    } catch {
+      // Capture may already be released.
+    }
+    // Native webview host bounds track layout; transform moves the card
+    // without a ResizeObserver event, so nudge a re-measure.
+    window.dispatchEvent(new Event("resize"));
+  };
+
+  return (
+    <aside
+      aria-label="Browser"
+      className={[
+        "gyro-browser-rail",
+        offset ? "is-floating" : "",
+        isDragging ? "is-dragging" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      ref={railRef}
+      style={
+        offset
+          ? {
+              transform: `translate(${offset.x}px, ${offset.y}px)`,
+            }
+          : undefined
+      }
+    >
+      <header
+        className="gyro-browser-rail-drag-handle"
+        onPointerCancel={endDrag}
+        onPointerDown={beginDrag}
+        onPointerMove={onDragMove}
+        onPointerUp={endDrag}
+        title="Drag to move browser"
+      >
+        <div className="gyro-chat-tool-title">
+          <Globe2 aria-hidden="true" size={15} />
+          <div>
+            <strong>Browser</strong>
+            <span>
+              {browserPreview?.title?.trim() ||
+                browserPreview?.url ||
+                "Session browser"}
+            </span>
+          </div>
+        </div>
+        <div className="gyro-browser-rail-header-actions">
+          <span aria-hidden="true" className="gyro-browser-rail-grip">
+            <GripVertical size={14} />
+          </span>
+          <button
+            aria-label="Close browser"
+            className="gyro-chat-tool-close"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </header>
+      <BrowserPreviewSurface
+        browserPreview={browserPreview}
+        nativeHost={browserNativeHost}
+        overlayOccluded={browserOverlayOccluded}
+        onBack={onBrowserBack}
+        onDeviceChange={onBrowserDeviceChange}
+        onForward={onBrowserForward}
+        onHostBoundsChange={onBrowserHostBoundsChange}
+        onNavigate={onBrowserNavigate}
+        onOpenExternal={onBrowserOpenExternal}
+        onReload={onBrowserReload}
+        onScreenshot={onBrowserScreenshot}
+        onUrlChange={onBrowserUrlChange}
+      />
+    </aside>
   );
 }
 

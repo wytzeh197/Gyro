@@ -7089,14 +7089,58 @@ textarea:focus-visible {
   min-width: 0;
   overflow: hidden;
   padding: 12px;
+  position: relative;
+  touch-action: none;
+  transition: box-shadow 120ms ease;
+  will-change: transform;
+  z-index: 2;
 }
 
-.gyro-browser-rail > header {
+.gyro-browser-rail.is-floating {
+  box-shadow:
+    0 22px 54px color-mix(in srgb, #000 28%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  z-index: 8;
+}
+
+.gyro-browser-rail.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+  z-index: 12;
+}
+
+.gyro-browser-rail > header,
+.gyro-browser-rail-drag-handle {
   align-items: center;
   color: var(--gyro-muted);
+  cursor: grab;
   display: flex;
+  gap: 8px;
   justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.gyro-browser-rail.is-dragging > header,
+.gyro-browser-rail.is-dragging .gyro-browser-rail-drag-handle {
+  cursor: grabbing;
+}
+
+.gyro-browser-rail-header-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.gyro-browser-rail-grip {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  opacity: 0.7;
+  padding: 4px;
+}
+
+.gyro-browser-rail-drag-handle:hover .gyro-browser-rail-grip {
+  opacity: 1;
 }
 
 .gyro-browser-rail .gyro-browser-preview {

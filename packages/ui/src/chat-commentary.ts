@@ -19,6 +19,10 @@ const PREAMBLE_BLOCK =
 
 const ONLINE_GREETING = /\bis online and working\b/i;
 
+/** One-line readiness openers models restate every turn — drop entirely. */
+const STATUS_GREETING =
+  /\b(?:chat\s+mode\s+is\s+up|is\s+online\s+and\s+working|(?:is\s+)?(?:up|ready|online)\s+and\s+(?:ready|working)|ready\s+to\s+(?:help|work|assist))\b/i;
+
 /**
  * Offsets where successive streamed blocks were concatenated without a break.
  * Always includes 0 when any later boundary exists so callers can slice the
@@ -87,6 +91,23 @@ export function isOrphanAssistantFragment(value: string): boolean {
   return lettersAndDigits.length <= 1 && trimmed.length <= 6;
 }
 
+/**
+ * True for short readiness lines that should not appear in the transcript at
+ * all ("Gyro chat mode is up.", "…is online and working.").
+ */
+export function isTransientStatusGreeting(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 140) {
+    return false;
+  }
+  // Single short sentence of pure status.
+  const sentenceCount = (trimmed.match(/[.!?](?:\s|$)/g) ?? []).length;
+  if (sentenceCount > 1) {
+    return false;
+  }
+  return STATUS_GREETING.test(trimmed) || ONLINE_GREETING.test(trimmed);
+}
+
 /** True when a short block reads as mid-run narration rather than the answer. */
 export function isAssistantPreambleBlock(value: string): boolean {
   const trimmed = value.trim();
@@ -96,7 +117,7 @@ export function isAssistantPreambleBlock(value: string): boolean {
   if (isOrphanAssistantFragment(trimmed)) {
     return true;
   }
-  if (ONLINE_GREETING.test(trimmed)) {
+  if (isTransientStatusGreeting(trimmed)) {
     return true;
   }
   // Multi-sentence blocks are usually the answer, even if they open with "I'll".
@@ -116,7 +137,12 @@ export function structuredCommentaryBlocks(value: string) {
       .replace(GLUED_BLOCK_BOUNDARY, "$1\n\n")
       .split(/\n\s*\n/)
       .map((block) => block.trim())
-      .filter((block) => block && !isOrphanAssistantFragment(block))
+      .filter(
+        (block) =>
+          block &&
+          !isOrphanAssistantFragment(block) &&
+          !isTransientStatusGreeting(block),
+      )
   );
 }
 
@@ -124,23 +150,32 @@ export function structuredCommentaryBlocks(value: string) {
  * When a multi-block message ends a turn that already did work, peel leading
  * plan/status lines so they stay on the run rail instead of the answer body.
  * Always keeps at least one block as the answer.
+ *
+ * Transient status greetings ("chat mode is up") are dropped entirely rather
+ * than moved to the rail — they should not show each turn.
  */
 export function peelAssistantPreambleBlocks(blocks: string[]): {
   preambles: string[];
   answer: string[];
 } {
-  if (blocks.length <= 1) {
-    return { preambles: [], answer: blocks };
+  const usable = blocks.filter(
+    (block) => block && !isTransientStatusGreeting(block),
+  );
+  if (usable.length === 0) {
+    return { preambles: [], answer: blocks.slice(-1) };
+  }
+  if (usable.length === 1) {
+    return { preambles: [], answer: usable };
   }
   let peel = 0;
   while (
-    peel < blocks.length - 1 &&
-    isAssistantPreambleBlock(blocks[peel] ?? "")
+    peel < usable.length - 1 &&
+    isAssistantPreambleBlock(usable[peel] ?? "")
   ) {
     peel += 1;
   }
   return {
-    preambles: blocks.slice(0, peel),
-    answer: blocks.slice(peel),
+    preambles: usable.slice(0, peel),
+    answer: usable.slice(peel),
   };
 }

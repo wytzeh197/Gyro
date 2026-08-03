@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 
 import {
   isOrphanAssistantFragment,
+  isTransientStatusGreeting,
   peelAssistantPreambleBlocks,
+  structuredCommentaryBlocks,
 } from "../packages/ui/src/chat-commentary.ts";
 import {
   buildRunModel,
@@ -63,7 +65,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   splitToolName("gyro_capabilities__terminal_open"),
-  { tool: "terminal open" },
+  { tool: "Terminal open" },
   "a capability id should lose its prefix, not its name",
 );
 assert.deepEqual(
@@ -83,7 +85,7 @@ assert.deepEqual(
       }),
     ),
   }),
-  { label: "Used tool", description: "github · create issue" },
+  { label: "github · create issue" },
   "the row should name the tool rather than say a tool was used",
 );
 
@@ -336,6 +338,18 @@ assert.ok(
 );
 assert.equal(isOrphanAssistantFragment("e."), true);
 assert.equal(isOrphanAssistantFragment("Chat, CLI, and IDE in one place."), false);
+assert.equal(isTransientStatusGreeting("Gyro chat mode is up."), true);
+assert.equal(
+  isTransientStatusGreeting("Chat, CLI, and IDE in one place."),
+  false,
+);
+assert.deepEqual(
+  structuredCommentaryBlocks(
+    "Gyro chat mode is up.\n\nI received your Test message.\n\nWhat would you like to do next?",
+  ),
+  ["I received your Test message.", "What would you like to do next?"],
+  "status greetings should be stripped from the final answer body",
+);
 assert.deepEqual(
   peelAssistantPreambleBlocks([
     "I'll look up the README.",
@@ -391,8 +405,7 @@ assert.deepEqual(rowText("context", "Compacted context"), {
 
 // An unknown kind stays a beat rather than vanishing.
 assert.deepEqual(rowText("something-new", "Rendered a diagram"), {
-  label: "Used tool",
-  description: "Rendered a diagram",
+  label: "Rendered a diagram",
 });
 
 // ACP provider placeholders must not double as "Used tool · xAI tool".
@@ -402,8 +415,47 @@ assert.equal(isGenericProviderToolLabel("Read README.md"), false);
 assert.deepEqual(rowText("tool", "xAI tool"), { label: "Used tool" });
 assert.deepEqual(
   rowText("read", "Read README.md", { path: "README.md" }),
-  { label: "Used tool", description: "Read README.md" },
+  { label: "Read README.md" },
   "ACP read kinds should keep the read verb and path",
+);
+assert.deepEqual(
+  splitToolName(
+    '{"tool_input":{},"tool_name":"gyro_capabilities__gyro_workspace_get_context"}',
+  ),
+  { tool: "Workspace context" },
+  "JSON tool payloads should unwrap to a human capability name",
+);
+assert.deepEqual(
+  splitToolName("gyro_capabilities__gyro_workspace_get_context"),
+  { tool: "Workspace context" },
+  "capability tool ids should drop the gyro_capabilities prefix",
+);
+assert.deepEqual(
+  rowText("tool", "gyro_capabilities__gyro_workspace_get_context"),
+  { label: "Workspace context" },
+  "the rail should show a clean capability name, not Used tool + machine id",
+);
+
+// Repeated updates for the same tool collapse to one beat.
+const repeatedTool = buildRunModel([
+  activity("tool", "gyro_capabilities__gyro_workspace_get_context", {}, 0),
+  activity(
+    "tool",
+    '{"tool_name":"gyro_capabilities__gyro_workspace_get_context"}',
+    {},
+    0,
+  ),
+  activity(
+    "tool",
+    '{"tool_input":{},"tool_name":"gyro_capabilities__gyro_workspace_get_context","variant":"UseTool"}',
+    {},
+    0,
+  ),
+]);
+assert.equal(
+  repeatedTool.steps.filter((step) => step.kind === "work").length,
+  1,
+  "adjacent identical tool calls should coalesce on the rail",
 );
 
 // A running file edit says so.
@@ -430,7 +482,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   rowText("tool", "Used it", { tool: "mcp__linear__create_issue" }),
-  { label: "Used tool", description: "linear · create issue" },
+  { label: "linear · create issue" },
   "the named tool field should win over detail",
 );
 assert.deepEqual(
