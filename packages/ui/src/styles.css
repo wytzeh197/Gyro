@@ -23059,7 +23059,10 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-composer-dock {
-  align-items: center;
+  /* Stretch, never center: with container-type size containment on the shell,
+     align-items:center + percentage min-width collapses the box to a one-
+     character column (placeholder stacks vertically; only + stays visible). */
+  align-items: stretch;
   flex-direction: column;
   gap: 0;
   /* Inside a thread the composer stack narrows to the transcript column, so
@@ -25438,6 +25441,16 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-surface.is-tiled .gyro-chat-thread-canvas {
   min-width: 0;
 }
+/* Tiled panes can sit under the main-thread 280px floor; fill the pane. */
+.gyro-chat-surface.is-tiled .gyro-chat-composer-dock > .gyro-composer-shell,
+.gyro-chat-surface.is-tiled
+  .gyro-chat-composer-dock
+  > .gyro-composer-shell.is-hero,
+.gyro-chat-surface.is-tiled
+  .gyro-chat-composer-dock
+  > .gyro-composer-shell.is-hero.has-provider {
+  min-width: 0;
+}
 /* Fresh-chat "start" screen adapts to a narrow split pane instead of using
    viewport-based sizing that only fits the full-width single view. cqi units
    resolve against the pane width, so the logo/heading scale with the pane. */
@@ -27132,14 +27145,21 @@ button.gyro-account-menu-row:hover,
 /* -- Composer width ------------------------------------------------------- */
 
 /* A hero composer with no container opinion still gets the hero measure. When
-   it is tiled into a pane it fills the pane instead. */
+   it is tiled into a pane it fills the pane instead.
+
+   min-width must be a definite length, not min(100%, 280px). Percentage
+   min-width is treated as 0 under cyclic sizing (parent width depends on the
+   shell; the shell uses container-type size containment so content cannot
+   push it open). That was the Alpha 34 / 34.1 one-character vertical strip. */
 .gyro-composer-shell.is-hero {
   box-sizing: border-box;
   max-width: var(--gyro-composer-width);
-  min-width: min(100%, 280px);
+  min-width: 280px;
   width: min(var(--gyro-composer-width), 100%);
 }
 
+/* Constrained (rail / sidebar): parent already has a definite width, so the
+   shell fills it. min-width:0 is safe here because the parent is stretched. */
 .gyro-chat-start .gyro-composer-shell.is-hero.is-constrained,
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.is-constrained {
   max-width: none;
@@ -27147,10 +27167,10 @@ button.gyro-account-menu-row:hover,
   width: 100%;
 }
 
-/* Thread dock: stretch the column, then center the shell by margin — not by
-   align-items:center. Center-alignment on a column flex plus container-type
-   size containment was letting the shell shrink to a one-character column
-   (placeholder stacked vertically with only the + control visible). */
+/* Thread dock: stretch the column, then center children with margin-inline.
+   Never align-items/align-self:center on the shell — that reintroduces
+   shrink-to-fit + size containment collapse (placeholder stacked vertically
+   with only the + control visible). */
 .gyro-chat-composer-dock {
   align-items: stretch;
   box-sizing: border-box;
@@ -27166,17 +27186,19 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-composer-dock > .gyro-model-focus-strip,
 .gyro-chat-composer-dock > .gyro-model-focus-peek,
 .gyro-chat-composer-dock > .gyro-plan-decision-card {
-  align-self: center;
+  align-self: stretch;
   box-sizing: border-box;
+  margin-inline: auto;
   max-width: min(100%, var(--gyro-composer-width));
-  min-width: min(100%, 280px);
+  min-width: 0;
   width: min(100%, var(--gyro-composer-width));
 }
 
 .gyro-chat-composer-dock > .gyro-composer-shell.is-hero,
 .gyro-chat-composer-dock > .gyro-composer-shell.is-hero.has-provider {
+  /* Definite floor beats size-containment collapse even if width % is cyclic. */
+  min-width: 280px;
   max-width: min(100%, var(--gyro-composer-width));
-  min-width: min(100%, 280px);
   width: min(100%, var(--gyro-composer-width));
 }
 
@@ -27190,9 +27212,13 @@ button.gyro-account-menu-row:hover,
 }
 
 /* Canvas must be two rows (transcript + dock). The older 46px/48px first track
-   assumed the topbar lived inside the canvas; it is a surface sibling now. */
+   assumed the topbar lived inside the canvas; it is a surface sibling now.
+   One definite column so the dock width comes from the surface, not content. */
 .gyro-chat-thread-canvas {
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  width: 100%;
 }
 
 /* -- One column, top to bottom -------------------------------------------- */
@@ -28248,7 +28274,13 @@ button.gyro-account-menu-row:hover,
   row-gap: 4px;
 }
 
-.gyro-sidebar-ai-chat .gyro-composer-shell {
+.gyro-sidebar-ai-chat .gyro-composer-shell,
+.gyro-sidebar-ai-chat .gyro-chat-composer-dock > .gyro-composer-shell,
+.gyro-sidebar-ai-chat .gyro-chat-composer-dock > .gyro-composer-shell.is-hero,
+.gyro-sidebar-ai-chat
+  .gyro-chat-composer-dock
+  > .gyro-composer-shell.is-hero.has-provider {
+  /* Sidebar panes are often under 280px; never force a floor that overflows. */
   min-width: 0;
 }
 
