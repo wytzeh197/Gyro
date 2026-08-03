@@ -4448,15 +4448,28 @@ expect(
     /\.gyro-chat-composer-dock \.gyro-composer-shell\.is-hero\.has-provider\s*\{[\s\S]*?max-width:\s*var\(--gyro-chat-content-width\);[\s\S]*?width:\s*min\(100%,\s*var\(--gyro-chat-content-width\)\);/.test(
       styleSource,
     ) &&
-    // Alpha 34.1: dock must stretch (not center) so the shell cannot collapse
-    // to a one-character column under size containment.
+    // Alpha 34.1 / 34.2: dock must stretch (not center) so the shell cannot
+    // collapse to a one-character column under size containment.
     cssRules(styleSource, ".gyro-chat-composer-dock").some(
       (rule) =>
         rule.includes("align-items: stretch") && rule.includes("width: 100%"),
     ) &&
-    styleSource.includes("min-width: min(100%, 280px)") &&
-    cssRules(styleSource, ".gyro-chat-thread-canvas").some((rule) =>
-      rule.includes("grid-template-rows: minmax(0, 1fr) auto"),
+    // Definite 280px floor — not min(100%, 280px), which becomes 0 under
+    // cyclic percentage resolution and reintroduces the vertical strip.
+    styleSource.includes("min-width: 280px") &&
+    !styleSource.includes("min-width: min(100%, 280px)") &&
+    cssRules(styleSource, ".gyro-chat-thread-canvas").some(
+      (rule) =>
+        rule.includes("grid-template-rows: minmax(0, 1fr) auto") &&
+        rule.includes("grid-template-columns: minmax(0, 1fr)"),
+    ) &&
+    // Dock children center via margin, not align-self:center (shrink-to-fit).
+    styleSource.includes(
+      ".gyro-chat-composer-dock > .gyro-composer-shell",
+    ) &&
+    styleSource.includes("margin-inline: auto") &&
+    !/\.gyro-chat-composer-dock\s*>\s*\.gyro-composer-shell[\s\S]{0,400}?align-self:\s*center/.test(
+      styleSource,
     ) &&
     surfaceSource.includes("!event.shiftKey") &&
     surfaceSource.includes("event.preventDefault()") &&
