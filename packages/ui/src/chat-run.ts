@@ -1,4 +1,9 @@
 import {
+  isOrphanAssistantFragment,
+  peelAssistantPreambleBlocks,
+  structuredCommentaryBlocks,
+} from "./chat-commentary.ts";
+import {
   expandAssistantMessageSegments,
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
@@ -132,12 +137,13 @@ export function buildRunModel(
     expandAssistantMessageSegments(events),
   );
   const visible = ordered.filter((event) => !isHiddenRunEvent(event));
-  const response = closingResponseEvent(visible, options.isRunning ?? false);
+  const closing = partitionClosingResponse(visible, options.isRunning ?? false);
   const steps: RunStep[] = [];
   const files: FileChange[] = [];
+  const consumedResponseIds = new Set(closing?.sourceIds ?? []);
 
   for (const event of visible) {
-    if (event === response) {
+    if (consumedResponseIds.has(event.id)) {
       continue;
     }
     const item = workItemFromEvent(event);
@@ -153,7 +159,7 @@ export function buildRunModel(
     }
     if (event.kind === "assistant-message") {
       const text = event.message.trim();
-      if (text) {
+      if (text && !isOrphanAssistantFragment(text)) {
         steps.push({ kind: "say", id: event.id, at: event.createdAt, text });
       }
       continue;
@@ -161,15 +167,37 @@ export function buildRunModel(
     steps.push({ kind: "ask", id: event.id, at: event.createdAt, event });
   }
 
+  // Plan lines peeled from a trailing multi-block answer rejoin the rail as
+  // say steps so they stay under "Worked for …" instead of the response body.
+  for (const preamble of closing?.preambles ?? []) {
+    const text = preamble.message.trim();
+    if (text && !isOrphanAssistantFragment(text)) {
+      steps.push({
+        kind: "say",
+        id: preamble.id,
+        at: preamble.createdAt,
+        text,
+      });
+    }
+  }
+
   return {
-    phase: runPhase(steps, response, options),
+    phase: runPhase(steps, closing?.response, options),
     startedAt:
       options.startedAt ?? visible[0]?.createdAt ?? new Date(0).toISOString(),
     steps,
     files,
-    response,
+    response: closing?.response,
   };
 }
+
+type ClosingResponse = {
+  response: SessionEvent;
+  /** Every original assistant event folded into the answer (skipped as steps). */
+  sourceIds: string[];
+  /** Leading plan lines peeled out of a multi-block trailing answer. */
+  preambles: SessionEvent[];
+};
 
 /**
  * The closing assistant message, when it is the answer rather than a preamble.
@@ -182,27 +210,113 @@ export function buildRunModel(
  * Trailing file activity does not unseat it. A file edit can be reported after
  * the text it belongs to, and treating that as "something followed the answer"
  * would strand the answer in the rail.
+ *
+ * When several assistant blocks trail the last tool call, leading plan/status
+ * lines are peeled into rail preambles so the response body is only the answer.
  */
-function closingResponseEvent(events: SessionEvent[], isRunning: boolean) {
-  const spoken = events.filter(
-    (event) => event.kind === "assistant-message" && event.message.trim(),
-  );
-  const closing = spoken.at(-1);
-  if (!closing) {
+function partitionClosingResponse(
+  events: SessionEvent[],
+  isRunning: boolean,
+): ClosingResponse | undefined {
+  let end = events.length;
+  while (end > 0 && workItemFromEvent(events[end - 1]!)?.kind === "file") {
+    end -= 1;
+  }
+
+  const trailing: SessionEvent[] = [];
+  let index = end - 1;
+  while (index >= 0 && events[index]!.kind === "assistant-message") {
+    const text = events[index]!.message.trim();
+    if (text && !isOrphanAssistantFragment(text)) {
+      trailing.unshift(events[index]!);
+    }
+    index -= 1;
+  }
+  if (trailing.length === 0) {
     return undefined;
   }
-  const index = events.indexOf(closing);
-  const after = events.slice(index + 1);
-  const closesTurn = after.every(
-    (event) => workItemFromEvent(event)?.kind === "file",
+
+  const before = events.slice(0, index + 1);
+  const followsWork = before.some(
+    (event) => event.kind !== "assistant-message",
   );
-  if (!closesTurn) {
+  if (isRunning && !followsWork) {
     return undefined;
   }
-  const followsWork = events
-    .slice(0, index)
-    .some((event) => event.kind !== "assistant-message");
-  return followsWork || !isRunning ? closing : undefined;
+
+  // Peel plan/status lines from the trailing blocks. Applies with or without
+  // tools — glued pure-Q&A streams often attach "I'll check…" to the answer.
+  const blocks = trailing.map((event) => event.message.trim());
+  const { preambles: preambleTexts, answer: answerTexts } =
+    peelAssistantPreambleBlocks(blocks);
+  const preambleEvents = trailing.slice(0, preambleTexts.length);
+  const answerEvents = trailing.slice(preambleTexts.length);
+
+  // Single trailing block that still mixes plan + answer as one string.
+  if (answerEvents.length === 1) {
+    const only = answerEvents[0]!;
+    const parts = structuredCommentaryBlocks(only.message);
+    if (parts.length > 1) {
+      const peeled = peelAssistantPreambleBlocks(parts);
+      if (peeled.preambles.length > 0) {
+        return {
+          response: sanitizeResponseEvent({
+            ...only,
+            message: peeled.answer.join("\n\n"),
+          }),
+          sourceIds: [only.id],
+          preambles: [
+            ...preambleEvents,
+            ...peeled.preambles.map((text, peelIndex) => ({
+              ...only,
+              id: `${only.id}::preamble-${peelIndex}`,
+              message: text,
+            })),
+          ],
+        };
+      }
+    }
+  }
+
+  if (answerEvents.length === 0) {
+    const fallback = trailing.at(-1)!;
+    return {
+      response: sanitizeResponseEvent(fallback),
+      sourceIds: [fallback.id],
+      preambles: trailing.slice(0, -1),
+    };
+  }
+
+  // Silence unused when peel left answerTexts unused beyond length checks.
+  void answerTexts;
+
+  const response =
+    answerEvents.length === 1
+      ? sanitizeResponseEvent(answerEvents[0]!)
+      : sanitizeResponseEvent(joinAssistantEvents(answerEvents));
+
+  return {
+    response,
+    sourceIds: answerEvents.map((event) => event.id),
+    preambles: preambleEvents,
+  };
+}
+
+function joinAssistantEvents(events: SessionEvent[]): SessionEvent {
+  const first = events[0]!;
+  return {
+    ...first,
+    message: events
+      .map((event) => event.message.trim())
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
+function sanitizeResponseEvent(event: SessionEvent): SessionEvent {
+  const blocks = structuredCommentaryBlocks(event.message);
+  const message = blocks.join("\n\n");
+  return message === event.message ? event : { ...event, message };
 }
 
 function runPhase(
@@ -296,6 +410,47 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         id,
         status,
         ...splitToolName(text(payload, "tool") ?? detail ?? label),
+      };
+    // ACP providers (Grok/Kimi/Gemini) report native kinds that are not yet
+    // renamed on the wire. Map them so the rail can show real verbs.
+    case "read": {
+      const path = text(payload, "path") ?? detail;
+      return {
+        kind: "tool",
+        id,
+        status,
+        tool:
+          label && !isGenericProviderToolLabel(label)
+            ? label
+            : path
+              ? `Read ${path}`
+              : "Read file",
+      };
+    }
+    case "edit":
+    case "delete":
+    case "move":
+      return {
+        kind: "file",
+        id,
+        status,
+        path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
+      };
+    case "execute":
+      return {
+        kind: "command",
+        id,
+        status,
+        command: text(payload, "command") ?? detail ?? label,
+        intent: text(payload, "intent"),
+      };
+    case "fetch":
+      return {
+        kind: "search",
+        id,
+        status,
+        scope: "web",
+        query: text(payload, "query") ?? detail,
       };
     default:
       // An unrecognised kind is still work that happened. Showing it as a tool
@@ -396,12 +551,23 @@ export function runRowText(step: RunStep): RunRowText {
             ? "Compacting context"
             : "Compacted context",
       };
-    case "tool":
-      return {
-        label: "Used tool",
-        description: item.server ? `${item.server} · ${item.tool}` : item.tool,
-      };
+    case "tool": {
+      const description = item.server
+        ? `${item.server} · ${item.tool}`
+        : item.tool;
+      // ACP fallbacks look like "xAI tool" / "Kimi tool". Showing
+      // "Used tool · xAI tool" is noise — drop the redundant description.
+      if (isGenericProviderToolLabel(description)) {
+        return { label: "Used tool" };
+      }
+      return { label: "Used tool", description };
+    }
   }
+}
+
+/** `{Provider} tool` placeholders that add nothing next to "Used tool". */
+export function isGenericProviderToolLabel(value: string): boolean {
+  return /^[A-Za-z][\w.+-]*\s+tool$/i.test(value.trim());
 }
 
 function fileVerb(status: WorkStatus) {

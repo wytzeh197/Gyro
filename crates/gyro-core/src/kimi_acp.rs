@@ -849,36 +849,39 @@ fn handle_session_update<Delta, Activity>(
             }
         }
         Some("tool_call") | Some("tool_call_update") => {
-            // Grok, Gemini, and Kimi share this ACP path. Never hardcode one
-            // provider's name into the fallback — a Grok turn labeled
-            // "Kimi tool" reads like the wrong backend is running.
+            // Grok, Gemini, and Kimi share this ACP path. Prefer a real title,
+            // then a kind-derived verb + path/query, and only fall back to
+            // "{provider} tool" when nothing more specific is available.
             let default_id = format!("{}-tool", acp_activity_id_slug(provider_label));
-            let default_label = format!("{provider_label} tool");
             let id = update
                 .get("toolCallId")
                 .and_then(Value::as_str)
                 .unwrap_or(default_id.as_str())
                 .to_string();
-            let label = update
-                .get("title")
-                .and_then(Value::as_str)
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or(default_label.as_str())
-                .to_string();
-            let kind = update
+            let acp_kind = update
                 .get("kind")
                 .and_then(Value::as_str)
-                .unwrap_or("tool")
-                .to_string();
+                .unwrap_or("other");
+            let title = update
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty());
+            let raw_input = update.get("rawInput");
+            let path = acp_raw_input_path(raw_input);
+            let query = acp_raw_input_query(raw_input);
+            let command = acp_raw_input_command(raw_input);
+            let (kind, label, detail) =
+                acp_tool_activity_parts(provider_label, acp_kind, title, path, query, command);
             let status = match update.get("status").and_then(Value::as_str) {
                 Some("completed") => "done",
                 Some("failed") => "failed",
                 _ => "running",
             }
             .to_string();
-            let detail = update
-                .get("rawInput")
-                .map(|value| redact_secrets(&value.to_string()));
+            let detail = detail.or_else(|| {
+                raw_input.map(|value| redact_secrets(&value.to_string()))
+            });
             on_activity(&KimiAcpActivity {
                 id,
                 kind,
@@ -912,6 +915,125 @@ fn acp_activity_id_slug(provider_label: &str) -> String {
     } else {
         slug
     }
+}
+
+/// Map an ACP tool kind into Gyro's activity contract and a human rail label.
+///
+/// Returns `(activityKind, label, detail)` where `detail` is the path, query,
+/// or command the UI can show next to the verb.
+fn acp_tool_activity_parts(
+    provider_label: &str,
+    acp_kind: &str,
+    title: Option<&str>,
+    path: Option<String>,
+    query: Option<String>,
+    command: Option<String>,
+) -> (String, String, Option<String>) {
+    let titled = |fallback: String| title.map(str::to_string).unwrap_or(fallback);
+    match acp_kind {
+        "read" | "edit" | "delete" | "move" => {
+            let verb = match acp_kind {
+                "read" => "Read",
+                "edit" => "Edit",
+                "delete" => "Delete",
+                _ => "Move",
+            };
+            let label = titled(match path.as_deref() {
+                Some(path) => format!("{verb} {path}"),
+                None => format!("{verb} file"),
+            });
+            ("file".into(), label, path)
+        }
+        "execute" => {
+            let label = titled(match command.as_deref() {
+                Some(command) => format!("Run {command}"),
+                None => "Run command".into(),
+            });
+            ("command".into(), label, command.or(path))
+        }
+        "search" => {
+            let label = titled(match query.as_deref() {
+                Some(query) => format!("Search {query}"),
+                None => "Search".into(),
+            });
+            ("search".into(), label, query.or(path))
+        }
+        "fetch" => {
+            let label = titled(match query.as_deref().or(path.as_deref()) {
+                Some(target) => format!("Fetch {target}"),
+                None => "Fetch".into(),
+            });
+            ("search".into(), label, query.or(path))
+        }
+        "think" => ("tool".into(), titled("Thinking".into()), None),
+        other => {
+            let label = titled(if other != "other" && other != "tool" {
+                humanize_acp_kind(other)
+            } else {
+                format!("{provider_label} tool")
+            });
+            ("tool".into(), label, path.or(query).or(command))
+        }
+    }
+}
+
+fn humanize_acp_kind(kind: &str) -> String {
+    kind.split(|ch: char| ch == '_' || ch == '-')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn acp_raw_input_path(raw_input: Option<&Value>) -> Option<String> {
+    let value = raw_input?;
+    if let Some(path) = value.as_str().map(str::trim).filter(|path| !path.is_empty()) {
+        // Bare string inputs are usually a path for read/edit.
+        if path.contains('/') || path.contains('\\') || path.contains('.') {
+            return Some(redact_secrets(path));
+        }
+    }
+    acp_raw_input_string(value, &["path", "file", "filePath", "filename", "target"])
+}
+
+fn acp_raw_input_query(raw_input: Option<&Value>) -> Option<String> {
+    let value = raw_input?;
+    acp_raw_input_string(value, &["query", "pattern", "search", "q", "url", "uri"])
+}
+
+fn acp_raw_input_command(raw_input: Option<&Value>) -> Option<String> {
+    let value = raw_input?;
+    if let Some(command) = value.as_str().map(str::trim).filter(|command| !command.is_empty()) {
+        if !command.contains('/') && !command.contains('\\') {
+            return Some(redact_secrets(command));
+        }
+    }
+    acp_raw_input_string(value, &["command", "cmd", "shell", "script"])
+}
+
+fn acp_raw_input_string(value: &Value, keys: &[&str]) -> Option<String> {
+    let object = value.as_object()?;
+    for key in keys {
+        if let Some(found) = object
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|found| !found.is_empty())
+        {
+            return Some(redact_secrets(found));
+        }
+    }
+    None
 }
 
 fn classify_approval(tool_call: &Value) -> KimiAcpApprovalKind {
@@ -1456,6 +1578,49 @@ done
         assert!(!activities
             .iter()
             .any(|activity| activity.label.contains("Kimi")));
+    }
+
+    /// Kind + rawInput should beat the bare "{provider} tool" fallback so the
+    /// rail can show "Read README.md" instead of four identical "xAI tool" rows.
+    #[cfg(unix)]
+    #[test]
+    fn tool_activity_uses_kind_and_path_when_title_is_missing() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"xai-session"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"call-read","kind":"read","status":"completed","rawInput":{"path":"README.md"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        );
+        let mut activities = Vec::new();
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            None,
+        );
+        request.provider_label = "xAI".into();
+        run_kimi_acp(
+            request,
+            |_| {},
+            |activity| activities.push(activity.clone()),
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(activities[0].kind, "file");
+        assert_eq!(activities[0].label, "Read README.md");
+        assert_eq!(activities[0].detail.as_deref(), Some("README.md"));
     }
 
     #[cfg(unix)]
