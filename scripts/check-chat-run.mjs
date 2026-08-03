@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  isOrphanAssistantFragment,
+  peelAssistantPreambleBlocks,
+} from "../packages/ui/src/chat-commentary.ts";
+import {
   buildRunModel,
   formatRunDuration,
+  isGenericProviderToolLabel,
   isRunPhaseLive,
   runHeaderLabel,
   runRowText,
@@ -285,6 +290,65 @@ assert.equal(
   "a command after the last message means it was not the answer",
 );
 
+// Multi-paragraph answers after tools must not swallow plan lines into the body.
+const planThenAnswer = buildRunModel([
+  say(
+    "I'll look up the Gyro README and return its first sentence.\n\nChat, CLI, and IDE in one place.\n\nThat's the first sentence in README.md.",
+    0,
+  ),
+  activity("tool", "Read README.md", { path: "README.md" }, 0),
+  say(
+    "I'll look up the Gyro README and return its first sentence.\n\nChat, CLI, and IDE in one place.\n\nThat's the first sentence in README.md.",
+    1,
+  ),
+]);
+// When the cumulative message lands after tools, preambles peel to the rail.
+const afterTools = buildRunModel([
+  activity("tool", "Read README.md", { path: "README.md" }, 0),
+  say(
+    "I'll look up the Gyro README and return its first sentence.\n\ne.\n\nChat, CLI, and IDE in one place.\n\nThat's the first sentence in README.md.",
+    1,
+  ),
+]);
+assert.equal(
+  afterTools.response?.message.includes("Chat, CLI, and IDE in one place."),
+  true,
+  "the answer body should keep the real first sentence",
+);
+assert.equal(
+  afterTools.response?.message.includes("I'll look up"),
+  false,
+  "plan preambles should not sit in the final response body",
+);
+assert.equal(
+  (afterTools.response?.message ?? "")
+    .split(/\n\s*\n/)
+    .some((block) => block.trim() === "e."),
+  false,
+  "orphan stream fragments like 'e.' must not reach the answer",
+);
+assert.ok(
+  afterTools.steps.some(
+    (step) =>
+      step.kind === "say" && step.text.includes("I'll look up the Gyro README"),
+  ),
+  "peeled plan lines should remain visible on the run rail",
+);
+assert.equal(isOrphanAssistantFragment("e."), true);
+assert.equal(isOrphanAssistantFragment("Chat, CLI, and IDE in one place."), false);
+assert.deepEqual(
+  peelAssistantPreambleBlocks([
+    "I'll look up the README.",
+    "Chat, CLI, and IDE in one place.",
+  ]),
+  {
+    preambles: ["I'll look up the README."],
+    answer: ["Chat, CLI, and IDE in one place."],
+  },
+);
+// Silence unused-binding noise when the first multi-block scenario is only for coverage.
+assert.ok(planThenAnswer.steps.length >= 1);
+
 // --- kinds and wording ------------------------------------------------------------
 
 const rowText = (activityKind, label, extra) =>
@@ -330,6 +394,17 @@ assert.deepEqual(rowText("something-new", "Rendered a diagram"), {
   label: "Used tool",
   description: "Rendered a diagram",
 });
+
+// ACP provider placeholders must not double as "Used tool · xAI tool".
+assert.equal(isGenericProviderToolLabel("xAI tool"), true);
+assert.equal(isGenericProviderToolLabel("Kimi tool"), true);
+assert.equal(isGenericProviderToolLabel("Read README.md"), false);
+assert.deepEqual(rowText("tool", "xAI tool"), { label: "Used tool" });
+assert.deepEqual(
+  rowText("read", "Read README.md", { path: "README.md" }),
+  { label: "Used tool", description: "Read README.md" },
+  "ACP read kinds should keep the read verb and path",
+);
 
 // A running file edit says so.
 assert.deepEqual(

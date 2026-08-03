@@ -1,4 +1,9 @@
-import { gluedAssistantBlockStarts } from "./chat-commentary.ts";
+import {
+  assistantMessageBlockStarts,
+  isOrphanAssistantFragment,
+  peelAssistantPreambleBlocks,
+  structuredCommentaryBlocks,
+} from "./chat-commentary.ts";
 import type { SessionEvent } from "./types.ts";
 
 export type InterleavedChatTimelineItem =
@@ -109,14 +114,17 @@ function assistantMessageSegments(
       return segments;
     }
   }
-  return gluedAssistantMessageSegments(event.message);
+  return recoveredAssistantMessageSegments(event.message);
 }
 
-/** Recover block starts from `edits.Now…` / `is.Gyro…` when the stream left no marks. */
-function gluedAssistantMessageSegments(
+/**
+ * Recover block starts when the stream left no marks: glued joins
+ * (`edits.Now…`) and blank-line paragraphs (plan line vs answer).
+ */
+function recoveredAssistantMessageSegments(
   message: string,
 ): AssistantMessageSegment[] | undefined {
-  const starts = gluedAssistantBlockStarts(message);
+  const starts = assistantMessageBlockStarts(message);
   if (starts.length < 2) {
     return undefined;
   }
@@ -134,6 +142,10 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
     }
     const segments = assistantMessageSegments(event);
     if (!segments) {
+      const trimmed = event.message.trim();
+      if (!trimmed || isOrphanAssistantFragment(trimmed)) {
+        return [];
+      }
       return [event];
     }
     const payload = eventPayload(event) ?? {};
@@ -152,7 +164,10 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
               : { ...rest, timelineSequence: segment.sequence },
         };
       })
-      .filter((segment) => segment.message.trim().length > 0);
+      .filter((segment) => {
+        const trimmed = segment.message.trim();
+        return trimmed.length > 0 && !isOrphanAssistantFragment(trimmed);
+      });
   });
 }
 
@@ -177,29 +192,80 @@ export function chatTurnTimelineSections(
   options?: { isRunning?: boolean },
 ): ChatTurnTimelineSections {
   const items = interleavedChatTimelineItems(events);
-  const spoken = items.filter(
-    (item) => isNarrationEvent(item) && !isBlankMessage(item),
-  );
-  const closing = spoken.at(-1);
   const sequenced: InterleavedChatTimelineItem[] = items.filter(
     (item) => item.kind !== "file-summary",
   );
-  const closesTurn = closing !== undefined && sequenced.at(-1) === closing;
-  const followsWork =
-    closing !== undefined &&
-    sequenced
-      .slice(0, sequenced.indexOf(closing))
-      .some((item) => !isNarrationEvent(item));
-  const response =
-    closesTurn && (followsWork || !options?.isRunning) ? closing : undefined;
-  const responseEvent = response?.kind === "event" ? response.event : undefined;
+
+  // Skip trailing file summaries already removed; walk back over trailing
+  // narration to form the answer (and peel plan lines when work preceded it).
+  let end = sequenced.length;
+  const trailing: Extract<InterleavedChatTimelineItem, { kind: "event" }>[] = [];
+  while (end > 0) {
+    const item = sequenced[end - 1]!;
+    if (!isNarrationEvent(item) || isBlankMessage(item)) {
+      break;
+    }
+    trailing.unshift(item);
+    end -= 1;
+  }
+
+  const before = sequenced.slice(0, end);
+  const followsWork = before.some((item) => !isNarrationEvent(item));
+  const closesTurn = trailing.length > 0;
+  let responseEvent: SessionEvent | undefined;
+  const preambleIds = new Set<string>();
+
+  if (closesTurn && (followsWork || !options?.isRunning)) {
+    const blocks = trailing.map((item) => item.event.message.trim());
+    // Peel plan/status lines even on pure Q&A when the stream glued a preamble
+    // to the answer (`I'll check….Gyro is…`). Real multi-paragraph answers
+    // that do not match preamble patterns stay whole.
+    const peeled = peelAssistantPreambleBlocks(blocks);
+    for (let index = 0; index < peeled.preambles.length; index += 1) {
+      preambleIds.add(trailing[index]!.event.id);
+    }
+    const answerItems = trailing.slice(peeled.preambles.length);
+    if (answerItems.length === 1) {
+      const only = answerItems[0]!.event;
+      const parts = structuredCommentaryBlocks(only.message);
+      if (parts.length > 1) {
+        const inner = peelAssistantPreambleBlocks(parts);
+        responseEvent = {
+          ...only,
+          message: inner.answer.join("\n\n"),
+        };
+      } else {
+        responseEvent = only;
+      }
+    } else if (answerItems.length > 1) {
+      const first = answerItems[0]!.event;
+      responseEvent = {
+        ...first,
+        message: answerItems
+          .map((item) => item.event.message.trim())
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+    } else {
+      responseEvent = trailing.at(-1)?.event;
+    }
+  }
+
+  const responseSourceIds = new Set(
+    responseEvent
+      ? trailing
+          .filter((item) => !preambleIds.has(item.event.id))
+          .map((item) => item.event.id)
+      : [],
+  );
+
   const work = items.filter(
     (
       item,
     ): item is Exclude<InterleavedChatTimelineItem, { kind: "file-summary" }> =>
       item.kind !== "file-summary" &&
       !(isNarrationEvent(item) && isBlankMessage(item)) &&
-      item !== response,
+      !(item.kind === "event" && responseSourceIds.has(item.event.id)),
   );
   const files = items.filter(
     (

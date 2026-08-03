@@ -234,8 +234,14 @@ function RunRow({
       </button>
     );
   }
+  // Only attach a native tooltip when it adds detail the row does not already
+  // show (truncated path, full command). Duplicating the label on hover is noise.
+  const title =
+    text.description && text.description !== text.label
+      ? text.description
+      : undefined;
   return (
-    <div className={className} title={text.description ?? text.label}>
+    <div className={className} title={title}>
       {body}
     </div>
   );
