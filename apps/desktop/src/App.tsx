@@ -755,6 +755,10 @@ export function App() {
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
     loadChatDrafts(),
   );
+  /** Per-draft model picks so split-screen new chats don't share the global model. */
+  const [chatDraftModels, setChatDraftModels] = useState<
+    Record<string, SessionModelSelection>
+  >({});
   const [chatAttachments, setChatAttachments] = useState<
     Record<string, ChatAttachment[]>
   >(() => loadChatAttachments());
@@ -6288,17 +6292,26 @@ export function App() {
         },
         { notifySuccess: false },
       );
-      if (activeSessionId && provider) {
-        void saveSessionModel(activeSessionId, {
-          providerId,
-          providerLabel: provider.displayName,
-          modelId: model?.id ?? provider.selectedModelId,
-          modelLabel: model?.displayName,
-          reasoningEffort: selectedReasoningEffort(provider),
-        });
+      if (!provider) {
+        return;
+      }
+      const selection: SessionModelSelection = {
+        providerId,
+        providerLabel: provider.displayName,
+        modelId: model?.id ?? provider.selectedModelId,
+        modelLabel: model?.displayName,
+        reasoningEffort: selectedReasoningEffort(provider),
+      };
+      if (activeSessionId) {
+        void saveSessionModel(activeSessionId, selection);
+      } else {
+        setChatDraftModels((current) => ({
+          ...current,
+          [activeDraftKey]: selection,
+        }));
       }
     },
-    [activeSessionId, config, persistConfig, saveSessionModel],
+    [activeDraftKey, activeSessionId, config, persistConfig, saveSessionModel],
   );
 
   const setProviderAuthStatus = useCallback(
@@ -6754,14 +6767,23 @@ export function App() {
         providerId,
         model: selectedModel?.displayName ?? modelId,
       });
-      if (activeSessionId && provider) {
-        void saveSessionModel(activeSessionId, {
+      if (provider) {
+        const selection: SessionModelSelection = {
           providerId,
           providerLabel: provider.displayName,
           modelId,
           modelLabel: selectedModel?.displayName ?? modelId,
           reasoningEffort,
-        });
+        };
+        if (activeSessionId) {
+          void saveSessionModel(activeSessionId, selection);
+        } else {
+          // Bind the pick to this draft pane so other split chats keep theirs.
+          setChatDraftModels((current) => ({
+            ...current,
+            [activeDraftKey]: selection,
+          }));
+        }
       }
       if (provider && selectedModel) {
         recordModelSelection(
@@ -6773,6 +6795,7 @@ export function App() {
       }
     },
     [
+      activeDraftKey,
       activeSessionId,
       config,
       persistConfig,
@@ -6820,7 +6843,14 @@ export function App() {
           : provider,
       );
       const provider = providers.find((item) => item.id === providerId);
-      const model = provider ? getProviderModel(provider) : undefined;
+      // Prefer the model already bound to this chat/draft so effort applies to
+      // the model shown in the chip, not a different global selection.
+      const boundModelId = activeSessionId
+        ? sessions.find((session) => session.id === activeSessionId)?.modelId
+        : chatDraftModels[activeDraftKey]?.modelId;
+      const model = provider
+        ? getProviderModel(provider, boundModelId)
+        : undefined;
       if (!provider || !model?.supportedReasoningEfforts?.includes(effort)) {
         notify(
           "command-failed",
@@ -6834,17 +6864,32 @@ export function App() {
         selectedProviderId: providerId,
         modelProviders: providers,
       });
+      const selection: SessionModelSelection = {
+        providerId,
+        providerLabel: provider.displayName,
+        modelId: model.id,
+        modelLabel: model.displayName,
+        reasoningEffort: effort,
+      };
       if (activeSessionId) {
-        void saveSessionModel(activeSessionId, {
-          providerId,
-          providerLabel: provider.displayName,
-          modelId: model.id,
-          modelLabel: model.displayName,
-          reasoningEffort: effort,
-        });
+        void saveSessionModel(activeSessionId, selection);
+      } else {
+        setChatDraftModels((current) => ({
+          ...current,
+          [activeDraftKey]: selection,
+        }));
       }
     },
-    [activeSessionId, config, notify, persistConfig, saveSessionModel],
+    [
+      activeDraftKey,
+      activeSessionId,
+      chatDraftModels,
+      config,
+      notify,
+      persistConfig,
+      saveSessionModel,
+      sessions,
+    ],
   );
 
   const acceptModelStandardPrompt = useCallback(() => {
@@ -7760,6 +7805,13 @@ export function App() {
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
       const sessionModel = {
         ...selectedSessionModelFromConfig(config),
+        // Prefer the model bound to this session or draft pane over the global
+        // picker — required so split-screen chats keep independent models.
+        ...(activeSessionId
+          ? sessionModelSelectionFromSession(
+              sessions.find((session) => session.id === activeSessionId),
+            )
+          : chatDraftModels[activeDraftKey]),
         ...overrideContext?.sessionModel,
       };
       const selectedProvider = providersForConfig(config).find(
@@ -7982,6 +8034,14 @@ export function App() {
           draftKey: activeDraftKey,
           sessionId: session.id,
           workspacePath: session.workspacePath,
+        });
+        setChatDraftModels((current) => {
+          if (!(activeDraftKey in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[activeDraftKey];
+          return next;
         });
         activeSessionIdRef.current = session.id;
         setActiveSessionId(session.id);
@@ -8455,6 +8515,7 @@ export function App() {
       activeSessionPlan,
       applyCouncilChatResponse,
       applyProviderChatResponse,
+      chatDraftModels,
       chatMessageQueues,
       refreshProviderUsage,
       checkProviderReadiness,
@@ -8467,6 +8528,7 @@ export function App() {
       refreshEvents,
       resetChatDraft,
       saveSessionModel,
+      sessions,
       setSessionSending,
       setEventsForSession,
       updateSessionTitle,
@@ -10290,7 +10352,17 @@ export function App() {
       workspacePath?: string;
     }) => {
       const projectKey = normalizedChatProjectKey(candidate.workspacePath);
-      const paneLayout = chatGrid.layouts[projectKey];
+      // Prefer the active project layout, then the candidate workspace, so a
+      // slightly mismatched path still finds the sibling pane in a split.
+      const paneLayout =
+        (chatGrid.activeProjectKey
+          ? chatGrid.layouts[chatGrid.activeProjectKey]
+          : undefined) ??
+        (projectKey ? chatGrid.layouts[projectKey] : undefined) ??
+        Object.values(chatGrid.layouts).find((layout) =>
+          layout.slots.some((slot) => slot?.paneId === candidate.paneId),
+        );
+      const layoutProjectKey = paneLayout?.projectKey || projectKey;
       if (candidate.sessionId) {
         closedChatPaneSessionsRef.current.add(candidate.sessionId);
       }
@@ -10308,26 +10380,41 @@ export function App() {
         activeSessionIdRef.current = nextPane.sessionId;
         setActiveSessionId(nextPane.sessionId);
         setWorkspacePath(nextPane.workspacePath);
+      } else if (nextPane?.kind === "draft") {
+        // Leaving a draft open after closing a session pane is still a split
+        // exit — keep the draft visible rather than collapsing to empty home.
+        suppressSessionAutoSelectRef.current = true;
+        activeSessionIdRef.current = undefined;
+        setActiveSessionId(undefined);
+        setWorkspacePath(nextPane.workspacePath);
       } else {
         suppressSessionAutoSelectRef.current = true;
         activeSessionIdRef.current = undefined;
         setActiveSessionId(undefined);
-        if (nextPane) {
-          setWorkspacePath(nextPane.workspacePath);
-        }
       }
       setChatPanelByPaneId((current) => {
         const next = { ...current };
         delete next[candidate.paneId];
         return next;
       });
-      dispatchChatGrid({
-        type: "close-pane",
-        projectKey,
-        paneId: candidate.paneId,
-      });
+      if (layoutProjectKey) {
+        dispatchChatGrid({
+          type: "close-pane",
+          projectKey: layoutProjectKey,
+          paneId: candidate.paneId,
+        });
+        if (nextPane) {
+          // Explicitly focus the remaining pane after close so the grid does
+          // not briefly render with no focused slot and fall through to empty.
+          dispatchChatGrid({
+            type: "focus-pane",
+            projectKey: layoutProjectKey,
+            paneId: nextPane.paneId,
+          });
+        }
+      }
     },
-    [chatGrid.layouts],
+    [chatGrid.activeProjectKey, chatGrid.layouts],
   );
 
   const requestCloseChatPane = useCallback(
@@ -13071,7 +13158,9 @@ export function App() {
             : undefined
         }
         onCloseChat={() => {
-          focusChatPane(pane);
+          // Do not focus the pane being closed. Focusing first raced
+          // activeSessionId against closeChatPane's handoff to the remaining
+          // pane and could empty a split grid when the X was clicked.
           requestCloseChatPane(pane);
         }}
         onOpenToolPanel={(tab) => {
@@ -13142,12 +13231,11 @@ export function App() {
           message: item.message,
         }))}
         savedProjects={savedProjects}
-        sessionModel={{
-          modelLabel: paneSession?.modelLabel,
-          providerId: paneSession?.providerId,
-          providerLabel: paneSession?.providerLabel,
-          reasoningEffort: paneSession?.reasoningEffort,
-        }}
+        sessionModel={
+          pane.kind === "session"
+            ? sessionModelSelectionFromSession(paneSession)
+            : chatDraftModels[paneDraftKey]
+        }
         sessionPlan={panePlan}
         sessionGoal={paneGoal}
         isMission={isMissionSession(
@@ -13327,12 +13415,11 @@ export function App() {
         message: item.message,
       }))}
       savedProjects={savedProjects}
-      sessionModel={{
-        modelLabel: activeSession?.modelLabel,
-        providerId: activeSession?.providerId,
-        providerLabel: activeSession?.providerLabel,
-        reasoningEffort: activeSession?.reasoningEffort,
-      }}
+      sessionModel={
+        activeSession
+          ? sessionModelSelectionFromSession(activeSession)
+          : chatDraftModels[activeDraftKey]
+      }
       sessionPlan={activeSessionPlan}
       sessionGoal={activeSessionGoal}
       isMission={activeIsMission}
@@ -13649,12 +13736,11 @@ export function App() {
                       message: item.message,
                     }))}
                     savedProjects={savedProjects}
-                    sessionModel={{
-                      modelLabel: activeSession?.modelLabel,
-                      providerId: activeSession?.providerId,
-                      providerLabel: activeSession?.providerLabel,
-                      reasoningEffort: activeSession?.reasoningEffort,
-                    }}
+                    sessionModel={
+                      activeSession
+                        ? sessionModelSelectionFromSession(activeSession)
+                        : chatDraftModels[activeDraftKey]
+                    }
                     sessionPlan={activeSessionPlan}
                     sessionGoal={activeSessionGoal}
                     isMission={activeIsMission}
@@ -14175,12 +14261,11 @@ export function App() {
           onSetOnboardingStep={(step) =>
             dispatchWorkbench({ type: "set-onboarding-step", step })
           }
-          sessionModel={{
-            modelLabel: activeSession?.modelLabel,
-            providerId: activeSession?.providerId,
-            providerLabel: activeSession?.providerLabel,
-            reasoningEffort: activeSession?.reasoningEffort,
-          }}
+          sessionModel={
+            activeSession
+              ? sessionModelSelectionFromSession(activeSession)
+              : chatDraftModels[activeDraftKey]
+          }
           workspaceMode={workbench.workspaceMode}
           onToggleEnvironmentRail={() =>
             dispatchWorkbench({ type: "toggle-chat-environment-rail" })
@@ -17045,6 +17130,36 @@ function selectedSessionModelFromConfig(config: GyroConfig) {
     modelId: model?.id ?? provider?.selectedModelId,
     modelLabel: model?.displayName ?? provider?.selectedModelId,
     reasoningEffort: provider ? selectedReasoningEffort(provider) : undefined,
+  };
+}
+
+/** Model fields stored on a session, for per-pane composer binding. */
+function sessionModelSelectionFromSession(
+  session?: Pick<
+    Session,
+    | "providerId"
+    | "providerLabel"
+    | "modelId"
+    | "modelLabel"
+    | "reasoningEffort"
+  > | null,
+): SessionModelSelection | undefined {
+  if (
+    !session?.providerId &&
+    !session?.modelId &&
+    !session?.modelLabel
+  ) {
+    return undefined;
+  }
+  return {
+    providerId:
+      session.providerId && isProviderId(session.providerId)
+        ? session.providerId
+        : undefined,
+    providerLabel: session.providerLabel,
+    modelId: session.modelId,
+    modelLabel: session.modelLabel,
+    reasoningEffort: session.reasoningEffort,
   };
 }
 

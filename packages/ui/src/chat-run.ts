@@ -55,6 +55,11 @@ export type WorkItem =
       status: WorkStatus;
       tool: string;
       server?: string;
+      /**
+       * What the tool ran on, when the provider sent a machine identity as the
+       * tool name (Bash, Skill, mcp__…). Shown muted next to the bright label.
+       */
+      note?: string;
     };
 
 /**
@@ -141,7 +146,12 @@ export function buildRunModel(
   const closing = partitionClosingResponse(visible, options.isRunning ?? false);
   const steps: RunStep[] = [];
   const files: FileChange[] = [];
-  const consumedResponseIds = new Set(closing?.sourceIds ?? []);
+  // Peeled preambles rejoin the rail below, so the main pass has to skip the
+  // originals — otherwise a real (non-synthetic) preamble event is drawn twice.
+  const consumedResponseIds = new Set([
+    ...(closing?.sourceIds ?? []),
+    ...(closing?.preambles ?? []).map((event) => event.id),
+  ]);
 
   for (const event of visible) {
     if (consumedResponseIds.has(event.id)) {
@@ -226,7 +236,9 @@ function coalesceAdjacentToolSteps(steps: RunStep[]): RunStep[] {
 }
 
 function toolIdentity(item: Extract<WorkItem, { kind: "tool" }>): string {
-  return `${item.server ?? ""}::${item.tool}`.toLowerCase();
+  // Include the note so consecutive Skill/Bash-shaped rows with different
+  // targets stay as separate beats instead of collapsing into one.
+  return `${item.server ?? ""}::${item.tool}::${item.note ?? ""}`.toLowerCase();
 }
 
 type ClosingResponse = {
@@ -423,7 +435,9 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         id,
         status,
         command: text(payload, "command") ?? detail ?? label,
-        intent: text(payload, "intent"),
+        // Prefer an explicit intent; fall back to the free-form note when the
+        // backend reclassified Bash with a description in the note slot.
+        intent: text(payload, "intent") ?? text(payload, "note"),
       };
     case "file":
       return {
@@ -435,6 +449,8 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         deletions: count(payload, "deletions"),
       };
     case "search": {
+      // Prefer the structured query; a note is a secondary scope (path) and is
+      // not the thing being searched for.
       const query = text(payload, "query") ?? detail;
       return {
         kind: "search",
@@ -458,6 +474,7 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         id,
         status,
         ...splitToolName(text(payload, "tool") ?? detail ?? label),
+        note: text(payload, "note"),
       };
     // ACP providers (Grok/Kimi/Gemini) report native kinds that are not yet
     // renamed on the wire. Map them so the rail can show real verbs.
@@ -490,7 +507,7 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         id,
         status,
         command: text(payload, "command") ?? detail ?? label,
-        intent: text(payload, "intent"),
+        intent: text(payload, "intent") ?? text(payload, "note"),
       };
     case "fetch":
       return {
@@ -503,7 +520,13 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
     default:
       // An unrecognised kind is still work that happened. Showing it as a tool
       // keeps the beat rather than dropping it out of the run.
-      return { kind: "tool", id, status, ...splitToolName(label) };
+      return {
+        kind: "tool",
+        id,
+        status,
+        ...splitToolName(label),
+        note: text(payload, "note"),
+      };
   }
 }
 
@@ -723,6 +746,8 @@ export function runRowText(step: RunStep): RunRowText {
             : item.status === "failed"
               ? "Command failed"
               : "Ran command",
+        // Intent (why) wins over the raw command (what). A provider note is the
+        // same shape as intent when Bash was reclassified with a description.
         description: item.intent ?? item.command,
       };
     case "file":
@@ -749,30 +774,40 @@ export function runRowText(step: RunStep): RunRowText {
             : "Compacted context",
       };
     case "tool": {
-      const description = item.server
+      const toolLabel = item.server
         ? `${item.server} · ${item.tool}`
         : item.tool;
+      const note =
+        item.note &&
+        item.note.trim() &&
+        !isRawToolPayload(item.note) &&
+        item.note.trim().toLowerCase() !== item.tool.trim().toLowerCase()
+          ? item.note.trim()
+          : undefined;
+      const withNote = (label: string): RunRowText =>
+        note ? { label, description: note } : { label };
       // ACP fallbacks look like "xAI tool" / "Kimi tool". Showing
       // "Used tool · xAI tool" is noise — drop the redundant description.
-      if (isGenericProviderToolLabel(description)) {
-        return {
-          label: item.status === "running" ? "Using tool" : "Used tool",
-        };
+      if (isGenericProviderToolLabel(toolLabel)) {
+        return withNote(
+          item.status === "running" ? "Using tool" : "Used tool",
+        );
       }
       // Familiar capability labels get a progressive verb while in flight.
       if (item.status === "running") {
         const progressive = progressiveToolLabel(item.tool);
         if (progressive) {
-          return { label: progressive };
+          return withNote(progressive);
         }
       }
-      // Prefer a clean tool name as the primary label when we have one.
-      if (description && !isRawToolPayload(description)) {
-        return { label: description };
+      // Prefer a clean tool name as the primary label when we have one; the
+      // note is the muted half that stops "Bash · Bash · Bash" rails.
+      if (toolLabel && !isRawToolPayload(toolLabel)) {
+        return withNote(toolLabel);
       }
-      return {
-        label: item.status === "running" ? "Using tool" : "Used tool",
-      };
+      return withNote(
+        item.status === "running" ? "Using tool" : "Used tool",
+      );
     }
   }
 }
