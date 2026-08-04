@@ -51,6 +51,7 @@ import {
   Minus,
   Moon,
   MoreHorizontal,
+  Monitor,
   Palette,
   PanelBottom,
   PanelLeftClose,
@@ -66,11 +67,14 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   RotateCcw,
   ScrollText,
   Sparkles,
   Square,
   Sun,
+  Tablet,
+  Target,
   Terminal,
   TriangleAlert,
   Trash2,
@@ -119,7 +123,6 @@ import {
 import {
   estimateTurnCost,
   formatTokenCount,
-  ledgerWindows,
   summarizeSessionCost,
   summarizeUsageSafety,
 } from "./usage-ledger";
@@ -387,6 +390,8 @@ type AppChromeProps = {
   savedProjects: Array<{ path: string; label: string }>;
   activeSessionId?: string;
   sendingSessionIds?: string[];
+  /** Sessions that own a live model terminal (power-relevant even when idle). */
+  modelTerminalSessionIds?: string[];
   activeDestination: AppDestination;
   activeWorkspaceLayout: WorkspaceLayoutId;
   workspacePath?: string;
@@ -417,7 +422,12 @@ type AppChromeProps = {
   isShellOptimizing?: boolean;
   onOpenCommandPalette: () => void;
   onCreateSession: () => void;
-  onCreateCliSession: (profileId: string, workspacePath: string) => void;
+  onCreateMission?: () => void;
+  onCreateCliSession: (
+    profileId: string,
+    workspacePath: string,
+    options?: { missionSessionId?: string; taskTitle?: string },
+  ) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
   onAddWorkspaceFolder?: () => void;
@@ -996,6 +1006,7 @@ export function AppChrome({
   savedProjects,
   activeSessionId,
   sendingSessionIds = [],
+  modelTerminalSessionIds = [],
   activeDestination,
   activeWorkspaceLayout,
   workspacePath,
@@ -1024,6 +1035,7 @@ export function AppChrome({
   isShellOptimizing = false,
   onOpenCommandPalette,
   onCreateSession,
+  onCreateMission,
   onCreateCliSession,
   onSelectSessions,
   onOpenWorkspace,
@@ -1458,6 +1470,7 @@ export function AppChrome({
               activeSession={activeSession}
               activeSessionId={activeSessionId}
               sendingSessionIds={sendingSessionIds}
+              modelTerminalSessionIds={modelTerminalSessionIds}
               activeWorkspaceLayout={activeWorkspaceLayout}
               commandProfiles={commandProfiles}
               files={files}
@@ -1467,6 +1480,7 @@ export function AppChrome({
               onAddTerminalPane={onAddTerminalPane}
               onCloseTerminalPane={onCloseTerminalPane}
               onCreateSession={onCreateSession}
+              onCreateMission={onCreateMission}
               onCreateCliSession={onCreateCliSession}
               onDeleteSession={onDeleteSession}
               onOpenCommandPalette={onOpenCommandPalette}
@@ -2287,6 +2301,7 @@ function WorkspaceSidebarContent({
   savedProjects,
   activeSessionId,
   sendingSessionIds,
+  modelTerminalSessionIds = [],
   activeSession,
   activeDestination,
   activeWorkspaceLayout,
@@ -2305,6 +2320,7 @@ function WorkspaceSidebarContent({
   onSelectWorkspaceLayout,
   onOpenToolPanel,
   onCreateSession,
+  onCreateMission,
   onCreateCliSession,
   onSelectSessions,
   onOpenWorkspace,
@@ -2366,6 +2382,7 @@ function WorkspaceSidebarContent({
   savedProjects: Array<{ path: string; label: string }>;
   activeSessionId?: string;
   sendingSessionIds: string[];
+  modelTerminalSessionIds?: string[];
   activeSession?: Session;
   activeDestination: AppDestination;
   activeWorkspaceLayout: WorkspaceLayoutId;
@@ -2384,7 +2401,12 @@ function WorkspaceSidebarContent({
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
   onCreateSession: () => void;
-  onCreateCliSession: (profileId: string, workspacePath: string) => void;
+  onCreateMission?: () => void;
+  onCreateCliSession: (
+    profileId: string,
+    workspacePath: string,
+    options?: { missionSessionId?: string; taskTitle?: string },
+  ) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
   onAddWorkspaceFolder?: () => void;
@@ -2459,9 +2481,16 @@ function WorkspaceSidebarContent({
   const pinnedSessions = sessions.filter((session) =>
     pinnedSessionIds.includes(session.id),
   );
-  const recentSessions = sessions.filter(
-    (session) => !pinnedSessionIds.includes(session.id),
-  );
+  // Hide empty "New chat" / "New mission" shells until something real happens.
+  const recentSessions = sessions.filter((session) => {
+    if (pinnedSessionIds.includes(session.id)) {
+      return false;
+    }
+    const hasMissionWorkers = terminalPanes.some(
+      (pane) => pane.missionSessionId === session.id,
+    );
+    return sessionHasStartedForSidebar(session, { hasMissionWorkers });
+  });
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
   const [draggedSessionId, setDraggedSessionId] = useState<string>();
   const [newSessionMenuView, setNewSessionMenuView] = useState<
@@ -2812,6 +2841,7 @@ function WorkspaceSidebarContent({
     <SessionSidebarRow
       isActive={session.id === activeSessionId}
       isSending={sendingSessionIds.includes(session.id)}
+      hasModelTerminal={modelTerminalSessionIds.includes(session.id)}
       isNested={isNested}
       isMenuOpen={openSessionMenuId === session.id}
       isPinned={pinnedSessionIds.includes(session.id)}
@@ -2863,12 +2893,9 @@ function WorkspaceSidebarContent({
       <SidebarThreadRow
         icon={Terminal}
         indent={isNested}
-        isActive={
-          activeWorkspaceLayout === "terminal-grid" &&
-          pane.id === selectedTerminalPaneId
-        }
+        isActive={pane.id === selectedTerminalPaneId}
         key={pane.id}
-        label={pane.title}
+        label={pane.taskTitle ?? pane.title}
         meta={sidebarTerminalActivityLabel(activity)}
         onClick={() => onSelectTerminalPane?.(pane.id)}
         onClose={() => onCloseTerminalPane?.(pane.id)}
@@ -2876,10 +2903,22 @@ function WorkspaceSidebarContent({
       />
     );
   };
-  const renderNavigationItem = (item: SidebarSessionItem) =>
-    item.kind === "chat"
-      ? renderSessionRow(item.session, true)
-      : renderCliPaneRow(item.pane, true);
+  /** Mission-owned CLIs nest under their goal chat; free CLIs stay top-level. */
+  const renderNavigationItem = (item: SidebarSessionItem) => {
+    if (item.kind === "cli") {
+      return renderCliPaneRow(item.pane, true);
+    }
+    const session = item.session;
+    const missionWorkers = terminalPanes.filter(
+      (pane) => pane.missionSessionId === session.id,
+    );
+    return (
+      <div className="gyro-sidebar-mission-cluster" key={session.id}>
+        {renderSessionRow(session, true)}
+        {missionWorkers.map((pane) => renderCliPaneRow(pane, true))}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -3978,14 +4017,31 @@ function WorkspaceSidebarContent({
                       <MessageSquare size={15} />
                       <strong>New Chat</strong>
                     </button>
+                    {onCreateMission ? (
+                      <button
+                        aria-label="New mission"
+                        onClick={() => {
+                          setNewSessionMenuView("closed");
+                          onCreateMission();
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Target size={15} />
+                        <span>
+                          <strong>New mission</strong>
+                          <small>Goal chat that owns CLI workers</small>
+                        </span>
+                      </button>
+                    ) : null}
                   </div>
                   <div
-                    aria-label="CLI sessions"
+                    aria-label="Open CLI sessions"
                     className="gyro-sidebar-session-group is-cli"
                     role="group"
                   >
                     <span className="gyro-sidebar-session-group-label">
-                      CLI
+                      Open CLI
                     </span>
                     {cliProjects.length === 0 ? (
                       <button
@@ -4080,6 +4136,9 @@ function WorkspaceSidebarContent({
                   : collapsedProjectSessions;
               const hiddenCount =
                 project.items.length - visibleProjectSessions.length;
+              const timeGroupedSessions = isExpanded
+                ? groupSidebarItemsByRecency(visibleProjectSessions)
+                : [{ label: null as string | null, items: visibleProjectSessions }];
               return (
                 <div
                   className={[
@@ -4176,7 +4235,16 @@ function WorkspaceSidebarContent({
                   {!isCollapsed ? (
                     <>
                       {visibleProjectSessions.length > 0 ? (
-                        visibleProjectSessions.map(renderNavigationItem)
+                        timeGroupedSessions.map((group) => (
+                          <div key={group.label ?? "recent"}>
+                            {group.label ? (
+                              <div className="gyro-sidebar-time-group">
+                                {group.label}
+                              </div>
+                            ) : null}
+                            {group.items.map(renderNavigationItem)}
+                          </div>
+                        ))
                       ) : (
                         <button
                           className="gyro-sidebar-thread is-empty"
@@ -4370,6 +4438,7 @@ function SessionSidebarRow({
   session,
   isActive,
   isSending,
+  hasModelTerminal = false,
   isNested,
   isPinned,
   isOpen,
@@ -4388,6 +4457,7 @@ function SessionSidebarRow({
   session: Session;
   isActive: boolean;
   isSending: boolean;
+  hasModelTerminal?: boolean;
   isNested?: boolean;
   isPinned: boolean;
   isOpen?: boolean;
@@ -4488,14 +4558,32 @@ function SessionSidebarRow({
           ) : null}
         </span>
         <small
-          aria-label={isSending ? "Chat working" : undefined}
-          className={
-            isSending ? "gyro-session-time is-working" : "gyro-session-time"
+          aria-label={
+            isSending
+              ? "Chat working"
+              : hasModelTerminal
+                ? "Model terminal running"
+                : undefined
           }
-          title={isSending ? "Chat working in the background" : undefined}
+          className={[
+            "gyro-session-time",
+            isSending ? "is-working" : "",
+            !isSending && hasModelTerminal ? "is-model-terminal" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          title={
+            isSending
+              ? "Chat working in the background"
+              : hasModelTerminal
+                ? "Model-owned terminal is still running"
+                : undefined
+          }
         >
           {isSending ? (
             <CircleDashed aria-hidden="true" size={13} />
+          ) : hasModelTerminal ? (
+            <Terminal aria-hidden="true" size={12} />
           ) : (
             relativeSessionTime(session.updatedAt)
           )}
@@ -4626,6 +4714,10 @@ function sidebarProjectGroups(
         second.normalizedPath.length - first.normalizedPath.length,
     );
   for (const pane of terminalPanes) {
+    // Mission workers render nested under their goal chat, not as peers.
+    if (pane.missionSessionId) {
+      continue;
+    }
     const panePath = normalizeSidebarPath(
       pane.projectPath ?? pane.workingDirectory,
     );
@@ -4674,6 +4766,51 @@ function sidebarSessionTimestamp(item: SidebarSessionItem) {
   const value =
     item.kind === "chat" ? item.session.updatedAt : item.pane.createdAt;
   return new Date(value).getTime() || 0;
+}
+
+/** Placeholder titles used before the first real turn or auto-title. */
+function isSidebarPlaceholderSessionTitle(title: string) {
+  return [
+    "new chat",
+    "new mission",
+    "desktop session",
+    "worktree session",
+    "agent workspace",
+    "cli workspace",
+    "worktree cli workspace",
+    "agent workspace cli",
+  ].includes(title.trim().toLowerCase());
+}
+
+/**
+ * Whether a chat/mission should list in the Projects sidebar.
+ * Unstarted shells (empty New chat / New mission) stay out until activity.
+ */
+function sessionHasStartedForSidebar(
+  session: Session,
+  options: { hasMissionWorkers?: boolean } = {},
+) {
+  // Mission with workers is already real work even without a goal message.
+  if (options.hasMissionWorkers) {
+    return true;
+  }
+  if (!isSidebarPlaceholderSessionTitle(session.title)) {
+    return true;
+  }
+  if (session.summary?.trim()) {
+    return true;
+  }
+  // First turn / rename updates `updatedAt` after create.
+  const created = Date.parse(session.createdAt);
+  const updated = Date.parse(session.updatedAt);
+  if (
+    Number.isFinite(created) &&
+    Number.isFinite(updated) &&
+    updated > created + 1_500
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function normalizeSidebarPath(path?: string) {
@@ -5543,6 +5680,90 @@ function effectiveChatArrangement(
   return "grid";
 }
 
+/**
+ * Mission control strip: workers under one goal chat. Phase 1 is manual
+ * spawn (same default profile × N); plan-approve-spawn comes later.
+ *
+ * When the goal chat is already active, hide the empty-state lecture so the
+ * board stays a compact control strip rather than a second empty product.
+ */
+function MissionWorkersBoard({
+  defaultProfileLabel,
+  goalActive = false,
+  onAddWorker,
+  onSelectWorker,
+  workers,
+}: {
+  defaultProfileLabel?: string;
+  /** True once the mission has chat turns / a live goal run. */
+  goalActive?: boolean;
+  onAddWorker?: () => void;
+  onSelectWorker?: (paneId: string) => void;
+  workers: TerminalPane[];
+}) {
+  const showEmptyHint = workers.length === 0 && !goalActive;
+  return (
+    <section
+      aria-label="Mission workers"
+      className={[
+        "gyro-mission-workers",
+        goalActive ? "is-goal-active" : "",
+        workers.length === 0 ? "is-empty" : "has-workers",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div className="gyro-mission-workers-header">
+        <span className="gyro-mission-workers-title">
+          <Target aria-hidden="true" size={13} />
+          Workers
+          {workers.length > 0 ? <em>{workers.length}</em> : null}
+        </span>
+        {onAddWorker ? (
+          <button
+            className="gyro-mission-workers-add"
+            onClick={onAddWorker}
+            type="button"
+          >
+            <Plus size={13} />
+            Add worker
+            {defaultProfileLabel ? (
+              <small>{defaultProfileLabel}</small>
+            ) : null}
+          </button>
+        ) : null}
+      </div>
+      {showEmptyHint ? (
+        <p className="gyro-mission-workers-empty">
+          Optional: add CLI workers for parallel tasks (same runtime by
+          default).
+        </p>
+      ) : null}
+      {workers.length > 0 ? (
+        <ul className="gyro-mission-workers-list">
+          {workers.map((worker) => (
+            <li key={worker.id}>
+              <button
+                className={`gyro-mission-worker is-${worker.status}`}
+                onClick={() => onSelectWorker?.(worker.id)}
+                type="button"
+              >
+                <span className="gyro-mission-worker-title">
+                  {worker.taskTitle ?? worker.title}
+                </span>
+                <span className="gyro-mission-worker-meta">
+                  {worker.status}
+                  {worker.profileId ? ` · ${worker.profileId}` : null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 type ChatSurfaceProps = {
   events: SessionEvent[];
   draft?: string;
@@ -5598,6 +5819,12 @@ type ChatSurfaceProps = {
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
   isGoalComposerActive?: boolean;
+  /** When true, this chat is a mission control plane for CLI workers. */
+  isMission?: boolean;
+  missionWorkers?: TerminalPane[];
+  missionDefaultProfileLabel?: string;
+  onAddMissionWorker?: () => void;
+  onSelectMissionWorker?: (paneId: string) => void;
   promptHistory?: string[];
   chatMode?: ChatMode;
   attachments?: ChatAttachment[];
@@ -5653,6 +5880,10 @@ type ChatSurfaceProps = {
   onStopChat?: () => void;
   onCloseChat?: () => void;
   onContinueChat?: () => void;
+  /** Older transcript pages exist before the current window. */
+  hasMoreBefore?: boolean;
+  isLoadingEarlier?: boolean;
+  onLoadEarlier?: () => void;
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
@@ -5736,6 +5967,11 @@ export function ChatSurface({
   sessionPlan,
   sessionGoal,
   isGoalComposerActive = false,
+  isMission = false,
+  missionWorkers = [],
+  missionDefaultProfileLabel,
+  onAddMissionWorker,
+  onSelectMissionWorker,
   promptHistory = [],
   chatMode = "normal",
   attachments = [],
@@ -5767,6 +6003,9 @@ export function ChatSurface({
   onStopChat,
   onCloseChat,
   onContinueChat,
+  hasMoreBefore = false,
+  isLoadingEarlier = false,
+  onLoadEarlier,
   onCouncilAction,
   onSend,
   onComposerAction,
@@ -6095,11 +6334,12 @@ export function ChatSurface({
             onProviderStatusAction={onProviderStatusAction}
           />
         ))}
-        {turns.map((turn) => (
+        {turns.map((turn, turnIndex) => (
           <ChatTurn
             artifactActions={{
               onOpenFiles: () => onComposerAction?.("open-files"),
               onOpenTool: onOpenToolPanel,
+              onOpenExternalPreview: () => onBrowserOpenExternal?.(),
               onSendPrompt: handleArtifactPrompt,
             }}
             isActive={turn.id === activeTurnId}
@@ -6111,13 +6351,25 @@ export function ChatSurface({
             onProviderApprovalAction={onProviderApprovalAction}
             onProviderStatusAction={onProviderStatusAction}
             onReusePrompt={onReusePrompt}
-            onContinueChat={onContinueChat}
+            onContinueChat={
+              // Only the latest turn needs Continue — older ones clutter the rail
+              // and imply unfinished work on already-finished messages.
+              turnIndex === turns.length - 1 ? onContinueChat : undefined
+            }
             onOpenPlan={onTogglePlanPanel}
             onPlanDecision={handlePlanDecision}
             plan={sessionPlan}
             isPlanDecisionPending={isPlanDecisionPending}
             isPlanPanelOpen={activeRailPanel === "plan"}
             isPlanReadyForDecision={isPlanReadyForDecision}
+            previewCapture={
+              browserPreview?.latestCapture
+                ? {
+                    src: browserPreview.latestCapture.src,
+                    path: browserPreview.latestCapture.path,
+                  }
+                : undefined
+            }
             sourceControl={sourceControl}
             sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
             turn={turn}
@@ -6130,6 +6382,7 @@ export function ChatSurface({
     ),
     [
       onMutationApprovalAction,
+      onBrowserOpenExternal,
       onComposerAction,
       onCouncilAction,
       onContinueChat,
@@ -6139,6 +6392,8 @@ export function ChatSurface({
       onProviderStatusAction,
       handlePlanDecision,
       handleArtifactPrompt,
+      browserPreview?.latestCapture?.path,
+      browserPreview?.latestCapture?.src,
       sourceControl,
       turnSourceControlBaselines,
       activeTurnId,
@@ -6193,12 +6448,15 @@ export function ChatSurface({
       worktreeName={worktreeName}
     />
   ) : null;
+  const missionHasWorkers = missionWorkers.length > 0;
   if (turns.length === 0 && looseEvents.length === 0) {
     return (
       <div
         className={[
           "gyro-chat-surface",
           "is-empty",
+          isMission ? "is-mission" : "",
+          missionHasWorkers ? "has-mission-workers" : "",
           isTiled ? "is-tiled" : "",
           activeRailPanel ? "has-environment" : "",
         ]
@@ -6213,25 +6471,44 @@ export function ChatSurface({
           data-tauri-drag-region
         />
         <section
-          className="gyro-chat-start"
-          aria-label="New Chat"
+          className={[
+            "gyro-chat-start",
+            isMission ? "is-mission" : "",
+            missionHasWorkers ? "is-mission-docked" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          aria-label={isMission ? "New mission" : "New Chat"}
           style={{ width: "min(860px, 100%)" }}
         >
-          <span className="gyro-brand-logo">
-            <img
-              alt="Gyro"
-              className="is-light"
-              src={gyroLogoTransparentDark}
-            />
-            <img
-              alt=""
-              aria-hidden="true"
-              className="is-dark"
-              src={gyroLogoTransparentLight}
-            />
-          </span>
+          {isMission && missionHasWorkers ? null : (
+            <span className="gyro-brand-logo">
+              <img
+                alt="Gyro"
+                className="is-light"
+                src={gyroLogoTransparentDark}
+              />
+              <img
+                alt=""
+                aria-hidden="true"
+                className="is-dark"
+                src={gyroLogoTransparentLight}
+              />
+            </span>
+          )}
           <h1>
-            {startProjectLabel ? (
+            {isMission ? (
+              startProjectLabel ? (
+                <>
+                  <span>What&apos;s the mission in </span>
+                  <span className="gyro-chat-start-brand-word">
+                    {startProjectLabel}?
+                  </span>
+                </>
+              ) : (
+                <span>What&apos;s the mission goal?</span>
+              )
+            ) : startProjectLabel ? (
               <>
                 <span>What should we do in </span>
                 <span className="gyro-chat-start-brand-word">
@@ -6242,6 +6519,15 @@ export function ChatSurface({
               <span>What should we work on?</span>
             )}
           </h1>
+          {isMission ? (
+            <MissionWorkersBoard
+              defaultProfileLabel={missionDefaultProfileLabel}
+              goalActive={false}
+              onAddWorker={onAddMissionWorker}
+              onSelectWorker={onSelectMissionWorker}
+              workers={missionWorkers}
+            />
+          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -6522,7 +6808,7 @@ export function ChatSurface({
 
       <section className="gyro-chat-thread-canvas" aria-label="Chat">
         <div
-          aria-busy={isComposerSending}
+          aria-busy={isComposerSending || isLoadingEarlier}
           aria-live="polite"
           aria-relevant="additions text"
           className="gyro-thread-body gyro-chat-transcript"
@@ -6530,6 +6816,26 @@ export function ChatSurface({
           ref={transcriptRef}
           role="log"
         >
+          {hasMoreBefore && onLoadEarlier ? (
+            <div className="gyro-chat-load-earlier">
+              <button
+                disabled={isLoadingEarlier}
+                onClick={onLoadEarlier}
+                type="button"
+              >
+                {isLoadingEarlier ? "Loading earlier…" : "Load earlier messages"}
+              </button>
+            </div>
+          ) : null}
+          {isMission ? (
+            <MissionWorkersBoard
+              defaultProfileLabel={missionDefaultProfileLabel}
+              goalActive
+              onAddWorker={onAddMissionWorker}
+              onSelectWorker={onSelectMissionWorker}
+              workers={missionWorkers}
+            />
+          ) : null}
           {transcriptContent}
         </div>
 
@@ -7969,23 +8275,26 @@ function capabilityPolicySummary(policy: ProjectCapabilityPolicy) {
 }
 
 function chatToolBrowserStatusLabel(browserPreview?: BrowserPreview) {
+  if (browserPreview?.captureStatus === "capturing") {
+    return "Capturing";
+  }
   switch (browserPreview?.status) {
     case "loading":
       return "Loading";
     case "verification-passed":
-      return "Verified";
+    case "ready":
+      return "Live";
     case "console-error": {
       const count = browserPreview.consoleErrors;
       return count > 0
-        ? `${count} console ${count === 1 ? "error" : "errors"}`
-        : "Console issue";
+        ? `${count} issue${count === 1 ? "" : "s"}`
+        : "Issues";
     }
     case "verification-failed":
-      return "Needs attention";
+      return "Unreachable";
     case "idle":
-    case "ready":
     default:
-      return "Ready";
+      return "Idle";
   }
 }
 
@@ -13243,8 +13552,8 @@ function ResizableBrowserRail({
             <strong>Browser</strong>
             <span>
               {browserPreview?.title?.trim() ||
-                browserPreview?.url ||
-                "Session browser"}
+                browserPreviewHostLabel(browserPreview?.url) ||
+                "Session preview"}
             </span>
           </div>
         </div>
@@ -13261,6 +13570,7 @@ function ResizableBrowserRail({
         browserPreview={browserPreview}
         nativeHost={browserNativeHost}
         overlayOccluded={browserOverlayOccluded}
+        variant="chat"
         onBack={onBrowserBack}
         onDeviceChange={onBrowserDeviceChange}
         onForward={onBrowserForward}
@@ -13277,6 +13587,7 @@ function ResizableBrowserRail({
 
 export function BrowserPreviewSurface({
   compact = false,
+  variant,
   browserPreview,
   nativeHost = false,
   overlayOccluded = false,
@@ -13291,6 +13602,8 @@ export function BrowserPreviewSurface({
   onHostBoundsChange,
 }: {
   compact?: boolean;
+  /** Chat rail uses a lighter chrome; workbench keeps full diagnostics chrome. */
+  variant?: "workbench" | "chat";
   browserPreview?: BrowserPreview;
   /** When true, render a spacer host for a native child webview instead of an iframe. */
   nativeHost?: boolean;
@@ -13321,19 +13634,72 @@ export function BrowserPreviewSurface({
       diagnosticsCaptured: false,
       captureStatus: "idle",
       status: "idle",
-      verificationMessage: "Ready · localhost:3000",
+      verificationMessage: "Idle",
     } satisfies BrowserPreview);
+  const resolvedVariant = variant ?? (compact ? "workbench" : "workbench");
+  const isChat = resolvedVariant === "chat";
   const canGoBack = preview.historyIndex > 0;
   const canGoForward = preview.historyIndex < preview.history.length - 1;
   const [frameRevision, setFrameRevision] = useState(0);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [frameMode, setFrameMode] = useState<"live" | "capture">("live");
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const lastCaptureKeyRef = useRef<string | undefined>(undefined);
   const frameUrl = normalizedBrowserPreviewUrl(preview.url);
   const hasDiagnostics = preview.consoleErrors !== 0;
   const useNativeHost = nativeHost || preview.nativeHost === true;
   const canCapturePreview =
     useNativeHost || isLoopbackBrowserPreviewUrl(frameUrl);
   const isLocalPreview = isLoopbackBrowserPreviewUrl(frameUrl);
+  const hostLabel = browserPreviewHostLabel(preview.url);
+  const isLoading = preview.status === "loading";
+  const isCapturing = preview.captureStatus === "capturing";
+  const isLive =
+    preview.status === "ready" || preview.status === "verification-passed";
+  const isFailed =
+    preview.status === "verification-failed" ||
+    preview.status === "console-error";
+  const captureSrc = preview.latestCapture?.src;
+  const hasCapture =
+    preview.captureStatus === "captured" && Boolean(captureSrc);
+  // Auto-open Capture view when a new screenshot lands.
+  useEffect(() => {
+    const key = preview.latestCapture
+      ? `${preview.latestCapture.path}:${preview.latestCapture.createdAt}`
+      : undefined;
+    if (
+      preview.captureStatus === "captured" &&
+      key &&
+      key !== lastCaptureKeyRef.current &&
+      captureSrc
+    ) {
+      lastCaptureKeyRef.current = key;
+      setFrameMode("capture");
+    }
+  }, [captureSrc, preview.captureStatus, preview.latestCapture]);
+  // Fall back to Live if the capture disappears.
+  useEffect(() => {
+    if (frameMode === "capture" && !hasCapture) {
+      setFrameMode("live");
+    }
+  }, [frameMode, hasCapture]);
+  const showingCapture = frameMode === "capture" && hasCapture;
+  // Placeholder fills the frame when there is no live paint yet (or host is occluded).
+  const showPlaceholder =
+    !showingCapture &&
+    (overlayOccluded ||
+      preview.status === "idle" ||
+      isLoading ||
+      preview.status === "verification-failed" ||
+      (!useNativeHost && !isLive && preview.status !== "console-error"));
+  const showCaptureBackdrop =
+    Boolean(captureSrc) &&
+    !showingCapture &&
+    (preview.status === "idle" ||
+      preview.status === "verification-failed" ||
+      overlayOccluded);
+  // Hide the native webview while inspecting a freeze-frame capture.
+  const hostShouldHide = overlayOccluded || showingCapture;
 
   useEffect(() => {
     if (!useNativeHost || !onHostBoundsChange) {
@@ -13344,7 +13710,7 @@ export function BrowserPreviewSurface({
       return;
     }
     const report = () => {
-      if (overlayOccluded) {
+      if (hostShouldHide) {
         onHostBoundsChange(null);
         return;
       }
@@ -13375,18 +13741,38 @@ export function BrowserPreviewSurface({
   }, [
     useNativeHost,
     onHostBoundsChange,
-    overlayOccluded,
+    hostShouldHide,
     compact,
+    isChat,
     preview.device,
   ]);
+
+  const reloadFrame = () => {
+    setFrameRevision((revision) => revision + 1);
+    onReload?.();
+  };
+
+  const statusRingClass =
+    isFailed
+      ? "gyro-ring is-failed"
+      : isLoading || isCapturing
+        ? "gyro-ring is-running"
+        : isLive
+          ? "gyro-ring is-done"
+          : "gyro-ring is-idle";
 
   return (
     <div
       className={[
         "gyro-browser-preview",
         compact ? "is-compact" : "",
+        isChat ? "is-chat" : "is-workbench",
         useNativeHost ? "is-native-host" : "",
         overlayOccluded ? "is-occluded" : "",
+        isLoading ? "is-loading" : "",
+        isCapturing ? "is-capturing-frame" : "",
+        isLive ? "is-live" : "",
+        showingCapture ? "is-capture-view" : "",
         `is-device-${preview.device}`,
       ]
         .filter(Boolean)
@@ -13400,7 +13786,7 @@ export function BrowserPreviewSurface({
         >
           <button
             aria-label="Back"
-            disabled={!canGoBack}
+            disabled={!canGoBack || showingCapture}
             onClick={onBack}
             type="button"
           >
@@ -13408,7 +13794,7 @@ export function BrowserPreviewSurface({
           </button>
           <button
             aria-label="Forward"
-            disabled={!canGoForward}
+            disabled={!canGoForward || showingCapture}
             onClick={onForward}
             type="button"
           >
@@ -13416,10 +13802,8 @@ export function BrowserPreviewSurface({
           </button>
           <button
             aria-label="Reload"
-            onClick={() => {
-              setFrameRevision((revision) => revision + 1);
-              onReload?.();
-            }}
+            disabled={showingCapture}
+            onClick={reloadFrame}
             type="button"
           >
             <RefreshCw size={14} />
@@ -13429,6 +13813,9 @@ export function BrowserPreviewSurface({
           className="gyro-url-bar"
           onSubmit={(event) => {
             event.preventDefault();
+            if (showingCapture) {
+              setFrameMode("live");
+            }
             onNavigate?.(frameUrl);
           }}
         >
@@ -13440,7 +13827,13 @@ export function BrowserPreviewSurface({
             value={preview.url}
           />
           <small className={isLocalPreview ? "is-local" : "is-web"}>
-            {useNativeHost ? "native" : isLocalPreview ? "local" : "web"}
+            {showingCapture
+              ? "capture"
+              : useNativeHost
+                ? "native"
+                : isLocalPreview
+                  ? "local"
+                  : "web"}
           </small>
         </form>
         <div
@@ -13448,28 +13841,74 @@ export function BrowserPreviewSurface({
           role="group"
           aria-label="Browser actions"
         >
-          <select
+          {hasCapture ? (
+            <div
+              className="gyro-browser-view-group"
+              role="group"
+              aria-label="Preview mode"
+            >
+              <button
+                aria-pressed={frameMode === "live"}
+                className={frameMode === "live" ? "is-active" : undefined}
+                onClick={() => setFrameMode("live")}
+                title="Live preview"
+                type="button"
+              >
+                Live
+              </button>
+              <button
+                aria-pressed={frameMode === "capture"}
+                className={frameMode === "capture" ? "is-active" : undefined}
+                onClick={() => setFrameMode("capture")}
+                title="Last capture"
+                type="button"
+              >
+                Capture
+              </button>
+            </div>
+          ) : null}
+          <div
+            className="gyro-browser-device-group"
+            role="group"
             aria-label="Device size"
-            onChange={(event) =>
-              onDeviceChange?.(event.target.value as BrowserPreviewDevice)
-            }
-            value={preview.device}
           >
-            <option value="desktop">Desktop</option>
-            <option value="tablet">Tablet</option>
-            <option value="mobile">Mobile</option>
-          </select>
+            {(
+              [
+                { id: "desktop", label: "Desktop", icon: Monitor },
+                { id: "tablet", label: "Tablet", icon: Tablet },
+                { id: "mobile", label: "Mobile", icon: Smartphone },
+              ] as const
+            ).map((device) => {
+              const Icon = device.icon;
+              return (
+                <button
+                  aria-label={device.label}
+                  aria-pressed={preview.device === device.id}
+                  className={
+                    preview.device === device.id ? "is-active" : undefined
+                  }
+                  key={device.id}
+                  onClick={() => onDeviceChange?.(device.id)}
+                  title={device.label}
+                  type="button"
+                >
+                  <Icon size={14} />
+                </button>
+              );
+            })}
+          </div>
           <button
             aria-label="Capture browser screenshot"
             className={`gyro-browser-capture-button${
-              preview.captureStatus === "capturing" ? " is-capturing" : ""
+              isCapturing ? " is-capturing" : ""
             }`}
-            disabled={
-              preview.captureStatus === "capturing" || !canCapturePreview
-            }
-            onClick={() => onScreenshot?.("capture")}
+            disabled={isCapturing || !canCapturePreview}
+            onClick={() => {
+              setFrameMode("live");
+              onScreenshot?.("capture");
+            }}
             title={
-              preview.captureStatus === "capturing"
+              isCapturing
                 ? "Capturing preview"
                 : canCapturePreview
                   ? "Capture screenshot"
@@ -13498,33 +13937,111 @@ export function BrowserPreviewSurface({
           {useNativeHost ? (
             <div
               ref={hostRef}
+              aria-hidden={showingCapture || undefined}
               aria-label="Native browser surface"
-              className="gyro-browser-native-host"
+              className={[
+                "gyro-browser-native-host",
+                showingCapture ? "is-capture-hidden" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               data-browser-host="true"
-            />
-          ) : (
-            <iframe
-              key={`${frameUrl}:${frameRevision}`}
-              referrerPolicy="no-referrer"
-              src={frameUrl}
-              title="Browser preview"
-            />
-          )}
+            >
+              {showPlaceholder ? (
+                <BrowserFramePlaceholder
+                  captureSrc={showCaptureBackdrop ? captureSrc : undefined}
+                  hostLabel={hostLabel}
+                  isLoading={isLoading}
+                  isOccluded={overlayOccluded}
+                  isUnreachable={preview.status === "verification-failed"}
+                  onNavigate={onNavigate}
+                  onOpenExternal={onOpenExternal}
+                  onReload={reloadFrame}
+                  suggestedUrl={frameUrl}
+                />
+              ) : null}
+            </div>
+          ) : null}
+          {showingCapture && captureSrc ? (
+            <div className="gyro-browser-capture-view">
+              <img
+                alt={`Browser capture of ${hostLabel || preview.url}`}
+                className="gyro-browser-capture-image"
+                draggable={false}
+                src={captureSrc}
+              />
+              <div className="gyro-browser-capture-meta">
+                <span>
+                  {preview.latestCapture?.width ?? 0} ×{" "}
+                  {preview.latestCapture?.height ?? 0}
+                  {hostLabel ? ` · ${hostLabel}` : ""}
+                  {preview.latestCapture?.createdAt
+                    ? ` · ${formatBrowserCaptureTime(preview.latestCapture.createdAt)}`
+                    : ""}
+                </span>
+                <div className="gyro-browser-capture-actions">
+                  <button
+                    onClick={() => setFrameMode("live")}
+                    type="button"
+                  >
+                    Back to live
+                  </button>
+                  <button
+                    onClick={() => onScreenshot?.("reveal")}
+                    type="button"
+                  >
+                    Reveal file
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : !useNativeHost ? (
+            showPlaceholder ? (
+              <BrowserFramePlaceholder
+                captureSrc={showCaptureBackdrop ? captureSrc : undefined}
+                hostLabel={hostLabel}
+                isLoading={isLoading}
+                isOccluded={overlayOccluded}
+                isUnreachable={preview.status === "verification-failed"}
+                onNavigate={onNavigate}
+                onOpenExternal={onOpenExternal}
+                onReload={reloadFrame}
+                suggestedUrl={frameUrl}
+              />
+            ) : (
+              <iframe
+                key={`${frameUrl}:${frameRevision}`}
+                referrerPolicy="no-referrer"
+                src={frameUrl}
+                title="Browser preview"
+              />
+            )
+          ) : null}
+          {isLoading || isCapturing ? (
+            <div
+              aria-live="polite"
+              className="gyro-browser-activity-strip"
+            >
+              <span className="gyro-ring is-running" />
+              <span>
+                {isCapturing
+                  ? "Capturing screenshot…"
+                  : hostLabel
+                    ? `Loading ${hostLabel}…`
+                    : "Loading preview…"}
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="gyro-browser-statusbar">
         <div>
-          <span
-            className={
-              preview.status === "verification-failed" ||
-              preview.status === "console-error"
-                ? "gyro-ring is-failed"
-                : preview.status === "loading"
-                  ? "gyro-ring is-running"
-                  : "gyro-ring is-done"
-            }
-          />
-          <span>{browserStatusLabel(preview)}</span>
+          <span className={statusRingClass} />
+          <span>
+            {showingCapture
+              ? `Capture · ${hostLabel || "preview"} · ${deviceLabel(preview.device)}`
+              : browserStatusLabel(preview)}
+          </span>
         </div>
         {preview.captureStatus !== "idle" ? (
           <button
@@ -13532,11 +14049,23 @@ export function BrowserPreviewSurface({
               preview.captureStatus === "failed" ? "has-errors" : undefined
             }
             disabled={preview.captureStatus !== "captured"}
-            onClick={() => onScreenshot?.("reveal")}
+            onClick={() => {
+              if (preview.captureStatus === "captured" && hasCapture) {
+                setFrameMode((mode) =>
+                  mode === "capture" ? "live" : "capture",
+                );
+                return;
+              }
+              onScreenshot?.("reveal");
+            }}
             title={
               preview.captureStatus === "failed"
                 ? preview.captureError
-                : preview.latestCapture?.path
+                : hasCapture
+                  ? showingCapture
+                    ? "Show live preview"
+                    : "Show last capture"
+                  : preview.latestCapture?.path
             }
             type="button"
           >
@@ -13545,25 +14074,39 @@ export function BrowserPreviewSurface({
               ? "Capturing..."
               : preview.captureStatus === "failed"
                 ? "Capture failed"
-                : `${preview.latestCapture?.width ?? 0} x ${preview.latestCapture?.height ?? 0}`}
+                : showingCapture
+                  ? "Viewing capture"
+                  : `${preview.latestCapture?.width ?? 0} × ${preview.latestCapture?.height ?? 0}`}
           </button>
         ) : null}
-        <button
-          aria-expanded={isDiagnosticsOpen}
-          className={hasDiagnostics ? "has-errors" : ""}
-          disabled={!preview.diagnosticsCaptured || !hasDiagnostics}
-          onClick={() => setIsDiagnosticsOpen((open) => !open)}
-          type="button"
-        >
-          <TriangleAlert size={13} />
-          {preview.diagnosticsCaptured
-            ? preview.consoleErrors === 0
-              ? "No page errors"
-              : `${preview.consoleErrors} issue${preview.consoleErrors === 1 ? "" : "s"}`
-            : preview.diagnosticsSupported
-              ? "Diagnostics unavailable"
-              : "HTTP check only"}
-        </button>
+        {!isChat ? (
+          <button
+            aria-expanded={isDiagnosticsOpen}
+            className={hasDiagnostics ? "has-errors" : ""}
+            disabled={!preview.diagnosticsCaptured || !hasDiagnostics}
+            onClick={() => setIsDiagnosticsOpen((open) => !open)}
+            type="button"
+          >
+            <TriangleAlert size={13} />
+            {preview.diagnosticsCaptured
+              ? preview.consoleErrors === 0
+                ? "No page errors"
+                : `${preview.consoleErrors} issue${preview.consoleErrors === 1 ? "" : "s"}`
+              : preview.diagnosticsSupported
+                ? "Diagnostics unavailable"
+                : "HTTP check only"}
+          </button>
+        ) : hasDiagnostics ? (
+          <button
+            aria-expanded={isDiagnosticsOpen}
+            className="has-errors"
+            onClick={() => setIsDiagnosticsOpen((open) => !open)}
+            type="button"
+          >
+            <TriangleAlert size={13} />
+            {`${preview.consoleErrors} issue${preview.consoleErrors === 1 ? "" : "s"}`}
+          </button>
+        ) : null}
       </div>
       {isDiagnosticsOpen && preview.diagnostics.length > 0 ? (
         <div
@@ -13593,6 +14136,129 @@ export function BrowserPreviewSurface({
       ) : null}
     </div>
   );
+}
+
+function BrowserFramePlaceholder({
+  captureSrc,
+  hostLabel,
+  isLoading,
+  isOccluded,
+  isUnreachable,
+  onNavigate,
+  onOpenExternal,
+  onReload,
+  suggestedUrl,
+}: {
+  captureSrc?: string;
+  hostLabel?: string;
+  isLoading: boolean;
+  isOccluded: boolean;
+  isUnreachable: boolean;
+  onNavigate?: (url: string) => void;
+  onOpenExternal?: () => void;
+  onReload?: () => void;
+  suggestedUrl: string;
+}) {
+  const title = isOccluded
+    ? "Preview hidden"
+    : isLoading
+      ? "Loading preview"
+      : isUnreachable
+        ? "Can't reach this URL"
+        : "No live preview yet";
+  const detail = isOccluded
+    ? "Close the overlay to show the native browser surface again."
+    : isLoading
+      ? hostLabel
+        ? `Connecting to ${hostLabel}…`
+        : "Connecting…"
+      : isUnreachable
+        ? "Start the app, or try another local URL."
+        : "Point the browser at a running app, or open this URL externally.";
+
+  return (
+    <div
+      className={[
+        "gyro-browser-placeholder",
+        isLoading ? "is-loading" : "",
+        captureSrc ? "has-capture" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {captureSrc ? (
+        <img
+          alt=""
+          className="gyro-browser-placeholder-capture"
+          draggable={false}
+          src={captureSrc}
+        />
+      ) : null}
+      <div className="gyro-browser-placeholder-body">
+        {isLoading ? (
+          <div className="gyro-browser-skeleton" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+        ) : (
+          <div className="gyro-browser-placeholder-icon" aria-hidden="true">
+            <Globe2 size={22} />
+          </div>
+        )}
+        <strong>{title}</strong>
+        <p>{detail}</p>
+        {!isOccluded ? (
+          <div className="gyro-browser-placeholder-actions">
+            {suggestedUrl && suggestedUrl !== "about:blank" ? (
+              <button
+                onClick={() => onNavigate?.(suggestedUrl)}
+                type="button"
+              >
+                {hostLabel || "localhost:3000"}
+              </button>
+            ) : null}
+            {isUnreachable || isLoading ? (
+              <button onClick={onReload} type="button">
+                Retry
+              </button>
+            ) : null}
+            <button onClick={onOpenExternal} type="button">
+              Open external
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function browserPreviewHostLabel(url?: string) {
+  const trimmed = url?.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(
+      /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `http://${trimmed}`,
+    );
+    return parsed.host || parsed.hostname || "";
+  } catch {
+    return "";
+  }
+}
+
+function formatBrowserCaptureTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString();
+  }
 }
 
 function browserDiagnosticLabel(
@@ -14524,6 +15190,83 @@ export function TerminalTerminateConfirmOverlay({
   );
 }
 
+type ChatCloseConfirmOverlayProps = {
+  chatLabel: string;
+  hasModelTerminal?: boolean;
+  onCancel: () => void;
+  /** Close the pane and leave the provider turn running in the background. */
+  onKeepRunning: () => void;
+  /** Stop the provider turn (and model terminal if any), then close the pane. */
+  onStopAndClose: () => void;
+};
+
+/**
+ * Closing a chat pane does not always mean the user wants the backend CLI
+ * to keep burning power. Ask when a turn (or model-owned terminal) is live.
+ */
+export function ChatCloseConfirmOverlay({
+  chatLabel,
+  hasModelTerminal = false,
+  onCancel,
+  onKeepRunning,
+  onStopAndClose,
+}: ChatCloseConfirmOverlayProps) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      aria-modal="true"
+      className="gyro-terminal-terminate-overlay"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+      role="alertdialog"
+    >
+      <section
+        aria-label={`Close ${chatLabel}`}
+        className="gyro-terminal-terminate-card gyro-chat-close-card"
+      >
+        <div className="gyro-terminal-terminate-heading">
+          <MessageSquare size={16} />
+          <h2>Stop this chat?</h2>
+        </div>
+        <p>
+          <strong>{chatLabel}</strong> still has work running
+          {hasModelTerminal ? " and a model-owned terminal" : ""}. Closing the
+          pane without stopping leaves it using power in the background.
+        </p>
+        <div className="gyro-terminal-terminate-actions gyro-chat-close-actions">
+          <button onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button onClick={onKeepRunning} type="button">
+            Keep running
+          </button>
+          <button
+            autoFocus
+            className="is-danger"
+            onClick={onStopAndClose}
+            type="button"
+          >
+            Stop and close
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 type SettingsPanelProps = {
   config: GyroConfig;
 };
@@ -14575,7 +15318,7 @@ type SettingsSurfaceProps = {
   selectedUsageProviderId?: ProviderId;
   usageVisualization?: "bars" | "wheels";
   providerUsage?: ProviderUsageState;
-  /** Gyro's own measurements for the selected provider. */
+  /** Local ledger summary used for spend-limit controls. */
   providerLedger?: ProviderLedgerSummary;
   usageSafety?: UsageSafetySnapshot;
   onProviderBudgetChange?: (providerId: ProviderId, maxTokens: number) => void;
@@ -15046,13 +15789,28 @@ export function SettingsSurface({
                 </label>
                 <div className="gyro-usage-toolbar">
                   <div>
-                    <strong>{usageProvider.displayName} allowance</strong>
+                    <strong>
+                      {usageProvider.id === "openai" ||
+                      usageProvider.id === "anthropic" ||
+                      usageProvider.id === "xai"
+                        ? `${usageProvider.displayName} plan windows`
+                        : `${usageProvider.displayName} spend`}
+                    </strong>
                     <span>
-                      {providerUsage?.fetchedAt
-                        ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""}`
+                      {providerUsage?.status === "available" &&
+                      providerUsage.windows.length > 0
+                        ? providerUsage.fetchedAt
+                          ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · % of window spent`
+                          : "Percent of each plan window spent"
                         : providerUsage?.status === "loading"
                           ? "Checking with the provider…"
-                          : "This provider reports no allowance"}
+                          : usageProvider.id === "openai" ||
+                              usageProvider.id === "anthropic" ||
+                              usageProvider.id === "xai"
+                            ? usageProvider.id === "xai"
+                              ? "Refresh to load Grok Build weekly credit usage"
+                              : "Plan windows appear after the first chat or refresh"
+                            : "No plan window API on this provider — local spend is below"}
                     </span>
                   </div>
                   <div className="gyro-usage-toolbar-actions">
@@ -15084,20 +15842,28 @@ export function SettingsSurface({
                     </button>
                   </div>
                 </div>
-                {providerUsage?.status === "available" ? (
+                {providerUsage?.status === "available" &&
+                providerUsage.windows.length > 0 ? (
                   <div className="gyro-usage-cards">
-                    <UsageCard
-                      window={providerUsage.windows.find(
-                        (window) => window.id === "five-hour",
-                      )}
-                      visualization={usageVisualization}
-                    />
-                    <UsageCard
-                      window={providerUsage.windows.find(
-                        (window) => window.id === "weekly",
-                      )}
-                      visualization={usageVisualization}
-                    />
+                    {/* Show every window the provider (or ledger) reported —
+                        five-hour, weekly, weekly-opus, etc. — not only two slots. */}
+                    {[...providerUsage.windows]
+                      .sort((left, right) => {
+                        const order = ["five-hour", "weekly"];
+                        const leftRank = order.indexOf(left.id);
+                        const rightRank = order.indexOf(right.id);
+                        return (
+                          (leftRank === -1 ? order.length : leftRank) -
+                          (rightRank === -1 ? order.length : rightRank)
+                        );
+                      })
+                      .map((window) => (
+                        <UsageCard
+                          key={window.id}
+                          visualization={usageVisualization}
+                          window={window}
+                        />
+                      ))}
                   </div>
                 ) : providerUsage?.status === "loading" ||
                   providerUsage?.status === "error" ? (
@@ -15111,7 +15877,7 @@ export function SettingsSurface({
                       </strong>
                       <span>
                         {providerUsage.error ??
-                          "Gyro's own measurements are below."}
+                          "Connect or refresh this provider to load plan usage."}
                       </span>
                     </div>
                     <button
@@ -15125,12 +15891,6 @@ export function SettingsSurface({
                     </button>
                   </div>
                 ) : null}
-                {/* Every provider has a measured figure, because it comes from
-                    Gyro's ledger rather than from the provider reporting one. */}
-                <ProviderLedgerPanel
-                  providerLabel={usageProvider.displayName}
-                  summary={providerLedger}
-                />
               </div>
             ) : (
               <div className="gyro-usage-empty">
@@ -16156,80 +16916,6 @@ function usagePauseDetail(snapshot: UsageSafetySnapshot) {
   return notice ? [notice.title, notice.detail].filter(Boolean).join(" ") : "";
 }
 
-function ProviderLedgerPanel({
-  providerLabel,
-  summary,
-}: {
-  providerLabel: string;
-  summary?: ProviderLedgerSummary;
-}) {
-  const windows = useMemo(() => ledgerWindows(summary), [summary]);
-  if (windows.length === 0) return null;
-  const isEmpty = windows.every(
-    (view) => view.percent === 0 && view.detail.startsWith("0 "),
-  );
-
-  return (
-    <section
-      aria-label={`${providerLabel} measured usage`}
-      className="gyro-ledger-panel"
-    >
-      <header>
-        <strong>Measured by Gyro</strong>
-        <span>
-          {isEmpty ? "No runs recorded yet" : "Share of the local limit"}
-        </span>
-      </header>
-      <div className="gyro-ledger-windows">
-        {windows.map((view) => (
-          <article className="gyro-ledger-window" key={view.id}>
-            <header>
-              <span>{view.label}</span>
-              {view.isEstimated ? (
-                <em title="This provider reports no token counts, so its share is estimated from message length.">
-                  estimated
-                </em>
-              ) : null}
-            </header>
-            <strong>{view.percentLabel}</strong>
-            <small>
-              {view.detail}
-              {view.hasBudget ? " · budget" : ""}
-            </small>
-            <div
-              aria-label={`${view.percent}% used`}
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={view.percent}
-              className={`gyro-ledger-budget${view.percent >= 90 ? " is-high" : ""}`}
-              role="progressbar"
-            >
-              <span
-                style={{
-                  width: `${Math.max(view.percent, view.percent > 0 ? 2 : 0)}%`,
-                }}
-              />
-            </div>
-            {view.origins.length > 0 ? (
-              <ul className="gyro-ledger-origins">
-                {view.origins.map((origin) => (
-                  <li key={origin.label}>
-                    <span>{origin.label}</span>
-                    <i>
-                      <b style={{ width: `${origin.share}%` }} />
-                    </i>
-                    <em>{origin.tokens}</em>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function UsageCard({
   window,
   visualization,
@@ -16238,49 +16924,87 @@ function UsageCard({
   visualization: "bars" | "wheels";
 }) {
   if (!window) return null;
-  // Settings only ever shows windows Codex measured, so an unmeasured one is
-  // treated as untouched rather than dropped from the card.
-  const used = Math.max(0, Math.min(100, window.usedPercent ?? 0));
-  const remaining = 100 - used;
+  // Plan windows report how much of the allowance is *spent* this period.
+  // The bar fills as spend builds up.
+  const measured =
+    typeof window.usedPercent === "number" &&
+    Number.isFinite(window.usedPercent);
+  const used = measured
+    ? Math.max(0, Math.min(100, Math.round(window.usedPercent!)))
+    : window.status === "exhausted"
+      ? 100
+      : undefined;
   const severity =
-    remaining <= 10 ? "critical" : remaining <= 25 ? "warning" : "normal";
+    window.status === "exhausted" || (used !== undefined && used >= 95)
+      ? "critical"
+      : window.status === "warning" || (used !== undefined && used >= 80)
+        ? "warning"
+        : "normal";
+  const usedLabel =
+    used === undefined
+      ? "—"
+      : used === 0 && measured && (window.usedPercent ?? 0) > 0
+        ? "<1"
+        : String(used);
   return (
     <article className={`gyro-usage-card is-${severity}`}>
       <header>
         <strong>{window.label}</strong>
         <span>
-          {remaining <= 10
-            ? "Critical"
-            : remaining <= 25
-              ? "Low"
-              : "Within limit"}
+          {severity === "critical"
+            ? "Limit reached"
+            : severity === "warning"
+              ? "High usage"
+              : used === undefined
+                ? "Unmeasured"
+                : "Within limit"}
         </span>
       </header>
       {visualization === "wheels" ? (
         <div
           className="gyro-usage-wheel"
-          style={{ "--usage": `${remaining * 3.6}deg` } as CSSProperties}
+          style={
+            {
+              "--usage": `${(used ?? 0) * 3.6}deg`,
+            } as CSSProperties
+          }
         >
           <span>
-            <strong>{remaining}%</strong>
-            <small>remaining</small>
+            <strong>{used === undefined ? "—" : `${usedLabel}%`}</strong>
+            <small>used</small>
           </span>
         </div>
       ) : (
         <div
-          className="gyro-usage-bar"
-          aria-label={`${remaining}% remaining`}
+          className={`gyro-usage-bar${used === undefined ? " is-unmeasured" : ""}`}
+          aria-label={
+            used === undefined
+              ? `${window.label}: level not reported`
+              : `${usedLabel}% used`
+          }
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={remaining}
+          {...(used !== undefined ? { "aria-valuenow": used } : {})}
         >
-          <span style={{ width: `${remaining}%` }} />
+          {used !== undefined ? (
+            <span
+              style={{
+                width: `${Math.max(used, used > 0 ? 2 : 0)}%`,
+              }}
+            />
+          ) : null}
         </div>
       )}
       <div className="gyro-usage-card-meta">
-        <strong>{remaining}% available</strong>
-        <span>{formatUsageReset(window.resetsAt)}</span>
+        <strong>
+          {used === undefined ? "Level not reported" : `${usedLabel}% used`}
+        </strong>
+        <span>
+          {window.resetsAt
+            ? formatUsageReset(window.resetsAt)
+            : "Resets with plan window"}
+        </span>
       </div>
     </article>
   );
@@ -19529,6 +20253,7 @@ function ChatTurn({
   isPlanDecisionPending,
   isPlanPanelOpen,
   isPlanReadyForDecision,
+  previewCapture,
   sourceControl,
   sourceControlBaseline,
   turn,
@@ -19557,6 +20282,7 @@ function ChatTurn({
   isPlanDecisionPending: boolean;
   isPlanPanelOpen?: boolean;
   isPlanReadyForDecision: boolean;
+  previewCapture?: { src?: string; path?: string };
   sourceControl?: SourceControlState;
   sourceControlBaseline?: Record<
     string,
@@ -19603,6 +20329,13 @@ function ChatTurn({
       : undefined,
   });
   const responseEvent = runModel.response;
+  // Offer Continue when the turn produced anything the user might resume from —
+  // a text answer, or work that stopped before an answer (empty void + tools).
+  const canContinue =
+    !isRunning &&
+    Boolean(onContinueChat) &&
+    (hasResponse || runModel.steps.length > 0) &&
+    runModel.phase.name === "done";
   // A turn the provider never closed out can be resent; a cancelled one cannot
   // be reconnected. Both decisions stay here because they need the status event
   // the run model deliberately does not carry.
@@ -19628,7 +20361,7 @@ function ChatTurn({
       <div className="gyro-chat-run">
         <ChatRun
           headerActions={
-            !isRunning && hasResponse && onContinueChat ? (
+            canContinue ? (
               <button onClick={onContinueChat} type="button">
                 Continue
               </button>
@@ -19695,6 +20428,7 @@ function ChatTurn({
                       actions={artifactActions}
                       event={responseEvent}
                       onCouncilAction={onCouncilAction}
+                      previewCapture={previewCapture}
                     />
                   )}
                 </div>
@@ -19780,12 +20514,14 @@ function AssistantResponse({
   actions,
   event,
   onCouncilAction,
+  previewCapture,
 }: {
   actions?: ChatArtifactActions;
   event: SessionEvent;
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
+  previewCapture?: { src?: string; path?: string };
 }) {
   const council = useMemo(() => councilResponseFromEvent(event), [event]);
   // Repair glued stream blocks (`repo.Gyro is…`) so the final answer reads as
@@ -19830,7 +20566,11 @@ function AssistantResponse({
   return (
     <div className="gyro-response">
       <div className="gyro-response-body">{body}</div>
-      <ChatArtifacts actions={actions} artifacts={artifacts} />
+      <ChatArtifacts
+        actions={actions}
+        artifacts={artifacts}
+        previewCapture={previewCapture}
+      />
       <footer className="gyro-response-actions">
         <button
           aria-label="Copy response"
@@ -21188,21 +21928,56 @@ function deviceLabel(device: BrowserPreviewDevice) {
 }
 
 function browserStatusLabel(preview: BrowserPreview) {
-  const message = preview.verificationMessage?.trim();
-  if (message) {
-    return `${message} · ${deviceLabel(preview.device)}`;
+  const device = deviceLabel(preview.device);
+  const host = browserPreviewHostLabel(preview.url);
+  const legacyNoPreview = /no preview loaded/i.test(
+    preview.verificationMessage ?? "",
+  );
+
+  if (preview.captureStatus === "capturing") {
+    return `Capturing · ${device}`;
   }
-  const url = preview.url?.trim();
-  if (!url) {
-    return `Enter a local URL to preview · ${deviceLabel(preview.device)}`;
-  }
-  try {
-    const host = new URL(
-      /^[a-z][a-z\d+.-]*:/i.test(url) ? url : `http://${url}`,
-    ).host;
-    return `Ready · ${host} · ${deviceLabel(preview.device)}`;
-  } catch {
-    return `Ready · ${deviceLabel(preview.device)}`;
+
+  switch (preview.status) {
+    case "loading":
+      return host ? `Loading · ${host} · ${device}` : `Loading · ${device}`;
+    case "console-error": {
+      const count = preview.consoleErrors || 1;
+      return `${count} issue${count === 1 ? "" : "s"} · ${device}`;
+    }
+    case "verification-failed": {
+      if (legacyNoPreview) {
+        return host ? `Idle · ${host} · ${device}` : `Idle · ${device}`;
+      }
+      const detail = (preview.verificationMessage ?? "")
+        .replace(/^unreachable\s*·?\s*/i, "")
+        .replace(/^preview unavailable:\s*/i, "")
+        .trim();
+      if (detail && !legacyNoPreview) {
+        return detail.toLowerCase().includes(device.toLowerCase())
+          ? detail
+          : `Unreachable · ${detail}`;
+      }
+      return host ? `Unreachable · ${host} · ${device}` : `Unreachable · ${device}`;
+    }
+    case "verification-passed":
+    case "ready":
+      return host ? `Live · ${host} · ${device}` : `Live · ${device}`;
+    case "idle":
+    default: {
+      if (legacyNoPreview) {
+        return host ? `Idle · ${host} · ${device}` : `Idle · ${device}`;
+      }
+      const message = preview.verificationMessage?.trim() ?? "";
+      if (
+        message &&
+        !/^ready(\s*·|$)/i.test(message) &&
+        !/^idle(\s*·|$)/i.test(message)
+      ) {
+        return message.includes(device) ? message : `${message} · ${device}`;
+      }
+      return host ? `Idle · ${host} · ${device}` : `Idle · ${device}`;
+    }
   }
 }
 
@@ -21223,6 +21998,48 @@ function relativeSessionTime(value: string) {
     return `${hours}h`;
   }
   return `${Math.round(hours / 24)}d`;
+}
+
+function sidebarRecencyLabel(updatedAt: number, now: number): string {
+  if (Number.isNaN(updatedAt) || updatedAt <= 0) {
+    return "Older";
+  }
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 6);
+  const startOfMonth = new Date(startOfToday);
+  startOfMonth.setDate(startOfMonth.getDate() - 29);
+  if (updatedAt >= startOfToday.getTime()) {
+    return "Today";
+  }
+  if (updatedAt >= startOfWeek.getTime()) {
+    return "This week";
+  }
+  if (updatedAt >= startOfMonth.getTime()) {
+    return "Earlier this month";
+  }
+  return "Older";
+}
+
+/**
+ * Group expanded project chats by recency so a month-old thread is not lost
+ * in a flat list sorted only by updated_at.
+ */
+function groupSidebarItemsByRecency(items: SidebarSessionItem[]) {
+  const now = Date.now();
+  const order = ["Today", "This week", "Earlier this month", "Older"] as const;
+  const buckets = new Map<string, SidebarSessionItem[]>();
+  for (const label of order) {
+    buckets.set(label, []);
+  }
+  for (const item of items) {
+    const label = sidebarRecencyLabel(sidebarSessionTimestamp(item), now);
+    buckets.get(label)?.push(item);
+  }
+  return order
+    .map((label) => ({ label, items: buckets.get(label) ?? [] }))
+    .filter((group) => group.items.length > 0);
 }
 
 function formatBytes(value: number) {

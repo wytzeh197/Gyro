@@ -26,6 +26,19 @@ const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
 const SESSION_STORE_SCHEMA_VERSION: i32 = 2;
 
+/// One page of session history read from the JSONL log.
+///
+/// Recent opens still use the bounded tail path. Older pages use
+/// [`SessionStore::read_events_before`] so a month-old chat can be walked
+/// without loading the entire transcript into memory at once.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEventPage {
+    pub events: Vec<SessionEvent>,
+    /// True when the log still has events earlier than this page.
+    pub has_more_before: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionOrigin {
@@ -1295,6 +1308,74 @@ impl SessionStore {
         Ok(events)
     }
 
+    /// Read up to `limit` events that appear **before** `before_event_id` in the
+    /// JSONL log (older history). Returns oldest→newest order within the page.
+    ///
+    /// `has_more_before` is true when the log still has events earlier than this
+    /// page, so the UI can offer another "load earlier" step without scanning
+    /// the whole file again just to decide.
+    pub fn read_events_before(
+        &self,
+        session_id: Uuid,
+        before_event_id: Uuid,
+        limit: usize,
+    ) -> Result<SessionEventPage> {
+        if limit == 0 {
+            return Ok(SessionEventPage {
+                events: Vec::new(),
+                has_more_before: false,
+            });
+        }
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(SessionEventPage {
+                events: Vec::new(),
+                has_more_before: false,
+            });
+        }
+
+        let file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for read", events_path.display()))?;
+        let reader = BufReader::new(file);
+        let mut ring: std::collections::VecDeque<SessionEvent> =
+            std::collections::VecDeque::with_capacity(limit.saturating_add(1));
+        let mut dropped_before_ring = false;
+        let mut found_cursor = false;
+        let mut line_index = 0usize;
+        for line in reader.lines() {
+            let line = line.with_context(|| format!("read {}", events_path.display()))?;
+            if line.trim().is_empty() {
+                line_index = line_index.saturating_add(1);
+                continue;
+            }
+            let event = parse_session_event_line(&events_path, line_index, &line)?;
+            line_index = line_index.saturating_add(1);
+            if event.id == before_event_id {
+                found_cursor = true;
+                break;
+            }
+            if ring.len() == limit {
+                ring.pop_front();
+                dropped_before_ring = true;
+            }
+            ring.push_back(event);
+        }
+        if !found_cursor {
+            return Ok(SessionEventPage {
+                events: Vec::new(),
+                has_more_before: false,
+            });
+        }
+        Ok(SessionEventPage {
+            events: ring.into_iter().collect(),
+            has_more_before: dropped_before_ring,
+        })
+    }
+
     fn session_events_path(&self, session_id: Uuid) -> Result<PathBuf> {
         let path = self.paths.sessions_dir.join(format!("{session_id}.jsonl"));
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
@@ -2535,6 +2616,48 @@ mod tests {
         assert_eq!(events[1].message, "message 9");
         assert_eq!(events[2].message, "message 10");
         assert_eq!(events[3].message, "message 11");
+    }
+
+    #[test]
+    fn reads_events_before_a_cursor_for_older_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "history page")
+            .unwrap();
+
+        let mut ids = Vec::new();
+        for index in 0..8 {
+            let event = store
+                .append_event(
+                    session.id,
+                    SessionEventKind::UserMessage,
+                    format!("message {index}"),
+                    serde_json::json!({ "index": index }),
+                )
+                .unwrap();
+            ids.push(event.id);
+        }
+
+        let page = store.read_events_before(session.id, ids[5], 3).unwrap();
+        assert_eq!(page.events.len(), 3);
+        assert_eq!(page.events[0].message, "message 2");
+        assert_eq!(page.events[1].message, "message 3");
+        assert_eq!(page.events[2].message, "message 4");
+        assert!(page.has_more_before);
+
+        let earlier = store
+            .read_events_before(session.id, page.events[0].id, 10)
+            .unwrap();
+        assert_eq!(earlier.events[0].kind, SessionEventKind::SessionCreated);
+        assert_eq!(earlier.events.last().unwrap().message, "message 1");
+        assert!(!earlier.has_more_before);
+
+        let missing = store
+            .read_events_before(session.id, Uuid::new_v4(), 3)
+            .unwrap();
+        assert!(missing.events.is_empty());
+        assert!(!missing.has_more_before);
     }
 
     #[test]

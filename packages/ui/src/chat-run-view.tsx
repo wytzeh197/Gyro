@@ -73,12 +73,34 @@ export function ChatRun({
   renderSay,
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
-  const [isCollapsed, setIsCollapsed] = useState(!isLive);
+  // Incomplete settles (work on the rail, no final answer) start open so a
+  // mid-task stop does not look like an empty "Worked for …" void. Fully
+  // answered historical turns stay collapsed until the user expands them.
+  const [isCollapsed, setIsCollapsed] = useState(
+    () => !isLive && Boolean(model.response) && model.steps.length > 0,
+  );
+  // Re-open when a turn goes live again (retry / reconnect). Never force
+  // collapse on settle — that was wiping the just-finished trail.
   useEffect(() => {
-    setIsCollapsed(!isLive);
+    if (isLive) {
+      setIsCollapsed(false);
+    }
   }, [isLive]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
+  // Keep a thinking beat while the model is quiet between tools, not only at
+  // the empty start of a run — otherwise the rail freezes on the last Done row.
+  const hasRunningWork = model.steps.some(
+    (step) => step.kind === "work" && step.item.status === "running",
+  );
+  const showThinkingPulse =
+    isLive &&
+    (model.phase.name === "thinking" ||
+      (model.phase.name === "working" && !hasRunningWork));
+  const showFinalizingPulse = model.phase.name === "finalizing";
+  const showRail =
+    showSteps &&
+    (model.steps.length > 0 || showThinkingPulse || showFinalizingPulse);
 
   return (
     <div className="gyro-run">
@@ -89,29 +111,35 @@ export function ChatRun({
         model={model}
         onToggle={() => setIsCollapsed((current) => !current)}
       />
-      {showSteps && model.steps.length > 0 ? (
+      {showRail ? (
         <ol aria-label="Work timeline" className="gyro-run-rail">
-          {model.steps.map((step) => (
-            <li className="gyro-run-row-item" key={step.id}>
-              {step.kind === "ask" && renderAsk ? (
-                renderAsk(step.event)
-              ) : (
-                <RunRow
-                  onOpenChanges={onOpenChanges}
-                  renderSay={renderSay}
-                  step={step}
-                />
-              )}
-            </li>
-          ))}
-          {model.phase.name === "finalizing" ? (
+          {showSteps
+            ? model.steps.map((step) => (
+                <li className="gyro-run-row-item" key={step.id}>
+                  {step.kind === "ask" && renderAsk ? (
+                    renderAsk(step.event)
+                  ) : (
+                    <RunRow
+                      onOpenChanges={onOpenChanges}
+                      renderSay={renderSay}
+                      step={step}
+                    />
+                  )}
+                </li>
+              ))
+            : null}
+          {showFinalizingPulse ? (
             <li className="gyro-run-row-item">
               <RunPulse label="Finalizing" />
             </li>
           ) : null}
+          {showThinkingPulse ? (
+            <li className="gyro-run-row-item">
+              <RunPulse label="Thinking" />
+            </li>
+          ) : null}
         </ol>
       ) : null}
-      {model.phase.name === "thinking" ? <RunPulse label="Thinking" /> : null}
       {model.phase.name === "failed" || model.phase.name === "interrupted" ? (
         <RunProblem
           onReconnect={onReconnect}
@@ -247,11 +275,14 @@ function RunRow({
   );
 }
 
-/** The "still going" beat: a label with no icon and no duration to report yet. */
+/** The "still going" beat: sits on the rail spine so an empty run still has shape. */
 function RunPulse({ label }: { label: string }) {
   return (
     <div className="gyro-run-pulse" role="status">
-      {label}
+      <span aria-hidden="true" className="gyro-run-row-icon">
+        <Lightbulb size={15} />
+      </span>
+      <span className="gyro-run-pulse-label">{label}</span>
     </div>
   );
 }

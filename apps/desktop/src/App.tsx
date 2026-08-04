@@ -12,6 +12,7 @@ import {
   CHAT_GRID_MAX_SLOTS,
   CLI_LAUNCH_PRESET_MAX_PANES,
   AutomationsSurface,
+  ChatCloseConfirmOverlay,
   ChatGridSurface,
   ChatSurface,
   CommandPaletteOverlay,
@@ -32,7 +33,10 @@ import {
   createInitialWorkbenchState,
   createNotification,
   createTerminalPane,
+  isMissionSession,
   isUserSelectedWorkspacePath,
+  missionDefaultProfile,
+  missionWorkerPanes,
   defaultCommandProfiles,
   getProviderModel,
   isProviderId,
@@ -174,6 +178,8 @@ import {
   applyProviderChatStreamActivity,
   isProviderStatusEvent,
   limitSessionEventsForUi,
+  MAX_CHAT_EVENT_HOLD_COUNT,
+  MAX_CHAT_EVENT_RENDER_COUNT,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
@@ -696,6 +702,16 @@ export function App() {
   const events = activeSessionId
     ? (sessionEventsById[activeSessionId] ?? [])
     : [];
+  const limitEventsForSession = useCallback(
+    (sessionId: string, events: SessionEvent[]) =>
+      limitSessionEventsForUi(
+        events,
+        expandedHistorySessionsRef.current.has(sessionId)
+          ? MAX_CHAT_EVENT_HOLD_COUNT
+          : MAX_CHAT_EVENT_RENDER_COUNT,
+      ),
+    [],
+  );
   const setEventsForSession = useCallback(
     (
       sessionId: string,
@@ -703,11 +719,12 @@ export function App() {
     ) => {
       setSessionEventsById((current) => {
         const previous = current[sessionId] ?? [];
-        const next = typeof value === "function" ? value(previous) : value;
+        const resolved = typeof value === "function" ? value(previous) : value;
+        const next = limitEventsForSession(sessionId, resolved);
         return previous === next ? current : { ...current, [sessionId]: next };
       });
     },
-    [],
+    [limitEventsForSession],
   );
   const setEvents = useCallback(
     (value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[])) => {
@@ -872,6 +889,21 @@ export function App() {
     useState<ModelStandardPrompt>();
   const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
     useState<TerminalPane>();
+  const [chatCloseCandidate, setChatCloseCandidate] = useState<{
+    paneId: string;
+    sessionId?: string;
+    workspacePath?: string;
+    label: string;
+    isSending: boolean;
+    hasModelTerminal: boolean;
+  }>();
+  const [hasMoreBeforeBySession, setHasMoreBeforeBySession] = useState<
+    Record<string, boolean>
+  >({});
+  const [loadingEarlierSessionIds, setLoadingEarlierSessionIds] = useState<
+    string[]
+  >([]);
+  const expandedHistorySessionsRef = useRef(new Set<string>());
   const toolPanelHeight = workbench.preferences.workspacePanelHeight;
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
   // Chat UI paints immediately; non-essential actions stay gated until the
@@ -1097,6 +1129,17 @@ export function App() {
   const activeSessionGoal = activeSessionId
     ? persistedActiveSessionGoal
     : pendingNewChatGoal;
+  const activeIsMission = isMissionSession(
+    activeSession,
+    workbench.preferences.missionSessionIds,
+  );
+  const activeMissionWorkers = activeSessionId
+    ? missionWorkerPanes(workbench.terminalPanes, activeSessionId)
+    : [];
+  const activeMissionDefaultProfile = missionDefaultProfile(
+    commandProfiles,
+    workbench.preferences.missionDefaultProfileId,
+  );
   const activeSessionUsage = activeSessionId
     ? sessionUsageById[activeSessionId]
     : undefined;
@@ -1477,7 +1520,8 @@ export function App() {
             providerId,
             status: "unavailable",
             windows: [],
-            error: "This provider does not expose a supported quota source.",
+            // No plan windows (5h/weekly) on this account type — spend is the ledger.
+            error: undefined,
           },
         }));
         return;
@@ -1503,17 +1547,26 @@ export function App() {
           { providerId },
         );
         if (request !== providerUsageRequestRef.current[providerId]) return;
+        const hasWindows = snapshot.windows.length > 0;
+        const hasMeasured = snapshot.windows.some(
+          (window) =>
+            typeof window.usedPercent === "number" &&
+            Number.isFinite(window.usedPercent),
+        );
         setProviderUsageByProvider((current) => ({
           ...current,
           [providerId]: {
             providerId,
-            status: snapshot.windows.length > 0 ? "available" : "unavailable",
+            status: hasWindows ? "available" : "unavailable",
             windows: snapshot.windows,
             fetchedAt: snapshot.fetchedAt,
-            error:
-              snapshot.windows.length > 0
-                ? undefined
-                : "Codex did not report an active rolling usage window.",
+            error: hasWindows
+              ? undefined
+              : providerId === "openai"
+                ? "Codex did not report an active rolling usage window."
+                : hasMeasured
+                  ? undefined
+                  : "No usage recorded yet for this provider. Send a message to start the ledger.",
           },
         }));
       } catch (error) {
@@ -1905,14 +1958,18 @@ export function App() {
       if (!isTauriRuntime()) {
         setEventsForSession(
           sessionId,
-          limitSessionEventsForUi(
+          limitEventsForSession(
+            sessionId,
             optimisticEventsRef.current.get(sessionId) ?? [],
           ),
         );
         return;
       }
       try {
-        const nextEvents = await invoke<SessionEvent[]>("read_session_events", {
+        const page = await invoke<{
+          events: SessionEvent[];
+          hasMoreBefore: boolean;
+        }>("read_session_events", {
           sessionId,
         });
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
@@ -1921,12 +1978,20 @@ export function App() {
           // by the older transcript snapshot.
           const latestOptimisticEvents =
             optimisticEventsRef.current.get(sessionId);
+          // Fresh open always starts from the recent window; expanded history
+          // only grows via load-earlier.
+          expandedHistorySessionsRef.current.delete(sessionId);
+          setHasMoreBeforeBySession((current) => ({
+            ...current,
+            [sessionId]: page.hasMoreBefore,
+          }));
           setEventsForSession(
             sessionId,
-            limitSessionEventsForUi(
+            limitEventsForSession(
+              sessionId,
               markInactiveCapabilityResources(
                 mergePersistedAndOptimisticEvents(
-                  nextEvents,
+                  page.events,
                   latestOptimisticEvents,
                 ),
                 liveCapabilityResourceIdsRef.current,
@@ -1940,13 +2005,85 @@ export function App() {
           if (optimisticEvents && optimisticEvents.length > 0) {
             setEventsForSession(
               sessionId,
-              limitSessionEventsForUi(optimisticEvents),
+              limitEventsForSession(sessionId, optimisticEvents),
             );
           }
         }
       }
     },
-    [setEventsForSession],
+    [limitEventsForSession, setEventsForSession],
+  );
+
+  const loadEarlierEvents = useCallback(
+    async (sessionId: string) => {
+      if (!isTauriRuntime() || loadingEarlierSessionIds.includes(sessionId)) {
+        return;
+      }
+      const currentEvents = sessionEventsById[sessionId] ?? [];
+      const cursor = currentEvents.find(
+        (event) => event.kind !== "session-created",
+      );
+      if (!cursor) {
+        setHasMoreBeforeBySession((current) => ({
+          ...current,
+          [sessionId]: false,
+        }));
+        return;
+      }
+      setLoadingEarlierSessionIds((current) =>
+        current.includes(sessionId) ? current : [...current, sessionId],
+      );
+      try {
+        const page = await invoke<{
+          events: SessionEvent[];
+          hasMoreBefore: boolean;
+        }>("read_session_events", {
+          sessionId,
+          beforeEventId: cursor.id,
+          limit: MAX_CHAT_EVENT_RENDER_COUNT,
+        });
+        expandedHistorySessionsRef.current.add(sessionId);
+        setHasMoreBeforeBySession((current) => ({
+          ...current,
+          [sessionId]: page.hasMoreBefore,
+        }));
+        if (page.events.length === 0) {
+          return;
+        }
+        setEventsForSession(sessionId, (existing) => {
+          const byId = new Map(existing.map((event) => [event.id, event]));
+          for (const event of page.events) {
+            if (!byId.has(event.id)) {
+              byId.set(event.id, event);
+            }
+          }
+          const merged = Array.from(byId.values()).sort(
+            (first, second) =>
+              new Date(first.createdAt).getTime() -
+                new Date(second.createdAt).getTime() ||
+              first.id.localeCompare(second.id),
+          );
+          return limitEventsForSession(sessionId, merged);
+        });
+      } catch (error) {
+        notify(
+          "command-failed",
+          "Could not load earlier messages",
+          String(error),
+        );
+      } finally {
+        setLoadingEarlierSessionIds((current) =>
+          current.filter((id) => id !== sessionId),
+        );
+      }
+    },
+    [
+      limitEventsForSession,
+      loadingEarlierSessionIds,
+      notify,
+      sessionEventsById,
+      setEventsForSession,
+    ],
   );
 
   useEffect(() => {
@@ -2091,6 +2228,7 @@ export function App() {
             (item) => item.id === payload.sessionId,
           );
           const url = stringFromRecord(data, "url") ?? payload.resource.label;
+          const capturePath = stringFromRecord(capture, "path");
           recordFocus({
             kind: "browser",
             label: payload.resource.label,
@@ -2107,9 +2245,33 @@ export function App() {
                 url,
                 status: "completed",
                 label: payload.resource.label,
-                latestCapturePath: stringFromRecord(capture, "path"),
+                latestCapturePath: capturePath,
               },
             }));
+          }
+          // Surface agent screenshots in the Live/Capture toggle + preview card.
+          if (capturePath && isActiveModelWorkspace) {
+            const width = numberFromUnknown(capture?.width) ?? 0;
+            const height = numberFromUnknown(capture?.height) ?? 0;
+            const filename =
+              stringFromRecord(capture, "filename") ??
+              capturePath.split(/[/\\]/).pop() ??
+              "browser-capture.png";
+            dispatchWorkbench({
+              type: "browser-capture-success",
+              capture: {
+                path: capturePath,
+                filename,
+                width,
+                height,
+                createdAt:
+                  stringFromRecord(capture, "createdAt") ??
+                  new Date().toISOString(),
+                src: isTauriRuntime()
+                  ? convertFileSrc(capturePath)
+                  : capturePath,
+              },
+            });
           }
         }
         if (payload.resource.kind === "ide") {
@@ -5083,99 +5245,144 @@ export function App() {
     }
   }, [notify, refreshIdeServices, workbench.preferences.workspaceTrust]);
 
-  const createSession = useCallback(async () => {
-    const sessionLayout: WorkspaceLayoutId = "thread";
-    dispatchWorkbench({
-      type: "select-workspace-layout",
-      layout: sessionLayout,
-    });
-    dispatchWorkbench({ type: "close-tool-panel" });
-    suppressSessionAutoSelectRef.current = false;
-    if (!isTauriRuntime()) {
-      const session = createPreviewSession(
-        sessionLayout,
-        workbench.workspaceMode,
-        newSessionModelFromConfig(config),
-        workspacePath ?? "",
-        "New chat",
-      );
-      setWorkspacePath(session.workspacePath);
-      setFiles([]);
-      setSessions((current) => [session, ...current]);
-      activeSessionIdRef.current = session.id;
-      setActiveSessionId(session.id);
-      setEventsForSession(session.id, []);
+  const createSession = useCallback(
+    async (options: { kind?: "chat" | "mission" } = {}) => {
+      const isMission = options.kind === "mission";
+      const sessionLayout: WorkspaceLayoutId = "thread";
+      const title = isMission ? "New mission" : "New chat";
       dispatchWorkbench({
-        type: "complete-onboarding-step",
-        step: "first-session",
+        type: "select-workspace-layout",
+        layout: sessionLayout,
       });
-      notify("terminal", "Session created", session.title);
-      return;
-    }
-    try {
-      const workspace = workspacePath ?? "";
-      const shouldCreateWorktree =
-        workbench.workspaceMode === "worktree" && workspace.length > 0;
-      const title = "New chat";
-      const metadata = workspaceRunMetadata(
-        shouldCreateWorktree ? "worktree" : "local",
-        `${title}-${Date.now()}`,
-      );
-      const session = shouldCreateWorktree
-        ? await invoke<Session>("create_worktree_session", {
-            branch: metadata.branch,
-            ...newSessionModelFromConfig(config),
-            title,
-            worktreeName: metadata.worktreeName,
-            workspacePath: workspace,
-          })
-        : await invoke<Session>("create_desktop_session", {
-            ...newSessionModelFromConfig(config),
-            title,
-            workspacePath: workspace,
-          });
-      setWorkspacePath(session.workspacePath);
-      await refreshSessions();
-      setActiveSessionId(session.id);
-      dispatchWorkbench({
-        type: "complete-onboarding-step",
-        step: "first-session",
-      });
-      if (shouldCreateWorktree) {
+      dispatchWorkbench({ type: "close-tool-panel" });
+      suppressSessionAutoSelectRef.current = false;
+      const registerMission = (sessionId: string) => {
+        if (!isMission) {
+          return;
+        }
+        dispatchWorkbench({
+          type: "register-mission-session",
+          sessionId,
+        });
+        setIsGoalComposerActive(true);
+      };
+      if (!isTauriRuntime()) {
+        const session = createPreviewSession(
+          sessionLayout,
+          workbench.workspaceMode,
+          newSessionModelFromConfig(config),
+          workspacePath ?? "",
+          title,
+        );
+        if (isMission) {
+          session.kind = "mission";
+        }
+        setWorkspacePath(session.workspacePath);
+        setFiles([]);
+        setSessions((current) => [session, ...current]);
+        activeSessionIdRef.current = session.id;
+        setActiveSessionId(session.id);
+        setEventsForSession(session.id, []);
+        registerMission(session.id);
+        dispatchWorkbench({
+          type: "complete-onboarding-step",
+          step: "first-session",
+        });
         notify(
           "terminal",
-          "Agent workspace ready",
-          session.branch
-            ? `${session.branch} — main project stays untouched.`
-            : "Private branch under Gyro — main project stays untouched.",
+          isMission ? "Mission created" : "Session created",
+          session.title,
         );
-      } else {
-        notify("terminal", "Session created", session.title);
+        return;
       }
-    } catch {
-      const session = createPreviewSession(
-        sessionLayout,
-        workbench.workspaceMode,
-        newSessionModelFromConfig(config),
-        workspacePath ?? "",
-        "New chat",
-      );
-      setWorkspacePath(session.workspacePath);
-      setFiles([]);
-      setSessions((current) => [session, ...current]);
-      activeSessionIdRef.current = session.id;
-      setActiveSessionId(session.id);
-      setEventsForSession(session.id, []);
-      notify("command-failed", "Session fallback", "Created preview session");
-    }
-  }, [
-    config,
-    notify,
-    refreshSessions,
-    setEventsForSession,
-    workbench.workspaceMode,
-    workspacePath,
-  ]);
+      try {
+        const workspace = workspacePath ?? "";
+        const shouldCreateWorktree =
+          workbench.workspaceMode === "worktree" && workspace.length > 0;
+        const metadata = workspaceRunMetadata(
+          shouldCreateWorktree ? "worktree" : "local",
+          `${title}-${Date.now()}`,
+        );
+        const session = shouldCreateWorktree
+          ? await invoke<Session>("create_worktree_session", {
+              branch: metadata.branch,
+              ...newSessionModelFromConfig(config),
+              title,
+              worktreeName: metadata.worktreeName,
+              workspacePath: workspace,
+            })
+          : await invoke<Session>("create_desktop_session", {
+              ...newSessionModelFromConfig(config),
+              title,
+              workspacePath: workspace,
+            });
+        if (isMission) {
+          session.kind = "mission";
+        }
+        setWorkspacePath(session.workspacePath);
+        await refreshSessions();
+        setActiveSessionId(session.id);
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === session.id
+              ? { ...item, kind: isMission ? "mission" : item.kind }
+              : item,
+          ),
+        );
+        registerMission(session.id);
+        dispatchWorkbench({
+          type: "complete-onboarding-step",
+          step: "first-session",
+        });
+        if (shouldCreateWorktree) {
+          notify(
+            "terminal",
+            "Agent workspace ready",
+            session.branch
+              ? `${session.branch} — main project stays untouched.`
+              : "Private branch under Gyro — main project stays untouched.",
+          );
+        } else {
+          notify(
+            "terminal",
+            isMission ? "Mission created" : "Session created",
+            session.title,
+          );
+        }
+      } catch {
+        const session = createPreviewSession(
+          sessionLayout,
+          workbench.workspaceMode,
+          newSessionModelFromConfig(config),
+          workspacePath ?? "",
+          title,
+        );
+        if (isMission) {
+          session.kind = "mission";
+        }
+        setWorkspacePath(session.workspacePath);
+        setFiles([]);
+        setSessions((current) => [session, ...current]);
+        activeSessionIdRef.current = session.id;
+        setActiveSessionId(session.id);
+        setEventsForSession(session.id, []);
+        registerMission(session.id);
+        notify("command-failed", "Session fallback", "Created preview session");
+      }
+    },
+    [
+      config,
+      notify,
+      refreshSessions,
+      setEventsForSession,
+      workbench.workspaceMode,
+      workspacePath,
+    ],
+  );
+
+  const createMission = useCallback(() => {
+    void createSession({ kind: "mission" });
+  }, [createSession]);
 
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean } = {}) => {
@@ -5742,6 +5949,8 @@ export function App() {
       startingOutput = "",
       template,
       workspacePathOverride,
+      missionSessionId,
+      taskTitle,
     }: {
       commandOverride?: string;
       paneId?: string;
@@ -5749,6 +5958,8 @@ export function App() {
       startingOutput?: string;
       template?: TerminalTemplate;
       workspacePathOverride?: string;
+      missionSessionId?: string;
+      taskTitle?: string;
     }) => {
       const process = terminalProcessForProfile(profile, commandOverride);
       const existingPane = workbench.terminalPanes.find(
@@ -5786,6 +5997,8 @@ export function App() {
             launchWorkspacePath,
           ),
           projectPath: launchWorkspacePath,
+          missionSessionId,
+          taskTitle,
         });
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
@@ -5924,25 +6137,97 @@ export function App() {
   }, [activeProfileId, commandProfiles, launchTerminalPane, notify]);
 
   const createCliSession = useCallback(
-    (profileId: string, projectPath: string) => {
+    (
+      profileId: string,
+      projectPath: string,
+      options?: { missionSessionId?: string; taskTitle?: string },
+    ) => {
       const profile = getCommandProfile(commandProfiles, profileId);
-      dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: "terminal-grid",
-      });
+      const isMissionWorker = Boolean(options?.missionSessionId);
+      // Mission workers stay under the goal chat with a docked terminal.
+      // Standalone CLI opens the full terminal grid.
+      if (isMissionWorker) {
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "thread",
+        });
+        dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+      } else {
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "terminal-grid",
+        });
+      }
       void launchTerminalPane({
         profile,
         workspacePathOverride: projectPath,
+        missionSessionId: options?.missionSessionId,
+        taskTitle: options?.taskTitle,
       }).then((started) => {
         notify(
           started ? "terminal" : "command-failed",
-          started ? "CLI session started" : "CLI session failed",
+          started
+            ? isMissionWorker
+              ? "Mission worker started"
+              : "CLI session started"
+            : "CLI session failed",
           `${profile.displayName} · ${workspaceName(projectPath)}`,
         );
+        // Refit after the tool panel has laid out.
+        if (started && isMissionWorker) {
+          window.setTimeout(() => {
+            window.dispatchEvent(new Event("resize"));
+          }, 200);
+        }
       });
     },
     [commandProfiles, launchTerminalPane, notify],
   );
+
+  const addMissionWorker = useCallback(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    const projectPath =
+      activeSession?.workspacePath || workspacePath || savedProjects[0]?.path;
+    if (!projectPath) {
+      notify(
+        "command-failed",
+        "Choose a project",
+        "Missions need a workspace before adding workers",
+      );
+      return;
+    }
+    const profile = missionDefaultProfile(
+      commandProfiles,
+      workbench.preferences.missionDefaultProfileId,
+    );
+    const workerIndex =
+      missionWorkerPanes(workbench.terminalPanes, activeSessionId).length + 1;
+    createCliSession(profile.id, projectPath, {
+      missionSessionId: activeSessionId,
+      taskTitle: `Task ${workerIndex}`,
+    });
+    dispatchWorkbench({
+      type: "set-mission-default-profile",
+      profileId: profile.id,
+    });
+  }, [
+    activeSession?.workspacePath,
+    activeSessionId,
+    commandProfiles,
+    createCliSession,
+    notify,
+    savedProjects,
+    workbench.preferences.missionDefaultProfileId,
+    workbench.terminalPanes,
+    workspacePath,
+  ]);
+
+  const selectMissionWorker = useCallback((paneId: string) => {
+    dispatchWorkbench({ type: "select-terminal-pane", paneId });
+    dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+  }, []);
 
   const saveSessionModel = useCallback(
     async (sessionId: string, model: SessionModelSelection) => {
@@ -7940,6 +8225,13 @@ export function App() {
           setPendingNewChatMode("normal");
           setPendingNewChatPlan({ title: "Plan", items: [] });
           optimisticEventsRef.current.delete(persistedSession.id);
+          // Refresh plan windows after every completed turn so Claude stream
+          // limits and ledger spend stay current for every connected model.
+          const usageProviderId =
+            sessionModel.providerId ?? selectedProvider?.id;
+          if (usageProviderId && providerSupportsUsage(usageProviderId)) {
+            void refreshProviderUsage(usageProviderId);
+          }
         } catch (error) {
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
@@ -8116,6 +8408,11 @@ export function App() {
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
         optimisticEventsRef.current.delete(activeSessionId);
+        const usageProviderId =
+          sessionModel.providerId ?? selectedProvider?.id;
+        if (usageProviderId && providerSupportsUsage(usageProviderId)) {
+          void refreshProviderUsage(usageProviderId);
+        }
       } catch (error) {
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
@@ -8159,6 +8456,7 @@ export function App() {
       applyCouncilChatResponse,
       applyProviderChatResponse,
       chatMessageQueues,
+      refreshProviderUsage,
       checkProviderReadiness,
       config,
       isShellOptimizing,
@@ -9972,6 +10270,141 @@ export function App() {
     void closeTerminalPane(paneId);
   }, [closeTerminalPane, terminalTerminateCandidate]);
 
+  const modelTerminalSessionIds = useMemo(
+    () =>
+      workbench.terminalPanes
+        .filter(
+          (pane) =>
+            pane.id.startsWith("model:") &&
+            (pane.status === "running" || pane.status === "waiting"),
+        )
+        .map((pane) => pane.id.slice("model:".length))
+        .filter(Boolean),
+    [workbench.terminalPanes],
+  );
+
+  const closeChatPane = useCallback(
+    (candidate: {
+      paneId: string;
+      sessionId?: string;
+      workspacePath?: string;
+    }) => {
+      const projectKey = normalizedChatProjectKey(candidate.workspacePath);
+      const paneLayout = chatGrid.layouts[projectKey];
+      if (candidate.sessionId) {
+        closedChatPaneSessionsRef.current.add(candidate.sessionId);
+      }
+      const nextPane =
+        paneLayout?.slots.find(
+          (slot) =>
+            slot?.paneId === paneLayout.focusedPaneId &&
+            slot?.paneId !== candidate.paneId,
+        ) ??
+        paneLayout?.slots.find(
+          (slot) => slot && slot.paneId !== candidate.paneId,
+        );
+      if (nextPane?.kind === "session") {
+        suppressSessionAutoSelectRef.current = false;
+        activeSessionIdRef.current = nextPane.sessionId;
+        setActiveSessionId(nextPane.sessionId);
+        setWorkspacePath(nextPane.workspacePath);
+      } else {
+        suppressSessionAutoSelectRef.current = true;
+        activeSessionIdRef.current = undefined;
+        setActiveSessionId(undefined);
+        if (nextPane) {
+          setWorkspacePath(nextPane.workspacePath);
+        }
+      }
+      setChatPanelByPaneId((current) => {
+        const next = { ...current };
+        delete next[candidate.paneId];
+        return next;
+      });
+      dispatchChatGrid({
+        type: "close-pane",
+        projectKey,
+        paneId: candidate.paneId,
+      });
+    },
+    [chatGrid.layouts],
+  );
+
+  const requestCloseChatPane = useCallback(
+    (pane: {
+      paneId: string;
+      kind: string;
+      sessionId?: string;
+      workspacePath?: string;
+    }) => {
+      const sessionId = pane.kind === "session" ? pane.sessionId : undefined;
+      const isSending = Boolean(
+        sessionId && sendingSessionIdsRef.current.has(sessionId),
+      );
+      const modelTerminal = sessionId
+        ? workbench.terminalPanes.find(
+            (terminal) =>
+              terminal.id === `model:${sessionId}` &&
+              (terminal.status === "running" || terminal.status === "waiting"),
+          )
+        : undefined;
+      const hasModelTerminal = Boolean(modelTerminal);
+      if (!isSending && !hasModelTerminal) {
+        closeChatPane({
+          paneId: pane.paneId,
+          sessionId,
+          workspacePath: pane.workspacePath,
+        });
+        return;
+      }
+      const session = sessions.find((item) => item.id === sessionId);
+      setChatCloseCandidate({
+        paneId: pane.paneId,
+        sessionId,
+        workspacePath: pane.workspacePath,
+        label: session?.title?.trim() || "This chat",
+        isSending,
+        hasModelTerminal,
+      });
+    },
+    [closeChatPane, sessions, workbench.terminalPanes],
+  );
+
+  const confirmKeepRunningChatClose = useCallback(() => {
+    if (!chatCloseCandidate) {
+      return;
+    }
+    const candidate = chatCloseCandidate;
+    setChatCloseCandidate(undefined);
+    closeChatPane(candidate);
+  }, [chatCloseCandidate, closeChatPane]);
+
+  const confirmStopAndCloseChat = useCallback(() => {
+    if (!chatCloseCandidate) {
+      return;
+    }
+    const candidate = chatCloseCandidate;
+    setChatCloseCandidate(undefined);
+    if (candidate.sessionId && isTauriRuntime()) {
+      if (candidate.isSending) {
+        void invoke("stop_provider_chat", {
+          sessionId: candidate.sessionId,
+        }).catch(() => undefined);
+      }
+      if (candidate.hasModelTerminal) {
+        const modelPaneId = `model:${candidate.sessionId}`;
+        void invoke("stop_terminal_pane", { paneId: modelPaneId }).catch(
+          () => undefined,
+        );
+        void invoke("close_terminal_pane", { paneId: modelPaneId }).catch(
+          () => undefined,
+        );
+        dispatchWorkbench({ type: "remove-terminal-pane", paneId: modelPaneId });
+      }
+    }
+    closeChatPane(candidate);
+  }, [chatCloseCandidate, closeChatPane]);
+
   const restartTerminalPane = useCallback(
     async (paneId: string) => {
       if (!isTauriRuntime()) {
@@ -10239,6 +10672,65 @@ export function App() {
     }).catch(() => undefined);
   }, [browserOverlayOccluded, sessionBrowserKey]);
 
+  const attachBrowserCaptureToChat = useCallback(
+    async (capture: BrowserPreviewCapture) => {
+      if (!isTauriRuntime() || !capture.path) {
+        return;
+      }
+      try {
+        const attachment = await invoke<ChatAttachment>(
+          "prepare_chat_attachment",
+          {
+            request: {
+              sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+              path: capture.path,
+              workspacePath:
+                activeSession?.workspacePath ?? workspacePath ?? undefined,
+              kind: "image",
+              name: capture.filename || "browser-capture.png",
+            },
+          },
+        );
+        setChatAttachments((current) => {
+          const existing = current[activeDraftKey] ?? [];
+          const imageCount = existing.filter(
+            (item) => item.kind === "image",
+          ).length;
+          if (imageCount >= 4) {
+            return current;
+          }
+          // Avoid stacking identical captures if the user hammers the camera.
+          if (
+            existing.some(
+              (item) =>
+                item.path === capture.path || item.path === attachment.path,
+            )
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            [activeDraftKey]: [
+              ...existing,
+              {
+                ...attachment,
+                previewUrl: capture.src ?? convertFileSrc(attachment.path),
+              },
+            ],
+          };
+        });
+      } catch {
+        // Capture view still works without composer attachment.
+      }
+    },
+    [
+      activeDraftKey,
+      activeSession?.workspacePath,
+      activeSessionId,
+      workspacePath,
+    ],
+  );
+
   const captureBrowserPreview = useCallback(
     async (action: "capture" | "reveal" = "capture") => {
       if (action === "reveal") {
@@ -10300,10 +10792,17 @@ export function App() {
             },
           );
         }
+        const captureWithSrc: BrowserPreviewCapture = {
+          ...capture,
+          src: isTauriRuntime() ? convertFileSrc(capture.path) : capture.path,
+        };
         dispatchWorkbench({
           type: "browser-capture-success",
-          capture,
+          capture: captureWithSrc,
         });
+        // Drop the freeze-frame into the composer so it becomes part of the
+        // chat trail (send it as context, or just keep it staged).
+        void attachBrowserCaptureToChat(captureWithSrc);
       } catch (error) {
         const message = String(error);
         dispatchWorkbench({
@@ -10314,6 +10813,7 @@ export function App() {
       }
     },
     [
+      attachBrowserCaptureToChat,
       notify,
       sessionBrowserKey,
       workbench.browserPreview.device,
@@ -12556,44 +13056,23 @@ export function App() {
         }}
         onContinueChat={() => requestSend("Continue")}
         onCouncilAction={handleCouncilAction}
+        hasMoreBefore={
+          pane.kind === "session"
+            ? Boolean(hasMoreBeforeBySession[pane.sessionId])
+            : false
+        }
+        isLoadingEarlier={
+          pane.kind === "session" &&
+          loadingEarlierSessionIds.includes(pane.sessionId)
+        }
+        onLoadEarlier={
+          pane.kind === "session"
+            ? () => void loadEarlierEvents(pane.sessionId)
+            : undefined
+        }
         onCloseChat={() => {
-          const projectKey = normalizedChatProjectKey(pane.workspacePath);
-          const paneLayout = chatGrid.layouts[projectKey];
-          if (pane.kind === "session") {
-            closedChatPaneSessionsRef.current.add(pane.sessionId);
-          }
-          const nextPane =
-            paneLayout?.slots.find(
-              (candidate) =>
-                candidate?.paneId === paneLayout.focusedPaneId &&
-                candidate?.paneId !== pane.paneId,
-            ) ??
-            paneLayout?.slots.find(
-              (candidate) => candidate && candidate.paneId !== pane.paneId,
-            );
-          if (nextPane?.kind === "session") {
-            suppressSessionAutoSelectRef.current = false;
-            activeSessionIdRef.current = nextPane.sessionId;
-            setActiveSessionId(nextPane.sessionId);
-            setWorkspacePath(nextPane.workspacePath);
-          } else {
-            suppressSessionAutoSelectRef.current = true;
-            activeSessionIdRef.current = undefined;
-            setActiveSessionId(undefined);
-            if (nextPane) {
-              setWorkspacePath(nextPane.workspacePath);
-            }
-          }
-          setChatPanelByPaneId((current) => {
-            const next = { ...current };
-            delete next[pane.paneId];
-            return next;
-          });
-          dispatchChatGrid({
-            type: "close-pane",
-            projectKey,
-            paneId: pane.paneId,
-          });
+          focusChatPane(pane);
+          requestCloseChatPane(pane);
         }}
         onOpenToolPanel={(tab) => {
           focusChatPane(pane);
@@ -12671,6 +13150,47 @@ export function App() {
         }}
         sessionPlan={panePlan}
         sessionGoal={paneGoal}
+        isMission={isMissionSession(
+          paneSession,
+          workbench.preferences.missionSessionIds,
+        )}
+        missionWorkers={
+          paneSession
+            ? missionWorkerPanes(workbench.terminalPanes, paneSession.id)
+            : []
+        }
+        missionDefaultProfileLabel={
+          missionDefaultProfile(
+            commandProfiles,
+            workbench.preferences.missionDefaultProfileId,
+          ).displayName
+        }
+        onAddMissionWorker={
+          paneSession &&
+          isMissionSession(paneSession, workbench.preferences.missionSessionIds)
+            ? () => {
+                const projectPath =
+                  paneSession.workspacePath ||
+                  workspacePath ||
+                  savedProjects[0]?.path;
+                if (!projectPath) {
+                  return;
+                }
+                const profile = missionDefaultProfile(
+                  commandProfiles,
+                  workbench.preferences.missionDefaultProfileId,
+                );
+                const workerIndex =
+                  missionWorkerPanes(workbench.terminalPanes, paneSession.id)
+                    .length + 1;
+                createCliSession(profile.id, projectPath, {
+                  missionSessionId: paneSession.id,
+                  taskTitle: `Task ${workerIndex}`,
+                });
+              }
+            : undefined
+        }
+        onSelectMissionWorker={selectMissionWorker}
         sessionSummary={paneSession?.summary}
         sessionTitle={paneSession?.title}
         sourceControl={workbench.ide.sourceControl}
@@ -12815,6 +13335,11 @@ export function App() {
       }}
       sessionPlan={activeSessionPlan}
       sessionGoal={activeSessionGoal}
+      isMission={activeIsMission}
+      missionWorkers={activeMissionWorkers}
+      missionDefaultProfileLabel={activeMissionDefaultProfile.displayName}
+      onAddMissionWorker={addMissionWorker}
+      onSelectMissionWorker={selectMissionWorker}
       sessionSummary={activeSession?.summary}
       sessionTitle={activeSession?.title}
       sourceControl={workbench.ide.sourceControl}
@@ -12833,6 +13358,7 @@ export function App() {
       activeDestination={activeDestination}
       activeSessionId={sidebarActiveSessionId}
       sendingSessionIds={sendingSessionIds}
+      modelTerminalSessionIds={modelTerminalSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
       commandProfiles={commandProfiles}
@@ -12848,6 +13374,7 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onCloseTerminalPane={requestCloseTerminalPane}
       onCreateSession={startNewChat}
+      onCreateMission={createMission}
       onCreateCliSession={createCliSession}
       onDeleteSession={deleteSession}
       onDismissNotification={(id) =>
@@ -13130,6 +13657,13 @@ export function App() {
                     }}
                     sessionPlan={activeSessionPlan}
                     sessionGoal={activeSessionGoal}
+                    isMission={activeIsMission}
+                    missionWorkers={activeMissionWorkers}
+                    missionDefaultProfileLabel={
+                      activeMissionDefaultProfile.displayName
+                    }
+                    onAddMissionWorker={addMissionWorker}
+                    onSelectMissionWorker={selectMissionWorker}
                     sessionSummary={activeSession?.summary}
                     sessionTitle={activeSession?.title}
                     sourceControl={workbench.ide.sourceControl}
@@ -13666,6 +14200,11 @@ export function App() {
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
+          isMission={activeIsMission}
+          missionWorkers={activeMissionWorkers}
+          missionDefaultProfileLabel={activeMissionDefaultProfile.displayName}
+          onAddMissionWorker={addMissionWorker}
+          onSelectMissionWorker={selectMissionWorker}
           showOnboardingSteps
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
@@ -13700,6 +14239,15 @@ export function App() {
               (profile) => profile.id === terminalTerminateCandidate.profileId,
             )?.displayName ?? terminalTerminateCandidate.title
           }
+        />
+      ) : null}
+      {chatCloseCandidate ? (
+        <ChatCloseConfirmOverlay
+          chatLabel={chatCloseCandidate.label}
+          hasModelTerminal={chatCloseCandidate.hasModelTerminal}
+          onCancel={() => setChatCloseCandidate(undefined)}
+          onKeepRunning={confirmKeepRunningChatClose}
+          onStopAndClose={confirmStopAndCloseChat}
         />
       ) : null}
       {isCommandPaletteOpen ? (
@@ -14170,14 +14718,33 @@ function LiveTerminalPaneBody({
 
         const fitAndReport = () => {
           try {
-            fitAddon.fit();
-            const sizeKey = `${terminal.cols}x${terminal.rows}`;
+            const hostEl = hostRef.current;
+            // Fitting at 0×0 is what scatters TUI apps across the window.
             if (
-              statusRef.current === "running" &&
-              sizeKey !== lastSizeRef.current
+              !hostEl ||
+              hostEl.clientWidth < 24 ||
+              hostEl.clientHeight < 24
             ) {
-              lastSizeRef.current = sizeKey;
-              onResizeRef.current(pane.id, terminal.cols, terminal.rows);
+              return;
+            }
+            fitAddon.fit();
+            const cols = terminal.cols;
+            const rows = terminal.rows;
+            if (cols < 2 || rows < 2) {
+              return;
+            }
+            const sizeKey = `${cols}x${rows}`;
+            if (sizeKey === lastSizeRef.current) {
+              return;
+            }
+            lastSizeRef.current = sizeKey;
+            // Tell the PTY for live sessions so full-screen CLIs (Claude Code)
+            // redraw instead of leaving garbage from the previous geometry.
+            if (
+              statusRef.current === "running" ||
+              statusRef.current === "waiting"
+            ) {
+              onResizeRef.current(pane.id, cols, rows);
             }
           } catch {
             // The terminal can be hidden during route transitions; the next resize fixes it.
@@ -14188,15 +14755,23 @@ function LiveTerminalPaneBody({
           if (resizeFrameRef.current) {
             window.cancelAnimationFrame(resizeFrameRef.current);
           }
-          resizeFrameRef.current = window.requestAnimationFrame(fitAndReport);
+          // Double-rAF: wait until layout settles after the tool panel mounts.
+          resizeFrameRef.current = window.requestAnimationFrame(() => {
+            resizeFrameRef.current = window.requestAnimationFrame(fitAndReport);
+          });
         };
 
         const resizeObserver = new ResizeObserver(scheduleFit);
         resizeObserver.observe(hostRef.current);
         scheduleFit();
+        // Panel height often animates open after mount; refit shortly after.
+        const lateFit = window.setTimeout(scheduleFit, 120);
+        const lateFit2 = window.setTimeout(scheduleFit, 320);
 
         disposeTerminal = () => {
           resizeObserver.disconnect();
+          window.clearTimeout(lateFit);
+          window.clearTimeout(lateFit2);
           if (resizeFrameRef.current) {
             window.cancelAnimationFrame(resizeFrameRef.current);
           }
@@ -14243,10 +14818,43 @@ function LiveTerminalPaneBody({
   }, [pane.output]);
 
   useEffect(() => {
-    if (isActive) {
-      terminalRef.current?.focus();
+    if (!isActive) {
+      return;
     }
-  }, [isActive]);
+    terminalRef.current?.focus();
+    // Refit when the pane becomes selected (e.g. mission worker opens).
+    const timer = window.setTimeout(() => {
+      try {
+        const host = hostRef.current;
+        const fitAddon = fitAddonRef.current;
+        const terminal = terminalRef.current;
+        if (
+          !host ||
+          !fitAddon ||
+          !terminal ||
+          host.clientWidth < 24 ||
+          host.clientHeight < 24
+        ) {
+          return;
+        }
+        fitAddon.fit();
+        if (
+          terminal.cols >= 2 &&
+          terminal.rows >= 2 &&
+          (statusRef.current === "running" || statusRef.current === "waiting")
+        ) {
+          const sizeKey = `${terminal.cols}x${terminal.rows}`;
+          if (sizeKey !== lastSizeRef.current) {
+            lastSizeRef.current = sizeKey;
+            onResizeRef.current(pane.id, terminal.cols, terminal.rows);
+          }
+        }
+      } catch {
+        // ignore fit races during unmount
+      }
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [isActive, pane.id]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -15675,6 +16283,17 @@ function stringFromRecord(
 ) {
   const value = record?.[key];
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function numberFromUnknown(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function planStatusVerb(status: SessionPlanItemStatus) {
