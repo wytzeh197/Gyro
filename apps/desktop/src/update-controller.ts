@@ -30,6 +30,27 @@ function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;
 }
 
+/**
+ * `latest.json` carries a `size` per platform that the updater itself ignores.
+ * Reading it lets the sidebar show the download weight before it starts.
+ */
+async function updateArchiveSize(update: Update): Promise<number | undefined> {
+  try {
+    const platforms = update.rawJson.platforms;
+    if (!platforms || typeof platforms !== "object") {
+      return undefined;
+    }
+    const platformKey = await invoke<string>("updater_platform_key");
+    const entry =
+      (platforms as Record<string, { size?: unknown }>)[platformKey] ??
+      (platforms as Record<string, { size?: unknown }>)[`${platformKey}-app`];
+    const size = entry?.size;
+    return typeof size === "number" && size > 0 ? size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function useGyroUpdater({
   automaticChecks,
 }: {
@@ -98,6 +119,7 @@ export function useGyroUpdater({
           nextVersion: update.version,
           releaseNotes: update.body,
           releaseDate: update.date,
+          totalBytes: await updateArchiveSize(update),
           lastCheckedAt: checkedAt,
         });
         return {
@@ -159,7 +181,8 @@ export function useGyroUpdater({
       }
     }
     let downloadedBytes = 0;
-    let totalBytes: number | undefined;
+    // Falls back to the manifest size when the server omits a content length.
+    let totalBytes: number | undefined = stateRef.current.totalBytes;
     setState((current) => ({
       ...current,
       status: "downloading",
@@ -169,7 +192,7 @@ export function useGyroUpdater({
     try {
       await update.download((event) => {
         if (event.event === "Started") {
-          totalBytes = event.data.contentLength;
+          totalBytes = event.data.contentLength ?? totalBytes;
         } else if (event.event === "Progress") {
           downloadedBytes += event.data.chunkLength;
         }

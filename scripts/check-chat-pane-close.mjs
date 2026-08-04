@@ -41,6 +41,9 @@ function createApp() {
         .filter((pane) => pane?.kind === "session")
         .map((pane) => pane.sessionId);
     },
+    firstSlotSessionId() {
+      return grid.layouts[PROJECT]?.slots[0]?.sessionId;
+    },
   };
 
   const syncEffect = () => {
@@ -94,6 +97,8 @@ function createApp() {
   };
 
   app.closePane = (pane) => {
+    // Mirror App.tsx: never focus the pane being closed first — that race is
+    // what emptied the split when the user clicked X on the left chat.
     const paneLayout = grid.layouts[PROJECT];
     if (pane.kind === "session") app.closedPaneSessions.add(pane.sessionId);
     const nextPane =
@@ -117,6 +122,13 @@ function createApp() {
       projectKey: PROJECT,
       paneId: pane.paneId,
     });
+    if (nextPane) {
+      app.dispatch({
+        type: "focus-pane",
+        projectKey: PROJECT,
+        paneId: nextPane.paneId,
+      });
+    }
     app.settle();
   };
 
@@ -168,12 +180,29 @@ assert.deepEqual(
   ["T"],
   "closing one chat should leave the other",
 );
+assert.equal(
+  app.activeSessionId,
+  "T",
+  "the remaining split pane must become the active session",
+);
+// Compact: after unsplit, the survivor sits in the first slot so the grid
+// cannot look empty while a chat is still open.
+assert.equal(
+  app.firstSlotSessionId(),
+  "T",
+  "closing a split pane should compact the remaining chat into the first slot",
+);
 
 app.closePane(paneFor(sessions[1]));
 assert.deepEqual(
   app.openPaneSessionIds(),
   [],
   "closing the last chat empties the grid",
+);
+assert.equal(
+  app.activeSessionId,
+  undefined,
+  "closing the last pane clears the active session",
 );
 
 // The regression: anything that re-enables auto-select — focusing a pane,

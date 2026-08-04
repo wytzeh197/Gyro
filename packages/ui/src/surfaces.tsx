@@ -271,7 +271,12 @@ import {
 } from "./council";
 
 type BrowserScreenshotAction = "capture" | "reveal";
-import { shouldShowSidebarUpdate, updateSidebarLabel } from "./update-state";
+import {
+  shouldShowSidebarUpdate,
+  updateSidebarLabel,
+  updateSizeLabel,
+  updateVersionTag,
+} from "./update-state";
 
 type IconComponent = typeof MessageSquare;
 const CommandIcon = Command;
@@ -1911,6 +1916,76 @@ function WorkspacePreparationControl({
   );
 }
 
+/** Roughly the tooltip's own height — enough to pick a side before it paints. */
+const UPDATE_TIP_CLEARANCE = 76;
+
+function SidebarUpdateControl({
+  state,
+  onAction,
+}: {
+  state: UpdateState;
+  onAction?: (state: UpdateState) => void;
+}) {
+  const [placement, setPlacement] = useState<"above" | "below">("below");
+  const controlRef = useRef<HTMLDivElement>(null);
+  const tipId = useId();
+  const isBusy = state.status === "downloading" || state.status === "installing";
+  const label = updateSidebarLabel(state);
+  const tag = updateVersionTag(state);
+  const size = updateSizeLabel(state);
+
+  /* The button lives in the titlebar, so the tip drops down unless the window
+     is too short for it to land on screen. */
+  const measurePlacement = useCallback(() => {
+    const rect = controlRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const roomBelow = window.innerHeight - rect.bottom;
+    setPlacement(
+      roomBelow < UPDATE_TIP_CLEARANCE && rect.top > UPDATE_TIP_CLEARANCE
+        ? "above"
+        : "below",
+    );
+  }, []);
+
+  return (
+    <div
+      className="gyro-sidebar-update is-windowbar"
+      data-tip-placement={placement}
+      onFocus={measurePlacement}
+      onPointerEnter={measurePlacement}
+      ref={controlRef}
+    >
+      <button
+        aria-busy={isBusy}
+        aria-describedby={tipId}
+        aria-label={label}
+        className="gyro-sidebar-update-button"
+        data-status={state.status}
+        disabled={isBusy}
+        onClick={() => onAction?.(state)}
+        type="button"
+      >
+        {state.status === "downloading" ? (
+          <span className="gyro-sidebar-update-percent">
+            {state.progressPercent ?? 0}%
+          </span>
+        ) : state.status === "ready" || state.status === "installing" ? (
+          <RefreshCw
+            className={state.status === "installing" ? "is-spinning" : ""}
+            size={11}
+          />
+        ) : (
+          <Download size={11} />
+        )}
+      </button>
+      <div className="gyro-sidebar-update-tip" id={tipId} role="tooltip">
+        <strong>{tag ?? label}</strong>
+        <span>{size}</span>
+      </div>
+    </div>
+  );
+}
+
 function SettingsSidebarContent({
   activeSection,
   backLabel,
@@ -2950,40 +3025,10 @@ function WorkspaceSidebarContent({
             progress={workspacePreparation}
           />
           {updateState ? (
-            <div className="gyro-sidebar-update is-windowbar">
-              <button
-                aria-busy={
-                  updateState.status === "downloading" ||
-                  updateState.status === "installing"
-                }
-                aria-label={updateSidebarLabel(updateState)}
-                className="gyro-sidebar-update-button"
-                data-status={updateState.status}
-                disabled={
-                  updateState.status === "downloading" ||
-                  updateState.status === "installing"
-                }
-                onClick={() => onUpdateAction?.(updateState)}
-                title={updateSidebarLabel(updateState)}
-                type="button"
-              >
-                {updateState.status === "downloading" ? (
-                  <span className="gyro-sidebar-update-percent">
-                    {updateState.progressPercent ?? 0}%
-                  </span>
-                ) : updateState.status === "ready" ||
-                  updateState.status === "installing" ? (
-                  <RefreshCw
-                    className={
-                      updateState.status === "installing" ? "is-spinning" : ""
-                    }
-                    size={11}
-                  />
-                ) : (
-                  <Download size={11} />
-                )}
-              </button>
-            </div>
+            <SidebarUpdateControl
+              onAction={onUpdateAction}
+              state={updateState}
+            />
           ) : null}
           <div
             aria-hidden="true"
@@ -6258,16 +6303,30 @@ export function ChatSurface({
     return () => window.cancelAnimationFrame(animationFrame);
   }, [deferredEvents, updateTranscriptScrollPosition]);
   const contextModel = useMemo(() => {
+    // Prefer the chat's own model over the global picker state so split panes
+    // keep independent context windows when each thread uses a different model.
     const providers = providersForConfig(config);
-    const providerId = config.selectedProviderId ?? sessionModel?.providerId;
+    const boundToSession = Boolean(
+      sessionModel?.providerId &&
+        (sessionModel.modelId || sessionModel.modelLabel),
+    );
+    const providerId = boundToSession
+      ? sessionModel?.providerId
+      : (config.selectedProviderId ?? sessionModel?.providerId);
     const provider = providers.find((item) => item.id === providerId);
-    const modelId = provider?.selectedModelId ?? sessionModel?.modelId;
+    const modelId = boundToSession
+      ? (sessionModel?.modelId ?? provider?.selectedModelId)
+      : (provider?.selectedModelId ?? sessionModel?.modelId);
     const model = provider ? getProviderModel(provider, modelId) : undefined;
     return {
       providerId,
       modelId,
       modelLabel:
-        model?.displayName ?? sessionModel?.modelLabel ?? modelId ?? undefined,
+        (boundToSession ? sessionModel?.modelLabel : undefined) ??
+        model?.displayName ??
+        sessionModel?.modelLabel ??
+        modelId ??
+        undefined,
       contextWindowTokens: model?.contextWindowTokens,
     };
   }, [
@@ -17945,11 +18004,21 @@ function Composer({
     textarea.style.overflowY = textarea.scrollHeight > 148 ? "auto" : "hidden";
   }, [draft]);
   const providerConfigs = providersForConfig(config);
+  // Each chat pane may bind its own provider/model. Prefer that over the
+  // workbench-wide selection so split-screen composers can diverge.
+  const boundToSession = Boolean(
+    sessionModel?.providerId &&
+      (sessionModel.modelId || sessionModel.modelLabel),
+  );
+  const effectiveProviderId = boundToSession
+    ? sessionModel?.providerId
+    : config.selectedProviderId;
   const selectedProvider = providerConfigs.find(
-    (provider) => provider.id === config.selectedProviderId,
+    (provider) => provider.id === effectiveProviderId,
   );
   const sessionProvider =
-    sessionModel?.providerId && sessionModel.modelLabel
+    sessionModel?.providerId &&
+    (sessionModel.modelLabel || sessionModel.modelId)
       ? providerConfigs.find(
           (provider) => provider.id === sessionModel.providerId,
         )
@@ -17962,21 +18031,38 @@ function Composer({
       provider.authStatus === "connected",
   );
   const hasSelectedProvider = Boolean(
-    selectedProvider ?? sessionModel?.modelLabel,
+    selectedProvider ?? sessionModel?.modelLabel ?? sessionModel?.modelId,
   );
   const hasReadyProvider = Boolean(
     selectedProvider?.authStatus === "connected" ||
     sessionProvider?.authStatus === "connected",
   );
-  const providerModelLabel = selectedProvider
-    ? selectedModelLabel(selectedProvider)
-    : (sessionModel?.modelLabel ?? "Select provider");
+  const effectiveModelId = boundToSession
+    ? sessionModel?.modelId
+    : selectedProvider?.selectedModelId;
+  const resolvedBoundModel =
+    selectedProvider && effectiveModelId
+      ? getProviderModel(selectedProvider, effectiveModelId)
+      : undefined;
+  const providerModelLabel = boundToSession
+    ? (sessionModel?.modelLabel ??
+      resolvedBoundModel?.displayName ??
+      sessionModel?.modelId ??
+      "Select provider")
+    : selectedProvider
+      ? selectedModelLabel(selectedProvider)
+      : (sessionModel?.modelLabel ?? "Select provider");
   const modelChipLabel = hasSelectedProvider
     ? providerModelLabel
     : "Choose model";
-  const providerReasoningEffort = selectedProvider
-    ? selectedReasoningEffort(selectedProvider)
-    : sessionModel?.reasoningEffort;
+  const providerReasoningEffort = boundToSession
+    ? (sessionModel?.reasoningEffort ??
+      (selectedProvider
+        ? selectedReasoningEffort(selectedProvider)
+        : undefined))
+    : selectedProvider
+      ? selectedReasoningEffort(selectedProvider)
+      : sessionModel?.reasoningEffort;
   const approvalMode = approvalModeForConfig(config);
   const approvalCopy = providerApprovalCopy(selectedProvider?.id, config);
   const approvalChipClassName =
@@ -18089,7 +18175,7 @@ function Composer({
           action: isConnected
             ? `select-provider:${provider.id}`
             : `connect-provider:${provider.id}`,
-          active: isConnected && provider.id === config.selectedProviderId,
+          active: isConnected && provider.id === effectiveProviderId,
           disabled: false,
           disconnected: !isConnected,
           icon: Sparkles,
@@ -18101,14 +18187,18 @@ function Composer({
         };
       }),
   ];
+  const activeModelIdForPicker =
+    modelPickerProvider && modelPickerProvider.id === effectiveProviderId
+      ? (effectiveModelId ?? modelPickerProvider.selectedModelId)
+      : modelPickerProvider?.selectedModelId;
   const providerModelItems: ComposerPopoverItem[] = [
     ...(modelPickerProvider
       ? [
           ...modelPickerProvider.models.map((model) => ({
             action: `select-provider-model:${modelPickerProvider.id}:${model.id}`,
             active:
-              modelPickerProvider.id === config.selectedProviderId &&
-              model.id === modelPickerProvider.selectedModelId,
+              modelPickerProvider.id === effectiveProviderId &&
+              model.id === activeModelIdForPicker,
             icon: Sparkles,
             hideIcon: true,
             kind: "model" as const,
@@ -18117,17 +18207,18 @@ function Composer({
         ]
       : []),
   ];
+  const effortSourceModel = selectedProvider
+    ? getProviderModel(selectedProvider, effectiveModelId)
+    : undefined;
   const effortItems: ComposerPopoverItem[] = selectedProvider
-    ? (getProviderModel(selectedProvider)?.supportedReasoningEfforts ?? []).map(
-        (effort) => ({
-          action: `select-provider-effort:${selectedProvider.id}:${effort}`,
-          active: effort === selectedReasoningEffort(selectedProvider),
-          hideIcon: true,
-          icon: Gauge,
-          kind: "effort" as const,
-          label: reasoningEffortLabel(effort),
-        }),
-      )
+    ? (effortSourceModel?.supportedReasoningEfforts ?? []).map((effort) => ({
+        action: `select-provider-effort:${selectedProvider.id}:${effort}`,
+        active: effort === providerReasoningEffort,
+        hideIcon: true,
+        icon: Gauge,
+        kind: "effort" as const,
+        label: reasoningEffortLabel(effort),
+      }))
     : [];
   const contextItems: ComposerPopoverItem[] = [
     {

@@ -89,6 +89,53 @@ assert.deepEqual(
   "the row should name the tool rather than say a tool was used",
 );
 
+// A machine tool id without a note used to paint three identical "Bash" rows.
+// The note is the muted half that says what it ran on.
+assert.deepEqual(
+  runRowText({
+    kind: "work",
+    id: "evt_skill",
+    at: at(0),
+    item: workItemFromEvent(
+      activity("tool", "Used Skill", {
+        detail: "Skill",
+        tool: "Skill",
+        note: "simplify",
+      }),
+    ),
+  }),
+  { label: "Skill", description: "simplify" },
+  "a tool row should show the specifics beside the machine identity",
+);
+assert.deepEqual(
+  runRowText({
+    kind: "work",
+    id: "evt_bash_intent",
+    at: at(0),
+    item: workItemFromEvent(
+      activity("command", "Ran command", {
+        detail: "pnpm test",
+        command: "pnpm test",
+        note: "Run the suite",
+      }),
+    ),
+  }),
+  { label: "Ran command", description: "Run the suite" },
+  "a Bash description reclassified as note should win over the raw command",
+);
+
+// Consecutive tools with the same name but different notes stay separate —
+// otherwise three Skill calls collapse into one.
+const distinctNotes = buildRunModel([
+  activity("tool", "Used Skill", { detail: "Skill", note: "simplify" }, 0),
+  activity("tool", "Used Skill", { detail: "Skill", note: "review" }, 0),
+]);
+assert.equal(
+  distinctNotes.steps.length,
+  2,
+  "tools that share a name but not a target should not coalesce",
+);
+
 // --- no batching --------------------------------------------------------------
 
 // Parallel calls arrive milliseconds apart. The reference design is a flat rail,
@@ -360,6 +407,50 @@ assert.deepEqual(
     answer: ["Chat, CLI, and IDE in one place."],
   },
 );
+// Observation first, plan last — the closer is what marks narration.
+assert.equal(
+  peelAssistantPreambleBlocks([
+    "Yes — I see it in the sidebar. Let me find where that's controlled.",
+    "The control lives in SidebarUpdateControl.",
+  ]).preambles.length,
+  1,
+  "a block that closes by promising the assistant's next step is a preamble",
+);
+assert.equal(
+  peelAssistantPreambleBlocks([
+    "The control lives in SidebarUpdateControl. Let me know if you want a tweak.",
+    "I can also rename the helper if that reads better.",
+  ]).preambles.length,
+  0,
+  "Let me know… hands the turn back and must stay in the answer",
+);
+
+// A real preamble event that trails the last tool (so it is peeled from the
+// closing answer) must not be drawn twice — once in the main pass and once
+// when preambles rejoin the rail.
+const doubleDraw = buildRunModel([
+  activity("command", "Ran command", { detail: "rg runRowText" }, 0),
+  {
+    id: "evt_preamble_once",
+    sessionId: "ses_1",
+    turnId: "turn_1",
+    createdAt: at(1),
+    kind: "assistant-message",
+    message:
+      "Yes — I see the bug. Let me find where the rail labels are built.",
+    payload: {},
+  },
+  say("The labels come from runRowText.", 2),
+]);
+assert.equal(
+  doubleDraw.steps.filter(
+    (step) =>
+      step.kind === "say" && step.text.includes("Let me find where the rail"),
+  ).length,
+  1,
+  "a peeled preamble should appear once on the rail, not twice",
+);
+
 // Silence unused-binding noise when the first multi-block scenario is only for coverage.
 assert.ok(planThenAnswer.steps.length >= 1);
 

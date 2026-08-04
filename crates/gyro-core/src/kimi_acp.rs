@@ -484,19 +484,28 @@ where
     }
 
     let mut prompt = request.prompt.clone();
-    if reopened_as_fresh {
+    // Gyro sessions are local. Whenever this provider turn is not continuing an
+    // open agent session — first turn after a model handoff, failed reopen, or
+    // an agent that never supported resume — inject the local transcript so any
+    // model can pick up where another left off.
+    if !resumed {
         if let Some(history) = request
             .conversation_history_text
             .as_deref()
             .map(str::trim)
             .filter(|text| !text.is_empty())
         {
+            let reason = if reopened_as_fresh {
+                "the agent session could not be reopened"
+            } else {
+                "this is a fresh agent session for a local Gyro chat handoff"
+            };
             prompt.insert(
                 0,
                 json!({
                     "type": "text",
                     "text": format!(
-                        "Prior conversation in this Gyro chat (the agent session could not be reopened, so this is continuity context):\n{history}"
+                        "Prior conversation in this Gyro chat ({reason}, so this is continuity context):\n{history}"
                     ),
                 }),
             );
@@ -1487,6 +1496,56 @@ done
         assert_eq!(deltas, ["hello from K3"]);
         assert_eq!(activities[0].id, "tool-1");
         assert!(!output.resumed);
+    }
+
+    /// A model handoff starts with no provider resume cursor. Local history
+    /// must still be injected so the new model can continue the Gyro session.
+    #[cfg(unix)]
+    #[test]
+    fn fresh_session_injects_local_history_for_model_handoff() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}],"agentCapabilities":{}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"handoff-session"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in
+        *Prior\ conversation*)
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"handoff-aware reply"}}}}'
+          ;;
+        *)
+          printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"missing history"}}}}'
+          ;;
+      esac
+      printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            None,
+        );
+        request.provider_label = "xAI".into();
+        request.conversation_history_text =
+            Some("User: fix the split close\n\nAssistant: looking into it".into());
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(output.session_id, "handoff-session");
+        assert!(!output.resumed);
+        assert_eq!(output.response, "handoff-aware reply");
     }
 
     /// Grok-shaped agents often reject session/resume with Method not found.

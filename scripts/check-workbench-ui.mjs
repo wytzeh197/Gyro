@@ -645,7 +645,9 @@ const coreCapabilitiesSource = readRepoFile(
   "crates/gyro-core/src/capabilities.rs",
 );
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
+const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const updateStateSource = readRepoFile("packages/ui/src/update-state.ts");
 const updateControllerSource = readRepoFile(
   "apps/desktop/src/update-controller.ts",
 );
@@ -3311,9 +3313,14 @@ expect(
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
     // Live runs keep a Thinking pulse between tools; settled incomplete runs
-    // stay expanded so the trail does not vanish under "Worked for …".
+    // stay expanded so the trail does not vanish under "Worked for …". Fully
+    // answered turns auto-collapse once so the answer is what stays on screen.
     runViewSource.includes("showThinkingPulse") &&
-    runViewSource.includes("Boolean(model.response) && model.steps.length > 0") &&
+    runViewSource.includes("const isAnswered =") &&
+    runViewSource.includes('model.phase.name === "done"') &&
+    runViewSource.includes("Boolean(model.response)") &&
+    runViewSource.includes("model.steps.length > 0") &&
+    runViewSource.includes("hasAutoCollapsed") &&
     runViewSource.includes("if (isLive)") &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&
@@ -4571,26 +4578,29 @@ expect(
   "Local app launch docs and scripts should steer users to Gyro.app instead of the raw debug executable.",
 );
 const updateControlStart = surfaceSource.indexOf(
-  'className="gyro-sidebar-update is-windowbar"',
+  "function SidebarUpdateControl",
 );
 const updateControlSource = surfaceSource.slice(
   updateControlStart,
-  surfaceSource.indexOf(
-    'className="gyro-sidebar-titlebar-drag-region"',
-    updateControlStart,
-  ),
+  surfaceSource.indexOf("function SettingsSidebarContent", updateControlStart),
 );
 expect(
   surfaceSource.includes('className="gyro-sidebar-update is-windowbar"') &&
-    surfaceSource.indexOf('className="gyro-sidebar-update is-windowbar"') >
+    surfaceSource.indexOf("<SidebarUpdateControl") >
       surfaceSource.indexOf('aria-label="Forward"') &&
-    updateControlSource.includes(
-      "onClick={() => onUpdateAction?.(updateState)}",
-    ) &&
+    updateControlSource.includes("onClick={() => onAction?.(state)}") &&
     updateControlSource.includes('className="gyro-sidebar-update-percent"') &&
-    updateControlSource.includes("updateState.progressPercent ?? 0") &&
-    updateControlSource.includes('updateState.status === "ready"') &&
+    updateControlSource.includes("state.progressPercent ?? 0") &&
+    updateControlSource.includes('state.status === "ready"') &&
     updateControlSource.includes("<RefreshCw") &&
+    updateControlSource.includes('role="tooltip"') &&
+    updateControlSource.includes("data-tip-placement={placement}") &&
+    updateControlSource.includes("updateVersionTag(state)") &&
+    updateControlSource.includes("updateSizeLabel(state)") &&
+    styleSource.includes(".gyro-sidebar-update-tip") &&
+    styleSource.includes(
+      '.gyro-sidebar-update[data-tip-placement="above"] .gyro-sidebar-update-tip',
+    ) &&
     !updateControlSource.includes('aria-haspopup="dialog"') &&
     !surfaceSource.includes("function UpdatePopover") &&
     styleSource.includes(".gyro-sidebar-update-button") &&
@@ -5018,11 +5028,14 @@ expect(
       "refresh-provider-models:${modelPickerProvider.id}",
     ) &&
     !surfaceSource.includes("connect-provider:${modelPickerProvider.id}") &&
+    // Split-screen: each composer prefers its bound session/draft model over
+    // the workbench-wide selectedProviderId so panes can diverge.
+    surfaceSource.includes("const effectiveProviderId = boundToSession") &&
     surfaceSource.includes(
-      "(provider) => provider.id === config.selectedProviderId",
+      "(provider) => provider.id === effectiveProviderId",
     ) &&
     surfaceSource.includes(
-      "active: isConnected && provider.id === config.selectedProviderId",
+      "active: isConnected && provider.id === effectiveProviderId",
     ) &&
     // Clean-machine path: disconnected providers start login instead of a
     // dead "Unavailable" label that leaves send blocked without a next step.
@@ -5054,7 +5067,7 @@ expect(
     surfaceSource.includes("clearModelFlyoutPreviewTimer") &&
     surfaceSource.includes("modelFlyoutPreviewTimerRef") &&
     surfaceSource.includes(
-      "modelPickerProvider.id === config.selectedProviderId",
+      "modelPickerProvider.id === effectiveProviderId",
     ) &&
     appSource.includes("selectProvider(providerId);") &&
     appSource.includes("{ notifySuccess: false }") &&
@@ -5077,6 +5090,70 @@ expect(
     surfaceSource.includes("data-flyout-vertical={modelFlyoutVertical}") &&
     !surfaceSource.includes('title="Model & effort"'),
   "Provider picker should keep a sticky model flyout while selecting models.",
+);
+
+// Split-screen chats each bind their own model. Changing the picker in a new
+// draft must not rewrite the model chip on every other open pane.
+expect(
+  surfaceSource.includes("const boundToSession = Boolean(") &&
+    surfaceSource.includes("const effectiveModelId = boundToSession") &&
+    surfaceSource.includes("const providerModelLabel = boundToSession") &&
+    appSource.includes("chatDraftModels") &&
+    appSource.includes("setChatDraftModels") &&
+    appSource.includes("sessionModelSelectionFromSession") &&
+    appSource.includes(
+      "// Bind the pick to this draft pane so other split chats keep theirs.",
+    ) &&
+    appSource.includes("sessionModelSelectionFromSession(paneSession)") &&
+    appSource.includes("chatDraftModels[paneDraftKey]") &&
+    appSource.includes("chatDraftModels[activeDraftKey]"),
+  "Composer model selection should be per session/draft so split panes stay independent.",
+);
+
+// Handing a local chat to another model drops foreign resume cursors and
+// injects local history so the new model can continue the same thread.
+expect(
+  coreSessionsSource.includes("clear_all_provider_session_bindings") &&
+    coreSessionsSource.includes("model_handoff_clears_provider_resume_bindings") &&
+    tauriSource.includes("compatible_provider_session_binding") &&
+    kimiAcpSource.includes(
+      "fresh_session_injects_local_history_for_model_handoff",
+    ) &&
+    kimiAcpSource.includes("this is a fresh agent session for a local Gyro chat handoff"),
+  "Model handoff should clear provider resume bindings and inject local history into a fresh agent session.",
+);
+
+// Tool rails need the human specifics (command, skill name, path), not only the
+// machine tool id that used to paint "Bash · Bash · Bash".
+expect(
+  tauriSource.includes("activity_note") &&
+    tauriSource.includes("fn tool_use_activity") &&
+    tauriSource.includes("fn provider_tool_activity_note") &&
+    tauriSource.includes("fn extract_provider_activities") &&
+    tauriSource.includes('"note": activity.note') &&
+    tauriSource.includes("tool_use_activities_carry_specifics_not_just_the_tool_name") &&
+    typeSource.includes("activityNote?: string | null") &&
+    providerStreamSource.includes("note: streamEvent.activityNote") &&
+    runSource.includes("note: text(payload, \"note\")") &&
+    runSource.includes("item.note") &&
+    runSource.includes("toolIdentity"),
+  "Provider tool activities should carry a note so the run rail can name what each tool ran on.",
+);
+
+// Claude plan windows need the account usage endpoint — the stream names the
+// window and reset but never utilization, which left the composer on em dashes.
+expect(
+  tauriSource.includes("fetch_anthropic_provider_usage") &&
+    tauriSource.includes("provider_usage_windows_from_anthropic_usage") &&
+    tauriSource.includes("claude_oauth_access_token") &&
+    tauriSource.includes("/api/oauth/usage") &&
+    tauriSource.includes("updater_platform_key") &&
+    updateStateSource.includes("formatUpdateSize") &&
+    updateStateSource.includes("updateSizeLabel") &&
+    updateStateSource.includes("updateVersionTag") &&
+    updateControllerSource.includes("updateArchiveSize") &&
+    updateControllerSource.includes('invoke<string>("updater_platform_key")'),
+  "Anthropic plan usage and the update tip should read live account windows and archive size.",
 );
 
 // The composer is not always full-window width. In the Workspace AI sidebar
@@ -6200,8 +6277,12 @@ expect(
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
     surfaceSource.includes("contextUsage.remainingLabel") &&
+    // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "eventModelId !== model.modelId",
+      "reportedModelId !== model.modelId",
+    ) &&
+    readRepoFile("packages/ui/src/context-usage.ts").includes(
+      "const matchesModel =",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "reportedTokens + liveEstimatedTokens",

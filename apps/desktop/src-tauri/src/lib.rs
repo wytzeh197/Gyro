@@ -1430,6 +1430,8 @@ struct ProviderChatStreamEvent {
     activity_kind: Option<String>,
     activity_label: Option<String>,
     activity_detail: Option<String>,
+    /// The specifics behind a machine identity — see [`ProviderActivity::note`].
+    activity_note: Option<String>,
     activity_status: Option<String>,
     message: Option<String>,
     error: Option<String>,
@@ -1489,6 +1491,13 @@ struct ProviderActivity {
     kind: String,
     label: String,
     detail: Option<String>,
+    /// The human specifics of the row, when `detail` is a machine identity.
+    ///
+    /// A tool call has both: `detail` says which tool ran (`Skill`,
+    /// `mcp__github__create_issue`) and this says what it ran on (`simplify`).
+    /// Without the second slot the row can only show one of them, which is how
+    /// a rail of real work came to read "Bash", "Bash", "Bash".
+    note: Option<String>,
     status: String,
 }
 
@@ -1802,6 +1811,20 @@ fn list_sessions_blocking() -> Result<Vec<Session>, String> {
 #[tauri::command]
 async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     app.restart()
+}
+
+/// Platform key this build downloads from `latest.json`, so the UI can read the
+/// matching archive size before the download starts.
+#[tauri::command]
+async fn updater_platform_key() -> String {
+    let os = if cfg!(target_os = "macos") {
+        "darwin"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+    format!("{os}-{}", std::env::consts::ARCH)
 }
 
 #[tauri::command]
@@ -4293,7 +4316,8 @@ fn run_provider_chat_blocking(
 
     let binding = store
         .get_provider_session_binding(session_id, &request.provider_id)
-        .map_err(to_string)?;
+        .map_err(to_string)?
+        .and_then(|binding| compatible_provider_session_binding(binding, &request));
     let runner_output = match run_provider_chat_with_retry(
         &store,
         &app,
@@ -4941,7 +4965,22 @@ fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static
     instructions
 }
 
+/// Local transcript for a provider turn that cannot resume a foreign agent
+/// session (model handoff, missing cursor, or first turn after a switch).
+fn local_conversation_history_for_request(request: &ProviderChatRequest) -> Option<String> {
+    acp_conversation_history_text_for_session(&request.session_id)
+}
+
 fn provider_context_message(request: &ProviderChatRequest) -> String {
+    provider_context_message_with_history(request, None)
+}
+
+/// Build the provider prompt, optionally carrying local chat history so a
+/// model that did not resume a provider session still sees the full thread.
+fn provider_context_message_with_history(
+    request: &ProviderChatRequest,
+    conversation_history: Option<&str>,
+) -> String {
     let mut context = Vec::new();
     context.push(format!(
         "Gyro chat mode: {}.",
@@ -4951,6 +4990,11 @@ fn provider_context_message(request: &ProviderChatRequest) -> String {
             ChatMode::Normal => "normal",
         }
     ));
+    if let Some(history) = conversation_history.map(str::trim).filter(|text| !text.is_empty()) {
+        context.push(format!(
+            "Prior conversation in this Gyro chat (local session continuity — continue from here):\n{history}"
+        ));
+    }
     if request.mode == ChatMode::Council {
         context.push(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
@@ -10193,7 +10237,9 @@ async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot
 ///
 /// 1. **OpenAI / Codex** — live `account/rateLimits/read` (5h + weekly used %).
 /// 2. **xAI / Grok Build** — live `_x.ai/billing` (weekly credit % + reset).
-/// 3. **Anthropic / Claude** — windows streamed mid-answer and stored.
+/// 3. **Anthropic / Claude** — live `/api/oauth/usage` (5h + weekly used %),
+///    falling back to the windows streamed mid-answer, which carry a reset but
+///    no percentage.
 ///
 /// Kimi and Gemini have no plan-window source here; use the ledger for spend.
 fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
@@ -10223,7 +10269,19 @@ fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapsho
             }
         }
     } else if provider_id == "anthropic" {
-        stored_provider_usage(provider_id)?.windows
+        match fetch_anthropic_provider_usage(provider_id) {
+            Ok(snapshot) => {
+                remember_provider_rate_limits(provider_id, &snapshot.windows);
+                snapshot.windows
+            }
+            Err(error) => {
+                live_error = Some(error);
+                // The stream still names the window and its reset, so a failed
+                // poll degrades to "5-hour limit, resets in 2 hr" rather than
+                // to nothing at all.
+                stored_provider_usage(provider_id)?.windows
+            }
+        }
     } else {
         Vec::new()
     };
@@ -10396,6 +10454,147 @@ fn provider_usage_windows_from_xai_billing(
         used_percent: Some(used_percent),
         resets_at,
     }]
+}
+
+/// Where Claude Code keeps the OAuth token Gyro reuses to read plan usage.
+///
+/// The keychain entry is written by `claude login` and refreshed by the CLI on
+/// every run; the file is the same JSON on machines without a keychain.
+const CLAUDE_CREDENTIALS_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+const CLAUDE_CREDENTIALS_FILE: &str = ".claude/.credentials.json";
+/// The account endpoint behind Claude Code's own `/usage`.
+const ANTHROPIC_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+
+/// Read the Claude Code OAuth access token this machine already holds.
+///
+/// Gyro never asks for a second login: the plan windows belong to the same
+/// account the chat runs on, so the token the CLI keeps is the one to use.
+fn claude_oauth_access_token() -> Result<String, String> {
+    let raw = claude_credentials_json()
+        .ok_or_else(|| "Sign in to Claude Code to read your plan usage.".to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| "Claude Code credentials could not be read.".to_string())?;
+    let oauth = parsed.get("claudeAiOauth").unwrap_or(&parsed);
+    // An expired token is worth reporting plainly: the CLI refreshes it on its
+    // next run, so the user's fix is to run Claude once rather than debug Gyro.
+    if let Some(expires_at) = oauth.get("expiresAt").and_then(serde_json::Value::as_i64) {
+        if expires_at > 0 && expires_at < chrono::Utc::now().timestamp_millis() {
+            return Err("Claude Code sign-in has expired. Run Claude once to refresh it.".into());
+        }
+    }
+    oauth
+        .get("accessToken")
+        .and_then(serde_json::Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "Claude Code credentials do not include an access token.".to_string())
+}
+
+fn claude_credentials_json() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = Command::new("security")
+            .args([
+                "find-generic-password",
+                "-s",
+                CLAUDE_CREDENTIALS_KEYCHAIN_SERVICE,
+                "-w",
+            ])
+            .output()
+        {
+            if output.status.success() {
+                let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !raw.is_empty() {
+                    return Some(raw);
+                }
+            }
+        }
+    }
+    let path = user_home_directory().ok()?.join(CLAUDE_CREDENTIALS_FILE);
+    fs::read_to_string(path).ok()
+}
+
+/// Ask the Anthropic account API what the plan windows are actually at.
+///
+/// The chat stream is not a source for this: Claude Code's `rate_limit_event`
+/// names the window and its reset but carries no utilization, which is why the
+/// composer sat on two em dashes. `/api/oauth/usage` is the same endpoint the
+/// CLI's own `/usage` reads, and it answers with a percentage per window.
+fn fetch_anthropic_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
+    let token = claude_oauth_access_token()?;
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(10))
+        .build();
+    let response = agent
+        .get(ANTHROPIC_USAGE_URL)
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("anthropic-beta", "oauth-2025-04-20")
+        .set("Content-Type", "application/json")
+        .call()
+        .map_err(|error| match error {
+            ureq::Error::Status(401 | 403, _) => {
+                "Claude Code sign-in was rejected. Run Claude once to refresh it.".to_string()
+            }
+            ureq::Error::Status(status, _) => {
+                format!("Anthropic usage request failed (HTTP {status}).")
+            }
+            ureq::Error::Transport(_) => {
+                "Anthropic usage is unreachable right now (offline?).".to_string()
+            }
+        })?;
+    let payload: serde_json::Value = response
+        .into_json()
+        .map_err(|_| "Anthropic usage response could not be read.".to_string())?;
+    let windows = provider_usage_windows_from_anthropic_usage(&payload);
+    if windows.is_empty() {
+        return Err("Anthropic reported no plan usage window for this account.".into());
+    }
+    Ok(ProviderUsageSnapshot {
+        provider_id: provider_id.into(),
+        windows,
+        fetched_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+/// Map the account payload onto Gyro plan windows.
+///
+/// Every window is optional and a plan only carries the ones it meters, so an
+/// absent key is left out rather than rendered as an empty bar. Model-scoped
+/// weekly limits (Opus, Sonnet) only appear on plans that have them.
+fn provider_usage_windows_from_anthropic_usage(
+    payload: &serde_json::Value,
+) -> Vec<ProviderRateLimitWindow> {
+    [
+        ("five_hour", "five-hour", "5-hour limit"),
+        ("seven_day", "weekly", "Weekly limit"),
+        ("seven_day_opus", "weekly-opus", "Weekly · Opus"),
+        ("seven_day_sonnet", "weekly-sonnet", "Weekly · Sonnet"),
+    ]
+    .into_iter()
+    .filter_map(|(key, id, label)| {
+        let window = payload.get(key)?;
+        let used_percent = window
+            .get("utilization")
+            .and_then(serde_json::Value::as_f64)
+            .map(|value| value.round().clamp(0.0, 100.0) as i32)?;
+        let status = match used_percent {
+            100 => "exhausted",
+            80..=99 => "warning",
+            _ => "ok",
+        };
+        Some(ProviderRateLimitWindow {
+            id: id.into(),
+            label: label.into(),
+            status: status.into(),
+            used_percent: Some(used_percent),
+            resets_at: window
+                .get("resets_at")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+        })
+    })
+    .collect()
 }
 
 /// Replay a provider's last known windows, expired ones already dropped.
@@ -11287,57 +11486,134 @@ where
             output.resumed = binding_cursor.is_some();
             Ok(output)
         }
+        // A dead provider cursor is not a user-visible failure: clear it and
+        // immediately retry once without resume. Local history is injected by
+        // the runners when resume is absent, so continuity stays in Gyro.
         Err(error) if binding.is_some() && is_stale_resume_error(&error.to_string()) => {
             let session_id =
                 parse_uuid(&request.session_id).map_err(|error| anyhow::anyhow!(error))?;
             let _ = store.clear_provider_session_binding(session_id, &request.provider_id);
-            Err(error.context(
-                "the stale provider cursor was cleared; retry explicitly to avoid replaying tools",
-            ))
-        }
-        Err(error) => {
-            let last_error = Some(gyro_core::security::redact_secrets(&error.to_string()));
-            match binding {
-                Some(binding) => {
-                    let _ = store.upsert_provider_session_binding(
-                        binding.session_id,
-                        binding.provider_id,
-                        binding.model_id,
-                        binding.model_label,
-                        binding.reasoning_effort,
-                        binding.resume_cursor_json,
-                        "failed",
-                        last_error,
-                    );
+            let mut fresh_attempt = ProviderRunAttempt::default();
+            match run_once(None, &mut fresh_attempt) {
+                Ok(mut output) => {
+                    output.resumed = false;
+                    output.retry_count = output.retry_count.saturating_add(1);
+                    Ok(output)
                 }
-                // A session's first turn has no binding to carry forward, so
-                // the cursor this run created is the only record that the
-                // provider conversation exists. Dropping it is what made a
-                // stopped first turn restart from nothing on every retry.
-                None => {
-                    let cursor_json = attempt
-                        .resume_cursor
-                        .as_ref()
-                        .and_then(|cursor| serde_json::to_value(cursor).ok());
-                    if let (Some(cursor_json), Ok(session_id)) =
-                        (cursor_json, parse_uuid(&request.session_id))
-                    {
-                        let _ = store.upsert_provider_session_binding(
-                            session_id,
-                            request.provider_id.clone(),
-                            request.model_id.clone(),
-                            request.model_label.clone(),
-                            request.reasoning_effort.clone(),
-                            cursor_json,
-                            "failed",
-                            last_error,
-                        );
-                    }
+                Err(retry_error) => {
+                    persist_failed_provider_attempt(
+                        store,
+                        request,
+                        None,
+                        &fresh_attempt,
+                        &retry_error,
+                    );
+                    Err(retry_error.context(
+                        "the stale provider cursor was cleared and a fresh attempt also failed",
+                    ))
                 }
             }
+        }
+        // Brief network blips should not surface as "xAI send needs attention"
+        // when a single immediate retry succeeds.
+        Err(error) if is_transient_provider_error(&error.to_string()) => {
+            let mut retry_attempt = ProviderRunAttempt::default();
+            match run_once(binding_cursor.as_ref(), &mut retry_attempt) {
+                Ok(mut output) => {
+                    output.resumed = binding_cursor.is_some();
+                    output.retry_count = output.retry_count.saturating_add(1);
+                    Ok(output)
+                }
+                Err(retry_error) => {
+                    persist_failed_provider_attempt(
+                        store,
+                        request,
+                        binding.as_ref(),
+                        &retry_attempt,
+                        &retry_error,
+                    );
+                    Err(retry_error)
+                }
+            }
+        }
+        Err(error) => {
+            persist_failed_provider_attempt(
+                store,
+                request,
+                binding.as_ref(),
+                &attempt,
+                &error,
+            );
             Err(error)
         }
     }
+}
+
+fn persist_failed_provider_attempt(
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+    binding: Option<&ProviderSessionBinding>,
+    attempt: &ProviderRunAttempt,
+    error: &anyhow::Error,
+) {
+    let last_error = Some(gyro_core::security::redact_secrets(&error.to_string()));
+    match binding {
+        Some(binding) => {
+            let _ = store.upsert_provider_session_binding(
+                binding.session_id,
+                binding.provider_id.clone(),
+                binding.model_id.clone(),
+                binding.model_label.clone(),
+                binding.reasoning_effort.clone(),
+                binding.resume_cursor_json.clone(),
+                "failed",
+                last_error,
+            );
+        }
+        // A session's first turn has no binding to carry forward, so the cursor
+        // this run created is the only record that the provider conversation
+        // exists. Dropping it is what made a stopped first turn restart from
+        // nothing on every retry.
+        None => {
+            let cursor_json = attempt
+                .resume_cursor
+                .as_ref()
+                .and_then(|cursor| serde_json::to_value(cursor).ok());
+            if let (Some(cursor_json), Ok(session_id)) =
+                (cursor_json, parse_uuid(&request.session_id))
+            {
+                let _ = store.upsert_provider_session_binding(
+                    session_id,
+                    request.provider_id.clone(),
+                    request.model_id.clone(),
+                    request.model_label.clone(),
+                    request.reasoning_effort.clone(),
+                    cursor_json,
+                    "failed",
+                    last_error,
+                );
+            }
+        }
+    }
+}
+
+fn is_transient_provider_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    if is_provider_cancellation(error) || is_stale_resume_error(error) {
+        return false;
+    }
+    normalized.contains("connection reset")
+        || normalized.contains("connection refused")
+        || normalized.contains("broken pipe")
+        || normalized.contains("timed out")
+        || normalized.contains("timeout")
+        || normalized.contains("temporarily unavailable")
+        || normalized.contains("try again")
+        || normalized.contains("network is unreachable")
+        || normalized.contains("could not resolve host")
+        || normalized.contains("dns")
+        || normalized.contains("eof while")
+        || normalized.contains("unexpected eof")
 }
 
 fn run_provider_chat_once(
@@ -11510,13 +11786,10 @@ fn run_kimi_acp_chat(
     let resume_session_id = resume_cursor
         .filter(|cursor| cursor.kind == runtime.cursor_kind)
         .map(|cursor| cursor.session_id.clone());
-    // When a follow-up may have to open a fresh ACP session (Grok often cannot
-    // resume), pass Gyro's transcript so multi-turn still has context.
-    let conversation_history_text = if resume_session_id.is_some() {
-        acp_conversation_history_text(app, &request.session_id)
-    } else {
-        None
-    };
+    // Always load the local transcript. Grok often cannot resume; model handoffs
+    // also start a fresh agent session. Either way the local Gyro session is the
+    // source of truth and must travel with the prompt when resume is unavailable.
+    let conversation_history_text = acp_conversation_history_text(app, &request.session_id);
 
     let program_args = if request.provider_id == "xai" {
         build_grok_acp_program_args(
@@ -11588,6 +11861,7 @@ fn run_kimi_acp_chat(
                 kind: activity.kind.clone(),
                 label: activity.label.clone(),
                 detail: activity.detail.clone(),
+                note: None,
                 status: activity.status.clone(),
             };
             emit_provider_activity_event(app, request, &activity, None);
@@ -11689,6 +11963,23 @@ fn provider_resume_cursor_from_binding(
     serde_json::from_value::<ProviderResumeCursor>(binding.resume_cursor_json.clone()).ok()
 }
 
+/// A stored resume cursor is only usable when it was written for the same model
+/// the user is sending with now. After a local model handoff the binding is
+/// usually cleared already; this filter is the safety net for in-flight state.
+fn compatible_provider_session_binding(
+    binding: ProviderSessionBinding,
+    request: &ProviderChatRequest,
+) -> Option<ProviderSessionBinding> {
+    if binding.provider_id != request.provider_id {
+        return None;
+    }
+    match (&binding.model_id, &request.model_id) {
+        (Some(bound), Some(wanted)) if bound != wanted => None,
+        (Some(_), None) | (None, Some(_)) => None,
+        _ => Some(binding),
+    }
+}
+
 fn run_openai_codex_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -11718,7 +12009,14 @@ fn run_openai_codex_chat(
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let contextual_message = provider_context_message(request);
+    let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "codex-session");
+    let history = if can_resume {
+        None
+    } else {
+        local_conversation_history_for_request(request)
+    };
+    let contextual_message =
+        provider_context_message_with_history(request, history.as_deref());
     let prompt = openai_codex_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -11859,7 +12157,14 @@ fn run_openai_codex_app_server_chat(
     attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let contextual_message = provider_context_message(request);
+    let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "codex-session");
+    let history = if can_resume {
+        None
+    } else {
+        local_conversation_history_for_request(request)
+    };
+    let contextual_message =
+        provider_context_message_with_history(request, history.as_deref());
     let prompt = openai_codex_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -12471,6 +12776,7 @@ impl CodexAppServerCommentaryStream {
                 kind: "commentary".into(),
                 label: String::new(),
                 detail: None,
+                note: None,
                 status: "running".into(),
             });
             self.active = Some(CodexAppServerActiveCommentary {
@@ -12541,6 +12847,7 @@ fn codex_item_activity(
         kind: kind.into(),
         label,
         detail: None,
+        note: None,
         status,
     }
 }
@@ -12563,6 +12870,7 @@ fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -
             "Summarized earlier conversation to keep the thread within the model context window."
                 .into(),
         ),
+        note: None,
         status: status.into(),
     }
 }
@@ -13175,7 +13483,14 @@ fn run_anthropic_claude_chat(
     attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let contextual_message = provider_context_message(request);
+    let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "claude-session");
+    let history = if can_resume {
+        None
+    } else {
+        local_conversation_history_for_request(request)
+    };
+    let contextual_message =
+        provider_context_message_with_history(request, history.as_deref());
     let prompt = claude_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -14756,9 +15071,10 @@ fn provider_activity_event_entry(
     // `detail` carries different material per kind — a shell command, a path, a
     // tool id — so a reader has to know the kind to know what it is holding.
     // Naming the field as well makes the contract explicit, and lets an adapter
-    // that has both a path and a human note send them separately later. The
-    // renderer prefers these and falls back to `detail`, so older persisted
-    // events keep rendering unchanged.
+    // that has both a path and a human note send them separately: `note` is the
+    // second slot that carries the specifics of a named tool. The renderer
+    // prefers these and falls back to `detail`, so older persisted events keep
+    // rendering unchanged.
     let detail = activity.detail.as_deref();
     let named_detail = |wanted: &str| {
         if activity.kind == wanted {
@@ -14773,6 +15089,8 @@ fn provider_activity_event_entry(
         "activityKind": activity.kind,
         "label": activity.label,
         "detail": activity.detail,
+        // Specifics behind a machine tool id (Bash command, skill name, path).
+        "note": activity.note,
         "status": activity.status,
         "command": named_detail("command"),
         "path": named_detail("file"),
@@ -15577,10 +15895,13 @@ fn handle_provider_stdout_line(
         stream_state.note_intervening_work();
         return;
     }
-    if let Some(activity) = extract_provider_activity(&value) {
-        if let Some(activity) = stream_state.push_activity(activity) {
-            let activity_sequence = stream_state.activity_sequence(&activity);
-            emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
+    let activities = extract_provider_activities(&value);
+    if !activities.is_empty() {
+        for activity in activities {
+            if let Some(activity) = stream_state.push_activity(activity) {
+                let activity_sequence = stream_state.activity_sequence(&activity);
+                emit_provider_activity_event(app, request, &activity, Some(activity_sequence));
+            }
         }
         stream_state.note_intervening_work();
     }
@@ -15979,8 +16300,21 @@ fn extract_provider_commentary_activity(value: &serde_json::Value) -> Option<Pro
         kind: "commentary".into(),
         label: sanitize_provider_text_delta(&text),
         detail: None,
+        note: None,
         status: "done".into(),
     })
+}
+
+/// Cap for the muted side of a rail row — long shell lines stay scannable.
+const PROVIDER_ACTIVITY_NOTE_CHARS: usize = 240;
+
+/// Every work beat this stream frame carries. Claude can pack several
+/// `tool_use` blocks into one assistant message; Codex still sends one item.
+fn extract_provider_activities(value: &serde_json::Value) -> Vec<ProviderActivity> {
+    if let Some(activity) = extract_provider_activity(value) {
+        return vec![activity];
+    }
+    extract_provider_tool_uses_from_message(value)
 }
 
 fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivity> {
@@ -16009,7 +16343,120 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
                 .map(|index| format!("{item_type}-{index}"))
         })
         .unwrap_or_else(|| format!("{item_type}-{}", Uuid::new_v4()));
-    let status = if event_type.contains("started")
+    let status = provider_activity_status(event_type, nested_type, item);
+
+    match item_type {
+        "command_execution" | "command" => {
+            let command = json_string_or_joined(item.get("command"))?;
+            Some(ProviderActivity {
+                id,
+                kind: "command".into(),
+                label: command_activity_label(&command),
+                detail: Some(command),
+                note: None,
+                status: status.into(),
+            })
+        }
+        "file_change" | "file_edit" => {
+            let path = provider_activity_path(item).unwrap_or_else(|| "workspace files".into());
+            Some(ProviderActivity {
+                id,
+                kind: "file".into(),
+                label: format!("Updated {path}"),
+                detail: Some(path),
+                note: None,
+                status: status.into(),
+            })
+        }
+        "mcp_tool_call" | "tool_use" | "tool_call" => {
+            let name = item
+                .get("name")
+                .or_else(|| item.get("tool"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool");
+            let input = item.get("input").or_else(|| item.get("arguments"));
+            Some(tool_use_activity(id, name, input, status))
+        }
+        "web_search" | "web_search_call" => {
+            let query = item
+                .get("query")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            Some(ProviderActivity {
+                id,
+                kind: "search".into(),
+                label: "Searched the web".into(),
+                detail: query,
+                note: None,
+                status: status.into(),
+            })
+        }
+        "context_compaction" | "contextCompaction" | "compaction" => Some(ProviderActivity {
+            id,
+            kind: "context".into(),
+            label: if status == "running" {
+                "Compacting context".into()
+            } else {
+                "Compacted context".into()
+            },
+            detail: Some(
+                "Summarized earlier conversation to keep the thread within the model context window."
+                    .into(),
+            ),
+            note: None,
+            status: status.into(),
+        }),
+        _ => None,
+    }
+}
+
+/// Claude Code (and Anthropic-shaped streams) finish a tool with the full
+/// `input` on the assistant message. `content_block_start` often only has the
+/// name, so the completed message is what fills in the note / reclassifies
+/// Bash → command.
+fn extract_provider_tool_uses_from_message(value: &serde_json::Value) -> Vec<ProviderActivity> {
+    let message = value
+        .get("message")
+        .or_else(|| value.pointer("/event/message"))
+        .unwrap_or(value);
+    let content = message
+        .get("content")
+        .and_then(|value| value.as_array())
+        .or_else(|| value.get("content").and_then(|value| value.as_array()));
+    let Some(content) = content else {
+        return Vec::new();
+    };
+    let event_type = value
+        .get("type")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
+    content
+        .iter()
+        .filter_map(|block| {
+            let block_type = block.get("type").and_then(|value| value.as_str())?;
+            if block_type != "tool_use" && block_type != "tool_call" && block_type != "mcp_tool_call"
+            {
+                return None;
+            }
+            let name = block
+                .get("name")
+                .or_else(|| block.get("tool"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool");
+            let id = block
+                .get("id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{block_type}-{}", Uuid::new_v4()));
+            let input = block.get("input").or_else(|| block.get("arguments"));
+            let status = provider_activity_status(event_type, event_type, block);
+            Some(tool_use_activity(id, name, input, status))
+        })
+        .collect()
+}
+
+fn provider_activity_status(event_type: &str, nested_type: &str, item: &serde_json::Value) -> &'static str {
+    if event_type.contains("started")
         || nested_type.contains("start")
         || item.get("status").and_then(|value| value.as_str()) == Some("in_progress")
     {
@@ -16021,58 +16468,159 @@ fn extract_provider_activity(value: &serde_json::Value) -> Option<ProviderActivi
         "failed"
     } else {
         "done"
-    };
+    }
+}
 
-    let (kind, label, detail) = match item_type {
-        "command_execution" | "command" => {
-            let command = json_string_or_joined(item.get("command"))?;
-            (
-                "command".to_string(),
-                command_activity_label(&command),
-                Some(command),
-            )
-        }
-        "file_change" | "file_edit" => {
-            let path = provider_activity_path(item).unwrap_or_else(|| "workspace files".into());
-            ("file".to_string(), format!("Updated {path}"), Some(path))
-        }
-        "mcp_tool_call" | "tool_use" | "tool_call" => {
-            let name = item
-                .get("name")
-                .or_else(|| item.get("tool"))
-                .and_then(|value| value.as_str())
-                .unwrap_or("tool");
-            (
-                "tool".to_string(),
-                format!("Used {}", humanize_activity_name(name)),
-                Some(name.to_string()),
-            )
-        }
-        "web_search" | "web_search_call" => {
-            ("search".to_string(), "Searched the web".to_string(), None)
-        }
-        "context_compaction" | "contextCompaction" | "compaction" => (
-            "context".to_string(),
-            if status == "running" {
-                "Compacting context".to_string()
-            } else {
-                "Compacted context".to_string()
-            },
-            Some(
-                "Summarized earlier conversation to keep the thread within the model context window."
-                    .to_string(),
-            ),
-        ),
-        _ => return None,
-    };
+/// Map a provider tool call onto the rail kind that already has wording, and
+/// keep a free-form `note` when the primary field is only a machine id.
+fn tool_use_activity(
+    id: String,
+    name: &str,
+    input: Option<&serde_json::Value>,
+    status: &str,
+) -> ProviderActivity {
+    let input = input.unwrap_or(&serde_json::Value::Null);
+    let note = provider_tool_activity_note(name, input);
 
-    Some(ProviderActivity {
+    // Well-known Claude Code tools carry enough structure to reclassify so the
+    // rail can say "Ran command · pnpm test" instead of "Bash" three times.
+    match name {
+        "Bash" | "KillShell" => {
+            if let Some(command) = json_object_string(input, &["command"]) {
+                let description = json_object_string(input, &["description"])
+                    .filter(|value| value != &command);
+                return ProviderActivity {
+                    id,
+                    kind: "command".into(),
+                    label: command_activity_label(&command),
+                    detail: Some(command),
+                    note: description,
+                    status: status.into(),
+                };
+            }
+        }
+        "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
+            if let Some(path) = json_object_string(
+                input,
+                &["file_path", "filePath", "path", "notebook_path", "notebookPath"],
+            ) {
+                let label = if name == "Read" {
+                    let file_name = Path::new(&path)
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or(&path);
+                    format!("Read {file_name}")
+                } else {
+                    format!("Updated {path}")
+                };
+                return ProviderActivity {
+                    id,
+                    kind: "file".into(),
+                    label,
+                    detail: Some(path),
+                    note: None,
+                    status: status.into(),
+                };
+            }
+        }
+        "Grep" | "Glob" => {
+            if let Some(query) =
+                json_object_string(input, &["pattern", "glob", "glob_pattern", "query"])
+            {
+                return ProviderActivity {
+                    id,
+                    kind: "search".into(),
+                    label: "Searched project".into(),
+                    detail: Some(query),
+                    note: json_object_string(input, &["path", "file_path", "filePath"]),
+                    status: status.into(),
+                };
+            }
+        }
+        "WebSearch" | "WebFetch" => {
+            if let Some(query) = json_object_string(input, &["query", "url"]) {
+                return ProviderActivity {
+                    id,
+                    kind: "search".into(),
+                    label: "Searched the web".into(),
+                    detail: Some(query),
+                    note: None,
+                    status: status.into(),
+                };
+            }
+        }
+        _ => {}
+    }
+
+    ProviderActivity {
         id,
-        kind,
-        label,
-        detail,
+        kind: "tool".into(),
+        label: format!("Used {}", humanize_activity_name(name)),
+        detail: Some(name.to_string()),
+        note,
         status: status.into(),
-    })
+    }
+}
+
+/// The muted half of a tool row: command, path, skill name, query — whatever
+/// the provider put in `input` that is not the tool's own identity.
+fn provider_tool_activity_note(name: &str, input: &serde_json::Value) -> Option<String> {
+    if !input.is_object() {
+        return None;
+    }
+    let preferred: &[&str] = match name {
+        "Skill" | "skill" => &["skill", "skill_name", "skillName", "name"],
+        "Bash" | "KillShell" => &["command", "description"],
+        "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
+            &["file_path", "filePath", "path", "notebook_path", "notebookPath"]
+        }
+        "Grep" | "Glob" => &["pattern", "glob", "glob_pattern", "query"],
+        "WebSearch" | "WebFetch" => &["query", "url"],
+        // MCP / generic tools often put the target in one of these.
+        _ => &[
+            "command",
+            "query",
+            "path",
+            "file_path",
+            "filePath",
+            "pattern",
+            "url",
+            "description",
+            "skill",
+            "skill_name",
+            "skillName",
+            "name",
+            "title",
+            "prompt",
+            "message",
+        ],
+    };
+    if let Some(value) = json_object_string(input, preferred) {
+        // Don't echo the tool's own machine name as the note.
+        if value.eq_ignore_ascii_case(name) {
+            return None;
+        }
+        return Some(truncate_chars(&value, PROVIDER_ACTIVITY_NOTE_CHARS));
+    }
+    None
+}
+
+fn json_object_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    let object = value.as_object()?;
+    for key in keys {
+        if let Some(found) = object.get(*key).and_then(|entry| match entry {
+            serde_json::Value::String(text) => {
+                let trimmed = text.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }
+            serde_json::Value::Number(number) => Some(number.to_string()),
+            serde_json::Value::Bool(flag) => Some(flag.to_string()),
+            _ => None,
+        }) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn json_string_or_joined(value: Option<&serde_json::Value>) -> Option<String> {
@@ -16183,6 +16731,7 @@ fn emit_provider_chat_event(
         activity_kind: None,
         activity_label: None,
         activity_detail: None,
+        activity_note: None,
         activity_status: None,
         recovery_kind: error
             .as_deref()
@@ -16214,6 +16763,7 @@ fn emit_provider_activity_event(
         activity_kind: Some(activity.kind.clone()),
         activity_label: Some(activity.label.clone()),
         activity_detail: activity.detail.clone(),
+        activity_note: activity.note.clone(),
         activity_status: Some(activity.status.clone()),
         message: None,
         error: None,
@@ -16427,8 +16977,13 @@ fn build_grok_acp_program_args(
     args
 }
 
-/// Recent user/assistant turns for ACP agents that cannot reopen a session.
+/// Recent user/assistant turns for agents that cannot reopen a provider session.
 fn acp_conversation_history_text(_app: &tauri::AppHandle, session_id: &str) -> Option<String> {
+    acp_conversation_history_text_for_session(session_id)
+}
+
+/// Load the local Gyro transcript for any model handoff or failed resume.
+fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
     let session_uuid = parse_uuid(session_id).ok()?;
     let store = open_store().ok()?;
     let events = store.read_recent_events(session_uuid, 40).ok()?;
@@ -19224,6 +19779,7 @@ pub fn run() {
             prepare_chat_attachment,
             prepare_workspace,
             restart_app,
+            updater_platform_key,
             menu_bar::hide_menu_bar_popover,
             recover_automation_leases,
             rename_session,
@@ -21435,6 +21991,7 @@ while True:
                 ])
                 .to_string(),
             ),
+            note: None,
             status: "done".into(),
         })
         .unwrap();
@@ -21601,6 +22158,101 @@ while True:
         assert_eq!(retained, vec![command]);
     }
 
+    /// Claude Code tools used to land as three identical "Bash" rows. The
+    /// completed assistant message carries the command; reclassify it so the
+    /// rail can show "Ran command · pnpm test", and keep a free-form note when
+    /// the primary slot is only a machine tool id (Skill, MCP, …).
+    #[test]
+    fn tool_use_activities_carry_specifics_not_just_the_tool_name() {
+        let bash = extract_provider_activity(&serde_json::json!({
+            "type": "content_block_start",
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_bash",
+                "name": "Bash",
+                "input": { "command": "pnpm test", "description": "Run the suite" }
+            }
+        }))
+        .expect("bash tool use");
+        assert_eq!(bash.kind, "command");
+        assert_eq!(bash.detail.as_deref(), Some("pnpm test"));
+        assert_eq!(bash.note.as_deref(), Some("Run the suite"));
+        assert_eq!(bash.label, "Ran command");
+
+        let skill = extract_provider_activity(&serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "toolu_skill",
+                "type": "tool_use",
+                "name": "Skill",
+                "input": { "skill": "simplify" }
+            }
+        }))
+        .expect("skill tool use");
+        assert_eq!(skill.kind, "tool");
+        assert_eq!(skill.detail.as_deref(), Some("Skill"));
+        assert_eq!(skill.note.as_deref(), Some("simplify"));
+
+        let read = extract_provider_activity(&serde_json::json!({
+            "event": {
+                "type": "content_block_start",
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_read",
+                    "name": "Read",
+                    "input": { "file_path": "packages/ui/src/chat-run.ts" }
+                }
+            },
+            "type": "stream_event"
+        }))
+        .expect("read tool use");
+        assert_eq!(read.kind, "file");
+        assert_eq!(
+            read.detail.as_deref(),
+            Some("packages/ui/src/chat-run.ts")
+        );
+        assert!(read.label.contains("chat-run.ts"));
+
+        // A finished assistant message may carry several tool_use blocks; each
+        // becomes its own rail beat with the input filled in.
+        let packed = extract_provider_activities(&serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    { "type": "text", "text": "On it." },
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Bash",
+                        "input": { "command": "rg note packages/ui" }
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_2",
+                        "name": "Skill",
+                        "input": { "skill": "simplify" }
+                    }
+                ]
+            }
+        }));
+        assert_eq!(packed.len(), 2);
+        assert_eq!(packed[0].kind, "command");
+        assert_eq!(packed[0].detail.as_deref(), Some("rg note packages/ui"));
+        assert_eq!(packed[1].kind, "tool");
+        assert_eq!(packed[1].note.as_deref(), Some("simplify"));
+
+        // Persisted session events keep the note so a reload still shows it.
+        let (_label, payload, _) = provider_activity_event_entry(
+            &anthropic_provider_request(),
+            Uuid::nil(),
+            0,
+            &skill,
+        );
+        assert_eq!(payload["note"], "simplify");
+        assert_eq!(payload["detail"], "Skill");
+        assert_eq!(payload["tool"], "Skill");
+    }
+
     #[test]
     fn codex_app_server_commentary_streams_cumulative_snapshots_with_missing_ids() {
         let mut stream = CodexAppServerCommentaryStream::new();
@@ -21672,6 +22324,7 @@ while True:
             kind: "command".into(),
             label: "Searched project".into(),
             detail: None,
+            note: None,
             status: "done".into(),
         });
         complete_commentary(
@@ -21685,6 +22338,7 @@ while True:
             kind: "command".into(),
             label: "Ran tests".into(),
             detail: None,
+            note: None,
             status: "done".into(),
         });
         complete_commentary(
@@ -21754,6 +22408,7 @@ while True:
                 kind: "command".into(),
                 label: "Ran command".into(),
                 detail: None,
+                note: None,
                 status: "done".into(),
             });
         }
@@ -21767,6 +22422,7 @@ while True:
             kind: "commentary".into(),
             label: label.into(),
             detail: None,
+            note: None,
             status: "done".into(),
         };
         let mut state = StreamingCommandState::new();
@@ -21777,6 +22433,7 @@ while True:
             kind: "command".into(),
             label: "Ran command".into(),
             detail: None,
+            note: None,
             status: "done".into(),
         });
         let continuation = state
@@ -22306,6 +22963,63 @@ while True:
         );
     }
 
+    /// The account endpoint is the only source that measures a Claude plan
+    /// window: the chat stream names the window and its reset but never how
+    /// full it is, which is what left both bars showing an em dash.
+    #[test]
+    fn anthropic_account_usage_maps_measured_plan_windows() {
+        let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+            "five_hour": {
+                "utilization": 64.0,
+                "resets_at": "2026-08-04T13:30:00.259542+00:00"
+            },
+            "seven_day": {
+                "utilization": 91.0,
+                "resets_at": "2026-08-09T16:59:59.259573+00:00"
+            },
+            "seven_day_opus": serde_json::Value::Null,
+            "seven_day_sonnet": serde_json::Value::Null
+        }));
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].id, "five-hour");
+        assert_eq!(windows[0].label, "5-hour limit");
+        assert_eq!(windows[0].used_percent, Some(64));
+        assert_eq!(windows[0].status, "ok");
+        assert_eq!(
+            windows[0].resets_at.as_deref(),
+            Some("2026-08-04T13:30:00.259542+00:00")
+        );
+        assert_eq!(windows[1].id, "weekly");
+        assert_eq!(windows[1].label, "Weekly limit");
+        assert_eq!(windows[1].used_percent, Some(91));
+        assert_eq!(windows[1].status, "warning");
+    }
+
+    /// A plan that meters an Opus-only week says so, and one that meters
+    /// nothing at all leaves the composer on the streamed windows rather than
+    /// on bars sitting at zero.
+    #[test]
+    fn anthropic_account_usage_only_reports_windows_the_plan_meters() {
+        let scoped = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+            "five_hour": { "utilization": 100.0 },
+            "seven_day_opus": { "utilization": 12.0 }
+        }));
+        assert_eq!(
+            scoped
+                .iter()
+                .map(|window| (window.id.as_str(), window.status.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("five-hour", "exhausted"), ("weekly-opus", "ok")]
+        );
+        assert!(scoped[0].resets_at.is_none());
+
+        assert!(provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+            "five_hour": serde_json::Value::Null,
+            "extra_usage": { "is_enabled": false }
+        }))
+        .is_empty());
+    }
+
     #[test]
     fn claude_effort_arg_drops_levels_claude_code_rejects() {
         assert_eq!(
@@ -22461,7 +23175,7 @@ while True:
     }
 
     #[test]
-    fn stale_resume_binding_is_cleared_without_replaying_the_request() {
+    fn stale_resume_binding_is_cleared_and_retried_without_cursor() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
         let session = store
@@ -22503,7 +23217,7 @@ while True:
             workspace_context: None,
         };
         let mut attempts = Vec::new();
-        let error = run_provider_chat_with_retry_using(
+        let output = run_provider_chat_with_retry_using(
             &store,
             &request,
             Some(binding),
@@ -22525,16 +23239,66 @@ while True:
                 })
             },
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert_eq!(attempts, vec![Some("stale-provider-session".into())]);
-        assert!(error
-            .to_string()
-            .contains("retry explicitly to avoid replaying tools"));
+        // First attempt used the dead cursor; the automatic recovery attempt
+        // starts clean so local history can carry the thread.
+        assert_eq!(
+            attempts,
+            vec![Some("stale-provider-session".into()), None]
+        );
+        assert_eq!(output.response, "Recovered");
+        assert!(!output.resumed);
+        assert_eq!(output.retry_count, 1);
         assert!(store
             .get_provider_session_binding(session.id, "openai")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn model_handoff_skips_incompatible_provider_binding() {
+        let binding = ProviderSessionBinding {
+            session_id: Uuid::new_v4(),
+            provider_id: "xai".into(),
+            model_id: Some("grok-4".into()),
+            model_label: Some("Grok 4".into()),
+            reasoning_effort: None,
+            resume_cursor_json: serde_json::json!({
+                "kind": "xai-acp-session",
+                "sessionId": "old-model-session",
+            }),
+            status: "ready".into(),
+            last_error: None,
+            updated_at: chrono::Utc::now(),
+        };
+        let request = ProviderChatRequest {
+            session_id: binding.session_id.to_string(),
+            message: "continue with the new model".into(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            provider_id: "xai".into(),
+            provider_label: Some("xAI".into()),
+            model_id: Some("grok-4.5".into()),
+            model_label: Some("Grok 4.5".into()),
+            reasoning_effort: None,
+            require_command_approval: true,
+            require_file_edit_approval: true,
+            full_access: false,
+            suggest_title: false,
+            workspace_path: None,
+            mode: ChatMode::Normal,
+            goal: None,
+            plan: None,
+            attachments: Vec::new(),
+            workspace_context: None,
+        };
+        assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
+        let same_model = ProviderChatRequest {
+            model_id: Some("grok-4".into()),
+            model_label: Some("Grok 4".into()),
+            ..request
+        };
+        assert!(compatible_provider_session_binding(binding, &same_model).is_some());
     }
 
     /// A session's first turn is the case `provider_failure_recovery` used to

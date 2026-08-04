@@ -60,19 +60,34 @@ const reported = estimateComposerContextUsage(events, "z".repeat(400), {
 });
 assert.equal(reported.source, "reported");
 assert.equal(reported.usedLabel, "12K");
-assert.equal(reported.remainingLabel, "88K");
-assert.equal(reported.windowLabel, "100K");
-assert.equal(reported.percent, 12);
+// The window is the selected model's, not the one some earlier turn recorded.
+assert.equal(reported.windowLabel, "1.05M");
+assert.equal(reported.percentLabel, "1%");
 assert.match(reported.detail, /newer thread content and this draft/);
 
+// A model with no window of its own in the catalog still measures against the
+// window the provider reported for it.
+const catalogless = estimateComposerContextUsage(events, "", {
+  providerId: "openai",
+  modelId: "gpt-5.6-sol",
+  modelLabel: "GPT-5.6 Sol",
+});
+assert.equal(catalogless.windowLabel, "100K");
+assert.equal(catalogless.percent, 12);
+
+// Switching model does not empty the thread. The last measured occupancy is
+// what the next send carries into whichever model reads it, so it stands rather
+// than dropping the meter back to an estimate that reads as near-empty.
 const switchedModel = estimateComposerContextUsage(events, "", {
   providerId: "openai",
   modelId: "gpt-5.4-mini",
   modelLabel: "GPT-5.4 mini",
   contextWindowTokens: 400_000,
 });
-assert.equal(switchedModel.source, "estimated");
+assert.equal(switchedModel.source, "reported");
+assert.equal(switchedModel.usedLabel, "12K");
 assert.equal(switchedModel.windowLabel, "400K");
+assert.match(switchedModel.detail, /ran on gpt-5\.6-sol/);
 
 const clamped = estimateComposerContextUsage(
   [
