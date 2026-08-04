@@ -109,16 +109,25 @@ function formatCompactTokenCount(tokens: number) {
   return String(tokens);
 }
 
+/**
+ * The window the next send will actually have.
+ *
+ * Gyro's catalog answers for the model that is selected *now*, so it leads. A
+ * reported window is a record of what some earlier turn ran with: a chat that
+ * spoke to Claude Code before it served Opus 5 its full window carries a 200K
+ * reading forever, and the meter would keep measuring a 1M model against it.
+ * The reported figure still answers for models the catalog does not list.
+ */
 function resolveContextWindow(
   reportedContextWindow: number | undefined,
   model: ContextModelSelection,
 ) {
   return (
-    (reportedContextWindow && reportedContextWindow > 0
-      ? reportedContextWindow
-      : undefined) ??
     (model.contextWindowTokens && model.contextWindowTokens > 0
       ? model.contextWindowTokens
+      : undefined) ??
+    (reportedContextWindow && reportedContextWindow > 0
+      ? reportedContextWindow
       : undefined) ??
     PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"] ??
     128_000
@@ -147,6 +156,7 @@ export function estimateComposerContextUsage(
 ): ComposerContextUsage {
   let reportedEventIndex = -1;
   let reportedUsage: Record<string, unknown> | undefined;
+  let reportedModelId: string | undefined;
   // The window and the token counts come from different places. Every provider
   // reports the window Gyro resolved for its model, but only some report what
   // the turn spent, so a run that carries a window and no counts still has to
@@ -160,14 +170,16 @@ export function estimateComposerContextUsage(
     const usage = recordFromUnknown(payload?.contextUsage);
     if (!usage) continue;
 
-    const eventProviderId = stringValue(payload, "providerId");
     const eventModelId = stringValue(payload, "modelId");
-    if (model.providerId && eventProviderId !== model.providerId) continue;
-    if (model.modelId && eventModelId !== model.modelId) continue;
-
-    if (reportedContextWindow === undefined) {
+    const matchesModel =
+      (!model.providerId ||
+        stringValue(payload, "providerId") === model.providerId) &&
+      (!model.modelId || eventModelId === model.modelId);
+    // The window is only meaningful for the model that reported it.
+    if (matchesModel && reportedContextWindow === undefined) {
       reportedContextWindow = finiteNumber(usage, "modelContextWindow");
     }
+    if (reportedUsage) continue;
     if (finiteNumber(usage, "inputTokens") === undefined) continue;
     // A run that used tools bills the re-sent conversation once per request, so
     // some CLIs report a turn total several times the window. Nothing can
@@ -180,9 +192,15 @@ export function estimateComposerContextUsage(
       continue;
     }
 
+    // How full the thread is belongs to the conversation, not to the model that
+    // last read it: switching model or provider mid-chat does not empty it. The
+    // newest reading therefore stands even when another model produced it,
+    // rather than dropping the meter back to an estimate that counts only the
+    // text Gyro stored and reads as near-empty.
     reportedEventIndex = index;
     reportedUsage = usage;
-    break;
+    reportedModelId = eventModelId;
+    if (matchesModel) break;
   }
 
   const reportedInputTokens = finiteNumber(reportedUsage, "inputTokens");
@@ -224,10 +242,18 @@ export function estimateComposerContextUsage(
   const windowLabel = formatCompactTokenCount(contextWindowTokens);
   const isReported = reportedInputTokens !== undefined;
   const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
+  const isOtherModelReading = Boolean(
+    isReported &&
+      reportedModelId &&
+      model.modelId &&
+      reportedModelId !== model.modelId,
+  );
   const detail = isReported
-    ? liveEstimatedTokens > 0
-      ? "Provider-reported usage plus an estimate for newer thread content and this draft."
-      : "Reported by the provider for the latest completed turn on this model."
+    ? isOtherModelReading
+      ? `Measured on the last turn, which ran on ${reportedModelId}; the thread carries the same content into this model.`
+      : liveEstimatedTokens > 0
+        ? "Provider-reported usage plus an estimate for newer thread content and this draft."
+        : "Reported by the provider for the latest completed turn on this model."
     : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
 
   return {

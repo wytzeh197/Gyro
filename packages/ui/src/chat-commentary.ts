@@ -17,6 +17,16 @@ const GLUED_BLOCK_BOUNDARY =
 const PREAMBLE_BLOCK =
   /^(?:I['’]ll|I will|I['’]m going to|I need to|Let me|Looking|Checking|Searching|Reading|First[,]?|Next[,]?|Now[,]?|Got it|Sure|Okay|OK)\b/i;
 
+/**
+ * The assistant announcing its own next move ("Let me find where that's
+ * controlled.", "I'll pull up the sidebar component."). Narration closes this
+ * way and an answer does not, so it reads as a preamble however the block
+ * opened — except for the sign-off "Let me know…", which invites a reply
+ * rather than promising work.
+ */
+const OWN_NEXT_STEP = /^(?:I['’]ll|I will|I['’]m going to|I need to|Let me)\b/i;
+const OWN_NEXT_STEP_EXCEPTION = /^Let me know\b/i;
+
 const ONLINE_GREETING = /\bis online and working\b/i;
 
 /** One-line readiness openers models restate every turn — drop entirely. */
@@ -108,10 +118,39 @@ export function isTransientStatusGreeting(value: string): boolean {
   return STATUS_GREETING.test(trimmed) || ONLINE_GREETING.test(trimmed);
 }
 
+/**
+ * The block's closing sentence, used to ask what it leaves the reader with.
+ */
+function lastSentence(value: string): string | undefined {
+  const sentences = value
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  return sentences.at(-1);
+}
+
+/**
+ * True when a block signs off by promising the assistant's next step. This is
+ * the one narration shape the opener test misses: an observation first, the
+ * plan last ("Yes — I see it. … Let me find where that's controlled."), which
+ * is long and multi-sentence and so fails every other preamble rule.
+ */
+function announcesOwnNextStep(value: string): boolean {
+  if (value.length > 400) {
+    return false;
+  }
+  const closing = lastSentence(value);
+  return Boolean(
+    closing &&
+      OWN_NEXT_STEP.test(closing) &&
+      !OWN_NEXT_STEP_EXCEPTION.test(closing),
+  );
+}
+
 /** True when a short block reads as mid-run narration rather than the answer. */
 export function isAssistantPreambleBlock(value: string): boolean {
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 220) {
+  if (!trimmed) {
     return false;
   }
   if (isOrphanAssistantFragment(trimmed)) {
@@ -119,6 +158,17 @@ export function isAssistantPreambleBlock(value: string): boolean {
   }
   if (isTransientStatusGreeting(trimmed)) {
     return true;
+  }
+  // "Let me know…" hands the turn back; it closes an answer rather than
+  // introducing work, so it outranks the "Let me" opener below.
+  if (OWN_NEXT_STEP_EXCEPTION.test(trimmed)) {
+    return false;
+  }
+  if (announcesOwnNextStep(trimmed)) {
+    return true;
+  }
+  if (trimmed.length > 220) {
+    return false;
   }
   // Multi-sentence blocks are usually the answer, even if they open with "I'll".
   if ((trimmed.match(/[.!?](?:\s|$)/g) ?? []).length >= 2 && trimmed.length > 100) {

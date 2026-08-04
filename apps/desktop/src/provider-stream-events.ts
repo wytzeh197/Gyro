@@ -563,6 +563,7 @@ export function applyProviderChatStreamActivity(
         activityKind: streamEvent.activityKind ?? "tool",
         label: nextLabel,
         detail: streamEvent.activityDetail,
+        note: streamEvent.activityNote,
         status: streamEvent.activityStatus ?? "done",
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,

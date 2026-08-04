@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, resolve } from "node:path";
 
 function argument(name) {
@@ -44,6 +50,8 @@ function platform(archivePattern, label) {
   }
   return {
     signature,
+    // Extra key the updater ignores; Gyro shows it before the download starts.
+    size: statSync(resolve(assetsDirectory, archive)).size,
     url: `https://github.com/wytzeh197/Gyro/releases/download/${tag}/${archive}`,
   };
 }

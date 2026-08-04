@@ -450,11 +450,26 @@ export function chatGridReducer(
       next = { ...current, focusedPaneId: action.paneId };
     }
   } else if (action.type === "close-pane") {
+    // Compact so a single remaining pane sits in the first cell. Leaving a
+    // hole after unsplit made some layouts look empty even though a chat was
+    // still open.
+    const remaining = current.slots.filter(
+      (pane): pane is ChatPaneRef =>
+        Boolean(pane) && pane?.paneId !== action.paneId,
+    );
+    const slots: Array<ChatPaneRef | null> = remaining.slice(
+      0,
+      CHAT_GRID_MAX_SLOTS,
+    );
+    while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
     next = chatLayoutWithValidFocus({
       ...current,
-      slots: current.slots.map((pane) =>
-        pane?.paneId === action.paneId ? null : pane,
-      ),
+      slots,
+      // A lone pane is no longer a split — clear the two-pane direction so a
+      // later drop can establish a fresh Left/Right arrangement.
+      splitDirection: remaining.length === 2 ? current.splitDirection : undefined,
+      arrangement:
+        remaining.length <= 1 ? undefined : current.arrangement,
     });
   } else if (action.type === "move-pane") {
     const fromIndex = current.slots.findIndex(
