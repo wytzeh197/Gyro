@@ -137,7 +137,8 @@ export function MenuBarPopover() {
   const [snapshot, setSnapshot] = useState<MenuBarSnapshot>(EMPTY_SNAPSHOT);
   const [now, setNow] = useState(Date.now());
   const [stoppingIds, setStoppingIds] = useState<string[]>([]);
-  const visibleJobs = snapshot.jobs.slice(0, 3);
+  // Show every concurrent provider slot (cap 4) plus automations; scroll if more.
+  const visibleJobs = snapshot.jobs.slice(0, 8);
   const overflow = Math.max(0, snapshot.jobs.length - visibleJobs.length);
   const header = useMemo(() => headerCopy(snapshot), [snapshot]);
   const recentOutcome = snapshot.recentOutcome;

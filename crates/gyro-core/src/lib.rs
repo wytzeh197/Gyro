@@ -125,8 +125,8 @@ pub use provider_stream::{
 };
 pub use sessions::{
     CreateSessionContext, MutationProposal, MutationProposalOperation, MutationProposalStatus,
-    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode,
+    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionEventPage,
+    SessionOrigin, SessionStore, SessionWorkspaceMode,
 };
 pub use sqlite::{
     checkpoint_wal_passive, configure_connection, is_busy_error, open_private_database,

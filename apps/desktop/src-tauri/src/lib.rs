@@ -2953,24 +2953,64 @@ fn bounded_automation_summary(value: &str) -> String {
     truncate_chars(value.trim(), 600)
 }
 
-#[tauri::command]
-async fn read_session_events(session_id: String) -> Result<Vec<SessionEvent>, String> {
-    tauri::async_runtime::spawn_blocking(move || read_session_events_blocking(session_id))
-        .await
-        .map_err(|error| format!("session event read worker failed: {error}"))?
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionEventsReadResult {
+    events: Vec<SessionEvent>,
+    /// True when older events exist before the returned window.
+    has_more_before: bool,
 }
 
-fn read_session_events_blocking(session_id: String) -> Result<Vec<SessionEvent>, String> {
+#[tauri::command]
+async fn read_session_events(
+    session_id: String,
+    before_event_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<SessionEventsReadResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        read_session_events_blocking(session_id, before_event_id, limit)
+    })
+    .await
+    .map_err(|error| format!("session event read worker failed: {error}"))?
+}
+
+fn read_session_events_blocking(
+    session_id: String,
+    before_event_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<SessionEventsReadResult, String> {
     let store = open_store()?;
     let session_id = parse_uuid(&session_id)?;
-    read_session_events_from_store(&store, session_id).map_err(to_string)
+    let page_limit = limit
+        .unwrap_or(MAX_DESKTOP_SESSION_EVENTS_READ)
+        .clamp(1, MAX_DESKTOP_SESSION_EVENTS_READ);
+    if let Some(before_event_id) = before_event_id {
+        let before = parse_uuid(&before_event_id)?;
+        let page = store
+            .read_events_before(session_id, before, page_limit)
+            .map_err(to_string)?;
+        return Ok(SessionEventsReadResult {
+            events: page.events,
+            has_more_before: page.has_more_before,
+        });
+    }
+    read_session_events_from_store(&store, session_id, page_limit).map_err(to_string)
 }
 
 fn read_session_events_from_store(
     store: &SessionStore,
     session_id: Uuid,
-) -> anyhow::Result<Vec<SessionEvent>> {
-    let mut events = store.read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)?;
+    max_recent_events: usize,
+) -> anyhow::Result<SessionEventsReadResult> {
+    let mut events = store.read_recent_events(session_id, max_recent_events)?;
+    // The tail path re-inserts session-created, so a full page of "content"
+    // events still means older history may exist even when the returned length
+    // equals the limit after that insert.
+    let content_events = events
+        .iter()
+        .filter(|event| event.kind != SessionEventKind::SessionCreated)
+        .count();
+    let has_more_before = content_events >= max_recent_events;
     let represented_proposals = events
         .iter()
         .filter_map(event_mutation_proposal_id)
@@ -2993,7 +3033,10 @@ fn read_session_events_from_store(
         let _ = store.mark_mutation_proposal_surfaced(proposal.id);
         events.push(recovered);
     }
-    Ok(events)
+    Ok(SessionEventsReadResult {
+        events,
+        has_more_before,
+    })
 }
 
 fn event_mutation_proposal_id(event: &SessionEvent) -> Option<Uuid> {
@@ -5642,17 +5685,16 @@ fn merge_renderer_config(mut incoming: GyroConfig, persisted: &GyroConfig) -> Gy
 
 /// What one provider has spent, measured by Gyro rather than reported by it.
 ///
-/// Settings previously had nothing to show for providers without a quota
-/// endpoint — four of the five. The ledger covers all of them, so a provider
-/// that reports no allowance still has a spend figure, flagged when it rests
-/// on estimates.
+/// Windows match plan meters (5-hour session + weekly), not a calendar day, so
+/// the measured panel lines up with Claude/Codex allowance cards. Providers
+/// without a quota API still get both rows from local spend.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderLedgerSummary {
     provider_id: String,
-    /// Rolling 24 hours.
-    day: UsageTotals,
-    /// Rolling 7 days.
+    /// Rolling 5 hours — same window as Claude/Codex session limits.
+    five_hour: UsageTotals,
+    /// Rolling 7 days — same window as weekly plan limits.
     week: UsageTotals,
     /// Present only when a budget is configured for this provider.
     budget: Option<gyro_core::BudgetState>,
@@ -5665,8 +5707,8 @@ async fn get_provider_usage_ledger(provider_id: String) -> Result<ProviderLedger
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store()?;
         let now = chrono::Utc::now();
-        let day = store
-            .provider_usage_totals_since(&provider_id, now - chrono::Duration::hours(24))
+        let five_hour = store
+            .provider_usage_totals_since(&provider_id, now - chrono::Duration::hours(5))
             .map_err(to_string)?;
         let week = store
             .provider_usage_totals_since(&provider_id, now - chrono::Duration::days(7))
@@ -5684,7 +5726,7 @@ async fn get_provider_usage_ledger(provider_id: String) -> Result<ProviderLedger
         Ok(ProviderLedgerSummary {
             budget,
             daily_reference_tokens: guard.daily_reference_tokens,
-            day,
+            five_hour,
             provider_id,
             week,
         })
@@ -10149,20 +10191,211 @@ async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot
 
 /// The plan windows Gyro can state for a provider right now.
 ///
-/// Codex is asked directly, because it answers. Every other provider is served
-/// from the store, where the windows it named while answering were kept. That is
-/// what makes a limit survive the session that heard it: without it, a provider
-/// that only speaks mid-answer has nothing to say until the first turn of a new
-/// session finishes, and the composer shows an empty pair of bars.
+/// 1. **OpenAI / Codex** — live `account/rateLimits/read` (5h + weekly used %).
+/// 2. **xAI / Grok Build** — live `_x.ai/billing` (weekly credit % + reset).
+/// 3. **Anthropic / Claude** — windows streamed mid-answer and stored.
+///
+/// Kimi and Gemini have no plan-window source here; use the ledger for spend.
 fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    if provider_id == "openai" {
-        let snapshot = fetch_codex_provider_usage(provider_id)?;
-        // A poll is the freshest reading there is, so it is worth keeping for
-        // the next session to open with rather than re-polling from blank.
-        remember_provider_rate_limits(provider_id, &snapshot.windows);
-        return Ok(snapshot);
+    let mut live_error: Option<String> = None;
+    let mut windows = if provider_id == "openai" {
+        match fetch_codex_provider_usage(provider_id) {
+            Ok(snapshot) => {
+                // A poll is the freshest reading there is, so it is worth keeping
+                // for the next session to open with rather than re-polling from blank.
+                remember_provider_rate_limits(provider_id, &snapshot.windows);
+                snapshot.windows
+            }
+            Err(error) => {
+                live_error = Some(error);
+                stored_provider_usage(provider_id)?.windows
+            }
+        }
+    } else if provider_id == "xai" {
+        match fetch_xai_provider_usage(provider_id) {
+            Ok(snapshot) => {
+                remember_provider_rate_limits(provider_id, &snapshot.windows);
+                snapshot.windows
+            }
+            Err(error) => {
+                live_error = Some(error);
+                stored_provider_usage(provider_id)?.windows
+            }
+        }
+    } else if provider_id == "anthropic" {
+        stored_provider_usage(provider_id)?.windows
+    } else {
+        Vec::new()
+    };
+
+    windows.sort_by_key(|window| match window.id.as_str() {
+        "five-hour" => 0,
+        "weekly" => 1,
+        _ => 2,
+    });
+
+    if windows.is_empty() {
+        if let Some(error) = live_error {
+            return Err(error);
+        }
     }
-    stored_provider_usage(provider_id)
+
+    Ok(ProviderUsageSnapshot {
+        provider_id: provider_id.into(),
+        fetched_at: chrono::Utc::now().to_rfc3339(),
+        windows,
+    })
+}
+
+/// Ask Grok Build for the real plan window (weekly credit usage + reset).
+///
+/// Grok exposes this on ACP as `_x.ai/billing` after `authenticate` with the
+/// cached OIDC token — not on the public inference API. The TUI's
+/// "Weekly limit: 46%" is exactly `creditUsagePercent` from that response.
+fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
+    let mut process = command_with_gui_path("grok");
+    process
+        .args([
+            "--no-auto-update",
+            "--permission-mode",
+            "default",
+            "agent",
+            "--no-leader",
+            "stdio",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = process
+        .spawn()
+        .map_err(|error| format!("could not start the Grok usage service: {error}"))?;
+    let result = (|| {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Grok usage service input is unavailable".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Grok usage service output is unavailable".to_string())?;
+        let messages = spawn_codex_app_server_reader(stdout);
+        // Auth + billing is usually quick; allow a bit more than Codex for spawn.
+        let deadline = Instant::now() + Duration::from_secs(20);
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientInfo": {
+                        "name": "gyro",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "clientCapabilities": {},
+                },
+            }),
+        )?;
+        let initialize = receive_codex_app_server_response(&messages, 1, deadline)?;
+        if initialize.get("error").is_some() {
+            let _ = codex_app_server_result(&initialize)?;
+        }
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 2,
+                "method": "authenticate",
+                "params": { "methodId": "cached_token" },
+            }),
+        )?;
+        let auth = receive_codex_app_server_response(&messages, 2, deadline)?;
+        if auth.get("error").is_some() {
+            return Err(auth
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Grok authentication failed")
+                .to_string());
+        }
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 3,
+                "method": "_x.ai/billing",
+                "params": {},
+            }),
+        )?;
+        let response = receive_codex_app_server_response(&messages, 3, deadline)?;
+        let payload = codex_app_server_result(&response)?;
+        let windows = provider_usage_windows_from_xai_billing(&payload);
+        if windows.is_empty() {
+            return Err("Grok billing did not report a plan usage window".into());
+        }
+        Ok(ProviderUsageSnapshot {
+            provider_id: provider_id.into(),
+            windows,
+            fetched_at: chrono::Utc::now().to_rfc3339(),
+        })
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+/// Map Grok's `_x.ai/billing` payload onto Gyro plan windows.
+fn provider_usage_windows_from_xai_billing(
+    payload: &serde_json::Value,
+) -> Vec<ProviderRateLimitWindow> {
+    let config = payload.get("config").unwrap_or(payload);
+    let used_percent = config
+        .get("creditUsagePercent")
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value.round().clamp(0.0, 100.0) as i32);
+    let period = config.get("currentPeriod");
+    let period_type = period
+        .and_then(|value| value.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let (id, label) = match period_type {
+        "USAGE_PERIOD_TYPE_WEEKLY" | "WEEKLY" | "weekly" => ("weekly", "Weekly limit"),
+        "USAGE_PERIOD_TYPE_MONTHLY" | "MONTHLY" | "monthly" => ("monthly", "Monthly limit"),
+        "USAGE_PERIOD_TYPE_FIVE_HOUR" | "USAGE_PERIOD_TYPE_5_HOUR" | "FIVE_HOUR" | "five_hour" => {
+            ("five-hour", "5-hour limit")
+        }
+        _ => {
+            // SuperGrok Build currently ships a weekly credit window; fall back
+            // to weekly so an unknown type still surfaces as a plan card.
+            ("weekly", "Weekly limit")
+        }
+    };
+    let resets_at = period
+        .and_then(|value| value.get("end"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            config
+                .get("billingPeriodEnd")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
+    let Some(used_percent) = used_percent else {
+        return Vec::new();
+    };
+    let status = match used_percent {
+        100 => "exhausted",
+        80..=99 => "warning",
+        _ => "ok",
+    };
+    vec![ProviderRateLimitWindow {
+        id: id.into(),
+        label: label.into(),
+        status: status.into(),
+        used_percent: Some(used_percent),
+        resets_at,
+    }]
 }
 
 /// Replay a provider's last known windows, expired ones already dropped.
@@ -15566,17 +15799,49 @@ fn provider_rate_limit_from_claude_stream(
         _ if using_overage => "exhausted",
         _ => "ok",
     };
+    // Prefer an explicit utilization when Claude sends one; otherwise only an
+    // exhausted window is a known number (100%). Unmeasured windows stay open
+    // so the ledger fill can supply a local spend percentage without inventing
+    // a plan reading.
+    let used_percent =
+        claude_rate_limit_used_percent(info).or_else(|| (status == "exhausted").then_some(100));
     Some(ProviderRateLimitWindow {
         id,
         label,
         status: status.into(),
-        used_percent: (status == "exhausted").then_some(100),
+        used_percent,
         resets_at: info
             .get("resetsAt")
             .and_then(serde_json::Value::as_i64)
             .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
             .map(|timestamp| timestamp.to_rfc3339()),
     })
+}
+
+/// Read a 0–100 used % out of Claude's rate_limit_info when present.
+fn claude_rate_limit_used_percent(info: &serde_json::Value) -> Option<i32> {
+    for key in [
+        "utilization",
+        "usedPercent",
+        "used_percent",
+        "percentUsed",
+        "percent_used",
+    ] {
+        let value = info.get(key)?;
+        if let Some(number) = value.as_f64() {
+            // Claude has sent both 0–1 fractions and 0–100 percentages.
+            let percent = if (0.0..=1.0).contains(&number) {
+                (number * 100.0).round()
+            } else {
+                number.round()
+            };
+            return Some(percent.clamp(0.0, 100.0) as i32);
+        }
+        if let Some(number) = value.as_i64() {
+            return Some(number.clamp(0, 100) as i32);
+        }
+    }
+    None
 }
 
 /// Gyro's id and display label for a provider's window name.
@@ -22017,6 +22282,31 @@ while True:
     }
 
     #[test]
+    fn xai_billing_maps_weekly_credit_usage_percent() {
+        let windows = provider_usage_windows_from_xai_billing(&serde_json::json!({
+            "config": {
+                "creditUsagePercent": 46.0,
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-08-02T14:24:07.516124+00:00",
+                    "end": "2026-08-09T14:24:07.516124+00:00"
+                },
+                "billingPeriodEnd": "2026-08-09T14:24:07.516124+00:00"
+            },
+            "subscription_tier": "SuperGrok"
+        }));
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].id, "weekly");
+        assert_eq!(windows[0].label, "Weekly limit");
+        assert_eq!(windows[0].used_percent, Some(46));
+        assert_eq!(windows[0].status, "ok");
+        assert_eq!(
+            windows[0].resets_at.as_deref(),
+            Some("2026-08-09T14:24:07.516124+00:00")
+        );
+    }
+
+    #[test]
     fn claude_effort_arg_drops_levels_claude_code_rejects() {
         assert_eq!(
             claude_reasoning_effort_arg(Some("xhigh")),
@@ -22385,18 +22675,23 @@ while True:
             )
             .unwrap();
 
-        let first = read_session_events_from_store(&store, session.id).unwrap();
-        let second = read_session_events_from_store(&store, session.id).unwrap();
+        let first =
+            read_session_events_from_store(&store, session.id, MAX_DESKTOP_SESSION_EVENTS_READ)
+                .unwrap();
+        let second =
+            read_session_events_from_store(&store, session.id, MAX_DESKTOP_SESSION_EVENTS_READ)
+                .unwrap();
         let matching = |events: &[SessionEvent]| {
             events
                 .iter()
                 .filter(|event| event_mutation_proposal_id(event) == Some(proposal.id))
                 .count()
         };
-        assert_eq!(matching(&first), 1);
-        assert_eq!(matching(&second), 1);
+        assert_eq!(matching(&first.events), 1);
+        assert_eq!(matching(&second.events), 1);
         assert_eq!(
             second
+                .events
                 .iter()
                 .find(|event| event_mutation_proposal_id(event) == Some(proposal.id))
                 .unwrap()

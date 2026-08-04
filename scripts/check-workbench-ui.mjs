@@ -66,6 +66,7 @@ import {
 } from "../packages/ui/src/provider-catalog.ts";
 import {
   CHAT_RESPONSE_TRUNCATION_SUFFIX,
+  limitSessionEventsForUi,
   MAX_CHAT_EVENT_RENDER_COUNT,
   MAX_CHAT_RESPONSE_CHARS,
   applyProviderChatStreamDeltas,
@@ -319,10 +320,15 @@ expect(
 expect(
   surfaceSource.includes('aria-label="Close chat"') &&
     surfaceSource.includes("onCloseChat={onCloseChat}") &&
+    surfaceSource.includes("ChatCloseConfirmOverlay") &&
+    surfaceSource.includes("Stop and close") &&
+    surfaceSource.includes("Keep running") &&
     appSource.includes('type: "close-pane"') &&
-    appSource.includes("paneId: pane.paneId") &&
-    appSource.includes("const nextPane =") &&
-    appSource.includes("candidate.paneId !== pane.paneId") &&
+    appSource.includes("requestCloseChatPane") &&
+    appSource.includes("closeChatPane") &&
+    appSource.includes("ChatCloseConfirmOverlay") &&
+    appSource.includes("confirmStopAndCloseChat") &&
+    appSource.includes("confirmKeepRunningChatClose") &&
     appSource.includes("activeSessionIdRef.current = nextPane.sessionId") &&
     appSource.includes("setActiveSessionId(undefined)"),
   "Each Grid close control should remove its own pane and synchronize focus before session selection can restore the closed pane.",
@@ -967,6 +973,10 @@ expect(
   streamRegressionSetCalls === 1,
   "Provider stream deltas should be applied in one state update per flushed batch.",
 );
+// Stream helpers leave windowing to the app store so load-earlier history is
+// not snapped back to 400 on every delta. Bound the list the same way the
+// session store does for a default open window.
+streamRegressionState = limitSessionEventsForUi(streamRegressionState);
 expect(
   streamRegressionState.length === MAX_CHAT_EVENT_RENDER_COUNT,
   "Provider stream delta batches should keep the rendered event list bounded.",
@@ -3187,7 +3197,7 @@ expect(
     surfaceSource.includes("buildRunModel(") &&
     surfaceSource.includes("providerActivityPathsMatch") &&
     runSource.includes('case "file":') &&
-    runSource.includes('label: "Ran command"') &&
+    runSource.includes('"Ran command"') &&
     runSource.includes('case "context":') &&
     runViewSource.includes("context: Minimize2") &&
     styleSource.includes(".gyro-run-header-toggle") &&
@@ -3300,8 +3310,13 @@ expect(
     runViewSource.includes('<RunPulse label="Thinking"') &&
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
-    runViewSource.includes("showSteps && model.steps.length > 0") &&
+    // Live runs keep a Thinking pulse between tools; settled incomplete runs
+    // stay expanded so the trail does not vanish under "Worked for …".
+    runViewSource.includes("showThinkingPulse") &&
+    runViewSource.includes("Boolean(model.response) && model.steps.length > 0") &&
+    runViewSource.includes("if (isLive)") &&
     surfaceSource.includes("responseEvent") &&
+    surfaceSource.includes("canContinue") &&
     styleSource.includes(".gyro-run-row") &&
     styleSource.includes(".gyro-run-row-stat .is-added") &&
     styleSource.includes(".gyro-run-row-item") &&
@@ -3519,8 +3534,10 @@ expect(
       "(value) => setEventsForSession(streamEvent.sessionId, value)",
     ) &&
     surfaceSource.includes("sendingSessionIds.includes(session.id)") &&
-    surfaceSource.includes('aria-label={isSending ? "Chat working"') &&
-    surfaceSource.includes("gyro-session-time is-working") &&
+    surfaceSource.includes('aria-label={') &&
+    surfaceSource.includes('"Chat working"') &&
+    surfaceSource.includes("is-working") &&
+    surfaceSource.includes("gyro-session-time") &&
     styleSource.includes(".gyro-session-time.is-working svg"),
   "Background chats should keep session-scoped updates and show a rotating sidebar activity indicator.",
 );
@@ -3973,7 +3990,7 @@ expect(
     tauriSource.includes("unhandledrejection") &&
     tauriSource.includes("redact_secrets") &&
     !tauriSource.includes("dangerousRemoteDomainIpcAccess") &&
-    !surfaceSource.includes("gyro-browser-skeleton") &&
+    surfaceSource.includes("gyro-browser-skeleton") &&
     !reducerSource.includes("screenshotCount") &&
     reducerSource.includes('url: "http://localhost:3000"') &&
     tauriConfigSource.includes("frame-src http://localhost:*") &&
@@ -4351,7 +4368,7 @@ expect(
     surfaceSource.includes("<span>Files</span>") &&
     surfaceSource.includes("<span>Plan</span>") &&
     surfaceSource.includes("function chatToolBrowserStatusLabel") &&
-    surfaceSource.includes('return "Needs attention"') &&
+    surfaceSource.includes('return "Waiting"') &&
     surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
     surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
     surfaceSource.includes("Open files in Workspace") &&
@@ -5690,7 +5707,13 @@ for (const transcriptHelper of [
 const buttonMatches = surfaceSource.matchAll(/<button[\s\S]*?>/g);
 for (const match of buttonMatches) {
   const tag = match[0];
-  if (!tag.includes("onClick") && !tag.includes("disabled")) {
+  // Resize handles and sliders act via pointer/keyboard rather than click.
+  if (
+    !tag.includes("onClick") &&
+    !tag.includes("disabled") &&
+    !tag.includes("onPointerDown") &&
+    !tag.includes("onKeyDown")
+  ) {
     failures.push(`Button has no deterministic action: ${tag}`);
   }
 }

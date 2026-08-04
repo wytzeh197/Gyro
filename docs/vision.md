@@ -56,6 +56,30 @@ The product should be judged by whether a developer can open a repo, start or
 attach an agent run, understand what the agent wants to do, approve or reject
 changes, and keep moving without losing context.
 
+## CLI missions (direction)
+
+CLI should not stop at a provider launcher (open Shell / Claude Code / Codex).
+Over time it becomes **mission control** for coding agents:
+
+1. The user opens one **goal chat** (a mission) and states the goal.
+2. An orchestrator **plans and partitions** work into tasks.
+3. Gyro **spawns multiple CLI workers** — often the **same** runtime (for
+   example several Grok Build sessions), each with a different task.
+4. The goal chat remains the control plane: status, replan, stop or reassign,
+   and integrate.
+5. Workspace, diffs, and approvals stay the shared inspection and trust layer.
+
+**Orchestration is not multi-model.** Multi-provider is optional power. The
+default fan-out is same CLI × N tasks. Opening a single raw CLI profile remains
+a power path for terminal-native workflows.
+
+Council (multi-seat deliberation) is a separate, frozen concept. Missions are
+multi-worker **execution**, not parallel answers in one chat.
+
+Alpha priority remains a dependable single-agent loop. Mission shell and
+manual multi-worker grouping come before plan-approve-spawn automation. See
+[cli-missions.md](./cli-missions.md).
+
 ## Open Core, and What Stays Free
 
 The unification itself—chat, CLI, and IDE in one local session—is never

@@ -141,10 +141,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
-      // Whether the provider exposes a queryable quota source, not whether it
-      // reports token usage. Claude Code has no usage command; its limits
-      // arrive as `rate_limit_event` frames on the chat stream instead.
-      supportsUsage: false,
+      // Plan windows stream mid-answer and are stored for poll/display.
+      supportsUsage: true,
       visibility: "standard",
     },
     models: [
@@ -210,6 +208,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
+      // No plan-window API; spend is the local ledger only (not fake 5h/weekly).
       supportsUsage: false,
       visibility: "standard",
     },
@@ -244,7 +243,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
-      supportsUsage: false,
+      // Weekly plan % via Grok ACP `_x.ai/billing` (creditUsagePercent).
+      supportsUsage: true,
       visibility: "standard",
     },
     models: [
@@ -284,6 +284,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
+      // No plan-window API; spend is the local ledger only (not fake 5h/weekly).
       supportsUsage: false,
       visibility: "standard",
     },
