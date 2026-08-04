@@ -724,6 +724,8 @@ export type ProviderChatStreamEvent = {
   activityKind?: string | null;
   activityLabel?: string | null;
   activityDetail?: string | null;
+  /** Specifics behind a machine tool id — command, path, skill name, … */
+  activityNote?: string | null;
   activityStatus?: "running" | "done" | "failed" | null;
   message?: string | null;
   error?: string | null;

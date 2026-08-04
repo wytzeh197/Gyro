@@ -18344,6 +18344,60 @@ body,
   cursor: wait;
 }
 
+/* Hover card for the titlebar update button: which release, and how heavy. */
+.gyro-sidebar-update-tip {
+  background: var(--gyro-premium-panel-strong);
+  border: 1px solid var(--gyro-premium-line);
+  border-radius: 7px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.44);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  min-width: 132px;
+  opacity: 0;
+  padding: 7px 9px;
+  pointer-events: none;
+  position: absolute;
+  transition:
+    opacity var(--gyro-premium-motion) var(--gyro-premium-ease),
+    transform var(--gyro-premium-motion) var(--gyro-premium-ease),
+    visibility var(--gyro-premium-motion) var(--gyro-premium-ease);
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 130;
+}
+
+.gyro-sidebar-update[data-tip-placement="below"] .gyro-sidebar-update-tip {
+  top: calc(100% + 7px);
+  transform: translateY(-3px);
+}
+
+.gyro-sidebar-update[data-tip-placement="above"] .gyro-sidebar-update-tip {
+  bottom: calc(100% + 7px);
+  transform: translateY(3px);
+}
+
+.gyro-sidebar-update-tip strong {
+  color: var(--gyro-premium-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: -0.1px;
+}
+
+.gyro-sidebar-update-tip span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gyro-sidebar-update:hover .gyro-sidebar-update-tip,
+.gyro-sidebar-update:focus-within .gyro-sidebar-update-tip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
 .gyro-sidebar-update-percent {
   font-size: 9px;
   font-variant-numeric: tabular-nums;

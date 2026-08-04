@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Book,
   ChevronDown,
@@ -73,19 +73,32 @@ export function ChatRun({
   renderSay,
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
-  // Incomplete settles (work on the rail, no final answer) start open so a
-  // mid-task stop does not look like an empty "Worked for …" void. Fully
-  // answered historical turns stay collapsed until the user expands them.
-  const [isCollapsed, setIsCollapsed] = useState(
-    () => !isLive && Boolean(model.response) && model.steps.length > 0,
-  );
-  // Re-open when a turn goes live again (retry / reconnect). Never force
-  // collapse on settle — that was wiping the just-finished trail.
+  // A fully answered turn — work on the rail plus a final answer — is history:
+  // it starts collapsed, and folds itself away the moment it settles, so the
+  // answer is what stays on screen. Incomplete settles (a mid-task stop, a
+  // failure) stay open, because collapsing those leaves an empty "Worked for …"
+  // void with no answer under it.
+  const isAnswered =
+    model.phase.name === "done" &&
+    Boolean(model.response) &&
+    model.steps.length > 0;
+  const [isCollapsed, setIsCollapsed] = useState(() => !isLive && isAnswered);
+  // One automatic fold per run: after that the user's own toggle wins, so
+  // expanding a just-finished trail does not snap shut under them.
+  const hasAutoCollapsed = useRef(!isLive && isAnswered);
   useEffect(() => {
+    // Re-open when a turn goes live again (retry / reconnect), and arm the next
+    // fold.
     if (isLive) {
+      hasAutoCollapsed.current = false;
       setIsCollapsed(false);
+      return;
     }
-  }, [isLive]);
+    if (isAnswered && !hasAutoCollapsed.current) {
+      hasAutoCollapsed.current = true;
+      setIsCollapsed(true);
+    }
+  }, [isAnswered, isLive]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
   // Keep a thinking beat while the model is quiet between tools, not only at

@@ -851,6 +851,16 @@ impl SessionStore {
         model_label: Option<String>,
         reasoning_effort: Option<String>,
     ) -> Result<Option<Session>> {
+        // Gyro sessions are local and model-agnostic. When the user hands the
+        // same chat to another provider or model, drop provider-side resume
+        // cursors so the next turn rebuilds continuity from local history
+        // instead of a foreign agent session the new model cannot open.
+        let previous = self.get_session(session_id)?;
+        let Some(previous) = previous else {
+            return Ok(None);
+        };
+        let provider_changed = previous.provider_id != provider_id;
+        let model_changed = previous.model_id != model_id;
         let changed = self.conn.execute(
             "update sessions
              set provider_id = ?1, provider_label = ?2, model_id = ?3, model_label = ?4, reasoning_effort = ?5
@@ -867,7 +877,22 @@ impl SessionStore {
         if changed == 0 {
             return Ok(None);
         }
+        if provider_changed || model_changed {
+            let _ = self.clear_all_provider_session_bindings(session_id)?;
+        }
         self.get_session(session_id)
+    }
+
+    /// Drop every provider resume cursor for a local session.
+    ///
+    /// Used when the chat is handed to another model so the next turn is not
+    /// pinned to a foreign agent conversation the new model cannot reopen.
+    pub fn clear_all_provider_session_bindings(&self, session_id: Uuid) -> Result<bool> {
+        let changed = self.conn.execute(
+            "delete from provider_session_bindings where session_id = ?1",
+            params![session_id.to_string()],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn get_provider_session_binding(
@@ -2912,6 +2937,60 @@ mod tests {
         assert_eq!(updated.provider_id.as_deref(), Some("anthropic"));
         assert_eq!(updated.model_id.as_deref(), Some("claude-sonnet-5"));
         assert_eq!(updated.updated_at, stored.updated_at);
+    }
+
+    #[test]
+    fn model_handoff_clears_provider_resume_bindings() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session_with_context(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "handoff session",
+                CreateSessionContext {
+                    provider_id: Some("xai".into()),
+                    provider_label: Some("xAI".into()),
+                    model_id: Some("grok-4".into()),
+                    model_label: Some("Grok 4".into()),
+                    ..CreateSessionContext::default()
+                },
+            )
+            .unwrap();
+        store
+            .upsert_provider_session_binding(
+                session.id,
+                "xai",
+                Some("grok-4".into()),
+                Some("Grok 4".into()),
+                None,
+                serde_json::json!({ "kind": "xai-acp-session", "sessionId": Uuid::new_v4() }),
+                "ready",
+                None,
+            )
+            .unwrap();
+        assert!(store
+            .get_provider_session_binding(session.id, "xai")
+            .unwrap()
+            .is_some());
+
+        // Hand the same local session to another model — the foreign agent
+        // cursor must not pin the next turn to an unopenable conversation.
+        store
+            .update_session_model(
+                session.id,
+                Some("xai".into()),
+                Some("xAI".into()),
+                Some("grok-4.5".into()),
+                Some("Grok 4.5".into()),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(store
+            .get_provider_session_binding(session.id, "xai")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

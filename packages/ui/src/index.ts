@@ -366,10 +366,13 @@ export {
   workspacePathMatchesGlob,
 } from "./workspace-settings";
 export {
+  formatUpdateSize,
   shouldShowSidebarUpdate,
   updatePrimaryActionLabel,
   updateProgressPercent,
   updateSidebarLabel,
+  updateSizeLabel,
+  updateVersionTag,
 } from "./update-state";
 export {
   AppChrome,
