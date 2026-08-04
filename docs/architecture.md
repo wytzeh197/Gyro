@@ -30,7 +30,13 @@ store.
   of truth for chat history, while SQLite indexes sessions, turn status, and
   mutation proposals.
 - Durable event appends followed by SQLite metadata updates, plus bounded tail
-  reads for long sessions.
+  reads for long sessions. Opening a chat loads the recent event window; older
+  history is available via reverse pagination (`read_events_before`) so a
+  month-old thread stays fully readable without parsing the entire log at once.
+- Chat retention is local and unbounded by age: sessions stay until the user
+  deletes them. Closing a chat pane while a provider turn (or model-owned
+  terminal) is live asks Stop and close vs Keep running so background work is
+  never an invisible power drain.
 - Config loading and saving.
 - Approval policy.
 - Secret redaction.

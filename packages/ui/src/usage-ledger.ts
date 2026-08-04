@@ -1,5 +1,6 @@
 import type {
   BudgetState,
+  ProviderId,
   ProviderLedgerSummary,
   SessionUsageTotals,
   UsageOriginTotals,
@@ -129,7 +130,7 @@ export function isOutsizedTurn(
 
 /** One measured window in the Usage Limits panel. */
 export type LedgerWindowView = {
-  id: "day" | "week";
+  id: "five-hour" | "week";
   label: string;
   /** Always present: the proportion this window has used of its limit. */
   percent: number;
@@ -144,38 +145,113 @@ export type LedgerWindowView = {
   isEstimated: boolean;
 };
 
+type LedgerWindowSpec = {
+  id: "five-hour" | "week";
+  label: string;
+  /** Length of the rolling window, in hours. */
+  hours: number;
+  totalsKey: "fiveHour" | "week";
+};
+
 /**
- * Turn a provider's ledger totals into the two windows Settings shows.
+ * Which measured windows to show for a provider.
  *
- * Works for every provider, including the ones whose CLIs report no allowance:
- * the numbers come from what Gyro observed, and an estimated window says so
- * rather than presenting itself as measured.
+ * Matches how that account is actually limited:
+ * - OpenAI / Anthropic: 5-hour session + weekly
+ * - xAI (Grok Build): weekly only
+ * - Kimi / Gemini and others: weekly only (no known 5h plan meter)
+ */
+export function ledgerWindowSpecsForProvider(
+  providerId: string | undefined,
+): LedgerWindowSpec[] {
+  switch (providerId) {
+    case "openai":
+    case "anthropic":
+      return [
+        {
+          hours: 5,
+          id: "five-hour",
+          label: "5-hour window",
+          totalsKey: "fiveHour",
+        },
+        {
+          hours: 24 * 7,
+          id: "week",
+          label: "Weekly window",
+          totalsKey: "week",
+        },
+      ];
+    case "xai":
+      return [
+        {
+          hours: 24 * 7,
+          id: "week",
+          label: "Weekly window",
+          totalsKey: "week",
+        },
+      ];
+    case "kimi":
+    case "gemini":
+    default:
+      return [
+        {
+          hours: 24 * 7,
+          id: "week",
+          label: "Weekly window",
+          totalsKey: "week",
+        },
+      ];
+  }
+}
+
+/** Short copy for the measured panel header, based on which windows apply. */
+export function ledgerWindowsCaption(providerId: string | undefined) {
+  const specs = ledgerWindowSpecsForProvider(providerId);
+  if (specs.length === 0) return "Local spend";
+  if (specs.length === 1) {
+    return `Spend in the ${specs[0]!.label.toLowerCase()}`;
+  }
+  const labels = specs.map((spec) =>
+    spec.id === "five-hour" ? "5-hour" : "weekly",
+  );
+  return `Spend in the ${labels.join(" and ")} windows`;
+}
+
+/**
+ * Turn a provider's ledger totals into the windows Settings shows.
+ *
+ * Window set is provider-specific (see `ledgerWindowSpecsForProvider`). Percent
+ * is spend that builds up in the window (used / limit), not remaining capacity.
  */
 export function ledgerWindows(
   summary: ProviderLedgerSummary | undefined,
+  providerId?: ProviderId | string,
 ): LedgerWindowView[] {
   if (!summary) return [];
   const reference = Math.max(1, summary.dailyReferenceTokens);
-  return (
-    [
-      { days: 1, id: "day", label: "Last 24 hours", totals: summary.day },
-      { days: 7, id: "week", label: "Last 7 days", totals: summary.week },
-    ] as const
-  ).map(({ days, id, label, totals }) => {
+  const budgetHours = Math.max(1, summary.budget?.windowHours ?? 24);
+  const budgetMax = summary.budget?.maxTokens ?? 0;
+  const resolvedProviderId = providerId ?? summary.providerId;
+
+  return ledgerWindowSpecsForProvider(resolvedProviderId).map((spec) => {
+    const totals =
+      spec.totalsKey === "fiveHour" ? summary.fiveHour : summary.week;
     const biggest = totals.byOrigin[0]?.totalTokens ?? 0;
-    // A configured budget is the real limit and only covers its own window;
-    // otherwise the daily reference is scaled to the window being shown.
-    const hasBudget = Boolean(summary.budget && id === "day");
+    // Scale the daily reference (or a configured budget) to this window's length.
+    const hasBudget = budgetMax > 0;
     const limit = hasBudget
-      ? Math.max(1, summary.budget?.maxTokens ?? 1)
-      : reference * days;
-    const percent = Math.min(100, Math.round((totals.totalTokens / limit) * 100));
+      ? Math.max(1, Math.round((budgetMax * spec.hours) / budgetHours))
+      : Math.max(1, Math.round((reference * spec.hours) / 24));
+    const percent = Math.min(
+      100,
+      Math.round((totals.totalTokens / limit) * 100),
+    );
     return {
       detail: `${formatTokenCount(totals.totalTokens)} of ${formatTokenCount(limit)}`,
       hasBudget,
-      id,
+      id: spec.id,
       isEstimated: totals.estimatedCalls > 0,
-      label,
+      label: spec.label,
       origins: totals.byOrigin.slice(0, 4).map((origin) => ({
         label: origin.label,
         share: biggest > 0 ? Math.round((origin.totalTokens / biggest) * 100) : 0,

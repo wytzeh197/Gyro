@@ -392,13 +392,23 @@ function runPhase(
  * Structured fields win when present so the Stage 5 backend change is purely
  * additive; the label and detail strings stay as the fallback that keeps older
  * persisted sessions rendering.
+ *
+ * Capability calls (`gyro.capability.v1`) also land here so workspace gathering
+ * and other tools share the same minimal run-rail row as thinking / commands,
+ * instead of the old card chrome.
  */
 export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
   if (event.kind !== "system-event") {
     return undefined;
   }
   const payload = record(event.payload);
-  if (text(payload, "kind") !== "provider-activity") {
+  const payloadKind = text(payload, "kind");
+
+  if (payloadKind === "capability-call") {
+    return workItemFromCapabilityCall(event, payload);
+  }
+
+  if (payloadKind !== "provider-activity") {
     return undefined;
   }
   const id = event.id;
@@ -498,6 +508,140 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
 }
 
 /**
+ * Map a capability-call system event onto a run-rail work item.
+ * Keeps the same muted icon + breathe animation as "Thinking" / "Ran command".
+ */
+function workItemFromCapabilityCall(
+  event: SessionEvent,
+  payload: Record<string, unknown> | undefined,
+): WorkItem | undefined {
+  // Accept either schema-tagged payloads or bare capability-call kinds.
+  const schema = text(payload, "schema");
+  if (schema && schema !== "gyro.capability.v1") {
+    return undefined;
+  }
+  const capabilityId = text(payload, "capabilityId");
+  if (!capabilityId) {
+    return undefined;
+  }
+  const id = event.id;
+  const status = capabilityWorkStatus(text(payload, "status"));
+  const summary = text(payload, "summary");
+  const resource = record(payload?.resource);
+  const resourceLabel = text(resource, "label");
+
+  // Terminal-shaped work → command row (matches "Ran command").
+  if (
+    capabilityId.startsWith("terminal-") ||
+    capabilityId === "workspace-run-task" ||
+    capabilityId === "workspace-run-test"
+  ) {
+    return {
+      kind: "command",
+      id,
+      status,
+      command: summary ?? resourceLabel ?? humanizeCapabilityId(capabilityId),
+      intent: summary,
+    };
+  }
+
+  // Project search → search row.
+  if (capabilityId === "workspace-search") {
+    return {
+      kind: "search",
+      id,
+      status,
+      scope: "project",
+      query: summary ?? resourceLabel,
+    };
+  }
+
+  // File-ish workspace reads stay as tools with a clean verb.
+  if (
+    capabilityId === "workspace-read" ||
+    capabilityId === "workspace-read-range" ||
+    capabilityId === "workspace-list"
+  ) {
+    return {
+      kind: "tool",
+      id,
+      status,
+      tool: humanizeCapabilityId(capabilityId),
+    };
+  }
+
+  // Everything else (workspace-context, browser-*, ide-*, git, diff, …)
+  // is a single tool beat with a human label.
+  return {
+    kind: "tool",
+    id,
+    status,
+    tool: humanizeCapabilityId(capabilityId),
+  };
+}
+
+function capabilityWorkStatus(value: string | undefined): WorkStatus {
+  if (
+    value === "requested" ||
+    value === "waiting" ||
+    value === "running"
+  ) {
+    return "running";
+  }
+  if (
+    value === "failed" ||
+    value === "denied" ||
+    value === "cancelled"
+  ) {
+    return "failed";
+  }
+  return "done";
+}
+
+/** `workspace-context` → `Workspace context` */
+function humanizeCapabilityId(capabilityId: string): string {
+  const known: Record<string, string> = {
+    "workspace-context": "Workspace context",
+    "workspace-list": "List workspace",
+    "workspace-search": "Workspace search",
+    "workspace-read": "Read file",
+    "workspace-read-range": "Read file range",
+    "workspace-diagnostics": "Workspace diagnostics",
+    "workspace-git-status": "Git status",
+    "workspace-diff": "Workspace diff",
+    "workspace-propose-edit": "Propose edit",
+    "workspace-run-task": "Run task",
+    "workspace-run-test": "Run tests",
+    "workspace-read-output": "Read output",
+    "ide-reveal": "Reveal in editor",
+    "ide-open-panel": "Open panel",
+    "terminal-open": "Open terminal",
+    "terminal-read": "Read terminal",
+    "terminal-stop": "Stop terminal",
+    "browser-open": "Open browser",
+    "browser-inspect": "Inspect browser",
+    "browser-reload": "Reload browser",
+    "browser-screenshot": "Browser screenshot",
+    "browser-navigate": "Navigate browser",
+    "browser-back": "Browser back",
+    "browser-forward": "Browser forward",
+    "browser-click": "Browser click",
+    "browser-type": "Browser type",
+    "browser-scroll": "Browser scroll",
+    "browser-form-input": "Browser form input",
+    "browser-read-page": "Read page",
+    "browser-find": "Find on page",
+    "browser-console": "Browser console",
+    "browser-network": "Browser network",
+  };
+  if (known[capabilityId]) {
+    return known[capabilityId] as string;
+  }
+  const human = capabilityId.split("-").filter(Boolean).join(" ");
+  return human ? human.charAt(0).toUpperCase() + human.slice(1) : capabilityId;
+}
+
+/**
  * The header line. A duration is only claimed when one is actually known:
  * a failed or interrupted turn has no recorded end, and inventing one from the
  * moment the component happened to mount would put a fictional number on screen.
@@ -572,12 +716,27 @@ export function runRowText(step: RunStep): RunRowText {
   const item = step.item;
   switch (item.kind) {
     case "command":
-      return { label: "Ran command", description: item.intent ?? item.command };
+      return {
+        label:
+          item.status === "running"
+            ? "Running command"
+            : item.status === "failed"
+              ? "Command failed"
+              : "Ran command",
+        description: item.intent ?? item.command,
+      };
     case "file":
       return { label: fileVerb(item.status), description: item.path };
     case "search":
       return {
-        label: item.scope === "web" ? "Searched the web" : "Searched project",
+        label:
+          item.status === "running"
+            ? item.scope === "web"
+              ? "Searching the web"
+              : "Searching project"
+            : item.scope === "web"
+              ? "Searched the web"
+              : "Searched project",
         description: item.query,
       };
     case "memory":
@@ -596,15 +755,51 @@ export function runRowText(step: RunStep): RunRowText {
       // ACP fallbacks look like "xAI tool" / "Kimi tool". Showing
       // "Used tool · xAI tool" is noise — drop the redundant description.
       if (isGenericProviderToolLabel(description)) {
-        return { label: "Used tool" };
+        return {
+          label: item.status === "running" ? "Using tool" : "Used tool",
+        };
+      }
+      // Familiar capability labels get a progressive verb while in flight.
+      if (item.status === "running") {
+        const progressive = progressiveToolLabel(item.tool);
+        if (progressive) {
+          return { label: progressive };
+        }
       }
       // Prefer a clean tool name as the primary label when we have one.
       if (description && !isRawToolPayload(description)) {
         return { label: description };
       }
-      return { label: "Used tool" };
+      return {
+        label: item.status === "running" ? "Using tool" : "Used tool",
+      };
     }
   }
+}
+
+/** In-flight wording for the tools users see every turn. */
+function progressiveToolLabel(tool: string): string | undefined {
+  const key = tool.trim().toLowerCase();
+  const known: Record<string, string> = {
+    "workspace context": "Gathering workspace",
+    "list workspace": "Listing workspace",
+    "workspace search": "Searching workspace",
+    "read file": "Reading file",
+    "read file range": "Reading file",
+    "workspace diagnostics": "Checking diagnostics",
+    "git status": "Checking git status",
+    "workspace diff": "Reading diff",
+    "propose edit": "Proposing edit",
+    "run task": "Running task",
+    "run tests": "Running tests",
+    "read output": "Reading output",
+    "open browser": "Opening browser",
+    "browser navigate": "Navigating",
+    "browser screenshot": "Capturing browser",
+    "inspect browser": "Inspecting browser",
+    "reload browser": "Reloading browser",
+  };
+  return known[key];
 }
 
 /** `{Provider} tool` placeholders that add nothing next to "Used tool". */

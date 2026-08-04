@@ -2,7 +2,13 @@ import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 
 export const MAX_CHAT_RESPONSE_CHARS = 64_000;
 export const CHAT_RESPONSE_TRUNCATION_SUFFIX = "...";
+/** Default open window — keeps the first paint cheap. */
 export const MAX_CHAT_EVENT_RENDER_COUNT = 400;
+/**
+ * After the user loads earlier history, keep a larger in-memory window so the
+ * 400-cap does not immediately drop the older page they just requested.
+ */
+export const MAX_CHAT_EVENT_HOLD_COUNT = 2_500;
 const MAX_PENDING_STREAM_EVENTS_PER_TURN = 64;
 const MAX_STREAM_TURN_ORDER_STATES = 256;
 
@@ -121,16 +127,17 @@ type PendingStreamDeltaEvent = {
   turnId: string;
 };
 
-export function limitSessionEventsForUi(events: SessionEvent[]) {
-  if (events.length <= MAX_CHAT_EVENT_RENDER_COUNT) {
+export function limitSessionEventsForUi(
+  events: SessionEvent[],
+  maxEvents: number = MAX_CHAT_EVENT_RENDER_COUNT,
+) {
+  if (events.length <= maxEvents) {
     return events;
   }
   const sessionCreated = events.find(
     (event) => event.kind === "session-created",
   );
-  const recentEvents = events.slice(
-    Math.max(0, events.length - MAX_CHAT_EVENT_RENDER_COUNT),
-  );
+  const recentEvents = events.slice(Math.max(0, events.length - maxEvents));
   if (
     sessionCreated &&
     !recentEvents.some((event) => event.id === sessionCreated.id)
@@ -631,7 +638,9 @@ export function applyProviderChatStreamActivity(
     if (!current.some((event) => event.sessionId === streamEvent.sessionId)) {
       return current;
     }
-    return limitSessionEventsForUi(updateEvents(current));
+    // Leave windowing to the app store so expanded history (load-earlier)
+    // is not snapped back to the default open cap on every activity update.
+    return updateEvents(current);
   });
 }
 
@@ -704,7 +713,9 @@ export function applyProviderChatStreamDeltas(
         textDelta,
       );
     }
-    return limitSessionEventsForUi(next);
+    // Windowing is applied by the app session store (default open cap or the
+    // larger hold cap after load-earlier), not here.
+    return next;
   });
 }
 

@@ -22,6 +22,7 @@ const MAX_ROWS = 100;
 export type ChatArtifactActions = {
   onOpenFiles?: () => void;
   onOpenTool?: (tool: WorkbenchPaneTab) => void;
+  onOpenExternalPreview?: (url?: string) => void;
   onSendPrompt?: (prompt: string) => void;
 };
 
@@ -37,14 +38,31 @@ export function chatArtifactsFromEvent(event: SessionEvent): ChatArtifact[] {
 export function ChatArtifacts({
   actions,
   artifacts,
+  previewCapture,
 }: {
   actions?: ChatArtifactActions;
   artifacts: ChatArtifact[];
+  /** Latest browser capture for the active session — fills in preview thumbs. */
+  previewCapture?: { src?: string; path?: string };
 }) {
   if (!artifacts.length) return null;
+  const resolved = artifacts.map((artifact) => {
+    if (
+      artifact.kind === "preview" &&
+      !artifact.captureUrl &&
+      previewCapture?.src
+    ) {
+      return {
+        ...artifact,
+        captureUrl: previewCapture.src,
+        capturePath: artifact.capturePath ?? previewCapture.path,
+      };
+    }
+    return artifact;
+  });
   return (
     <div className="gyro-chat-artifacts" aria-label="Interactive artifacts">
-      {artifacts.map((artifact) => (
+      {resolved.map((artifact) => (
         <ChatArtifactCard
           actions={actions}
           artifact={artifact}
@@ -228,17 +246,63 @@ function ChatArtifactContent({
     );
   }
   if (artifact.kind === "preview") {
+    const host = previewHostLabel(artifact.url);
+    const statusLabel =
+      artifact.status === "streaming"
+        ? "Loading"
+        : artifact.status === "failed"
+          ? "Failed"
+          : artifact.status === "stale"
+            ? "Stale"
+            : artifact.captureUrl
+              ? "Captured"
+              : "Preview";
     return (
-      <>
-        {artifact.description ? <p>{artifact.description}</p> : null}
-        {artifact.url ? (
-          <code className="gyro-chat-artifact-url">{artifact.url}</code>
-        ) : null}
-        <ArtifactFooterAction
-          label="Open preview"
+      <div className="gyro-chat-artifact-preview">
+        <button
+          className="gyro-chat-artifact-preview-card"
           onClick={() => actions?.onOpenTool?.("browser")}
-        />
-      </>
+          type="button"
+        >
+          <span className="gyro-chat-artifact-preview-media">
+            {artifact.captureUrl ? (
+              <img
+                alt=""
+                draggable={false}
+                src={artifact.captureUrl}
+              />
+            ) : (
+              <span className="gyro-chat-artifact-preview-fallback">
+                <Globe2 aria-hidden="true" size={18} />
+              </span>
+            )}
+          </span>
+          <span className="gyro-chat-artifact-preview-meta">
+            <strong>{host || artifact.title || "Browser preview"}</strong>
+            {artifact.url ? (
+              <code className="gyro-chat-artifact-url">{artifact.url}</code>
+            ) : null}
+            {artifact.description ? <small>{artifact.description}</small> : null}
+            <em>{statusLabel}</em>
+          </span>
+        </button>
+        <div className="gyro-chat-artifact-footer-actions">
+          <button
+            onClick={() => actions?.onOpenTool?.("browser")}
+            type="button"
+          >
+            Open in panel
+          </button>
+          {actions?.onOpenExternalPreview && artifact.url ? (
+            <button
+              onClick={() => actions.onOpenExternalPreview?.(artifact.url)}
+              type="button"
+            >
+              Open external
+            </button>
+          ) : null}
+        </div>
+      </div>
     );
   }
   if (artifact.kind === "table") {
@@ -460,6 +524,10 @@ function normalizeChatArtifact(value: unknown): ChatArtifact | undefined {
       status,
       url: stringValue(item?.url),
       description: stringValue(item?.description),
+      capturePath: stringValue(item?.capturePath ?? item?.capture_path),
+      captureUrl: stringValue(
+        item?.captureUrl ?? item?.capture_url ?? item?.imageUrl ?? item?.image_url,
+      ),
     };
   if (kind === "table") {
     const columns = stringArray(item?.columns, MAX_COLUMNS);
@@ -527,6 +595,19 @@ function artifactStatus(value: unknown) {
     value === "completed"
     ? value
     : undefined;
+}
+
+function previewHostLabel(url?: string) {
+  const trimmed = url?.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(
+      /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `http://${trimmed}`,
+    );
+    return parsed.host || parsed.hostname || "";
+  } catch {
+    return trimmed;
+  }
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

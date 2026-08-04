@@ -1,5 +1,8 @@
 export type SessionOrigin = "cli" | "desktop";
 
+/** Chat is a single-agent thread; mission is a goal chat that can own CLI workers. */
+export type SessionKind = "chat" | "mission";
+
 export type SurfaceId = "chat" | "cli" | "ide";
 
 export type WorkspaceLayoutId = "thread" | "terminal-grid" | "code";
@@ -331,6 +334,10 @@ export type TerminalPane = {
    */
   governedSessionId?: string;
   governedProviderId?: string;
+  /** Parent mission chat session when this pane is a mission worker. */
+  missionSessionId?: string;
+  /** Short task label for the mission board (not the profile display name). */
+  taskTitle?: string;
 };
 
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
@@ -525,6 +532,8 @@ export type BrowserPreviewCapture = {
   width: number;
   height: number;
   createdAt: string;
+  /** Optional asset URL for rendering the capture in UI (e.g. convertFileSrc). */
+  src?: string;
 };
 
 export type BrowserPreview = {
@@ -858,6 +867,10 @@ export type ChatArtifact =
       status?: ChatArtifactStatus;
       url?: string;
       description?: string;
+      /** Absolute path to a capture, if known. */
+      capturePath?: string;
+      /** Renderable image URL for the capture thumbnail. */
+      captureUrl?: string;
     }
   | {
       id: string;
@@ -908,6 +921,13 @@ export type WorkbenchPreferences = {
   activeChatPanel?: ChatSidePanelId;
   modelFollow: ModelFollowMode;
   cliLaunchPreset: CliLaunchPreset;
+  /**
+   * Session ids that are missions (goal chats that own CLI workers). Phase 1
+   * stores this client-side until the session store persists `kind`.
+   */
+  missionSessionIds: string[];
+  /** Default command profile for new mission workers (e.g. same CLI × N). */
+  missionDefaultProfileId?: string;
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
   showMenuBarIcon: boolean;
@@ -1500,6 +1520,11 @@ export type Session = {
   createdAt: string;
   updatedAt: string;
   eventsPath: string;
+  /**
+   * Optional until the session store persists kind. Missions are also tracked in
+   * `WorkbenchPreferences.missionSessionIds` for Phase 1.
+   */
+  kind?: SessionKind;
 };
 
 export type SessionEvent = {
@@ -1635,18 +1660,19 @@ export type BudgetState = {
 /**
  * What one provider has spent, measured by Gyro rather than reported by it.
  *
- * Available for every provider, including the four whose CLIs expose no quota
- * endpoint at all.
+ * Windows match the plan meters providers actually use: a rolling 5-hour
+ * session window and a weekly window — not an arbitrary calendar day.
+ * Available for every provider, including those with no quota API.
  */
 export type ProviderLedgerSummary = {
   providerId: string;
-  /** Rolling 24 hours. */
-  day: SessionUsageTotals;
-  /** Rolling 7 days. */
+  /** Rolling 5 hours (same window as Claude/Codex session limits). */
+  fiveHour: SessionUsageTotals;
+  /** Rolling 7 days (same window as weekly plan limits). */
   week: SessionUsageTotals;
   /** Present only when a budget is configured for this provider. */
   budget?: BudgetState;
-  /** Denominator for the percentages when no budget is configured. */
+  /** Denominator for the percentages when no budget is configured (tokens / day). */
   dailyReferenceTokens: number;
 };
 
