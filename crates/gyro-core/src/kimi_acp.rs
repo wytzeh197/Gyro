@@ -879,9 +879,8 @@ fn handle_session_update<Delta, Activity>(
                 _ => "running",
             }
             .to_string();
-            let detail = detail.or_else(|| {
-                raw_input.map(|value| redact_secrets(&value.to_string()))
-            });
+            let detail =
+                detail.or_else(|| raw_input.map(|value| redact_secrets(&value.to_string())));
             on_activity(&KimiAcpActivity {
                 id,
                 kind,
@@ -997,7 +996,11 @@ fn humanize_acp_kind(kind: &str) -> String {
 
 fn acp_raw_input_path(raw_input: Option<&Value>) -> Option<String> {
     let value = raw_input?;
-    if let Some(path) = value.as_str().map(str::trim).filter(|path| !path.is_empty()) {
+    if let Some(path) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
         // Bare string inputs are usually a path for read/edit.
         if path.contains('/') || path.contains('\\') || path.contains('.') {
             return Some(redact_secrets(path));
@@ -1013,7 +1016,11 @@ fn acp_raw_input_query(raw_input: Option<&Value>) -> Option<String> {
 
 fn acp_raw_input_command(raw_input: Option<&Value>) -> Option<String> {
     let value = raw_input?;
-    if let Some(command) = value.as_str().map(str::trim).filter(|command| !command.is_empty()) {
+    if let Some(command) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    {
         if !command.contains('/') && !command.contains('\\') {
             return Some(redact_secrets(command));
         }

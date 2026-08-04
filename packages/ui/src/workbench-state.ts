@@ -1217,6 +1217,8 @@ export type WorkbenchAction =
   | { type: "set-usage-provider"; providerId?: ProviderId }
   | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
   | { type: "set-cli-launch-preset"; preset: CliLaunchPreset }
+  | { type: "register-mission-session"; sessionId: string }
+  | { type: "set-mission-default-profile"; profileId?: string }
   | { type: "toggle-sidebar-chats" }
   | { type: "toggle-chat-environment-rail" }
   | { type: "set-chat-environment-rail"; open: boolean }
@@ -1814,6 +1816,31 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           cliLaunchPreset: normalizeCliLaunchPreset(action.preset),
+        },
+      };
+    case "register-mission-session": {
+      const sessionId = action.sessionId.trim();
+      if (!sessionId) {
+        return state;
+      }
+      const existing = state.preferences.missionSessionIds ?? [];
+      if (existing.includes(sessionId)) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          missionSessionIds: [...existing, sessionId].slice(-500),
+        },
+      };
+    }
+    case "set-mission-default-profile":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          missionDefaultProfileId: action.profileId?.trim() || undefined,
         },
       };
     case "toggle-sidebar-chats":
@@ -3732,6 +3759,50 @@ function moveTerminalPane(
   return next;
 }
 
+/** True when the session is a mission goal chat (kind or client-side registry). */
+export function isMissionSession(
+  session: { id: string; kind?: string } | undefined,
+  missionSessionIds?: string[],
+): boolean {
+  if (!session) {
+    return false;
+  }
+  if (session.kind === "mission") {
+    return true;
+  }
+  return (missionSessionIds ?? []).includes(session.id);
+}
+
+/** CLI panes owned by a mission, newest first. */
+export function missionWorkerPanes(
+  panes: TerminalPane[],
+  missionSessionId: string,
+): TerminalPane[] {
+  return panes
+    .filter((pane) => pane.missionSessionId === missionSessionId)
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Default command profile for mission workers: explicit preference, else first
+ * ready non-shell profile (same-runtime fan-out), else shell.
+ */
+export function missionDefaultProfile(
+  profiles: CommandProfile[],
+  preferredProfileId?: string,
+): CommandProfile {
+  const ready = profiles.filter((profile) => profile.readiness !== "blocked");
+  const preferred =
+    preferredProfileId &&
+    ready.find((profile) => profile.id === preferredProfileId);
+  if (preferred) {
+    return preferred;
+  }
+  const nonShell = ready.find((profile) => profile.id !== "shell");
+  return nonShell ?? ready[0] ?? profiles[0]!;
+}
+
 export function createTerminalPane(
   id: string,
   profile: CommandProfile,
@@ -3742,12 +3813,18 @@ export function createTerminalPane(
     worktreeName?: string;
     projectPath?: string;
     workingDirectory?: string;
+    missionSessionId?: string;
+    taskTitle?: string;
   } = {},
 ): TerminalPane {
   const workspaceMode = options.workspaceMode ?? "local";
+  const taskTitle =
+    typeof options.taskTitle === "string" && options.taskTitle.trim()
+      ? options.taskTitle.trim()
+      : undefined;
   return {
     id,
-    title: profile.displayName,
+    title: taskTitle ?? profile.displayName,
     profileId: profile.id,
     command: [profile.command, ...profile.args].filter(Boolean).join(" "),
     output: defaultTerminalOutput(profile.displayName),
@@ -3760,6 +3837,8 @@ export function createTerminalPane(
     worktreeName: options.worktreeName,
     projectPath: options.projectPath,
     workingDirectory: options.workingDirectory,
+    missionSessionId: options.missionSessionId,
+    taskTitle,
     createdAt: new Date().toISOString(),
   };
 }
@@ -3777,6 +3856,14 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     worktreeName: pane.worktreeName,
     projectPath: pane.projectPath,
     workingDirectory: pane.workingDirectory,
+    missionSessionId:
+      typeof pane.missionSessionId === "string" && pane.missionSessionId.trim()
+        ? pane.missionSessionId.trim()
+        : undefined,
+    taskTitle:
+      typeof pane.taskTitle === "string" && pane.taskTitle.trim()
+        ? pane.taskTitle.trim()
+        : undefined,
     hasForegroundJob:
       typeof pane.hasForegroundJob === "boolean"
         ? pane.hasForegroundJob
@@ -3885,6 +3972,21 @@ function normalizeWorkbenchPreferences(
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),
+    missionSessionIds: Array.isArray(preferences?.missionSessionIds)
+      ? [
+          ...new Set(
+            preferences.missionSessionIds.filter(
+              (id): id is string =>
+                typeof id === "string" && id.trim().length > 0,
+            ),
+          ),
+        ].slice(0, 500)
+      : [],
+    missionDefaultProfileId:
+      typeof preferences?.missionDefaultProfileId === "string" &&
+      preferences.missionDefaultProfileId.trim()
+        ? preferences.missionDefaultProfileId.trim()
+        : undefined,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
     theme: preferences?.theme === "dark" ? "dark" : "light",
@@ -4493,7 +4595,7 @@ function defaultBrowserPreview() {
     captureError: undefined,
     latestCapture: undefined,
     status: "idle" as const,
-    verificationMessage: "Ready · localhost:3000",
+    verificationMessage: "Idle",
   };
 }
 

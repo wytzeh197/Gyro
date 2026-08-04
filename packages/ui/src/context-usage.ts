@@ -248,21 +248,35 @@ export function estimateComposerContextUsage(
 
 const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
 
-/** Providers whose plans meter a rolling 5-hour window and a weekly one. */
-const PLAN_LIMIT_PROVIDERS = new Set<ProviderId>(["anthropic", "openai"]);
+/**
+ * Providers whose accounts actually meter plan windows we can surface.
+ *
+ * OpenAI/Claude: 5h + weekly. xAI/Grok Build: weekly credit window only.
+ * Kimi/Gemini: no plan-window API — local ledger only.
+ */
+const PLAN_LIMIT_PROVIDERS = new Set<ProviderId>([
+  "anthropic",
+  "openai",
+  "xai",
+]);
 
 /**
- * The windows listed before the provider has said anything about them.
+ * Default empty plan rows before the first poll, per provider shape.
  *
- * Both plan-based CLIs only mention a limit once a run has touched it, so a
- * fresh session showed the context bar with no limits underneath — which reads
- * as a plan without limits rather than one that has not reported yet. The pair
- * is listed from the start and an unreported window stays unmeasured.
+ * Listed from the start so a fresh session does not look like “no limits”
+ * before the first reading arrives.
  */
-const DEFAULT_PLAN_LIMIT_WINDOWS: ProviderUsageWindow[] = [
-  { id: "five-hour", label: "5-hour limit" },
-  { id: "weekly", label: "Weekly limit" },
-];
+function defaultPlanLimitWindows(
+  providerId: ProviderId | undefined,
+): ProviderUsageWindow[] {
+  if (providerId === "xai") {
+    return [{ id: "weekly", label: "Weekly limit" }];
+  }
+  return [
+    { id: "five-hour", label: "5-hour limit" },
+    { id: "weekly", label: "Weekly limit" },
+  ];
+}
 
 /**
  * When a window resets, phrased the way a limit is actually read.
@@ -391,7 +405,7 @@ export function composerLimitWindows(
     PLAN_LIMIT_PROVIDERS.has(model.providerId) &&
     speaksDefaultWindows
   ) {
-    for (const window of DEFAULT_PLAN_LIMIT_WINDOWS) {
+    for (const window of defaultPlanLimitWindows(model.providerId)) {
       if (!byId.has(window.id)) byId.set(window.id, window);
     }
   }

@@ -511,7 +511,7 @@ const preparation = {
 const responses: Record<string, unknown> = {
   load_config: config,
   list_sessions: sessions,
-  read_session_events: chatEvents,
+  read_session_events: { events: chatEvents, hasMoreBefore: false },
   git_status: sourceControl,
   // Staging commands answer with the status the app re-renders from, so the
   // harness keeps showing a populated panel instead of emptying it.

@@ -54,7 +54,8 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_approvals: true,
         supports_images: true,
         supports_resume: true,
-        supports_usage: false,
+        // Streamed plan windows stored for display (no live quota command).
+        supports_usage: true,
     },
     ProviderDescriptor {
         id: "kimi",
@@ -76,7 +77,8 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_approvals: true,
         supports_images: true,
         supports_resume: true,
-        supports_usage: false,
+        // Weekly credit window from Grok ACP `_x.ai/billing`.
+        supports_usage: true,
     },
     ProviderDescriptor {
         id: "gemini",
