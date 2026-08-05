@@ -17,6 +17,7 @@ import {
   isUserSelectedWorkspacePath,
   normalizeCliLaunchPreset,
   parseProviderHealthOutput,
+  resolveChatGridDropSlot,
   sanitizeStoredIdeState,
   sanitizeStoredChatGridState,
   workbenchReducer,
@@ -175,6 +176,44 @@ expect(
     emptyGridDropLayout.focusedPaneId === "pane:first" &&
     emptyGridDropLayout.splitDirection === undefined,
   "Dropping onto an empty project grid should create and focus its first full-size chat pane.",
+);
+// Two chats tile as full-height columns, so the right column's top quadrant
+// sits over an occupied slot. Dropping there belongs in that quadrant, with the
+// sitting chat stepping down into the bottom half of its own column.
+let quadrantDropState = createInitialChatGridState();
+quadrantDropState = chatGridReducer(quadrantDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("left"),
+  mode: "drop",
+  slotIndex: 0,
+});
+quadrantDropState = chatGridReducer(quadrantDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("right"),
+  mode: "drop",
+  slotIndex: 0,
+  insertPosition: "after",
+  splitDirection: "horizontal",
+});
+quadrantDropState = chatGridReducer(quadrantDropState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("dropped"),
+  mode: "drop",
+  slotIndex: 1,
+});
+const quadrantDropLayout = quadrantDropState.layouts["/Users/example/Gyro"];
+expect(
+  quadrantDropLayout?.slots[0]?.sessionId === "left" &&
+    quadrantDropLayout.slots[1]?.sessionId === "dropped" &&
+    quadrantDropLayout.slots[2] === null &&
+    quadrantDropLayout.slots[3]?.sessionId === "right" &&
+    quadrantDropLayout.focusedPaneId === "pane:dropped" &&
+    resolveChatGridDropSlot(quadrantDropLayout.slots, 0).displacedIndex === 2 &&
+    resolveChatGridDropSlot(quadrantDropLayout.slots, 2).targetIndex === 2,
+  "A grid-position drop should land in the quadrant it was aimed at, displacing the column's sitting chat.",
 );
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
@@ -1072,6 +1111,42 @@ expect(
       mode: "follow",
     }).preferences.modelFollow === "follow",
   "Model follow should default to peek, reject unknown stored values, and stay switchable.",
+);
+
+let backgroundOpenState = workbenchReducer(createInitialWorkbenchState(), {
+  type: "ide-open-tab",
+  tab: { path: "src/reading.ts", title: "reading.ts", dirty: false },
+});
+backgroundOpenState = workbenchReducer(backgroundOpenState, {
+  type: "select-destination",
+  destination: "chat",
+});
+const backgroundOpenBefore = backgroundOpenState;
+backgroundOpenState = workbenchReducer(backgroundOpenState, {
+  type: "ide-open-tab",
+  tab: {
+    path: "src/model-read.ts",
+    title: "model-read.ts",
+    dirty: false,
+    preview: true,
+  },
+  background: true,
+});
+const backgroundOpenGroup = backgroundOpenState.ide.layout.groups.find(
+  (group) => group.id === backgroundOpenState.ide.layout.activeGroupId,
+);
+expect(
+  backgroundOpenState.activeDestination ===
+    backgroundOpenBefore.activeDestination &&
+    backgroundOpenState.activeWorkspaceLayout ===
+      backgroundOpenBefore.activeWorkspaceLayout &&
+    backgroundOpenState.ide.activePath === "src/reading.ts" &&
+    backgroundOpenGroup?.activePath === "src/reading.ts" &&
+    backgroundOpenState.ide.tabs.some(
+      (tab) => tab.path === "src/model-read.ts",
+    ) &&
+    backgroundOpenGroup?.tabs.some((tab) => tab.path === "src/model-read.ts"),
+  "A background tab open should join the tab strip without changing the destination, layout, or active file.",
 );
 
 let editorGroupState = workbenchReducer(initialState, {
@@ -3116,10 +3191,18 @@ expect(
     appSource.includes(
       "deriveSessionPlan(deferredEventsForPlan, activeSessionId)",
     ) &&
-    appSource.includes("const deferredEventsForTurn = deferredEventsForPlan") &&
+    // Live turns must not wait on deferred events — otherwise the rail freezes
+    // mid-stream while the provider is still working.
+    appSource.includes("const isLiveTurnStreaming = activeSessionId") &&
+    appSource.includes("const deferredEventsForTurn = isLiveTurnStreaming") &&
     appSource.includes("const derivedActiveTurn = useMemo") &&
     appSource.includes(
       "deriveActiveTurn(deferredEventsForTurn, activeSession?.title)",
+    ) &&
+    // Stream flushes stay high priority so concurrent React work cannot starve
+    // the live token stream.
+    appSource.includes(
+      "Stream text must paint at the same priority as the turn itself",
     ) &&
     appSource.includes("const nextTurn = derivedActiveTurn") &&
     appSource.includes(
@@ -3288,6 +3371,12 @@ expect(
     surfaceSource.includes("deriveTranscriptState") &&
     surfaceSource.includes("useDeferredValue") &&
     surfaceSource.includes("const deferredEvents = useDeferredValue(events)") &&
+    surfaceSource.includes(
+      "const transcriptEvents = isComposerSending ? events : deferredEvents",
+    ) &&
+    surfaceSource.includes(
+      "activeTranscriptTurnId(turns) ?? turns.at(-1)?.id",
+    ) &&
     surfaceSource.includes("const transcriptContent = useMemo") &&
     surfaceSource.includes(
       "const [localDraft, setLocalDraft] = useState(draft)",

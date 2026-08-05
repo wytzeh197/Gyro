@@ -245,6 +245,29 @@ export function persistableChatGridState(state: ChatGridState): ChatGridState {
   });
 }
 
+/**
+ * Resolve which slot a 2×2 grid-position drop lands in.
+ *
+ * A pane whose column partner is empty stretches across both rows, so the
+ * quadrant under the pointer can read as occupied even though its own cell is
+ * free. That pane steps aside into its partner cell and the new chat takes the
+ * half the pointer was actually over. Only when the whole column is taken does
+ * the drop fall back to the first free slot, and only a full grid lets a drop
+ * replace the chat underneath it.
+ */
+export function resolveChatGridDropSlot(
+  slots: Array<ChatPaneRef | null>,
+  slotIndex: number,
+): { displacedIndex?: number; targetIndex: number } {
+  if (!slots[slotIndex]) return { targetIndex: slotIndex };
+  const partnerIndex = slotIndex < 2 ? slotIndex + 2 : slotIndex - 2;
+  if (!slots[partnerIndex]) {
+    return { displacedIndex: partnerIndex, targetIndex: slotIndex };
+  }
+  const emptyIndex = slots.findIndex((pane) => pane === null);
+  return { targetIndex: emptyIndex >= 0 ? emptyIndex : slotIndex };
+}
+
 export function chatGridReducer(
   state: ChatGridState,
   action: ChatGridAction,
@@ -424,18 +447,19 @@ export function chatGridReducer(
             : focusedIndex >= 0
               ? focusedIndex
               : 0);
-        // On a grid-position drop, never clobber an existing chat while the
-        // grid still has room — fill the first empty slot instead. Only when
-        // every slot is taken does dropping onto one replace it.
-        if (
-          action.mode === "drop" &&
-          current.slots[targetIndex] &&
-          emptyIndex >= 0
-        ) {
-          targetIndex = emptyIndex;
-        }
         const slots = current.slots.slice(0, CHAT_GRID_MAX_SLOTS);
         while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+        // A grid-position drop belongs in the quadrant the pointer was over,
+        // never clobbering an existing chat while the grid still has room.
+        let displacedIndex: number | undefined;
+        if (action.mode === "drop") {
+          const resolved = resolveChatGridDropSlot(slots, targetIndex);
+          displacedIndex = resolved.displacedIndex;
+          targetIndex = resolved.targetIndex;
+        }
+        if (displacedIndex !== undefined) {
+          slots[displacedIndex] = slots[targetIndex] ?? null;
+        }
         slots[targetIndex] = action.pane;
         next = {
           ...current,
@@ -988,6 +1012,43 @@ function upsertPathInActiveEditorGroup(
   return syncEditorGroupsForActivePath(layout, path);
 }
 
+/**
+ * Adds the path to the active group's tab strip without making it the group's
+ * active tab, so a background open never changes what the editor is showing.
+ * A group with nothing open yet still adopts it, since there is no view to take.
+ */
+function appendPathToActiveEditorGroup(
+  layout: WorkbenchState["ide"]["layout"],
+  path: string,
+): WorkbenchState["ide"]["layout"] {
+  const groups =
+    layout.groups.length > 0 ? layout.groups : defaultIdeLayout().groups;
+  const fallbackGroup = groups[0] ?? createEditorGroup("group-main", "Main");
+  const activeGroupId = layout.activeGroupId || fallbackGroup.id;
+  return {
+    ...layout,
+    activeGroupId,
+    groups: groups.map((group) => {
+      if (group.id !== activeGroupId) {
+        return group;
+      }
+      const hasTab = group.tabs.some((tab) => tab.path === path);
+      return {
+        ...group,
+        activePath: group.activePath ?? path,
+        panes:
+          group.panes.length > 0 ? group.panes : [{ id: `${group.id}-pane` }],
+        tabs: hasTab
+          ? group.tabs
+          : [
+              ...group.tabs,
+              { path, title: workspaceNameFromPath(path), dirty: false },
+            ],
+      };
+    }),
+  };
+}
+
 function syncEditorTabInLayout(
   layout: WorkbenchState["ide"]["layout"],
   tab: EditorTab,
@@ -1240,7 +1301,12 @@ export type WorkbenchAction =
   | { type: "toggle-chat-plan" }
   | { type: "toggle-chat-browser" }
   | { type: "set-chat-panel"; panel?: ChatSidePanelId }
-  | { type: "ide-open-tab"; tab: EditorTab }
+  /**
+   * `background` opens the tab without moving the user: the app stays on its
+   * current destination and layout, and whatever tab was active stays active.
+   * Model-driven reads use it; anything the user clicked does not.
+   */
+  | { type: "ide-open-tab"; tab: EditorTab; background?: boolean }
   | { type: "ide-close-tab"; path: string; groupId?: string }
   | { type: "ide-rename-path"; fromPath: string; toPath: string }
   | { type: "ide-delete-path"; path: string }
@@ -1901,6 +1967,9 @@ export function workbenchReducer(
       const activeGroup = state.ide.layout.groups.find(
         (group) => group.id === state.ide.layout.activeGroupId,
       );
+      const background = action.background === true;
+      // A background open may recycle a stale preview tab, but never the one
+      // the user is looking at.
       const previewPath =
         tab.preview && !tab.pinned
           ? activeGroup?.tabs.find(
@@ -1908,7 +1977,12 @@ export function workbenchReducer(
                 item.path !== tab.path &&
                 item.preview &&
                 !item.pinned &&
-                !item.dirty,
+                !item.dirty &&
+                !(
+                  background &&
+                  (item.path === state.ide.activePath ||
+                    item.path === activeGroup.activePath)
+                ),
             )?.path
           : undefined;
       const baseTabs = previewPath
@@ -1924,14 +1998,22 @@ export function workbenchReducer(
         : state.ide.layout;
       return {
         ...state,
-        activeDestination: "workspace",
-        activeWorkspaceLayout: "code",
+        ...(background
+          ? {}
+          : {
+              activeDestination: "workspace" as const,
+              activeWorkspaceLayout: "code" as const,
+            }),
         ide: {
           ...state.ide,
           tabs,
-          activePath: tab.path,
+          activePath: background
+            ? (state.ide.activePath ?? tab.path)
+            : tab.path,
           layout: syncEditorTabInLayout(
-            upsertPathInActiveEditorGroup(baseLayout, tab.path),
+            background
+              ? appendPathToActiveEditorGroup(baseLayout, tab.path)
+              : upsertPathInActiveEditorGroup(baseLayout, tab.path),
             tab,
           ),
         },

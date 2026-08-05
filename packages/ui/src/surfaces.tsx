@@ -245,6 +245,7 @@ import {
   defaultCommandProfiles,
   defaultProviderStatuses,
   isUserSelectedWorkspacePath,
+  resolveChatGridDropSlot,
 } from "./workbench-state";
 import {
   preferredCleanMachineConnectProvider,
@@ -2091,14 +2092,18 @@ function SettingsSidebarContent({
 type ScmFileBadge = { icon: IconComponent; tone: string };
 
 /**
- * Language badge for a source control row: the icon and the colour tone the
- * Explorer would use for the same file, so a change list reads by colour first
- * and by name second — the way VS Code's Source Control view does.
+ * Language badge for a file row: the icon and the colour tone shared by the
+ * Explorer and Source Control, so a file reads by colour first and by name
+ * second — the way VS Code's views do — and looks the same in both.
  */
 const SCM_BADGE_REACT: ScmFileBadge = { icon: Atom, tone: "react" };
 const SCM_BADGE_BINARY: ScmFileBadge = { icon: Binary, tone: "binary" };
 const SCM_BADGE_JSON: ScmFileBadge = { icon: Braces, tone: "json" };
 const SCM_BADGE_STYLESHEET: ScmFileBadge = { icon: Hash, tone: "css" };
+const SCM_BADGE_CONFIG: ScmFileBadge = { icon: Settings, tone: "config" };
+const SCM_BADGE_TEXT: ScmFileBadge = { icon: FileText, tone: "default" };
+const SCM_BADGE_MEDIA: ScmFileBadge = { icon: Video, tone: "media" };
+const SCM_BADGE_LOG: ScmFileBadge = { icon: ScrollText, tone: "default" };
 
 const SCM_BADGE_BY_EXTENSION: Record<string, ScmFileBadge> = {
   tsx: SCM_BADGE_REACT,
@@ -2121,28 +2126,52 @@ const SCM_BADGE_BY_EXTENSION: Record<string, ScmFileBadge> = {
   svelte: { icon: FileCode2, tone: "html" },
   md: { icon: FileText, tone: "markdown" },
   mdx: { icon: FileText, tone: "markdown" },
-  txt: { icon: FileText, tone: "default" },
+  txt: SCM_BADGE_TEXT,
+  pdf: SCM_BADGE_TEXT,
+  log: SCM_BADGE_LOG,
   rs: { icon: FileCode2, tone: "rust" },
   go: { icon: FileCode2, tone: "go" },
   py: { icon: FileCode2, tone: "python" },
+  pyi: { icon: FileCode2, tone: "python" },
   rb: { icon: FileCode2, tone: "ruby" },
   swift: { icon: FileCode2, tone: "swift" },
   java: { icon: FileCode2, tone: "java" },
   kt: { icon: FileCode2, tone: "java" },
+  kts: { icon: FileCode2, tone: "java" },
+  scala: { icon: FileCode2, tone: "java" },
   c: { icon: FileCode2, tone: "cpp" },
   h: { icon: FileCode2, tone: "cpp" },
   cpp: { icon: FileCode2, tone: "cpp" },
+  cc: { icon: FileCode2, tone: "cpp" },
   hpp: { icon: FileCode2, tone: "cpp" },
-  toml: { icon: Settings, tone: "config" },
-  yaml: { icon: Settings, tone: "config" },
-  yml: { icon: Settings, tone: "config" },
-  ini: { icon: Settings, tone: "config" },
-  conf: { icon: Settings, tone: "config" },
-  env: { icon: Settings, tone: "config" },
+  cs: { icon: FileCode2, tone: "cpp" },
+  php: { icon: FileCode2, tone: "php" },
+  lua: { icon: FileCode2, tone: "lua" },
+  dart: { icon: FileCode2, tone: "dart" },
+  ex: { icon: FileCode2, tone: "elixir" },
+  exs: { icon: FileCode2, tone: "elixir" },
+  graphql: { icon: FileCode2, tone: "graphql" },
+  gql: { icon: FileCode2, tone: "graphql" },
+  prisma: { icon: Database, tone: "data" },
+  patch: { icon: FileCode2, tone: "diff" },
+  diff: { icon: FileCode2, tone: "diff" },
+  xml: { icon: FileCode2, tone: "html" },
+  plist: { icon: FileCode2, tone: "html" },
+  toml: SCM_BADGE_CONFIG,
+  yaml: SCM_BADGE_CONFIG,
+  yml: SCM_BADGE_CONFIG,
+  ini: SCM_BADGE_CONFIG,
+  conf: SCM_BADGE_CONFIG,
+  env: SCM_BADGE_CONFIG,
+  tf: SCM_BADGE_CONFIG,
+  nix: SCM_BADGE_CONFIG,
   sh: { icon: Terminal, tone: "shell" },
   bash: { icon: Terminal, tone: "shell" },
   zsh: { icon: Terminal, tone: "shell" },
   fish: { icon: Terminal, tone: "shell" },
+  ps1: { icon: Terminal, tone: "shell" },
+  bat: { icon: Terminal, tone: "shell" },
+  cmd: { icon: Terminal, tone: "shell" },
   png: { icon: ImageIcon, tone: "image" },
   jpg: { icon: ImageIcon, tone: "image" },
   jpeg: { icon: ImageIcon, tone: "image" },
@@ -2158,14 +2187,36 @@ const SCM_BADGE_BY_EXTENSION: Record<string, ScmFileBadge> = {
   otf: { icon: FileType, tone: "font" },
   zip: { icon: FileArchive, tone: "archive" },
   gz: { icon: FileArchive, tone: "archive" },
+  tgz: { icon: FileArchive, tone: "archive" },
   tar: { icon: FileArchive, tone: "archive" },
   dmg: { icon: FileArchive, tone: "archive" },
   sql: { icon: Database, tone: "data" },
   db: { icon: Database, tone: "data" },
   sqlite: { icon: Database, tone: "data" },
   csv: { icon: Database, tone: "data" },
+  tsv: { icon: Database, tone: "data" },
+  mp4: SCM_BADGE_MEDIA,
+  mov: SCM_BADGE_MEDIA,
+  webm: SCM_BADGE_MEDIA,
+  mp3: SCM_BADGE_MEDIA,
+  wav: SCM_BADGE_MEDIA,
   bin: SCM_BADGE_BINARY,
   wasm: SCM_BADGE_BINARY,
+  exe: SCM_BADGE_BINARY,
+  so: SCM_BADGE_BINARY,
+  dylib: SCM_BADGE_BINARY,
+};
+
+/** Files whose whole name carries the type, so the extension never fires. */
+const SCM_BADGE_BY_NAME: Record<string, ScmFileBadge> = {
+  dockerfile: SCM_BADGE_CONFIG,
+  makefile: SCM_BADGE_CONFIG,
+  procfile: SCM_BADGE_CONFIG,
+  rakefile: { icon: FileCode2, tone: "ruby" },
+  gemfile: { icon: FileCode2, tone: "ruby" },
+  license: SCM_BADGE_TEXT,
+  notice: SCM_BADGE_TEXT,
+  readme: { icon: FileText, tone: "markdown" },
 };
 
 function scmFileBadge(path: string): ScmFileBadge {
@@ -2177,10 +2228,16 @@ function scmFileBadge(path: string): ScmFileBadge {
   ) {
     return { icon: LockKeyhole, tone: "lock" };
   }
+  const named = SCM_BADGE_BY_NAME[name];
+  if (named) return named;
+  // Dotfiles are configuration by convention — .gitignore, .npmrc, .env.local —
+  // and their trailing segment is rarely a type worth reading as one.
+  if (name.startsWith(".env")) return SCM_BADGE_CONFIG;
+  if (name.startsWith(".") && !name.slice(1).includes(".")) {
+    return SCM_BADGE_CONFIG;
+  }
   const extension = name.includes(".") ? (name.split(".").at(-1) ?? "") : "";
-  return (
-    SCM_BADGE_BY_EXTENSION[extension] ?? { icon: FileText, tone: "default" }
-  );
+  return SCM_BADGE_BY_EXTENSION[extension] ?? SCM_BADGE_TEXT;
 }
 
 /**
@@ -5098,9 +5155,8 @@ function WorkspaceExplorerRow({
   onDoubleClick?: () => void;
   onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }) {
-  const extension =
-    kind === "file" ? label.split(".").pop()?.toLowerCase() : undefined;
-  const fileTone = workspaceFileTone(extension);
+  const badge = kind === "file" ? scmFileBadge(label) : undefined;
+  const FileIcon = badge?.icon ?? FileCode2;
 
   return (
     <button
@@ -5116,7 +5172,7 @@ function WorkspaceExplorerRow({
       data-buffer-state={bufferStatus}
       data-explorer-path={path}
       data-file-state={decoration?.color}
-      data-file-tone={fileTone}
+      data-file-tone={badge?.tone}
       data-open={isOpen || undefined}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -5131,7 +5187,11 @@ function WorkspaceExplorerRow({
       {kind === "directory" ? (
         <ChevronRight className="gyro-explorer-chevron" size={13} />
       ) : (
-        <FileCode2 className="gyro-explorer-file-icon" size={13} />
+        <FileIcon
+          aria-hidden="true"
+          className="gyro-explorer-file-icon"
+          size={13}
+        />
       )}
       <span>{label}</span>
       {decoration?.badge ? (
@@ -5139,21 +5199,6 @@ function WorkspaceExplorerRow({
       ) : null}
     </button>
   );
-}
-
-function workspaceFileTone(extension?: string) {
-  if (!extension) return "default";
-  if (["js", "jsx", "mjs", "cjs"].includes(extension)) return "javascript";
-  if (["ts", "tsx"].includes(extension)) return "typescript";
-  if (["json", "jsonc"].includes(extension)) return "json";
-  if (["css", "scss", "sass", "less"].includes(extension)) return "style";
-  if (["md", "mdx", "txt"].includes(extension)) return "document";
-  if (["rs", "toml"].includes(extension)) return "rust";
-  if (["sh", "zsh", "bash", "fish"].includes(extension)) return "shell";
-  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(extension)) {
-    return "image";
-  }
-  return "default";
 }
 
 function SidebarModeRow({
@@ -5449,6 +5494,17 @@ export function ChatGridSurface({
   while (slots.length < 4) slots.push(null);
   const dropZones = chatGridDropZones(slots);
   const arrangement = effectiveChatArrangement(layout, occupiedCount);
+  // Light up the tile the chat will actually land on. Grid-position zones can
+  // resolve to a different slot when the pointed-at column is full, and a
+  // preview that disagrees with the drop is worse than no preview.
+  const highlightedZoneId = (() => {
+    const hovered = dropZones.find((zone) => zone.id === dropTargetId);
+    if (!hovered || hovered.placement) return dropTargetId;
+    const { targetIndex } = resolveChatGridDropSlot(slots, hovered.slotIndex);
+    return (
+      dropZones.find((zone) => zone.slotIndex === targetIndex)?.id ?? hovered.id
+    );
+  })();
 
   const finishDrag = useCallback(() => {
     setDragSource(undefined);
@@ -5595,7 +5651,7 @@ export function ChatGridSurface({
               <div
                 className={[
                   "gyro-chat-grid-drop-zone",
-                  dropTargetId === zone.id ? "is-drop-target" : "",
+                  highlightedZoneId === zone.id ? "is-drop-target" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
@@ -6238,13 +6294,19 @@ export function ChatSurface({
     return undefined;
   }, [events]);
   const planDecisionKey = useMemo(() => {
-    if (!sessionPlan?.updatedAt || sessionPlan.items.length === 0) {
+    // A plan-mode turn that wrote the document but skipped the checklist
+    // marker is still approvable; only an empty plan is not.
+    if (
+      !sessionPlan?.updatedAt ||
+      (sessionPlan.items.length === 0 && !sessionPlan.content)
+    ) {
       return undefined;
     }
     return [
       sessionPlan.sessionId ?? "session",
       sessionPlan.sourceTurnId ?? "plan",
       sessionPlan.updatedAt,
+      sessionPlan.content?.length ?? 0,
       sessionPlan.items.map((item) => `${item.id}:${item.updatedAt}`).join("|"),
     ].join(":");
   }, [sessionPlan]);
@@ -6278,7 +6340,11 @@ export function ChatSurface({
     workspacePath && !isGeneratedGyroWorkspace(workspacePath)
       ? workspaceName(workspacePath)
       : undefined;
+  // Idle transcripts can lag a frame under React concurrency. A live turn cannot:
+  // deferred events made the rail freeze mid-stream while the provider kept
+  // working, so streaming and status updates always read from the latest list.
   const deferredEvents = useDeferredValue(events);
+  const transcriptEvents = isComposerSending ? events : deferredEvents;
   const updateTranscriptScrollPosition = useCallback(() => {
     const transcript = transcriptRef.current;
     if (!transcript) {
@@ -6301,7 +6367,7 @@ export function ChatSurface({
       updateTranscriptScrollPosition,
     );
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [deferredEvents, updateTranscriptScrollPosition]);
+  }, [transcriptEvents, updateTranscriptScrollPosition]);
   const contextModel = useMemo(() => {
     // Prefer the chat's own model over the global picker state so split panes
     // keep independent context windows when each thread uses a different model.
@@ -6337,8 +6403,8 @@ export function ChatSurface({
   ]);
   const contextUsage = useMemo(
     () =>
-      estimateComposerContextUsage(deferredEvents, localDraft, contextModel),
-    [contextModel, deferredEvents, localDraft],
+      estimateComposerContextUsage(transcriptEvents, localDraft, contextModel),
+    [contextModel, localDraft, transcriptEvents],
   );
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
@@ -6346,15 +6412,15 @@ export function ChatSurface({
   const composerLimits = useMemo(
     () =>
       composerLimitWindows(
-        deferredEvents,
+        transcriptEvents,
         contextModel,
         composerProviderUsage?.windows ?? [],
       ),
-    [composerProviderUsage?.windows, contextModel, deferredEvents],
+    [composerProviderUsage?.windows, contextModel, transcriptEvents],
   );
   const transcriptState = useMemo(
-    () => deriveTranscriptState(deferredEvents),
-    [deferredEvents],
+    () => deriveTranscriptState(transcriptEvents),
+    [transcriptEvents],
   );
   const { looseEvents, turns } = transcriptState;
   const activeRailPanel =
@@ -6377,8 +6443,11 @@ export function ChatSurface({
     onTogglePlanPanel,
     planDecisionKey,
   ]);
+  // Prefer the turn the provider is still driving. If its status has not landed
+  // yet (first paint of a new send), keep the latest turn live so the rail does
+  // not settle to "Worked" / "Interrupted" while the backend is still going.
   const activeTurnId = isComposerSending
-    ? activeTranscriptTurnId(turns)
+    ? (activeTranscriptTurnId(turns) ?? turns.at(-1)?.id)
     : undefined;
   const transcriptContent = useMemo(
     () => (
@@ -6944,6 +7013,7 @@ export function ChatSurface({
             <PlanDecisionCard
               isPending={isPlanDecisionPending}
               onDecision={handlePlanDecision}
+              onOpenPlan={onTogglePlanPanel}
               plan={sessionPlan}
             />
           ) : null}
@@ -6993,48 +7063,74 @@ export function ChatSurface({
   );
 }
 
+/** Steps shown before the card defers to the plan document. */
+const PLAN_DECISION_VISIBLE_STEPS = 5;
+
 function PlanDecisionCard({
   isPending,
   onDecision,
+  onOpenPlan,
   plan,
 }: {
   isPending: boolean;
   onDecision: (decision: "approve" | "reject") => void;
+  onOpenPlan?: () => void;
   plan: SessionPlan;
 }) {
+  const visibleItems = plan.items.slice(0, PLAN_DECISION_VISIBLE_STEPS);
+  const hiddenCount = plan.items.length - visibleItems.length;
+  const stepLabel =
+    plan.items.length > 0
+      ? `${plan.items.length} ${plan.items.length === 1 ? "step" : "steps"}`
+      : "Plan document";
   return (
     <section
       aria-label="Plan ready for approval"
-      className="gyro-plan-decision-card"
+      className={`gyro-plan-decision-card${isPending ? " is-pending" : ""}`}
     >
       <header>
-        <span className="gyro-plan-decision-icon">
-          <ListChecks size={16} />
-        </span>
         <div>
-          <small>Plan ready</small>
           <strong>{plan.title || "Implementation plan"}</strong>
+          <small>{stepLabel} · read-only until you approve</small>
         </div>
       </header>
-      <ol>
-        {plan.items.map((item) => (
-          <li key={item.id}>
-            <span aria-hidden="true">
-              {item.status === "complete" ? (
-                <Check size={12} />
-              ) : item.status === "blocked" ? (
-                <X size={12} />
-              ) : (
-                <CircleDashed size={12} />
-              )}
-            </span>
-            <div>
-              <strong>{item.title}</strong>
-              {item.detail ? <small>{item.detail}</small> : null}
-            </div>
-          </li>
-        ))}
-      </ol>
+      {visibleItems.length > 0 ? (
+        <ol>
+          {visibleItems.map((item, index) => (
+            <li key={item.id}>
+              {/* Every step reads `todo` at this moment, so identical status
+                  glyphs carry nothing; the ordinal carries the sequence. */}
+              <span aria-hidden="true">
+                {item.status === "complete" ? (
+                  <Check size={12} />
+                ) : item.status === "blocked" ? (
+                  <X size={12} />
+                ) : (
+                  index + 1
+                )}
+              </span>
+              <div>
+                <strong>{item.title}</strong>
+                {item.detail ? <small>{item.detail}</small> : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="gyro-plan-decision-summary">
+          The full plan is written up in the Plan document.
+        </p>
+      )}
+      {hiddenCount > 0 || visibleItems.length === 0 ? (
+        <button
+          className="gyro-plan-decision-more"
+          onClick={onOpenPlan}
+          type="button"
+        >
+          <ListChecks size={12} />
+          {hiddenCount > 0 ? `+${hiddenCount} more · open plan` : "Open plan"}
+        </button>
+      ) : null}
       <footer>
         <span>Implement this plan?</span>
         <div>
@@ -7056,6 +7152,9 @@ function PlanDecisionCard({
           </button>
         </div>
       </footer>
+      {isPending ? (
+        <span aria-hidden="true" className="gyro-plan-decision-progress" />
+      ) : null}
     </section>
   );
 }
@@ -8182,10 +8281,8 @@ function ChatSidePanel({
           aria-label="Model permissions"
         >
           <summary>
-            <span>
-              <ShieldCheck size={14} />
-              <strong>Permissions</strong>
-            </span>
+            <ShieldCheck size={15} />
+            <strong>Permissions</strong>
             <small>
               {capabilityActivities.filter((item) =>
                 ["requested", "waiting", "running"].includes(item.status),
@@ -8248,7 +8345,6 @@ function ChatEnvironmentLauncher({
 }) {
   return (
     <nav className="gyro-chat-tool-launcher" aria-label="Environment tools">
-      <span className="gyro-chat-tool-section-label">Tools</span>
       <button
         aria-label={`Open Changes, ${changesLabel}`}
         onClick={() => onOpenTool("diff")}
@@ -18998,24 +19094,8 @@ function Composer({
           </>
         ) : null}
         {surfaceControls}
-        {isGoalComposerActive ? (
-          <button
-            aria-label="Cancel setting goal"
-            aria-pressed="true"
-            className="gyro-composer-chip is-goal"
-            onClick={onCancelGoalComposer}
-            title="Cancel setting goal"
-            type="button"
-          >
-            <Goal size={13} />
-            <span className="gyro-composer-label">Goal</span>
-            <X
-              aria-hidden="true"
-              className="gyro-composer-chip-remove"
-              size={12}
-            />
-          </button>
-        ) : chatMode === "plan" ? (
+        {/* Mode and goal are independent, so both chips can sit here at once. */}
+        {chatMode === "plan" ? (
           <button
             aria-label="Remove Plan mode"
             aria-pressed="true"
@@ -19043,6 +19123,24 @@ function Composer({
           >
             <Users size={13} />
             <span className="gyro-composer-label">Council</span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : null}
+        {isGoalComposerActive ? (
+          <button
+            aria-label="Cancel setting goal"
+            aria-pressed="true"
+            className="gyro-composer-chip is-goal"
+            onClick={onCancelGoalComposer}
+            title="Cancel setting goal"
+            type="button"
+          >
+            <Goal size={13} />
+            <span className="gyro-composer-label">Goal</span>
             <X
               aria-hidden="true"
               className="gyro-composer-chip-remove"

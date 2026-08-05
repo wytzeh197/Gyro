@@ -9,7 +9,14 @@ export const MAX_CHAT_EVENT_RENDER_COUNT = 400;
  * 400-cap does not immediately drop the older page they just requested.
  */
 export const MAX_CHAT_EVENT_HOLD_COUNT = 2_500;
-const MAX_PENDING_STREAM_EVENTS_PER_TURN = 64;
+/**
+ * How many out-of-order events a turn may hold before the missing sequence is
+ * treated as lost. The previous bound of 64 worked for dense token streams but
+ * left tool-sparse turns frozen for a long time when a single IPC frame dropped
+ * — the rail stopped while the backend kept working. A smaller bound recovers
+ * mid-turn without waiting for the terminal event.
+ */
+const MAX_PENDING_STREAM_EVENTS_PER_TURN = 8;
 const MAX_STREAM_TURN_ORDER_STATES = 256;
 
 type ProviderStreamSequence = {
