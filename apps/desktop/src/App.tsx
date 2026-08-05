@@ -1113,8 +1113,15 @@ export function App() {
   eventsRef.current = events;
   selectedTerminalPaneIdRef.current = workbench.selectedTerminalPaneId;
   terminalPanesRef.current = workbench.terminalPanes;
+  // Plan/goal/mode can lag while idle. An in-flight turn cannot: deferred
+  // events starved live status and the rail froze before the provider finished.
   const deferredEventsForPlan = useDeferredValue(events);
-  const deferredEventsForTurn = deferredEventsForPlan;
+  const isLiveTurnStreaming = activeSessionId
+    ? sendingSessionIds.includes(activeSessionId)
+    : isStartingFirstTurn;
+  const deferredEventsForTurn = isLiveTurnStreaming
+    ? events
+    : deferredEventsForPlan;
   const persistedActiveSessionPlan = useMemo(
     () => deriveSessionPlan(deferredEventsForPlan, activeSessionId),
     [activeSessionId, deferredEventsForPlan],
@@ -2106,24 +2113,25 @@ export function App() {
     }
     const batches = Array.from(providerStreamBatchRef.current.values());
     providerStreamBatchRef.current.clear();
-    startTransition(() => {
-      const bySession = new Map<string, ProviderStreamBatch[]>();
-      for (const batch of batches) {
-        const group = bySession.get(batch.streamEvent.sessionId) ?? [];
-        group.push(batch);
-        bySession.set(batch.streamEvent.sessionId, group);
-      }
-      for (const [sessionId, sessionBatches] of bySession) {
-        applyProviderChatStreamDeltas(
-          optimisticEventsRef,
-          (value) => setEventsForSession(sessionId, value),
-          sessionBatches.map((batch) => ({
-            ...batch.streamEvent,
-            textDelta: batch.textDelta,
-          })),
-        );
-      }
-    });
+    // Stream text must paint at the same priority as the turn itself. Wrapping
+    // flushes in startTransition let concurrent work starve the rail so the
+    // frontend looked frozen while the provider was still producing tokens.
+    const bySession = new Map<string, ProviderStreamBatch[]>();
+    for (const batch of batches) {
+      const group = bySession.get(batch.streamEvent.sessionId) ?? [];
+      group.push(batch);
+      bySession.set(batch.streamEvent.sessionId, group);
+    }
+    for (const [sessionId, sessionBatches] of bySession) {
+      applyProviderChatStreamDeltas(
+        optimisticEventsRef,
+        (value) => setEventsForSession(sessionId, value),
+        sessionBatches.map((batch) => ({
+          ...batch.streamEvent,
+          textDelta: batch.textDelta,
+        })),
+      );
+    }
   }, [setEventsForSession]);
 
   useEffect(() => {
@@ -2311,7 +2319,9 @@ export function App() {
                 column: Math.max(1, column),
               });
               // The tab is opened as a preview either way, so the file is
-              // already waiting once the user walks over to Code.
+              // already waiting once the user walks over to Code. Outside
+              // "follow" it lands in the background: no destination change, no
+              // active-tab change, no scroll away from what the user is reading.
               if (isActiveModelWorkspace) {
                 dispatchWorkbench({
                   type: "ide-open-tab",
@@ -2321,22 +2331,17 @@ export function App() {
                     dirty: false,
                     preview: true,
                   },
+                  background: !shouldFollow,
                 });
+              }
+              if (shouldFollow) {
                 setEditorRevealTarget({
                   path,
                   lineNumber: Math.max(1, line),
                   column: Math.max(1, column),
                   nonce: Date.now(),
                 });
-              }
-              if (
-                shouldFollow ||
-                (isActiveModelWorkspace &&
-                  activeWorkspaceLayoutRef.current === "code")
-              ) {
                 setSelectedFile(path);
-              }
-              if (shouldFollow) {
                 dispatchWorkbench({
                   type: "select-workspace-layout",
                   layout: "code",
@@ -2458,7 +2463,8 @@ export function App() {
         streamEvent.phase === "started" ||
         streamEvent.phase === "completed" ||
         streamEvent.phase === "failed" ||
-        streamEvent.phase === "cancelled"
+        streamEvent.phase === "cancelled" ||
+        streamEvent.phase === "heartbeat"
       ) {
         flushProviderStreamBatches();
         applyProviderChatStreamEvent(
@@ -8702,7 +8708,9 @@ export function App() {
         );
         return true;
       }
-      if (activeSessionPlan.items.length === 0) {
+      // A plan the model wrote as prose but never emitted as a checklist is
+      // still a plan the user can approve.
+      if (activeSessionPlan.items.length === 0 && !activeSessionPlan.content) {
         return false;
       }
       const modeChanged = await changeChatMode("normal");
@@ -9973,9 +9981,6 @@ export function App() {
             ? "active"
             : (activeSessionGoal?.status ?? "active");
       if (!activeSessionId) {
-        if (action === "set" || action === "edit") {
-          setPendingNewChatMode("normal");
-        }
         setPendingNewChatGoal(
           action === "clear"
             ? undefined
@@ -10005,25 +10010,12 @@ export function App() {
               : action === "set"
                 ? `Goal set: ${text}`
                 : `Goal updated: ${text}`;
-      if (
-        (action === "set" || action === "edit") &&
-        activeChatMode === "plan"
-      ) {
-        const modeChanged = await changeChatMode("normal");
-        if (!modeChanged) {
-          return false;
-        }
-      }
+      // A goal is the outcome, a mode is how the turn runs. Setting one no
+      // longer cancels the other — the composer shows both.
       await appendGoalEvent(payload, message);
       return true;
     },
-    [
-      activeChatMode,
-      activeSessionGoal,
-      activeSessionId,
-      appendGoalEvent,
-      changeChatMode,
-    ],
+    [activeSessionGoal, activeSessionId, appendGoalEvent],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -16006,6 +15998,10 @@ function deriveActiveTurn(
   let hasCommandRequest = false;
   let hasCommandOutput = false;
   let hasStreamingAssistant = false;
+  let hasProviderActivity = false;
+  let providerStatus: string | undefined;
+  /** Heartbeats refresh the status event's createdAt; that is the live clock. */
+  let providerStatusCreatedAt: string | undefined;
 
   for (
     let index = Math.max(0, latestUserIndex);
@@ -16044,14 +16040,24 @@ function deriveActiveTurn(
       }
     } else if (event.kind === "system-event") {
       const payload = recordFromUnknown(event.payload);
+      const payloadKind = stringFromRecord(payload, "kind");
       const proposalId = stringFromRecord(payload, "proposalId");
       const status = stringFromRecord(payload, "status");
       if (
         proposalId &&
         status &&
-        stringFromRecord(payload, "kind") === "mutation-approval"
+        payloadKind === "mutation-approval"
       ) {
         mutationApprovalStatuses.set(proposalId, status);
+      }
+      // Backend status is the source of truth for whether the turn is still
+      // open. Heuristics below only fill gaps when no status event exists yet.
+      if (payloadKind === "provider-status" && status) {
+        providerStatus = status;
+        providerStatusCreatedAt = event.createdAt;
+      }
+      if (payloadKind === "provider-activity") {
+        hasProviderActivity = true;
       }
     } else if (event.kind === "command-requested") {
       hasCommandRequest = true;
@@ -16068,17 +16074,40 @@ function deriveActiveTurn(
       (status) => status === "pending",
     ).length;
 
+  // Prefer the durable/streamed provider status so a mid-turn assistant bubble
+  // never settles the workbench turn to "done" while the backend is still live.
   const status =
     approvalsPending > 0
       ? "waiting"
-      : hasStreamingAssistant
-        ? "running"
-        : hasCommandOutput ||
-            (!hasCommandRequest && lastEvent.kind === "assistant-message")
-          ? "done"
-          : hasCommandRequest
+      : providerStatus === "running" ||
+          providerStatus === "queued" ||
+          providerStatus === "waiting"
+        ? providerStatus
+        : providerStatus === "done" ||
+            providerStatus === "failed" ||
+            providerStatus === "cancelled" ||
+            providerStatus === "blocked"
+          ? providerStatus === "cancelled" || providerStatus === "blocked"
+            ? "failed"
+            : providerStatus
+          : hasStreamingAssistant || hasProviderActivity
             ? "running"
-            : "queued";
+            : hasCommandOutput ||
+                (!hasCommandRequest && lastEvent.kind === "assistant-message")
+              ? "done"
+              : hasCommandRequest
+                ? "running"
+                : "queued";
+
+  // While the provider is still open, use the later of the last timeline beat
+  // and the status event (which heartbeats touch). Otherwise quiet tool stretches
+  // after early activity leave a stale updatedAt and the idle watchdog fires.
+  const isLiveProviderStatus =
+    status === "running" || status === "queued" || status === "waiting";
+  const updatedAt =
+    isLiveProviderStatus && providerStatusCreatedAt
+      ? laterIsoTimestamp(lastEvent.createdAt, providerStatusCreatedAt)
+      : lastEvent.createdAt;
 
   return {
     id: turnId,
@@ -16086,7 +16115,7 @@ function deriveActiveTurn(
     sessionTitle,
     status,
     startedAt: latestUserEvent.createdAt,
-    updatedAt: lastEvent.createdAt,
+    updatedAt,
     lastEvent:
       lastEvent.kind === "assistant-message"
         ? "Assistant response received"
@@ -16199,6 +16228,39 @@ function deriveSessionPlan(
             normalizePlanItem(item, event, plan.items.length + index),
           ),
         ],
+        updatedAt: event.createdAt,
+      };
+      continue;
+    }
+
+    // Progress reports name only the ids that moved, so a turn that finishes
+    // three steps stays one marker line and never restates the plan.
+    if (payloadItems && action === "update-items") {
+      const updates = new Map(
+        payloadItems
+          .map((item) => recordFromUnknown(item))
+          .filter((record): record is Record<string, unknown> => Boolean(record))
+          .map((record) => [stringFromRecord(record, "id"), record] as const)
+          .filter(([id]) => Boolean(id)),
+      );
+      plan = {
+        ...plan,
+        items: plan.items.map((item) => {
+          const update = updates.get(item.id);
+          if (!update) {
+            return item;
+          }
+          return {
+            ...item,
+            detail: stringFromRecord(update, "detail") ?? item.detail,
+            status: normalizePlanStatus(update.status ?? item.status),
+            title:
+              stringFromRecord(update, "title") ??
+              stringFromRecord(update, "label") ??
+              item.title,
+            updatedAt: event.createdAt,
+          };
+        }),
         updatedAt: event.createdAt,
       };
       continue;
@@ -17107,6 +17169,19 @@ function createTurnId() {
   return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
 }
 
+/** Later of two ISO timestamps; falls back to the first parseable value. */
+function laterIsoTimestamp(first: string, second: string) {
+  const firstMs = Date.parse(first);
+  const secondMs = Date.parse(second);
+  if (!Number.isFinite(firstMs)) {
+    return Number.isFinite(secondMs) ? second : first;
+  }
+  if (!Number.isFinite(secondMs)) {
+    return first;
+  }
+  return secondMs >= firstMs ? second : first;
+}
+
 function providerLabelForId(
   providers: ModelProviderConfig[],
   statuses: WorkbenchState["providerStatuses"],
@@ -17576,7 +17651,13 @@ function applyProviderChatStreamEvent(
   if (!streamEvent.sessionId || !turnId) {
     return;
   }
-  if (streamEvent.phase === "started" || streamEvent.phase === "completed") {
+  // Heartbeats keep a quiet-but-alive run marked running and refresh the status
+  // event's timestamp so the idle watchdog does not settle the turn early.
+  if (
+    streamEvent.phase === "started" ||
+    streamEvent.phase === "completed" ||
+    streamEvent.phase === "heartbeat"
+  ) {
     updateOptimisticProviderStatus(
       optimisticEventsRef,
       setEvents,
@@ -17584,6 +17665,8 @@ function applyProviderChatStreamEvent(
       turnId,
       streamEvent.status ??
         (streamEvent.phase === "completed" ? "done" : "running"),
+      undefined,
+      streamEvent.phase === "heartbeat",
     );
     return;
   }
@@ -17630,6 +17713,8 @@ function updateOptimisticProviderStatus(
   turnId: string,
   status: OptimisticProviderStatus,
   error?: string,
+  /** Move createdAt forward so idle watches see the run is still alive. */
+  touchTimestamp = false,
 ) {
   const updateEvents = (items: SessionEvent[]) => {
     const targetIndex = items.findLastIndex(
@@ -17668,6 +17753,8 @@ function updateOptimisticProviderStatus(
     const completedAtMs = Date.parse(now);
     return {
       ...event,
+      // Heartbeats only move the timestamp; they do not invent a new status event.
+      createdAt: touchTimestamp ? now : event.createdAt,
       message: providerStatusMessage(status, {
         id: stringFromRecord(payload, "providerId") ?? "openai",
         displayName: providerLabel,

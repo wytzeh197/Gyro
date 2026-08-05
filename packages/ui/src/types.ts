@@ -707,7 +707,14 @@ export type ProviderResumeCursor = {
 };
 
 export type ProviderChatStreamPhase =
-  "started" | "activity" | "delta" | "completed" | "failed" | "cancelled";
+  | "started"
+  | "activity"
+  | "delta"
+  /** Backend keep-alive while the provider process is quiet but still running. */
+  | "heartbeat"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export type ProviderChatStreamEvent = {
   sessionId: string;

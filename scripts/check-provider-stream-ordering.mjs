@@ -98,6 +98,28 @@ assert.deepEqual(
   [streamEvent(2), streamEvent(4, "cancelled", "")],
 );
 
+// A single lost mid-turn sequence used to freeze the rail until the terminal
+// event (or 64 later frames). Sparse tool streams never hit that bound, so
+// recover once a handful of later events are waiting (size > 8).
+const midTurnGapState = new Map();
+assert.deepEqual(
+  orderProviderChatStreamEvent(midTurnGapState, streamEvent(0, "started", "")),
+  [streamEvent(0, "started", "")],
+);
+// Hole at 1: stack 2..9 without releasing, then the 9th pending unblocks them.
+for (let sequence = 2; sequence <= 9; sequence += 1) {
+  assert.deepEqual(
+    orderProviderChatStreamEvent(midTurnGapState, streamEvent(sequence)),
+    [],
+    `sequence ${sequence} should wait on the missing frame`,
+  );
+}
+assert.deepEqual(
+  orderProviderChatStreamEvent(midTurnGapState, streamEvent(10)),
+  [2, 3, 4, 5, 6, 7, 8, 9, 10].map((sequence) => streamEvent(sequence)),
+  "a small mid-turn gap must recover without waiting for completed/cancelled",
+);
+
 const optimisticEventsRef = { current: new Map([["session-1", []]]) };
 let renderedEvents = [];
 applyProviderChatStreamDeltas(
