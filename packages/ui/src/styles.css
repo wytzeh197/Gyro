@@ -29509,6 +29509,24 @@ button.gyro-account-menu-row:hover,
   font-weight: 450;
 }
 
+/* The retry beat borrows .gyro-run-row wholesale, so it is the same size as a
+   command line and the spine runs through it. Everything below is motion and
+   emphasis: the label sits at the brightness of a live row, and the icon sweeps
+   once per cycle then holds — one attempt, then the wait before the next. */
+.gyro-run-retry .gyro-run-row-label {
+  color: var(--gyro-text);
+}
+
+.gyro-run-retry .gyro-run-row-icon {
+  animation: gyro-run-retry-sweep 2.4s ease-in-out infinite;
+  color: var(--gyro-muted);
+  opacity: 1;
+}
+
+.gyro-run-retry .gyro-run-row-detail {
+  animation: gyro-run-breathe 2.4s ease-in-out infinite;
+}
+
 .gyro-run-problem {
   align-items: baseline;
   display: flex;
@@ -29566,9 +29584,34 @@ button.gyro-account-menu-row:hover,
   }
 }
 
+/* One turn of the arrow, then two thirds of the cycle held still. The rotation
+   keeps the 15px icon box (transform, not layout), so the row never shifts. The
+   dim during the hold matches gyro-run-breathe's floor, which is what keeps this
+   in the same family as the working beats instead of reading as a new device. */
+@keyframes gyro-run-retry-sweep {
+  0% {
+    opacity: 0.85;
+    transform: translateY(2px) rotate(0deg);
+  }
+  35% {
+    opacity: 0.85;
+    transform: translateY(2px) rotate(360deg);
+  }
+  70% {
+    opacity: 0.4;
+    transform: translateY(2px) rotate(360deg);
+  }
+  100% {
+    opacity: 0.85;
+    transform: translateY(2px) rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gyro-run-row.is-running .gyro-run-row-icon,
-  .gyro-run-pulse {
+  .gyro-run-pulse,
+  .gyro-run-retry .gyro-run-row-icon,
+  .gyro-run-retry .gyro-run-row-detail {
     animation: none;
   }
 }

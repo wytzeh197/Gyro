@@ -7,6 +7,7 @@ import {
   Lightbulb,
   Minimize2,
   Pencil,
+  RotateCw,
   Search,
   ShieldQuestion,
   SquareTerminal,
@@ -17,6 +18,7 @@ import {
   formatRunDuration,
   isRunPhaseLive,
   runHeaderLabel,
+  runRetryText,
   runRowText,
 } from "./chat-run";
 import type { RunModel, RunPhase, RunStep, WorkItem } from "./chat-run";
@@ -111,9 +113,15 @@ export function ChatRun({
     (model.phase.name === "thinking" ||
       (model.phase.name === "working" && !hasRunningWork));
   const showFinalizingPulse = model.phase.name === "finalizing";
+  // The retry beat replaces the other live beats rather than joining them: two
+  // things breathing at the tail of the rail reads as two runs.
+  const retryPhase = model.phase.name === "retrying" ? model.phase : undefined;
   const showRail =
     showSteps &&
-    (model.steps.length > 0 || showThinkingPulse || showFinalizingPulse);
+    (model.steps.length > 0 ||
+      showThinkingPulse ||
+      showFinalizingPulse ||
+      retryPhase !== undefined);
 
   return (
     <div className="gyro-run">
@@ -149,6 +157,11 @@ export function ChatRun({
           {showThinkingPulse ? (
             <li className="gyro-run-row-item">
               <RunPulse label="Thinking" />
+            </li>
+          ) : null}
+          {retryPhase ? (
+            <li className="gyro-run-row-item">
+              <RunRetry phase={retryPhase} />
             </li>
           ) : null}
         </ol>
@@ -284,6 +297,38 @@ function RunRow({
   return (
     <div className={className} title={title}>
       {body}
+    </div>
+  );
+}
+
+/**
+ * The "reaching for the provider again" beat.
+ *
+ * Built from the same two spans and the same grid as a work row, so it lands at
+ * exactly the size of a "Ran command" line and the spine runs through it
+ * unbroken. Only the motion tells it apart: the icon sweeps once per cycle and
+ * then holds, which reads as an attempt followed by a wait rather than the
+ * even breathing of work that is going fine. It stays in the muted palette on
+ * purpose — the danger colour belongs to the failure block, for when retrying
+ * has stopped being the answer.
+ */
+function RunRetry({
+  phase,
+}: {
+  phase: Extract<RunPhase, { name: "retrying" }>;
+}) {
+  const text = runRetryText(phase);
+  return (
+    <div className="gyro-run-row gyro-run-retry" role="status">
+      <span aria-hidden="true" className="gyro-run-row-icon">
+        <RotateCw size={15} />
+      </span>
+      <span className="gyro-run-row-text">
+        <span className="gyro-run-row-label">{text.label}</span>
+        {text.description ? (
+          <span className="gyro-run-row-detail">{text.description}</span>
+        ) : null}
+      </span>
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   isGenericProviderToolLabel,
   isRunPhaseLive,
   runHeaderLabel,
+  runRetryText,
   runRowText,
   splitToolName,
   workItemFromEvent,
@@ -300,6 +301,74 @@ assert.deepEqual(
   "a stale in-flight turn is interrupted",
 );
 
+// --- retrying -------------------------------------------------------------------
+
+// The network going away mid-run is a live beat, not a dead turn: the work
+// already on the rail is intact and the failure block stays out of the way.
+const offline = buildRunModel([activity("command", "pnpm test", {}, 0)], {
+  isRunning: true,
+  retry: { reason: "Waiting for the network" },
+});
+assert.deepEqual(
+  offline.phase,
+  { name: "retrying", attempt: undefined, reason: "Waiting for the network" },
+  "a live turn with a retry in flight is retrying",
+);
+assert.ok(isRunPhaseLive(offline.phase), "a retrying turn still ticks");
+assert.equal(
+  offline.steps.length,
+  1,
+  "the work behind a retry stays on the rail",
+);
+
+// The provider's last word is stale while the surface is dialling again —
+// otherwise the rail says "Stopped" over a reconnect that is still going.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    retry: { reason: "Reconnecting to the provider" },
+    status: { status: "failed", message: "Connection reset" },
+  }).phase.name,
+  "retrying",
+  "a retry in flight should outrank the failure that provoked it",
+);
+// A settled turn is over, whatever the surface thinks it is dialling.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: false,
+    retry: { reason: "Waiting for the network" },
+  }).phase.name,
+  "done",
+  "a retry hint should not resurrect a settled turn",
+);
+
+// The row copy: reason and attempt are separate facts, and the first attempt
+// carries no number because there is no series to count yet.
+assert.deepEqual(
+  runRetryText({ name: "retrying", reason: "Waiting for the network" }),
+  { label: "Retrying", description: "Waiting for the network" },
+  "a retry names what it is waiting for",
+);
+assert.deepEqual(
+  runRetryText({
+    name: "retrying",
+    reason: "Waiting for the network",
+    attempt: 3,
+  }),
+  { label: "Retrying", description: "Waiting for the network · attempt 3" },
+  "a repeated retry counts itself",
+);
+assert.equal(
+  runRetryText({ name: "retrying", attempt: 1 }).description,
+  "Waiting for the connection",
+  "the first attempt needs neither a number nor a guessed reason",
+);
+assert.equal(
+  runHeaderLabel({ name: "retrying" }, "12s"),
+  "Retrying · 12s",
+  "the header keeps the clock a retrying turn never stopped",
+);
+
 // --- the response rule ----------------------------------------------------------
 
 // While running, an opening line with no work behind it is a preamble.
@@ -312,6 +381,46 @@ assert.equal(
   buildRunModel([say("I'll take a look.", 0)]).response?.message,
   "I'll take a look.",
   "the same line closes the turn once the run has settled",
+);
+
+// Narration that trails the last tool is a rail beat, not the answer — a live
+// run that says "Let me check …" is still working, not finalizing.
+const narrating = buildRunModel(
+  [
+    activity("command", "ls node_modules/monaco-editor", {}, 0),
+    say(
+      "Both symptoms point at one root cause. Let me check the build config.",
+      1,
+    ),
+  ],
+  { isRunning: true },
+);
+assert.equal(
+  narrating.response,
+  undefined,
+  "mid-run narration should not be promoted to the answer",
+);
+assert.deepEqual(
+  narrating.phase,
+  { name: "working" },
+  "a run narrating its next step is working, not finalizing",
+);
+assert.equal(
+  narrating.steps.at(-1)?.kind,
+  "say",
+  "the narration should land on the rail as its own beat",
+);
+// The same line closes the turn once the run settles — something has to answer.
+assert.equal(
+  buildRunModel([
+    activity("command", "ls node_modules/monaco-editor", {}, 0),
+    say(
+      "Both symptoms point at one root cause. Let me check the build config.",
+      1,
+    ),
+  ]).response?.message.startsWith("Both symptoms"),
+  true,
+  "a settled turn still answers with its last block",
 );
 
 // A file edit reported after the closing text must not strand the answer.
