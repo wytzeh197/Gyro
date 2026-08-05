@@ -139,6 +139,10 @@ const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
 const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
 const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
+/// How often a live run reminds the desktop it is still working when the CLI is
+/// quiet (long tools, thinking). The chat idle watchdog is five minutes; this
+/// stays well under that so a silent but healthy process never looks finished.
+const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(45);
 const CODEX_ARTIFACT_COMPLETION_GRACE: Duration = Duration::from_secs(2);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
@@ -4538,6 +4542,33 @@ fn run_provider_chat_blocking(
             )
             .ok()
     });
+    // The model may report that it met the goal, never that the goal changed:
+    // the text stays the user's, only the status moves.
+    let goal_event = control_markers
+        .goal_update
+        .as_ref()
+        .filter(|update| {
+            update.get("status").and_then(serde_json::Value::as_str) == Some("complete")
+        })
+        .and_then(|_| request.goal.as_ref())
+        .filter(|goal| goal.status == "active" && !goal.text.trim().is_empty())
+        .and_then(|goal| {
+            let text = goal.text.trim();
+            store
+                .append_event_with_turn_id(
+                    session_id,
+                    SessionEventKind::GoalUpdated,
+                    format!("Goal completed: {text}"),
+                    serde_json::json!({
+                        "action": "set",
+                        "text": text,
+                        "status": "complete",
+                        "source": "model",
+                    }),
+                    Some(run_id),
+                )
+                .ok()
+        });
     let renamed_session = title_extraction
         .title
         .as_deref()
@@ -4573,6 +4604,9 @@ fn run_provider_chat_blocking(
         };
     if let Some(plan_event) = plan_event {
         activity_events.push(plan_event);
+    }
+    if let Some(goal_event) = goal_event {
+        activity_events.push(goal_event);
     }
     let status_event = append_provider_status_event(
         &store,
@@ -4990,7 +5024,10 @@ fn provider_context_message_with_history(
             ChatMode::Normal => "normal",
         }
     ));
-    if let Some(history) = conversation_history.map(str::trim).filter(|text| !text.is_empty()) {
+    if let Some(history) = conversation_history
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
         context.push(format!(
             "Prior conversation in this Gyro chat (local session continuity — continue from here):\n{history}"
         ));
@@ -5012,17 +5049,33 @@ fn provider_context_message_with_history(
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
         context.push("When the plan is ready for implementation, present the complete plan as polished Markdown with a descriptive heading and clear sections. Gyro displays that response as the Plan document.".into());
+    } else if request.plan.is_some() {
+        // Outside Plan mode the model was never told the marker exists, so the
+        // checklist sat at all-todo through the whole implementation turn.
+        context.push("The Gyro plan below is live while you work. As you finish or block steps, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"update-items\",\"items\":[{\"id\":\"step-id\",\"status\":\"complete\"}]}. Reuse the ids shown in the checklist, list every step whose status changed this turn, keep the JSON on one line, and use only todo, in-progress, complete, or blocked.".into());
     }
     context.extend(
         provider_approval_instructions(request)
             .into_iter()
             .map(str::to_string),
     );
-    if let Some(goal) = request.goal.as_ref().filter(|goal| goal.status == "active") {
-        context.push(format!("Active Gyro session goal: {}", goal.text.trim()));
+    if let Some(goal) = request.goal.as_ref() {
+        let text = goal.text.trim();
+        if !text.is_empty() {
+            if goal.status == "active" {
+                context.push(format!("Active Gyro session goal: {text}"));
+                context.push("If this turn fully achieves that goal, include one hidden line before the answer in this exact form: GYRO_GOAL_UPDATE: {\"status\":\"complete\"}. Only send it when the goal is actually met — Gyro marks the goal complete for the user, it does not ask again.".into());
+            } else {
+                // A met goal used to vanish from context entirely, so follow-up
+                // turns lost all knowledge of what the chat was for.
+                context.push(format!(
+                    "Gyro session goal (already met — do not redo that work): {text}"
+                ));
+            }
+        }
     }
-    if let Some(plan) = request.plan.as_ref() {
-        context.push(format!("Current Gyro plan snapshot: {plan}"));
+    if let Some(plan) = request.plan.as_ref().and_then(plan_context_line) {
+        context.push(plan);
     }
     let references = request
         .attachments
@@ -5060,6 +5113,53 @@ fn provider_context_message_with_history(
         context.join("\n"),
         request.message
     )
+}
+
+/// Render the plan for the model as a checklist rather than as raw JSON.
+///
+/// The stored value carries the whole plan document as an escaped Markdown
+/// string; sending it verbatim spends tokens on quoting the model already read
+/// and buries the one thing it needs — which step it is on, under which id.
+fn plan_context_line(plan: &serde_json::Value) -> Option<String> {
+    let items = plan.get("items").and_then(serde_json::Value::as_array)?;
+    let steps = items
+        .iter()
+        .filter_map(|item| {
+            let title = item
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty())?;
+            let mark = match item.get("status").and_then(serde_json::Value::as_str) {
+                Some("complete") => "x",
+                Some("in-progress") => "~",
+                Some("blocked") => "!",
+                _ => " ",
+            };
+            let id = item
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty());
+            Some(match id {
+                Some(id) => format!("- [{mark}] {title} (id: {id})"),
+                None => format!("- [{mark}] {title}"),
+            })
+        })
+        .collect::<Vec<_>>();
+    if steps.is_empty() {
+        return None;
+    }
+    let title = plan
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or("Plan");
+    Some(format!(
+        "Current Gyro plan — {title} ([x] complete, [~] in progress, [!] blocked):\n{}",
+        steps.join("\n")
+    ))
 }
 
 #[tauri::command]
@@ -11537,13 +11637,7 @@ where
             }
         }
         Err(error) => {
-            persist_failed_provider_attempt(
-                store,
-                request,
-                binding.as_ref(),
-                &attempt,
-                &error,
-            );
+            persist_failed_provider_attempt(store, request, binding.as_ref(), &attempt, &error);
             Err(error)
         }
     }
@@ -12015,8 +12109,7 @@ fn run_openai_codex_chat(
     } else {
         local_conversation_history_for_request(request)
     };
-    let contextual_message =
-        provider_context_message_with_history(request, history.as_deref());
+    let contextual_message = provider_context_message_with_history(request, history.as_deref());
     let prompt = openai_codex_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -12125,6 +12218,38 @@ fn run_openai_codex_chat(
         anyhow::bail!("OpenAI finished, but Codex did not return a chat response.");
     }
 
+    // Exit non-zero after a full streamed answer still completes the turn: the
+    // process is done, the user has the reply, and failing here only freezes a
+    // chat that already finished.
+    if let Some(response) = recover_streamed_provider_answer(&output, last_message.as_str()) {
+        let response_chars = response.chars().count();
+        let provider_session_id = output.provider_session_id.clone();
+        return Ok(ProviderRunnerOutput {
+            activities: provider_activities_for_response(output.activities, &response),
+            context_usage: output.context_usage,
+            billed_usage: output.billed_usage,
+            rate_limits: output.rate_limits,
+            response,
+            resume_cursor: provider_session_id
+                .clone()
+                .map(|session_id| ProviderResumeCursor {
+                    kind: "codex-session".into(),
+                    session_id,
+                }),
+            retry_count: 0,
+            resumed: resume_cursor.is_some(),
+            output_summary: Some(provider_output_summary(
+                "codex-cli",
+                &format!(
+                    "{} (answer kept after non-zero exit)",
+                    output.status_label.as_str()
+                ),
+                provider_session_id.as_deref(),
+                response_chars,
+            )),
+        });
+    }
+
     let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
     let stderr = gyro_core::security::redact_secrets(output.stderr.trim());
     if stdout.is_empty() && stderr.is_empty() {
@@ -12163,8 +12288,7 @@ fn run_openai_codex_app_server_chat(
     } else {
         local_conversation_history_for_request(request)
     };
-    let contextual_message =
-        provider_context_message_with_history(request, history.as_deref());
+    let contextual_message = provider_context_message_with_history(request, history.as_deref());
     let prompt = openai_codex_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -12186,6 +12310,21 @@ fn run_openai_codex_app_server_chat(
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     let mut child = ProviderProcessGuard::new(child);
+    let cancellation = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned())
+        .map(|control| control.cancellation.clone())
+        .unwrap_or_default();
+    let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let heartbeat = spawn_provider_chat_heartbeat(
+        app.clone(),
+        request.clone(),
+        cancellation,
+        heartbeat_stop.clone(),
+    );
     let result = (|| -> anyhow::Result<ProviderRunnerOutput> {
         let mut stdin = child
             .stdin
@@ -12601,6 +12740,8 @@ fn run_openai_codex_app_server_chat(
             )),
         })
     })();
+    heartbeat_stop.store(true, Ordering::Relaxed);
+    let _ = heartbeat.join();
     drop(child);
     result
 }
@@ -13489,8 +13630,7 @@ fn run_anthropic_claude_chat(
     } else {
         local_conversation_history_for_request(request)
     };
-    let contextual_message =
-        provider_context_message_with_history(request, history.as_deref());
+    let contextual_message = provider_context_message_with_history(request, history.as_deref());
     let prompt = claude_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -13600,6 +13740,34 @@ fn run_anthropic_claude_chat(
     // inside the stream rather than on stderr.
     if let Some(detail) = claude_login_failure(&format!("{stdout}{stderr}")) {
         anyhow::bail!("{detail}");
+    }
+    // Same partial-success path as Codex: a streamed answer outranks a non-zero
+    // exit once the process has actually stopped.
+    if let Some(response) = recover_streamed_provider_answer(&output, "") {
+        let response_chars = response.chars().count();
+        let provider_session_id = session_id.clone();
+        return Ok(ProviderRunnerOutput {
+            activities: provider_activities_for_response(output.activities, &response),
+            context_usage: output.context_usage,
+            billed_usage: output.billed_usage,
+            rate_limits: output.rate_limits,
+            response,
+            resume_cursor: Some(ProviderResumeCursor {
+                kind: "claude-session".into(),
+                session_id: provider_session_id.clone(),
+            }),
+            retry_count: 0,
+            resumed: resume_cursor.is_some(),
+            output_summary: Some(provider_output_summary(
+                "claude-code",
+                &format!(
+                    "{} (answer kept after non-zero exit)",
+                    output.status_label.as_str()
+                ),
+                Some(provider_session_id.as_str()),
+                response_chars,
+            )),
+        });
     }
     if stdout.is_empty() && stderr.is_empty() {
         anyhow::bail!(
@@ -14385,11 +14553,13 @@ struct StrippedControlMarkers {
     message: String,
     session_title: Option<String>,
     plan_update: Option<serde_json::Value>,
+    goal_update: Option<serde_json::Value>,
     artifacts: Vec<serde_json::Value>,
 }
 
 const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";
 const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
+const GYRO_GOAL_UPDATE_MARKER: &str = "GYRO_GOAL_UPDATE:";
 const GYRO_ARTIFACTS_MARKER: &str = "GYRO_ARTIFACTS:";
 const MAX_CHAT_ARTIFACTS: usize = 8;
 const MAX_CHAT_ARTIFACT_MARKER_BYTES: usize = 64 * 1024;
@@ -14401,6 +14571,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     let normalized = repair_glued_assistant_blocks(&response.replace("\r\n", "\n"));
     let mut session_title = None;
     let mut plan_update = None;
+    let mut goal_update = None;
     let mut artifacts = Vec::new();
     let mut kept_lines = Vec::new();
 
@@ -14409,6 +14580,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
             line,
             &mut session_title,
             &mut plan_update,
+            &mut goal_update,
             &mut artifacts,
         );
         if cleaned.trim().is_empty() {
@@ -14433,6 +14605,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
         message,
         session_title,
         plan_update,
+        goal_update,
         artifacts,
     }
 }
@@ -14458,6 +14631,7 @@ fn strip_control_markers_from_line(
     line: &str,
     session_title: &mut Option<String>,
     plan_update: &mut Option<serde_json::Value>,
+    goal_update: &mut Option<serde_json::Value>,
     artifacts: &mut Vec<serde_json::Value>,
 ) -> String {
     let mut rest = line;
@@ -14490,6 +14664,17 @@ fn strip_control_markers_from_line(
                     }
                 }
             }
+            GYRO_GOAL_UPDATE_MARKER => match take_leading_json_value(after_marker.trim_start()) {
+                Some((value, remainder)) if value.is_object() => {
+                    if goal_update.is_none() {
+                        *goal_update = Some(value);
+                    }
+                    rest = remainder;
+                }
+                _ => {
+                    rest = "";
+                }
+            },
             GYRO_ARTIFACTS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
                 Some((value, remainder)) => {
                     collect_chat_artifacts_from_value(value, artifacts);
@@ -14516,6 +14701,7 @@ fn next_control_marker(text: &str) -> Option<(&'static str, usize)> {
     let candidates = [
         GYRO_SESSION_TITLE_MARKER,
         GYRO_PLAN_UPDATE_MARKER,
+        GYRO_GOAL_UPDATE_MARKER,
         GYRO_ARTIFACTS_MARKER,
     ];
     candidates
@@ -14643,6 +14829,7 @@ fn derive_session_summary(response: &str) -> Option<String> {
             !line.is_empty()
                 && !line.starts_with("GYRO_SESSION_TITLE:")
                 && !line.starts_with("GYRO_PLAN_UPDATE:")
+                && !line.starts_with("GYRO_GOAL_UPDATE:")
         })
         .map(|line| {
             line.trim_start_matches(['#', '-', '*', '>'])
@@ -15670,6 +15857,11 @@ const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
 /// still leave behind a cursor a retry can resume from. It stays `None` when
 /// the CLI died before acknowledging the session — the case where no resumable
 /// conversation exists yet.
+///
+/// A background heartbeat keeps the desktop turn marked live while the process
+/// is still running but quiet (long tools, model thinking). Completion is never
+/// inferred from silence — only from process exit after the stdout buffers have
+/// been fully drained and the last text delta has been flushed.
 fn run_streaming_command(
     command: Command,
     max_runtime: Duration,
@@ -15698,6 +15890,16 @@ fn run_streaming_command(
     execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;
     execution.max_stderr_chars = MAX_CHAT_RESPONSE_CHARS;
     let mut stream_state = StreamingCommandState::new();
+    // Heartbeats share the run's cancellation token and a stop flag so they end
+    // the moment the process does — never after completed, and never as a
+    // substitute for a real terminal status.
+    let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let heartbeat = spawn_provider_chat_heartbeat(
+        app.clone(),
+        request.clone(),
+        run_control.cancellation.clone(),
+        heartbeat_stop.clone(),
+    );
     let outcome = gyro_core::run_command(execution, run_control.cancellation.clone(), |chunk| {
         if chunk.stream == ExecutionStream::Stdout {
             for line in stream_state.take_stdout_lines(&chunk.text) {
@@ -15705,7 +15907,13 @@ fn run_streaming_command(
             }
             stream_state.flush_pending_delta(app, request, false);
         }
-    })?;
+    });
+    heartbeat_stop.store(true, Ordering::Relaxed);
+    let _ = heartbeat.join();
+    let outcome = outcome?;
+    // Drain every remaining line and force-flush text before the termination
+    // check. Completing with a half-applied buffer is what left the chat looking
+    // finished while tokens were still sitting in memory.
     if let Some(line) = stream_state.take_final_stdout_line() {
         handle_provider_stdout_line(&line, app, request, &mut stream_state);
     }
@@ -15760,6 +15968,47 @@ fn run_streaming_command(
             .then_some(stream_state.assistant_text),
         parsed_stream_json: stream_state.parsed_stream_json,
         provider_session_id: stream_state.provider_session_id,
+    })
+}
+
+/// Tick the live stream while the provider process is still running.
+///
+/// Silence is not completion: long tools and thinking produce no frames for
+/// minutes. Without these beats the desktop idle watchdog treated the turn as
+/// finished and the rail stopped, even though the CLI was still alive.
+fn spawn_provider_chat_heartbeat(
+    app: tauri::AppHandle,
+    request: ProviderChatRequest,
+    cancellation: CancellationToken,
+    stop: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        loop {
+            // Sleep in short slices so stop/cancel is noticed promptly at the
+            // end of a run instead of waiting out a full heartbeat interval.
+            let deadline = Instant::now() + PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+            while Instant::now() < deadline {
+                if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
+                return;
+            }
+            emit_provider_chat_event(
+                &app,
+                &request,
+                "heartbeat",
+                Some(HarnessRunStatus::Running),
+                None,
+                Some(format!(
+                    "{} is still working",
+                    request.provider_label.as_deref().unwrap_or("Provider")
+                )),
+                None,
+            );
+        }
     })
 }
 
@@ -16434,7 +16683,9 @@ fn extract_provider_tool_uses_from_message(value: &serde_json::Value) -> Vec<Pro
         .iter()
         .filter_map(|block| {
             let block_type = block.get("type").and_then(|value| value.as_str())?;
-            if block_type != "tool_use" && block_type != "tool_call" && block_type != "mcp_tool_call"
+            if block_type != "tool_use"
+                && block_type != "tool_call"
+                && block_type != "mcp_tool_call"
             {
                 return None;
             }
@@ -16455,7 +16706,11 @@ fn extract_provider_tool_uses_from_message(value: &serde_json::Value) -> Vec<Pro
         .collect()
 }
 
-fn provider_activity_status(event_type: &str, nested_type: &str, item: &serde_json::Value) -> &'static str {
+fn provider_activity_status(
+    event_type: &str,
+    nested_type: &str,
+    item: &serde_json::Value,
+) -> &'static str {
     if event_type.contains("started")
         || nested_type.contains("start")
         || item.get("status").and_then(|value| value.as_str()) == Some("in_progress")
@@ -16487,8 +16742,8 @@ fn tool_use_activity(
     match name {
         "Bash" | "KillShell" => {
             if let Some(command) = json_object_string(input, &["command"]) {
-                let description = json_object_string(input, &["description"])
-                    .filter(|value| value != &command);
+                let description =
+                    json_object_string(input, &["description"]).filter(|value| value != &command);
                 return ProviderActivity {
                     id,
                     kind: "command".into(),
@@ -16502,7 +16757,13 @@ fn tool_use_activity(
         "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
             if let Some(path) = json_object_string(
                 input,
-                &["file_path", "filePath", "path", "notebook_path", "notebookPath"],
+                &[
+                    "file_path",
+                    "filePath",
+                    "path",
+                    "notebook_path",
+                    "notebookPath",
+                ],
             ) {
                 let label = if name == "Read" {
                     let file_name = Path::new(&path)
@@ -16571,9 +16832,13 @@ fn provider_tool_activity_note(name: &str, input: &serde_json::Value) -> Option<
     let preferred: &[&str] = match name {
         "Skill" | "skill" => &["skill", "skill_name", "skillName", "name"],
         "Bash" | "KillShell" => &["command", "description"],
-        "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
-            &["file_path", "filePath", "path", "notebook_path", "notebookPath"]
-        }
+        "Read" | "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => &[
+            "file_path",
+            "filePath",
+            "path",
+            "notebook_path",
+            "notebookPath",
+        ],
         "Grep" | "Glob" => &["pattern", "glob", "glob_pattern", "query"],
         "WebSearch" | "WebFetch" => &["query", "url"],
         // MCP / generic tools often put the target in one of these.
@@ -16772,14 +17037,52 @@ fn emit_provider_activity_event(
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
 
+/// Monotonic sequence for provider stream events on a session.
+///
+/// Prefer the active run control so sequences reset cleanly per turn. If the
+/// control is briefly unavailable (lock poison, race on tear-down), fall back to
+/// a process-wide counter rather than returning `0` for every frame — a stream
+/// of zeros made the desktop drop every event after the first and the rail
+/// looked finished while the backend was still emitting.
 fn next_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> u64 {
+    static ORPHAN_PROVIDER_EVENT_SEQUENCE: AtomicU64 = AtomicU64::new(1 << 48);
     app.state::<ProviderCancellationManager>()
         .flags
         .lock()
         .ok()
         .and_then(|flags| flags.get(session_id).cloned())
         .map(|control| control.next_event_sequence.fetch_add(1, Ordering::Relaxed))
-        .unwrap_or_default()
+        .unwrap_or_else(|| ORPHAN_PROVIDER_EVENT_SEQUENCE.fetch_add(1, Ordering::Relaxed))
+}
+
+/// A non-zero CLI exit that still produced a real streamed answer.
+///
+/// Several provider CLIs exit non-zero after tool errors the model already
+/// recovered from, or after writing a full answer. Treating those as total
+/// failure tore down a finished chat and left the desktop in "failed" while the
+/// user already had the reply. Cancel, timeout, and empty streams still fail.
+fn recover_streamed_provider_answer(
+    output: &StreamingCommandOutput,
+    last_message: &str,
+) -> Option<String> {
+    if output.status_success {
+        return None;
+    }
+    let candidates = [
+        output.assistant_text.as_deref().unwrap_or(""),
+        last_message,
+        // Raw stdout only when the CLI did not speak stream-json; a JSON dump is
+        // not an answer the user should see as a completed chat.
+        if output.parsed_stream_json {
+            ""
+        } else {
+            output.stdout.as_str()
+        },
+    ];
+    candidates.into_iter().find_map(|candidate| {
+        let response = sanitize_provider_chat_response(candidate.trim());
+        (!response.is_empty()).then_some(response)
+    })
 }
 
 fn extract_provider_session_id(value: &serde_json::Value) -> Option<String> {
@@ -20597,6 +20900,75 @@ mod tests {
     }
 
     #[test]
+    fn live_plan_reaches_the_model_as_a_checklist_that_normal_turns_can_advance() {
+        let mut request = anthropic_provider_request();
+        request.plan = Some(serde_json::json!({
+            "title": "Ship the rail",
+            "content": "# Ship the rail\n\nLong markdown document.",
+            "items": [
+                {"id": "step-one", "title": "Read the reducer", "status": "complete"},
+                {"id": "step-two", "title": "Move the chip", "status": "todo"},
+            ],
+        }));
+
+        let context = provider_context_message(&request);
+
+        assert!(context.contains("Current Gyro plan — Ship the rail"));
+        assert!(context.contains("- [x] Read the reducer (id: step-one)"));
+        assert!(context.contains("- [ ] Move the chip (id: step-two)"));
+        // The escaped plan document must not ride along as raw JSON.
+        assert!(!context.contains("Long markdown document"));
+        // Normal-mode turns are the ones that finish steps, so they get the marker.
+        assert!(context.contains("GYRO_PLAN_UPDATE:"));
+        assert!(context.contains("update-items"));
+
+        let mut planless = anthropic_provider_request();
+        planless.plan = None;
+        assert!(!provider_context_message(&planless).contains("GYRO_PLAN_UPDATE:"));
+    }
+
+    #[test]
+    fn a_met_goal_stays_in_context_and_only_an_active_one_can_be_completed() {
+        let mut request = anthropic_provider_request();
+        request.goal = Some(SessionGoalContext {
+            text: "Ship the plan rail".into(),
+            status: "active".into(),
+        });
+
+        let active = provider_context_message(&request);
+        assert!(active.contains("Active Gyro session goal: Ship the plan rail"));
+        assert!(active.contains("GYRO_GOAL_UPDATE:"));
+
+        request.goal = Some(SessionGoalContext {
+            text: "Ship the plan rail".into(),
+            status: "complete".into(),
+        });
+
+        let met = provider_context_message(&request);
+        assert!(met.contains("already met — do not redo that work"));
+        assert!(met.contains("Ship the plan rail"));
+        // Nothing to complete twice, so the marker instruction stays away.
+        assert!(!met.contains("GYRO_GOAL_UPDATE:"));
+    }
+
+    #[test]
+    fn goal_marker_is_captured_and_never_shown_in_the_bubble() {
+        let stripped = strip_hidden_control_markers(
+            "GYRO_GOAL_UPDATE: {\"status\":\"complete\"}\n\nThe rail is shipped.",
+        );
+
+        assert_eq!(stripped.message, "The rail is shipped.");
+        assert_eq!(
+            stripped
+                .goal_update
+                .as_ref()
+                .and_then(|update| update.get("status"))
+                .and_then(serde_json::Value::as_str),
+            Some("complete")
+        );
+    }
+
+    #[test]
     fn gated_provider_context_requires_a_question_for_each_action() {
         let mut request = anthropic_provider_request();
         request.provider_id = "openai".into();
@@ -22207,10 +22579,7 @@ while True:
         }))
         .expect("read tool use");
         assert_eq!(read.kind, "file");
-        assert_eq!(
-            read.detail.as_deref(),
-            Some("packages/ui/src/chat-run.ts")
-        );
+        assert_eq!(read.detail.as_deref(), Some("packages/ui/src/chat-run.ts"));
         assert!(read.label.contains("chat-run.ts"));
 
         // A finished assistant message may carry several tool_use blocks; each
@@ -22242,12 +22611,8 @@ while True:
         assert_eq!(packed[1].note.as_deref(), Some("simplify"));
 
         // Persisted session events keep the note so a reload still shows it.
-        let (_label, payload, _) = provider_activity_event_entry(
-            &anthropic_provider_request(),
-            Uuid::nil(),
-            0,
-            &skill,
-        );
+        let (_label, payload, _) =
+            provider_activity_event_entry(&anthropic_provider_request(), Uuid::nil(), 0, &skill);
         assert_eq!(payload["note"], "simplify");
         assert_eq!(payload["detail"], "Skill");
         assert_eq!(payload["tool"], "Skill");
@@ -22596,6 +22961,57 @@ while True:
 
         // A second startup has nothing left to close.
         assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_streamed_answer_survives_a_nonzero_cli_exit() {
+        let failed =
+            |assistant: Option<&str>, parsed_json: bool, stdout: &str| StreamingCommandOutput {
+                activities: Vec::new(),
+                context_usage: None,
+                billed_usage: None,
+                rate_limits: Vec::new(),
+                status_success: false,
+                status_label: "exit status: 1".into(),
+                stdout: stdout.into(),
+                stderr: "tool failed after the answer".into(),
+                assistant_text: assistant.map(str::to_string),
+                parsed_stream_json: parsed_json,
+                provider_session_id: Some("sess-1".into()),
+            };
+
+        assert_eq!(
+            recover_streamed_provider_answer(
+                &failed(Some("Here is the fix you asked for."), true, ""),
+                "",
+            ),
+            Some("Here is the fix you asked for.".into()),
+            "a real streamed answer must complete the turn even when the CLI exits 1",
+        );
+
+        let success = StreamingCommandOutput {
+            status_success: true,
+            ..failed(Some("already succeeded"), true, "")
+        };
+        assert_eq!(
+            recover_streamed_provider_answer(&success, ""),
+            None,
+            "successful exits use the normal success path, not recovery",
+        );
+
+        assert_eq!(
+            recover_streamed_provider_answer(
+                &failed(None, true, r#"{"type":"assistant","message":"noise"}"#),
+                "",
+            ),
+            None,
+            "a JSON stream dump is not an answer the user should keep",
+        );
+
+        assert_eq!(
+            recover_streamed_provider_answer(&failed(None, true, ""), "Codex last message."),
+            Some("Codex last message.".into()),
+        );
     }
 
     #[test]
@@ -23013,11 +23429,13 @@ while True:
         );
         assert!(scoped[0].resets_at.is_none());
 
-        assert!(provider_usage_windows_from_anthropic_usage(&serde_json::json!({
-            "five_hour": serde_json::Value::Null,
-            "extra_usage": { "is_enabled": false }
-        }))
-        .is_empty());
+        assert!(
+            provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+                "five_hour": serde_json::Value::Null,
+                "extra_usage": { "is_enabled": false }
+            }))
+            .is_empty()
+        );
     }
 
     #[test]
@@ -23243,10 +23661,7 @@ while True:
 
         // First attempt used the dead cursor; the automatic recovery attempt
         // starts clean so local history can carry the thread.
-        assert_eq!(
-            attempts,
-            vec![Some("stale-provider-session".into()), None]
-        );
+        assert_eq!(attempts, vec![Some("stale-provider-session".into()), None]);
         assert_eq!(output.response, "Recovered");
         assert!(!output.resumed);
         assert_eq!(output.retry_count, 1);
