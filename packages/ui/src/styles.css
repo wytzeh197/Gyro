@@ -161,14 +161,39 @@
   --gyro-status-cancelled: #8b95a3;
   --gyro-status-disabled: #646d79;
   --gyro-status-experimental: #aa86d8;
+  /* Language tones, shared by the Explorer and Source Control so one file
+     type reads the same colour everywhere it appears. */
+  --gyro-file-default: var(--gyro-muted);
   --gyro-file-javascript: #d9c34a;
   --gyro-file-typescript: #5b9fd4;
+  --gyro-file-react: #62c9e6;
   --gyro-file-json: #cdbf58;
-  --gyro-file-style: #a982cf;
-  --gyro-file-document: #6ca5cc;
+  --gyro-file-css: #a982cf;
+  --gyro-file-html: #d98a5b;
+  --gyro-file-vue: #6fbf8b;
+  --gyro-file-markdown: #6ca5cc;
   --gyro-file-rust: #cd8d64;
+  --gyro-file-go: #63b8c8;
+  --gyro-file-python: #63a6d8;
+  --gyro-file-ruby: #cf6f74;
+  --gyro-file-java: #c9776b;
+  --gyro-file-swift: #e2986a;
+  --gyro-file-cpp: #7f9fd4;
+  --gyro-file-php: #8b8ec9;
+  --gyro-file-lua: #6f8ed4;
+  --gyro-file-dart: #4fb0c0;
+  --gyro-file-elixir: #a98cc8;
+  --gyro-file-graphql: #d16fb0;
+  --gyro-file-diff: #93a4b3;
   --gyro-file-shell: #73ad70;
+  --gyro-file-config: #9aa6b2;
+  --gyro-file-lock: #8b95a3;
+  --gyro-file-binary: #8b95a3;
   --gyro-file-image: #b783ca;
+  --gyro-file-media: #c07fb0;
+  --gyro-file-archive: #a58bc4;
+  --gyro-file-font: #c9a86a;
+  --gyro-file-data: #7fbf8f;
   color: var(--gyro-text);
   font-family:
     Inter,
@@ -791,6 +816,38 @@
   --gyro-danger-soft: rgba(187, 45, 36, 0.1);
   --gyro-blue: #356fd6;
   --gyro-blue-soft: rgba(53, 111, 214, 0.09);
+  /* The dark tones are too light to read on a light sidebar; these are the
+     same hues carried down to a legible lightness. */
+  --gyro-file-javascript: #8a7413;
+  --gyro-file-typescript: #2f6f9f;
+  --gyro-file-react: #1f7f96;
+  --gyro-file-json: #857a10;
+  --gyro-file-css: #6d4a9c;
+  --gyro-file-html: #a0522d;
+  --gyro-file-vue: #2f7d4f;
+  --gyro-file-markdown: #3a6d8f;
+  --gyro-file-rust: #9a5a2b;
+  --gyro-file-go: #1f7a8c;
+  --gyro-file-python: #2c6b9c;
+  --gyro-file-ruby: #a53a3a;
+  --gyro-file-java: #98452f;
+  --gyro-file-swift: #a85a30;
+  --gyro-file-cpp: #3f5f9c;
+  --gyro-file-php: #4f52a3;
+  --gyro-file-lua: #34519c;
+  --gyro-file-dart: #1c7a89;
+  --gyro-file-elixir: #6a4a94;
+  --gyro-file-graphql: #a32f7c;
+  --gyro-file-diff: #55616e;
+  --gyro-file-shell: #3c7a3c;
+  --gyro-file-config: #5a6572;
+  --gyro-file-lock: #5a6572;
+  --gyro-file-binary: #5a6572;
+  --gyro-file-image: #7a4a94;
+  --gyro-file-media: #8a3f76;
+  --gyro-file-archive: #6d5a94;
+  --gyro-file-font: #8a6a25;
+  --gyro-file-data: #3f7f52;
   --gyro-canvas-subtle: #eef1f5;
   --gyro-window: #ffffff;
   --gyro-workbench-line: rgba(23, 27, 34, 0.1);
@@ -10626,42 +10683,102 @@ textarea:focus-visible {
   transform: rotate(90deg);
 }
 
+/* One rule per language tone, keyed by the same tone names Source Control
+   uses, so both views colour a file type identically. */
 .gyro-explorer-file-icon {
-  color: var(--gyro-muted);
+  color: var(--gyro-file-tone, var(--gyro-file-default));
+  flex: 0 0 auto;
 }
 
-.gyro-sidebar-explorer-row[data-file-tone="javascript"]
-  .gyro-explorer-file-icon {
-  color: var(--gyro-file-javascript);
+.gyro-sidebar-explorer-row[data-file-tone="javascript"] {
+  --gyro-file-tone: var(--gyro-file-javascript);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="typescript"]
-  .gyro-explorer-file-icon {
-  color: var(--gyro-file-typescript);
+.gyro-sidebar-explorer-row[data-file-tone="typescript"] {
+  --gyro-file-tone: var(--gyro-file-typescript);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="json"] .gyro-explorer-file-icon {
-  color: var(--gyro-file-json);
+.gyro-sidebar-explorer-row[data-file-tone="react"] {
+  --gyro-file-tone: var(--gyro-file-react);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="style"] .gyro-explorer-file-icon {
-  color: var(--gyro-file-style);
+.gyro-sidebar-explorer-row[data-file-tone="json"] {
+  --gyro-file-tone: var(--gyro-file-json);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="document"] .gyro-explorer-file-icon {
-  color: var(--gyro-file-document);
+.gyro-sidebar-explorer-row[data-file-tone="css"] {
+  --gyro-file-tone: var(--gyro-file-css);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="rust"] .gyro-explorer-file-icon {
-  color: var(--gyro-file-rust);
+.gyro-sidebar-explorer-row[data-file-tone="html"] {
+  --gyro-file-tone: var(--gyro-file-html);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="shell"] .gyro-explorer-file-icon {
-  color: var(--gyro-file-shell);
+.gyro-sidebar-explorer-row[data-file-tone="vue"] {
+  --gyro-file-tone: var(--gyro-file-vue);
 }
-
-.gyro-sidebar-explorer-row[data-file-tone="image"] .gyro-explorer-file-icon {
-  color: var(--gyro-file-image);
+.gyro-sidebar-explorer-row[data-file-tone="markdown"] {
+  --gyro-file-tone: var(--gyro-file-markdown);
+}
+.gyro-sidebar-explorer-row[data-file-tone="rust"] {
+  --gyro-file-tone: var(--gyro-file-rust);
+}
+.gyro-sidebar-explorer-row[data-file-tone="go"] {
+  --gyro-file-tone: var(--gyro-file-go);
+}
+.gyro-sidebar-explorer-row[data-file-tone="python"] {
+  --gyro-file-tone: var(--gyro-file-python);
+}
+.gyro-sidebar-explorer-row[data-file-tone="ruby"] {
+  --gyro-file-tone: var(--gyro-file-ruby);
+}
+.gyro-sidebar-explorer-row[data-file-tone="java"] {
+  --gyro-file-tone: var(--gyro-file-java);
+}
+.gyro-sidebar-explorer-row[data-file-tone="swift"] {
+  --gyro-file-tone: var(--gyro-file-swift);
+}
+.gyro-sidebar-explorer-row[data-file-tone="cpp"] {
+  --gyro-file-tone: var(--gyro-file-cpp);
+}
+.gyro-sidebar-explorer-row[data-file-tone="php"] {
+  --gyro-file-tone: var(--gyro-file-php);
+}
+.gyro-sidebar-explorer-row[data-file-tone="lua"] {
+  --gyro-file-tone: var(--gyro-file-lua);
+}
+.gyro-sidebar-explorer-row[data-file-tone="dart"] {
+  --gyro-file-tone: var(--gyro-file-dart);
+}
+.gyro-sidebar-explorer-row[data-file-tone="elixir"] {
+  --gyro-file-tone: var(--gyro-file-elixir);
+}
+.gyro-sidebar-explorer-row[data-file-tone="graphql"] {
+  --gyro-file-tone: var(--gyro-file-graphql);
+}
+.gyro-sidebar-explorer-row[data-file-tone="diff"] {
+  --gyro-file-tone: var(--gyro-file-diff);
+}
+.gyro-sidebar-explorer-row[data-file-tone="shell"] {
+  --gyro-file-tone: var(--gyro-file-shell);
+}
+.gyro-sidebar-explorer-row[data-file-tone="config"] {
+  --gyro-file-tone: var(--gyro-file-config);
+}
+.gyro-sidebar-explorer-row[data-file-tone="lock"] {
+  --gyro-file-tone: var(--gyro-file-lock);
+}
+.gyro-sidebar-explorer-row[data-file-tone="binary"] {
+  --gyro-file-tone: var(--gyro-file-binary);
+}
+.gyro-sidebar-explorer-row[data-file-tone="image"] {
+  --gyro-file-tone: var(--gyro-file-image);
+}
+.gyro-sidebar-explorer-row[data-file-tone="media"] {
+  --gyro-file-tone: var(--gyro-file-media);
+}
+.gyro-sidebar-explorer-row[data-file-tone="archive"] {
+  --gyro-file-tone: var(--gyro-file-archive);
+}
+.gyro-sidebar-explorer-row[data-file-tone="font"] {
+  --gyro-file-tone: var(--gyro-file-font);
+}
+.gyro-sidebar-explorer-row[data-file-tone="data"] {
+  --gyro-file-tone: var(--gyro-file-data);
 }
 
 .gyro-explorer-decoration {
@@ -14448,95 +14565,6 @@ body {
     display: grid;
     gap: 2px;
   }
-}
-
-.gyro-plan-decision-card {
-  max-height: none;
-  padding: 13px 14px 22px;
-}
-
-.gyro-plan-decision-card > header {
-  justify-content: space-between;
-  min-height: 28px;
-}
-
-.gyro-plan-decision-card > header > strong {
-  font-size: 13px;
-  font-weight: 620;
-}
-
-.gyro-plan-decision-card > header > button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
-  width: 28px;
-}
-
-.gyro-plan-decision-card > header > button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-  color: var(--gyro-text);
-}
-
-.gyro-plan-decision-actions {
-  display: grid;
-  gap: 7px;
-  margin-top: 8px;
-}
-
-.gyro-plan-decision-actions > button {
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--gyro-text);
-  display: grid;
-  font: inherit;
-  gap: 9px;
-  grid-template-columns: 30px minmax(0, 1fr);
-  min-height: 44px;
-  padding: 5px 10px;
-  text-align: left;
-}
-
-.gyro-plan-decision-actions > button > span {
-  align-items: center;
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 999px;
-  color: var(--gyro-muted);
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
-.gyro-plan-decision-actions > button > strong {
-  font-size: 12px;
-  font-weight: 580;
-}
-
-.gyro-plan-decision-actions > button.is-primary {
-  background: transparent;
-}
-
-.gyro-plan-decision-actions > button.is-secondary {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border-color: var(--gyro-premium-hairline-soft);
-  color: var(--gyro-muted);
-}
-
-.gyro-plan-decision-actions > button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
-  color: var(--gyro-text);
-}
-
-.gyro-plan-decision-actions > button:disabled {
-  cursor: wait;
-  opacity: 0.55;
 }
 
 :root[data-theme="light"]
@@ -23965,10 +23993,10 @@ button.gyro-account-menu-row:hover,
   box-sizing: border-box;
   color: var(--gyro-text);
   margin-bottom: -12px;
-  max-height: min(420px, calc(100vh - 210px));
   max-width: 700px;
   overflow: hidden;
   padding: 13px 14px 21px;
+  position: relative;
   width: min(700px, calc(100% - 24px));
   z-index: 1;
 }
@@ -23979,21 +24007,9 @@ button.gyro-account-menu-row:hover,
   gap: 9px;
 }
 
-.gyro-plan-decision-icon {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--gyro-accent) 28%, transparent);
-  border-radius: 8px;
-  color: color-mix(in srgb, var(--gyro-accent) 78%, var(--gyro-text));
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
 .gyro-plan-decision-card > header > div {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -24009,15 +24025,26 @@ button.gyro-account-menu-row:hover,
   line-height: 1.25;
 }
 
+/* Capped at five rows in the markup, so the list never scrolls inside the
+   transcript's own scroller. */
 .gyro-plan-decision-card ol {
   display: grid;
   gap: 2px;
   list-style: none;
   margin: 10px 0;
-  max-height: 210px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 0;
+  position: relative;
+}
+
+/* Hairline spine behind the ordinals turns a flat list into a sequence. */
+.gyro-plan-decision-card ol::before {
+  background: var(--gyro-premium-hairline-soft);
+  bottom: 12px;
+  content: "";
+  left: 13px;
+  position: absolute;
+  top: 12px;
+  width: 1px;
 }
 
 .gyro-plan-decision-card li {
@@ -24031,10 +24058,41 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-decision-card li > span {
   align-items: center;
-  color: var(--gyro-muted);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-faint);
   display: inline-flex;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
   height: 17px;
   justify-content: center;
+  position: relative;
+}
+
+.gyro-plan-decision-summary {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 10px 0;
+}
+
+.gyro-plan-decision-more {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font: inherit;
+  font-size: 11px;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 26px;
+  padding: 0 6px;
+}
+
+.gyro-plan-decision-more:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
 }
 
 .gyro-plan-decision-card li > div {
@@ -24091,6 +24149,47 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-decision-card > footer button.is-primary:hover:not(:disabled) {
   opacity: 0.88;
+}
+
+.gyro-plan-decision-card > footer button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+/* Approving switches modes and sends a turn; the bar says the click landed
+   without the card resizing under the pointer. */
+.gyro-plan-decision-progress {
+  bottom: 0;
+  height: 2px;
+  left: 0;
+  overflow: hidden;
+  position: absolute;
+  right: 0;
+}
+
+.gyro-plan-decision-progress::after {
+  animation: gyro-plan-decision-progress 1.1s ease-in-out infinite;
+  background: var(--gyro-accent);
+  content: "";
+  inset: 0;
+  position: absolute;
+}
+
+@keyframes gyro-plan-decision-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-plan-decision-progress::after {
+    animation: none;
+    opacity: 0.55;
+  }
 }
 
 .gyro-plan-decision-card > footer button:disabled {
@@ -24887,16 +24986,20 @@ button.gyro-account-menu-row:hover,
   grid-template-columns: minmax(0, 1fr) clamp(320px, 25vw, 372px);
 }
 
+/* Docked, not floating: the rail owns its column so opening it never reflows
+   the thread under a shadowed card. */
 .gyro-chat-surface.has-environment .gyro-chat-tool-rail {
-  align-self: start;
+  align-self: stretch;
   background: var(--gyro-premium-panel);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 16px;
-  box-shadow: 0 18px 42px color-mix(in srgb, #000 20%, transparent);
+  border: 0;
+  border-left: 1px solid var(--gyro-premium-hairline);
+  border-radius: 0;
+  box-shadow: none;
   gap: 0;
-  margin: 14px 14px 14px 0;
-  max-height: calc(100% - 28px);
-  padding: 16px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  margin: 0;
+  max-height: none;
+  padding: 10px 10px 12px;
 }
 
 .gyro-chat-surface.has-environment .gyro-chat-tool-rail.has-plan {
@@ -24905,65 +25008,64 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-tool-rail > header {
-  min-height: 42px;
-  padding: 0 2px 14px;
+  min-height: 30px;
+  padding: 0 4px 10px;
 }
 
+/* Shared by the Environment and Browser rails, so the three right-slot
+   surfaces read as one header. */
 .gyro-chat-tool-title {
-  align-items: center;
-  display: grid !important;
-  gap: 10px !important;
-  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: baseline;
+  display: flex !important;
+  gap: 8px !important;
+  min-width: 0;
 }
 
 .gyro-chat-tool-title > svg {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  border: 1px solid var(--gyro-premium-hairline-soft);
-  border-radius: 8px;
-  box-sizing: border-box;
-  color: var(--gyro-muted);
-  height: 30px;
-  padding: 7px;
-  width: 30px;
+  align-self: center;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--gyro-faint);
+  height: 14px;
+  padding: 0;
+  width: 14px;
 }
 
 .gyro-chat-tool-title > div {
-  display: grid;
-  gap: 2px;
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
   min-width: 0;
 }
 
 .gyro-chat-tool-rail > header strong {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .gyro-chat-tool-rail > header span {
-  font-size: 10px;
-}
-
-.gyro-chat-tool-section-label {
   color: var(--gyro-faint);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 2px 10px 7px;
-  text-transform: uppercase;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-chat-tool-launcher {
-  gap: 3px;
-  padding: 0 0 16px;
+  gap: 1px;
+  padding: 0;
 }
 
 .gyro-chat-tool-launcher button {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
-  gap: 11px;
-  min-height: 43px;
-  padding: 0 10px;
+  border-radius: var(--gyro-premium-radius-sm);
+  gap: 9px;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  min-height: 32px;
+  padding: 0 8px;
 }
 
 .gyro-chat-tool-launcher button:hover {
@@ -24972,18 +25074,47 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-tool-launcher button > svg {
-  color: var(--gyro-muted);
-  height: 16px;
-  width: 16px;
+  color: var(--gyro-faint);
+  height: 15px;
+  width: 15px;
 }
 
 .gyro-chat-tool-launcher button > span {
   font-size: 12px;
-  font-weight: 590;
+  font-weight: 500;
 }
 
+/* Status stays monochrome at every state; the dot carries the semantics so a
+   row never changes colour just to say it has a count. */
 .gyro-chat-tool-launcher button > small {
-  font-size: 10px;
+  color: var(--gyro-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gyro-chat-tool-launcher button.has-activity > small,
+.gyro-chat-tool-launcher button.has-warning > svg,
+.gyro-chat-tool-launcher button.has-warning > small {
+  color: var(--gyro-faint);
+}
+
+.gyro-chat-tool-launcher button.has-activity > small::before,
+.gyro-chat-tool-launcher button.has-warning > small::before {
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 5px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  width: 5px;
+}
+
+.gyro-chat-tool-launcher button.has-activity > small::before {
+  background: var(--gyro-success);
+}
+
+.gyro-chat-tool-launcher button.has-warning > small::before {
+  background: var(--gyro-warn);
 }
 
 .gyro-chat-tool-launcher button.is-active {
@@ -24996,22 +25127,25 @@ button.gyro-account-menu-row:hover,
   color: color-mix(in srgb, var(--gyro-premium-accent) 72%, var(--gyro-text));
 }
 
+/* Pinned to the foot of the rail so the tool list and the policy summary read
+   as two groups rather than one run-on list. */
 .gyro-capability-policy-summary {
+  align-self: end;
   border-top: 1px solid var(--gyro-premium-hairline-soft);
   display: block;
-  margin: 0 2px;
-  padding-top: 12px;
+  margin: 0;
+  padding-top: 8px;
 }
 
 .gyro-capability-policy-summary > summary {
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--gyro-premium-radius-sm);
   color: var(--gyro-muted);
   cursor: pointer;
   display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto 14px;
-  min-height: 34px;
+  gap: 9px;
+  grid-template-columns: 15px minmax(0, 1fr) auto 13px;
+  min-height: 32px;
   padding: 0 8px;
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
@@ -25027,22 +25161,22 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-text);
 }
 
-.gyro-capability-policy-summary > summary > span {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-width: 0;
+.gyro-capability-policy-summary > summary > svg:first-of-type {
+  color: var(--gyro-faint);
+  height: 15px;
+  width: 15px;
 }
 
 .gyro-capability-policy-summary > summary strong {
-  color: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--gyro-text);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .gyro-capability-policy-summary > summary small {
   color: var(--gyro-faint);
-  font-size: 9px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -28835,50 +28969,100 @@ button.gyro-account-menu-row:hover,
   margin-top: 4px;
 }
 
-/* Language tones — Seti-style hues shared with the Explorer. */
+/* Language tones — the same tokens the Explorer paints its icons with, one
+   per type rather than a handful of shared buckets. */
 .gyro-sidebar-scm-file-icon.is-react {
-  --gyro-scm-icon-tone: #61dafb;
+  --gyro-scm-icon-tone: var(--gyro-file-react);
 }
 .gyro-sidebar-scm-file-icon.is-typescript {
-  --gyro-scm-icon-tone: #519aba;
+  --gyro-scm-icon-tone: var(--gyro-file-typescript);
 }
-.gyro-sidebar-scm-file-icon.is-javascript,
-.gyro-sidebar-scm-file-icon.is-json,
+.gyro-sidebar-scm-file-icon.is-javascript {
+  --gyro-scm-icon-tone: var(--gyro-file-javascript);
+}
+.gyro-sidebar-scm-file-icon.is-json {
+  --gyro-scm-icon-tone: var(--gyro-file-json);
+}
 .gyro-sidebar-scm-file-icon.is-font {
-  --gyro-scm-icon-tone: #cbcb41;
+  --gyro-scm-icon-tone: var(--gyro-file-font);
 }
-.gyro-sidebar-scm-file-icon.is-css,
-.gyro-sidebar-scm-file-icon.is-markdown,
-.gyro-sidebar-scm-file-icon.is-go,
-.gyro-sidebar-scm-file-icon.is-python,
+.gyro-sidebar-scm-file-icon.is-css {
+  --gyro-scm-icon-tone: var(--gyro-file-css);
+}
+.gyro-sidebar-scm-file-icon.is-markdown {
+  --gyro-scm-icon-tone: var(--gyro-file-markdown);
+}
+.gyro-sidebar-scm-file-icon.is-go {
+  --gyro-scm-icon-tone: var(--gyro-file-go);
+}
+.gyro-sidebar-scm-file-icon.is-python {
+  --gyro-scm-icon-tone: var(--gyro-file-python);
+}
 .gyro-sidebar-scm-file-icon.is-cpp {
-  --gyro-scm-icon-tone: #519aba;
+  --gyro-scm-icon-tone: var(--gyro-file-cpp);
 }
-.gyro-sidebar-scm-file-icon.is-html,
-.gyro-sidebar-scm-file-icon.is-swift,
+.gyro-sidebar-scm-file-icon.is-php {
+  --gyro-scm-icon-tone: var(--gyro-file-php);
+}
+.gyro-sidebar-scm-file-icon.is-lua {
+  --gyro-scm-icon-tone: var(--gyro-file-lua);
+}
+.gyro-sidebar-scm-file-icon.is-dart {
+  --gyro-scm-icon-tone: var(--gyro-file-dart);
+}
+.gyro-sidebar-scm-file-icon.is-elixir {
+  --gyro-scm-icon-tone: var(--gyro-file-elixir);
+}
+.gyro-sidebar-scm-file-icon.is-graphql {
+  --gyro-scm-icon-tone: var(--gyro-file-graphql);
+}
+.gyro-sidebar-scm-file-icon.is-diff {
+  --gyro-scm-icon-tone: var(--gyro-file-diff);
+}
+.gyro-sidebar-scm-file-icon.is-html {
+  --gyro-scm-icon-tone: var(--gyro-file-html);
+}
+.gyro-sidebar-scm-file-icon.is-swift {
+  --gyro-scm-icon-tone: var(--gyro-file-swift);
+}
 .gyro-sidebar-scm-file-icon.is-rust {
-  --gyro-scm-icon-tone: #e37933;
+  --gyro-scm-icon-tone: var(--gyro-file-rust);
 }
-.gyro-sidebar-scm-file-icon.is-ruby,
+.gyro-sidebar-scm-file-icon.is-ruby {
+  --gyro-scm-icon-tone: var(--gyro-file-ruby);
+}
 .gyro-sidebar-scm-file-icon.is-java {
-  --gyro-scm-icon-tone: #cc3e44;
+  --gyro-scm-icon-tone: var(--gyro-file-java);
 }
-.gyro-sidebar-scm-file-icon.is-shell,
-.gyro-sidebar-scm-file-icon.is-vue,
+.gyro-sidebar-scm-file-icon.is-shell {
+  --gyro-scm-icon-tone: var(--gyro-file-shell);
+}
+.gyro-sidebar-scm-file-icon.is-vue {
+  --gyro-scm-icon-tone: var(--gyro-file-vue);
+}
 .gyro-sidebar-scm-file-icon.is-data {
-  --gyro-scm-icon-tone: #8dc149;
+  --gyro-scm-icon-tone: var(--gyro-file-data);
 }
-.gyro-sidebar-scm-file-icon.is-image,
+.gyro-sidebar-scm-file-icon.is-image {
+  --gyro-scm-icon-tone: var(--gyro-file-image);
+}
+.gyro-sidebar-scm-file-icon.is-media {
+  --gyro-scm-icon-tone: var(--gyro-file-media);
+}
 .gyro-sidebar-scm-file-icon.is-archive {
-  --gyro-scm-icon-tone: #a074c4;
+  --gyro-scm-icon-tone: var(--gyro-file-archive);
 }
-.gyro-sidebar-scm-file-icon.is-config,
-.gyro-sidebar-scm-file-icon.is-lock,
+.gyro-sidebar-scm-file-icon.is-config {
+  --gyro-scm-icon-tone: var(--gyro-file-config);
+}
+.gyro-sidebar-scm-file-icon.is-lock {
+  --gyro-scm-icon-tone: var(--gyro-file-lock);
+}
 .gyro-sidebar-scm-file-icon.is-binary {
-  --gyro-scm-icon-tone: #7d8f99;
+  --gyro-scm-icon-tone: var(--gyro-file-binary);
 }
 .gyro-sidebar-scm-file-icon.is-default {
-  --gyro-scm-icon-tone: var(--gyro-muted);
+  --gyro-scm-icon-tone: var(--gyro-file-default);
 }
 
 .gyro-scm-panel .gyro-sidebar-scm-row .gyro-sidebar-scm-file-icon {
