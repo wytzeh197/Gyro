@@ -20425,6 +20425,36 @@ function turnKeyFromEvent(event: SessionEvent) {
   );
 }
 
+/**
+ * Whether the machine currently has a network interface, watched live.
+ *
+ * `navigator.onLine` is the only loss-of-network signal available before a
+ * request has failed, which is exactly the window this is for: a turn that is
+ * mid-flight when the Wi-Fi drops has no failed response to learn from yet, so
+ * without this the rail would sit on "Working" until the provider eventually
+ * times out. It answers "is there a route out of this machine", not "is the
+ * provider reachable" — a captive portal still reads as online, and that case is
+ * caught later by the provider status.
+ */
+function useNetworkOnline(): boolean {
+  const [isOnline, setIsOnline] = useState(
+    () => globalThis.navigator?.onLine ?? true,
+  );
+  useEffect(() => {
+    const update = () => setIsOnline(globalThis.navigator?.onLine ?? true);
+    window.addEventListener("offline", update);
+    window.addEventListener("online", update);
+    // The listeners can miss a transition that happened between the initial
+    // read and the subscription.
+    update();
+    return () => {
+      window.removeEventListener("offline", update);
+      window.removeEventListener("online", update);
+    };
+  }, []);
+  return isOnline;
+}
+
 function ChatTurn({
   artifactActions,
   isActive,
@@ -20483,6 +20513,7 @@ function ChatTurn({
     ? providerStatusFromEvent(turn.statusEvent)
     : undefined;
   const isRunning = isActive;
+  const isOnline = useNetworkOnline();
   const startedAt = turn.runStartedAt ?? turn.startedAt;
   const completedAt = !isRunning
     ? (turn.completedAt ?? turn.statusEvent?.createdAt)
@@ -20516,6 +20547,14 @@ function ChatTurn({
           recoveryMessage: providerStatus.recoveryMessage,
         }
       : undefined,
+    // Two ways a live turn ends up waiting on the wire: the machine lost its
+    // network, or the provider already reported a transport failure the surface
+    // is dialling back from. Both are the same beat to the reader.
+    retry: !isOnline
+      ? { reason: "Waiting for the network" }
+      : providerIsUnreachable(providerStatus)
+        ? { reason: "Reconnecting to the provider" }
+        : undefined,
   });
   const responseEvent = runModel.response;
   // Offer Continue when the turn produced anything the user might resume from —
@@ -21294,6 +21333,33 @@ export function providerNeedsSignIn(recoveryKind: string | undefined) {
 
 function providerSignInLabel(recoveryKind: string | undefined) {
   return recoveryKind === "login-expired" ? "Sign in" : "Reconnect";
+}
+
+/** Words the backend uses for a transport that dropped, as opposed to a refusal. */
+const PROVIDER_TRANSPORT_FAILURE =
+  /\b(?:network|connection|connect|dns|offline|unreachable|timed out|timeout|socket|econn)\b/i;
+
+/**
+ * True when the provider's last word was a transport failure rather than a
+ * verdict. Only meaningful on a turn that is still live — the caller checks
+ * that — because a settled turn with the same status is simply over, and the
+ * failure block is the right place for it.
+ */
+function providerIsUnreachable(
+  status: ReturnType<typeof providerStatusFromEvent>,
+): boolean {
+  if (!status || status.status === "cancelled") {
+    return false;
+  }
+  if (status.recoveryKind === "network" || status.recoveryKind === "offline") {
+    return true;
+  }
+  if (status.status !== "failed" && status.status !== "blocked") {
+    return false;
+  }
+  return PROVIDER_TRANSPORT_FAILURE.test(
+    `${status.error ?? ""} ${status.recoveryMessage ?? ""}`,
+  );
 }
 
 function providerStatusFromEvent(event: SessionEvent) {

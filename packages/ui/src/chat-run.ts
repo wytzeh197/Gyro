@@ -1,4 +1,5 @@
 import {
+  isAssistantPreambleBlock,
   isOrphanAssistantFragment,
   isTransientStatusGreeting,
   peelAssistantPreambleBlocks,
@@ -83,6 +84,13 @@ export type RunPhase =
   | { name: "thinking" }
   | { name: "working" }
   | { name: "finalizing" }
+  /**
+   * The transport went away mid-run and the turn is waiting to reach the
+   * provider again. Live, not failed: the work behind it is intact, so the rail
+   * keeps its shape and the failure block stays out of the way until the retry
+   * gives up for good.
+   */
+  | { name: "retrying"; attempt?: number; reason?: string }
   | { name: "done"; durationMs?: number }
   | {
       name: "failed";
@@ -130,6 +138,12 @@ export type BuildRunModelOptions = {
   fileStats?: (
     path: string,
   ) => { additions?: number; deletions?: number } | undefined;
+  /**
+   * Set while the surface is trying to reach the provider again. Only the chat
+   * surface knows this — it owns the network watch and fires the resend — so the
+   * run model takes it as an input rather than guessing from a stale status.
+   */
+  retry?: { attempt?: number; reason?: string };
 };
 
 const INFLIGHT_STATUSES = ["queued", "running", "waiting"];
@@ -293,6 +307,15 @@ function partitionClosingResponse(
   if (isRunning && !followsWork) {
     return undefined;
   }
+  // Narration that trails the last tool is still narration while the run is
+  // going: it is the beat the rail should be showing, not an answer. Peeling
+  // below always keeps one block back, so without this a lone "Let me check the
+  // build config." becomes the response body and reports the turn as
+  // finalizing. A settled turn still needs something to answer with, so the
+  // rule is scoped to live runs.
+  if (isRunning && trailing.every(isNarrationOnly)) {
+    return undefined;
+  }
 
   // Peel plan/status lines from the trailing blocks. Applies with or without
   // tools — glued pure-Q&A streams often attach "I'll check…" to the answer.
@@ -352,6 +375,17 @@ function partitionClosingResponse(
   };
 }
 
+/**
+ * True when nothing in an assistant message reads as an answer — every block is
+ * a plan line, a status line, or a stray fragment. A message left with no usable
+ * blocks at all counts, since what it held was dropped as noise.
+ */
+function isNarrationOnly(event: SessionEvent): boolean {
+  return structuredCommentaryBlocks(event.message).every(
+    isAssistantPreambleBlock,
+  );
+}
+
 function joinAssistantEvents(events: SessionEvent[]): SessionEvent {
   const first = events[0]!;
   return {
@@ -380,6 +414,16 @@ function runPhase(
   // "working" would spin a timer nothing is driving.
   if (!isRunning && status && INFLIGHT_STATUSES.includes(status.status)) {
     return { name: "interrupted" };
+  }
+  // A retry in flight outranks the status that provoked it: the provider's last
+  // word is by definition stale while the surface is dialling again, and showing
+  // "Stopped" over a live reconnect reads as a dead turn the user has to rescue.
+  if (isRunning && options.retry) {
+    return {
+      name: "retrying",
+      attempt: options.retry.attempt,
+      reason: options.retry.reason,
+    };
   }
   if (status && PROBLEM_STATUSES.includes(status.status)) {
     return {
@@ -678,6 +722,10 @@ export function runHeaderLabel(
     case "working":
     case "finalizing":
       return elapsedLabel ? `Working for ${elapsedLabel}` : "Working";
+    // The clock is still honest here — the turn never ended — but "Working for"
+    // is not, so the header names the wait and the rail row carries the detail.
+    case "retrying":
+      return elapsedLabel ? `Retrying · ${elapsedLabel}` : "Retrying";
     case "done":
       return elapsedLabel ? `Worked for ${elapsedLabel}` : "Worked";
     case "failed":
@@ -718,11 +766,37 @@ export function isRunPhaseLive(phase: RunPhase) {
   return (
     phase.name === "thinking" ||
     phase.name === "working" ||
-    phase.name === "finalizing"
+    phase.name === "finalizing" ||
+    phase.name === "retrying"
   );
 }
 
 export type RunRowText = { label: string; description?: string };
+
+/**
+ * The retry beat's two halves, in the same shape as every other row so the rail
+ * stays one grid. The reason comes from whoever detected the loss, because
+ * "Waiting for the network" and "Reconnecting to the provider" are different
+ * facts and guessing between them here would put the wrong one on screen.
+ */
+export function runRetryText(
+  phase: Extract<RunPhase, { name: "retrying" }>,
+): RunRowText {
+  const reason = phase.reason?.trim();
+  // The first attempt needs no number — "Attempt 1" implies a series the user
+  // has not seen fail yet.
+  const attempt =
+    phase.attempt !== undefined && phase.attempt > 1
+      ? `attempt ${phase.attempt}`
+      : undefined;
+  return {
+    label: "Retrying",
+    description:
+      reason && attempt
+        ? `${reason} · ${attempt}`
+        : (reason ?? attempt ?? "Waiting for the connection"),
+  };
+}
 
 /**
  * The two halves of a row: the bright side names the action, the muted side
