@@ -225,6 +225,8 @@ import type {
   TerminalTemplate,
   ThemeMode,
   UpdateState,
+  CliUpdateOffer,
+  CliUpdatePhase,
   WorkbenchDensity,
   WorkbenchMode,
   WorkbenchPaneTab,
@@ -273,6 +275,8 @@ import {
 
 type BrowserScreenshotAction = "capture" | "reveal";
 import {
+  cliUpdateActionLabel,
+  cliUpdateNoticeMessage,
   shouldShowSidebarUpdate,
   updateSidebarLabel,
   updateSizeLabel,
@@ -306,6 +310,13 @@ const TOOL_PANEL_COLLAPSE_HEIGHT = 96;
 /** Leave room for editor chrome + status bar; still near full workspace. */
 const TOOL_PANEL_MAX_VIEWPORT_RATIO = 0.92;
 const IDE_SIDEBAR_KEYBOARD_STEP = 16;
+/**
+ * How far off the bottom of the transcript still counts as being at the bottom.
+ *
+ * Wide enough to survive sub-pixel rounding and a line of text arriving between
+ * frames, narrow enough that a reader who scrolled up stays scrolled up.
+ */
+const TRANSCRIPT_BOTTOM_SLACK = 72;
 
 function restingSidebarWidth() {
   if (typeof window === "undefined") {
@@ -412,6 +423,11 @@ type AppChromeProps = {
   activePaneTab?: WorkbenchPaneTab;
   activeSettingsSection?: SettingsSectionId;
   updateState?: UpdateState;
+  /** Provider CLIs with available updates (Claude, Codex, Grok, …). */
+  cliUpdateOffers?: CliUpdateOffer[];
+  cliUpdatePhase?: CliUpdatePhase;
+  onUpdateClis?: () => void;
+  onDismissCliUpdates?: () => void;
   workspaceSidebarHidden?: boolean;
   workspaceSidebarWidth?: number;
   workspacePreparation?: WorkspacePreparationProgress;
@@ -1006,6 +1022,76 @@ function WorkspaceActivityRail({
   );
 }
 
+/** Center-top notice when provider CLIs can be updated. */
+export function CliUpdateBanner({
+  offers,
+  phase = "idle",
+  onUpdate,
+  onDismiss,
+}: {
+  offers: CliUpdateOffer[];
+  phase?: CliUpdatePhase;
+  onUpdate?: () => void;
+  onDismiss?: () => void;
+}) {
+  const available = offers.filter((offer) => offer.updateAvailable);
+  if (available.length === 0) {
+    return null;
+  }
+  const isBusy = phase === "updating" || phase === "checking";
+  const actionLabel =
+    phase === "updating" ? "Updating…" : cliUpdateActionLabel(available);
+  const message =
+    phase === "failed"
+      ? "CLI update failed — try again"
+      : cliUpdateNoticeMessage(available);
+
+  return (
+    <div
+      aria-live="polite"
+      className="gyro-cli-update-banner"
+      data-phase={phase}
+      role="status"
+    >
+      <span className="gyro-cli-update-banner-icon" aria-hidden="true">
+        <Download size={13} />
+      </span>
+      <span className="gyro-cli-update-banner-copy">
+        <strong>{message}</strong>
+        {available.length === 1 && available[0]?.latestVersion ? (
+          <small>
+            {available[0].displayName}
+            {available[0].currentVersion
+              ? ` · ${available[0].currentVersion}`
+              : ""}
+          </small>
+        ) : available.length > 1 ? (
+          <small>
+            {available.map((offer) => offer.displayName).join(" · ")}
+          </small>
+        ) : null}
+      </span>
+      <button
+        className="gyro-cli-update-banner-action"
+        disabled={isBusy || !onUpdate}
+        onClick={() => onUpdate?.()}
+        type="button"
+      >
+        {actionLabel}
+      </button>
+      <button
+        aria-label="Dismiss CLI update notice"
+        className="gyro-cli-update-banner-dismiss"
+        disabled={isBusy}
+        onClick={() => onDismiss?.()}
+        type="button"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 export function AppChrome({
   sessions,
   commandProfiles,
@@ -1027,6 +1113,10 @@ export function AppChrome({
   activePaneTab = "diff",
   activeSettingsSection = "general",
   updateState,
+  cliUpdateOffers = [],
+  cliUpdatePhase = "idle",
+  onUpdateClis,
+  onDismissCliUpdates,
   workspaceSidebarHidden,
   workspaceSidebarWidth,
   onSelectSession,
@@ -1632,6 +1722,15 @@ export function AppChrome({
         </aside>
       )}
       <main className="gyro-main" tabIndex={-1}>
+        {activeDestination !== "settings" &&
+        cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
+          <CliUpdateBanner
+            offers={cliUpdateOffers}
+            onDismiss={onDismissCliUpdates}
+            onUpdate={onUpdateClis}
+            phase={cliUpdatePhase}
+          />
+        ) : null}
         {activeDestination === "settings" ? (
           <div className="gyro-settings-topbar">
             <div
@@ -6137,6 +6236,17 @@ export function ChatSurface({
   const [isTranscriptAwayFromBottom, setIsTranscriptAwayFromBottom] =
     useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  /**
+   * Whether the transcript should keep itself at the bottom as it grows.
+   *
+   * Jumping to the bottom once is not what the button is for: a live turn is
+   * still appending, so a single scroll lands where the bottom *was* and the
+   * reader is left behind again a moment later. This holds the pin until the
+   * reader scrolls up themselves.
+   */
+  const isFollowingTranscriptBottomRef = useRef(false);
+  /** Previous offset, so a scroll up can be told from content growing below. */
+  const lastTranscriptScrollTopRef = useRef(0);
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
   const [activeThreadContextMenu, setActiveThreadContextMenu] = useState<
     "workspace" | null
@@ -6353,21 +6463,62 @@ export function ChatSurface({
     }
     const distanceFromBottom =
       transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
-    setIsTranscriptAwayFromBottom(distanceFromBottom > 72);
+    const isAtBottom = distanceFromBottom <= TRANSCRIPT_BOTTOM_SLACK;
+    // Being at the bottom is the pin, whichever way the offset got there:
+    // content collapsing above also drags it back, and that is not the reader
+    // leaving. Only moving up and away from the bottom hands control over.
+    if (isAtBottom) {
+      isFollowingTranscriptBottomRef.current = true;
+    } else if (transcript.scrollTop < lastTranscriptScrollTopRef.current) {
+      isFollowingTranscriptBottomRef.current = false;
+    }
+    lastTranscriptScrollTopRef.current = transcript.scrollTop;
+    setIsTranscriptAwayFromBottom(!isAtBottom);
+  }, []);
+  /** Re-seat the transcript at the bottom, but only while it is following. */
+  const pinTranscriptToBottom = useCallback(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript || !isFollowingTranscriptBottomRef.current) {
+      return;
+    }
+    // Assigned rather than animated: a smooth scroll started against the last
+    // height is exactly what the growing turn outruns.
+    transcript.scrollTop = transcript.scrollHeight;
+    lastTranscriptScrollTopRef.current = transcript.scrollTop;
   }, []);
   const scrollTranscriptToBottom = useCallback(() => {
     const transcript = transcriptRef.current;
-    transcript?.scrollTo({
+    if (!transcript) {
+      return;
+    }
+    isFollowingTranscriptBottomRef.current = true;
+    lastTranscriptScrollTopRef.current = transcript.scrollTop;
+    transcript.scrollTo({
       behavior: "smooth",
       top: transcript.scrollHeight,
     });
   }, []);
   useEffect(() => {
-    const animationFrame = window.requestAnimationFrame(
-      updateTranscriptScrollPosition,
-    );
+    const animationFrame = window.requestAnimationFrame(() => {
+      pinTranscriptToBottom();
+      updateTranscriptScrollPosition();
+    });
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [transcriptEvents, updateTranscriptScrollPosition]);
+  }, [pinTranscriptToBottom, transcriptEvents, updateTranscriptScrollPosition]);
+  // A composer that grew, a rail that opened, a resized window: the transcript
+  // gets shorter without the event list changing, and the bottom moves with it.
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      pinTranscriptToBottom();
+      updateTranscriptScrollPosition();
+    });
+    observer.observe(transcript);
+    return () => observer.disconnect();
+  }, [pinTranscriptToBottom, updateTranscriptScrollPosition]);
   const contextModel = useMemo(() => {
     // Prefer the chat's own model over the global picker state so split panes
     // keep independent context windows when each thread uses a different model.
@@ -6535,9 +6686,18 @@ export function ChatSurface({
       turns,
     ],
   );
-  const sidePanel = activeRailPanel ? (
+  // The rail is the chat's standing context now, not a panel you opt into:
+  // project, isolation, branch, and spend have nowhere else to live. Closing
+  // the plan or browser panel falls back to it rather than to bare chat.
+  const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
+  const sidePanel = (
     <ChatSidePanel
-      activePanel={activeRailPanel}
+      activePanel={railPanel}
+      branchCatalog={branchCatalog}
+      isBranchLoading={isBranchLoading}
+      isComposerSending={isComposerSending}
+      savedProjects={savedProjects}
+      sessionUsage={sessionUsage}
       branchName={branchName}
       browserPreview={browserPreview}
       browserNativeHost={browserNativeHost}
@@ -6552,9 +6712,11 @@ export function ChatSurface({
       editorRequest={planEditorRequest}
       onEditorRequestHandled={onPlanEditorRequestHandled}
       onClose={
-        activeRailPanel === "browser"
-          ? onToggleBrowserPanel
-          : onToggleEnvironmentRail
+        railPanel === "environment"
+          ? undefined
+          : railPanel === "browser"
+            ? onToggleBrowserPanel
+            : onTogglePlanPanel
       }
       onComposerAction={onComposerAction}
       onOpenToolPanel={onOpenToolPanel}
@@ -6575,7 +6737,7 @@ export function ChatSurface({
       workspacePath={workspacePath}
       worktreeName={worktreeName}
     />
-  ) : null;
+  );
   const missionHasWorkers = missionWorkers.length > 0;
   if (turns.length === 0 && looseEvents.length === 0) {
     return (
@@ -6583,10 +6745,10 @@ export function ChatSurface({
         className={[
           "gyro-chat-surface",
           "is-empty",
+          "has-environment",
           isMission ? "is-mission" : "",
           missionHasWorkers ? "has-mission-workers" : "",
           isTiled ? "is-tiled" : "",
-          activeRailPanel ? "has-environment" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -6778,8 +6940,8 @@ export function ChatSurface({
       className={[
         "gyro-chat-surface",
         "is-thread",
+        "has-environment",
         isTiled ? "is-tiled" : "",
-        activeRailPanel ? "has-environment" : "",
         activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : "",
         workspaceMode === "worktree" ? "is-agent-workspace" : "",
       ]
@@ -6921,7 +7083,7 @@ export function ChatSurface({
             </div>
           </div>
           <ChatSurfaceControls
-            activePanel={activeRailPanel}
+            activePanel={railPanel}
             isToolPanelOpen={Boolean(isToolPanelOpen)}
             modelFocus={visibleModelFocus}
             onCloseChat={onCloseChat}
@@ -7052,7 +7214,6 @@ export function ChatSurface({
             sessionUsage={sessionUsage}
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
-            showContextRow={false}
             popoverPlacement="up"
             variant="hero"
           />
@@ -7718,6 +7879,13 @@ function ChatSidePanel({
   sessionGoal,
   terminalPanes = [],
   workspacePath,
+  branchCatalog,
+  branchName,
+  isBranchLoading,
+  isComposerSending,
+  savedProjects,
+  sessionUsage,
+  workspaceMode,
 }: {
   activePanel: ChatSidePanelId;
   branchName?: string;
@@ -7768,6 +7936,12 @@ function ChatSidePanel({
   workspaceMode?: WorkbenchMode;
   workspacePath?: string;
   worktreeName?: string;
+  // Standing chat context, moved off the composer and into the rail.
+  branchCatalog?: GitBranchCatalog;
+  isBranchLoading?: boolean;
+  isComposerSending?: boolean;
+  savedProjects?: Array<{ path: string; label: string; detail?: string }>;
+  sessionUsage?: SessionUsageTotals;
 }) {
   const [planEditor, setPlanEditor] = useState<{
     mode: "add" | "edit";
@@ -8247,15 +8421,28 @@ function ChatSidePanel({
             <span>{workspaceName(workspacePath)}</span>
           </div>
         </div>
-        <button
-          aria-label="Close environment"
-          className="gyro-chat-tool-close"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={14} />
-        </button>
+        {onClose ? (
+          <button
+            aria-label="Close environment"
+            className="gyro-chat-tool-close"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={14} />
+          </button>
+        ) : null}
       </header>
+      <ChatContextSection
+        branchCatalog={branchCatalog}
+        branchName={branchName}
+        isBranchLoading={isBranchLoading}
+        isSending={isComposerSending}
+        onAction={onComposerAction}
+        savedProjects={savedProjects}
+        sessionUsage={sessionUsage}
+        workspaceMode={workspaceMode}
+        workspacePath={workspacePath}
+      />
       <ChatEnvironmentLauncher
         browserLabel={browserLabel}
         browserPreview={browserPreview}
@@ -8309,6 +8496,247 @@ function ChatSidePanel({
         </details>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * Project, isolation, branch, and spend — the chat's standing context.
+ *
+ * These used to sit in a strip under the composer that only ever rendered on
+ * the hero, so an active thread had no way to see or change them. The rail is
+ * always present in chat, so they live here and stay reachable.
+ *
+ * Its popover state is its own: the composer's `activePopover` drives the
+ * attach, model, and effort menus that are still down there, and one shared
+ * cursor across two surfaces would let a rail menu close a composer one.
+ */
+function ChatContextSection({
+  branchCatalog,
+  branchName,
+  isBranchLoading,
+  isSending = false,
+  onAction,
+  savedProjects = [],
+  sessionUsage,
+  workspaceMode = "local",
+  workspacePath,
+}: {
+  branchCatalog?: GitBranchCatalog;
+  branchName?: string;
+  isBranchLoading?: boolean;
+  isSending?: boolean;
+  onAction?: (action: string) => void;
+  savedProjects?: Array<{ path: string; label: string; detail?: string }>;
+  sessionUsage?: SessionUsageTotals;
+  workspaceMode?: WorkbenchMode;
+  workspacePath?: string;
+}) {
+  const [activePopover, setActivePopover] = useState<
+    "project" | "workspace-mode" | "branch" | null
+  >(null);
+  const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
+    Boolean(activePopover),
+    () => setActivePopover(null),
+  );
+  const popoverBaseId = useId();
+  const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
+  const projectLabel = composerProjectLabel(workspacePath);
+  const modeChipLabel = workspaceModeLabel(workspaceMode);
+  const branchLabel =
+    branchName ?? (workspaceMode === "worktree" ? "New worktree branch" : "main");
+  const sessionCost = useMemo(
+    () => summarizeSessionCost(sessionUsage),
+    [sessionUsage],
+  );
+  const savedProjectItems: ComposerPopoverItem[] = savedProjects
+    .filter((project) => project.path)
+    .slice(0, 6)
+    .map((project) => ({
+      action: `select-saved-project:${encodeURIComponent(project.path)}`,
+      active: project.path === workspacePath,
+      detail: project.detail,
+      icon: Folder,
+      kind: "project" as const,
+      label: project.label,
+      removeAction: `remove-saved-project:${encodeURIComponent(project.path)}`,
+    }));
+  const runAction = (action?: string) => {
+    setActivePopover(null);
+    if (action) {
+      onAction?.(action);
+    }
+  };
+  const menuProps = (popover: "project" | "workspace-mode" | "branch") => ({
+    "aria-controls":
+      activePopover === popover ? `${popoverBaseId}-${popover}` : undefined,
+    "aria-expanded": activePopover === popover,
+    "aria-haspopup": "menu" as const,
+  });
+  const togglePopover = (popover: "project" | "workspace-mode" | "branch") => {
+    setActivePopover((current) => (current === popover ? null : popover));
+  };
+
+  return (
+    <section className="gyro-rail-section gyro-chat-context-section">
+      <div
+        className="gyro-composer-control"
+        ref={activePopover === "project" ? popoverScopeRef : undefined}
+      >
+        <button
+          className="gyro-composer-chip"
+          onClick={() => togglePopover("project")}
+          type="button"
+          {...menuProps("project")}
+        >
+          {hasUserWorkspace ? <Folder size={14} /> : <HardDrive size={14} />}
+          {projectLabel}
+          <ChevronDown size={13} />
+        </button>
+        {activePopover === "project" ? (
+          <ComposerPopover
+            id={`${popoverBaseId}-project`}
+            items={[
+              {
+                action: hasUserWorkspace
+                  ? `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`
+                  : "select-workspace",
+                active: hasUserWorkspace,
+                detail:
+                  hasUserWorkspace && workspacePath
+                    ? workspacePath
+                    : "Select the folder Gyro should use",
+                icon: hasUserWorkspace ? Folder : HardDrive,
+                label: projectLabel,
+                removeAction:
+                  hasUserWorkspace && workspacePath
+                    ? `remove-saved-project:${encodeURIComponent(workspacePath)}`
+                    : undefined,
+              },
+              ...savedProjectItems.filter(
+                (project) =>
+                  project.action !==
+                  `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`,
+              ),
+              {
+                action: "select-workspace",
+                icon: Folder,
+                label: hasUserWorkspace ? "Change folder" : "Select folder",
+              },
+              {
+                action: "search-workspace",
+                disabled: !hasUserWorkspace,
+                icon: Search,
+                label: "Search workspace",
+              },
+            ]}
+            onAction={runAction}
+            placement="down"
+            title="Project"
+          />
+        ) : null}
+      </div>
+      <div
+        className="gyro-composer-control"
+        ref={activePopover === "workspace-mode" ? popoverScopeRef : undefined}
+      >
+        <button
+          className={[
+            "gyro-composer-chip",
+            workspaceMode === "worktree" ? "is-agent-workspace" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onClick={() => togglePopover("workspace-mode")}
+          title={workspaceModeTechnicalHint(workspaceMode)}
+          type="button"
+          {...menuProps("workspace-mode")}
+        >
+          {workspaceMode === "worktree" ? (
+            <GitBranch size={14} />
+          ) : (
+            <Laptop size={14} />
+          )}
+          {modeChipLabel}
+          <ChevronDown size={13} />
+        </button>
+        {activePopover === "workspace-mode" ? (
+          <ComposerPopover
+            className="gyro-workspace-mode-picker"
+            id={`${popoverBaseId}-workspace-mode`}
+            items={[
+              {
+                action: "set-workspace-mode:local",
+                active: workspaceMode === "local",
+                icon: Laptop,
+                kind: "workspace-mode",
+                label: workspaceModePopoverLabel("local"),
+                tooltip: workspaceModeTechnicalHint("local"),
+              },
+              {
+                action: "set-workspace-mode:worktree",
+                active: workspaceMode === "worktree",
+                badge:
+                  hasUserWorkspace && workspaceMode !== "worktree"
+                    ? "Recommended"
+                    : undefined,
+                detail: hasUserWorkspace
+                  ? undefined
+                  : workspaceModeDetail("worktree", { hasWorkspace: false }),
+                icon: GitBranch,
+                kind: "workspace-mode",
+                label: workspaceModePopoverLabel("worktree"),
+                tooltip: workspaceModeTechnicalHint("worktree"),
+              },
+            ]}
+            onAction={runAction}
+            placement="down"
+          />
+        ) : null}
+      </div>
+      <div
+        className="gyro-composer-control"
+        ref={activePopover === "branch" ? popoverScopeRef : undefined}
+      >
+        <button
+          className="gyro-composer-chip"
+          onClick={() => togglePopover("branch")}
+          type="button"
+          {...menuProps("branch")}
+        >
+          <GitBranch size={14} />
+          {branchLabel}
+          <ChevronDown size={13} />
+        </button>
+        {activePopover === "branch" ? (
+          <ComposerPopover
+            className="gyro-composer-branch-picker"
+            id={`${popoverBaseId}-branch`}
+            items={branchPopoverItems({
+              branchCatalog,
+              branchName: branchLabel,
+              isDisabled: isSending,
+              isLoading: isBranchLoading,
+              workspaceMode,
+              workspacePath,
+            })}
+            onAction={runAction}
+            placement="down"
+          />
+        ) : null}
+      </div>
+      {sessionCost.isEmpty ? null : (
+        <span
+          className="gyro-composer-session-cost"
+          role="status"
+          title={sessionCost.title}
+        >
+          <Gauge aria-hidden="true" size={12} />
+          <span>{sessionCost.label}</span>
+          {sessionCost.cachedNote ? <em>{sessionCost.cachedNote}</em> : null}
+          {sessionCost.estimateNote ? <em>{sessionCost.estimateNote}</em> : null}
+        </span>
+      )}
+    </section>
   );
 }
 
@@ -17939,7 +18367,6 @@ function Composer({
   isBranchLoading,
   maxDraftLength,
   popoverPlacement,
-  showContextRow,
   /** False while the desktop shell is still warming the backend. */
   shellReady = true,
   variant = "thread",
@@ -17991,7 +18418,6 @@ function Composer({
   isBranchLoading?: boolean;
   maxDraftLength?: number;
   popoverPlacement?: "down" | "up";
-  showContextRow?: boolean;
   shellReady?: boolean;
   variant?: "thread" | "hero";
 }) {
@@ -18168,7 +18594,6 @@ function Composer({
   const isStopAction = Boolean(
     !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
   );
-  const modeChipLabel = workspaceModeLabel(workspaceMode);
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
   const councilResolution = useMemo(() => {
     if (chatMode !== "council") {
@@ -18209,32 +18634,7 @@ function Composer({
     providerBlockMessage: providerErrorMessage,
     workspacePath,
   });
-  const projectLabel = composerProjectLabel(workspacePath);
-  const savedProjectItems: ComposerPopoverItem[] = savedProjects
-    .filter((project) => project.path)
-    .slice(0, 6)
-    .map((project) => ({
-      action: `select-saved-project:${encodeURIComponent(project.path)}`,
-      active: project.path === workspacePath,
-      detail: project.detail,
-      icon: Folder,
-      kind: "project" as const,
-      label: project.label,
-      removeAction: `remove-saved-project:${encodeURIComponent(project.path)}`,
-    }));
-  const branchLabel =
-    branchName ??
-    (workspaceMode === "worktree" ? "New worktree branch" : "main");
-  const branchItems = branchPopoverItems({
-    branchCatalog,
-    branchName: branchLabel,
-    isDisabled: isSending,
-    isLoading: isBranchLoading,
-    workspaceMode,
-    workspacePath,
-  });
   const isHero = variant === "hero";
-  const shouldShowContextRow = showContextRow ?? isHero;
   const providerItems: ComposerPopoverItem[] = [
     ...(providerErrorMessage
       ? [
@@ -18459,13 +18859,6 @@ function Composer({
       label: "New chat",
     },
   ];
-  // What this chat has spent so far, from Gyro's ledger rather than from a
-  // provider's own reporting — so it is present even for the CLIs that report
-  // no counts at all.
-  const sessionCost = useMemo(
-    () => summarizeSessionCost(sessionUsage),
-    [sessionUsage],
-  );
   // What the next send is about to buy. A Council send is its seats plus a
   // synthesis, so the multiplier is disclosed before Enter commits it.
   const councilSeatCount = councilResolution?.seats.length;
@@ -19358,6 +19751,10 @@ function Composer({
             }
             requestSend();
           }}
+          // Grid slots focus their pane on pointerdown. Stopping that here
+          // keeps a stop click from also re-focusing / re-laying out the chat
+          // under the finger — which was reading as "click empty margin → stop".
+          onPointerDown={(event) => event.stopPropagation()}
           title={
             isStopAction
               ? "Stop response"
@@ -19380,172 +19777,6 @@ function Composer({
           )}
         </button>
       </div>
-      {shouldShowContextRow ? (
-        <div className="gyro-composer-context-row gyro-composer-reveal">
-          <div
-            className="gyro-composer-control"
-            ref={activePopover === "project" ? popoverScopeRef : undefined}
-          >
-            <button
-              className="gyro-composer-chip"
-              onClick={() => togglePopover("project")}
-              type="button"
-              {...menuProps("project")}
-            >
-              {hasUserWorkspace ? (
-                <Folder size={14} />
-              ) : (
-                <HardDrive size={14} />
-              )}
-              {projectLabel}
-              <ChevronDown size={13} />
-            </button>
-            {activePopover === "project" ? (
-              <ComposerPopover
-                id={`${popoverBaseId}-project`}
-                items={[
-                  {
-                    action: hasUserWorkspace
-                      ? `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`
-                      : "select-workspace",
-                    active: hasUserWorkspace,
-                    detail:
-                      hasUserWorkspace && workspacePath
-                        ? workspacePath
-                        : "Select the folder Gyro should use",
-                    icon: hasUserWorkspace ? Folder : HardDrive,
-                    label: projectLabel,
-                    removeAction:
-                      hasUserWorkspace && workspacePath
-                        ? `remove-saved-project:${encodeURIComponent(workspacePath)}`
-                        : undefined,
-                  },
-                  ...savedProjectItems.filter(
-                    (project) =>
-                      project.action !==
-                      `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`,
-                  ),
-                  {
-                    action: "select-workspace",
-                    icon: Folder,
-                    label: hasUserWorkspace ? "Change folder" : "Select folder",
-                  },
-                  {
-                    action: "search-workspace",
-                    disabled: !hasUserWorkspace,
-                    icon: Search,
-                    label: "Search workspace",
-                  },
-                ]}
-                onAction={runPopoverAction}
-                placement="down"
-                title="Project"
-              />
-            ) : null}
-          </div>
-          <div
-            className="gyro-composer-control"
-            ref={
-              activePopover === "workspace-mode" ? popoverScopeRef : undefined
-            }
-          >
-            <button
-              className={[
-                "gyro-composer-chip",
-                workspaceMode === "worktree" ? "is-agent-workspace" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              onClick={() => togglePopover("workspace-mode")}
-              title={workspaceModeTechnicalHint(workspaceMode)}
-              type="button"
-              {...menuProps("workspace-mode")}
-            >
-              {workspaceMode === "worktree" ? (
-                <GitBranch size={14} />
-              ) : (
-                <Laptop size={14} />
-              )}
-              {modeChipLabel}
-              <ChevronDown size={13} />
-            </button>
-            {activePopover === "workspace-mode" ? (
-              <ComposerPopover
-                className="gyro-workspace-mode-picker"
-                id={`${popoverBaseId}-workspace-mode`}
-                items={[
-                  {
-                    action: "set-workspace-mode:local",
-                    active: workspaceMode === "local",
-                    icon: Laptop,
-                    kind: "workspace-mode",
-                    label: workspaceModePopoverLabel("local"),
-                    // Full explanation lives on the chip tooltip — labels are enough here.
-                    tooltip: workspaceModeTechnicalHint("local"),
-                  },
-                  {
-                    action: "set-workspace-mode:worktree",
-                    active: workspaceMode === "worktree",
-                    badge:
-                      hasUserWorkspace && workspaceMode !== "worktree"
-                        ? "Recommended"
-                        : undefined,
-                    // Only surface a detail when isolation can't run yet.
-                    detail: hasUserWorkspace
-                      ? undefined
-                      : workspaceModeDetail("worktree", {
-                          hasWorkspace: false,
-                        }),
-                    icon: GitBranch,
-                    kind: "workspace-mode",
-                    label: workspaceModePopoverLabel("worktree"),
-                    tooltip: workspaceModeTechnicalHint("worktree"),
-                  },
-                ]}
-                onAction={runPopoverAction}
-                placement="down"
-              />
-            ) : null}
-          </div>
-          <div
-            className="gyro-composer-control"
-            ref={activePopover === "branch" ? popoverScopeRef : undefined}
-          >
-            <button
-              className="gyro-composer-chip"
-              onClick={() => togglePopover("branch")}
-              type="button"
-              {...menuProps("branch")}
-            >
-              <GitBranch size={14} />
-              {branchLabel}
-              <ChevronDown size={13} />
-            </button>
-            {activePopover === "branch" ? (
-              <ComposerPopover
-                className="gyro-composer-branch-picker"
-                id={`${popoverBaseId}-branch`}
-                items={branchItems}
-                onAction={runPopoverAction}
-                placement="down"
-              />
-            ) : null}
-          </div>
-          {sessionCost && !sessionCost.isEmpty ? (
-            <span
-              className="gyro-composer-session-cost"
-              role="status"
-              title={sessionCost.title}
-            >
-              <Gauge aria-hidden="true" size={12} />
-              <span>{sessionCost.label}</span>
-              {sessionCost.estimateNote ? (
-                <em>{sessionCost.estimateNote}</em>
-              ) : null}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -20425,6 +20656,36 @@ function turnKeyFromEvent(event: SessionEvent) {
   );
 }
 
+/**
+ * Whether the machine currently has a network interface, watched live.
+ *
+ * `navigator.onLine` is the only loss-of-network signal available before a
+ * request has failed, which is exactly the window this is for: a turn that is
+ * mid-flight when the Wi-Fi drops has no failed response to learn from yet, so
+ * without this the rail would sit on "Working" until the provider eventually
+ * times out. It answers "is there a route out of this machine", not "is the
+ * provider reachable" — a captive portal still reads as online, and that case is
+ * caught later by the provider status.
+ */
+function useNetworkOnline(): boolean {
+  const [isOnline, setIsOnline] = useState(
+    () => globalThis.navigator?.onLine ?? true,
+  );
+  useEffect(() => {
+    const update = () => setIsOnline(globalThis.navigator?.onLine ?? true);
+    window.addEventListener("offline", update);
+    window.addEventListener("online", update);
+    // The listeners can miss a transition that happened between the initial
+    // read and the subscription.
+    update();
+    return () => {
+      window.removeEventListener("offline", update);
+      window.removeEventListener("online", update);
+    };
+  }, []);
+  return isOnline;
+}
+
 function ChatTurn({
   artifactActions,
   isActive,
@@ -20483,6 +20744,7 @@ function ChatTurn({
     ? providerStatusFromEvent(turn.statusEvent)
     : undefined;
   const isRunning = isActive;
+  const isOnline = useNetworkOnline();
   const startedAt = turn.runStartedAt ?? turn.startedAt;
   const completedAt = !isRunning
     ? (turn.completedAt ?? turn.statusEvent?.createdAt)
@@ -20516,6 +20778,14 @@ function ChatTurn({
           recoveryMessage: providerStatus.recoveryMessage,
         }
       : undefined,
+    // Two ways a live turn ends up waiting on the wire: the machine lost its
+    // network, or the provider already reported a transport failure the surface
+    // is dialling back from. Both are the same beat to the reader.
+    retry: !isOnline
+      ? { reason: "Waiting for the network" }
+      : providerIsUnreachable(providerStatus)
+        ? { reason: "Reconnecting to the provider" }
+        : undefined,
   });
   const responseEvent = runModel.response;
   // Offer Continue when the turn produced anything the user might resume from —
@@ -21294,6 +21564,33 @@ export function providerNeedsSignIn(recoveryKind: string | undefined) {
 
 function providerSignInLabel(recoveryKind: string | undefined) {
   return recoveryKind === "login-expired" ? "Sign in" : "Reconnect";
+}
+
+/** Words the backend uses for a transport that dropped, as opposed to a refusal. */
+const PROVIDER_TRANSPORT_FAILURE =
+  /\b(?:network|connection|connect|dns|offline|unreachable|timed out|timeout|socket|econn)\b/i;
+
+/**
+ * True when the provider's last word was a transport failure rather than a
+ * verdict. Only meaningful on a turn that is still live — the caller checks
+ * that — because a settled turn with the same status is simply over, and the
+ * failure block is the right place for it.
+ */
+function providerIsUnreachable(
+  status: ReturnType<typeof providerStatusFromEvent>,
+): boolean {
+  if (!status || status.status === "cancelled") {
+    return false;
+  }
+  if (status.recoveryKind === "network" || status.recoveryKind === "offline") {
+    return true;
+  }
+  if (status.status !== "failed" && status.status !== "blocked") {
+    return false;
+  }
+  return PROVIDER_TRANSPORT_FAILURE.test(
+    `${status.error ?? ""} ${status.recoveryMessage ?? ""}`,
+  );
 }
 
 function providerStatusFromEvent(event: SessionEvent) {

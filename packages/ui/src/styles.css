@@ -1827,6 +1827,140 @@ button.gyro-account-menu-row:hover {
   position: relative;
 }
 
+/* Center-top notice when one or more provider CLIs can be updated. Uses theme
+   tokens so dark/light stay legible without a second layout. */
+.gyro-cli-update-banner {
+  align-items: center;
+  backdrop-filter: blur(14px) saturate(1.2);
+  background: color-mix(in srgb, var(--gyro-surface-raised) 88%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-accent) 28%, var(--gyro-border));
+  border-radius: 999px;
+  box-shadow:
+    0 10px 28px var(--gyro-shadow),
+    0 0 0 1px color-mix(in srgb, var(--gyro-accent) 10%, transparent);
+  display: flex;
+  gap: 10px;
+  left: 50%;
+  max-width: min(560px, calc(100% - 28px));
+  padding: 7px 8px 7px 12px;
+  pointer-events: auto;
+  position: absolute;
+  top: 14px;
+  transform: translateX(-50%);
+  z-index: 80;
+}
+
+.gyro-cli-update-banner-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
+  border-radius: 999px;
+  color: var(--gyro-accent-strong, var(--gyro-accent));
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.gyro-cli-update-banner-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-cli-update-banner-copy strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-cli-update-banner-copy small {
+  color: var(--gyro-muted);
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-cli-update-banner-action {
+  background: var(--gyro-primary-bg);
+  border: 0;
+  border-radius: 999px;
+  color: var(--gyro-primary-text);
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  min-height: 28px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.gyro-cli-update-banner-action:hover:not(:disabled) {
+  background: var(--gyro-primary-hover);
+}
+
+.gyro-cli-update-banner-action:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.gyro-cli-update-banner-dismiss {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.gyro-cli-update-banner-dismiss:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-cli-update-banner[data-phase="failed"] {
+  border-color: color-mix(in srgb, var(--gyro-danger) 40%, var(--gyro-border));
+  box-shadow:
+    0 10px 28px var(--gyro-shadow),
+    0 0 0 1px color-mix(in srgb, var(--gyro-danger) 12%, transparent);
+}
+
+.gyro-cli-update-banner[data-phase="failed"] .gyro-cli-update-banner-icon {
+  background: color-mix(in srgb, var(--gyro-danger) 14%, transparent);
+  color: var(--gyro-danger);
+}
+
+:root[data-theme="light"] .gyro-cli-update-banner {
+  background: color-mix(in srgb, var(--gyro-surface) 94%, #ffffff);
+  border-color: color-mix(in srgb, var(--gyro-accent) 22%, var(--gyro-border));
+  box-shadow:
+    0 12px 30px rgba(32, 40, 52, 0.12),
+    0 0 0 1px color-mix(in srgb, var(--gyro-accent) 8%, transparent);
+}
+
+:root[data-theme="light"] .gyro-cli-update-banner-icon {
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  color: var(--gyro-accent-strong, var(--gyro-accent));
+}
+
+:root[data-theme="dark"] .gyro-cli-update-banner {
+  background: color-mix(in srgb, var(--gyro-surface-raised) 86%, #0a0a0a);
+}
+
 .gyro-main-titlebar-drag-region {
   height: 58px;
   left: 0;
@@ -24288,6 +24422,29 @@ button.gyro-account-menu-row:hover,
   }
 }
 
+/* Chat context in the environment rail.
+   These chips came off a horizontal strip under the composer, so each one has
+   to fill the rail's column rather than sit at its own content width. */
+.gyro-chat-context-section > .gyro-composer-control {
+  display: flex;
+}
+
+.gyro-chat-context-section .gyro-composer-chip {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.gyro-chat-context-section .gyro-composer-chip > svg:last-child {
+  margin-left: auto;
+}
+
+.gyro-chat-context-section .gyro-composer-session-cost {
+  flex-wrap: wrap;
+  margin-left: 0;
+  margin-top: 6px;
+  white-space: normal;
+}
+
 /* Chat slash command menu */
 .gyro-composer-shell:has(.gyro-composer-slash-menu) {
   z-index: 123;
@@ -26292,8 +26449,18 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar > div:first-child span {
   max-width: 180px;
 }
-.gyro-chat-surface.is-tiled.has-environment .gyro-environment-rail,
-.gyro-chat-surface.is-tiled.has-environment .gyro-plan-rail {
+/*
+ * Temporary plan/browser panels may float over a tiled pane so a narrow
+ * split is not squeezed further. The standing environment rail must not:
+ * with always-on has-environment it would cover the right half of the
+ * transcript (and the stop control) and make any click "outside the chat
+ * width" land on rail chrome instead of the turn.
+ */
+.gyro-chat-surface.is-tiled.has-environment .gyro-environment-rail {
+  display: none;
+}
+.gyro-chat-surface.is-tiled.has-environment .gyro-plan-rail,
+.gyro-chat-surface.is-tiled.has-environment .gyro-browser-rail {
   bottom: 8px;
   box-shadow: 0 16px 44px rgb(0 0 0 / 44%);
   grid-area: auto;
@@ -29189,6 +29356,17 @@ button.gyro-account-menu-row:hover,
   min-height: 0;
 }
 
+/* The IDE sidebar renders the same chat at roughly a third of the width the
+   rail was sized for. A column beside it would leave the transcript unreadable,
+   so this embed keeps the full width and drops the rail. */
+.gyro-sidebar-ai-chat .gyro-chat-surface.has-environment {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gyro-sidebar-ai-chat .gyro-chat-tool-rail {
+  display: none;
+}
+
 /* At sidebar width the composer bar cannot hold its controls on one line;
    wrap rather than clipping the send button off the edge. */
 .gyro-sidebar-ai-chat .gyro-composer-bar {
@@ -29468,6 +29646,14 @@ button.gyro-account-menu-row:hover,
   gap: 6px;
 }
 
+/* Quieter than the path it follows: the count is how many, not what. */
+.gyro-run-row-repeat {
+  color: var(--gyro-faint);
+  flex: none;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .gyro-run-row-stat em {
   font-style: normal;
 }
@@ -29507,6 +29693,24 @@ button.gyro-account-menu-row:hover,
 
 .gyro-run-pulse-label {
   font-weight: 450;
+}
+
+/* The retry beat borrows .gyro-run-row wholesale, so it is the same size as a
+   command line and the spine runs through it. Everything below is motion and
+   emphasis: the label sits at the brightness of a live row, and the icon sweeps
+   once per cycle then holds — one attempt, then the wait before the next. */
+.gyro-run-retry .gyro-run-row-label {
+  color: var(--gyro-text);
+}
+
+.gyro-run-retry .gyro-run-row-icon {
+  animation: gyro-run-retry-sweep 2.4s ease-in-out infinite;
+  color: var(--gyro-muted);
+  opacity: 1;
+}
+
+.gyro-run-retry .gyro-run-row-detail {
+  animation: gyro-run-breathe 2.4s ease-in-out infinite;
 }
 
 .gyro-run-problem {
@@ -29566,9 +29770,34 @@ button.gyro-account-menu-row:hover,
   }
 }
 
+/* One turn of the arrow, then two thirds of the cycle held still. The rotation
+   keeps the 15px icon box (transform, not layout), so the row never shifts. The
+   dim during the hold matches gyro-run-breathe's floor, which is what keeps this
+   in the same family as the working beats instead of reading as a new device. */
+@keyframes gyro-run-retry-sweep {
+  0% {
+    opacity: 0.85;
+    transform: translateY(2px) rotate(0deg);
+  }
+  35% {
+    opacity: 0.85;
+    transform: translateY(2px) rotate(360deg);
+  }
+  70% {
+    opacity: 0.4;
+    transform: translateY(2px) rotate(360deg);
+  }
+  100% {
+    opacity: 0.85;
+    transform: translateY(2px) rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gyro-run-row.is-running .gyro-run-row-icon,
-  .gyro-run-pulse {
+  .gyro-run-pulse,
+  .gyro-run-retry .gyro-run-row-icon,
+  .gyro-run-retry .gyro-run-row-detail {
     animation: none;
   }
 }

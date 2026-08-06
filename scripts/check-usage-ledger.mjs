@@ -15,6 +15,7 @@ function totals(overrides = {}) {
     measuredCalls: 0,
     estimatedCalls: 0,
     inputTokens: 0,
+    cachedInputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
     byOrigin: [],
@@ -120,6 +121,39 @@ const automated = summarizeSessionCost(
   }),
 );
 assert.equal(automated.breakdown, "automations 3 · chat 1");
+
+// A tool-using turn bills the same conversation once per call. The total keeps
+// counting it — budgets are measured against that figure — but the line says
+// how much of it was context being re-read.
+const toolHeavy = summarizeSessionCost(
+  totals({
+    calls: 9,
+    measuredCalls: 9,
+    inputTokens: 567_771,
+    cachedInputTokens: 565_389,
+    totalTokens: 600_000,
+    byOrigin: [{ origin: "chat", label: "Chat", calls: 9, totalTokens: 600_000 }],
+  }),
+);
+assert.equal(toolHeavy.label, "600K tokens · 9 calls");
+assert.equal(toolHeavy.cachedNote, "565K re-read");
+assert.match(toolHeavy.title, /context re-read on each call/);
+
+// Below the threshold the split is noise, and an unmeasured provider reports no
+// cache reading at all, so neither claims one.
+assert.equal(
+  summarizeSessionCost(
+    totals({
+      calls: 4,
+      measuredCalls: 4,
+      cachedInputTokens: 20_000,
+      totalTokens: 200_000,
+      byOrigin: [{ origin: "chat", label: "Chat", calls: 4, totalTokens: 200_000 }],
+    }),
+  ).cachedNote,
+  undefined,
+);
+assert.equal(allEstimated.cachedNote, undefined);
 
 // Outsized-turn detection needs a baseline before it will call anything unusual.
 const baseline = totals({ calls: 6, totalTokens: 600_000 });

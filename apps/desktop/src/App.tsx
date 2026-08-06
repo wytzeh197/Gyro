@@ -57,6 +57,7 @@ import {
   readyCouncilProviders,
   resolveCouncilSeatRequests,
   parseProviderHealthOutput,
+  cliUpdateDismissKey,
   parseGyroWorkspaceFile,
   workspaceCommandForKeybinding,
   providerAuthStatusAfterHealth,
@@ -145,6 +146,10 @@ import {
   type TerminalPane,
   type TerminalTemplate,
   type UpdateState,
+  type CliUpdateOffer,
+  type CliUpdateCheckReport,
+  type CliUpdateApplyResult,
+  type CliUpdatePhase,
   type WorkbenchPaneTab,
   type WorkbenchState,
   type WorkbenchTurn,
@@ -176,6 +181,7 @@ import {
 import {
   applyProviderChatStreamDeltas,
   applyProviderChatStreamActivity,
+  settleOpenProviderActivitiesForTurn,
   isProviderStatusEvent,
   limitSessionEventsForUi,
   MAX_CHAT_EVENT_HOLD_COUNT,
@@ -2472,6 +2478,21 @@ export function App() {
           (value) => setEventsForSession(streamEvent.sessionId, value),
           streamEvent,
         );
+        // All providers: a settled turn must not leave optimistic tool rows
+        // stuck on "running" when the stream never sent a final activity frame.
+        if (
+          (streamEvent.phase === "completed" ||
+            streamEvent.phase === "failed" ||
+            streamEvent.phase === "cancelled") &&
+          streamEvent.turnId
+        ) {
+          settleOpenProviderActivitiesForTurn(
+            optimisticEventsRef,
+            (value) => setEventsForSession(streamEvent.sessionId, value),
+            streamEvent.sessionId,
+            streamEvent.turnId,
+          );
+        }
         return;
       }
       if (streamEvent.phase === "activity") {
@@ -12954,6 +12975,129 @@ export function App() {
   const updater = useGyroUpdater({
     automaticChecks: config.automaticUpdateChecks !== false,
   });
+
+  // Provider CLI updates (Claude, Codex, Grok, …) — separate from Gyro.app.
+  const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
+  const [cliUpdatePhase, setCliUpdatePhase] = useState<CliUpdatePhase>("idle");
+  const [cliUpdateError, setCliUpdateError] = useState<string>();
+  const cliUpdateCheckingRef = useRef(false);
+  const cliUpdatePhaseRef = useRef(cliUpdatePhase);
+  cliUpdatePhaseRef.current = cliUpdatePhase;
+  const checkCliUpdates = useCallback(async (userInitiated = false) => {
+    if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
+      return;
+    }
+    if (cliUpdatePhaseRef.current === "updating") {
+      return;
+    }
+    cliUpdateCheckingRef.current = true;
+    if (userInitiated) {
+      setCliUpdatePhase("checking");
+    }
+    try {
+      const report = await invoke<CliUpdateCheckReport>(
+        "check_cli_updates_command",
+      );
+      const offers = report.offers.filter((offer) => offer.updateAvailable);
+      const dismissKey = cliUpdateDismissKey(offers);
+      const dismissed =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("gyro.cli-updates.dismissed.v1")
+          : null;
+      setCliUpdateOffers(
+        dismissed && dismissed === dismissKey ? [] : offers,
+      );
+      setCliUpdatePhase("idle");
+      setCliUpdateError(undefined);
+    } catch (error) {
+      setCliUpdatePhase(userInitiated ? "failed" : "idle");
+      setCliUpdateError(String(error));
+      if (userInitiated) {
+        notify("command-failed", "CLI update check failed", String(error));
+      }
+    } finally {
+      cliUpdateCheckingRef.current = false;
+    }
+  }, [notify]);
+
+  const applyCliUpdates = useCallback(async () => {
+    if (!isTauriRuntime() || cliUpdateOffers.length === 0) {
+      return;
+    }
+    setCliUpdatePhase("updating");
+    setCliUpdateError(undefined);
+    try {
+      const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
+      const results = await invoke<CliUpdateApplyResult[]>(
+        "apply_cli_updates_command",
+        { providerIds },
+      );
+      const failed = results.filter((result) => !result.ok);
+      if (failed.length > 0) {
+        setCliUpdatePhase("failed");
+        setCliUpdateError(failed.map((item) => item.message).join(" · "));
+        notify(
+          "command-failed",
+          failed.length === results.length
+            ? "CLI update failed"
+            : "Some CLI updates failed",
+          failed.map((item) => `${item.displayName}: ${item.message}`).join("\n"),
+        );
+      } else {
+        notify(
+          "tests-passed",
+          results.length === 1
+            ? `${results[0]!.displayName} updated`
+            : `${results.length} CLIs updated`,
+          results.map((item) => item.message).join("\n"),
+        );
+        setCliUpdateOffers([]);
+        setCliUpdatePhase("idle");
+        localStorage.removeItem("gyro.cli-updates.dismissed.v1");
+      }
+      // Re-check so a partial failure still lists remaining updates.
+      void checkCliUpdates(false);
+    } catch (error) {
+      setCliUpdatePhase("failed");
+      setCliUpdateError(String(error));
+      notify("command-failed", "CLI update failed", String(error));
+    }
+  }, [checkCliUpdates, cliUpdateOffers, notify]);
+
+  const dismissCliUpdates = useCallback(() => {
+    const key = cliUpdateDismissKey(cliUpdateOffers);
+    if (key) {
+      localStorage.setItem("gyro.cli-updates.dismissed.v1", key);
+    }
+    setCliUpdateOffers([]);
+    setCliUpdatePhase("idle");
+    setCliUpdateError(undefined);
+  }, [cliUpdateOffers]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    const launchTimer = window.setTimeout(() => {
+      void checkCliUpdates(false);
+    }, 8_000);
+    const interval = window.setInterval(
+      () => {
+        void checkCliUpdates(false);
+      },
+      30 * 60 * 1_000,
+    );
+    const onFocus = () => {
+      void checkCliUpdates(false);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearTimeout(launchTimer);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [checkCliUpdates]);
+
   const checkForUpdatesWithFeedback = useCallback(async () => {
     const result = await updater.checkForUpdate(true);
     if (result.status === "current") {
@@ -13364,7 +13508,6 @@ export function App() {
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
-      isTiled
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       onAttachMediaFiles={attachDroppedMedia}
       onComposerAction={handleComposerAction}
@@ -13442,6 +13585,10 @@ export function App() {
       activeWorkspaceLayout={activeWorkspaceLayout}
       commandProfiles={commandProfiles}
       updateState={updater.state}
+      cliUpdateOffers={cliUpdateOffers}
+      cliUpdatePhase={cliUpdateError ? "failed" : cliUpdatePhase}
+      onUpdateClis={() => void applyCliUpdates()}
+      onDismissCliUpdates={dismissCliUpdates}
       workspaceSidebarHidden={workbench.preferences.workspaceSidebarHidden}
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
@@ -16719,6 +16866,7 @@ function MonacoEditorPane({
 }) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
+  const hasMountedRef = useRef(false);
   const revealEditorTarget = useCallback(
     (editor: Parameters<OnMount>[0]) => {
       if (!revealTarget || revealTarget.path !== path) {
@@ -16749,8 +16897,42 @@ function MonacoEditorPane({
     [],
   );
 
+  // @monaco-editor/react calls editor.updateOptions() whenever this object
+  // changes identity. A literal here re-configures the editor on every render,
+  // which on a keystroke means a full options + layout recompute.
+  const editorOptions = useMemo(
+    () => ({
+      automaticLayout: true,
+      bracketPairColorization: { enabled: true },
+      fontFamily:
+        "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
+      fontLigatures: false,
+      fontSize: 13.5,
+      guides: { bracketPairs: true, indentation: true },
+      lineHeight: 21,
+      minimap: { enabled: minimapEnabled, scale: 0.75 },
+      overviewRulerBorder: false,
+      padding: { top: 8, bottom: 12 },
+      renderWhitespace: "selection" as const,
+      scrollbar: {
+        horizontalScrollbarSize: 10,
+        verticalScrollbarSize: 10,
+      },
+      scrollBeyondLastLine: false,
+      smoothScrolling: true,
+      stickyScroll: { enabled: true, maxLineCount: 3 },
+      tabSize: 2,
+      wordWrap: "off" as const,
+    }),
+    [minimapEnabled],
+  );
+
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    hasMountedRef.current = true;
+    void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
+      remeasureMonacoFonts(),
+    );
     revealEditorTarget(editor);
     languageRegistrationsRef.current.forEach((registration) =>
       registration.dispose(),
@@ -16956,11 +17138,14 @@ function MonacoEditorPane({
     });
   };
 
-  if (loadState === "loading") {
-    return <div className="gyro-code-empty">Loading file preview...</div>;
-  }
   if (!path) {
     return <div className="gyro-code-empty">Select a workspace file.</div>;
+  }
+  // Only swap the placeholder in before the first mount. Doing it on every load
+  // tears the editor down and rebuilds it — including the font measurement —
+  // each time a tab is opened.
+  if (loadState === "loading" && !hasMountedRef.current) {
+    return <div className="gyro-code-empty">Loading file preview...</div>;
   }
 
   return (
@@ -16973,29 +17158,7 @@ function MonacoEditorPane({
         language={languageForPath(path)}
         onChange={(value) => onChange(value ?? "")}
         onMount={handleMount}
-        options={{
-          automaticLayout: true,
-          bracketPairColorization: { enabled: true },
-          fontFamily:
-            "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
-          fontLigatures: false,
-          fontSize: 13.5,
-          guides: { bracketPairs: true, indentation: true },
-          lineHeight: 21,
-          minimap: { enabled: minimapEnabled, scale: 0.75 },
-          overviewRulerBorder: false,
-          padding: { top: 8, bottom: 12 },
-          renderWhitespace: "selection",
-          scrollbar: {
-            horizontalScrollbarSize: 10,
-            verticalScrollbarSize: 10,
-          },
-          scrollBeyondLastLine: false,
-          smoothScrolling: true,
-          stickyScroll: { enabled: true, maxLineCount: 3 },
-          tabSize: 2,
-          wordWrap: "off",
-        }}
+        options={editorOptions}
         path={path}
         theme={theme === "light" ? "vs" : "gyro-dark"}
         value={buffer?.content ?? fileContent?.content ?? ""}
@@ -17005,28 +17168,67 @@ function MonacoEditorPane({
 }
 
 function languageForPath(path: string) {
-  const extension = path.split(".").at(-1)?.toLowerCase();
+  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
+  if (name === "dockerfile" || name.startsWith("dockerfile.")) {
+    return "dockerfile";
+  }
+  if (name === "makefile" || name === "cargo.lock") {
+    return "plaintext";
+  }
+  const extension = name.includes(".") ? name.split(".").at(-1) : undefined;
   switch (extension) {
     case "css":
       return "css";
+    case "scss":
+      return "scss";
+    case "less":
+      return "less";
     case "html":
+    case "htm":
       return "html";
     case "json":
+    case "jsonc":
       return "json";
     case "md":
+    case "mdx":
       return "markdown";
     case "rs":
       return "gyro-rust";
     case "ts":
-      return "typescript";
     case "tsx":
+    case "mts":
+    case "cts":
       return "typescript";
     case "js":
     case "jsx":
+    case "mjs":
+    case "cjs":
       return "javascript";
     case "yml":
     case "yaml":
       return "yaml";
+    case "toml":
+      return "ini";
+    case "ini":
+    case "cfg":
+    case "conf":
+      return "ini";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "shell";
+    case "py":
+      return "python";
+    case "go":
+      return "go";
+    case "sql":
+      return "sql";
+    case "xml":
+    case "svg":
+      return "xml";
+    case "graphql":
+    case "gql":
+      return "graphql";
     default:
       return "plaintext";
   }

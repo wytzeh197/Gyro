@@ -540,6 +540,62 @@ function preserveFirstSeenTimelineMetadata(
   };
 }
 
+/**
+ * When a turn settles (completed / failed / cancelled), close any optimistic
+ * activities still marked running. Providers often never send a final status
+ * frame for in-flight tools; without this the rail keeps breathing after the
+ * turn is done for every runner that streams activities.
+ */
+export function settleOpenProviderActivitiesForTurn(
+  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
+  setEvents: SessionEventsSetter,
+  sessionId: string,
+  turnId: string,
+) {
+  const updateEvents = (items: SessionEvent[]) => {
+    let changed = false;
+    const next = items.map((event) => {
+      if (event.sessionId !== sessionId || event.turnId !== turnId) {
+        return event;
+      }
+      if (!isProviderActivityEvent(event)) {
+        return event;
+      }
+      const payload = recordFromUnknown(event.payload);
+      const status = payload?.status;
+      if (status !== "running" && status !== "queued") {
+        return event;
+      }
+      changed = true;
+      return {
+        ...event,
+        payload: {
+          ...payload,
+          status: "done",
+        },
+      };
+    });
+    return changed ? next : items;
+  };
+
+  const currentOptimistic = optimisticEventsRef.current.get(sessionId);
+  if (currentOptimistic) {
+    const nextOptimistic = updateEvents(currentOptimistic);
+    if (nextOptimistic !== currentOptimistic) {
+      optimisticEventsRef.current.set(
+        sessionId,
+        limitSessionEventsForUi(nextOptimistic),
+      );
+    }
+  }
+  setEvents((current) => {
+    if (!current.some((event) => event.sessionId === sessionId)) {
+      return current;
+    }
+    return updateEvents(current);
+  });
+}
+
 export function applyProviderChatStreamActivity(
   optimisticEventsRef: { current: Map<string, SessionEvent[]> },
   setEvents: SessionEventsSetter,

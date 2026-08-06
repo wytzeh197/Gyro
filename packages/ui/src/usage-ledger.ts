@@ -13,6 +13,14 @@ export type SessionCostSummary = {
   label: string;
   /** `4 council seats · 1 synthesis`, or undefined when there is nothing to split. */
   breakdown?: string;
+  /**
+   * `1.1M re-read`, or undefined when cached context is not most of the total.
+   *
+   * A tool-using turn bills the whole conversation once per call, so the raw
+   * total reads far larger than the work the turn actually did. This names the
+   * re-read share rather than quietly removing it.
+   */
+  cachedNote?: string;
   /** Set when any part of the total was estimated rather than reported. */
   estimateNote?: string;
   /** Full sentence for the tooltip, including the estimate caveat. */
@@ -63,6 +71,28 @@ function breakdownLabel(byOrigin: UsageOriginTotals[]) {
 }
 
 /**
+ * The proportion of a total that has to be re-read context before saying so.
+ *
+ * Below this the split is noise. Above it the raw number misleads: it is
+ * mostly the same conversation counted once per call.
+ */
+const CACHED_SHARE_WORTH_NAMING = 0.4;
+
+/**
+ * Re-read context, when it is enough of the total to explain the total.
+ *
+ * Estimated calls carry no cache reading at all, so an unmeasured provider
+ * never reaches the threshold and never claims a split it cannot know.
+ */
+function cachedShare(totals: SessionUsageTotals) {
+  const cached = totals.cachedInputTokens;
+  if (!Number.isFinite(cached) || cached <= 0 || totals.totalTokens <= 0) {
+    return 0;
+  }
+  return cached / totals.totalTokens >= CACHED_SHARE_WORTH_NAMING ? cached : 0;
+}
+
+/**
  * Turn a session's ledger totals into the one line the chat surface shows.
  *
  * Measured and estimated calls are never blended into a single confident
@@ -83,6 +113,10 @@ export function summarizeSessionCost(
   const tokenLabel = formatTokenCount(totals.totalTokens);
   const label = `${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
   const breakdown = breakdownLabel(totals.byOrigin);
+  const cachedTokens = cachedShare(totals);
+  const cachedNote = cachedTokens
+    ? `${formatTokenCount(cachedTokens)} re-read`
+    : undefined;
   const estimateNote =
     totals.estimatedCalls > 0
       ? totals.measuredCalls > 0
@@ -96,6 +130,11 @@ export function summarizeSessionCost(
   if (breakdown) {
     titleParts.push(`Breakdown: ${breakdown}.`);
   }
+  if (cachedTokens) {
+    titleParts.push(
+      `${formatTokenCount(cachedTokens)} of that was context re-read on each call rather than sent fresh, so the total is larger than the work these calls did.`,
+    );
+  }
   if (estimateNote) {
     titleParts.push(
       totals.measuredCalls > 0
@@ -106,6 +145,7 @@ export function summarizeSessionCost(
 
   return {
     breakdown,
+    cachedNote,
     estimateNote,
     isEmpty: false,
     label,
