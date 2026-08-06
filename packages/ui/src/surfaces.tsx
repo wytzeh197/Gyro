@@ -225,6 +225,8 @@ import type {
   TerminalTemplate,
   ThemeMode,
   UpdateState,
+  CliUpdateOffer,
+  CliUpdatePhase,
   WorkbenchDensity,
   WorkbenchMode,
   WorkbenchPaneTab,
@@ -273,6 +275,8 @@ import {
 
 type BrowserScreenshotAction = "capture" | "reveal";
 import {
+  cliUpdateActionLabel,
+  cliUpdateNoticeMessage,
   shouldShowSidebarUpdate,
   updateSidebarLabel,
   updateSizeLabel,
@@ -419,6 +423,11 @@ type AppChromeProps = {
   activePaneTab?: WorkbenchPaneTab;
   activeSettingsSection?: SettingsSectionId;
   updateState?: UpdateState;
+  /** Provider CLIs with available updates (Claude, Codex, Grok, …). */
+  cliUpdateOffers?: CliUpdateOffer[];
+  cliUpdatePhase?: CliUpdatePhase;
+  onUpdateClis?: () => void;
+  onDismissCliUpdates?: () => void;
   workspaceSidebarHidden?: boolean;
   workspaceSidebarWidth?: number;
   workspacePreparation?: WorkspacePreparationProgress;
@@ -1013,6 +1022,76 @@ function WorkspaceActivityRail({
   );
 }
 
+/** Center-top notice when provider CLIs can be updated. */
+export function CliUpdateBanner({
+  offers,
+  phase = "idle",
+  onUpdate,
+  onDismiss,
+}: {
+  offers: CliUpdateOffer[];
+  phase?: CliUpdatePhase;
+  onUpdate?: () => void;
+  onDismiss?: () => void;
+}) {
+  const available = offers.filter((offer) => offer.updateAvailable);
+  if (available.length === 0) {
+    return null;
+  }
+  const isBusy = phase === "updating" || phase === "checking";
+  const actionLabel =
+    phase === "updating" ? "Updating…" : cliUpdateActionLabel(available);
+  const message =
+    phase === "failed"
+      ? "CLI update failed — try again"
+      : cliUpdateNoticeMessage(available);
+
+  return (
+    <div
+      aria-live="polite"
+      className="gyro-cli-update-banner"
+      data-phase={phase}
+      role="status"
+    >
+      <span className="gyro-cli-update-banner-icon" aria-hidden="true">
+        <Download size={13} />
+      </span>
+      <span className="gyro-cli-update-banner-copy">
+        <strong>{message}</strong>
+        {available.length === 1 && available[0]?.latestVersion ? (
+          <small>
+            {available[0].displayName}
+            {available[0].currentVersion
+              ? ` · ${available[0].currentVersion}`
+              : ""}
+          </small>
+        ) : available.length > 1 ? (
+          <small>
+            {available.map((offer) => offer.displayName).join(" · ")}
+          </small>
+        ) : null}
+      </span>
+      <button
+        className="gyro-cli-update-banner-action"
+        disabled={isBusy || !onUpdate}
+        onClick={() => onUpdate?.()}
+        type="button"
+      >
+        {actionLabel}
+      </button>
+      <button
+        aria-label="Dismiss CLI update notice"
+        className="gyro-cli-update-banner-dismiss"
+        disabled={isBusy}
+        onClick={() => onDismiss?.()}
+        type="button"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 export function AppChrome({
   sessions,
   commandProfiles,
@@ -1034,6 +1113,10 @@ export function AppChrome({
   activePaneTab = "diff",
   activeSettingsSection = "general",
   updateState,
+  cliUpdateOffers = [],
+  cliUpdatePhase = "idle",
+  onUpdateClis,
+  onDismissCliUpdates,
   workspaceSidebarHidden,
   workspaceSidebarWidth,
   onSelectSession,
@@ -1639,6 +1722,15 @@ export function AppChrome({
         </aside>
       )}
       <main className="gyro-main" tabIndex={-1}>
+        {activeDestination !== "settings" &&
+        cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
+          <CliUpdateBanner
+            offers={cliUpdateOffers}
+            onDismiss={onDismissCliUpdates}
+            onUpdate={onUpdateClis}
+            phase={cliUpdatePhase}
+          />
+        ) : null}
         {activeDestination === "settings" ? (
           <div className="gyro-settings-topbar">
             <div

@@ -1930,6 +1930,39 @@ export type UpdateState = {
   silentFailure?: boolean;
 };
 
+/** One provider CLI that Gyro can update (Claude, Codex, Grok, …). */
+export type CliUpdateOffer = {
+  providerId: string;
+  displayName: string;
+  program: string;
+  currentVersion?: string;
+  latestVersion?: string;
+  updateAvailable: boolean;
+  checkSource: string;
+  updateCommand: string[];
+};
+
+export type CliUpdateCheckReport = {
+  checkedAt: string;
+  offers: CliUpdateOffer[];
+};
+
+export type CliUpdateApplyResult = {
+  providerId: string;
+  displayName: string;
+  ok: boolean;
+  message: string;
+};
+
+export type CliUpdatePhase = "idle" | "checking" | "updating" | "failed";
+
+export type CliUpdateNoticeState = {
+  offers: CliUpdateOffer[];
+  phase: CliUpdatePhase;
+  error?: string;
+  checkedAt?: string;
+};
+
 export type WorkspaceFile = {
   path: string;
   kind: "file" | "directory";

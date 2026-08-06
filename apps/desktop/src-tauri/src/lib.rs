@@ -4,9 +4,9 @@ use gyro_core::augmented_gui_path;
 #[cfg(test)]
 use gyro_core::user_cli_paths;
 use gyro_core::{
-    apply_provider_mutation_transaction_with_cancellation, barrier_decision,
-    begin_provider_mutation_transaction, build_synthesizer_user_prompt, council_run_dir,
-    create_worktree, decide_mutation_proposal, final_run_status,
+    apply_cli_updates, apply_provider_mutation_transaction_with_cancellation, barrier_decision,
+    begin_provider_mutation_transaction, build_synthesizer_user_prompt, check_cli_updates,
+    council_run_dir, create_worktree, decide_mutation_proposal, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
         request_desktop_provider_capability, versions_compatible, AppNotification,
@@ -25,20 +25,20 @@ use gyro_core::{
     CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
     CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
     CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
-    CapabilityRunMode, CapabilityStatus, CouncilAttachmentRef, CouncilBarrierDecision,
-    CouncilContextSnapshot, CouncilRun, CouncilRunStatus, CouncilSeat, CouncilSeatStatus,
-    CouncilToolPolicy, CreateAutomationRequest, CreateSessionContext, ExecutionRequest,
-    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
-    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest, MutationDecision,
-    MutationProposal, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
-    ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
-    ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
-    ProviderRunPayload, ProviderSessionBinding, Session, SessionEvent, SessionEventKind,
-    SessionOrigin, SessionStore, SessionWorkspaceMode, UsageEntry, UsageOrigin, UsageOutcome,
-    UsageTokens, UsageTotals, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
-    CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
-    SYNTHESIZER_SYSTEM_PROMPT,
+    CapabilityRunMode, CapabilityStatus, CliUpdateApplyResult, CliUpdateCheckReport,
+    CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
+    CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
+    CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
+    GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
+    KimiAcpRequest, MutationDecision, MutationProposal, PendingProviderMutationCommit,
+    PreparedProviderMutationTransaction, ProjectCapabilityGrant, ProjectCapabilityPolicy,
+    ProviderCapabilitySupport, ProviderDiagnosticsPayload, ProviderExecutionKind,
+    ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
+    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
+    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode, UsageEntry,
+    UsageOrigin, UsageOutcome, UsageTokens, UsageTotals, WorkspaceContextSnapshot,
+    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -745,6 +745,11 @@ struct WorkspaceSearchRequest {
     query: String,
     globs: Option<Vec<String>>,
     max_results: Option<usize>,
+    /// When true, treat `query` as a regex (ripgrep default). UI search leaves
+    /// this off so ordinary user typing is fixed-string; capability/agent search
+    /// turns it on because agents send patterns like `stop|abort|cancel`.
+    #[serde(default)]
+    regex: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -8891,21 +8896,48 @@ fn search_workspace_impl(
         return Ok(Vec::new());
     }
     let max_results = request.max_results.unwrap_or(200).clamp(1, 1000);
+    // Agents (Grok ACP, Claude via capabilities) send regex patterns with `|`
+    // and `.*`. Fixed-string mode made those always return zero hits, so the
+    // model looped short "I'll investigate" turns and looked like a ~30s stop.
+    // UI search keeps fixed-strings so plain typing is not treated as regex.
+    let use_regex = request.regex.unwrap_or(false);
+    match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, use_regex) {
+        Ok(results) => Ok(results),
+        // Agents sometimes send patterns that are invalid regex. Fall back to a
+        // literal search so the capability returns matches instead of an error
+        // that short-circuits the whole turn.
+        Err(_) if use_regex => {
+            run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, false)
+                .or_else(|_| fallback_search_workspace(&root, query, max_results))
+        }
+        Err(_) => fallback_search_workspace(&root, query, max_results),
+    }
+}
+
+fn run_workspace_rg_search(
+    root: &Path,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     let mut command = command_with_gui_path("rg");
     command
-        .current_dir(&root)
+        .current_dir(root)
         .arg("--line-number")
         .arg("--column")
         .arg("--no-heading")
         .arg("--color")
-        .arg("never")
-        .arg("--fixed-strings");
-    if let Some(globs) = request.globs.as_ref() {
+        .arg("never");
+    if !use_regex {
+        command.arg("--fixed-strings");
+    }
+    if let Some(globs) = globs {
         for glob in globs {
             command.arg("--glob").arg(glob);
         }
     }
-    command.arg(query).arg(".");
+    command.arg("--").arg(query).arg(".");
 
     match run_bounded_command(
         &command,
@@ -8915,14 +8947,27 @@ fn search_workspace_impl(
         64 * 1024,
     ) {
         Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
-            Ok(parse_rg_output(&output.stdout, query, max_results))
+            Ok(parse_rg_output(&output.stdout, query, max_results, use_regex))
         }
         Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
-        Err(_) => fallback_search_workspace(&root, query, max_results),
+        Err(error) => Err(error),
     }
 }
 
-fn parse_rg_output(output: &str, query: &str, max_results: usize) -> Vec<WorkspaceSearchResult> {
+fn parse_rg_output(
+    output: &str,
+    query: &str,
+    max_results: usize,
+    use_regex: bool,
+) -> Vec<WorkspaceSearchResult> {
+    // Fixed-string match length is the query length. For regex, rg's column is
+    // the start of the match; without the match end we highlight one character
+    // so the range stays valid rather than inventing a length from the pattern.
+    let highlight_len = if use_regex {
+        1usize
+    } else {
+        query.chars().count().max(1)
+    };
     output
         .lines()
         .filter_map(|line| {
@@ -8931,7 +8976,7 @@ fn parse_rg_output(output: &str, query: &str, max_results: usize) -> Vec<Workspa
             let line_number = parts.next()?.parse::<usize>().ok()?;
             let start_column = parts.next()?.parse::<usize>().ok()?;
             let text = parts.next().unwrap_or_default().to_string();
-            let end_column = start_column + query.chars().count().max(1);
+            let end_column = start_column + highlight_len;
             Some(WorkspaceSearchResult {
                 path,
                 line_number,
@@ -9797,6 +9842,27 @@ async fn check_provider_health(
     tauri::async_runtime::spawn_blocking(move || check_provider_health_blocking(request))
         .await
         .map_err(|error| format!("provider health worker failed: {error}"))?
+}
+
+/// Scan installed provider CLIs for available updates (npm + native checks).
+#[tauri::command]
+async fn check_cli_updates_command() -> Result<CliUpdateCheckReport, String> {
+    tauri::async_runtime::spawn_blocking(check_cli_updates)
+        .await
+        .map_err(|error| format!("cli update check worker failed: {error}"))?
+        .map_err(to_string)
+}
+
+/// Apply updates for specific provider CLIs, or every pending offer when empty.
+#[tauri::command]
+async fn apply_cli_updates_command(
+    provider_ids: Option<Vec<String>>,
+) -> Result<Vec<CliUpdateApplyResult>, String> {
+    let ids = provider_ids.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || apply_cli_updates(&ids))
+        .await
+        .map_err(|error| format!("cli update worker failed: {error}"))?
+        .map_err(to_string)
 }
 
 #[tauri::command]
@@ -11959,8 +12025,15 @@ fn run_kimi_acp_chat(
                 status: activity.status.clone(),
             };
             emit_provider_activity_event(app, request, &activity, None);
+            // Upsert by id so intermediate tool_call_update frames replace the
+            // prior status instead of stacking dozens of "running" rows that
+            // then persist after end_turn (every ACP provider, not only Grok).
             if let Ok(mut sink) = activity_sink.lock() {
-                sink.push(activity);
+                if let Some(existing) = sink.iter_mut().find(|item| item.id == activity.id) {
+                    *existing = activity;
+                } else {
+                    sink.push(activity);
+                }
             }
         },
         |approval| {
@@ -16974,9 +17047,32 @@ fn provider_activities_for_response(
     response: &str,
 ) -> Vec<ProviderActivity> {
     let response = response.trim();
-    activities
+    // Providers stream many intermediate statuses for the same activity id
+    // (ACP tool_call → tool_call_update, Claude stream progress, …). Keeping
+    // every frame left the durable rail full of "running" ghosts after a turn
+    // settled — across Grok, Claude, and Codex. Collapse to the latest state
+    // per id in arrival order, then force any still-open work closed: once the
+    // provider has answered, nothing is still running.
+    let mut order = Vec::<String>::new();
+    let mut by_id = HashMap::<String, ProviderActivity>::new();
+    for activity in activities {
+        if activity.kind == "commentary" && activity.label.trim() == response {
+            continue;
+        }
+        if !by_id.contains_key(&activity.id) {
+            order.push(activity.id.clone());
+        }
+        by_id.insert(activity.id.clone(), activity);
+    }
+    order
         .into_iter()
-        .filter(|activity| activity.kind != "commentary" || activity.label.trim() != response)
+        .filter_map(|id| by_id.remove(&id))
+        .map(|mut activity| {
+            if activity.status == "running" || activity.status == "queued" {
+                activity.status = "done".into();
+            }
+            activity
+        })
         .collect()
 }
 
@@ -18106,11 +18202,14 @@ fn execute_provider_capability(
                 .get("maxResults")
                 .and_then(serde_json::Value::as_u64)
                 .map(|value| value as usize);
+            // Agents send regex-shaped queries (`foo|bar`, `cancel.*stream`).
+            // Fixed-string search made those return zero matches every turn.
             let mut results = search_workspace_impl(&WorkspaceSearchRequest {
                 workspace_path: workspace,
                 query,
                 globs,
                 max_results,
+                regex: Some(true),
             })?;
             results.retain(|result| !gyro_core::capability_path_is_sensitive(&result.path));
             for result in &mut results {
@@ -19602,7 +19701,10 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
             "depth": { "type": "integer", "minimum": 1, "maximum": 8 }
         }),
         CapabilityId::WorkspaceSearch => serde_json::json!({
-            "query": { "type": "string" },
+            "query": {
+                "type": "string",
+                "description": "Ripgrep regular expression. Use | for alternation and .* for wildcards."
+            },
             "globs": { "type": "array", "items": { "type": "string" } },
             "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000 }
         }),
@@ -20042,6 +20144,8 @@ pub fn run() {
             check_provider_auth,
             check_browser_preview,
             check_provider_health,
+            check_cli_updates_command,
+            apply_cli_updates_command,
             capture_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,
@@ -22783,6 +22887,55 @@ while True:
         assert!(retained
             .iter()
             .all(|activity| activity.label != "The timeline is fixed."));
+    }
+
+    /// Intermediate tool frames from every provider used to pile up as
+    /// separate "running" rows that stayed open after the turn settled.
+    /// Collapse by id and close open work so the durable rail matches reality.
+    #[test]
+    fn provider_activities_collapse_and_settle_open_work() {
+        let activities = vec![
+            ProviderActivity {
+                id: "tool-1".into(),
+                kind: "tool".into(),
+                label: "Search codebase".into(),
+                detail: Some("stop|abort".into()),
+                note: None,
+                status: "running".into(),
+            },
+            ProviderActivity {
+                id: "tool-1".into(),
+                kind: "tool".into(),
+                label: "Search codebase".into(),
+                detail: Some("stop|abort".into()),
+                note: None,
+                status: "running".into(),
+            },
+            ProviderActivity {
+                id: "tool-2".into(),
+                kind: "command".into(),
+                label: "Run rg".into(),
+                detail: Some("rg stop".into()),
+                note: None,
+                status: "done".into(),
+            },
+            ProviderActivity {
+                id: "tool-3".into(),
+                kind: "read".into(),
+                label: "Read App.tsx".into(),
+                detail: Some("apps/desktop/src/App.tsx".into()),
+                note: None,
+                status: "running".into(),
+            },
+        ];
+        let retained = provider_activities_for_response(activities, "All set.");
+        assert_eq!(retained.len(), 3);
+        assert_eq!(retained[0].id, "tool-1");
+        assert_eq!(retained[0].status, "done");
+        assert_eq!(retained[1].id, "tool-2");
+        assert_eq!(retained[1].status, "done");
+        assert_eq!(retained[2].id, "tool-3");
+        assert_eq!(retained[2].status, "done");
     }
 
     #[test]

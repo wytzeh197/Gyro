@@ -571,7 +571,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search text inside the current Gyro project.",
+        description: "Search text inside the current Gyro project with a regular expression (ripgrep).",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,

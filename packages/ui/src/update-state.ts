@@ -1,4 +1,4 @@
-import type { UpdateState } from "./types";
+import type { CliUpdateOffer, UpdateState } from "./types";
 
 export function updateProgressPercent(downloaded: number, total?: number) {
   if (!total || total <= 0) {
@@ -78,4 +78,45 @@ export function shouldShowSidebarUpdate(state: UpdateState) {
     state.status === "installing" ||
     (state.status === "failed" && !state.silentFailure)
   );
+}
+
+/** Primary button label for the CLI update notice. */
+export function cliUpdateActionLabel(offers: CliUpdateOffer[]) {
+  return offers.length > 1 ? "Update All" : "Update";
+}
+
+/** One-line copy for the center-top CLI update notice. */
+export function cliUpdateNoticeMessage(offers: CliUpdateOffer[]) {
+  const available = offers.filter((offer) => offer.updateAvailable);
+  if (available.length === 0) {
+    return "";
+  }
+  if (available.length === 1) {
+    const offer = available[0]!;
+    if (offer.currentVersion && offer.latestVersion) {
+      return `${offer.displayName} ${offer.currentVersion} → ${offer.latestVersion} is available`;
+    }
+    return `${offer.displayName} update is available`;
+  }
+  if (available.length === 2) {
+    return `Updates available for ${available[0]!.displayName} and ${available[1]!.displayName}`;
+  }
+  const head = available
+    .slice(0, -1)
+    .map((offer) => offer.displayName)
+    .join(", ");
+  const tail = available[available.length - 1]!.displayName;
+  return `Updates available for ${head}, and ${tail}`;
+}
+
+/** Stable key so dismissing one set of versions does not hide a newer set. */
+export function cliUpdateDismissKey(offers: CliUpdateOffer[]) {
+  return offers
+    .filter((offer) => offer.updateAvailable)
+    .map(
+      (offer) =>
+        `${offer.providerId}:${offer.latestVersion ?? offer.currentVersion ?? "latest"}`,
+    )
+    .sort()
+    .join("|");
 }
