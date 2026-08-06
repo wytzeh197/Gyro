@@ -1026,6 +1026,8 @@ export type SessionUsageTotals = {
   /** Calls Gyro estimated because the provider reports no counts. */
   estimatedCalls: number;
   inputTokens: number;
+  /** The share of `inputTokens` that was context re-read rather than sent fresh. */
+  cachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
   byOrigin: UsageOriginTotals[];

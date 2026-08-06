@@ -48,6 +48,18 @@ export type WorkItem =
       additions?: number;
       deletions?: number;
     }
+  /**
+   * The agent looked at something. Deliberately not a `file` item: a read is
+   * not a change, so it must not reach the turn's changed-file set or borrow
+   * the pencil.
+   */
+  | {
+      kind: "read";
+      id: string;
+      status: WorkStatus;
+      path?: string;
+      media: "image" | "file";
+    }
   | { kind: "memory"; id: string; status: WorkStatus }
   | { kind: "context"; id: string; status: WorkStatus }
   | {
@@ -65,12 +77,24 @@ export type WorkItem =
 
 /**
  * One beat of a run. A work step carries exactly one item: the reference design
- * is a flat rail where seven commands read as seven rows, so nothing here
- * batches. Collapsing happens in the header, by hiding the list entirely.
+ * is a flat rail where seven *different* commands read as seven rows, so no
+ * grouping happens by time or by kind. The one thing that folds is a beat that
+ * would repeat a row verbatim — see `absorbRepeatedWork`. Collapsing the rest
+ * happens in the header, by hiding the list entirely.
  */
 export type RunStep =
   | { kind: "say"; id: string; at: string; text: string }
-  | { kind: "work"; id: string; at: string; item: WorkItem }
+  | {
+      kind: "work";
+      id: string;
+      at: string;
+      item: WorkItem;
+      /**
+       * How many beats folded into this row. Absent or 1 means it happened
+       * once; the view only draws a count above that.
+       */
+      repeat?: number;
+    }
   | { kind: "ask"; id: string; at: string; event: SessionEvent };
 
 /**
@@ -179,7 +203,9 @@ export function buildRunModel(
         item.deletions = item.deletions ?? stats?.deletions;
         mergeFileChange(files, item);
       }
-      steps.push({ kind: "work", id: event.id, at: event.createdAt, item });
+      if (!absorbRepeatedWork(steps, item)) {
+        steps.push({ kind: "work", id: event.id, at: event.createdAt, item });
+      }
       continue;
     }
     if (event.kind === "assistant-message") {
@@ -525,15 +551,11 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
     case "read": {
       const path = text(payload, "path") ?? detail;
       return {
-        kind: "tool",
+        kind: "read",
         id,
         status,
-        tool:
-          label && !isGenericProviderToolLabel(label)
-            ? label
-            : path
-              ? `Read ${path}`
-              : "Read file",
+        path,
+        media: isImagePath(path) ? "image" : "file",
       };
     }
     case "edit":
@@ -623,12 +645,19 @@ function workItemFromCapabilityCall(
     };
   }
 
-  // File-ish workspace reads stay as tools with a clean verb.
-  if (
-    capabilityId === "workspace-read" ||
-    capabilityId === "workspace-read-range" ||
-    capabilityId === "workspace-list"
-  ) {
+  // Reading a workspace file is the same beat as a provider read, so it gets
+  // the same row rather than a generic wrench.
+  if (capabilityId === "workspace-read" || capabilityId === "workspace-read-range") {
+    const path = resourceLabel ?? summary;
+    return {
+      kind: "read",
+      id,
+      status,
+      path,
+      media: isImagePath(path) ? "image" : "file",
+    };
+  }
+  if (capabilityId === "workspace-list") {
     return {
       kind: "tool",
       id,
@@ -826,6 +855,11 @@ export function runRowText(step: RunStep): RunRowText {
       };
     case "file":
       return { label: fileVerb(item.status), description: item.path };
+    case "read":
+      return {
+        label: readVerb(item.status, item.media),
+        description: readTarget(item.path),
+      };
     case "search":
       return {
         label:
@@ -931,6 +965,56 @@ function fileVerb(status: WorkStatus) {
   return status === "failed" ? "Edit failed" : "Edited file";
 }
 
+function readVerb(status: WorkStatus, media: "image" | "file") {
+  if (status === "failed") {
+    return media === "image" ? "Image failed" : "Read failed";
+  }
+  if (status === "running") {
+    return media === "image" ? "Viewing image" : "Reading file";
+  }
+  return media === "image" ? "Viewed image" : "Read file";
+}
+
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "avif",
+  "heic",
+  "ico",
+]);
+
+export function isImagePath(path: string | undefined): boolean {
+  if (!path) {
+    return false;
+  }
+  const extension = path.split(".").at(-1)?.toLowerCase();
+  return Boolean(extension) && IMAGE_EXTENSIONS.has(extension as string);
+}
+
+/**
+ * What the rail shows next to a read verb.
+ *
+ * Chat attachments live as content-hashed blobs under the app's session store,
+ * so the real path is a 64-character digest the user has never seen. The
+ * filename is the only part of any read path that carries meaning at rail
+ * width, and for an attachment even that is noise — so it is dropped entirely
+ * and the verb ("Viewed image") stands alone.
+ */
+function readTarget(path: string | undefined): string | undefined {
+  if (!path) {
+    return undefined;
+  }
+  if (path.includes("/sessions/attachments/")) {
+    return "attachment";
+  }
+  return path;
+}
+
 /**
  * `mcp__github__create_issue` → `{ server: "github", tool: "create issue" }`
  * Also unwraps JSON payloads like `{"tool_name":"gyro_capabilities__…"}` that
@@ -1019,6 +1103,100 @@ function humanizeCapabilityTool(value: string): string {
 
 function humanizeToolSegment(value: string) {
   return value.split(/[_-]/).filter(Boolean).join(" ");
+}
+
+/**
+ * Folds a repeated beat into the row that already says it.
+ *
+ * The rail is otherwise flat on purpose — seven commands read as seven rows.
+ * But an agent that edits one file eight times produced eight rows carrying the
+ * *same* path and the same `+40`, because the stats are the file's whole diff
+ * rather than one edit's share. That is not eight beats of information.
+ *
+ * Two different reaches, because the two cases are different:
+ *
+ * - A **file** folds into its earlier row anywhere in the turn. One row per
+ *   path, held at the position it was first touched, numbers refreshed in
+ *   place. This mirrors `mergeFileChange` so the rail and the turn's changed
+ *   files cannot disagree.
+ * - **Everything else** folds only when it repeats back to back. A command run
+ *   again after other work is a genuine second beat, and pulling it upward
+ *   would scramble the order the run actually happened in.
+ *
+ * Returns whether the item was absorbed.
+ */
+function absorbRepeatedWork(steps: RunStep[], item: WorkItem): boolean {
+  const identity = workIdentity(item);
+  if (!identity) {
+    return false;
+  }
+  const target =
+    item.kind === "file"
+      ? findLastWorkStep(steps, identity)
+      : matchingLastStep(steps, identity);
+  if (!target) {
+    return false;
+  }
+  target.item = carryWorkStats(target.item, item);
+  target.repeat = (target.repeat ?? 1) + 1;
+  return true;
+}
+
+function findLastWorkStep(steps: RunStep[], identity: string) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]!;
+    if (step.kind === "work" && workIdentity(step.item) === identity) {
+      return step;
+    }
+  }
+  return undefined;
+}
+
+function matchingLastStep(steps: RunStep[], identity: string) {
+  const last = steps.at(-1);
+  return last?.kind === "work" && workIdentity(last.item) === identity
+    ? last
+    : undefined;
+}
+
+/**
+ * What makes two beats "the same work". A row only folds when its whole visible
+ * content would repeat, so an identity is the kind plus everything the row
+ * shows. Anything without a target to compare on (memory, context) returns
+ * `undefined` and never folds.
+ */
+function workIdentity(item: WorkItem): string | undefined {
+  switch (item.kind) {
+    case "file":
+      return `file:${item.path}`;
+    case "read":
+      return item.path ? `read:${item.media}:${item.path}` : undefined;
+    case "command":
+      return `command:${item.command}`;
+    case "search":
+      return item.query ? `search:${item.scope}:${item.query}` : undefined;
+    case "tool":
+      return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
+    case "memory":
+    case "context":
+      return undefined;
+  }
+}
+
+/**
+ * The later beat wins — same rule as `mergeFileChange` — except that a stat the
+ * newer beat did not carry keeps the value already on the row, so a provider
+ * that only reports line counts once does not blank them on the repeat.
+ */
+function carryWorkStats(previous: WorkItem, next: WorkItem): WorkItem {
+  if (previous.kind !== "file" || next.kind !== "file") {
+    return next;
+  }
+  return {
+    ...next,
+    additions: next.additions ?? previous.additions,
+    deletions: next.deletions ?? previous.deletions,
+  };
 }
 
 function mergeFileChange(

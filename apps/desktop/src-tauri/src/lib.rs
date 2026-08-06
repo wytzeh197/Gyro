@@ -15280,7 +15280,7 @@ fn provider_activity_event_entry(
         "note": activity.note,
         "status": activity.status,
         "command": named_detail("command"),
-        "path": named_detail("file"),
+        "path": named_detail("file").or_else(|| named_detail("read")),
         "tool": named_detail("tool"),
         "query": named_detail("search"),
         "providerId": request.provider_id,
@@ -16765,19 +16765,27 @@ fn tool_use_activity(
                     "notebookPath",
                 ],
             ) {
-                let label = if name == "Read" {
+                // A read is not a change. Keeping it out of the `file` bucket is
+                // what stops the rail saying "Edited file" over a path nothing
+                // wrote to, and keeps reads out of the turn's changed-file set.
+                if name == "Read" {
                     let file_name = Path::new(&path)
                         .file_name()
                         .and_then(|value| value.to_str())
                         .unwrap_or(&path);
-                    format!("Read {file_name}")
-                } else {
-                    format!("Updated {path}")
-                };
+                    return ProviderActivity {
+                        id,
+                        kind: "read".into(),
+                        label: format!("Read {file_name}"),
+                        detail: Some(path),
+                        note: None,
+                        status: status.into(),
+                    };
+                }
                 return ProviderActivity {
                     id,
                     kind: "file".into(),
-                    label,
+                    label: format!("Updated {path}"),
                     detail: Some(path),
                     note: None,
                     status: status.into(),
@@ -17285,6 +17293,15 @@ fn acp_conversation_history_text(_app: &tauri::AppHandle, session_id: &str) -> O
     acp_conversation_history_text_for_session(session_id)
 }
 
+/// Turns kept at full length before the transcript starts clipping harder.
+///
+/// Recent turns are what the model is actually continuing from, so they stay
+/// whole. Older ones only have to carry what was decided, and at the previous
+/// flat cap forty of them could put ~20K tokens in front of every prompt.
+const HISTORY_RECENT_TURNS: usize = 6;
+const HISTORY_RECENT_CHARS: usize = 2_000;
+const HISTORY_OLDER_CHARS: usize = 400;
+
 /// Load the local Gyro transcript for any model handoff or failed resume.
 fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
     let session_uuid = parse_uuid(session_id).ok()?;
@@ -17301,16 +17318,32 @@ fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String>
         if text.is_empty() {
             continue;
         }
-        // Cap each turn so a long tool dump does not blow the next prompt.
-        let clipped: String = text.chars().take(2_000).collect();
-        lines.push(format!("{role}: {clipped}"));
+        lines.push((role, text.to_string()));
     }
     // Drop the trailing user line — it is the message currently being sent and
-    // already lives in the main prompt.
-    if lines.last().is_some_and(|line| line.starts_with("User: ")) {
+    // already lives in the main prompt. Dropped before the taper so it does not
+    // spend one of the full-length slots on text the prompt already carries.
+    if lines.last().is_some_and(|(role, _)| *role == "User") {
         lines.pop();
     }
-    let joined = lines.join("\n\n");
+    // Clip from the far end: the tail is the thread being continued, the head
+    // is background.
+    let recent_from = lines.len().saturating_sub(HISTORY_RECENT_TURNS);
+    let joined = lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, (role, text))| {
+            let budget = if index >= recent_from {
+                HISTORY_RECENT_CHARS
+            } else {
+                HISTORY_OLDER_CHARS
+            };
+            let clipped: String = text.chars().take(budget).collect();
+            let elided = text.chars().nth(budget).is_some();
+            format!("{role}: {clipped}{}", if elided { " […]" } else { "" })
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
     (!joined.trim().is_empty()).then_some(joined)
 }
 
@@ -22578,9 +22611,24 @@ while True:
             "type": "stream_event"
         }))
         .expect("read tool use");
-        assert_eq!(read.kind, "file");
+        assert_eq!(read.kind, "read");
         assert_eq!(read.detail.as_deref(), Some("packages/ui/src/chat-run.ts"));
         assert!(read.label.contains("chat-run.ts"));
+
+        let write = extract_provider_activity(&serde_json::json!({
+            "event": {
+                "type": "content_block_start",
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_write",
+                    "name": "Write",
+                    "input": { "file_path": "packages/ui/src/chat-run.ts" }
+                }
+            },
+            "type": "stream_event"
+        }))
+        .expect("write tool use");
+        assert_eq!(write.kind, "file");
 
         // A finished assistant message may carry several tool_use blocks; each
         // becomes its own rail beat with the input filled in.
