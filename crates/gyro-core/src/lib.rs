@@ -2,6 +2,7 @@ pub mod account;
 pub mod automations;
 pub mod capabilities;
 pub mod cli_path;
+pub mod cli_updates;
 pub mod config;
 pub mod council;
 pub mod diff;
@@ -45,6 +46,10 @@ pub use capabilities::{
     PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 pub use cli_path::{augmented_gui_path, user_cli_paths};
+pub use cli_updates::{
+    apply_cli_updates, check_cli_updates, CliUpdateApplyResult, CliUpdateCheckReport,
+    CliUpdateOffer,
+};
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
     ModelProviderConfig,

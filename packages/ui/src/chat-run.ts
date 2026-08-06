@@ -240,14 +240,41 @@ export function buildRunModel(
     }
   }
 
+  // Providers of every kind leave intermediate tool frames as "running" when
+  // they end a turn without a final status update. Once the surface is no
+  // longer driving the turn, nothing is still running — settle the rail so
+  // settled turns do not breathe forever or look mid-flight.
+  const isRunning = options.isRunning ?? false;
+  const settledSteps = isRunning
+    ? coalesceAdjacentToolSteps(steps)
+    : settleRunningWorkSteps(coalesceAdjacentToolSteps(steps));
+  const settledFiles = isRunning
+    ? files
+    : files.map((file) =>
+        file.status === "running" ? { ...file, status: "done" as const } : file,
+      );
+
   return {
-    phase: runPhase(steps, closing?.response, options),
+    phase: runPhase(settledSteps, closing?.response, options),
     startedAt:
       options.startedAt ?? visible[0]?.createdAt ?? new Date(0).toISOString(),
-    steps: coalesceAdjacentToolSteps(steps),
-    files,
+    steps: settledSteps,
+    files: settledFiles,
     response: closing?.response,
   };
+}
+
+/** Close open work rows when the turn itself has finished. */
+function settleRunningWorkSteps(steps: RunStep[]): RunStep[] {
+  return steps.map((step) => {
+    if (step.kind !== "work" || step.item.status !== "running") {
+      return step;
+    }
+    return {
+      ...step,
+      item: { ...step.item, status: "done" },
+    };
+  });
 }
 
 /**
