@@ -8946,9 +8946,12 @@ fn run_workspace_rg_search(
         8 * 1024 * 1024,
         64 * 1024,
     ) {
-        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => {
-            Ok(parse_rg_output(&output.stdout, query, max_results, use_regex))
-        }
+        Ok(output) if output.succeeded() || output.exit_code() == Some(1) => Ok(parse_rg_output(
+            &output.stdout,
+            query,
+            max_results,
+            use_regex,
+        )),
         Ok(output) => Err(bounded_command_error("workspace search failed", &output)),
         Err(error) => Err(error),
     }

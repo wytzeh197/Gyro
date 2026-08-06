@@ -4,10 +4,8 @@
 //! center-top notice with **Update** or **Update All** — never installs without
 //! that explicit press.
 
-use crate::execution::{
-    run_command, CancellationToken, ExecutionRequest, ExecutionTermination,
-};
 use crate::cli_path::augmented_gui_path;
+use crate::execution::{run_command, CancellationToken, ExecutionRequest, ExecutionTermination};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -154,7 +152,8 @@ fn check_one_cli(
 
     // 1) Native check (Grok).
     if let Some(args) = spec.native_check_args {
-        if let Some(offer) = check_via_native_json(spec, args, current.clone(), update_command.clone())
+        if let Some(offer) =
+            check_via_native_json(spec, args, current.clone(), update_command.clone())
         {
             return Some(offer);
         }
@@ -173,10 +172,8 @@ fn check_one_cli(
                 .clone()
                 .or_else(|| entry.wanted.clone())
                 .map(|value| normalize_version(&value));
-            let update_available = versions_differ(
-                current_version.as_deref(),
-                latest_version.as_deref(),
-            );
+            let update_available =
+                versions_differ(current_version.as_deref(), latest_version.as_deref());
             return Some(CliUpdateOffer {
                 provider_id: spec.provider_id.into(),
                 display_name: spec.display_name.into(),
@@ -376,11 +373,8 @@ struct NpmOutdatedEntry {
 
 fn npm_global_outdated() -> Result<HashMap<String, NpmOutdatedEntry>> {
     // `npm outdated -g --json` exits 1 when packages are outdated — still success for us.
-    let output = run_cli_capture_allow_nonzero(
-        "npm",
-        &["outdated", "-g", "--json"],
-        CLI_CHECK_TIMEOUT,
-    )?;
+    let output =
+        run_cli_capture_allow_nonzero("npm", &["outdated", "-g", "--json"], CLI_CHECK_TIMEOUT)?;
     let trimmed = output.trim();
     if trimmed.is_empty() || trimmed == "{}" {
         return Ok(HashMap::new());
@@ -536,7 +530,9 @@ mod tests {
             .unwrap();
         let command = update_command_for(gemini);
         assert_eq!(command[0], "npm");
-        assert!(command.iter().any(|part| part.contains("@google/gemini-cli")));
+        assert!(command
+            .iter()
+            .any(|part| part.contains("@google/gemini-cli")));
     }
 
     #[test]
