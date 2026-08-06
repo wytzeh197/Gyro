@@ -36,6 +36,32 @@ type MonacoWorkerEnvironment = typeof globalThis & {
 
 loader.config({ monaco });
 
+// TSX files are opened under the `typescript` language id. Without JSX in the
+// compiler options the tokenizer treats tags as comparisons and the file loses
+// most of its colouring.
+const typescriptDefaults = monaco.languages.typescript.typescriptDefaults;
+typescriptDefaults.setCompilerOptions({
+  ...typescriptDefaults.getCompilerOptions(),
+  allowJs: true,
+  allowNonTsExtensions: true,
+  jsx: monaco.languages.typescript.JsxEmit.React,
+  moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+  target: monaco.languages.typescript.ScriptTarget.ESNext,
+});
+// Completion, hover, definition, references, and rename all come from the real
+// LSP. The bundled TypeScript worker only has the single open file, so its
+// semantic pass is both wrong and the dominant cost on large buffers.
+typescriptDefaults.setDiagnosticsOptions({
+  noSemanticValidation: true,
+  noSyntaxValidation: false,
+  noSuggestionDiagnostics: true,
+});
+monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+  noSemanticValidation: true,
+  noSyntaxValidation: false,
+  noSuggestionDiagnostics: true,
+});
+
 const GYRO_RUST_LANGUAGE_ID = "gyro-rust";
 
 monaco.languages.register({
@@ -69,6 +95,15 @@ monaco.languages.setMonarchTokensProvider(GYRO_RUST_LANGUAGE_ID, {
 
 export function disposeMonacoModel(path: string) {
   monaco.editor.getModel(monaco.Uri.parse(path))?.dispose();
+}
+
+// @monaco-editor/react creates the editor inside a `display: none` container
+// and only unhides it once mount finishes, so the first font measurement reads
+// back zero. Every view line then lands at the same offset. Re-measure once the
+// container is visible and once more when font loading settles.
+export function remeasureMonacoFonts() {
+  monaco.editor.remeasureFonts();
+  void document.fonts?.ready.then(() => monaco.editor.remeasureFonts());
 }
 
 monaco.editor.defineTheme("gyro-dark", {

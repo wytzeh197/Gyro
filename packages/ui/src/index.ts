@@ -210,6 +210,11 @@ export type {
   WorkspacePreparationProgress,
   WorkspacePreparationSnapshot,
   WorkspacePreparationStatus,
+  CliUpdateOffer,
+  CliUpdateCheckReport,
+  CliUpdateApplyResult,
+  CliUpdatePhase,
+  CliUpdateNoticeState,
 } from "./types";
 export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
@@ -366,6 +371,9 @@ export {
   workspacePathMatchesGlob,
 } from "./workspace-settings";
 export {
+  cliUpdateActionLabel,
+  cliUpdateDismissKey,
+  cliUpdateNoticeMessage,
   formatUpdateSize,
   shouldShowSidebarUpdate,
   updatePrimaryActionLabel,
@@ -381,6 +389,7 @@ export {
   ChatThread,
   ChatGridSurface,
   ChatSurface,
+  CliUpdateBanner,
   ChatUtilityBar,
   CliWorkspaceSurface,
   CommandPaletteOverlay,

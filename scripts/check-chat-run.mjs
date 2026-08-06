@@ -13,6 +13,7 @@ import {
   isGenericProviderToolLabel,
   isRunPhaseLive,
   runHeaderLabel,
+  runRetryText,
   runRowText,
   splitToolName,
   workItemFromEvent,
@@ -136,10 +137,10 @@ assert.equal(
   "tools that share a name but not a target should not coalesce",
 );
 
-// --- no batching --------------------------------------------------------------
+// --- distinct work never batches ----------------------------------------------
 
 // Parallel calls arrive milliseconds apart. The reference design is a flat rail,
-// so each one is its own row; nothing collapses them.
+// so each distinct one is its own row; nothing collapses work that differs.
 const parallel = buildRunModel([
   activity("tool", "Read a.ts", {}, 0),
   activity("tool", "Read b.ts", {}, 0),
@@ -226,6 +227,97 @@ assert.deepEqual(
   "repeat edits to one path should merge",
 );
 
+// --- identical work folds into one row -----------------------------------------
+
+// The rail used to repeat "Edited file · <path> +40" once per edit, because the
+// stat is the file's whole diff rather than one edit's share. One path is one
+// row, carrying the latest numbers.
+assert.equal(touchedTwice.steps.length, 1, "repeat edits should be one row");
+assert.equal(touchedTwice.steps[0].repeat, 2, "the row should count the edits");
+assert.equal(
+  touchedTwice.steps[0].item.additions,
+  4,
+  "the surviving row should carry the newest stats",
+);
+
+// A file rejoins its own row even when other work happened in between, and
+// holds the position it was first touched.
+const revisited = buildRunModel([
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 4 }, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 9 }, 2),
+]);
+assert.deepEqual(
+  revisited.steps.map((step) => `${step.item.kind}:${step.repeat ?? 1}`),
+  ["file:2", "command:1"],
+  "a revisited file should fold upward rather than open a second row",
+);
+assert.equal(
+  revisited.steps[0].item.additions,
+  9,
+  "the folded file row should show the latest diff",
+);
+
+// A stat the newer beat did not carry is not blanked by the fold.
+const statOnceOnly = buildRunModel([
+  activity(
+    "file",
+    "Updated src/a.ts",
+    { detail: "src/a.ts", additions: 12, deletions: 5 },
+    0,
+  ),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts" }, 1),
+]);
+assert.equal(statOnceOnly.steps[0].item.additions, 12);
+assert.equal(statOnceOnly.steps[0].item.deletions, 5);
+
+// Non-file work folds only back to back: a command repeated after other work is
+// a real second beat and must keep the run's order.
+const repeatedCommand = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+]);
+assert.equal(repeatedCommand.steps.length, 1, "a rerun command should fold");
+assert.equal(repeatedCommand.steps[0].repeat, 3);
+
+const separatedCommand = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  activity("search", "Searched project", { query: "rail", scope: "project" }, 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+]);
+assert.deepEqual(
+  separatedCommand.steps.map((step) => step.item.kind),
+  ["command", "search", "command"],
+  "a command run again after other work should stay a separate beat",
+);
+
+// Narration between two identical beats breaks the run of them.
+const splitByNarration = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  say("Trying that again.", 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+  say("Done.", 3),
+]);
+assert.deepEqual(
+  splitByNarration.steps.map((step) =>
+    step.kind === "say" ? "say" : step.item.kind,
+  ),
+  ["command", "say", "command"],
+  "narration should keep two identical commands apart",
+);
+
+// Memory and context beats have no target to compare on, so they never fold.
+const repeatedMemory = buildRunModel([
+  activity("memory", "Edited memory", {}, 0),
+  activity("memory", "Edited memory", {}, 1),
+]);
+assert.equal(
+  repeatedMemory.steps.length,
+  2,
+  "beats with no target should stay distinct",
+);
+
 // Diff stats come from source control, not from the provider payload. Dropping
 // that during the rewrite would leave every file row as a bare path.
 const withStats = buildRunModel(
@@ -300,6 +392,74 @@ assert.deepEqual(
   "a stale in-flight turn is interrupted",
 );
 
+// --- retrying -------------------------------------------------------------------
+
+// The network going away mid-run is a live beat, not a dead turn: the work
+// already on the rail is intact and the failure block stays out of the way.
+const offline = buildRunModel([activity("command", "pnpm test", {}, 0)], {
+  isRunning: true,
+  retry: { reason: "Waiting for the network" },
+});
+assert.deepEqual(
+  offline.phase,
+  { name: "retrying", attempt: undefined, reason: "Waiting for the network" },
+  "a live turn with a retry in flight is retrying",
+);
+assert.ok(isRunPhaseLive(offline.phase), "a retrying turn still ticks");
+assert.equal(
+  offline.steps.length,
+  1,
+  "the work behind a retry stays on the rail",
+);
+
+// The provider's last word is stale while the surface is dialling again —
+// otherwise the rail says "Stopped" over a reconnect that is still going.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    retry: { reason: "Reconnecting to the provider" },
+    status: { status: "failed", message: "Connection reset" },
+  }).phase.name,
+  "retrying",
+  "a retry in flight should outrank the failure that provoked it",
+);
+// A settled turn is over, whatever the surface thinks it is dialling.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: false,
+    retry: { reason: "Waiting for the network" },
+  }).phase.name,
+  "done",
+  "a retry hint should not resurrect a settled turn",
+);
+
+// The row copy: reason and attempt are separate facts, and the first attempt
+// carries no number because there is no series to count yet.
+assert.deepEqual(
+  runRetryText({ name: "retrying", reason: "Waiting for the network" }),
+  { label: "Retrying", description: "Waiting for the network" },
+  "a retry names what it is waiting for",
+);
+assert.deepEqual(
+  runRetryText({
+    name: "retrying",
+    reason: "Waiting for the network",
+    attempt: 3,
+  }),
+  { label: "Retrying", description: "Waiting for the network · attempt 3" },
+  "a repeated retry counts itself",
+);
+assert.equal(
+  runRetryText({ name: "retrying", attempt: 1 }).description,
+  "Waiting for the connection",
+  "the first attempt needs neither a number nor a guessed reason",
+);
+assert.equal(
+  runHeaderLabel({ name: "retrying" }, "12s"),
+  "Retrying · 12s",
+  "the header keeps the clock a retrying turn never stopped",
+);
+
 // --- the response rule ----------------------------------------------------------
 
 // While running, an opening line with no work behind it is a preamble.
@@ -312,6 +472,46 @@ assert.equal(
   buildRunModel([say("I'll take a look.", 0)]).response?.message,
   "I'll take a look.",
   "the same line closes the turn once the run has settled",
+);
+
+// Narration that trails the last tool is a rail beat, not the answer — a live
+// run that says "Let me check …" is still working, not finalizing.
+const narrating = buildRunModel(
+  [
+    activity("command", "ls node_modules/monaco-editor", {}, 0),
+    say(
+      "Both symptoms point at one root cause. Let me check the build config.",
+      1,
+    ),
+  ],
+  { isRunning: true },
+);
+assert.equal(
+  narrating.response,
+  undefined,
+  "mid-run narration should not be promoted to the answer",
+);
+assert.deepEqual(
+  narrating.phase,
+  { name: "working" },
+  "a run narrating its next step is working, not finalizing",
+);
+assert.equal(
+  narrating.steps.at(-1)?.kind,
+  "say",
+  "the narration should land on the rail as its own beat",
+);
+// The same line closes the turn once the run settles — something has to answer.
+assert.equal(
+  buildRunModel([
+    activity("command", "ls node_modules/monaco-editor", {}, 0),
+    say(
+      "Both symptoms point at one root cause. Let me check the build config.",
+      1,
+    ),
+  ]).response?.message.startsWith("Both symptoms"),
+  true,
+  "a settled turn still answers with its last block",
 );
 
 // A file edit reported after the closing text must not strand the answer.
@@ -504,10 +704,24 @@ assert.equal(isGenericProviderToolLabel("xAI tool"), true);
 assert.equal(isGenericProviderToolLabel("Kimi tool"), true);
 assert.equal(isGenericProviderToolLabel("Read README.md"), false);
 assert.deepEqual(rowText("tool", "xAI tool"), { label: "Used tool" });
+// A read is its own row: bright verb, muted target — never "Edited file".
 assert.deepEqual(
   rowText("read", "Read README.md", { path: "README.md" }),
-  { label: "Read README.md" },
-  "ACP read kinds should keep the read verb and path",
+  { label: "Read file", description: "README.md" },
+  "ACP read kinds should split into a read verb and the path",
+);
+assert.deepEqual(
+  rowText("read", "Read shot.png", { path: "/tmp/shot.png" }),
+  { label: "Viewed image", description: "/tmp/shot.png" },
+  "image reads should read as viewing, not editing",
+);
+// Chat attachments are content-hashed blobs; the digest is not worth a row.
+assert.deepEqual(
+  rowText("read", "Read a9bf.png", {
+    path: "/Users/x/Application Support/Gyro/sessions/attachments/d05/a9bf.png",
+  }),
+  { label: "Viewed image", description: "attachment" },
+  "attachment blobs should not leak their hashed path onto the rail",
 );
 assert.deepEqual(
   splitToolName(

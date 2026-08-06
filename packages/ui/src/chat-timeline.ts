@@ -12,7 +12,7 @@ export type InterleavedChatTimelineItem =
   | {
       kind: "activity-group";
       id: string;
-      activityKind: "command" | "search" | "tool";
+      activityKind: "command" | "read" | "search" | "tool";
       events: SessionEvent[];
     };
 
@@ -295,6 +295,7 @@ export function interleavedChatTimelineItems(events: SessionEvent[]) {
     }
     const groupedKind =
       activityKind === "command" ||
+      activityKind === "read" ||
       activityKind === "search" ||
       activityKind === "tool"
         ? activityKind

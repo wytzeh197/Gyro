@@ -203,6 +203,12 @@ pub struct UsageTotals {
     /// Calls whose tokens Gyro estimated because the provider reported nothing.
     pub estimated_calls: u32,
     pub input_tokens: u64,
+    /// The share of `input_tokens` that was context the call already had.
+    ///
+    /// Reported for the display only. `total_tokens` still counts it, because
+    /// every budget and ceiling in this module was tuned against that figure
+    /// and moving it would silently widen limits the user already set.
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
     pub by_origin: Vec<UsageOriginTotals>,
@@ -777,7 +783,8 @@ fn totals_from_rows(
 ) -> Result<UsageTotals> {
     let mut totals = UsageTotals::default();
     let mut stmt = conn.prepare(&format!(
-        "select origin, measured, input_tokens, output_tokens, total_tokens, occurred_at
+        "select origin, measured, input_tokens, cached_input_tokens, output_tokens,
+                total_tokens, occurred_at
          from usage_ledger where {where_clause} order by occurred_at asc"
     ))?;
     let rows = stmt.query_map(bind, |row| {
@@ -787,13 +794,22 @@ fn totals_from_rows(
             row.get::<_, i64>(2)?,
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
-            row.get::<_, String>(5)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?,
         ))
     })?;
 
     let mut by_origin: Vec<UsageOriginTotals> = Vec::new();
     for row in rows {
-        let (origin, measured, input_tokens, output_tokens, total_tokens, occurred_at) = row?;
+        let (
+            origin,
+            measured,
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            total_tokens,
+            occurred_at,
+        ) = row?;
         totals.calls += 1;
         if measured != 0 {
             totals.measured_calls += 1;
@@ -801,6 +817,10 @@ fn totals_from_rows(
             totals.estimated_calls += 1;
         }
         totals.input_tokens += input_tokens.max(0) as u64;
+        // Clamped to the input it is a share of: a provider that reports a
+        // cache read larger than its own input would otherwise render as
+        // "more cached than sent".
+        totals.cached_input_tokens += cached_input_tokens.clamp(0, input_tokens.max(0)) as u64;
         totals.output_tokens += output_tokens.max(0) as u64;
         totals.total_tokens += total_tokens.max(0) as u64;
 
@@ -1066,6 +1086,48 @@ mod tests {
         assert_eq!(totals.measured_calls, 1);
         assert_eq!(totals.estimated_calls, 1);
         assert!(totals.has_estimates());
+    }
+
+    #[test]
+    fn cached_input_is_totalled_for_the_display_without_moving_the_budget() {
+        let conn = memory_conn();
+        let session_id = Uuid::new_v4();
+        // A tool-using turn: nearly all of the input was the conversation the
+        // call already had.
+        insert_usage_entry(
+            &conn,
+            &entry(
+                session_id,
+                UsageOrigin::Chat,
+                UsageTokens::measured(Some(567_771), Some(565_389), Some(2_000), None, None),
+            ),
+        )
+        .expect("insert cached call");
+
+        let totals = session_usage_totals(&conn, session_id).expect("totals");
+        assert_eq!(totals.cached_input_tokens, 565_389);
+        assert_eq!(totals.input_tokens, 567_771);
+        // The billed figure still counts the re-read context, so a budget
+        // measured against it fires exactly where it did before.
+        assert_eq!(totals.total_tokens, 569_771);
+    }
+
+    #[test]
+    fn cached_input_never_exceeds_the_input_it_is_a_share_of() {
+        let conn = memory_conn();
+        let session_id = Uuid::new_v4();
+        insert_usage_entry(
+            &conn,
+            &entry(
+                session_id,
+                UsageOrigin::Chat,
+                UsageTokens::measured(Some(1_000), Some(9_000), Some(100), None, None),
+            ),
+        )
+        .expect("insert overreported cache");
+
+        let totals = session_usage_totals(&conn, session_id).expect("totals");
+        assert_eq!(totals.cached_input_tokens, 1_000);
     }
 
     #[test]

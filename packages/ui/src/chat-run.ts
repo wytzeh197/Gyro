@@ -1,4 +1,5 @@
 import {
+  isAssistantPreambleBlock,
   isOrphanAssistantFragment,
   isTransientStatusGreeting,
   peelAssistantPreambleBlocks,
@@ -47,6 +48,18 @@ export type WorkItem =
       additions?: number;
       deletions?: number;
     }
+  /**
+   * The agent looked at something. Deliberately not a `file` item: a read is
+   * not a change, so it must not reach the turn's changed-file set or borrow
+   * the pencil.
+   */
+  | {
+      kind: "read";
+      id: string;
+      status: WorkStatus;
+      path?: string;
+      media: "image" | "file";
+    }
   | { kind: "memory"; id: string; status: WorkStatus }
   | { kind: "context"; id: string; status: WorkStatus }
   | {
@@ -64,12 +77,24 @@ export type WorkItem =
 
 /**
  * One beat of a run. A work step carries exactly one item: the reference design
- * is a flat rail where seven commands read as seven rows, so nothing here
- * batches. Collapsing happens in the header, by hiding the list entirely.
+ * is a flat rail where seven *different* commands read as seven rows, so no
+ * grouping happens by time or by kind. The one thing that folds is a beat that
+ * would repeat a row verbatim — see `absorbRepeatedWork`. Collapsing the rest
+ * happens in the header, by hiding the list entirely.
  */
 export type RunStep =
   | { kind: "say"; id: string; at: string; text: string }
-  | { kind: "work"; id: string; at: string; item: WorkItem }
+  | {
+      kind: "work";
+      id: string;
+      at: string;
+      item: WorkItem;
+      /**
+       * How many beats folded into this row. Absent or 1 means it happened
+       * once; the view only draws a count above that.
+       */
+      repeat?: number;
+    }
   | { kind: "ask"; id: string; at: string; event: SessionEvent };
 
 /**
@@ -83,6 +108,13 @@ export type RunPhase =
   | { name: "thinking" }
   | { name: "working" }
   | { name: "finalizing" }
+  /**
+   * The transport went away mid-run and the turn is waiting to reach the
+   * provider again. Live, not failed: the work behind it is intact, so the rail
+   * keeps its shape and the failure block stays out of the way until the retry
+   * gives up for good.
+   */
+  | { name: "retrying"; attempt?: number; reason?: string }
   | { name: "done"; durationMs?: number }
   | {
       name: "failed";
@@ -130,6 +162,12 @@ export type BuildRunModelOptions = {
   fileStats?: (
     path: string,
   ) => { additions?: number; deletions?: number } | undefined;
+  /**
+   * Set while the surface is trying to reach the provider again. Only the chat
+   * surface knows this — it owns the network watch and fires the resend — so the
+   * run model takes it as an input rather than guessing from a stale status.
+   */
+  retry?: { attempt?: number; reason?: string };
 };
 
 const INFLIGHT_STATUSES = ["queued", "running", "waiting"];
@@ -165,7 +203,9 @@ export function buildRunModel(
         item.deletions = item.deletions ?? stats?.deletions;
         mergeFileChange(files, item);
       }
-      steps.push({ kind: "work", id: event.id, at: event.createdAt, item });
+      if (!absorbRepeatedWork(steps, item)) {
+        steps.push({ kind: "work", id: event.id, at: event.createdAt, item });
+      }
       continue;
     }
     if (event.kind === "assistant-message") {
@@ -200,14 +240,41 @@ export function buildRunModel(
     }
   }
 
+  // Providers of every kind leave intermediate tool frames as "running" when
+  // they end a turn without a final status update. Once the surface is no
+  // longer driving the turn, nothing is still running — settle the rail so
+  // settled turns do not breathe forever or look mid-flight.
+  const isRunning = options.isRunning ?? false;
+  const settledSteps = isRunning
+    ? coalesceAdjacentToolSteps(steps)
+    : settleRunningWorkSteps(coalesceAdjacentToolSteps(steps));
+  const settledFiles = isRunning
+    ? files
+    : files.map((file) =>
+        file.status === "running" ? { ...file, status: "done" as const } : file,
+      );
+
   return {
-    phase: runPhase(steps, closing?.response, options),
+    phase: runPhase(settledSteps, closing?.response, options),
     startedAt:
       options.startedAt ?? visible[0]?.createdAt ?? new Date(0).toISOString(),
-    steps: coalesceAdjacentToolSteps(steps),
-    files,
+    steps: settledSteps,
+    files: settledFiles,
     response: closing?.response,
   };
+}
+
+/** Close open work rows when the turn itself has finished. */
+function settleRunningWorkSteps(steps: RunStep[]): RunStep[] {
+  return steps.map((step) => {
+    if (step.kind !== "work" || step.item.status !== "running") {
+      return step;
+    }
+    return {
+      ...step,
+      item: { ...step.item, status: "done" },
+    };
+  });
 }
 
 /**
@@ -293,6 +360,15 @@ function partitionClosingResponse(
   if (isRunning && !followsWork) {
     return undefined;
   }
+  // Narration that trails the last tool is still narration while the run is
+  // going: it is the beat the rail should be showing, not an answer. Peeling
+  // below always keeps one block back, so without this a lone "Let me check the
+  // build config." becomes the response body and reports the turn as
+  // finalizing. A settled turn still needs something to answer with, so the
+  // rule is scoped to live runs.
+  if (isRunning && trailing.every(isNarrationOnly)) {
+    return undefined;
+  }
 
   // Peel plan/status lines from the trailing blocks. Applies with or without
   // tools — glued pure-Q&A streams often attach "I'll check…" to the answer.
@@ -352,6 +428,17 @@ function partitionClosingResponse(
   };
 }
 
+/**
+ * True when nothing in an assistant message reads as an answer — every block is
+ * a plan line, a status line, or a stray fragment. A message left with no usable
+ * blocks at all counts, since what it held was dropped as noise.
+ */
+function isNarrationOnly(event: SessionEvent): boolean {
+  return structuredCommentaryBlocks(event.message).every(
+    isAssistantPreambleBlock,
+  );
+}
+
 function joinAssistantEvents(events: SessionEvent[]): SessionEvent {
   const first = events[0]!;
   return {
@@ -380,6 +467,16 @@ function runPhase(
   // "working" would spin a timer nothing is driving.
   if (!isRunning && status && INFLIGHT_STATUSES.includes(status.status)) {
     return { name: "interrupted" };
+  }
+  // A retry in flight outranks the status that provoked it: the provider's last
+  // word is by definition stale while the surface is dialling again, and showing
+  // "Stopped" over a live reconnect reads as a dead turn the user has to rescue.
+  if (isRunning && options.retry) {
+    return {
+      name: "retrying",
+      attempt: options.retry.attempt,
+      reason: options.retry.reason,
+    };
   }
   if (status && PROBLEM_STATUSES.includes(status.status)) {
     return {
@@ -481,15 +578,11 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
     case "read": {
       const path = text(payload, "path") ?? detail;
       return {
-        kind: "tool",
+        kind: "read",
         id,
         status,
-        tool:
-          label && !isGenericProviderToolLabel(label)
-            ? label
-            : path
-              ? `Read ${path}`
-              : "Read file",
+        path,
+        media: isImagePath(path) ? "image" : "file",
       };
     }
     case "edit":
@@ -579,12 +672,19 @@ function workItemFromCapabilityCall(
     };
   }
 
-  // File-ish workspace reads stay as tools with a clean verb.
-  if (
-    capabilityId === "workspace-read" ||
-    capabilityId === "workspace-read-range" ||
-    capabilityId === "workspace-list"
-  ) {
+  // Reading a workspace file is the same beat as a provider read, so it gets
+  // the same row rather than a generic wrench.
+  if (capabilityId === "workspace-read" || capabilityId === "workspace-read-range") {
+    const path = resourceLabel ?? summary;
+    return {
+      kind: "read",
+      id,
+      status,
+      path,
+      media: isImagePath(path) ? "image" : "file",
+    };
+  }
+  if (capabilityId === "workspace-list") {
     return {
       kind: "tool",
       id,
@@ -678,6 +778,10 @@ export function runHeaderLabel(
     case "working":
     case "finalizing":
       return elapsedLabel ? `Working for ${elapsedLabel}` : "Working";
+    // The clock is still honest here — the turn never ended — but "Working for"
+    // is not, so the header names the wait and the rail row carries the detail.
+    case "retrying":
+      return elapsedLabel ? `Retrying · ${elapsedLabel}` : "Retrying";
     case "done":
       return elapsedLabel ? `Worked for ${elapsedLabel}` : "Worked";
     case "failed":
@@ -718,11 +822,37 @@ export function isRunPhaseLive(phase: RunPhase) {
   return (
     phase.name === "thinking" ||
     phase.name === "working" ||
-    phase.name === "finalizing"
+    phase.name === "finalizing" ||
+    phase.name === "retrying"
   );
 }
 
 export type RunRowText = { label: string; description?: string };
+
+/**
+ * The retry beat's two halves, in the same shape as every other row so the rail
+ * stays one grid. The reason comes from whoever detected the loss, because
+ * "Waiting for the network" and "Reconnecting to the provider" are different
+ * facts and guessing between them here would put the wrong one on screen.
+ */
+export function runRetryText(
+  phase: Extract<RunPhase, { name: "retrying" }>,
+): RunRowText {
+  const reason = phase.reason?.trim();
+  // The first attempt needs no number — "Attempt 1" implies a series the user
+  // has not seen fail yet.
+  const attempt =
+    phase.attempt !== undefined && phase.attempt > 1
+      ? `attempt ${phase.attempt}`
+      : undefined;
+  return {
+    label: "Retrying",
+    description:
+      reason && attempt
+        ? `${reason} · ${attempt}`
+        : (reason ?? attempt ?? "Waiting for the connection"),
+  };
+}
 
 /**
  * The two halves of a row: the bright side names the action, the muted side
@@ -752,6 +882,11 @@ export function runRowText(step: RunStep): RunRowText {
       };
     case "file":
       return { label: fileVerb(item.status), description: item.path };
+    case "read":
+      return {
+        label: readVerb(item.status, item.media),
+        description: readTarget(item.path),
+      };
     case "search":
       return {
         label:
@@ -857,6 +992,56 @@ function fileVerb(status: WorkStatus) {
   return status === "failed" ? "Edit failed" : "Edited file";
 }
 
+function readVerb(status: WorkStatus, media: "image" | "file") {
+  if (status === "failed") {
+    return media === "image" ? "Image failed" : "Read failed";
+  }
+  if (status === "running") {
+    return media === "image" ? "Viewing image" : "Reading file";
+  }
+  return media === "image" ? "Viewed image" : "Read file";
+}
+
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "avif",
+  "heic",
+  "ico",
+]);
+
+export function isImagePath(path: string | undefined): boolean {
+  if (!path) {
+    return false;
+  }
+  const extension = path.split(".").at(-1)?.toLowerCase();
+  return Boolean(extension) && IMAGE_EXTENSIONS.has(extension as string);
+}
+
+/**
+ * What the rail shows next to a read verb.
+ *
+ * Chat attachments live as content-hashed blobs under the app's session store,
+ * so the real path is a 64-character digest the user has never seen. The
+ * filename is the only part of any read path that carries meaning at rail
+ * width, and for an attachment even that is noise — so it is dropped entirely
+ * and the verb ("Viewed image") stands alone.
+ */
+function readTarget(path: string | undefined): string | undefined {
+  if (!path) {
+    return undefined;
+  }
+  if (path.includes("/sessions/attachments/")) {
+    return "attachment";
+  }
+  return path;
+}
+
 /**
  * `mcp__github__create_issue` → `{ server: "github", tool: "create issue" }`
  * Also unwraps JSON payloads like `{"tool_name":"gyro_capabilities__…"}` that
@@ -945,6 +1130,100 @@ function humanizeCapabilityTool(value: string): string {
 
 function humanizeToolSegment(value: string) {
   return value.split(/[_-]/).filter(Boolean).join(" ");
+}
+
+/**
+ * Folds a repeated beat into the row that already says it.
+ *
+ * The rail is otherwise flat on purpose — seven commands read as seven rows.
+ * But an agent that edits one file eight times produced eight rows carrying the
+ * *same* path and the same `+40`, because the stats are the file's whole diff
+ * rather than one edit's share. That is not eight beats of information.
+ *
+ * Two different reaches, because the two cases are different:
+ *
+ * - A **file** folds into its earlier row anywhere in the turn. One row per
+ *   path, held at the position it was first touched, numbers refreshed in
+ *   place. This mirrors `mergeFileChange` so the rail and the turn's changed
+ *   files cannot disagree.
+ * - **Everything else** folds only when it repeats back to back. A command run
+ *   again after other work is a genuine second beat, and pulling it upward
+ *   would scramble the order the run actually happened in.
+ *
+ * Returns whether the item was absorbed.
+ */
+function absorbRepeatedWork(steps: RunStep[], item: WorkItem): boolean {
+  const identity = workIdentity(item);
+  if (!identity) {
+    return false;
+  }
+  const target =
+    item.kind === "file"
+      ? findLastWorkStep(steps, identity)
+      : matchingLastStep(steps, identity);
+  if (!target) {
+    return false;
+  }
+  target.item = carryWorkStats(target.item, item);
+  target.repeat = (target.repeat ?? 1) + 1;
+  return true;
+}
+
+function findLastWorkStep(steps: RunStep[], identity: string) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]!;
+    if (step.kind === "work" && workIdentity(step.item) === identity) {
+      return step;
+    }
+  }
+  return undefined;
+}
+
+function matchingLastStep(steps: RunStep[], identity: string) {
+  const last = steps.at(-1);
+  return last?.kind === "work" && workIdentity(last.item) === identity
+    ? last
+    : undefined;
+}
+
+/**
+ * What makes two beats "the same work". A row only folds when its whole visible
+ * content would repeat, so an identity is the kind plus everything the row
+ * shows. Anything without a target to compare on (memory, context) returns
+ * `undefined` and never folds.
+ */
+function workIdentity(item: WorkItem): string | undefined {
+  switch (item.kind) {
+    case "file":
+      return `file:${item.path}`;
+    case "read":
+      return item.path ? `read:${item.media}:${item.path}` : undefined;
+    case "command":
+      return `command:${item.command}`;
+    case "search":
+      return item.query ? `search:${item.scope}:${item.query}` : undefined;
+    case "tool":
+      return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
+    case "memory":
+    case "context":
+      return undefined;
+  }
+}
+
+/**
+ * The later beat wins — same rule as `mergeFileChange` — except that a stat the
+ * newer beat did not carry keeps the value already on the row, so a provider
+ * that only reports line counts once does not blank them on the repeat.
+ */
+function carryWorkStats(previous: WorkItem, next: WorkItem): WorkItem {
+  if (previous.kind !== "file" || next.kind !== "file") {
+    return next;
+  }
+  return {
+    ...next,
+    additions: next.additions ?? previous.additions,
+    deletions: next.deletions ?? previous.deletions,
+  };
 }
 
 function mergeFileChange(
