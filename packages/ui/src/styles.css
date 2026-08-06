@@ -24288,6 +24288,29 @@ button.gyro-account-menu-row:hover,
   }
 }
 
+/* Chat context in the environment rail.
+   These chips came off a horizontal strip under the composer, so each one has
+   to fill the rail's column rather than sit at its own content width. */
+.gyro-chat-context-section > .gyro-composer-control {
+  display: flex;
+}
+
+.gyro-chat-context-section .gyro-composer-chip {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.gyro-chat-context-section .gyro-composer-chip > svg:last-child {
+  margin-left: auto;
+}
+
+.gyro-chat-context-section .gyro-composer-session-cost {
+  flex-wrap: wrap;
+  margin-left: 0;
+  margin-top: 6px;
+  white-space: normal;
+}
+
 /* Chat slash command menu */
 .gyro-composer-shell:has(.gyro-composer-slash-menu) {
   z-index: 123;
@@ -26292,8 +26315,18 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar > div:first-child span {
   max-width: 180px;
 }
-.gyro-chat-surface.is-tiled.has-environment .gyro-environment-rail,
-.gyro-chat-surface.is-tiled.has-environment .gyro-plan-rail {
+/*
+ * Temporary plan/browser panels may float over a tiled pane so a narrow
+ * split is not squeezed further. The standing environment rail must not:
+ * with always-on has-environment it would cover the right half of the
+ * transcript (and the stop control) and make any click "outside the chat
+ * width" land on rail chrome instead of the turn.
+ */
+.gyro-chat-surface.is-tiled.has-environment .gyro-environment-rail {
+  display: none;
+}
+.gyro-chat-surface.is-tiled.has-environment .gyro-plan-rail,
+.gyro-chat-surface.is-tiled.has-environment .gyro-browser-rail {
   bottom: 8px;
   box-shadow: 0 16px 44px rgb(0 0 0 / 44%);
   grid-area: auto;
@@ -29189,6 +29222,17 @@ button.gyro-account-menu-row:hover,
   min-height: 0;
 }
 
+/* The IDE sidebar renders the same chat at roughly a third of the width the
+   rail was sized for. A column beside it would leave the transcript unreadable,
+   so this embed keeps the full width and drops the rail. */
+.gyro-sidebar-ai-chat .gyro-chat-surface.has-environment {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gyro-sidebar-ai-chat .gyro-chat-tool-rail {
+  display: none;
+}
+
 /* At sidebar width the composer bar cannot hold its controls on one line;
    wrap rather than clipping the send button off the edge. */
 .gyro-sidebar-ai-chat .gyro-composer-bar {
@@ -29466,6 +29510,14 @@ button.gyro-account-menu-row:hover,
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   gap: 6px;
+}
+
+/* Quieter than the path it follows: the count is how many, not what. */
+.gyro-run-row-repeat {
+  color: var(--gyro-faint);
+  flex: none;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .gyro-run-row-stat em {

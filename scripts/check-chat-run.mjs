@@ -137,10 +137,10 @@ assert.equal(
   "tools that share a name but not a target should not coalesce",
 );
 
-// --- no batching --------------------------------------------------------------
+// --- distinct work never batches ----------------------------------------------
 
 // Parallel calls arrive milliseconds apart. The reference design is a flat rail,
-// so each one is its own row; nothing collapses them.
+// so each distinct one is its own row; nothing collapses work that differs.
 const parallel = buildRunModel([
   activity("tool", "Read a.ts", {}, 0),
   activity("tool", "Read b.ts", {}, 0),
@@ -225,6 +225,97 @@ assert.deepEqual(
   touchedTwice.files,
   [{ path: "src/a.ts", status: "done", additions: 4, deletions: undefined }],
   "repeat edits to one path should merge",
+);
+
+// --- identical work folds into one row -----------------------------------------
+
+// The rail used to repeat "Edited file · <path> +40" once per edit, because the
+// stat is the file's whole diff rather than one edit's share. One path is one
+// row, carrying the latest numbers.
+assert.equal(touchedTwice.steps.length, 1, "repeat edits should be one row");
+assert.equal(touchedTwice.steps[0].repeat, 2, "the row should count the edits");
+assert.equal(
+  touchedTwice.steps[0].item.additions,
+  4,
+  "the surviving row should carry the newest stats",
+);
+
+// A file rejoins its own row even when other work happened in between, and
+// holds the position it was first touched.
+const revisited = buildRunModel([
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 4 }, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 9 }, 2),
+]);
+assert.deepEqual(
+  revisited.steps.map((step) => `${step.item.kind}:${step.repeat ?? 1}`),
+  ["file:2", "command:1"],
+  "a revisited file should fold upward rather than open a second row",
+);
+assert.equal(
+  revisited.steps[0].item.additions,
+  9,
+  "the folded file row should show the latest diff",
+);
+
+// A stat the newer beat did not carry is not blanked by the fold.
+const statOnceOnly = buildRunModel([
+  activity(
+    "file",
+    "Updated src/a.ts",
+    { detail: "src/a.ts", additions: 12, deletions: 5 },
+    0,
+  ),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts" }, 1),
+]);
+assert.equal(statOnceOnly.steps[0].item.additions, 12);
+assert.equal(statOnceOnly.steps[0].item.deletions, 5);
+
+// Non-file work folds only back to back: a command repeated after other work is
+// a real second beat and must keep the run's order.
+const repeatedCommand = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+]);
+assert.equal(repeatedCommand.steps.length, 1, "a rerun command should fold");
+assert.equal(repeatedCommand.steps[0].repeat, 3);
+
+const separatedCommand = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  activity("search", "Searched project", { query: "rail", scope: "project" }, 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+]);
+assert.deepEqual(
+  separatedCommand.steps.map((step) => step.item.kind),
+  ["command", "search", "command"],
+  "a command run again after other work should stay a separate beat",
+);
+
+// Narration between two identical beats breaks the run of them.
+const splitByNarration = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  say("Trying that again.", 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+  say("Done.", 3),
+]);
+assert.deepEqual(
+  splitByNarration.steps.map((step) =>
+    step.kind === "say" ? "say" : step.item.kind,
+  ),
+  ["command", "say", "command"],
+  "narration should keep two identical commands apart",
+);
+
+// Memory and context beats have no target to compare on, so they never fold.
+const repeatedMemory = buildRunModel([
+  activity("memory", "Edited memory", {}, 0),
+  activity("memory", "Edited memory", {}, 1),
+]);
+assert.equal(
+  repeatedMemory.steps.length,
+  2,
+  "beats with no target should stay distinct",
 );
 
 // Diff stats come from source control, not from the provider payload. Dropping
@@ -613,10 +704,24 @@ assert.equal(isGenericProviderToolLabel("xAI tool"), true);
 assert.equal(isGenericProviderToolLabel("Kimi tool"), true);
 assert.equal(isGenericProviderToolLabel("Read README.md"), false);
 assert.deepEqual(rowText("tool", "xAI tool"), { label: "Used tool" });
+// A read is its own row: bright verb, muted target — never "Edited file".
 assert.deepEqual(
   rowText("read", "Read README.md", { path: "README.md" }),
-  { label: "Read README.md" },
-  "ACP read kinds should keep the read verb and path",
+  { label: "Read file", description: "README.md" },
+  "ACP read kinds should split into a read verb and the path",
+);
+assert.deepEqual(
+  rowText("read", "Read shot.png", { path: "/tmp/shot.png" }),
+  { label: "Viewed image", description: "/tmp/shot.png" },
+  "image reads should read as viewing, not editing",
+);
+// Chat attachments are content-hashed blobs; the digest is not worth a row.
+assert.deepEqual(
+  rowText("read", "Read a9bf.png", {
+    path: "/Users/x/Application Support/Gyro/sessions/attachments/d05/a9bf.png",
+  }),
+  { label: "Viewed image", description: "attachment" },
+  "attachment blobs should not leak their hashed path onto the rail",
 );
 assert.deepEqual(
   splitToolName(

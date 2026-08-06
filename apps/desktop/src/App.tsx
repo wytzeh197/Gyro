@@ -13364,7 +13364,6 @@ export function App() {
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
-      isTiled
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       onAttachMediaFiles={attachDroppedMedia}
       onComposerAction={handleComposerAction}
@@ -16719,6 +16718,7 @@ function MonacoEditorPane({
 }) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
+  const hasMountedRef = useRef(false);
   const revealEditorTarget = useCallback(
     (editor: Parameters<OnMount>[0]) => {
       if (!revealTarget || revealTarget.path !== path) {
@@ -16749,8 +16749,42 @@ function MonacoEditorPane({
     [],
   );
 
+  // @monaco-editor/react calls editor.updateOptions() whenever this object
+  // changes identity. A literal here re-configures the editor on every render,
+  // which on a keystroke means a full options + layout recompute.
+  const editorOptions = useMemo(
+    () => ({
+      automaticLayout: true,
+      bracketPairColorization: { enabled: true },
+      fontFamily:
+        "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
+      fontLigatures: false,
+      fontSize: 13.5,
+      guides: { bracketPairs: true, indentation: true },
+      lineHeight: 21,
+      minimap: { enabled: minimapEnabled, scale: 0.75 },
+      overviewRulerBorder: false,
+      padding: { top: 8, bottom: 12 },
+      renderWhitespace: "selection" as const,
+      scrollbar: {
+        horizontalScrollbarSize: 10,
+        verticalScrollbarSize: 10,
+      },
+      scrollBeyondLastLine: false,
+      smoothScrolling: true,
+      stickyScroll: { enabled: true, maxLineCount: 3 },
+      tabSize: 2,
+      wordWrap: "off" as const,
+    }),
+    [minimapEnabled],
+  );
+
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    hasMountedRef.current = true;
+    void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
+      remeasureMonacoFonts(),
+    );
     revealEditorTarget(editor);
     languageRegistrationsRef.current.forEach((registration) =>
       registration.dispose(),
@@ -16956,11 +16990,14 @@ function MonacoEditorPane({
     });
   };
 
-  if (loadState === "loading") {
-    return <div className="gyro-code-empty">Loading file preview...</div>;
-  }
   if (!path) {
     return <div className="gyro-code-empty">Select a workspace file.</div>;
+  }
+  // Only swap the placeholder in before the first mount. Doing it on every load
+  // tears the editor down and rebuilds it — including the font measurement —
+  // each time a tab is opened.
+  if (loadState === "loading" && !hasMountedRef.current) {
+    return <div className="gyro-code-empty">Loading file preview...</div>;
   }
 
   return (
@@ -16973,29 +17010,7 @@ function MonacoEditorPane({
         language={languageForPath(path)}
         onChange={(value) => onChange(value ?? "")}
         onMount={handleMount}
-        options={{
-          automaticLayout: true,
-          bracketPairColorization: { enabled: true },
-          fontFamily:
-            "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
-          fontLigatures: false,
-          fontSize: 13.5,
-          guides: { bracketPairs: true, indentation: true },
-          lineHeight: 21,
-          minimap: { enabled: minimapEnabled, scale: 0.75 },
-          overviewRulerBorder: false,
-          padding: { top: 8, bottom: 12 },
-          renderWhitespace: "selection",
-          scrollbar: {
-            horizontalScrollbarSize: 10,
-            verticalScrollbarSize: 10,
-          },
-          scrollBeyondLastLine: false,
-          smoothScrolling: true,
-          stickyScroll: { enabled: true, maxLineCount: 3 },
-          tabSize: 2,
-          wordWrap: "off",
-        }}
+        options={editorOptions}
         path={path}
         theme={theme === "light" ? "vs" : "gyro-dark"}
         value={buffer?.content ?? fileContent?.content ?? ""}
@@ -17005,28 +17020,67 @@ function MonacoEditorPane({
 }
 
 function languageForPath(path: string) {
-  const extension = path.split(".").at(-1)?.toLowerCase();
+  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
+  if (name === "dockerfile" || name.startsWith("dockerfile.")) {
+    return "dockerfile";
+  }
+  if (name === "makefile" || name === "cargo.lock") {
+    return "plaintext";
+  }
+  const extension = name.includes(".") ? name.split(".").at(-1) : undefined;
   switch (extension) {
     case "css":
       return "css";
+    case "scss":
+      return "scss";
+    case "less":
+      return "less";
     case "html":
+    case "htm":
       return "html";
     case "json":
+    case "jsonc":
       return "json";
     case "md":
+    case "mdx":
       return "markdown";
     case "rs":
       return "gyro-rust";
     case "ts":
-      return "typescript";
     case "tsx":
+    case "mts":
+    case "cts":
       return "typescript";
     case "js":
     case "jsx":
+    case "mjs":
+    case "cjs":
       return "javascript";
     case "yml":
     case "yaml":
       return "yaml";
+    case "toml":
+      return "ini";
+    case "ini":
+    case "cfg":
+    case "conf":
+      return "ini";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "shell";
+    case "py":
+      return "python";
+    case "go":
+      return "go";
+    case "sql":
+      return "sql";
+    case "xml":
+    case "svg":
+      return "xml";
+    case "graphql":
+    case "gql":
+      return "graphql";
     default:
       return "plaintext";
   }

@@ -560,9 +560,11 @@ expect(
     runSource.includes("expandAssistantMessageSegments(") &&
     // One item per step: the rail is flat, so nothing batches parallel calls
     // into a collapsed group the way the old activity groups did.
-    runSource.includes(
-      '{ kind: "work"; id: string; at: string; item: WorkItem }',
-    ) &&
+    // Work steps stay flat; a repeated beat folds via optional `repeat` rather
+    // than a nested group or a collapsed preview mode.
+    runSource.includes("kind: \"work\"") &&
+    runSource.includes("item: WorkItem") &&
+    runSource.includes("repeat?: number") &&
     !runSource.includes("batchWorkSteps") &&
     !runViewSource.includes('"collapsed" | "preview" | "expanded"') &&
     // File edits stay inline on the rail and carry their own stats, rather than
@@ -4397,7 +4399,10 @@ expect(
     surfaceSource.includes("editorRequest={planEditorRequest}") &&
     surfaceSource.includes("onEditorRequestHandled?.()") &&
     surfaceSource.includes("handledEditorRequestTokenRef") &&
-    surfaceSource.includes("const sidePanel = activeRailPanel ? (") &&
+    surfaceSource.includes(
+      'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
+    ) &&
+    surfaceSource.includes("const sidePanel = (") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
     /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
@@ -4453,7 +4458,7 @@ expect(
   "AI model checklist plan events should be typed, persisted, derived, and visible in chat.",
 );
 expect(
-  surfaceSource.includes('activeRailPanel ? "has-environment" : ""') &&
+  surfaceSource.includes('"is-thread",\n        "has-environment"') &&
     surfaceSource.includes('aria-label="Environment"') &&
     surfaceSource.includes('aria-label="Plan harness"') &&
     surfaceSource.includes("function ChatEnvironmentLauncher") &&
@@ -4528,7 +4533,9 @@ expect(
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
     surfaceSource.includes('aria-label="Jump to latest message"') &&
     surfaceSource.includes("isTranscriptAwayFromBottom") &&
-    surfaceSource.includes("distanceFromBottom > 72") &&
+    surfaceSource.includes("distanceFromBottom <= TRANSCRIPT_BOTTOM_SLACK") &&
+    surfaceSource.includes("isFollowingTranscriptBottomRef") &&
+    surfaceSource.includes("const pinTranscriptToBottom") &&
     surfaceSource.includes('behavior: "smooth"') &&
     styleSource.includes(".gyro-chat-jump-to-bottom") &&
     styleSource.includes("bottom: calc(100% + 10px)") &&
@@ -4546,11 +4553,11 @@ expect(
       (rule) =>
         rule.includes("max-width: none") && rule.includes("width: 100%"),
     ) &&
-    surfaceSource.includes("showContextRow={false}") &&
-    surfaceSource.includes(
-      "const shouldShowContextRow = showContextRow ?? isHero",
-    ) &&
-    surfaceSource.includes("{shouldShowContextRow ? (") &&
+    !surfaceSource.includes("gyro-composer-context-row") &&
+    !surfaceSource.includes("shouldShowContextRow") &&
+    surfaceSource.includes("function ChatContextSection") &&
+    surfaceSource.includes("<ChatContextSection") &&
+    styleSource.includes(".gyro-chat-context-section .gyro-composer-chip") &&
     styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell:focus-within",

@@ -3,6 +3,8 @@ import {
   Book,
   ChevronDown,
   ChevronRight,
+  Eye,
+  Image as ImageIcon,
   type LucideIcon,
   Lightbulb,
   Minimize2,
@@ -41,10 +43,19 @@ const WORK_ICON = {
   command: SquareTerminal,
   file: Pencil,
   memory: Book,
+  read: Eye,
   search: Search,
   context: Minimize2,
   tool: Wrench,
 } as const satisfies Record<WorkItem["kind"], LucideIcon>;
+
+/** A read of an image is still a read, but the eye undersells what happened. */
+function workIcon(item: WorkItem): LucideIcon {
+  if (item.kind === "read" && item.media === "image") {
+    return ImageIcon;
+  }
+  return WORK_ICON[item.kind];
+}
 
 export type ChatRunProps = {
   model: RunModel;
@@ -230,12 +241,13 @@ function RunRow({
   const text = runRowText(step);
   const item = step.kind === "work" ? step.item : undefined;
   const Icon = item
-    ? WORK_ICON[item.kind]
+    ? workIcon(item)
     : step.kind === "ask"
       ? ShieldQuestion
       : Lightbulb;
   const status = item?.status ?? "done";
   const file = item?.kind === "file" ? item : undefined;
+  const repeat = step.kind === "work" ? (step.repeat ?? 1) : 1;
   const className = [
     "gyro-run-row",
     `is-${step.kind}`,
@@ -257,6 +269,11 @@ function RunRow({
         </span>
         {text.description ? (
           <span className="gyro-run-row-detail">{text.description}</span>
+        ) : null}
+        {/* How many times the same beat folded in. Only ever drawn above one,
+            so a row that happened once stays exactly as it was. */}
+        {repeat > 1 ? (
+          <span className="gyro-run-row-repeat">×{repeat}</span>
         ) : null}
         {/* A side with no lines is left off entirely: the reference shows a bare
             `+73`, and a trailing `-0` is noise on every new file. */}
