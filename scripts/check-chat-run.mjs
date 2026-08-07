@@ -624,6 +624,33 @@ assert.equal(
   0,
   "Let me know… hands the turn back and must stay in the answer",
 );
+// Narration that leads with context used to escape the rail entirely: the
+// opener test only fired on a first-person start, so "<observation>, so let me
+// …" was promoted to the answer and rendered under the rail mid-run.
+for (const narration of [
+  "This is a sizable change, so let me map the state model before editing.",
+  "The strip is back in place. Now let me look at the recording.",
+  "Confirmed the split geometry, so I will check the launcher next.",
+]) {
+  assert.equal(
+    peelAssistantPreambleBlocks([narration, "The rail lives in surfaces.tsx."])
+      .preambles.length,
+    1,
+    `context-first narration is a preamble: ${narration}`,
+  );
+}
+// The same closing-sentence rule must not swallow an answer that merely offers
+// a follow-up or names the assistant in passing.
+for (const answer of [
+  "The fix is in surfaces.tsx. Let me know if you want the tests too.",
+  "I removed the rail copy and restored the strip; both typecheck clean.",
+]) {
+  assert.equal(
+    peelAssistantPreambleBlocks([answer]).preambles.length,
+    0,
+    `answers stay answers: ${answer}`,
+  );
+}
 
 // A real preamble event that trails the last tool (so it is peeled from the
 // closing answer) must not be drawn twice — once in the main pass and once

@@ -147,6 +147,30 @@ function announcesOwnNextStep(value: string): boolean {
   );
 }
 
+/**
+ * The closing sentence commits to the assistant's own next move even though the
+ * block does not open that way — "This is a sizable change, so let me map the
+ * state model", "The strip is back. Now let me look at the recording."
+ *
+ * Both forms are checked against the closing sentence only, and both require a
+ * first-person commitment, so an answer that merely opens a sentence with
+ * "Now" ("Now you can run it.") is not swept up.
+ */
+const OWN_NEXT_STEP_SENTENCE =
+  /^(?:(?:so|then|and|but|first|next|now|okay|ok)[,]?\s+)?(?:I['’]ll\b|I will\b|I['’]m going to\b|I need to\b|let me\b(?!\s+know)|looking\b|checking\b|searching\b|reading\b)/i;
+const OWN_NEXT_STEP_CLAUSE =
+  /\b(?:so|then|and|but|first|next|now)\s+(?:I['’]ll\b|I will\b|I['’]m going to\b|I need to\b|let me\b(?!\s+know))/i;
+
+function closingSentenceIntroducesWork(value: string): boolean {
+  const closing = lastSentence(value);
+  if (!closing || OWN_NEXT_STEP_EXCEPTION.test(closing)) {
+    return false;
+  }
+  return (
+    OWN_NEXT_STEP_SENTENCE.test(closing) || OWN_NEXT_STEP_CLAUSE.test(closing)
+  );
+}
+
 /** True when a short block reads as mid-run narration rather than the answer. */
 export function isAssistantPreambleBlock(value: string): boolean {
   const trimmed = value.trim();
@@ -174,7 +198,7 @@ export function isAssistantPreambleBlock(value: string): boolean {
   if ((trimmed.match(/[.!?](?:\s|$)/g) ?? []).length >= 2 && trimmed.length > 100) {
     return false;
   }
-  return PREAMBLE_BLOCK.test(trimmed);
+  return PREAMBLE_BLOCK.test(trimmed) || closingSentenceIntroducesWork(trimmed);
 }
 
 export function structuredCommentaryBlocks(value: string) {

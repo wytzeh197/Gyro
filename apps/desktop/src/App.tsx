@@ -89,6 +89,8 @@ import {
   type CouncilActionRequest,
   type CouncilRun,
   type ChatPaneRef,
+  type ChatRailDiffTools,
+  type ChatRailTerminalTools,
   type ChatSidePanelId,
   type CliLaunchPreset,
   type CommandProfile,
@@ -12972,6 +12974,115 @@ export function App() {
     />
   );
 
+  // The chat rail hosts Changes and Terminal itself now, so it needs the same
+  // handlers the workspace panel runs on. Bundled per tool because the rail
+  // reaches every ChatSurface, and loose props would multiply across them.
+  const railDiffTools: ChatRailDiffTools = {
+    onAcceptAll: () =>
+      dispatchWorkbench({
+        type: "set-diff-review-state",
+        state: "approved",
+        action: "all changes approved",
+      }),
+    onAcceptFile: (path) =>
+      dispatchWorkbench({
+        type: "set-diff-file-state",
+        path,
+        state: "accepted",
+        action: `${path} accepted`,
+      }),
+    onComment: (path) => dispatchWorkbench({ type: "add-diff-comment", path }),
+    onOpenInEditor: (path) => {
+      openEditorFile(path);
+      dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
+    },
+    onRejectAll: () =>
+      dispatchWorkbench({
+        type: "set-diff-review-state",
+        state: "rejected",
+        action: "all changes rejected",
+      }),
+    onRejectFile: (path) =>
+      dispatchWorkbench({
+        type: "set-diff-file-state",
+        path,
+        state: "rejected",
+        action: `${path} rejected`,
+      }),
+    onRunGitAction: (actionId) => void runGitReviewAction(actionId),
+    onSelectFile: (path) => dispatchWorkbench({ type: "select-diff-file", path }),
+    onToggleDirectory: (directory) =>
+      dispatchWorkbench({ type: "toggle-diff-directory", directory }),
+    onUndo: () =>
+      dispatchWorkbench({
+        type: "undo-diff-action",
+        action: "diff review reset",
+      }),
+  };
+
+  const railTerminalTools: ChatRailTerminalTools = {
+    activeProfileId,
+    cliLaunchPreset: workbench.preferences.cliLaunchPreset,
+    isLaunchingCliPreset,
+    isTerminalSourceControlLoading:
+      terminalSourceControlLoadingPaneId === selectedTerminalPane?.id,
+    onAddTerminalPane: addTerminalPane,
+    onCloseTerminalPane: requestCloseTerminalPane,
+    onKillTerminalPane: stopTerminalPane,
+    onLaunchCliPreset: launchCliPreset,
+    onMoveTerminalPane: (sourcePaneId, targetPaneId) =>
+      dispatchWorkbench({
+        type: "move-terminal-pane",
+        sourcePaneId,
+        targetPaneId,
+      }),
+    onOpenCommandPalette: () => openGlobalSearch("commands"),
+    onProfileChange: setActiveProfileId,
+    onRefreshTerminalSourceControl: () => {
+      if (selectedTerminalPane) {
+        void refreshTerminalSourceControl(selectedTerminalPane.id);
+      }
+    },
+    onRenameTerminalPane: renameTerminalPane,
+    onRestartTerminalPane: restartTerminalPane,
+    onReviewTerminalChanges: reviewTerminalChanges,
+    onRunCommandProfile: runCommandProfile,
+    onRunProfile: runProfile,
+    onSelectTerminalPane: (paneId) =>
+      dispatchWorkbench({ type: "select-terminal-pane", paneId }),
+    onSetTerminalPaneLayout: (paneId, layout) =>
+      dispatchWorkbench({ type: "set-terminal-pane-layout", paneId, layout }),
+    onSplitTerminalPane: splitTerminalPane,
+    onTerminalUtilityAction: handleTerminalUtilityAction,
+    onWriteTerminalInput: writeTerminalInput,
+    output: terminalOutput,
+    profiles: commandProfiles,
+    renderTerminalPaneBody: (pane) => (
+      <LiveTerminalPaneBody
+        isActive={pane.id === workbench.selectedTerminalPaneId}
+        onBell={(paneId) => {
+          if (paneId !== selectedTerminalPaneIdRef.current) {
+            dispatchWorkbench({
+              type: "set-terminal-pane-attention",
+              paneId,
+              attention: "waiting",
+            });
+          }
+        }}
+        onReconnect={restartTerminalPane}
+        onResize={resizeTerminalPane}
+        onSelect={(paneId) =>
+          dispatchWorkbench({ type: "select-terminal-pane", paneId })
+        }
+        onWrite={writeTerminalInputToPane}
+        pane={pane}
+        theme={workbench.preferences.theme}
+      />
+    ),
+    selectedTerminalPaneId: workbench.selectedTerminalPaneId,
+    terminalTemplate: workbench.terminalTemplate,
+  };
+
   const updater = useGyroUpdater({
     automaticChecks: config.automaticUpdateChecks !== false,
   });
@@ -13177,6 +13288,15 @@ export function App() {
     return (
       <ChatSurface
         activeChatPanel={panePanel}
+        onSelectChatPanel={(panel) => {
+          focusChatPane(pane);
+          setChatPanelByPaneId((current) => ({
+            ...current,
+            [pane.paneId]: panel,
+          }));
+        }}
+        railDiffTools={railDiffTools}
+        railTerminalTools={railTerminalTools}
         browserPreview={workbench.browserPreview}
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded}
@@ -13454,6 +13574,11 @@ export function App() {
     <ChatSurface
       chatSwitcher={workspaceChatSwitcher}
       activeChatPanel={activeChatPanel}
+      onSelectChatPanel={(panel) =>
+        dispatchWorkbench({ type: "set-chat-panel", panel })
+      }
+      railDiffTools={railDiffTools}
+      railTerminalTools={railTerminalTools}
       browserPreview={workbench.browserPreview}
       browserNativeHost={browserNativeHost}
       browserOverlayOccluded={browserOverlayOccluded}
@@ -13776,6 +13901,11 @@ export function App() {
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
                     activeChatPanel={activeChatPanel}
+                    onSelectChatPanel={(panel) =>
+                      dispatchWorkbench({ type: "set-chat-panel", panel })
+                    }
+                    railDiffTools={railDiffTools}
+                    railTerminalTools={railTerminalTools}
                     browserPreview={workbench.browserPreview}
                     capabilityPolicy={activeCapabilityPolicy}
                     config={config}
@@ -14340,6 +14470,11 @@ export function App() {
       {activeDestination === "onboarding" ? (
         <ChatSurface
           activeChatPanel={activeChatPanel}
+          onSelectChatPanel={(panel) =>
+            dispatchWorkbench({ type: "set-chat-panel", panel })
+          }
+          railDiffTools={railDiffTools}
+          railTerminalTools={railTerminalTools}
           capabilityActivities={
             activeSessionId
               ? Object.values(capabilityRunsBySessionId[activeSessionId] ?? {})

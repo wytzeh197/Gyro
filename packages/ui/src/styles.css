@@ -24422,29 +24422,6 @@ button.gyro-account-menu-row:hover,
   }
 }
 
-/* Chat context in the environment rail.
-   These chips came off a horizontal strip under the composer, so each one has
-   to fill the rail's column rather than sit at its own content width. */
-.gyro-chat-context-section > .gyro-composer-control {
-  display: flex;
-}
-
-.gyro-chat-context-section .gyro-composer-chip {
-  justify-content: flex-start;
-  width: 100%;
-}
-
-.gyro-chat-context-section .gyro-composer-chip > svg:last-child {
-  margin-left: auto;
-}
-
-.gyro-chat-context-section .gyro-composer-session-cost {
-  flex-wrap: wrap;
-  margin-left: 0;
-  margin-top: 6px;
-  white-space: normal;
-}
-
 /* Chat slash command menu */
 .gyro-composer-shell:has(.gyro-composer-slash-menu) {
   z-index: 123;
@@ -25208,6 +25185,45 @@ button.gyro-account-menu-row:hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A tool that took the rail over. It fills the column instead of hugging its
+   content, because Changes and Terminal both scroll their own bodies. */
+.gyro-environment-rail.is-tool {
+  align-self: stretch;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gyro-environment-rail.is-tool > :last-child {
+  min-height: 0;
+  overflow: auto;
+}
+
+.gyro-chat-tool-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gyro-chat-tool-back {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--gyro-premium-radius-sm);
+  color: var(--gyro-muted);
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.gyro-chat-tool-back:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 
 .gyro-chat-tool-launcher {

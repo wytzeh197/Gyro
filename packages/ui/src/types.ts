@@ -27,7 +27,17 @@ export type WorkbenchDensity = "comfortable" | "compact";
 
 export type WorkbenchMode = "local" | "worktree";
 
-export type ChatSidePanelId = "environment" | "plan" | "browser";
+/**
+ * What the right pane is showing. `environment` is the launcher the pane falls
+ * back to; every other id is a tool that took the pane over in place, so
+ * picking one never closes the pane.
+ */
+export type ChatSidePanelId =
+  | "environment"
+  | "plan"
+  | "browser"
+  | "changes"
+  | "terminal";
 
 export type ChatMode = "normal" | "plan" | "council";
 

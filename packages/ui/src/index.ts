@@ -412,4 +412,8 @@ export {
   WorkspaceToolPanel,
   WorkspaceHeader,
 } from "./surfaces";
-export type { ModelFocusPeekContent } from "./surfaces";
+export type {
+  ChatRailDiffTools,
+  ChatRailTerminalTools,
+  ModelFocusPeekContent,
+} from "./surfaces";
