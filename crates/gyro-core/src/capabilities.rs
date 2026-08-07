@@ -606,12 +606,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace task with visible, attributed output.",
+        description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTest,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace test task with visible, attributed output.",
+        description: "Run one discovered Workspace test task with visible, attributed output. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadOutput,
