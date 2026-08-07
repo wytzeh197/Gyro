@@ -18140,6 +18140,67 @@ fn persist_capability_grant(
     Ok(())
 }
 
+/// Claim this chat's single model-owned terminal and start `command` in it.
+///
+/// Shared by `terminal.open` and by background `workspace.run_task`, so a
+/// background task is readable and stoppable through the same terminal
+/// capabilities instead of blocking the turn until it exits.
+fn claim_model_terminal(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    call_id: Uuid,
+    title: String,
+    command: String,
+    args: Vec<String>,
+    cwd: &Path,
+) -> anyhow::Result<(String, TerminalPaneSnapshot)> {
+    let resources = app.state::<ProviderCapabilityResourceManager>();
+    let mut terminals = resources
+        .terminals
+        .lock()
+        .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?;
+    terminals.retain(|_, owned| {
+        app.state::<TerminalProcessManager>()
+            .read(&owned.pane_id, None)
+            .is_ok_and(|snapshot| snapshot.status == "running")
+    });
+    if terminals.contains_key(&bound.session_id) {
+        anyhow::bail!("this chat already owns a live model terminal");
+    }
+    if terminals.len() >= MAX_MODEL_TERMINAL_PROCESSES {
+        anyhow::bail!("model terminal limit reached");
+    }
+    let resource_id = Uuid::new_v4().to_string();
+    let pane_id = format!("model:{}", bound.session_id);
+    let snapshot = app
+        .state::<TerminalProcessManager>()
+        .create(TerminalPaneRequest {
+            pane_id: pane_id.clone(),
+            title,
+            profile_id: None,
+            command,
+            args,
+            workspace_path: Some(bound.workspace_key.clone()),
+            workspace_mode: Some("local".into()),
+            working_directory: Some(cwd.display().to_string()),
+            cols: Some(120),
+            rows: Some(32),
+            ..Default::default()
+        })?;
+    terminals.insert(
+        bound.session_id.clone(),
+        ModelTerminalResource {
+            resource_id: resource_id.clone(),
+            pane_id,
+            session_id: bound.session_id.clone(),
+            turn_id: bound.turn_id.clone(),
+            call_id,
+            workspace_key: bound.workspace_key.clone(),
+        },
+    );
+    Ok((resource_id, snapshot))
+}
+
 fn execute_provider_capability(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
@@ -18461,71 +18522,113 @@ fn execute_provider_capability(
             if is_test && task.group != "test" {
                 anyhow::bail!("the requested task is not a discovered test task");
             }
-            let output_resource = CapabilityResourceRef {
-                id: format!("output:{}:{}", bound.session_id, task_id),
-                kind: "output".into(),
-                label: task.label.clone(),
-            };
-            let _ = app.emit(
-                PROVIDER_CAPABILITY_RESOURCE_EVENT,
-                ProviderCapabilityResourceEvent {
-                    session_id: bound.session_id.clone(),
-                    turn_id: bound.turn_id.clone(),
-                    call_id: request.context.call_id,
-                    resource: output_resource.clone(),
-                    data: serde_json::json!({
+            let kind = if is_test { "test" } else { "task" };
+            if arguments
+                .get("background")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                let (resource_id, snapshot) = claim_model_terminal(
+                    app,
+                    bound,
+                    request.context.call_id,
+                    format!("Model · {}", task.label),
+                    task.command.clone(),
+                    task.args.clone(),
+                    &bound.workspace,
+                )?;
+                let resource = CapabilityResourceRef {
+                    id: resource_id,
+                    kind: "terminal".into(),
+                    label: snapshot.title.clone(),
+                };
+                (
+                    format!("Started {kind} {task_id} in this chat's terminal"),
+                    serde_json::json!({
                         "taskId": task.id,
                         "label": task.label,
-                        "kind": if is_test { "test" } else { "task" },
-                        "status": "running",
+                        "kind": kind,
+                        "status": snapshot.status,
+                        "background": true,
                         "command": task.command,
                         "args": task.args,
+                        "pane": snapshot,
+                        "owner": {
+                            "kind": "model",
+                            "sessionId": bound.session_id,
+                            "turnId": bound.turn_id,
+                            "callId": request.context.call_id,
+                        }
                     }),
-                },
-            );
-            let cancellation = app
-                .state::<ProviderCancellationManager>()
-                .flags
-                .lock()
-                .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
-                .get(&bound.session_id)
-                .map(|control| control.cancellation.clone())
-                .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
-            let _admission = IdeCommandAdmission::acquire().map_err(anyhow::Error::msg)?;
-            let mut command = command_with_gui_path(&task.command);
-            command.current_dir(&bound.workspace).args(&task.args);
-            let mut output = run_command_output_with_cancellation(command, cancellation)?;
-            if is_test {
-                output.stdout = format!("tests {:?}\n{}", vec![task.id.clone()], output.stdout);
-            } else if output.status == "done" {
-                output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
+                    Some(resource),
+                )
+            } else {
+                let output_resource = CapabilityResourceRef {
+                    id: format!("output:{}:{}", bound.session_id, task_id),
+                    kind: "output".into(),
+                    label: task.label.clone(),
+                };
+                let _ = app.emit(
+                    PROVIDER_CAPABILITY_RESOURCE_EVENT,
+                    ProviderCapabilityResourceEvent {
+                        session_id: bound.session_id.clone(),
+                        turn_id: bound.turn_id.clone(),
+                        call_id: request.context.call_id,
+                        resource: output_resource.clone(),
+                        data: serde_json::json!({
+                            "taskId": task.id,
+                            "label": task.label,
+                            "kind": kind,
+                            "status": "running",
+                            "command": task.command,
+                            "args": task.args,
+                        }),
+                    },
+                );
+                let cancellation = app
+                    .state::<ProviderCancellationManager>()
+                    .flags
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
+                    .get(&bound.session_id)
+                    .map(|control| control.cancellation.clone())
+                    .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
+                let _admission = IdeCommandAdmission::acquire().map_err(anyhow::Error::msg)?;
+                let mut command = command_with_gui_path(&task.command);
+                command.current_dir(&bound.workspace).args(&task.args);
+                let mut output = run_command_output_with_cancellation(command, cancellation)?;
+                if is_test {
+                    output.stdout = format!("tests {:?}\n{}", vec![task.id.clone()], output.stdout);
+                } else if output.status == "done" {
+                    output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
+                }
+                let output_data = serde_json::json!({
+                    "taskId": task.id,
+                    "label": task.label,
+                    "kind": kind,
+                    "status": output.status,
+                    "stdout": truncate_chars(&output.stdout, 48_000),
+                    "stderr": truncate_chars(&output.stderr, 24_000),
+                    "finishedAt": chrono::Utc::now(),
+                });
+                if let Ok(mut contexts) = app
+                    .state::<CapabilityIdeEvidenceManager>()
+                    .by_workspace
+                    .lock()
+                {
+                    let context = contexts
+                        .entry(bound.workspace_key.clone())
+                        .or_insert_with(|| bound.workspace_context.clone());
+                    context.revision = context.revision.saturating_add(1);
+                    context.captured_at = chrono::Utc::now();
+                    context.active_output = Some(output_data.clone());
+                }
+                (
+                    format!("Ran {kind} {task_id}"),
+                    output_data,
+                    Some(output_resource),
+                )
             }
-            let output_data = serde_json::json!({
-                "taskId": task.id,
-                "label": task.label,
-                "kind": if is_test { "test" } else { "task" },
-                "status": output.status,
-                "stdout": truncate_chars(&output.stdout, 48_000),
-                "stderr": truncate_chars(&output.stderr, 24_000),
-                "finishedAt": chrono::Utc::now(),
-            });
-            if let Ok(mut contexts) = app
-                .state::<CapabilityIdeEvidenceManager>()
-                .by_workspace
-                .lock()
-            {
-                let context = contexts
-                    .entry(bound.workspace_key.clone())
-                    .or_insert_with(|| bound.workspace_context.clone());
-                context.revision = context.revision.saturating_add(1);
-                context.captured_at = chrono::Utc::now();
-                context.active_output = Some(output_data.clone());
-            }
-            (
-                format!("Ran {} {task_id}", if is_test { "test" } else { "task" }),
-                output_data,
-                Some(output_resource),
-            )
         }
         CapabilityId::WorkspaceReadOutput => {
             let context = app
@@ -18612,50 +18715,15 @@ fn execute_provider_capability(
             if !cwd.is_dir() {
                 anyhow::bail!("terminal working directory is not a directory");
             }
-            let resources = app.state::<ProviderCapabilityResourceManager>();
-            let mut terminals = resources
-                .terminals
-                .lock()
-                .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?;
-            terminals.retain(|_, owned| {
-                app.state::<TerminalProcessManager>()
-                    .read(&owned.pane_id, None)
-                    .is_ok_and(|snapshot| snapshot.status == "running")
-            });
-            if terminals.contains_key(&bound.session_id) {
-                anyhow::bail!("this chat already owns a live model terminal");
-            }
-            if terminals.len() >= MAX_MODEL_TERMINAL_PROCESSES {
-                anyhow::bail!("model terminal limit reached");
-            }
-            let resource_id = Uuid::new_v4().to_string();
-            let pane_id = format!("model:{}", bound.session_id);
-            let snapshot = app
-                .state::<TerminalProcessManager>()
-                .create(TerminalPaneRequest {
-                    pane_id: pane_id.clone(),
-                    title: format!("Model · {}", program),
-                    profile_id: None,
-                    command: program,
-                    args,
-                    workspace_path: Some(bound.workspace_key.clone()),
-                    workspace_mode: Some("local".into()),
-                    working_directory: Some(cwd.display().to_string()),
-                    cols: Some(120),
-                    rows: Some(32),
-                    ..Default::default()
-                })?;
-            terminals.insert(
-                bound.session_id.clone(),
-                ModelTerminalResource {
-                    resource_id: resource_id.clone(),
-                    pane_id,
-                    session_id: bound.session_id.clone(),
-                    turn_id: bound.turn_id.clone(),
-                    call_id: request.context.call_id,
-                    workspace_key: bound.workspace_key.clone(),
-                },
-            );
+            let (resource_id, snapshot) = claim_model_terminal(
+                app,
+                bound,
+                request.context.call_id,
+                format!("Model · {}", program),
+                program,
+                args,
+                &cwd,
+            )?;
             let resource = CapabilityResourceRef {
                 id: resource_id,
                 kind: "terminal".into(),
@@ -19730,7 +19798,11 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
             "expectedHash": { "type": "string" }
         }),
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => serde_json::json!({
-            "taskId": { "type": "string" }
+            "taskId": { "type": "string" },
+            "background": {
+                "type": "boolean",
+                "description": "Start the task in this chat's terminal and return immediately instead of waiting for it to exit. Use for dev servers, watchers, and other long-running commands, then read output with gyro_terminal_read and end it with gyro_terminal_stop."
+            }
         }),
         CapabilityId::IdeOpenPanel => serde_json::json!({
             "panel": {
@@ -20965,6 +21037,16 @@ mod tests {
             proposal_schema["required"],
             serde_json::json!(["path", "content"])
         );
+        // A long-running task must be startable without holding the turn open,
+        // so `background` is offered but never required.
+        for id in [
+            CapabilityId::WorkspaceRunTask,
+            CapabilityId::WorkspaceRunTest,
+        ] {
+            let task_schema = desktop_capability_tool_schema(id);
+            assert_eq!(task_schema["required"], serde_json::json!(["taskId"]));
+            assert_eq!(task_schema["properties"]["background"]["type"], "boolean");
+        }
     }
 
     #[test]
