@@ -126,7 +126,7 @@ assert.match(
 
 assert.match(
   types,
-  /ChatSidePanelId = "environment" \| "plan" \| "browser"/,
+  /ChatSidePanelId =[\s\S]*?\|\s*"browser"/,
   "ChatSidePanelId must include browser",
 );
 

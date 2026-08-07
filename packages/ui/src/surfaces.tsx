@@ -13,6 +13,7 @@ import {
   Camera,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDashed,
   Columns2,
@@ -6123,6 +6124,10 @@ type ChatSurfaceProps = {
   onAgentAction?: (action: string) => void;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenToolPanel?: (tab: WorkbenchPaneTab) => void;
+  /** Moves the right pane between the launcher and a tool without closing it. */
+  onSelectChatPanel?: (panel: ChatSidePanelId) => void;
+  railDiffTools?: ChatRailDiffTools;
+  railTerminalTools?: ChatRailTerminalTools;
   onToggleToolPanel?: () => void;
 };
 
@@ -6216,6 +6221,9 @@ export function ChatSurface({
   onCompleteOnboardingStep,
   onLoadChangeDiff,
   onOpenToolPanel,
+  onSelectChatPanel,
+  railDiffTools,
+  railTerminalTools,
   onToggleToolPanel,
   onPlanItemStatusChange,
   onPlanAction,
@@ -6693,12 +6701,6 @@ export function ChatSurface({
   const sidePanel = (
     <ChatSidePanel
       activePanel={railPanel}
-      branchCatalog={branchCatalog}
-      isBranchLoading={isBranchLoading}
-      isComposerSending={isComposerSending}
-      savedProjects={savedProjects}
-      sessionUsage={sessionUsage}
-      branchName={branchName}
       browserPreview={browserPreview}
       browserNativeHost={browserNativeHost}
       browserOverlayOccluded={browserOverlayOccluded}
@@ -6720,7 +6722,10 @@ export function ChatSurface({
       }
       onComposerAction={onComposerAction}
       onOpenToolPanel={onOpenToolPanel}
+      onSelectPanel={onSelectChatPanel}
       onTogglePlanPanel={onTogglePlanPanel}
+      railDiffTools={railDiffTools}
+      railTerminalTools={railTerminalTools}
       onBrowserBack={onBrowserBack}
       onBrowserForward={onBrowserForward}
       onBrowserReload={onBrowserReload}
@@ -6733,7 +6738,6 @@ export function ChatSurface({
       sessionPlan={sessionPlan}
       sessionGoal={sessionGoal}
       terminalPanes={terminalPanes}
-      workspaceMode={workspaceMode}
       workspacePath={workspacePath}
       worktreeName={worktreeName}
     />
@@ -7192,6 +7196,8 @@ export function ChatSurface({
             onSend={handleSend}
             onStop={onStopChat}
             isSending={isComposerSending}
+            branchCatalog={branchCatalog}
+            isBranchLoading={isBranchLoading}
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
             providerStatuses={providerStatuses}
@@ -7865,7 +7871,10 @@ function ChatSidePanel({
   onClose,
   onComposerAction,
   onOpenToolPanel,
+  onSelectPanel,
   onTogglePlanPanel,
+  railDiffTools,
+  railTerminalTools,
   onBrowserBack,
   onBrowserForward,
   onBrowserReload,
@@ -7879,16 +7888,8 @@ function ChatSidePanel({
   sessionGoal,
   terminalPanes = [],
   workspacePath,
-  branchCatalog,
-  branchName,
-  isBranchLoading,
-  isComposerSending,
-  savedProjects,
-  sessionUsage,
-  workspaceMode,
 }: {
   activePanel: ChatSidePanelId;
-  branchName?: string;
   browserPreview?: BrowserPreview;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
@@ -7917,6 +7918,9 @@ function ChatSidePanel({
   onClose?: () => void;
   onComposerAction?: (action: string) => void;
   onOpenToolPanel?: (tab: WorkbenchPaneTab) => void;
+  onSelectPanel?: (panel: ChatSidePanelId) => void;
+  railDiffTools?: ChatRailDiffTools;
+  railTerminalTools?: ChatRailTerminalTools;
   onTogglePlanPanel?: () => void;
   onBrowserBack?: () => void;
   onBrowserForward?: () => void;
@@ -7933,15 +7937,8 @@ function ChatSidePanel({
   sessionGoal?: SessionGoal;
   promptHistory?: string[];
   terminalPanes?: TerminalPane[];
-  workspaceMode?: WorkbenchMode;
   workspacePath?: string;
   worktreeName?: string;
-  // Standing chat context, moved off the composer and into the rail.
-  branchCatalog?: GitBranchCatalog;
-  isBranchLoading?: boolean;
-  isComposerSending?: boolean;
-  savedProjects?: Array<{ path: string; label: string; detail?: string }>;
-  sessionUsage?: SessionUsageTotals;
 }) {
   const [planEditor, setPlanEditor] = useState<{
     mode: "add" | "edit";
@@ -8014,10 +8011,70 @@ function ChatSidePanel({
     planItemCount > 0
       ? Math.round((completedPlanItems / planItemCount) * 100)
       : 0;
+  // Tools the rail can host itself take the pane over in place. Anything else
+  // still hands off to the workspace panel, which means closing the rail.
+  const railPanelForTool: Partial<Record<WorkbenchPaneTab, ChatSidePanelId>> = {
+    browser: "browser",
+    diff: "changes",
+    ...(railTerminalTools ? { terminal: "terminal" as const } : {}),
+  };
   const openTool = (tab: WorkbenchPaneTab) => {
+    const panel = railPanelForTool[tab];
+    if (panel && onSelectPanel) {
+      onSelectPanel(panel);
+      return;
+    }
     onClose?.();
     onOpenToolPanel?.(tab);
   };
+  // A tool took the pane over, so the way out is back to the launcher rather
+  // than closing the pane the user just opened.
+  const backToLauncher = () => onSelectPanel?.("environment");
+
+  if (activePanel === "changes") {
+    return (
+      <aside className="gyro-environment-rail is-tool" aria-label="Changes">
+        <ChatRailToolHeader
+          icon={<GitPullRequest aria-hidden="true" size={15} />}
+          detail={changesLabel}
+          onBack={backToLauncher}
+          title="Changes"
+        />
+        <DiffReviewSurface
+          compact
+          diffReview={diffReview}
+          onAcceptAll={railDiffTools?.onAcceptAll}
+          onAcceptFile={railDiffTools?.onAcceptFile}
+          onComment={railDiffTools?.onComment}
+          onOpenInEditor={railDiffTools?.onOpenInEditor}
+          onRejectAll={railDiffTools?.onRejectAll}
+          onRejectFile={railDiffTools?.onRejectFile}
+          onRunGitAction={railDiffTools?.onRunGitAction}
+          onSelectFile={railDiffTools?.onSelectFile}
+          onToggleDirectory={railDiffTools?.onToggleDirectory}
+          onUndo={railDiffTools?.onUndo}
+        />
+      </aside>
+    );
+  }
+
+  if (activePanel === "terminal" && railTerminalTools) {
+    return (
+      <aside className="gyro-environment-rail is-tool" aria-label="Terminal">
+        <ChatRailToolHeader
+          icon={<Terminal aria-hidden="true" size={15} />}
+          detail={terminalLabel}
+          onBack={backToLauncher}
+          title="Terminal"
+        />
+        <TerminalPanel
+          {...railTerminalTools}
+          terminalPanes={terminalPanes}
+          terminalSourceControl={sourceControl}
+        />
+      </aside>
+    );
+  }
 
   if (activePanel === "browser") {
     return (
@@ -8432,17 +8489,6 @@ function ChatSidePanel({
           </button>
         ) : null}
       </header>
-      <ChatContextSection
-        branchCatalog={branchCatalog}
-        branchName={branchName}
-        isBranchLoading={isBranchLoading}
-        isSending={isComposerSending}
-        onAction={onComposerAction}
-        savedProjects={savedProjects}
-        sessionUsage={sessionUsage}
-        workspaceMode={workspaceMode}
-        workspacePath={workspacePath}
-      />
       <ChatEnvironmentLauncher
         browserLabel={browserLabel}
         browserPreview={browserPreview}
@@ -8499,16 +8545,49 @@ function ChatSidePanel({
   );
 }
 
+/** Title row for a tool that has taken the chat rail over. */
+function ChatRailToolHeader({
+  detail,
+  icon,
+  onBack,
+  title,
+}: {
+  detail?: string;
+  icon: ReactNode;
+  onBack?: () => void;
+  title: string;
+}) {
+  return (
+    <header className="gyro-chat-tool-header">
+      <button
+        aria-label="Back to environment"
+        className="gyro-chat-tool-back"
+        onClick={onBack}
+        type="button"
+      >
+        <ChevronLeft aria-hidden="true" size={15} />
+      </button>
+      <div className="gyro-chat-tool-title">
+        {icon}
+        <div>
+          <strong>{title}</strong>
+          {detail ? <span>{detail}</span> : null}
+        </div>
+      </div>
+    </header>
+  );
+}
+
 /**
  * Project, isolation, branch, and spend — the chat's standing context.
  *
- * These used to sit in a strip under the composer that only ever rendered on
- * the hero, so an active thread had no way to see or change them. The rail is
- * always present in chat, so they live here and stay reachable.
+ * They live in the strip under the composer, on the hero and in an active
+ * thread alike — the same place the send controls are, so switching project,
+ * isolation, or branch never costs a trip to the rail.
  *
  * Its popover state is its own: the composer's `activePopover` drives the
- * attach, model, and effort menus that are still down there, and one shared
- * cursor across two surfaces would let a rail menu close a composer one.
+ * attach, model, and effort menus in the row above, and one shared cursor
+ * across both rows would let a context menu close a composer one.
  */
 function ChatContextSection({
   branchCatalog,
@@ -8577,7 +8656,7 @@ function ChatContextSection({
   };
 
   return (
-    <section className="gyro-rail-section gyro-chat-context-section">
+    <section className="gyro-composer-context-row gyro-composer-reveal">
       <div
         className="gyro-composer-control"
         ref={activePopover === "project" ? popoverScopeRef : undefined}
@@ -10863,6 +10942,31 @@ export function DiffPreview({
     </section>
   );
 }
+
+/**
+ * Everything the chat rail needs to host Changes and Terminal itself.
+ *
+ * They are bundles rather than loose props because the rail reaches every
+ * `ChatSurface` call site; one object per tool keeps a new handler from
+ * rippling through all of them.
+ */
+export type ChatRailDiffTools = {
+  onAcceptAll?: () => void;
+  onAcceptFile?: (path: string) => void;
+  onComment?: (path: string) => void;
+  onOpenInEditor?: (path: string) => void;
+  onRejectAll?: () => void;
+  onRejectFile?: (path: string) => void;
+  onRunGitAction?: (actionId: GitReviewActionId) => void;
+  onSelectFile?: (path: string) => void;
+  onToggleDirectory?: (directory: string) => void;
+  onUndo?: () => void;
+};
+
+export type ChatRailTerminalTools = Omit<
+  TerminalPanelProps,
+  "terminalPanes" | "terminalSourceControl"
+>;
 
 type TerminalPanelProps = {
   profiles: CommandProfile[];
@@ -19777,6 +19881,19 @@ function Composer({
           )}
         </button>
       </div>
+      {isHero ? (
+        <ChatContextSection
+          branchCatalog={branchCatalog}
+          branchName={branchName}
+          isBranchLoading={isBranchLoading}
+          isSending={isSending}
+          onAction={onComposerAction}
+          savedProjects={savedProjects}
+          sessionUsage={sessionUsage}
+          workspaceMode={workspaceMode}
+          workspacePath={workspacePath}
+        />
+      ) : null}
     </div>
   );
 }

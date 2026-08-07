@@ -4553,11 +4553,13 @@ expect(
       (rule) =>
         rule.includes("max-width: none") && rule.includes("width: 100%"),
     ) &&
-    !surfaceSource.includes("gyro-composer-context-row") &&
-    !surfaceSource.includes("shouldShowContextRow") &&
     surfaceSource.includes("function ChatContextSection") &&
     surfaceSource.includes("<ChatContextSection") &&
-    styleSource.includes(".gyro-chat-context-section .gyro-composer-chip") &&
+    surfaceSource.includes(
+      '"gyro-composer-context-row gyro-composer-reveal"',
+    ) &&
+    !surfaceSource.includes("gyro-chat-context-section") &&
+    !styleSource.includes("gyro-chat-context-section") &&
     styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell:focus-within",
