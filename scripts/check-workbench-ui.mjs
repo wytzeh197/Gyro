@@ -4402,7 +4402,7 @@ expect(
     surfaceSource.includes(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
-    surfaceSource.includes("const sidePanel = (") &&
+    surfaceSource.includes("const sidePanel = activeRailPanel ? (") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
     /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
@@ -4458,7 +4458,9 @@ expect(
   "AI model checklist plan events should be typed, persisted, derived, and visible in chat.",
 );
 expect(
-  surfaceSource.includes('"is-thread",\n        "has-environment"') &&
+  surfaceSource.includes(
+    '"is-thread",\n        activeRailPanel ? "has-environment" : "",',
+  ) &&
     surfaceSource.includes('aria-label="Environment"') &&
     surfaceSource.includes('aria-label="Plan harness"') &&
     surfaceSource.includes("function ChatEnvironmentLauncher") &&
