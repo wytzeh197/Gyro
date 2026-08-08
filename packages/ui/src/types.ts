@@ -594,6 +594,26 @@ export type Notification = {
 export type NotificationPermissionState =
   "granted" | "denied" | "prompt" | "prompt-with-rationale";
 
+export type SystemAccessScopeId =
+  | "desktop"
+  | "documents"
+  | "downloads"
+  | "removable-volumes"
+  | "full-disk";
+
+export type SystemAccessStatus =
+  "granted" | "denied" | "unavailable" | "unsupported";
+
+export type SystemAccessScope = {
+  id: SystemAccessScopeId;
+  label: string;
+  reason: string;
+  status: SystemAccessStatus;
+  path?: string;
+  canPrompt: boolean;
+  settingsUrl: string;
+};
+
 export type ProviderConnectionStatus =
   "not-configured" | "checking" | "connected" | "failed" | "disconnected";
 
@@ -920,6 +940,7 @@ export type OnboardingStepId =
   | "account"
   | "welcome"
   | "theme"
+  | "system-access"
   | "workspace"
   | "provider"
   | "approval"
