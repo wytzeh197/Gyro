@@ -140,6 +140,8 @@ import {
   type SessionsLayoutId,
   type SettingsSectionId,
   type SourceControlState,
+  type SystemAccessScope,
+  type SystemAccessScopeId,
   type Task,
   type TaskDefinition,
   type TaskStatus,
@@ -433,6 +435,8 @@ const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
+/** Set once the first launch has asked macOS for its folder grants. */
+const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
 const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
 const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
@@ -795,6 +799,9 @@ export function App() {
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
   const [isTestingNotification, setIsTestingNotification] = useState(false);
+  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>([]);
+  const [isCheckingSystemAccess, setIsCheckingSystemAccess] = useState(false);
+  const systemAccessBootstrapRef = useRef(false);
   const [providerUsageByProvider, setProviderUsageByProvider] = useState<
     Partial<Record<ProviderId, ProviderUsageState>>
   >({});
@@ -1516,6 +1523,85 @@ export function App() {
       setIsTestingNotification(false);
     }
   }, [isTestingNotification, notify]);
+  /**
+   * Resolves Gyro's macOS folder grants. On an undetermined scope the read
+   * inside `check_system_access` is what makes macOS show its permission sheet,
+   * so the first call of the app's life is also the one that asks.
+   */
+  const checkSystemAccess = useCallback(async () => {
+    if (!isTauriRuntime()) return [] as SystemAccessScope[];
+    setIsCheckingSystemAccess(true);
+    try {
+      const scopes = await invoke<SystemAccessScope[]>("check_system_access");
+      setSystemAccess(scopes);
+      return scopes;
+    } catch (error) {
+      notify(
+        "command-failed",
+        "Could not check macOS access",
+        String(error),
+      );
+      return [] as SystemAccessScope[];
+    } finally {
+      setIsCheckingSystemAccess(false);
+    }
+  }, [notify]);
+  const openSystemAccessSettings = useCallback(
+    async (scope: SystemAccessScopeId) => {
+      if (!isTauriRuntime()) return;
+      try {
+        await invoke("open_system_access_settings", { scope });
+      } catch (error) {
+        notify(
+          "command-failed",
+          "Could not open System Settings",
+          String(error),
+        );
+      }
+    },
+    [notify],
+  );
+  useEffect(() => {
+    if (!isTauriRuntime() || systemAccessBootstrapRef.current) {
+      return undefined;
+    }
+    systemAccessBootstrapRef.current = true;
+    const alreadyPrompted =
+      readBoundedLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, 8) === "true";
+    void checkSystemAccess().then((scopes) => {
+      safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
+      dispatchWorkbench({
+        type: "complete-onboarding-step",
+        step: "system-access",
+      });
+      if (alreadyPrompted) return;
+      const blocked = scopes.filter(
+        (scope) => scope.status === "denied" && scope.canPrompt,
+      );
+      if (blocked.length === 0) return;
+      notify(
+        "command-failed",
+        "macOS is blocking some folders",
+        `${blocked.map((scope) => scope.label).join(", ")}. Settings > Permissions has the repair.`,
+      );
+    });
+    return undefined;
+  }, [checkSystemAccess, notify]);
+  useEffect(() => {
+    if (
+      activeDestination !== "settings" ||
+      workbench.preferences.lastSettingsSection !== "permissions" ||
+      !isTauriRuntime()
+    ) {
+      return undefined;
+    }
+    void checkSystemAccess();
+    return undefined;
+  }, [
+    activeDestination,
+    checkSystemAccess,
+    workbench.preferences.lastSettingsSection,
+  ]);
   const refreshProviderUsage = useCallback(
     async (providerId: ProviderId, showFailureNotification = false) => {
       if (providerUsageInFlightRef.current.has(providerId)) return;
@@ -14307,6 +14393,12 @@ export function App() {
           isTestingNotification={isTestingNotification}
           notificationPermission={notificationPermission}
           onTestNotification={() => void testSystemNotification()}
+          systemAccess={systemAccess}
+          isCheckingSystemAccess={isCheckingSystemAccess}
+          onRecheckSystemAccess={() => void checkSystemAccess()}
+          onOpenSystemAccessSettings={(scope: SystemAccessScopeId) =>
+            void openSystemAccessSettings(scope)
+          }
           onResetUiState={() => dispatchWorkbench({ type: "reset-state" })}
           onSectionChange={(section: SettingsSectionId) =>
             dispatchWorkbench({ type: "set-settings-section", section })

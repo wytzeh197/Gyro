@@ -63,6 +63,7 @@ use walkdir::WalkDir;
 
 mod menu_bar;
 mod session_browser;
+mod system_access;
 
 #[cfg(test)]
 use gyro_core::{
@@ -20221,6 +20222,8 @@ pub fn run() {
             check_provider_health,
             check_cli_updates_command,
             apply_cli_updates_command,
+            system_access::check_system_access,
+            system_access::open_system_access_settings,
             capture_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,

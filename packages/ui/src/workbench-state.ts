@@ -4797,6 +4797,7 @@ function nextOnboardingStep(step: OnboardingStepId): OnboardingStepId {
     "account",
     "welcome",
     "theme",
+    "system-access",
     "workspace",
     "provider",
     "approval",
