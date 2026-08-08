@@ -124,7 +124,6 @@ import {
 import {
   estimateTurnCost,
   formatTokenCount,
-  summarizeSessionCost,
   summarizeUsageSafety,
 } from "./usage-ledger";
 import {
@@ -218,6 +217,8 @@ import type {
   SessionPlanItemStatus,
   SourceControlFile,
   SourceControlState,
+  SystemAccessScope,
+  SystemAccessScopeId,
   Task,
   TaskDefinition,
   TaskStatus,
@@ -6694,11 +6695,11 @@ export function ChatSurface({
       turns,
     ],
   );
-  // The rail is the chat's standing context now, not a panel you opt into:
-  // project, isolation, branch, and spend have nowhere else to live. Closing
-  // the plan or browser panel falls back to it rather than to bare chat.
+  // The rail is opt-in: chat opens without it and the topbar toggle brings it
+  // back. Closing the plan or browser panel closes the rail outright rather
+  // than falling back to the environment panel.
   const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
-  const sidePanel = (
+  const sidePanel = activeRailPanel ? (
     <ChatSidePanel
       activePanel={railPanel}
       browserPreview={browserPreview}
@@ -6715,7 +6716,7 @@ export function ChatSurface({
       onEditorRequestHandled={onPlanEditorRequestHandled}
       onClose={
         railPanel === "environment"
-          ? undefined
+          ? onToggleEnvironmentRail
           : railPanel === "browser"
             ? onToggleBrowserPanel
             : onTogglePlanPanel
@@ -6741,7 +6742,7 @@ export function ChatSurface({
       workspacePath={workspacePath}
       worktreeName={worktreeName}
     />
-  );
+  ) : null;
   const missionHasWorkers = missionWorkers.length > 0;
   if (turns.length === 0 && looseEvents.length === 0) {
     return (
@@ -6749,7 +6750,7 @@ export function ChatSurface({
         className={[
           "gyro-chat-surface",
           "is-empty",
-          "has-environment",
+          activeRailPanel ? "has-environment" : "",
           isMission ? "is-mission" : "",
           missionHasWorkers ? "has-mission-workers" : "",
           isTiled ? "is-tiled" : "",
@@ -6944,7 +6945,7 @@ export function ChatSurface({
       className={[
         "gyro-chat-surface",
         "is-thread",
-        "has-environment",
+        activeRailPanel ? "has-environment" : "",
         isTiled ? "is-tiled" : "",
         activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : "",
         workspaceMode === "worktree" ? "is-agent-workspace" : "",
@@ -7087,7 +7088,7 @@ export function ChatSurface({
             </div>
           </div>
           <ChatSurfaceControls
-            activePanel={railPanel}
+            activePanel={activeRailPanel}
             isToolPanelOpen={Boolean(isToolPanelOpen)}
             modelFocus={visibleModelFocus}
             onCloseChat={onCloseChat}
@@ -7221,6 +7222,7 @@ export function ChatSurface({
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
             popoverPlacement="up"
+            showContextRow={false}
             variant="hero"
           />
         </div>
@@ -8596,7 +8598,6 @@ function ChatContextSection({
   isSending = false,
   onAction,
   savedProjects = [],
-  sessionUsage,
   workspaceMode = "local",
   workspacePath,
 }: {
@@ -8606,7 +8607,6 @@ function ChatContextSection({
   isSending?: boolean;
   onAction?: (action: string) => void;
   savedProjects?: Array<{ path: string; label: string; detail?: string }>;
-  sessionUsage?: SessionUsageTotals;
   workspaceMode?: WorkbenchMode;
   workspacePath?: string;
 }) {
@@ -8623,10 +8623,6 @@ function ChatContextSection({
   const modeChipLabel = workspaceModeLabel(workspaceMode);
   const branchLabel =
     branchName ?? (workspaceMode === "worktree" ? "New worktree branch" : "main");
-  const sessionCost = useMemo(
-    () => summarizeSessionCost(sessionUsage),
-    [sessionUsage],
-  );
   const savedProjectItems: ComposerPopoverItem[] = savedProjects
     .filter((project) => project.path)
     .slice(0, 6)
@@ -8803,18 +8799,6 @@ function ChatContextSection({
           />
         ) : null}
       </div>
-      {sessionCost.isEmpty ? null : (
-        <span
-          className="gyro-composer-session-cost"
-          role="status"
-          title={sessionCost.title}
-        >
-          <Gauge aria-hidden="true" size={12} />
-          <span>{sessionCost.label}</span>
-          {sessionCost.cachedNote ? <em>{sessionCost.cachedNote}</em> : null}
-          {sessionCost.estimateNote ? <em>{sessionCost.estimateNote}</em> : null}
-        </span>
-      )}
     </section>
   );
 }
@@ -15970,6 +15954,29 @@ function notificationPermissionDetail(permission: NotificationPermissionState) {
   }
 }
 
+function systemAccessValue(scope: SystemAccessScope) {
+  switch (scope.status) {
+    case "granted":
+      return "Allowed";
+    case "denied":
+      return scope.canPrompt ? "Blocked" : "Not granted";
+    case "unavailable":
+      return "Not on this Mac";
+    case "unsupported":
+      return "Not applicable";
+  }
+}
+
+function systemAccessDetail(scope: SystemAccessScope) {
+  if (scope.status === "denied") {
+    return `${scope.reason} Grant it in System Settings, then re-check.`;
+  }
+  if (scope.status === "unavailable" && scope.path) {
+    return `${scope.path} does not exist, so nothing to grant.`;
+  }
+  return scope.reason;
+}
+
 type SettingsSurfaceProps = {
   config: GyroConfig;
   cliLaunchPreset?: CliLaunchPreset;
@@ -15993,6 +16000,10 @@ type SettingsSurfaceProps = {
   notificationPermission?: NotificationPermissionState;
   isTestingNotification?: boolean;
   onTestNotification?: () => void;
+  systemAccess?: SystemAccessScope[];
+  isCheckingSystemAccess?: boolean;
+  onRecheckSystemAccess?: () => void;
+  onOpenSystemAccessSettings?: (scope: SystemAccessScopeId) => void;
   onToggleProvider?: (providerId: string) => void;
   onTestProvider?: (providerId: string) => void;
   /** Repairs a connected provider whose credential the provider itself rejected. */
@@ -16229,6 +16240,10 @@ export function SettingsSurface({
   notificationPermission = "prompt",
   isTestingNotification = false,
   onTestNotification,
+  systemAccess,
+  isCheckingSystemAccess = false,
+  onRecheckSystemAccess,
+  onOpenSystemAccessSettings,
   onToggleProvider,
   onTestProvider,
   onSignInProvider,
@@ -16998,6 +17013,47 @@ export function SettingsSurface({
                 </button>
               </SettingsRow>
             </SettingsGroup>
+            {systemAccess && systemAccess.length > 0 ? (
+              <SettingsGroup label="macOS system access">
+                {systemAccess.map((scope) => (
+                  <SettingsRow
+                    key={scope.id}
+                    label={scope.label}
+                    value={systemAccessValue(scope)}
+                    detail={systemAccessDetail(scope)}
+                  >
+                    {scope.status === "granted" ||
+                    scope.status === "unavailable" ? (
+                      <span className="gyro-settings-info-value">
+                        {systemAccessValue(scope)}
+                      </span>
+                    ) : (
+                      <button
+                        className="gyro-secondary-button"
+                        disabled={!onOpenSystemAccessSettings}
+                        onClick={() => onOpenSystemAccessSettings?.(scope.id)}
+                        type="button"
+                      >
+                        Open System Settings
+                      </button>
+                    )}
+                  </SettingsRow>
+                ))}
+                <SettingsRow
+                  label="Re-check access"
+                  detail="Run after changing Gyro's entries in System Settings."
+                >
+                  <button
+                    className="gyro-secondary-button"
+                    disabled={isCheckingSystemAccess || !onRecheckSystemAccess}
+                    onClick={onRecheckSystemAccess}
+                    type="button"
+                  >
+                    {isCheckingSystemAccess ? "Checking..." : "Check again"}
+                  </button>
+                </SettingsRow>
+              </SettingsGroup>
+            ) : null}
           </SettingsSection>
         ) : null}
 
@@ -18473,6 +18529,7 @@ function Composer({
   popoverPlacement,
   /** False while the desktop shell is still warming the backend. */
   shellReady = true,
+  showContextRow,
   variant = "thread",
 }: {
   attachments?: ChatAttachment[];
@@ -18523,6 +18580,8 @@ function Composer({
   maxDraftLength?: number;
   popoverPlacement?: "down" | "up";
   shellReady?: boolean;
+  /** Defaults to the hero layout: project, mode, and branch only at the start. */
+  showContextRow?: boolean;
   variant?: "thread" | "hero";
 }) {
   const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
@@ -18739,6 +18798,7 @@ function Composer({
     workspacePath,
   });
   const isHero = variant === "hero";
+  const shouldShowContextRow = showContextRow ?? isHero;
   const providerItems: ComposerPopoverItem[] = [
     ...(providerErrorMessage
       ? [
@@ -18983,19 +19043,7 @@ function Composer({
       sessionUsage,
     ],
   );
-  // An expensive send is armed once and sent on the second press, so quota is
-  // never committed by a single keystroke.
-  const [isCostConfirmPending, setIsCostConfirmPending] = useState(false);
-  const needsCostConfirm = !isGoalComposerActive && turnCost.needsConfirm;
-  useEffect(() => {
-    setIsCostConfirmPending(false);
-  }, [chatMode, councilSeatCount, providerReasoningEffort]);
   const requestSend = () => {
-    if (needsCostConfirm && !isCostConfirmPending) {
-      setIsCostConfirmPending(true);
-      return;
-    }
-    setIsCostConfirmPending(false);
     onSend();
   };
   const costPreviewTitle = `Each seat carries this chat's context, and the synthesizer then reads their answers. Estimated total for one send: ${turnCost.label}.`;
@@ -19300,29 +19348,6 @@ function Composer({
               Resume
             </button>
           ) : null}
-        </div>
-      ) : null}
-      {isCostConfirmPending ? (
-        <div className="gyro-composer-cost-confirm" role="alertdialog">
-          <Gauge aria-hidden="true" size={14} />
-          <span>
-            <strong>{turnCost.label}</strong>
-            <small>{turnCost.confirmReason}</small>
-          </span>
-          <button
-            className="gyro-composer-cost-confirm-cancel"
-            onClick={() => setIsCostConfirmPending(false)}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button
-            className="gyro-composer-cost-confirm-send"
-            onClick={requestSend}
-            type="button"
-          >
-            Send anyway
-          </button>
         </div>
       ) : null}
       {isSlashMenuOpen ? (
@@ -19881,7 +19906,7 @@ function Composer({
           )}
         </button>
       </div>
-      {isHero ? (
+      {shouldShowContextRow ? (
         <ChatContextSection
           branchCatalog={branchCatalog}
           branchName={branchName}
@@ -19889,7 +19914,6 @@ function Composer({
           isSending={isSending}
           onAction={onComposerAction}
           savedProjects={savedProjects}
-          sessionUsage={sessionUsage}
           workspaceMode={workspaceMode}
           workspacePath={workspacePath}
         />
