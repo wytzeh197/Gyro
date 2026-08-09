@@ -11418,11 +11418,16 @@ textarea:focus-visible {
   justify-items: stretch;
 }
 
+/* The gutter has to follow the pane, not the window. With 8vw the sidebar and
+   split-pane embeds lost up to 240px of a ~460px pane, which starved the start
+   column until the heading wrapped and the composer bar stacked. A percentage
+   resolves against this surface's own containing block, so a full-width chat
+   still lands on the same 120px it always had. */
 .gyro-chat-surface.is-empty {
   align-content: center;
   justify-items: center;
   min-height: 100vh;
-  padding: 0 clamp(24px, 8vw, 120px);
+  padding: 0 clamp(24px, 8%, 120px);
 }
 
 .gyro-chat-start {
@@ -20146,7 +20151,10 @@ textarea:focus-visible,
 }
 
 .gyro-ide-assistant-chat .gyro-chat-surface.is-empty {
+  /* This embed keeps the full width, so the start column gets an edge gutter
+     rather than the roomy one the standalone chat shell can afford. */
   padding-block: 12px;
+  padding-inline: 14px;
 }
 
 .gyro-ide-assistant-chat .gyro-chat-start {
