@@ -478,21 +478,30 @@ function runPhase(
       reason: options.retry.reason,
     };
   }
+  // The open invoke owns the rail. A stale failed/cancelled status event must
+  // not paint "Stopped" while the provider process is still running — that is
+  // exactly the "random stop" look mid-tool.
+  if (isRunning) {
+    if (steps.length === 0) {
+      return { name: "thinking" };
+    }
+    return response ? { name: "finalizing" } : { name: "working" };
+  }
   if (status && PROBLEM_STATUSES.includes(status.status)) {
+    const cancelled = status.status === "cancelled";
     return {
       name: "failed",
-      message: status.message ?? status.error ?? "The run stopped early",
-      recoveryKind: status.recoveryKind,
+      message: cancelled
+        ? (status.message?.trim() || "Stopped")
+        : (status.message ?? status.error ?? "The run stopped early"),
+      // Normalize so the header and problem tone can tell user-stop from crash.
+      recoveryKind: cancelled
+        ? (status.recoveryKind ?? "cancelled")
+        : status.recoveryKind,
       recoveryMessage: status.recoveryMessage,
     };
   }
-  if (!isRunning) {
-    return { name: "done", durationMs: options.durationMs };
-  }
-  if (steps.length === 0) {
-    return { name: "thinking" };
-  }
-  return response ? { name: "finalizing" } : { name: "working" };
+  return { name: "done", durationMs: options.durationMs };
 }
 
 /**
@@ -785,10 +794,19 @@ export function runHeaderLabel(
     case "done":
       return elapsedLabel ? `Worked for ${elapsedLabel}` : "Worked";
     case "failed":
-      return "Stopped";
+      // User cancel is "Stopped"; a real failure is "Failed" so recovery copy
+      // and tone can differ without a second chrome system.
+      return phase.recoveryKind === "cancelled" ? "Stopped" : "Failed";
     case "interrupted":
       return "Interrupted";
   }
+}
+
+/** True when the failed phase is a user-initiated stop rather than a crash. */
+export function isCancelledRunPhase(
+  phase: RunPhase,
+): phase is Extract<RunPhase, { name: "failed" }> {
+  return phase.name === "failed" && phase.recoveryKind === "cancelled";
 }
 
 /** `231` → `3m 51s`, matching the reference header. */
