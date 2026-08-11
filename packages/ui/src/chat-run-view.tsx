@@ -18,6 +18,7 @@ import {
 
 import {
   formatRunDuration,
+  isCancelledRunPhase,
   isRunPhaseLive,
   runHeaderLabel,
   runRetryText,
@@ -134,8 +135,22 @@ export function ChatRun({
       showFinalizingPulse ||
       retryPhase !== undefined);
 
+  const shellClass = [
+    "gyro-run",
+    isLive
+      ? model.phase.name === "retrying"
+        ? "is-retrying"
+        : "is-live"
+      : model.phase.name === "failed" || model.phase.name === "interrupted"
+        ? "is-problem"
+        : "is-settled",
+    isCancelledRunPhase(model.phase) ? "is-cancelled" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="gyro-run">
+    <div className={shellClass}>
       <RunHeader
         canCollapse={canCollapse}
         headerActions={headerActions}
@@ -374,15 +389,31 @@ function RunProblem({
   reconnectLabel?: string;
 }) {
   const isInterrupted = phase.name === "interrupted";
+  const isCancelled =
+    phase.name === "failed" && phase.recoveryKind === "cancelled";
   const detail = isInterrupted
     ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
-    : (phase.recoveryMessage ?? undefined);
+    : isCancelled
+      ? (phase.recoveryMessage ?? "You stopped this response. Continue to pick it back up.")
+      : (phase.recoveryMessage ?? undefined);
+  const title = isInterrupted
+    ? "Previous send was interrupted"
+    : isCancelled
+      ? phase.message?.trim() || "Stopped"
+      : phase.message;
   return (
-    <div className="gyro-run-problem" role="alert">
+    <div
+      className={[
+        "gyro-run-problem",
+        isCancelled ? "is-cancelled" : "",
+        isInterrupted ? "is-interrupted" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      role="alert"
+    >
       <span className="gyro-run-problem-text">
-        <strong>
-          {isInterrupted ? "Previous send was interrupted" : phase.message}
-        </strong>
+        <strong>{title}</strong>
         {detail ? <span>{detail}</span> : null}
       </span>
       <span className="gyro-run-problem-actions">

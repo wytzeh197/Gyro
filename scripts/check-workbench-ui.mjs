@@ -132,6 +132,21 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
+// Re-focusing the already-focused pane must keep state identity. Grid slots
+// fire focus on every pointerdown; a fresh object re-rendered the chat under
+// the finger and could turn empty-margin presses into stops.
+const refocusSamePane = chatGridReducer(chatGridState, {
+  type: "focus-pane",
+  projectKey: "/Users/example/Gyro",
+  paneId: "pane:two",
+});
+expect(
+  refocusSamePane === chatGridState &&
+    refocusSamePane.layouts["/Users/example/Gyro"] === testedGridLayout &&
+    refocusSamePane.layouts["/Users/example/Gyro"]?.focusedPaneId ===
+      "pane:two",
+  "focus-pane should no-op when the pane is already focused.",
+);
 let directionalGridState = createInitialChatGridState();
 directionalGridState = chatGridReducer(directionalGridState, {
   type: "select-pane",
@@ -3301,11 +3316,41 @@ expect(
     surfaceSource.includes('"Stop response"') &&
     surfaceSource.includes('"Queue message"') &&
     surfaceSource.includes("onStop?.();") &&
+    // Stop must be armed by a press on the control so empty-margin focus
+    // re-layout cannot convert a foreign click into a stop.
+    surfaceSource.includes("stopArmedRef") &&
+    surfaceSource.includes("stopArmedRef.current = true") &&
+    surfaceSource.includes("event.detail === 0") &&
     surfaceSource.includes(
       "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
     ) &&
-    surfaceSource.includes('className="gyro-send-button"') &&
+    surfaceSource.includes('"gyro-send-button"') &&
+    surfaceSource.includes('isStopAction ? "is-stop"') &&
+    surfaceSource.includes('isSending ? "is-sending"') &&
+    styleSource.includes(".gyro-send-button.is-stop") &&
+    styleSource.includes(".gyro-run.is-live") &&
+    styleSource.includes(".gyro-run-problem.is-cancelled") &&
     !surfaceSource.includes('className="gyro-composer-stop-button"') &&
+    // Pane focus no longer re-renders mid-gesture when already focused.
+    workbenchSource.includes(
+      "current.focusedPaneId !== action.paneId &&",
+    ) &&
+    appSource.includes(
+      'alreadyFocused && (pane.kind === "draft" || alreadyActiveSession)',
+    ) &&
+    appSource.includes("sendingSessionIdsRef.current.has(turn.sessionId)") &&
+    // Composer/transcript gutters follow the pane, not the window width.
+    styleSource.includes("padding: 10px clamp(24px, 8%, 120px) 16px") &&
+    styleSource.includes("padding: 18px clamp(24px, 8%, 120px) 22px") &&
+    // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
+    tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
+    tauriSource.includes(
+      "timeout: Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS)",
+    ) &&
+    tauriSource.includes("execution.inactivity_timeout = None") &&
+    tauriSource.includes("heartbeat_stop") &&
+    tauriSource.includes("run_kimi_acp_chat") &&
+    tauriSource.includes("spawn_provider_chat_heartbeat") &&
     surfaceSource.includes("function ChatMessageQueue") &&
     surfaceSource.includes('aria-label="Queued message options"') &&
     surfaceSource.includes("gyro-chat-message-queue-menu") &&
@@ -3491,9 +3536,8 @@ expect(
     tauriSource.includes('"item.completed"') &&
     tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     tauriSource.includes("PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS") &&
-    tauriSource.includes(
-      "execution.inactivity_timeout = Some(inactivity_timeout)",
-    ) &&
+    // Chat provider CLIs do not kill quiet tools for stdout silence.
+    tauriSource.includes("execution.inactivity_timeout = None") &&
     tauriSource.includes("ExecutionTermination::Inactive") &&
     tauriSource.includes("ProviderRunPayload::new") &&
     tauriSource.includes("Some(chat_message_preview(&request.message))") &&

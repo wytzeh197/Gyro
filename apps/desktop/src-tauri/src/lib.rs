@@ -11973,6 +11973,15 @@ fn run_kimi_acp_chat(
     let plan_mode = request.mode == ChatMode::Plan;
     let require_command_approval = request.require_command_approval;
     let require_file_approval = request.require_file_edit_approval;
+    // Same quiet-period heartbeats as Claude/Codex so the desktop keeps the
+    // turn marked live while ACP tools think without frames.
+    let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let heartbeat = spawn_provider_chat_heartbeat(
+        app.clone(),
+        request.clone(),
+        cancellation.clone(),
+        heartbeat_stop.clone(),
+    );
     let output = run_kimi_acp(
         KimiAcpRequest {
             provider_label: provider_label.into(),
@@ -12004,8 +12013,15 @@ fn run_kimi_acp_chat(
                 KimiAcpMode::Normal
             },
             resume_session_id,
-            timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
-            inactivity_timeout: Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+            // Wall clock is the 24h chat max, not the 30m quiet-period constant.
+            // Mis-wiring both to inactivity killed healthy Grok/Kimi/Gemini turns
+            // at half an hour even when the agent was still working.
+            timeout: Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+            // Quiet tools produce no ACP frames for long stretches. Silence is
+            // not completion — only max runtime and user cancel end the turn.
+            // Frame-level inactivity is set to the same ceiling so it cannot
+            // undercut the wall clock.
+            inactivity_timeout: Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
             cancellation: cancellation.clone(),
         },
         |delta| {
@@ -12098,7 +12114,12 @@ fn run_kimi_acp_chat(
             })?;
             Ok(())
         },
-    )?;
+    );
+    // Stop heartbeats on every exit path so a finished ACP turn never keeps
+    // emitting "still working" after completed/failed/cancelled.
+    heartbeat_stop.store(true, Ordering::Relaxed);
+    let _ = heartbeat.join();
+    let output = output?;
     let activities = activities
         .lock()
         .map_err(|_| anyhow::anyhow!("{provider_label} activity state is unavailable"))?
@@ -12543,7 +12564,6 @@ fn run_openai_codex_app_server_chat(
         let mut context_usage = None;
         let mut turn_started = false;
         let mut completed_artifact_response_at: Option<Instant> = None;
-        let mut last_protocol_activity = Instant::now();
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
@@ -12559,15 +12579,12 @@ fn run_openai_codex_app_server_chat(
             if remaining.is_zero() {
                 anyhow::bail!("Codex app server turn timed out");
             }
-            let inactivity_remaining = Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS)
-                .saturating_sub(last_protocol_activity.elapsed());
-            if inactivity_remaining.is_zero() {
-                anyhow::bail!("Codex app server stopped producing protocol activity");
-            }
+            // Quiet tools often produce no protocol frames for long stretches.
+            // The pipe is still open (Disconnected would fire), so silence is
+            // not completion — only max runtime, cancel, and real disconnect end
+            // the turn.
             let message = match messages.recv_timeout(
-                remaining
-                    .min(inactivity_remaining)
-                    .min(Duration::from_millis(250)),
+                remaining.min(Duration::from_millis(250)),
             ) {
                 Ok(message) => message.map_err(anyhow::Error::msg)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -12584,7 +12601,6 @@ fn run_openai_codex_app_server_chat(
                     anyhow::bail!("Codex app server disconnected")
                 }
             };
-            last_protocol_activity = Instant::now();
             protocol_messages = protocol_messages.saturating_add(1);
             protocol_bytes = protocol_bytes.saturating_add(serde_json::to_vec(&message)?.len());
             if protocol_messages > MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES
@@ -15939,10 +15955,14 @@ const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
 /// is still running but quiet (long tools, model thinking). Completion is never
 /// inferred from silence — only from process exit after the stdout buffers have
 /// been fully drained and the last text delta has been flushed.
+///
+/// Process inactivity is intentionally off for chat: long tools can produce no
+/// stdout for far longer than a half-hour quiet window. Heartbeats keep the UI
+/// honest; max runtime and user cancel still end the turn.
 fn run_streaming_command(
     command: Command,
     max_runtime: Duration,
-    inactivity_timeout: Duration,
+    _inactivity_timeout: Duration,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     observed_session_id: &mut Option<String>,
@@ -15963,7 +15983,8 @@ fn run_streaming_command(
         .map(|(key, value)| (key.to_os_string(), value.map(|value| value.to_os_string())))
         .collect();
     execution.timeout = max_runtime;
-    execution.inactivity_timeout = Some(inactivity_timeout);
+    // Silence is not completion for chat provider CLIs.
+    execution.inactivity_timeout = None;
     execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;
     execution.max_stderr_chars = MAX_CHAT_RESPONSE_CHARS;
     let mut stream_state = StreamingCommandState::new();
@@ -16018,10 +16039,9 @@ fn run_streaming_command(
             )
         }
         ExecutionTermination::Inactive => {
-            anyhow::bail!(
-                "no provider activity was received for {} seconds",
-                inactivity_timeout.as_secs()
-            )
+            // Chat disables process inactivity; if this fires it is a bug in
+            // the request wiring rather than an expected quiet-tool path.
+            anyhow::bail!("provider was marked inactive unexpectedly")
         }
         ExecutionTermination::OutputLimit => {
             anyhow::bail!("provider exceeded Gyro's output activity limit")
