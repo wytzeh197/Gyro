@@ -470,7 +470,14 @@ export function chatGridReducer(
       }
     }
   } else if (action.type === "focus-pane") {
-    if (current.slots.some((pane) => pane?.paneId === action.paneId)) {
+    // No-op when the pane is already focused. Grid slots focus on pointerdown
+    // for every press inside the chat, including empty margin; re-emitting the
+    // same focusedPaneId re-rendered the surface mid-gesture and could move the
+    // stop control under the finger ("click empty margin → stop").
+    if (
+      current.focusedPaneId !== action.paneId &&
+      current.slots.some((pane) => pane?.paneId === action.paneId)
+    ) {
       next = { ...current, focusedPaneId: action.paneId };
     }
   } else if (action.type === "close-pane") {
@@ -507,6 +514,16 @@ export function chatGridReducer(
       slots[toIndex] = fromPane;
       next = { ...current, slots, focusedPaneId: action.paneId };
     }
+  }
+  // Keep state identity stable when nothing about the layout changed. Grid
+  // slots dispatch focus on every pointerdown; a fresh object forced the chat
+  // to re-render mid-gesture even when the focused pane was already current.
+  if (
+    next === current &&
+    state.activeProjectKey === projectKey &&
+    state.layouts[projectKey] === current
+  ) {
+    return state;
   }
   return {
     ...state,
