@@ -423,6 +423,32 @@ assert.equal(
   "retrying",
   "a retry in flight should outrank the failure that provoked it",
 );
+// An open invoke owns the rail even without a retry: a stale cancelled/failed
+// status must not paint Stopped while the process is still running.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    status: { status: "cancelled", message: "chat cancelled by user" },
+  }).phase.name,
+  "working",
+  "a live invoke outranks a stale cancelled status",
+);
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    status: { status: "failed", message: "Provider error" },
+  }).phase.name,
+  "working",
+  "a live invoke outranks a stale failed status",
+);
+assert.equal(
+  buildRunModel([], {
+    isRunning: false,
+    status: { status: "cancelled", message: "chat cancelled by user" },
+  }).phase.recoveryKind,
+  "cancelled",
+  "a settled cancel is tagged recoveryKind cancelled",
+);
 // A settled turn is over, whatever the surface thinks it is dialling.
 assert.equal(
   buildRunModel([activity("command", "pnpm test", {}, 0)], {
@@ -870,8 +896,16 @@ assert.equal(
 // invent a duration from whenever the component happened to mount.
 assert.equal(
   runHeaderLabel({ name: "failed", message: "Provider error" }, "9s"),
+  "Failed",
+  "a real failure is labeled Failed, not Stopped",
+);
+assert.equal(
+  runHeaderLabel(
+    { name: "failed", message: "Stopped", recoveryKind: "cancelled" },
+    "9s",
+  ),
   "Stopped",
-  "a failed turn should not claim a duration",
+  "a user cancel is labeled Stopped",
 );
 assert.equal(runHeaderLabel({ name: "interrupted" }, "9s"), "Interrupted");
 assert.equal(

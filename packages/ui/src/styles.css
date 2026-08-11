@@ -2578,6 +2578,25 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-primary-text);
 }
 
+/* Stop is intentional and calm — not a louder danger pill than Send. */
+.gyro-send-button.is-stop {
+  background: color-mix(in srgb, var(--gyro-text) 14%, var(--gyro-surface-raised));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-text) 18%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-send-button.is-stop:hover {
+  background: color-mix(in srgb, var(--gyro-text) 20%, var(--gyro-surface-raised));
+  color: var(--gyro-text);
+  transform: none;
+}
+
+.gyro-composer-shell.is-sending {
+  box-shadow: inset 0 1px 0
+    color-mix(in srgb, var(--gyro-accent) 28%, transparent);
+}
+
 .gyro-environment-rail {
   align-self: start;
   background: var(--gyro-surface-raised);
@@ -12781,7 +12800,7 @@ textarea:focus-visible {
 .gyro-chat-composer-dock {
   background: #0b0c0e;
   min-width: 0;
-  padding: 10px clamp(24px, 6vw, 72px) 18px;
+  padding: 10px clamp(24px, 6%, 72px) 18px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
@@ -13897,7 +13916,9 @@ body {
 
 .gyro-chat-transcript {
   background: transparent;
-  padding: 18px clamp(24px, 9vw, 124px) 22px;
+  /* Percentage gutters follow the pane, not the window — same rule as the
+     empty-chat start surface. vw was eating narrow sidebar/split embeds. */
+  padding: 18px clamp(24px, 8%, 120px) 22px;
 }
 
 .gyro-chat-transcript .gyro-message,
@@ -13985,7 +14006,7 @@ body {
 
 .gyro-chat-composer-dock {
   background: transparent;
-  padding: 10px clamp(24px, 9vw, 124px) 16px;
+  padding: 10px clamp(24px, 8%, 120px) 16px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
@@ -21964,7 +21985,10 @@ button.gyro-settings-row em::after {
   box-sizing: border-box;
   display: flex;
   justify-content: center;
-  padding: 10px clamp(24px, 9vw, 124px) 16px;
+  /* Pane-relative gutters (not vw). Wide windows were clamping to 124px per
+     side even inside a ~460px sidebar chat, so empty margins looked huge and
+     clicks beside the composer felt like a big stop target. */
+  padding: 10px clamp(24px, 8%, 120px) 16px;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider {
@@ -22116,6 +22140,40 @@ button.gyro-settings-row em::after {
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-send-button:disabled {
   background: #d1d5db;
   color: #6b7280;
+}
+
+/* Stop must win over the cream/hero send fill in every theme. */
+.gyro-send-button.is-stop,
+.gyro-chat-composer-dock .gyro-send-button.is-stop,
+.gyro-chat-start .gyro-send-button.is-stop {
+  background: color-mix(in srgb, var(--gyro-text) 14%, var(--gyro-surface-raised, #2a2b2f));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-text) 20%, transparent);
+  color: var(--gyro-text);
+  opacity: 1;
+}
+
+.gyro-send-button.is-stop:hover,
+.gyro-chat-composer-dock .gyro-send-button.is-stop:hover,
+.gyro-chat-start .gyro-send-button.is-stop:hover {
+  background: color-mix(in srgb, var(--gyro-text) 22%, var(--gyro-surface-raised, #2a2b2f));
+  color: var(--gyro-text);
+  transform: none;
+}
+
+:root[data-theme="light"] .gyro-send-button.is-stop,
+:root[data-theme="light"] .gyro-chat-composer-dock .gyro-send-button.is-stop {
+  background: #e8eaee;
+  box-shadow: inset 0 0 0 1px rgba(31, 36, 44, 0.16);
+  color: #1f242c;
+}
+
+:root[data-theme="light"] .gyro-send-button.is-stop:hover,
+:root[data-theme="light"]
+  .gyro-chat-composer-dock
+  .gyro-send-button.is-stop:hover {
+  background: #dce0e6;
+  color: #111827;
 }
 
 /* Live chat turns: prompt, run activity, and response share one transcript flow. */
@@ -29544,6 +29602,29 @@ button.gyro-account-menu-row:hover,
   width: 100%;
 }
 
+/* Live runs lift the header half a step so Working for … is easy to trust. */
+.gyro-run.is-live .gyro-run-header,
+.gyro-run.is-retrying .gyro-run-header {
+  color: var(--gyro-muted);
+}
+
+.gyro-run.is-settled .gyro-run-header {
+  color: var(--gyro-faint);
+}
+
+/* Static live cue when motion is reduced (breathing icons are off). */
+.gyro-run.is-live .gyro-run-header-toggle > span::before,
+.gyro-run.is-retrying .gyro-run-header-toggle > span::before {
+  background: var(--gyro-accent);
+  border-radius: 50%;
+  content: "";
+  display: none;
+  flex: 0 0 auto;
+  height: 6px;
+  margin-right: 6px;
+  width: 6px;
+}
+
 .gyro-run-header {
   align-items: center;
   color: var(--gyro-faint);
@@ -29757,6 +29838,14 @@ button.gyro-account-menu-row:hover,
   font-weight: 520;
 }
 
+.gyro-run-problem.is-cancelled .gyro-run-problem-text strong {
+  color: var(--gyro-muted);
+}
+
+.gyro-run-problem.is-interrupted .gyro-run-problem-text strong {
+  color: var(--gyro-warn, var(--gyro-muted));
+}
+
 .gyro-run-problem-text span {
   color: var(--gyro-faint);
   font-size: 13px;
@@ -29818,6 +29907,11 @@ button.gyro-account-menu-row:hover,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .gyro-run.is-live .gyro-run-header-toggle > span::before,
+  .gyro-run.is-retrying .gyro-run-header-toggle > span::before {
+    display: inline-block;
+  }
+
   .gyro-run-row.is-running .gyro-run-row-icon,
   .gyro-run-pulse,
   .gyro-run-retry .gyro-run-row-icon,

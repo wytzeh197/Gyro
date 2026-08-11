@@ -5789,6 +5789,17 @@ export function App() {
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
       const projectKey = normalizedChatProjectKey(pane.workspacePath);
+      const layout = chatGrid.layouts[projectKey];
+      const alreadyFocused = layout?.focusedPaneId === pane.paneId;
+      const alreadyActiveSession =
+        pane.kind === "session" && activeSessionIdRef.current === pane.sessionId;
+      // Grid slots call this on every pointerdown inside the pane. When the
+      // user is already in that chat, re-selecting + reloading events only
+      // re-lays out the surface mid-click — which was able to land a stop on
+      // empty margin presses. Skip the heavy path and let focus-pane no-op.
+      if (alreadyFocused && (pane.kind === "draft" || alreadyActiveSession)) {
+        return;
+      }
       dispatchChatGrid({ type: "focus-pane", projectKey, paneId: pane.paneId });
       setWorkspacePath(pane.workspacePath);
       if (pane.kind === "session") {
@@ -5796,14 +5807,18 @@ export function App() {
         suppressSessionAutoSelectRef.current = false;
         activeSessionIdRef.current = pane.sessionId;
         setActiveSessionId(pane.sessionId);
-        void refreshEvents(pane.sessionId);
+        // Only reload the transcript when switching into this session, not on
+        // every empty-margin click while it is already active and streaming.
+        if (!alreadyActiveSession) {
+          void refreshEvents(pane.sessionId);
+        }
       } else {
         suppressSessionAutoSelectRef.current = true;
         activeSessionIdRef.current = undefined;
         setActiveSessionId(undefined);
       }
     },
-    [acknowledgeFinishedChat, refreshEvents],
+    [acknowledgeFinishedChat, chatGrid.layouts, refreshEvents],
   );
 
   const addSessionToChatGrid = useCallback(
@@ -12743,6 +12758,12 @@ export function App() {
     ) {
       return;
     }
+    // While the provider invoke is still open the backend owns the turn.
+    // Marking it stale only confuses the rail into looking "stopped" even
+    // though the model is still running (heartbeats can lag during long tools).
+    if (sendingSessionIdsRef.current.has(turn.sessionId)) {
+      return;
+    }
     const updatedAt = new Date(turn.updatedAt).getTime();
     if (Number.isNaN(updatedAt)) {
       return;
@@ -12752,6 +12773,10 @@ export function App() {
       ACTIVE_TURN_IDLE_MS - (Date.now() - updatedAt),
     );
     const timeout = window.setTimeout(() => {
+      // Re-check at fire time: the turn may have started sending again.
+      if (sendingSessionIdsRef.current.has(turn.sessionId)) {
+        return;
+      }
       dispatchWorkbench({
         type: "reconcile-active-turn-timeout",
         idleMs: ACTIVE_TURN_IDLE_MS,
@@ -12762,8 +12787,10 @@ export function App() {
   }, [
     workbench.activeTurn?.approvalsPending,
     workbench.activeTurn?.id,
+    workbench.activeTurn?.sessionId,
     workbench.activeTurn?.status,
     workbench.activeTurn?.updatedAt,
+    sendingSessionIds,
   ]);
 
   useEffect(() => {

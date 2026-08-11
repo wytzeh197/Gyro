@@ -18588,6 +18588,15 @@ function Composer({
     null,
   );
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /**
+   * Stop only when the press started on the stop control itself.
+   *
+   * Grid slots focus the pane on pointerdown. That used to re-layout the
+   * composer under the finger so a press that began on empty margin could
+   * finish as a click on Stop — reading as "click empty margin → stop".
+   * Arming on pointerdown and requiring it on click keeps stop intentional.
+   */
+  const stopArmedRef = useRef(false);
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
@@ -19245,6 +19254,7 @@ function Composer({
           ? "has-provider"
           : "is-provider-collapsed",
         isHero && constrainToParent ? "is-constrained" : "",
+        isSending ? "is-sending" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -19868,22 +19878,64 @@ function Composer({
                   : "Send message"
           }
           aria-busy={false}
-          className="gyro-send-button"
+          className={[
+            "gyro-send-button",
+            isStopAction ? "is-stop" : "",
+            isSending && !isStopAction ? "is-queue" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           disabled={
             !isStopAction && (!canSubmitComposer || draft.trim().length === 0)
           }
-          onClick={() => {
+          onClick={(event) => {
             setActivePopover(null);
             if (isStopAction) {
+              // Only honor stop when the press began on this button. A click
+              // that migrated here after a layout shift (empty margin focus)
+              // must not cancel the run. Keyboard activation (Enter/Space)
+              // synthesizes a click with detail 0 and no pointerdown arm.
+              const armed =
+                stopArmedRef.current || event.detail === 0;
+              stopArmedRef.current = false;
+              if (!armed) {
+                return;
+              }
               onStop?.();
               return;
             }
+            stopArmedRef.current = false;
             requestSend();
           }}
           // Grid slots focus their pane on pointerdown. Stopping that here
           // keeps a stop click from also re-focusing / re-laying out the chat
           // under the finger — which was reading as "click empty margin → stop".
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            if (!isStopAction) {
+              stopArmedRef.current = false;
+              return;
+            }
+            stopArmedRef.current = true;
+            const button = event.currentTarget;
+            const disarmIfReleasedAway = (up: PointerEvent) => {
+              document.removeEventListener("pointerup", disarmIfReleasedAway, true);
+              document.removeEventListener(
+                "pointercancel",
+                disarmIfReleasedAway,
+                true,
+              );
+              if (!up.composedPath().includes(button)) {
+                stopArmedRef.current = false;
+              }
+            };
+            document.addEventListener("pointerup", disarmIfReleasedAway, true);
+            document.addEventListener(
+              "pointercancel",
+              disarmIfReleasedAway,
+              true,
+            );
+          }}
           title={
             isStopAction
               ? "Stop response"
@@ -20962,7 +21014,15 @@ function ChatTurn({
         <ChatRun
           headerActions={
             canContinue ? (
-              <button onClick={onContinueChat} type="button">
+              <button
+                onClick={onContinueChat}
+                title={
+                  hasResponse
+                    ? "Continue this chat"
+                    : "Resume this turn from where it left off"
+                }
+                type="button"
+              >
                 Continue
               </button>
             ) : null
