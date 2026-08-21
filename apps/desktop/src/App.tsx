@@ -997,6 +997,15 @@ export function App() {
         .map((provider) => provider.id),
     [config],
   );
+  // The ledger is local, so every connected provider has spend to read —
+  // including the ones with no plan-window API to poll.
+  const backgroundLedgerProviderIds = useMemo(
+    () =>
+      providersForConfig(config)
+        .filter((provider) => provider.authStatus === "connected")
+        .map((provider) => provider.id),
+    [config],
+  );
   const activeChatPanel: ChatSidePanelId | undefined =
     workbench.preferences.activeChatPanel ??
     (workbench.preferences.chatEnvironmentRailOpen ? "environment" : undefined);
@@ -1536,11 +1545,7 @@ export function App() {
       setSystemAccess(scopes);
       return scopes;
     } catch (error) {
-      notify(
-        "command-failed",
-        "Could not check macOS access",
-        String(error),
-      );
+      notify("command-failed", "Could not check macOS access", String(error));
       return [] as SystemAccessScope[];
     } finally {
       setIsCheckingSystemAccess(false);
@@ -1707,10 +1712,18 @@ export function App() {
   );
 
   useEffect(() => {
-    if (backgroundUsageProviderIds.length === 0) return undefined;
+    if (
+      backgroundUsageProviderIds.length === 0 &&
+      backgroundLedgerProviderIds.length === 0
+    ) {
+      return undefined;
+    }
     const refreshInBackground = () => {
       for (const providerId of backgroundUsageProviderIds) {
         void refreshProviderUsage(providerId);
+      }
+      for (const providerId of backgroundLedgerProviderIds) {
+        void refreshProviderLedger(providerId);
       }
     };
     const refreshWhenVisible = () => {
@@ -1730,7 +1743,12 @@ export function App() {
       window.removeEventListener("focus", refreshInBackground);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [backgroundUsageProviderIds, refreshProviderUsage]);
+  }, [
+    backgroundLedgerProviderIds,
+    backgroundUsageProviderIds,
+    refreshProviderLedger,
+    refreshProviderUsage,
+  ]);
 
   useEffect(() => {
     if (
@@ -5792,7 +5810,8 @@ export function App() {
       const layout = chatGrid.layouts[projectKey];
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
-        pane.kind === "session" && activeSessionIdRef.current === pane.sessionId;
+        pane.kind === "session" &&
+        activeSessionIdRef.current === pane.sessionId;
       // Grid slots call this on every pointerdown inside the pane. When the
       // user is already in that chat, re-selecting + reloading events only
       // re-lays out the surface mid-click — which was able to land a stop on
@@ -8422,6 +8441,9 @@ export function App() {
           if (usageProviderId && providerSupportsUsage(usageProviderId)) {
             void refreshProviderUsage(usageProviderId);
           }
+          if (usageProviderId) {
+            void refreshProviderLedger(usageProviderId);
+          }
         } catch (error) {
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
@@ -8598,10 +8620,12 @@ export function App() {
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
         optimisticEventsRef.current.delete(activeSessionId);
-        const usageProviderId =
-          sessionModel.providerId ?? selectedProvider?.id;
+        const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
         if (usageProviderId && providerSupportsUsage(usageProviderId)) {
           void refreshProviderUsage(usageProviderId);
+        }
+        if (usageProviderId) {
+          void refreshProviderLedger(usageProviderId);
         }
       } catch (error) {
         const errorMessage = String(error);
@@ -10602,7 +10626,10 @@ export function App() {
         void invoke("close_terminal_pane", { paneId: modelPaneId }).catch(
           () => undefined,
         );
-        dispatchWorkbench({ type: "remove-terminal-pane", paneId: modelPaneId });
+        dispatchWorkbench({
+          type: "remove-terminal-pane",
+          paneId: modelPaneId,
+        });
       }
     }
     closeChatPane(candidate);
@@ -10736,12 +10763,15 @@ export function App() {
     isCommandPaletteOpen || Boolean(modelStandardPrompt);
 
   const ensureSessionBrowser = useCallback(
-    async (url: string, bounds?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    } | null) => {
+    async (
+      url: string,
+      bounds?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      } | null,
+    ) => {
       if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
         return;
       }
@@ -10840,7 +10870,8 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    let unlisten: Promise<(() => void) | undefined> = Promise.resolve(undefined);
+    let unlisten: Promise<(() => void) | undefined> =
+      Promise.resolve(undefined);
     try {
       unlisten = listen<{ sessionId: string; url: string }>(
         "session-browser-opened",
@@ -11879,7 +11910,7 @@ export function App() {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        workbench.preferences.theme === "light" ? "#f6f7f8" : "#101010",
+        workbench.preferences.theme === "light" ? "#f2f4f7" : "#0e0e0e",
       );
     safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
   }, [workbench.preferences.density, workbench.preferences.theme]);
@@ -13123,7 +13154,8 @@ export function App() {
         action: `${path} rejected`,
       }),
     onRunGitAction: (actionId) => void runGitReviewAction(actionId),
-    onSelectFile: (path) => dispatchWorkbench({ type: "select-diff-file", path }),
+    onSelectFile: (path) =>
+      dispatchWorkbench({ type: "select-diff-file", path }),
     onToggleDirectory: (directory) =>
       dispatchWorkbench({ type: "toggle-diff-directory", directory }),
     onUndo: () =>
@@ -13207,42 +13239,43 @@ export function App() {
   const cliUpdateCheckingRef = useRef(false);
   const cliUpdatePhaseRef = useRef(cliUpdatePhase);
   cliUpdatePhaseRef.current = cliUpdatePhase;
-  const checkCliUpdates = useCallback(async (userInitiated = false) => {
-    if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
-      return;
-    }
-    if (cliUpdatePhaseRef.current === "updating") {
-      return;
-    }
-    cliUpdateCheckingRef.current = true;
-    if (userInitiated) {
-      setCliUpdatePhase("checking");
-    }
-    try {
-      const report = await invoke<CliUpdateCheckReport>(
-        "check_cli_updates_command",
-      );
-      const offers = report.offers.filter((offer) => offer.updateAvailable);
-      const dismissKey = cliUpdateDismissKey(offers);
-      const dismissed =
-        typeof localStorage !== "undefined"
-          ? localStorage.getItem("gyro.cli-updates.dismissed.v1")
-          : null;
-      setCliUpdateOffers(
-        dismissed && dismissed === dismissKey ? [] : offers,
-      );
-      setCliUpdatePhase("idle");
-      setCliUpdateError(undefined);
-    } catch (error) {
-      setCliUpdatePhase(userInitiated ? "failed" : "idle");
-      setCliUpdateError(String(error));
-      if (userInitiated) {
-        notify("command-failed", "CLI update check failed", String(error));
+  const checkCliUpdates = useCallback(
+    async (userInitiated = false) => {
+      if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
+        return;
       }
-    } finally {
-      cliUpdateCheckingRef.current = false;
-    }
-  }, [notify]);
+      if (cliUpdatePhaseRef.current === "updating") {
+        return;
+      }
+      cliUpdateCheckingRef.current = true;
+      if (userInitiated) {
+        setCliUpdatePhase("checking");
+      }
+      try {
+        const report = await invoke<CliUpdateCheckReport>(
+          "check_cli_updates_command",
+        );
+        const offers = report.offers.filter((offer) => offer.updateAvailable);
+        const dismissKey = cliUpdateDismissKey(offers);
+        const dismissed =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem("gyro.cli-updates.dismissed.v1")
+            : null;
+        setCliUpdateOffers(dismissed && dismissed === dismissKey ? [] : offers);
+        setCliUpdatePhase("idle");
+        setCliUpdateError(undefined);
+      } catch (error) {
+        setCliUpdatePhase(userInitiated ? "failed" : "idle");
+        setCliUpdateError(String(error));
+        if (userInitiated) {
+          notify("command-failed", "CLI update check failed", String(error));
+        }
+      } finally {
+        cliUpdateCheckingRef.current = false;
+      }
+    },
+    [notify],
+  );
 
   const applyCliUpdates = useCallback(async () => {
     if (!isTauriRuntime() || cliUpdateOffers.length === 0) {
@@ -13265,7 +13298,9 @@ export function App() {
           failed.length === results.length
             ? "CLI update failed"
             : "Some CLI updates failed",
-          failed.map((item) => `${item.displayName}: ${item.message}`).join("\n"),
+          failed
+            .map((item) => `${item.displayName}: ${item.message}`)
+            .join("\n"),
         );
       } else {
         notify(
@@ -13446,6 +13481,7 @@ export function App() {
         onLoadModelFocusPeek={loadModelFocusPeek}
         onOpenModelFocus={openModelFocus}
         providerUsageByProvider={providerUsageByProvider}
+        providerLedgerById={providerLedgerById}
         sessionUsage={paneSessionUsage}
         usageSafety={usageSafety}
         onResumeUsage={() => void resumeUsage()}
@@ -14031,6 +14067,7 @@ export function App() {
                     onLoadModelFocusPeek={loadModelFocusPeek}
                     onOpenModelFocus={openModelFocus}
                     providerUsageByProvider={providerUsageByProvider}
+        providerLedgerById={providerLedgerById}
                     sessionUsage={activeSessionUsage}
                     usageSafety={usageSafety}
                     onResumeUsage={() => void resumeUsage()}
@@ -14602,6 +14639,7 @@ export function App() {
           capabilityPolicy={activeCapabilityPolicy}
           config={config}
           providerUsageByProvider={providerUsageByProvider}
+          providerLedgerById={providerLedgerById}
           sessionUsage={activeSessionUsage}
           usageSafety={usageSafety}
           onResumeUsage={() => void resumeUsage()}
@@ -15380,7 +15418,7 @@ function LiveTerminalPaneBody({
 function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
   if (theme === "light") {
     return {
-      background: "#ffffff",
+      background: "#f6f8fa",
       black: "#1f242c",
       blue: "#1f66d1",
       brightBlack: "#5b6470",
@@ -15405,7 +15443,7 @@ function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
   }
 
   return {
-    background: "#0b0b0b",
+    background: "#0c0c0c",
     black: "#080808",
     blue: "#6ea8ff",
     brightBlack: "#858585",
@@ -16444,11 +16482,7 @@ function deriveActiveTurn(
       const payloadKind = stringFromRecord(payload, "kind");
       const proposalId = stringFromRecord(payload, "proposalId");
       const status = stringFromRecord(payload, "status");
-      if (
-        proposalId &&
-        status &&
-        payloadKind === "mutation-approval"
-      ) {
+      if (proposalId && status && payloadKind === "mutation-approval") {
         mutationApprovalStatuses.set(proposalId, status);
       }
       // Backend status is the source of truth for whether the turn is still
@@ -16640,7 +16674,9 @@ function deriveSessionPlan(
       const updates = new Map(
         payloadItems
           .map((item) => recordFromUnknown(item))
-          .filter((record): record is Record<string, unknown> => Boolean(record))
+          .filter((record): record is Record<string, unknown> =>
+            Boolean(record),
+          )
           .map((record) => [stringFromRecord(record, "id"), record] as const)
           .filter(([id]) => Boolean(id)),
       );
@@ -17414,7 +17450,7 @@ function MonacoEditorPane({
         onMount={handleMount}
         options={editorOptions}
         path={path}
-        theme={theme === "light" ? "vs" : "gyro-dark"}
+        theme={theme === "light" ? "gyro-light" : "gyro-dark"}
         value={buffer?.content ?? fileContent?.content ?? ""}
       />
     </Suspense>
@@ -17675,11 +17711,7 @@ function sessionModelSelectionFromSession(
     | "reasoningEffort"
   > | null,
 ): SessionModelSelection | undefined {
-  if (
-    !session?.providerId &&
-    !session?.modelId &&
-    !session?.modelLabel
-  ) {
+  if (!session?.providerId && !session?.modelId && !session?.modelLabel) {
     return undefined;
   }
   return {

@@ -278,10 +278,12 @@ const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
  * Providers whose accounts actually meter plan windows we can surface.
  *
  * OpenAI/Claude: 5h + weekly. xAI/Grok Build: weekly credit window only.
- * Kimi/Gemini: no plan-window API — local ledger only.
+ * Kimi: the context window its `/usage` reports (plan quota lines join when
+ * the CLI prints them). Gemini: no plan-window API — local ledger only.
  */
 const PLAN_LIMIT_PROVIDERS = new Set<ProviderId>([
   "anthropic",
+  "kimi",
   "openai",
   "xai",
 ]);
@@ -297,6 +299,9 @@ function defaultPlanLimitWindows(
 ): ProviderUsageWindow[] {
   if (providerId === "xai") {
     return [{ id: "weekly", label: "Weekly limit" }];
+  }
+  if (providerId === "kimi") {
+    return [{ id: "context", label: "Context window" }];
   }
   return [
     { id: "five-hour", label: "5-hour limit" },
@@ -422,9 +427,10 @@ export function composerLimitWindows(
   // A provider that names windows Gyro does not model is describing its own
   // allowance, and padding it with the standard pair would invent limits it
   // never claimed. Only a provider still speaking the standard vocabulary gets
-  // the missing halves filled in.
-  const speaksDefaultWindows = [...byId.keys()].every((id) =>
-    LIMIT_WINDOW_ORDER.includes(id),
+  // the missing halves filled in. Local ledger spend rows ("ledger-*") sit
+  // beside the plan vocabulary and never suppress it.
+  const speaksDefaultWindows = [...byId.keys()].every(
+    (id) => LIMIT_WINDOW_ORDER.includes(id) || id.startsWith("ledger-"),
   );
   if (
     model.providerId &&

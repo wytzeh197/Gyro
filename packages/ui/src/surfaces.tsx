@@ -124,6 +124,8 @@ import {
 import {
   estimateTurnCost,
   formatTokenCount,
+  ledgerLimitWindows,
+  ledgerWindows,
   summarizeUsageSafety,
 } from "./usage-ledger";
 import {
@@ -259,9 +261,11 @@ import {
   defaultModelLabel,
   getProviderModel,
   isProviderExecutable,
+  isProviderId,
   providerCapabilities,
   providerDefaultModelId,
   providerNeedsSignInRepair,
+  providerSupportsUsage,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
@@ -1024,6 +1028,44 @@ function WorkspaceActivityRail({
   );
 }
 
+/** Provider name with its mark, for the CLI update notice headline. */
+function CliUpdateOfferName({ offer }: { offer: CliUpdateOffer }) {
+  return (
+    <span className="gyro-cli-update-banner-name">
+      {isProviderId(offer.providerId) ? (
+        <ProviderLogo providerId={offer.providerId} />
+      ) : null}
+      {offer.displayName}
+    </span>
+  );
+}
+
+/** Headline for the CLI update notice: names carry their provider marks. */
+function cliUpdateNoticeHeadline(available: CliUpdateOffer[]) {
+  if (available.length === 1) {
+    const offer = available[0]!;
+    return (
+      <>
+        <CliUpdateOfferName offer={offer} />{" "}
+        {offer.currentVersion && offer.latestVersion
+          ? `${offer.currentVersion} → ${offer.latestVersion} is available`
+          : "update is available"}
+      </>
+    );
+  }
+  const names = available.map((offer) => (
+    <CliUpdateOfferName key={offer.providerId} offer={offer} />
+  ));
+  const joined = names.flatMap((node, index) =>
+    index === 0
+      ? [node]
+      : index === names.length - 1
+        ? [names.length > 2 ? ", and " : " and ", node]
+        : [", ", node],
+  );
+  return <>Updates available for {joined}</>;
+}
+
 /** Center-top notice when provider CLIs can be updated. */
 export function CliUpdateBanner({
   offers,
@@ -1043,13 +1085,18 @@ export function CliUpdateBanner({
   const isBusy = phase === "updating" || phase === "checking";
   const actionLabel =
     phase === "updating" ? "Updating…" : cliUpdateActionLabel(available);
-  const message =
+  const headline =
     phase === "failed"
       ? "CLI update failed — try again"
-      : cliUpdateNoticeMessage(available);
+      : cliUpdateNoticeHeadline(available);
 
   return (
     <div
+      aria-label={
+        phase === "failed"
+          ? "CLI update failed — try again"
+          : cliUpdateNoticeMessage(available)
+      }
       aria-live="polite"
       className="gyro-cli-update-banner"
       data-phase={phase}
@@ -1059,19 +1106,7 @@ export function CliUpdateBanner({
         <Download size={13} />
       </span>
       <span className="gyro-cli-update-banner-copy">
-        <strong>{message}</strong>
-        {available.length === 1 && available[0]?.latestVersion ? (
-          <small>
-            {available[0].displayName}
-            {available[0].currentVersion
-              ? ` · ${available[0].currentVersion}`
-              : ""}
-          </small>
-        ) : available.length > 1 ? (
-          <small>
-            {available.map((offer) => offer.displayName).join(" · ")}
-          </small>
-        ) : null}
+        <strong>{headline}</strong>
       </span>
       <button
         className="gyro-cli-update-banner-action"
@@ -2031,7 +2066,8 @@ function SidebarUpdateControl({
   const [placement, setPlacement] = useState<"above" | "below">("below");
   const controlRef = useRef<HTMLDivElement>(null);
   const tipId = useId();
-  const isBusy = state.status === "downloading" || state.status === "installing";
+  const isBusy =
+    state.status === "downloading" || state.status === "installing";
   const label = updateSidebarLabel(state);
   const tag = updateVersionTag(state);
   const size = updateSizeLabel(state);
@@ -4341,7 +4377,12 @@ function WorkspaceSidebarContent({
                 project.items.length - visibleProjectSessions.length;
               const timeGroupedSessions = isExpanded
                 ? groupSidebarItemsByRecency(visibleProjectSessions)
-                : [{ label: null as string | null, items: visibleProjectSessions }];
+                : [
+                    {
+                      label: null as string | null,
+                      items: visibleProjectSessions,
+                    },
+                  ];
               return (
                 <div
                   className={[
@@ -5929,9 +5970,7 @@ function MissionWorkersBoard({
           >
             <Plus size={13} />
             Add worker
-            {defaultProfileLabel ? (
-              <small>{defaultProfileLabel}</small>
-            ) : null}
+            {defaultProfileLabel ? <small>{defaultProfileLabel}</small> : null}
           </button>
         ) : null}
       </div>
@@ -5984,6 +6023,8 @@ type ChatSurfaceProps = {
   providerReadiness?: ProviderReadiness;
   providerStatuses?: ProviderStatus[];
   providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
+  /** Local spend per provider, from Gyro's usage ledger. */
+  providerLedgerById?: Partial<Record<ProviderId, ProviderLedgerSummary>>;
   /** What this chat has spent, from Gyro's own usage ledger. */
   sessionUsage?: SessionUsageTotals;
   /** The current hold on runs and every configured budget. */
@@ -6143,6 +6184,7 @@ export function ChatSurface({
   config,
   providerReadiness,
   providerUsageByProvider,
+  providerLedgerById,
   sessionUsage,
   usageSafety,
   onResumeUsage,
@@ -6534,7 +6576,7 @@ export function ChatSurface({
     const providers = providersForConfig(config);
     const boundToSession = Boolean(
       sessionModel?.providerId &&
-        (sessionModel.modelId || sessionModel.modelLabel),
+      (sessionModel.modelId || sessionModel.modelLabel),
     );
     const providerId = boundToSession
       ? sessionModel?.providerId
@@ -6569,15 +6611,35 @@ export function ChatSurface({
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
     : undefined;
-  const composerLimits = useMemo(
-    () =>
-      composerLimitWindows(
-        transcriptEvents,
-        contextModel,
-        composerProviderUsage?.windows ?? [],
-      ),
-    [composerProviderUsage?.windows, contextModel, transcriptEvents],
-  );
+  const composerProviderLedger = contextModel.providerId
+    ? providerLedgerById?.[contextModel.providerId]
+    : undefined;
+  const composerLimits = useMemo(() => {
+    const planWindows = composerProviderUsage?.windows ?? [];
+    const hasMeasuredPlanWindow = planWindows.some(
+      (window) =>
+        typeof window.usedPercent === "number" &&
+        Number.isFinite(window.usedPercent),
+    );
+    // Local spend stands in where the provider meters nothing Gyro can poll,
+    // and covers the gap before the first plan reading arrives.
+    const ledgerRows =
+      composerProviderLedger &&
+      contextModel.providerId &&
+      (!providerSupportsUsage(contextModel.providerId) ||
+        !hasMeasuredPlanWindow)
+        ? ledgerLimitWindows(composerProviderLedger, contextModel.providerId)
+        : [];
+    return composerLimitWindows(transcriptEvents, contextModel, [
+      ...planWindows,
+      ...ledgerRows,
+    ]);
+  }, [
+    composerProviderLedger,
+    composerProviderUsage?.windows,
+    contextModel,
+    transcriptEvents,
+  ]);
   const transcriptState = useMemo(
     () => deriveTranscriptState(transcriptEvents),
     [transcriptEvents],
@@ -7118,7 +7180,9 @@ export function ChatSurface({
                 onClick={onLoadEarlier}
                 type="button"
               >
-                {isLoadingEarlier ? "Loading earlier…" : "Load earlier messages"}
+                {isLoadingEarlier
+                  ? "Loading earlier…"
+                  : "Load earlier messages"}
               </button>
             </div>
           ) : null}
@@ -8622,7 +8686,8 @@ function ChatContextSection({
   const projectLabel = composerProjectLabel(workspacePath);
   const modeChipLabel = workspaceModeLabel(workspaceMode);
   const branchLabel =
-    branchName ?? (workspaceMode === "worktree" ? "New worktree branch" : "main");
+    branchName ??
+    (workspaceMode === "worktree" ? "New worktree branch" : "main");
   const savedProjectItems: ComposerPopoverItem[] = savedProjects
     .filter((project) => project.path)
     .slice(0, 6)
@@ -8932,9 +8997,7 @@ function chatToolBrowserStatusLabel(browserPreview?: BrowserPreview) {
       return "Live";
     case "console-error": {
       const count = browserPreview.consoleErrors;
-      return count > 0
-        ? `${count} issue${count === 1 ? "" : "s"}`
-        : "Issues";
+      return count > 0 ? `${count} issue${count === 1 ? "" : "s"}` : "Issues";
     }
     case "verification-failed":
       return "Unreachable";
@@ -12679,14 +12742,6 @@ export function AutomationsSurface({
             Create a local automation for recurring checks, heartbeat prompts,
             or follow-up agent runs.
           </span>
-          <button
-            className="gyro-primary-button"
-            onClick={onCreateAutomation}
-            type="button"
-          >
-            <Plus size={15} />
-            Create automation
-          </button>
         </section>
       ) : (
         <div className="gyro-automation-layout">
@@ -14423,14 +14478,13 @@ export function BrowserPreviewSurface({
     onReload?.();
   };
 
-  const statusRingClass =
-    isFailed
-      ? "gyro-ring is-failed"
-      : isLoading || isCapturing
-        ? "gyro-ring is-running"
-        : isLive
-          ? "gyro-ring is-done"
-          : "gyro-ring is-idle";
+  const statusRingClass = isFailed
+    ? "gyro-ring is-failed"
+    : isLoading || isCapturing
+      ? "gyro-ring is-running"
+      : isLive
+        ? "gyro-ring is-done"
+        : "gyro-ring is-idle";
 
   return (
     <div
@@ -14651,10 +14705,7 @@ export function BrowserPreviewSurface({
                     : ""}
                 </span>
                 <div className="gyro-browser-capture-actions">
-                  <button
-                    onClick={() => setFrameMode("live")}
-                    type="button"
-                  >
+                  <button onClick={() => setFrameMode("live")} type="button">
                     Back to live
                   </button>
                   <button
@@ -14689,10 +14740,7 @@ export function BrowserPreviewSurface({
             )
           ) : null}
           {isLoading || isCapturing ? (
-            <div
-              aria-live="polite"
-              className="gyro-browser-activity-strip"
-            >
+            <div aria-live="polite" className="gyro-browser-activity-strip">
               <span className="gyro-ring is-running" />
               <span>
                 {isCapturing
@@ -14882,10 +14930,7 @@ function BrowserFramePlaceholder({
         {!isOccluded ? (
           <div className="gyro-browser-placeholder-actions">
             {suggestedUrl && suggestedUrl !== "about:blank" ? (
-              <button
-                onClick={() => onNavigate?.(suggestedUrl)}
-                type="button"
-              >
+              <button onClick={() => onNavigate?.(suggestedUrl)} type="button">
                 {hostLabel || "localhost:3000"}
               </button>
             ) : null}
@@ -16494,7 +16539,8 @@ export function SettingsSurface({
                     <strong>
                       {usageProvider.id === "openai" ||
                       usageProvider.id === "anthropic" ||
-                      usageProvider.id === "xai"
+                      usageProvider.id === "xai" ||
+                      usageProvider.id === "kimi"
                         ? `${usageProvider.displayName} plan windows`
                         : `${usageProvider.displayName} spend`}
                     </strong>
@@ -16508,11 +16554,12 @@ export function SettingsSurface({
                           ? "Checking with the provider…"
                           : usageProvider.id === "openai" ||
                               usageProvider.id === "anthropic" ||
-                              usageProvider.id === "xai"
+                              usageProvider.id === "xai" ||
+                              usageProvider.id === "kimi"
                             ? usageProvider.id === "xai"
                               ? "Refresh to load Grok Build weekly credit usage"
                               : "Plan windows appear after the first chat or refresh"
-                            : "No plan window API on this provider — local spend is below"}
+                            : "No plan window API on this provider — local spend measured by Gyro is below"}
                     </span>
                   </div>
                   <div className="gyro-usage-toolbar-actions">
@@ -16592,7 +16639,30 @@ export function SettingsSurface({
                       Refresh
                     </button>
                   </div>
-                ) : null}
+                ) : (
+                  /* No plan windows to show — fall back to what Gyro measured
+                     itself. This is the only usage view Gemini has, and the
+                     fallback for every provider whose live read failed. */
+                  <div className="gyro-usage-cards">
+                    {ledgerWindows(providerLedger, usageProvider.id).map(
+                      (window) => (
+                        <UsageCard
+                          key={window.id}
+                          resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
+                          visualization={usageVisualization}
+                          window={{
+                            id: window.id,
+                            label:
+                              window.id === "five-hour"
+                                ? "5-hour spend · local"
+                                : "Weekly spend · local",
+                            usedPercent: window.percent,
+                          }}
+                        />
+                      ),
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="gyro-usage-empty">
@@ -17625,12 +17695,6 @@ function formatUsageReset(value?: string) {
   return `Resets ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date)}`;
 }
 
-/**
- * What Gyro measured for a provider, as opposed to what the provider reported.
- *
- * This is the part that works everywhere: Codex is the only CLI with a quota
- * endpoint, so without the ledger four of five providers had nothing to show.
- */
 /** Budget choices, in the units people actually think in. */
 function budgetOptions(current?: number) {
   const presets = [
@@ -17662,9 +17726,12 @@ function usagePauseDetail(snapshot: UsageSafetySnapshot) {
 function UsageCard({
   window,
   visualization,
+  resetCaption,
 }: {
   window?: ProviderUsageState["windows"][number];
   visualization: "bars" | "wheels";
+  /** Replaces the reset line — ledger windows carry their spend detail here. */
+  resetCaption?: string;
 }) {
   if (!window) return null;
   // Plan windows report how much of the allowance is *spent* this period.
@@ -17744,9 +17811,10 @@ function UsageCard({
           {used === undefined ? "Level not reported" : `${usedLabel}% used`}
         </strong>
         <span>
-          {window.resetsAt
-            ? formatUsageReset(window.resetsAt)
-            : "Resets with plan window"}
+          {resetCaption ??
+            (window.resetsAt
+              ? formatUsageReset(window.resetsAt)
+              : "Resets with plan window")}
         </span>
       </div>
     </article>
@@ -18702,7 +18770,7 @@ function Composer({
   // workbench-wide selection so split-screen composers can diverge.
   const boundToSession = Boolean(
     sessionModel?.providerId &&
-      (sessionModel.modelId || sessionModel.modelLabel),
+    (sessionModel.modelId || sessionModel.modelLabel),
   );
   const effectiveProviderId = boundToSession
     ? sessionModel?.providerId
@@ -19895,8 +19963,7 @@ function Composer({
               // that migrated here after a layout shift (empty margin focus)
               // must not cancel the run. Keyboard activation (Enter/Space)
               // synthesizes a click with detail 0 and no pointerdown arm.
-              const armed =
-                stopArmedRef.current || event.detail === 0;
+              const armed = stopArmedRef.current || event.detail === 0;
               stopArmedRef.current = false;
               if (!armed) {
                 return;
@@ -19919,7 +19986,11 @@ function Composer({
             stopArmedRef.current = true;
             const button = event.currentTarget;
             const disarmIfReleasedAway = (up: PointerEvent) => {
-              document.removeEventListener("pointerup", disarmIfReleasedAway, true);
+              document.removeEventListener(
+                "pointerup",
+                disarmIfReleasedAway,
+                true,
+              );
               document.removeEventListener(
                 "pointercancel",
                 disarmIfReleasedAway,
@@ -22645,7 +22716,9 @@ function browserStatusLabel(preview: BrowserPreview) {
           ? detail
           : `Unreachable · ${detail}`;
       }
-      return host ? `Unreachable · ${host} · ${device}` : `Unreachable · ${device}`;
+      return host
+        ? `Unreachable · ${host} · ${device}`
+        : `Unreachable · ${device}`;
     }
     case "verification-passed":
     case "ready":

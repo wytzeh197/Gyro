@@ -300,6 +300,7 @@ export {
   formatTokenCount,
   isOutsizedTurn,
   ledgerWindowSpecsForProvider,
+  ledgerLimitWindows,
   ledgerWindows,
   ledgerWindowsCaption,
   summarizeSessionCost,
