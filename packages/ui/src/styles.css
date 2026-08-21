@@ -1,7 +1,29 @@
+/*
+ * Inter carries the interface; Inter Tight carries display type only (hero and
+ * page H1s). Both are the latin variable subsets, vendored next to this sheet
+ * so the desktop app never contacts a font CDN. SIL OFL 1.1; see
+ * site/assets/ATTRIBUTIONS.md.
+ */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/inter-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./assets/fonts/inter-tight-latin.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
-  --gyro-app: #101010;
-  --gyro-sidebar: #181818;
+  --gyro-app: #0e0e0e;
+  --gyro-sidebar: #1a1a1a;
   --gyro-sidebar-soft: #242424;
   --gyro-pane: #121212;
   --gyro-surface: #151515;
@@ -43,7 +65,7 @@
   --gyro-danger-soft: rgba(255, 105, 97, 0.13);
   --gyro-blue: #7aa7ff;
   --gyro-blue-soft: rgba(122, 167, 255, 0.12);
-  --gyro-canvas-subtle: #101010;
+  --gyro-canvas-subtle: #0e0e0e;
   --gyro-window: #141414;
   --gyro-workbench-line: rgba(255, 255, 255, 0.07);
   --gyro-control-bg: #1b1b1b;
@@ -77,16 +99,31 @@
   --gyro-premium-radius-lg: 8px;
   --gyro-premium-radius-xl: 10px;
   --gyro-premium-radius-composer: 12px;
+  --gyro-radius-xs: var(--gyro-premium-radius-xs);
+  --gyro-radius-sm: var(--gyro-premium-radius-sm);
+  --gyro-radius-md: var(--gyro-premium-radius-md);
+  --gyro-radius-lg: var(--gyro-premium-radius-lg);
+  --gyro-radius-xl: var(--gyro-premium-radius-xl);
+  --gyro-radius-composer: var(--gyro-premium-radius-composer);
   /* Motion ladder. Fast is a state flip, motion is a control settling, slow is
      a surface arriving. Everything shares one ease. */
   --gyro-premium-motion-fast: 80ms;
   --gyro-premium-motion: 130ms;
   --gyro-premium-motion-slow: 180ms;
   --gyro-premium-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  /* Type ladder, for reference. Sizes in this sheet are literal so that the
-     dense chrome stays legible when a rule is read in isolation:
-     9/10 micro labels · 11/12 chrome · 13 support · 14 body · 16 lead ·
-     18/20/22 headings · 26/28 display. */
+  --gyro-font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --gyro-font-display:
+    "Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gyro-font-micro: 10px;
+  --gyro-font-chrome: 12px;
+  --gyro-font-support: 13px;
+  --gyro-font-body: 14px;
+  --gyro-font-lead: 16px;
+  --gyro-font-heading: 20px;
+  --gyro-font-display-size: 28px;
   --gyro-chat-content-width: 772px;
   /* The composer and everything docked above it share one width. On the start
      screen that is the hero measure; inside a thread the dock narrows it to the
@@ -119,22 +156,10 @@
   --gyro-hero-shadow: 0 20px 48px rgba(0, 0, 0, 0.38);
   --gyro-hero-shadow-focus: 0 22px 52px rgba(0, 0, 0, 0.42);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-  --gyro-page-header-bg: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--gyro-surface-raised) 82%, transparent),
-    color-mix(in srgb, var(--gyro-app) 94%, transparent)
-  );
-  --gyro-page-canvas: color-mix(in srgb, var(--gyro-app) 97%, white 3%);
-  --gyro-page-card: color-mix(
-    in srgb,
-    var(--gyro-surface) 94%,
-    var(--gyro-text) 6%
-  );
-  --gyro-page-card-hover: color-mix(
-    in srgb,
-    var(--gyro-surface-raised) 90%,
-    white 10%
-  );
+  --gyro-page-header-bg: var(--gyro-surface-raised);
+  --gyro-page-canvas: var(--gyro-app);
+  --gyro-page-card: var(--gyro-surface);
+  --gyro-page-card-hover: var(--gyro-surface-raised);
   --gyro-ide-sidebar-width: 224px;
   --gyro-ide-tab-height: 32px;
   --gyro-ide-context-height: 32px;
@@ -195,14 +220,12 @@
   --gyro-file-font: #c9a86a;
   --gyro-file-data: #7fbf8f;
   color: var(--gyro-text);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--gyro-font-sans);
+  font-feature-settings:
+    "cv05" 1,
+    "cv11" 1,
+    "calt" 1;
+  font-synthesis: none;
 }
 
 /* Durable Chat context: attachments, goals, plans, and run controls. */
@@ -1833,41 +1856,35 @@ button.gyro-account-menu-row:hover {
   align-items: center;
   backdrop-filter: blur(14px) saturate(1.2);
   background: color-mix(in srgb, var(--gyro-surface-raised) 88%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-accent) 28%, var(--gyro-border));
+  border: 1px solid var(--gyro-border);
   border-radius: 999px;
-  box-shadow:
-    0 10px 28px var(--gyro-shadow),
-    0 0 0 1px color-mix(in srgb, var(--gyro-accent) 10%, transparent);
+  box-shadow: 0 10px 28px var(--gyro-shadow);
   display: flex;
-  gap: 10px;
-  left: 50%;
+  gap: 8px;
+  left: 0;
+  margin-inline: auto;
   max-width: min(560px, calc(100% - 28px));
-  padding: 7px 8px 7px 12px;
+  padding: 5px 6px 5px 12px;
   pointer-events: auto;
   position: absolute;
+  right: 0;
   top: 14px;
-  transform: translateX(-50%);
+  width: fit-content;
   z-index: 80;
 }
 
 .gyro-cli-update-banner-icon {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
-  border-radius: 999px;
-  color: var(--gyro-accent-strong, var(--gyro-accent));
+  color: var(--gyro-muted);
   display: inline-flex;
   flex: 0 0 auto;
-  height: 26px;
   justify-content: center;
-  width: 26px;
 }
 
 .gyro-cli-update-banner-copy {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 1px;
   min-width: 0;
 }
 
@@ -1882,13 +1899,17 @@ button.gyro-account-menu-row:hover {
   white-space: nowrap;
 }
 
-.gyro-cli-update-banner-copy small {
-  color: var(--gyro-muted);
-  font-size: 10px;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Names stay plain inline text so every word in the headline shares one
+   baseline; only the mark is nudged down to center on the cap height. */
+.gyro-cli-update-banner-name {
   white-space: nowrap;
+}
+
+.gyro-cli-update-banner-name .gyro-provider-logo {
+  height: 16px;
+  margin-right: 4px;
+  vertical-align: -0.28em;
+  width: 16px;
 }
 
 .gyro-cli-update-banner-action {
@@ -1933,28 +1954,16 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-cli-update-banner[data-phase="failed"] {
-  border-color: color-mix(in srgb, var(--gyro-danger) 40%, var(--gyro-border));
-  box-shadow:
-    0 10px 28px var(--gyro-shadow),
-    0 0 0 1px color-mix(in srgb, var(--gyro-danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-danger) 45%, var(--gyro-border));
 }
 
 .gyro-cli-update-banner[data-phase="failed"] .gyro-cli-update-banner-icon {
-  background: color-mix(in srgb, var(--gyro-danger) 14%, transparent);
   color: var(--gyro-danger);
 }
 
 :root[data-theme="light"] .gyro-cli-update-banner {
   background: color-mix(in srgb, var(--gyro-surface) 94%, #ffffff);
-  border-color: color-mix(in srgb, var(--gyro-accent) 22%, var(--gyro-border));
-  box-shadow:
-    0 12px 30px rgba(32, 40, 52, 0.12),
-    0 0 0 1px color-mix(in srgb, var(--gyro-accent) 8%, transparent);
-}
-
-:root[data-theme="light"] .gyro-cli-update-banner-icon {
-  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
-  color: var(--gyro-accent-strong, var(--gyro-accent));
+  box-shadow: 0 12px 30px rgba(32, 40, 52, 0.12);
 }
 
 :root[data-theme="dark"] .gyro-cli-update-banner {
@@ -2191,10 +2200,11 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-chat-prompt h1 {
-  color: var(--gyro-text);
+  color: var(--gyro-hero-heading);
+  font-family: var(--gyro-font-display);
   font-size: clamp(24px, 2vw, 30px);
-  font-weight: 500;
-  letter-spacing: 0;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   line-height: 1.15;
   margin: 0;
   text-align: center;
@@ -2580,14 +2590,22 @@ button.gyro-account-menu-row:hover {
 
 /* Stop is intentional and calm — not a louder danger pill than Send. */
 .gyro-send-button.is-stop {
-  background: color-mix(in srgb, var(--gyro-text) 14%, var(--gyro-surface-raised));
+  background: color-mix(
+    in srgb,
+    var(--gyro-text) 14%,
+    var(--gyro-surface-raised)
+  );
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--gyro-text) 18%, transparent);
   color: var(--gyro-text);
 }
 
 .gyro-send-button.is-stop:hover {
-  background: color-mix(in srgb, var(--gyro-text) 20%, var(--gyro-surface-raised));
+  background: color-mix(
+    in srgb,
+    var(--gyro-text) 20%,
+    var(--gyro-surface-raised)
+  );
   color: var(--gyro-text);
   transform: none;
 }
@@ -5012,13 +5030,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-browser-placeholder {
   align-items: center;
-  background:
-    radial-gradient(
-      120% 80% at 50% 0%,
-      color-mix(in srgb, var(--gyro-text) 6%, transparent),
-      transparent 55%
-    ),
-    var(--gyro-app, #111214);
+  background: var(--gyro-app);
   display: grid;
   height: 100%;
   justify-items: center;
@@ -5100,7 +5112,11 @@ button.gyro-account-menu-row:hover {
 
 .gyro-browser-placeholder-actions > button:hover {
   background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
-  border-color: color-mix(in srgb, var(--gyro-accent, #7aa2ff) 40%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent, #7aa2ff) 40%,
+    transparent
+  );
 }
 
 .gyro-browser-placeholder .gyro-browser-skeleton {
@@ -6672,11 +6688,7 @@ button.gyro-account-menu-row:hover {
 }
 
 body {
-  background: linear-gradient(
-    180deg,
-    var(--gyro-app) 0%,
-    var(--gyro-canvas-subtle) 100%
-  );
+  background: var(--gyro-app);
   text-rendering: geometricPrecision;
 }
 
@@ -6701,24 +6713,12 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-app) 92%, #1f2228) 0%,
-      var(--gyro-app) 280px
-    ),
-    var(--gyro-app);
+  background: var(--gyro-app);
   grid-template-columns: 248px minmax(0, 1fr);
 }
 
 .gyro-sidebar {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-sidebar) 88%, #282b30) 0%,
-      var(--gyro-sidebar) 44%
-    ),
-    var(--gyro-sidebar);
+  background: var(--gyro-sidebar);
   border-right-color: var(--gyro-border);
   padding: 12px 10px;
 }
@@ -6902,14 +6902,7 @@ textarea:focus-visible {
 
 .gyro-chat-landing {
   align-items: start;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-canvas-subtle) 84%, var(--gyro-accent) 5%)
-        0%,
-      var(--gyro-canvas-subtle) 58%
-    ),
-    var(--gyro-canvas-subtle);
+  background: var(--gyro-canvas-subtle);
   padding-top: clamp(104px, 16vh, 168px);
 }
 
@@ -6918,8 +6911,10 @@ textarea:focus-visible {
 }
 
 .gyro-chat-prompt h1 {
+  font-family: var(--gyro-font-display);
   font-size: clamp(25px, 2vw, 32px);
-  font-weight: 720;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   line-height: 1.08;
 }
 
@@ -7002,10 +6997,8 @@ textarea:focus-visible {
 .gyro-automation-stop,
 .gyro-automation-result,
 .gyro-browser-page {
-  border-radius: 8px;
-  box-shadow:
-    0 12px 28px color-mix(in srgb, var(--gyro-shadow) 72%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
 }
 
 .gyro-cli-surface,
@@ -7060,20 +7053,12 @@ textarea:focus-visible {
 
 .gyro-pane-tabs button.is-active,
 .gyro-terminal-tab.is-active {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--gyro-surface-soft) 78%, var(--gyro-accent) 10%) 0%,
-    var(--gyro-pane) 100%
-  );
+  background: var(--gyro-pane);
   box-shadow: inset 0 -2px 0 var(--gyro-accent);
 }
 
 .gyro-terminal-grid {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--gyro-pane) 82%, #15171b) 0%,
-    var(--gyro-pane) 100%
-  );
+  background: var(--gyro-pane);
   gap: 10px;
   padding: 10px;
 }
@@ -7115,13 +7100,7 @@ textarea:focus-visible {
 .gyro-inline-diff,
 .gyro-code-surface,
 .gyro-browser-frame {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-code-bg) 92%, #141922 8%) 0%,
-      var(--gyro-code-bg) 220px
-    ),
-    var(--gyro-code-bg);
+  background: var(--gyro-code-bg);
 }
 
 .gyro-terminal-controlbar select,
@@ -9289,13 +9268,7 @@ textarea:focus-visible {
   min-width: 0;
   overflow: auto;
   padding: clamp(24px, 4vw, 52px);
-  background:
-    radial-gradient(
-      circle at 82% 0%,
-      color-mix(in srgb, var(--gyro-accent) 8%, transparent),
-      transparent 34%
-    ),
-    var(--gyro-workspace-bg);
+  background: var(--gyro-workspace-bg);
 }
 
 .gyro-workspace-settings-editor > header {
@@ -13228,10 +13201,12 @@ textarea:focus-visible {
   border-radius: 0;
   box-shadow: none;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 0 0 10px;
+  scrollbar-width: none;
 }
 
 .gyro-settings-nav button {
@@ -13446,13 +13421,7 @@ body {
 
 .gyro-sidebar,
 .gyro-app-shell.is-chat-shell .gyro-sidebar {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-premium-sidebar) 88%, #2a2c31) 0%,
-      var(--gyro-premium-sidebar) 34%
-    ),
-    var(--gyro-premium-sidebar);
+  background: var(--gyro-sidebar);
   border-right-color: var(--gyro-premium-line);
 }
 
@@ -13559,13 +13528,7 @@ body {
 
 .gyro-sidebar-footer,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-premium-sidebar) 0%, transparent) 0%,
-      var(--gyro-premium-sidebar) 24%
-    ),
-    var(--gyro-premium-sidebar);
+  background: var(--gyro-sidebar);
   border-top: 1px solid
     color-mix(in srgb, var(--gyro-premium-line) 52%, transparent);
 }
@@ -15169,9 +15132,7 @@ body {
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 42%),
-    #2b2c2f;
+  background: #2b2c2f;
   border: 1px solid transparent;
   border-radius: 20px;
   box-shadow:
@@ -17854,8 +17815,7 @@ textarea,
 }
 
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-shell {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.76), transparent 44%), #ffffff;
+  background: #ffffff;
   box-shadow:
     0 18px 38px rgba(32, 34, 38, 0.1),
     inset 0 0 0 0.5px rgba(32, 34, 38, 0.14),
@@ -22146,7 +22106,11 @@ button.gyro-settings-row em::after {
 .gyro-send-button.is-stop,
 .gyro-chat-composer-dock .gyro-send-button.is-stop,
 .gyro-chat-start .gyro-send-button.is-stop {
-  background: color-mix(in srgb, var(--gyro-text) 14%, var(--gyro-surface-raised, #2a2b2f));
+  background: color-mix(
+    in srgb,
+    var(--gyro-text) 14%,
+    var(--gyro-surface-raised, #2a2b2f)
+  );
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--gyro-text) 20%, transparent);
   color: var(--gyro-text);
@@ -22156,7 +22120,11 @@ button.gyro-settings-row em::after {
 .gyro-send-button.is-stop:hover,
 .gyro-chat-composer-dock .gyro-send-button.is-stop:hover,
 .gyro-chat-start .gyro-send-button.is-stop:hover {
-  background: color-mix(in srgb, var(--gyro-text) 22%, var(--gyro-surface-raised, #2a2b2f));
+  background: color-mix(
+    in srgb,
+    var(--gyro-text) 22%,
+    var(--gyro-surface-raised, #2a2b2f)
+  );
   color: var(--gyro-text);
   transform: none;
 }
@@ -22992,7 +22960,7 @@ button.gyro-settings-row em::after {
 }
 
 :root[data-theme="light"] .gyro-chat-run-change-summary > header {
-  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  background: var(--gyro-surface);
 }
 
 :root[data-theme="light"] .gyro-change-summary-actions > button {
@@ -24746,7 +24714,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-bar > span {
-  background: linear-gradient(90deg, #7e8998, #b4bdc9);
+  background: #9aa3ae;
   border-radius: 2px;
   display: block;
   height: 100%;
@@ -24811,11 +24779,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-limit-bar > span {
-  background: linear-gradient(
-    90deg,
-    var(--gyro-accent),
-    var(--gyro-accent-strong)
-  );
+  background: var(--gyro-accent);
   border-radius: inherit;
   display: block;
   height: 100%;
@@ -24823,11 +24787,11 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-limit-row.is-warning .gyro-composer-limit-bar > span {
-  background: linear-gradient(90deg, #c9922f, #e0aa46);
+  background: var(--gyro-warn);
 }
 
 .gyro-composer-limit-row.is-critical .gyro-composer-limit-bar > span {
-  background: linear-gradient(90deg, #c04a43, #db6157);
+  background: var(--gyro-danger);
 }
 
 /*
@@ -25817,13 +25781,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-kanban-grid {
-  background:
-    radial-gradient(
-      circle at 50% -20%,
-      color-mix(in srgb, var(--gyro-accent) 6%, transparent),
-      transparent 42%
-    ),
-    var(--gyro-page-canvas);
+  background: var(--gyro-page-canvas);
   gap: 10px;
   padding: 12px;
 }
@@ -26066,9 +26024,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-workspace-route.is-code .gyro-editor-tabs {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent),
-    var(--gyro-ide-header-bg);
+  background: var(--gyro-ide-header-bg);
 }
 
 .gyro-workspace-route.is-code .gyro-editor-tabs > button {
@@ -26093,13 +26049,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-workspace-route.is-code .gyro-code-empty {
-  background:
-    radial-gradient(
-      circle at 50% 52%,
-      color-mix(in srgb, var(--gyro-accent) 4%, transparent),
-      transparent 28%
-    ),
-    var(--gyro-ide-editor-bg);
+  background: var(--gyro-ide-editor-bg);
   color: var(--gyro-ide-secondary-foreground);
 }
 
@@ -26114,13 +26064,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-workspace-route.is-code > .gyro-editor-statusbar {
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--gyro-accent) 5%, transparent),
-      transparent 32%
-    ),
-    var(--gyro-ide-status-bg);
+  background: var(--gyro-ide-status-bg);
 }
 
 .gyro-editor-statusbar-group > span:hover {
@@ -26130,17 +26074,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-ide-surface.is-project-empty {
-  background:
-    radial-gradient(
-      circle at 50% 42%,
-      color-mix(in srgb, var(--gyro-accent) 7%, transparent),
-      transparent 34%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--gyro-ide-editor-bg) 96%, #fff 4%),
-      var(--gyro-ide-editor-bg)
-    );
+  background: var(--gyro-ide-editor-bg);
 }
 
 .gyro-ide-project-empty {
@@ -26165,11 +26099,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-ide-project-empty-icon {
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--gyro-accent) 13%, transparent),
-    color-mix(in srgb, var(--gyro-surface-raised) 92%, transparent)
-  );
+  background: var(--gyro-surface-raised);
   border-color: color-mix(in srgb, var(--gyro-accent) 20%, transparent);
   border-radius: 16px;
   box-shadow:
@@ -26223,10 +26153,10 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] {
-  --gyro-page-header-bg: linear-gradient(180deg, #ffffff, #f7f8fa);
-  --gyro-page-canvas: #f6f7f9;
-  --gyro-page-card: #ffffff;
-  --gyro-page-card-hover: #f8faff;
+  --gyro-page-header-bg: var(--gyro-surface);
+  --gyro-page-canvas: var(--gyro-app);
+  --gyro-page-card: var(--gyro-surface);
+  --gyro-page-card-hover: var(--gyro-surface-raised);
 }
 
 :root[data-theme="light"] .gyro-workspace-route.is-code {
@@ -26672,11 +26602,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-composer-context-bar > span {
-  background: linear-gradient(
-    90deg,
-    var(--gyro-accent),
-    var(--gyro-accent-strong)
-  );
+  background: var(--gyro-accent);
   min-width: 0;
   transition: width var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
@@ -26812,12 +26738,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-shell
   > .gyro-composer-attachments
   .gyro-composer-attachment.is-image {
-  background:
-    linear-gradient(45deg, rgba(127, 135, 148, 0.08) 25%, transparent 25%) 0 0 /
-      12px 12px,
-    linear-gradient(-45deg, rgba(127, 135, 148, 0.08) 25%, transparent 25%) 0
-      0 / 12px 12px,
-    var(--gyro-surface-raised);
+  background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: 8px;
   box-shadow: none;
@@ -29945,4 +29866,147 @@ button.gyro-account-menu-row:hover,
 
 .gyro-run-header-actions button:hover {
   color: var(--gyro-text);
+}
+
+/* --------------------------------------------------------------------------
+ * Quality lock. Wins over leftover compatibility layers. No decorative
+ * gradients. Type, primitives, empty states, and page chrome share one bar.
+ * -------------------------------------------------------------------------- */
+
+.gyro-button,
+.gyro-primary-button,
+.gyro-secondary-button,
+.gyro-icon-button {
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  min-height: var(--gyro-control-standard);
+}
+
+.gyro-field,
+.gyro-select,
+.gyro-url-bar,
+.gyro-terminal-controlbar select,
+.gyro-terminal-controlbar input,
+.gyro-provider-handoff-form input,
+.gyro-provider-handoff-form select {
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-chrome);
+}
+
+.gyro-card,
+.gyro-tools-card,
+.gyro-provider-card,
+.gyro-kanban-column,
+.gyro-task-card,
+.gyro-automation-metric {
+  background: var(--gyro-page-card);
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+}
+
+.gyro-page-header,
+.gyro-surface-page-header {
+  background: var(--gyro-page-header-bg);
+}
+
+.gyro-surface-page-header h1,
+.gyro-tools-head h1,
+.gyro-chat-prompt h1,
+.gyro-ide-project-empty h1,
+.gyro-early-shell-hero h1 {
+  font-family: var(--gyro-font-display);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.gyro-empty,
+.gyro-automation-empty,
+.gyro-pane-empty,
+.gyro-code-empty,
+.gyro-terminal-empty,
+.gyro-plan-empty {
+  align-content: center;
+  background: transparent;
+  color: var(--gyro-muted);
+  justify-items: center;
+  text-align: center;
+}
+
+.gyro-empty strong,
+.gyro-automation-empty strong,
+.gyro-ide-project-empty h1 {
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.gyro-pane-empty-icon,
+.gyro-ide-project-empty-icon {
+  background: var(--gyro-surface-raised);
+  box-shadow: none;
+}
+
+.gyro-settings-nav {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.gyro-settings-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.gyro-provider-model-picker button.is-active {
+  background: color-mix(in srgb, var(--gyro-accent) 8%, var(--gyro-surface));
+  border-color: color-mix(in srgb, var(--gyro-accent) 28%, var(--gyro-border));
+  box-shadow: inset 2px 0 0 var(--gyro-accent);
+}
+
+.gyro-automation-empty strong {
+  font-size: var(--gyro-font-lead);
+}
+
+.gyro-overlay,
+.gyro-command-palette,
+.gyro-project-remove-card,
+.gyro-account-menu,
+.gyro-session-menu,
+.gyro-composer-popover {
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-composer);
+  box-shadow:
+    0 18px 44px var(--gyro-premium-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
+.gyro-code-empty,
+.gyro-ide-surface.is-project-empty {
+  background: var(--gyro-code-bg);
+}
+
+.gyro-chat-landing,
+.gyro-tools-surface,
+.gyro-board-surface,
+.gyro-automations-surface,
+.gyro-providers-surface,
+.gyro-settings-surface,
+.gyro-cli-surface,
+.gyro-ide-surface,
+.gyro-diff-review {
+  background: var(--gyro-page-canvas);
+}
+
+@media (max-width: 980px) {
+  .gyro-settings-nav {
+    flex-wrap: nowrap;
+  }
 }

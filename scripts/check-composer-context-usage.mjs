@@ -352,4 +352,37 @@ assert.equal(
   0,
 );
 
+// Kimi speaks its own window vocabulary — the context row its /usage scrape
+// reports — and gets that placeholder before the first reading arrives.
+const kimiDefaults = composerLimitWindows([], { providerId: "kimi" }, [], now);
+assert.deepEqual(
+  kimiDefaults.map((window) => [window.id, window.label, window.percentLabel]),
+  [["context", "Context window", "—"]],
+);
+
+// Ledger spend rows ride the polled-windows channel under ids that never
+// collide with plan windows, and never suppress the default placeholders.
+const withLedgerRow = composerLimitWindows(
+  [],
+  { providerId: "openai" },
+  [{ id: "ledger-weekly", label: "Weekly spend · local", usedPercent: 12 }],
+  now,
+);
+assert.deepEqual(
+  withLedgerRow.map((window) => window.id),
+  ["five-hour", "weekly", "ledger-weekly"],
+);
+
+// For a provider with no plan API, the ledger row is the whole list.
+const geminiLedgerRow = composerLimitWindows(
+  [],
+  { providerId: "gemini" },
+  [{ id: "ledger-weekly", label: "Weekly spend · local", usedPercent: 34 }],
+  now,
+);
+assert.deepEqual(
+  geminiLedgerRow.map((window) => [window.id, window.percent]),
+  [["ledger-weekly", 34]],
+);
+
 console.log("Composer context usage checks passed.");

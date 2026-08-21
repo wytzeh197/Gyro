@@ -10410,8 +10410,10 @@ async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot
 /// 3. **Anthropic / Claude** — live `/api/oauth/usage` (5h + weekly used %),
 ///    falling back to the windows streamed mid-answer, which carry a reset but
 ///    no percentage.
+/// 4. **Kimi** — live ACP `/usage` scrape: the context window today, plus the
+///    weekly and 5-hour quota lines when the CLI starts printing them.
 ///
-/// Kimi and Gemini have no plan-window source here; use the ledger for spend.
+/// Gemini has no usage source here; use the ledger for spend.
 fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
     let mut live_error: Option<String> = None;
     let mut windows = if provider_id == "openai" {
@@ -10449,6 +10451,17 @@ fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapsho
                 // The stream still names the window and its reset, so a failed
                 // poll degrades to "5-hour limit, resets in 2 hr" rather than
                 // to nothing at all.
+                stored_provider_usage(provider_id)?.windows
+            }
+        }
+    } else if provider_id == "kimi" {
+        match fetch_kimi_provider_usage(provider_id) {
+            Ok(snapshot) => {
+                remember_provider_rate_limits(provider_id, &snapshot.windows);
+                snapshot.windows
+            }
+            Err(error) => {
+                live_error = Some(error);
                 stored_provider_usage(provider_id)?.windows
             }
         }
@@ -10624,6 +10637,244 @@ fn provider_usage_windows_from_xai_billing(
         used_percent: Some(used_percent),
         resets_at,
     }]
+}
+
+/// Ask Kimi Code what its own `/usage` command reports, over ACP.
+///
+/// Kimi exposes no plan-quota endpoint; `/usage` is the one place the CLI
+/// states the account's usage, and ACP is how Gyro already drives the CLI for
+/// chat. This runs the same sequence an IDE would — `initialize`,
+/// `authenticate`, a throwaway session, `/usage` as the prompt — and reads the
+/// answer back off the message stream. The throwaway session is deleted again
+/// so background polling does not litter the user's session list.
+fn fetch_kimi_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
+    let mut process = command_with_gui_path("kimi");
+    process
+        .args(["acp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = process
+        .spawn()
+        .map_err(|error| format!("could not start the Kimi usage service: {error}"))?;
+    let result = (|| {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Kimi usage service input is unavailable".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Kimi usage service output is unavailable".to_string())?;
+        let messages = spawn_codex_app_server_reader(stdout);
+        // Session setup adds a step Grok's poll does not need; allow for spawn.
+        let deadline = Instant::now() + Duration::from_secs(20);
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientInfo": {
+                        "name": "gyro",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "clientCapabilities": {},
+                },
+            }),
+        )?;
+        let initialize = receive_codex_app_server_response(&messages, 1, deadline)?;
+        codex_app_server_result(&initialize)?;
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 2,
+                "method": "authenticate",
+                "params": { "methodId": "login" },
+            }),
+        )?;
+        let auth = receive_codex_app_server_response(&messages, 2, deadline)?;
+        if auth.get("error").is_some() {
+            return Err(auth
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Sign in to Kimi Code to read your plan usage.")
+                .to_string());
+        }
+
+        let cwd = user_home_directory().map_err(to_string)?;
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 3,
+                "method": "session/new",
+                "params": { "cwd": cwd, "mcpServers": [] },
+            }),
+        )?;
+        let session = receive_codex_app_server_response(&messages, 3, deadline)?;
+        let session_id = codex_app_server_result(&session)?
+            .get("sessionId")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "Kimi did not open a usage session".to_string())?
+            .to_string();
+
+        let usage = (|| {
+            write_codex_app_server_message(
+                &mut stdin,
+                &serde_json::json!({
+                    "id": 4,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id,
+                        "prompt": [{ "type": "text", "text": "/usage" }],
+                    },
+                }),
+            )?;
+            receive_kimi_usage_text(&messages, 4, deadline)
+        })();
+
+        // Best-effort cleanup: a leftover probe session would show up in the
+        // user's `/sessions` list on every poll. Wait for the acknowledgement
+        // so the delete lands before the child is killed.
+        let _ = write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 5,
+                "method": "session/delete",
+                "params": { "sessionId": session_id },
+            }),
+        );
+        let _ = receive_codex_app_server_response(
+            &messages,
+            5,
+            Instant::now() + Duration::from_secs(3),
+        );
+
+        let text = usage?;
+        let windows = provider_usage_windows_from_kimi_usage(&text);
+        if windows.is_empty() {
+            return Err("Kimi /usage did not report a usage window".into());
+        }
+        Ok(ProviderUsageSnapshot {
+            provider_id: provider_id.into(),
+            windows,
+            fetched_at: chrono::Utc::now().to_rfc3339(),
+        })
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+/// Read `session/prompt` to the end, keeping the text Kimi streamed back.
+///
+/// `/usage` answers through `agent_message_chunk` notifications, not the
+/// response payload, so the plain response helper cannot be used here.
+fn receive_kimi_usage_text(
+    messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
+    request_id: u64,
+    deadline: Instant,
+) -> Result<String, String> {
+    let mut text = String::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Kimi usage request timed out".into());
+        }
+        let message = messages
+            .recv_timeout(remaining)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => "Kimi usage request timed out".to_string(),
+                mpsc::RecvTimeoutError::Disconnected => {
+                    "Kimi usage service disconnected".to_string()
+                }
+            })??;
+        if message.get("id").and_then(serde_json::Value::as_u64) == Some(request_id) {
+            codex_app_server_result(&message)?;
+            return Ok(text);
+        }
+        let update = message
+            .get("params")
+            .and_then(|params| params.get("update"));
+        if let Some(update) = update {
+            if update.get("sessionUpdate").and_then(serde_json::Value::as_str)
+                == Some("agent_message_chunk")
+            {
+                if let Some(chunk) = update
+                    .get("content")
+                    .and_then(|content| content.get("text"))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    text.push_str(chunk);
+                }
+            }
+        }
+    }
+}
+
+/// The first percentage a `/usage` line states, e.g. the `0` in
+/// `Context: 0 / 262144 tokens (0%)`.
+fn kimi_usage_line_percent(line: &str) -> Option<i32> {
+    let bytes = line.as_bytes();
+    let percent_at = bytes.iter().position(|byte| *byte == b'%')?;
+    let mut start = percent_at;
+    while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
+        start -= 1;
+    }
+    if start == percent_at {
+        return None;
+    }
+    line[start..percent_at]
+        .parse::<f64>()
+        .ok()
+        .map(|value| value.round().clamp(0.0, 100.0) as i32)
+}
+
+/// Map Kimi `/usage` text onto Gyro usage windows.
+///
+/// The command prints one line per meter — "Context: 0 / 262144 tokens (0%)"
+/// is what the current build answers over ACP, and the weekly and 5-hour plan
+/// quota lines the membership carries are picked up as soon as the CLI prints
+/// them there. A line only becomes a window when it pairs a label Gyro knows
+/// with a percentage; anything else is ignored rather than guessed at.
+fn provider_usage_windows_from_kimi_usage(text: &str) -> Vec<ProviderRateLimitWindow> {
+    let mut windows = Vec::new();
+    let mut seen = HashSet::new();
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        let (id, label) = if lower.trim_start().starts_with("context:") {
+            ("context", "Context window")
+        } else if lower.contains("week") {
+            ("weekly", "Weekly limit")
+        } else if lower.contains("5-hour") || lower.contains("5 hour") || lower.contains("5h") {
+            ("five-hour", "5-hour limit")
+        } else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(used_percent) = kimi_usage_line_percent(line) else {
+            continue;
+        };
+        let status = match used_percent {
+            100 => "exhausted",
+            80..=99 => "warning",
+            _ => "ok",
+        };
+        windows.push(ProviderRateLimitWindow {
+            id: id.into(),
+            label: label.into(),
+            status: status.into(),
+            used_percent: Some(used_percent),
+            resets_at: None,
+        });
+    }
+    windows
 }
 
 /// Where Claude Code keeps the OAuth token Gyro reuses to read plan usage.
@@ -23661,6 +23912,52 @@ while True:
         assert_eq!(window.id, "monthly-opus");
         assert_eq!(window.label, "Monthly opus limit");
         assert_eq!(window.status, "warning");
+    }
+
+    /// What the current CLI build actually answers over ACP: the context
+    /// window, and a session total line Gyro does not turn into a window.
+    #[test]
+    fn kimi_usage_maps_the_context_window_line() {
+        let windows = provider_usage_windows_from_kimi_usage(
+            "Context: 12345 / 262144 tokens (5%)\nSession total: 12 calls, 34000 tokens",
+        );
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].id, "context");
+        assert_eq!(windows[0].label, "Context window");
+        assert_eq!(windows[0].used_percent, Some(5));
+        assert_eq!(windows[0].status, "ok");
+    }
+
+    /// The membership quota lines join the same output when the CLI prints
+    /// them; each pairs its label with a percentage.
+    #[test]
+    fn kimi_usage_picks_up_plan_quota_lines_when_printed() {
+        let windows = provider_usage_windows_from_kimi_usage(
+            "Context: 0 / 262144 tokens (0%)\n\
+             5-hour quota: 96% used\n\
+             Weekly quota: 42% used",
+        );
+        assert_eq!(windows.len(), 3);
+        assert_eq!(windows[1].id, "five-hour");
+        assert_eq!(windows[1].used_percent, Some(96));
+        assert_eq!(windows[1].status, "warning");
+        assert_eq!(windows[2].id, "weekly");
+        assert_eq!(windows[2].label, "Weekly limit");
+        assert_eq!(windows[2].used_percent, Some(42));
+        assert_eq!(windows[2].status, "ok");
+    }
+
+    /// A full window is reported as exhausted, and text without a known
+    /// labelled percentage stays windowless rather than inventing one.
+    #[test]
+    fn kimi_usage_marks_full_windows_exhausted_and_ignores_the_rest() {
+        let windows =
+            provider_usage_windows_from_kimi_usage("Weekly quota: 100% used\nhello world");
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].status, "exhausted");
+        assert!(provider_usage_windows_from_kimi_usage("no usage here").is_empty());
+        // A label without a percentage is not a reading.
+        assert!(provider_usage_windows_from_kimi_usage("Weekly quota: unavailable").is_empty());
     }
 
     #[test]

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   estimateTurnCost,
+  ledgerLimitWindows,
   ledgerWindows,
   formatTokenCount,
   isOutsizedTurn,
@@ -414,5 +415,29 @@ const idle = ledgerWindows({
 assert.equal(idle[0].percentLabel, "0%");
 assert.equal(idle[0].detail, "0 of 14M");
 assert.deepEqual(idle[0].origins, []);
+
+// The composer shape: prefixed ids so local spend never overwrites a plan
+// window of the same length, and labels that say the spend is measured locally.
+assert.deepEqual(ledgerLimitWindows(undefined), []);
+const limitRows = ledgerLimitWindows({
+  providerId: "gemini",
+  dailyReferenceTokens: 2_000_000,
+  fiveHour: totals(),
+  week: totals({ calls: 9, totalTokens: 1_400_000 }),
+});
+assert.deepEqual(
+  limitRows.map((window) => [window.id, window.label, window.usedPercent]),
+  [["ledger-weekly", "Weekly spend · local", 10]],
+);
+const anthropicLimitRows = ledgerLimitWindows({
+  providerId: "anthropic",
+  dailyReferenceTokens: 2_000_000,
+  fiveHour: totals({ calls: 4, totalTokens: 200_000 }),
+  week: totals({ calls: 20, totalTokens: 2_800_000 }),
+});
+assert.deepEqual(
+  anthropicLimitRows.map((window) => window.id),
+  ["ledger-five-hour", "ledger-weekly"],
+);
 
 console.log("usage ledger checks passed");
