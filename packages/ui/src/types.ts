@@ -1380,9 +1380,19 @@ export type TaskDefinition = {
   args: string[];
   group: "build" | "test" | "dev" | "custom";
   cwd?: string;
-  status: "idle" | "running" | "done" | "failed";
+  status: "idle" | "running" | "done" | "failed" | "cancelled";
   lastRunAt?: string;
   outputChannelId?: string;
+  /** "suggested" comes from project manifests, "custom" from saved commands. */
+  source?: "suggested" | "custom";
+};
+
+/** A command the person typed into Run and Test to keep for this workspace. */
+export type CustomTaskDraft = {
+  commandLine: string;
+  label?: string;
+  group?: TaskDefinition["group"];
+  cwd?: string;
 };
 
 export type TestTreeItem = {

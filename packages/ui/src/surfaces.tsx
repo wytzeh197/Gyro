@@ -124,7 +124,6 @@ import {
 import {
   estimateTurnCost,
   formatTokenCount,
-  ledgerLimitWindows,
   ledgerWindows,
   summarizeUsageSafety,
 } from "./usage-ledger";
@@ -154,6 +153,7 @@ import {
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
 import type {
+  CustomTaskDraft,
   AppDestination,
   Automation,
   BrowserPreview,
@@ -265,7 +265,6 @@ import {
   providerCapabilities,
   providerDefaultModelId,
   providerNeedsSignInRepair,
-  providerSupportsUsage,
   providersForConfig,
   selectedModelLabel,
   selectedReasoningEffort,
@@ -490,6 +489,9 @@ type AppChromeProps = {
   onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
   onCommitSourceControl?: (message: string) => void;
+  onPushSourceControl?: () => void;
+  onPullSourceControl?: () => void;
+  isSourceControlSyncing?: boolean;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
   onSelectWorkspaceBranch?: (branch: string) => void;
@@ -503,6 +505,10 @@ type AppChromeProps = {
   ) => void | Promise<void>;
   onOpenGithubUrl?: (url: string) => void | Promise<void>;
   onRunIdeTask?: (task: TaskDefinition) => void;
+  onStopIdeTask?: (task: TaskDefinition) => void | Promise<void>;
+  onRefreshIdeTasks?: () => void;
+  onCreateCustomTask?: (draft: CustomTaskDraft) => void | Promise<void>;
+  onDeleteCustomTask?: (task: TaskDefinition) => void | Promise<void>;
   onStartDebugSession?: (command: string) => void;
   onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
   onStopDebugSession?: (session: DebugSessionState) => void;
@@ -1190,6 +1196,9 @@ export function AppChrome({
   onDiscardSourceControlFile,
   onOpenSourceControlDiff,
   onCommitSourceControl,
+  onPushSourceControl,
+  onPullSourceControl,
+  isSourceControlSyncing = false,
   branchCatalog,
   isBranchLoading = false,
   onSelectWorkspaceBranch,
@@ -1200,6 +1209,10 @@ export function AppChrome({
   onRerunGithubRun,
   onOpenGithubUrl,
   onRunIdeTask,
+  onStopIdeTask,
+  onRefreshIdeTasks,
+  onCreateCustomTask,
+  onDeleteCustomTask,
   onStartDebugSession,
   onSendDebugCommand,
   onStopDebugSession,
@@ -1634,6 +1647,9 @@ export function AppChrome({
               onRefreshSourceControl={onRefreshSourceControl}
               onOpenSourceControlDiff={onOpenSourceControlDiff}
               onCommitSourceControl={onCommitSourceControl}
+              onPushSourceControl={onPushSourceControl}
+              onPullSourceControl={onPullSourceControl}
+              isSourceControlSyncing={isSourceControlSyncing}
               branchCatalog={branchCatalog}
               isBranchLoading={isBranchLoading}
               onSelectWorkspaceBranch={onSelectWorkspaceBranch}
@@ -1645,6 +1661,10 @@ export function AppChrome({
               onRerunGithubRun={onRerunGithubRun}
               onOpenGithubUrl={onOpenGithubUrl}
               onRunIdeTask={onRunIdeTask}
+              onStopIdeTask={onStopIdeTask}
+              onRefreshIdeTasks={onRefreshIdeTasks}
+              onCreateCustomTask={onCreateCustomTask}
+              onDeleteCustomTask={onDeleteCustomTask}
               onStartDebugSession={onStartDebugSession}
               onSendDebugCommand={onSendDebugCommand}
               onStopDebugSession={onStopDebugSession}
@@ -2398,6 +2418,86 @@ function scmStateDecoration(state: SourceControlFile["state"]) {
   return SCM_STATE_DECORATIONS[state] ?? SCM_STATE_DECORATIONS.modified;
 }
 
+/**
+ * The row that gets a commit off this machine.
+ *
+ * Committing writes history locally; nothing reaches GitHub until it is
+ * pushed, so the panel says where the branch stands against its remote and
+ * offers the one press that closes the gap. A branch that has never been
+ * published says so plainly — "Publish branch" is a different act from a
+ * push, and the count that would normally sit beside it does not exist yet.
+ */
+function ScmSyncRow({
+  ahead,
+  behind,
+  hasRemote,
+  onPull,
+  onPush,
+  syncing,
+  upstream,
+}: {
+  ahead: number;
+  behind: number;
+  hasRemote: boolean;
+  onPull?: () => void;
+  onPush?: () => void;
+  syncing: boolean;
+  upstream?: string;
+}) {
+  if (!hasRemote) {
+    return null;
+  }
+  const published = Boolean(upstream);
+  const pushLabel = published
+    ? ahead > 0
+      ? `Push ${ahead}`
+      : "Push"
+    : "Publish branch";
+  const summary = !published
+    ? "This branch is not on the remote yet"
+    : behind > 0 && ahead > 0
+      ? `${ahead} to push, ${behind} to pull`
+      : ahead > 0
+        ? `${ahead} commit${ahead === 1 ? "" : "s"} to push`
+        : behind > 0
+          ? `${behind} commit${behind === 1 ? "" : "s"} to pull`
+          : `Up to date with ${upstream}`;
+  return (
+    <div className="gyro-sidebar-scm-sync">
+      <span className="gyro-scm-sync-summary" title={upstream ?? undefined}>
+        {summary}
+      </span>
+      <div className="gyro-scm-sync-actions">
+        {behind > 0 ? (
+          <button
+            className="is-secondary"
+            disabled={syncing}
+            onClick={onPull}
+            title={`Pull ${behind} from ${upstream}`}
+            type="button"
+          >
+            <ArrowDown size={12} />
+            {`Pull ${behind}`}
+          </button>
+        ) : null}
+        <button
+          disabled={syncing || (published && ahead === 0 && behind === 0)}
+          onClick={onPush}
+          title={
+            published
+              ? `Push to ${upstream}`
+              : "Push this branch to the remote and track it"
+          }
+          type="button"
+        >
+          <ArrowUp size={12} />
+          {syncing ? "Working…" : pushLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Cap per group so a huge working tree cannot stall the sidebar. */
 const SCM_GROUP_LIMIT = 60;
 
@@ -2612,6 +2712,9 @@ function WorkspaceSidebarContent({
   onDiscardSourceControlFile,
   onOpenSourceControlDiff,
   onCommitSourceControl,
+  onPushSourceControl,
+  onPullSourceControl,
+  isSourceControlSyncing = false,
   branchCatalog,
   isBranchLoading = false,
   onSelectWorkspaceBranch,
@@ -2622,6 +2725,10 @@ function WorkspaceSidebarContent({
   onRerunGithubRun,
   onOpenGithubUrl,
   onRunIdeTask,
+  onStopIdeTask,
+  onRefreshIdeTasks,
+  onCreateCustomTask,
+  onDeleteCustomTask,
   onStartDebugSession,
   onSendDebugCommand,
   onStopDebugSession,
@@ -2711,6 +2818,9 @@ function WorkspaceSidebarContent({
   onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
   onCommitSourceControl?: (message: string) => void;
+  onPushSourceControl?: () => void;
+  onPullSourceControl?: () => void;
+  isSourceControlSyncing?: boolean;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
   onSelectWorkspaceBranch?: (branch: string) => void;
@@ -2724,6 +2834,10 @@ function WorkspaceSidebarContent({
   ) => void | Promise<void>;
   onOpenGithubUrl?: (url: string) => void | Promise<void>;
   onRunIdeTask?: (task: TaskDefinition) => void;
+  onStopIdeTask?: (task: TaskDefinition) => void | Promise<void>;
+  onRefreshIdeTasks?: () => void;
+  onCreateCustomTask?: (draft: CustomTaskDraft) => void | Promise<void>;
+  onDeleteCustomTask?: (task: TaskDefinition) => void | Promise<void>;
   onStartDebugSession?: (command: string) => void;
   onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
   onStopDebugSession?: (session: DebugSessionState) => void;
@@ -2873,6 +2987,16 @@ function WorkspaceSidebarContent({
     [sourceControlFiles],
   );
   const [debugAdapterCommand, setDebugAdapterCommand] = useState("lldb-dap");
+  const [isAddingRunCommand, setIsAddingRunCommand] = useState(false);
+  const [runCommandDraft, setRunCommandDraft] = useState("");
+  const [runCommandLabelDraft, setRunCommandLabelDraft] = useState("");
+  const [runCommandGroupDraft, setRunCommandGroupDraft] =
+    useState<TaskDefinition["group"]>("custom");
+  const [runCommandFilter, setRunCommandFilter] = useState("");
+  const runTaskGroups = useMemo(
+    () => groupedRunTasks(ide?.taskDefinitions ?? [], runCommandFilter),
+    [ide?.taskDefinitions, runCommandFilter],
+  );
   const visibleFiles = useMemo(
     () =>
       files.filter((file) =>
@@ -3865,6 +3989,15 @@ function WorkspaceSidebarContent({
                     </button>
                   </div>
                 </form>
+                <ScmSyncRow
+                  ahead={ide?.sourceControl.ahead ?? 0}
+                  behind={ide?.sourceControl.behind ?? 0}
+                  hasRemote={ide?.sourceControl.available === true}
+                  onPull={onPullSourceControl}
+                  onPush={onPushSourceControl}
+                  syncing={isSourceControlSyncing}
+                  upstream={ide?.sourceControl.upstream}
+                />
                 {ide?.sourceControl.error ? (
                   <div className="gyro-sidebar-mini-copy is-error">
                     {ide.sourceControl.error}
@@ -4000,148 +4133,268 @@ function WorkspaceSidebarContent({
           {activeIdeView === "run-test" ? (
             <SidebarSection
               grow
+              headerActions={
+                <div className="gyro-sidebar-section-actions">
+                  <button
+                    aria-label="Add a command"
+                    onClick={() => setIsAddingRunCommand((open) => !open)}
+                    title="Add a command"
+                    type="button"
+                  >
+                    <Plus size={12} />
+                  </button>
+                  <button
+                    aria-label="Rescan workspace commands"
+                    onClick={() => onRefreshIdeTasks?.()}
+                    title="Rescan commands"
+                    type="button"
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                </div>
+              }
               meta={String(ide?.taskDefinitions.length ?? 0)}
               title="Run and Test"
             >
-              <form
-                className="gyro-sidebar-debug-launch"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const command = debugAdapterCommand.trim();
-                  if (command) {
-                    onStartDebugSession?.(command);
-                  }
-                }}
-              >
-                <input
-                  aria-label="Debug adapter command"
-                  onChange={(event) =>
-                    setDebugAdapterCommand(event.target.value)
-                  }
-                  placeholder="lldb-dap or debugpy-adapter"
-                  value={debugAdapterCommand}
-                />
-                <button
-                  disabled={!debugAdapterCommand.trim()}
-                  title="Initialize local debug adapter"
-                  type="submit"
-                >
-                  <Play size={13} />
-                  Start
-                </button>
-              </form>
-              <div className="gyro-sidebar-mini-copy">
-                Gyro uses adapters already installed on this device and never
-                installs one automatically.
-              </div>
-              {(ide?.debugSessions ?? []).map((session) => (
-                <div className="gyro-sidebar-debug-session" key={session.id}>
-                  <div>
-                    <span>{session.name}</span>
-                    <small>{session.status}</small>
-                  </div>
-                  <div className="gyro-sidebar-debug-controls">
-                    <button
-                      aria-label={`Refresh ${session.name}`}
-                      disabled={
-                        session.status === "stopped" ||
-                        session.status === "failed"
-                      }
-                      onClick={() => onSendDebugCommand?.(session, "threads")}
-                      title="Refresh threads"
-                      type="button"
-                    >
-                      <RefreshCw size={12} />
-                    </button>
-                    <button
-                      aria-label={`Continue ${session.name}`}
-                      disabled={
-                        session.status === "stopped" ||
-                        session.status === "failed"
-                      }
-                      onClick={() => onSendDebugCommand?.(session, "continue")}
-                      title="Continue"
-                      type="button"
-                    >
-                      <Play size={12} />
-                    </button>
-                    <button
-                      aria-label={`Pause ${session.name}`}
-                      disabled={
-                        session.status === "stopped" ||
-                        session.status === "failed"
-                      }
-                      onClick={() => onSendDebugCommand?.(session, "pause")}
-                      title="Pause"
-                      type="button"
-                    >
-                      <PauseCircle size={12} />
-                    </button>
-                    <button
-                      aria-label={`Step over ${session.name}`}
-                      disabled={
-                        session.status === "stopped" ||
-                        session.status === "failed"
-                      }
-                      onClick={() => onSendDebugCommand?.(session, "next")}
-                      title="Step over"
-                      type="button"
-                    >
-                      <ArrowRight size={12} />
-                    </button>
-                    <button
-                      aria-label={`Stop ${session.name}`}
-                      disabled={session.status === "stopped"}
-                      onClick={() => onStopDebugSession?.(session)}
-                      title="Stop"
-                      type="button"
-                    >
-                      <Square size={11} />
-                    </button>
-                  </div>
-                  {session.message ? <p>{session.message}</p> : null}
-                </div>
-              ))}
-              {(ide?.taskDefinitions ?? []).length > 0 ? (
-                ide?.taskDefinitions
-                  .slice(0, 24)
-                  .map((task) => (
-                    <SidebarDestinationRow
-                      icon={task.group === "test" ? ListChecks : Play}
-                      isActive={task.status === "running"}
-                      key={task.id}
-                      label={task.label}
-                      meta={task.group}
-                      onClick={() => onRunIdeTask?.(task)}
-                    />
-                  ))
-              ) : (
-                <div className="gyro-sidebar-mini-copy">
-                  Tasks appear from package scripts and Cargo manifests.
-                </div>
-              )}
-              {(ide?.testTree?.[0]?.children ?? []).slice(0, 8).map((test) => (
-                <SidebarDestinationRow
-                  icon={ListChecks}
-                  isActive={test.status === "running"}
-                  key={test.id}
-                  label={test.label}
-                  meta={test.status}
-                  onClick={() => {
-                    if (test.path) {
-                      onOpenWorkspaceFile?.(test.path);
+              {isAddingRunCommand ? (
+                <form
+                  className="gyro-run-command-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const commandLine = runCommandDraft.trim();
+                    if (!commandLine) {
                       return;
                     }
-                    const matchingTask = ide?.taskDefinitions.find(
-                      (task) => task.id === test.id,
-                    );
-                    const task = matchingTask ?? defaultTestTask;
-                    if (task) {
-                      onRunIdeTask?.(task);
+                    void onCreateCustomTask?.({
+                      commandLine,
+                      label: runCommandLabelDraft.trim() || undefined,
+                      group: runCommandGroupDraft,
+                    });
+                    setRunCommandDraft("");
+                    setRunCommandLabelDraft("");
+                    setIsAddingRunCommand(false);
+                  }}
+                >
+                  <input
+                    aria-label="Command to run"
+                    autoFocus
+                    onChange={(event) => setRunCommandDraft(event.target.value)}
+                    placeholder="pnpm test --filter ui"
+                    value={runCommandDraft}
+                  />
+                  <input
+                    aria-label="Command name"
+                    onChange={(event) =>
+                      setRunCommandLabelDraft(event.target.value)
+                    }
+                    placeholder="Name (optional)"
+                    value={runCommandLabelDraft}
+                  />
+                  <div className="gyro-run-command-form-row">
+                    <select
+                      aria-label="Command group"
+                      onChange={(event) =>
+                        setRunCommandGroupDraft(
+                          event.target.value as TaskDefinition["group"],
+                        )
+                      }
+                      value={runCommandGroupDraft}
+                    >
+                      <option value="custom">Command</option>
+                      <option value="test">Test</option>
+                      <option value="build">Build</option>
+                      <option value="dev">Dev</option>
+                    </select>
+                    <button
+                      onClick={() => {
+                        setIsAddingRunCommand(false);
+                        setRunCommandDraft("");
+                        setRunCommandLabelDraft("");
+                      }}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    <button disabled={!runCommandDraft.trim()} type="submit">
+                      Save
+                    </button>
+                  </div>
+                  <p>
+                    Saved commands run from the workspace root and are kept in
+                    .gyro/tasks.json.
+                  </p>
+                </form>
+              ) : null}
+              {(ide?.taskDefinitions.length ?? 0) > 8 ? (
+                <input
+                  aria-label="Filter commands"
+                  className="gyro-run-command-filter"
+                  onChange={(event) => setRunCommandFilter(event.target.value)}
+                  placeholder="Filter commands"
+                  value={runCommandFilter}
+                />
+              ) : null}
+              {runTaskGroups.length > 0 ? (
+                runTaskGroups.map((group) => (
+                  <div className="gyro-run-task-group" key={group.id}>
+                    <div className="gyro-run-task-group-label">
+                      {group.label}
+                    </div>
+                    {group.tasks.map((task) => (
+                      <RunTaskRow
+                        key={task.id}
+                        onRemove={
+                          task.source === "custom" && onDeleteCustomTask
+                            ? () => void onDeleteCustomTask(task)
+                            : undefined
+                        }
+                        onRun={() => onRunIdeTask?.(task)}
+                        onStop={() => void onStopIdeTask?.(task)}
+                        task={task}
+                      />
+                    ))}
+                  </div>
+                ))
+              ) : (
+                <div className="gyro-sidebar-mini-copy">
+                  {runCommandFilter.trim()
+                    ? "No command matches this filter."
+                    : "No commands found yet. Gyro suggests them from package scripts, Cargo, Make, just, Go, and Python projects — or add your own with +."}
+                </div>
+              )}
+              {(ide?.testTree?.[0]?.children ?? []).length > 0 ? (
+                <div className="gyro-run-task-group">
+                  <div className="gyro-run-task-group-label">Last results</div>
+                  {(ide?.testTree?.[0]?.children ?? [])
+                    .slice(0, 8)
+                    .map((test) => (
+                      <SidebarDestinationRow
+                        icon={ListChecks}
+                        isActive={test.status === "running"}
+                        key={test.id}
+                        label={test.label}
+                        meta={test.status}
+                        onClick={() => {
+                          if (test.path) {
+                            onOpenWorkspaceFile?.(test.path);
+                            return;
+                          }
+                          const matchingTask = ide?.taskDefinitions.find(
+                            (task) => task.id === test.id,
+                          );
+                          const task = matchingTask ?? defaultTestTask;
+                          if (task) {
+                            onRunIdeTask?.(task);
+                          }
+                        }}
+                      />
+                    ))}
+                </div>
+              ) : null}
+              <div className="gyro-run-task-group">
+                <div className="gyro-run-task-group-label">Debug adapter</div>
+                <form
+                  className="gyro-sidebar-debug-launch"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const command = debugAdapterCommand.trim();
+                    if (command) {
+                      onStartDebugSession?.(command);
                     }
                   }}
-                />
-              ))}
+                >
+                  <input
+                    aria-label="Debug adapter command"
+                    onChange={(event) =>
+                      setDebugAdapterCommand(event.target.value)
+                    }
+                    placeholder="lldb-dap or debugpy-adapter"
+                    value={debugAdapterCommand}
+                  />
+                  <button
+                    disabled={!debugAdapterCommand.trim()}
+                    title="Initialize local debug adapter"
+                    type="submit"
+                  >
+                    <Play size={13} />
+                    Start
+                  </button>
+                </form>
+                <div className="gyro-sidebar-mini-copy">
+                  Gyro uses adapters already installed on this device and never
+                  installs one automatically.
+                </div>
+                {(ide?.debugSessions ?? []).map((session) => (
+                  <div className="gyro-sidebar-debug-session" key={session.id}>
+                    <div>
+                      <span>{session.name}</span>
+                      <small>{session.status}</small>
+                    </div>
+                    <div className="gyro-sidebar-debug-controls">
+                      <button
+                        aria-label={`Refresh ${session.name}`}
+                        disabled={
+                          session.status === "stopped" ||
+                          session.status === "failed"
+                        }
+                        onClick={() => onSendDebugCommand?.(session, "threads")}
+                        title="Refresh threads"
+                        type="button"
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                      <button
+                        aria-label={`Continue ${session.name}`}
+                        disabled={
+                          session.status === "stopped" ||
+                          session.status === "failed"
+                        }
+                        onClick={() =>
+                          onSendDebugCommand?.(session, "continue")
+                        }
+                        title="Continue"
+                        type="button"
+                      >
+                        <Play size={12} />
+                      </button>
+                      <button
+                        aria-label={`Pause ${session.name}`}
+                        disabled={
+                          session.status === "stopped" ||
+                          session.status === "failed"
+                        }
+                        onClick={() => onSendDebugCommand?.(session, "pause")}
+                        title="Pause"
+                        type="button"
+                      >
+                        <PauseCircle size={12} />
+                      </button>
+                      <button
+                        aria-label={`Step over ${session.name}`}
+                        disabled={
+                          session.status === "stopped" ||
+                          session.status === "failed"
+                        }
+                        onClick={() => onSendDebugCommand?.(session, "next")}
+                        title="Step over"
+                        type="button"
+                      >
+                        <ArrowRight size={12} />
+                      </button>
+                      <button
+                        aria-label={`Stop ${session.name}`}
+                        disabled={session.status === "stopped"}
+                        onClick={() => onStopDebugSession?.(session)}
+                        title="Stop"
+                        type="button"
+                      >
+                        <Square size={11} />
+                      </button>
+                    </div>
+                    {session.message ? <p>{session.message}</p> : null}
+                  </div>
+                ))}
+              </div>
             </SidebarSection>
           ) : null}
 
@@ -5237,6 +5490,115 @@ function terminalPaneHasActiveWork(pane: TerminalPane) {
   return !isInteractiveShellPane(pane) || pane.hasForegroundJob !== false;
 }
 
+const RUN_TASK_GROUP_LABELS: Array<{
+  id: TaskDefinition["group"];
+  label: string;
+}> = [
+  { id: "test", label: "Tests" },
+  { id: "build", label: "Build" },
+  { id: "dev", label: "Dev servers" },
+  { id: "custom", label: "Other commands" },
+];
+
+export function taskCommandLine(task: TaskDefinition): string {
+  return [task.command, ...task.args].join(" ");
+}
+
+/**
+ * Buckets the discovered catalog for the sidebar: saved commands stay on top,
+ * then suggestions by what they do.
+ */
+export function groupedRunTasks(
+  tasks: TaskDefinition[],
+  filter: string,
+): Array<{ id: string; label: string; tasks: TaskDefinition[] }> {
+  const needle = filter.trim().toLowerCase();
+  const matching = needle
+    ? tasks.filter(
+        (task) =>
+          task.label.toLowerCase().includes(needle) ||
+          taskCommandLine(task).toLowerCase().includes(needle),
+      )
+    : tasks;
+  const saved = matching.filter((task) => task.source === "custom");
+  const suggested = matching.filter((task) => task.source !== "custom");
+  const groups: Array<{ id: string; label: string; tasks: TaskDefinition[] }> =
+    saved.length > 0
+      ? [{ id: "saved", label: "Saved commands", tasks: saved }]
+      : [];
+  for (const group of RUN_TASK_GROUP_LABELS) {
+    const grouped = suggested.filter((task) => task.group === group.id);
+    if (grouped.length > 0) {
+      groups.push({ id: group.id, label: group.label, tasks: grouped });
+    }
+  }
+  return groups;
+}
+
+function runTaskStatusCopy(task: TaskDefinition): string | undefined {
+  switch (task.status) {
+    case "running":
+      return "running";
+    case "done":
+      return "passed";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "stopped";
+    default:
+      return undefined;
+  }
+}
+
+function RunTaskRow({
+  task,
+  onRun,
+  onStop,
+  onRemove,
+}: {
+  task: TaskDefinition;
+  onRun: () => void;
+  onStop: () => void;
+  onRemove?: () => void;
+}) {
+  const commandLine = taskCommandLine(task);
+  const isRunning = task.status === "running";
+  const status = runTaskStatusCopy(task);
+  const LaunchIcon = task.group === "test" ? ListChecks : Play;
+
+  return (
+    <div className="gyro-run-task-row" data-status={task.status}>
+      <button
+        aria-label={
+          isRunning ? `Stop ${task.label}` : `Run ${task.label}: ${commandLine}`
+        }
+        className="gyro-run-task-main"
+        onClick={isRunning ? onStop : onRun}
+        title={isRunning ? `Stop ${commandLine}` : commandLine}
+        type="button"
+      >
+        {isRunning ? <Square size={11} /> : <LaunchIcon size={13} />}
+        <span>
+          {task.label}
+          <small>{commandLine}</small>
+        </span>
+      </button>
+      {status ? <em className="gyro-run-task-status">{status}</em> : null}
+      {onRemove ? (
+        <button
+          aria-label={`Remove ${task.label}`}
+          className="gyro-run-task-remove"
+          onClick={onRemove}
+          title="Remove saved command"
+          type="button"
+        >
+          <Trash2 size={11} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function SidebarDestinationRow({
   icon: Icon,
   label,
@@ -6023,8 +6385,6 @@ type ChatSurfaceProps = {
   providerReadiness?: ProviderReadiness;
   providerStatuses?: ProviderStatus[];
   providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
-  /** Local spend per provider, from Gyro's usage ledger. */
-  providerLedgerById?: Partial<Record<ProviderId, ProviderLedgerSummary>>;
   /** What this chat has spent, from Gyro's own usage ledger. */
   sessionUsage?: SessionUsageTotals;
   /** The current hold on runs and every configured budget. */
@@ -6184,7 +6544,6 @@ export function ChatSurface({
   config,
   providerReadiness,
   providerUsageByProvider,
-  providerLedgerById,
   sessionUsage,
   usageSafety,
   onResumeUsage,
@@ -6611,35 +6970,18 @@ export function ChatSurface({
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
     : undefined;
-  const composerProviderLedger = contextModel.providerId
-    ? providerLedgerById?.[contextModel.providerId]
-    : undefined;
-  const composerLimits = useMemo(() => {
-    const planWindows = composerProviderUsage?.windows ?? [];
-    const hasMeasuredPlanWindow = planWindows.some(
-      (window) =>
-        typeof window.usedPercent === "number" &&
-        Number.isFinite(window.usedPercent),
-    );
-    // Local spend stands in where the provider meters nothing Gyro can poll,
-    // and covers the gap before the first plan reading arrives.
-    const ledgerRows =
-      composerProviderLedger &&
-      contextModel.providerId &&
-      (!providerSupportsUsage(contextModel.providerId) ||
-        !hasMeasuredPlanWindow)
-        ? ledgerLimitWindows(composerProviderLedger, contextModel.providerId)
-        : [];
-    return composerLimitWindows(transcriptEvents, contextModel, [
-      ...planWindows,
-      ...ledgerRows,
-    ]);
-  }, [
-    composerProviderLedger,
-    composerProviderUsage?.windows,
-    contextModel,
-    transcriptEvents,
-  ]);
+  const composerLimits = useMemo(
+    () =>
+      // Only allowances the provider itself reports belong here. Gyro's local
+      // ledger measures what was spent, not what the plan permits, so it never
+      // stands in for a real limit.
+      composerLimitWindows(
+        transcriptEvents,
+        contextModel,
+        composerProviderUsage?.windows ?? [],
+      ),
+    [composerProviderUsage?.windows, contextModel, transcriptEvents],
+  );
   const transcriptState = useMemo(
     () => deriveTranscriptState(transcriptEvents),
     [transcriptEvents],
@@ -19823,6 +20165,13 @@ function Composer({
                         : "Unavailable"}
                     </small>
                   )}
+                  {/* A row of em dashes says a limit is unknown but not why.
+                      The provider's own reason usually names the fix — an
+                      expired sign-in, a CLI that is not installed — so it
+                      belongs beside the windows it explains. */}
+                  {providerUsage?.status === "error" && providerUsage.error ? (
+                    <small>{providerUsage.error}</small>
+                  ) : null}
                 </div>
               ) : null}
             </div>

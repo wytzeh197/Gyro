@@ -1370,6 +1370,12 @@ export type WorkbenchAction =
   | { type: "github-set-pull-requests"; pullRequests: GithubPullRequest[] }
   | { type: "github-error"; error?: string }
   | { type: "ide-set-tasks"; tasks: TaskDefinition[] }
+  | {
+      type: "ide-set-task-status";
+      taskId: string;
+      status: TaskDefinition["status"];
+      lastRunAt?: string;
+    }
   | { type: "ide-set-test-tree"; tests: TestTreeItem[] }
   | { type: "ide-set-debug-session"; session: DebugSessionState }
   | { type: "ide-remove-debug-session"; sessionId: string }
@@ -2738,6 +2744,22 @@ export function workbenchReducer(
       return {
         ...state,
         ide: { ...state.ide, taskDefinitions: action.tasks },
+      };
+    case "ide-set-task-status":
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          taskDefinitions: state.ide.taskDefinitions.map((task) =>
+            task.id === action.taskId
+              ? {
+                  ...task,
+                  status: action.status,
+                  lastRunAt: action.lastRunAt ?? task.lastRunAt,
+                }
+              : task,
+          ),
+        },
       };
     case "ide-set-test-tree":
       return {
@@ -4658,8 +4680,13 @@ function normalizeGitReviewActions(
   const hasStagedChanges = repoKnown
     ? sourceControl.files.some((file) => file.staged)
     : undefined;
-  const hasUnpushedCommits = repoKnown ? sourceControl.ahead > 0 : undefined;
   const hasUpstream = repoKnown ? Boolean(sourceControl.upstream) : undefined;
+  // A branch with no upstream reports no ahead count at all — git has nothing
+  // to count against — so it would read as "nothing to push" precisely when
+  // pushing is the whole point. An unpublished branch is always publishable.
+  const hasUnpushedCommits = repoKnown
+    ? sourceControl.ahead > 0 || !hasUpstream
+    : undefined;
 
   return actions.map((action) => {
     if (action.status === "running" || action.status === "done") {

@@ -16220,6 +16220,204 @@ body {
   }
 }
 
+.gyro-sidebar-section-actions {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.gyro-sidebar-section-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  display: flex;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.gyro-sidebar-section-actions button:hover {
+  background: var(--gyro-sidebar-soft);
+  color: var(--gyro-hover-text);
+}
+
+.gyro-run-command-form {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px;
+}
+
+.gyro-run-command-form input,
+.gyro-run-command-form select,
+.gyro-run-command-filter {
+  background: var(--gyro-surface-deep);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-text);
+  font: inherit;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.gyro-run-command-form input {
+  font-size: 12px;
+}
+
+.gyro-run-command-filter {
+  font-size: 12px;
+  margin-bottom: 6px;
+  width: 100%;
+}
+
+.gyro-run-command-form-row {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.gyro-run-command-form-row button {
+  background: var(--gyro-surface-deep);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  padding: 5px 9px;
+}
+
+.gyro-run-command-form-row button[type="submit"] {
+  background: var(--gyro-sidebar-soft);
+  color: var(--gyro-text);
+}
+
+.gyro-run-command-form-row button:disabled {
+  opacity: 0.45;
+}
+
+.gyro-run-command-form p {
+  color: var(--gyro-faint);
+  font-size: 10.5px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.gyro-run-task-group {
+  display: grid;
+  gap: 1px;
+}
+
+.gyro-run-task-group + .gyro-run-task-group {
+  margin-top: 10px;
+}
+
+.gyro-run-task-group-label {
+  color: var(--gyro-faint);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  padding: 4px 7px 3px;
+  text-transform: uppercase;
+}
+
+.gyro-run-task-row {
+  align-items: center;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.gyro-run-task-row:hover {
+  background: var(--gyro-sidebar-soft);
+}
+
+.gyro-run-task-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--gyro-sidebar-text);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 32px;
+  min-width: 0;
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.gyro-run-task-main > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-run-task-main > span,
+.gyro-run-task-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-run-task-main > span {
+  font-size: 12.5px;
+}
+
+.gyro-run-task-main small {
+  color: var(--gyro-faint);
+  font-size: 10.5px;
+}
+
+.gyro-run-task-row[data-status="running"] .gyro-run-task-main {
+  color: var(--gyro-hover-text);
+}
+
+.gyro-run-task-status {
+  color: var(--gyro-faint);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gyro-run-task-row[data-status="running"] .gyro-run-task-status {
+  color: var(--gyro-accent);
+}
+
+.gyro-run-task-row[data-status="failed"] .gyro-run-task-status {
+  color: var(--gyro-danger);
+}
+
+.gyro-run-task-row[data-status="done"] .gyro-run-task-status {
+  color: var(--gyro-success);
+}
+
+.gyro-run-task-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--gyro-faint);
+  display: flex;
+  height: 22px;
+  justify-content: center;
+  opacity: 0;
+  width: 22px;
+}
+
+.gyro-run-task-row:hover .gyro-run-task-remove,
+.gyro-run-task-remove:focus-visible {
+  opacity: 1;
+}
+
+.gyro-run-task-remove:hover {
+  color: var(--gyro-hover-text);
+}
+
 .gyro-sidebar-debug-launch {
   display: grid;
   gap: 6px;
@@ -29338,6 +29536,52 @@ button.gyro-account-menu-row:hover,
   display: inline-flex;
   gap: 5px;
   justify-content: center;
+}
+
+/* Where the branch stands against its remote, and the press that closes the
+   gap. It reads as one line under the commit form because publishing is the
+   second half of committing, not a separate errand. */
+.gyro-sidebar-scm-sync {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 2px 0 6px;
+}
+
+.gyro-scm-sync-summary {
+  color: var(--gyro-text-soft, rgba(0, 0, 0, 0.55));
+  flex: 1 1 auto;
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-scm-sync-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.gyro-scm-sync-actions > button {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.gyro-scm-sync-actions > button.is-secondary {
+  background: transparent !important;
+  border: 1px solid var(--gyro-border-soft, rgba(0, 0, 0, 0.1)) !important;
+  color: var(--gyro-text) !important;
+  font-weight: 600;
+}
+
+.gyro-scm-sync-actions > button.is-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent) !important;
 }
 
 /* The AI view is the workspace chat, rendered at sidebar width. It fills the

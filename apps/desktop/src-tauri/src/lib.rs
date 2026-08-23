@@ -193,6 +193,58 @@ static ATTACHMENT_SESSION_LOCKS: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>
     OnceLock::new();
 static ACTIVE_IDE_COMMANDS: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_BROWSER_PREVIEWS: AtomicUsize = AtomicUsize::new(0);
+static ACTIVE_TASK_RUNS: OnceLock<Mutex<HashMap<String, CancellationToken>>> = OnceLock::new();
+
+fn active_task_runs() -> &'static Mutex<HashMap<String, CancellationToken>> {
+    ACTIVE_TASK_RUNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn task_run_key(root: &Path, task_id: &str) -> String {
+    format!("{}\u{1e}{task_id}", root.display())
+}
+
+/// Keeps a running task cancellable for as long as the command is alive.
+struct TaskRunHandle {
+    key: String,
+    cancellation: CancellationToken,
+}
+
+impl TaskRunHandle {
+    fn register(root: &Path, task_id: &str) -> Self {
+        let key = task_run_key(root, task_id);
+        let cancellation = CancellationToken::default();
+        if let Ok(mut runs) = active_task_runs().lock() {
+            runs.insert(key.clone(), cancellation.clone());
+        }
+        Self { key, cancellation }
+    }
+
+    fn token(&self) -> CancellationToken {
+        self.cancellation.clone()
+    }
+}
+
+impl Drop for TaskRunHandle {
+    fn drop(&mut self) {
+        if let Ok(mut runs) = active_task_runs().lock() {
+            runs.remove(&self.key);
+        }
+    }
+}
+
+fn cancel_task_run(root: &Path, task_id: &str) -> bool {
+    let key = task_run_key(root, task_id);
+    let Ok(runs) = active_task_runs().lock() else {
+        return false;
+    };
+    match runs.get(&key) {
+        Some(cancellation) => {
+            cancellation.cancel();
+            true
+        }
+        None => false,
+    }
+}
 
 struct IdeCommandAdmission;
 
@@ -938,6 +990,56 @@ struct TaskDefinitionResult {
     cwd: Option<String>,
     status: String,
     output_channel_id: Option<String>,
+    /// "suggested" for tasks detected from manifests, "custom" for saved commands.
+    source: String,
+}
+
+/// A command the person saved for this workspace, persisted in `.gyro/tasks.json`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomTaskRecord {
+    id: String,
+    label: String,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default = "default_custom_task_group")]
+    group: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomTaskFile {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    tasks: Vec<CustomTaskRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomTaskCreateRequest {
+    workspace_path: String,
+    command_line: String,
+    label: Option<String>,
+    group: Option<String>,
+    cwd: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomTaskDeleteRequest {
+    workspace_path: String,
+    task_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskCancelRequest {
+    workspace_path: String,
+    task_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -6943,7 +7045,7 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
             error: Some("The selected folder is not a Git repository.".into()),
         });
     };
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command.arg("-C").arg(&repo_root).args([
         "for-each-ref",
         "--format=%(committerdate:unix)%09%(refname:short)",
@@ -6981,7 +7083,7 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
         .into_iter()
         .map(|(_, branch)| branch)
         .collect::<Vec<_>>();
-    let mut current_command = command_with_gui_path("git");
+    let mut current_command = git_command();
     current_command
         .arg("-C")
         .arg(&repo_root)
@@ -7008,7 +7110,7 @@ fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCata
 }
 
 fn git_linked_worktrees(repo_root: &Path) -> anyhow::Result<Vec<GitLinkedWorktree>> {
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(repo_root)
@@ -7066,7 +7168,7 @@ fn git_remove_worktree_impl(
         return Err(anyhow::anyhow!("cannot remove the active workspace"));
     }
 
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(&repo_root)
@@ -7103,7 +7205,7 @@ fn git_checkout_branch_impl(
     if catalog.current.as_deref() == Some(request.branch.as_str()) {
         return Ok(catalog);
     }
-    let mut status_command = command_with_gui_path("git");
+    let mut status_command = git_command();
     status_command
         .arg("-C")
         .arg(&repo_root)
@@ -7125,7 +7227,7 @@ fn git_checkout_branch_impl(
             "commit or stash workspace changes before switching branches"
         ));
     }
-    let mut switch_command = command_with_gui_path("git");
+    let mut switch_command = git_command();
     switch_command
         .arg("-C")
         .arg(&repo_root)
@@ -7168,7 +7270,7 @@ async fn git_diff(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
 
 fn git_diff_blocking(request: GitPathRequest) -> Result<IdeCommandOutput, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command.arg("-C").arg(root).arg("diff");
     if request.staged.unwrap_or(false) {
         command.arg("--cached");
@@ -7191,14 +7293,14 @@ fn git_stage_blocking(request: GitStageRequest) -> Result<SourceControlStatus, S
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(&root)
         .arg("add")
         .arg("--")
         .arg(relative);
-    run_command_output(command).map_err(to_string)?;
+    run_git_action(command)?;
     git_status_impl(&request.workspace_path).map_err(to_string)
 }
 
@@ -7213,7 +7315,7 @@ fn git_unstage_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(&root)
@@ -7221,7 +7323,7 @@ fn git_unstage_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
         .arg("--staged")
         .arg("--")
         .arg(relative);
-    run_command_output(command).map_err(to_string)?;
+    run_git_action(command)?;
     git_status_impl(&request.workspace_path).map_err(to_string)
 }
 
@@ -7236,7 +7338,7 @@ fn git_discard_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
     let path = assert_workspace_path(&root, &request.path).map_err(to_string)?;
     let relative = path.strip_prefix(&root).map_err(to_string)?;
-    let mut status_command = command_with_gui_path("git");
+    let mut status_command = git_command();
     status_command
         .arg("-C")
         .arg(&root)
@@ -7248,15 +7350,15 @@ fn git_discard_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
     let is_added = state.as_bytes().first() == Some(&b'A');
 
     if is_added {
-        let mut unstage = command_with_gui_path("git");
+        let mut unstage = git_command();
         unstage
             .arg("-C")
             .arg(&root)
             .args(["rm", "--cached", "-f", "--"])
             .arg(relative);
-        run_command_output(unstage).map_err(to_string)?;
+        run_git_action(unstage)?;
     } else if !is_untracked {
-        let mut restore = command_with_gui_path("git");
+        let mut restore = git_command();
         restore.arg("-C").arg(&root).arg("restore");
         if state.as_bytes().first().is_some_and(|value| *value != b' ') {
             restore.args(["--source=HEAD", "--staged", "--worktree"]);
@@ -7264,7 +7366,7 @@ fn git_discard_blocking(request: GitStageRequest) -> Result<SourceControlStatus,
             restore.arg("--worktree");
         }
         restore.arg("--").arg(relative);
-        run_command_output(restore).map_err(to_string)?;
+        run_git_action(restore)?;
     }
 
     if is_untracked || is_added {
@@ -7289,7 +7391,7 @@ fn git_commit_blocking(request: GitCommitRequest) -> Result<IdeCommandOutput, St
     if request.message.trim().is_empty() {
         return Err("commit message is required".into());
     }
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(root)
@@ -7321,7 +7423,7 @@ fn git_create_branch_impl(request: &GitCreateBranchRequest) -> anyhow::Result<Gi
     {
         return Err(anyhow::anyhow!("that branch already exists"));
     }
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(&repo_root)
@@ -7361,11 +7463,14 @@ async fn git_push(request: GitSyncRequest) -> Result<GitSyncResult, String> {
 
 fn git_push_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command.arg("-C").arg(&root).arg("push");
-    if request.set_upstream {
-        // A branch created locally has no upstream yet; `--set-upstream` is the
-        // difference between "push" working and failing with a hint.
+    // A branch created locally has no upstream yet; `--set-upstream` is the
+    // difference between "push" working and failing with a hint. The caller
+    // says so from the status it is showing, and a branch that turns out to
+    // have no upstream anyway is published rather than refused, so the first
+    // push of a branch never depends on the panel having refreshed first.
+    if request.set_upstream || git_upstream(&root).is_none() {
         let branch = git_current_branch(&root)
             .ok_or_else(|| "could not determine the current branch".to_string())?;
         command
@@ -7389,7 +7494,7 @@ async fn git_pull(request: GitSyncRequest) -> Result<GitSyncResult, String> {
 
 fn git_pull_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     // `--ff-only` keeps a button press from silently producing a merge commit or
     // a rebase; a diverged branch surfaces as an error the user can act on.
     command.arg("-C").arg(&root).args(["pull", "--ff-only"]);
@@ -7409,7 +7514,7 @@ async fn git_fetch(request: GitSyncRequest) -> Result<GitSyncResult, String> {
 
 fn git_fetch_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(&root)
@@ -7424,7 +7529,7 @@ fn git_fetch_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> 
 }
 
 fn git_current_branch(root: &Path) -> Option<String> {
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(root)
@@ -7443,6 +7548,71 @@ fn git_current_branch(root: &Path) -> Option<String> {
     let branch = output.stdout.trim().to_string();
     // Detached HEAD reports "HEAD", which is not a pushable branch name.
     (!branch.is_empty() && branch != "HEAD").then_some(branch)
+}
+
+/// The remote branch the current one tracks, where it tracks one.
+fn git_upstream(root: &Path) -> Option<String> {
+    let mut command = git_command();
+    command
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )
+    .ok()?;
+    if !output.succeeded() {
+        return None;
+    }
+    let upstream = output.stdout.trim().to_string();
+    (!upstream.is_empty()).then_some(upstream)
+}
+
+/// A `git` invocation that can never stall waiting to be answered.
+///
+/// Every git command here runs behind a button in a window, where there is no
+/// terminal to answer on. Left to itself git would sit waiting for a username
+/// on a push whose credentials have lapsed, and the press would hang until the
+/// inactivity timeout rather than say what went wrong. Refusing the prompt
+/// turns that wait into git's own error, which names the remote and the cause.
+fn git_command() -> Command {
+    let mut command = command_with_gui_path("git");
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
+/// Run a git command that must either do the thing or say why it did not.
+///
+/// `run_command_output` reports a non-zero exit as data rather than as a
+/// failure, which suits a terminal pane but not a button: a stage that git
+/// refused would refresh the panel unchanged and read as a press that did
+/// nothing. This turns the exit code back into an error carrying git's own
+/// first line, which is what the panel puts in front of the user.
+fn run_git_action(command: Command) -> Result<IdeCommandOutput, String> {
+    let output = run_command_output(command).map_err(to_string)?;
+    if output.status == "done" {
+        return Ok(output);
+    }
+    Err(git_action_error(&output))
+}
+
+/// What to tell the user about a git command that did not succeed.
+fn git_action_error(output: &IdeCommandOutput) -> String {
+    let spoken = [output.stderr.as_str(), output.stdout.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .find(|text| !text.is_empty());
+    match spoken {
+        Some(text) => first_error_line(text),
+        // A command killed for running too long, or for saying too much, exits
+        // without explaining itself; its termination is the only account there
+        // is of it.
+        None => format!("the git command {}", output.status),
+    }
 }
 
 fn first_error_line(stderr: &str) -> String {
@@ -8045,6 +8215,19 @@ async fn task_run(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
         .map_err(|error| format!("task run worker failed: {error}"))?
 }
 
+fn task_working_directory(root: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
+    match cwd.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(relative) => {
+            let resolved = assert_workspace_path(root, relative).map_err(to_string)?;
+            if !resolved.is_dir() {
+                return Err("task working directory is missing from this workspace".into());
+            }
+            Ok(resolved)
+        }
+        None => Ok(root.to_path_buf()),
+    }
+}
+
 fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
     let _admission = IdeCommandAdmission::acquire()?;
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
@@ -8056,13 +8239,44 @@ fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String
     if request.command != task.command || request.args != task.args {
         return Err("task definition changed; refresh tasks before running it".into());
     }
+    let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
-    command.current_dir(root).args(&task.args);
-    let mut output = run_command_output(command).map_err(to_string)?;
+    command.current_dir(working_directory).args(&task.args);
+    let handle = TaskRunHandle::register(&root, &task.id);
+    let mut output =
+        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     if output.status == "done" {
         output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
     }
     Ok(output)
+}
+
+#[tauri::command]
+async fn task_create_custom(
+    request: CustomTaskCreateRequest,
+) -> Result<Vec<TaskDefinitionResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || custom_task_create_impl(&request).map_err(to_string))
+        .await
+        .map_err(|error| format!("custom task create worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn task_delete_custom(
+    request: CustomTaskDeleteRequest,
+) -> Result<Vec<TaskDefinitionResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || custom_task_delete_impl(&request).map_err(to_string))
+        .await
+        .map_err(|error| format!("custom task delete worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn task_cancel(request: TaskCancelRequest) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+        Ok(cancel_task_run(&root, &request.task_id))
+    })
+    .await
+    .map_err(|error| format!("task cancel worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -8105,9 +8319,12 @@ fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String
     {
         return Err("test definition changed; refresh tests before running it".into());
     }
+    let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
-    command.current_dir(root).args(&task.args);
-    let mut output = run_command_output(command).map_err(to_string)?;
+    command.current_dir(working_directory).args(&task.args);
+    let handle = TaskRunHandle::register(&root, &task.id);
+    let mut output =
+        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     output.stdout = format!("tests {:?}\n{}", vec![task.id], output.stdout);
     Ok(output)
 }
@@ -9074,7 +9291,7 @@ fn fallback_search_workspace(
 
 fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
     let root = workspace_root(workspace_path)?;
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(&root)
@@ -9212,7 +9429,7 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
 }
 
 fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(workspace)
@@ -9276,7 +9493,7 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
 }
 
 fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
-    let mut command = command_with_gui_path("git");
+    let mut command = git_command();
     command
         .arg("-C")
         .arg(repo_root)
@@ -9302,7 +9519,7 @@ fn git_numstat_without_head(repo_root: &Path) -> (HashMap<String, (usize, usize)
         &["diff", "--numstat", "--no-renames", "--cached", "--"][..],
         &["diff", "--numstat", "--no-renames", "--"][..],
     ] {
-        let mut command = command_with_gui_path("git");
+        let mut command = git_command();
         command.arg("-C").arg(repo_root).args(args);
         let Ok(output) = run_bounded_command(
             &command,
@@ -9423,70 +9640,588 @@ fn git_state_from_code(code: char) -> String {
     .into()
 }
 
-fn task_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TaskDefinitionResult>> {
-    let root = workspace_root(workspace_path)?;
-    let mut tasks = Vec::new();
-    let package_json = root.join("package.json");
-    if package_json.exists() {
-        let (package, _) =
-            read_bounded_regular_file(&package_json, 1024 * 1024, "package manifest")?;
-        if package.len() > 1024 * 1024 {
-            anyhow::bail!("package manifest exceeds the 1 MiB size limit");
+const MAX_CUSTOM_WORKSPACE_TASKS: usize = 64;
+const MAX_DISCOVERED_TASKS: usize = 240;
+const MAX_CUSTOM_TASK_FILE_BYTES: usize = 128 * 1024;
+const MAX_MANIFEST_SCAN_BYTES: usize = 512 * 1024;
+const MAX_TARGETS_PER_MANIFEST: usize = 40;
+const MAX_CUSTOM_TASK_LABEL_CHARS: usize = 80;
+const MAX_CUSTOM_TASK_TOKEN_CHARS: usize = 400;
+const MAX_CUSTOM_TASK_ARGS: usize = 48;
+
+fn default_custom_task_group() -> String {
+    "custom".into()
+}
+
+fn task_group_for_name(name: &str) -> &'static str {
+    let name = name.to_ascii_lowercase();
+    if name.contains("test") || name.contains("spec") || name.contains("check") {
+        "test"
+    } else if name.contains("build") || name.contains("compile") || name.contains("bundle") {
+        "build"
+    } else if name.contains("dev") || name.contains("start") || name.contains("serve") {
+        "dev"
+    } else {
+        "custom"
+    }
+}
+
+fn task_id_slug(value: &str) -> String {
+    let mut slug = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '/' | ':') {
+            slug.push(character);
+        } else if !slug.ends_with('-') {
+            slug.push('-');
         }
-        let package = String::from_utf8(package).context("package manifest is not UTF-8")?;
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&package) {
-            if let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) {
-                let runner = if root.join("pnpm-lock.yaml").exists() {
-                    "pnpm"
-                } else {
-                    "npm"
-                };
-                for name in scripts.keys() {
-                    let group = if name.contains("test") {
-                        "test"
-                    } else if name.contains("build") {
-                        "build"
-                    } else if name.contains("dev") || name.contains("start") {
-                        "dev"
-                    } else {
-                        "custom"
-                    };
-                    tasks.push(TaskDefinitionResult {
-                        id: format!("package:{name}"),
-                        label: format!("{runner} {name}"),
-                        command: runner.into(),
-                        args: vec!["run".into(), name.to_string()],
-                        group: group.into(),
-                        cwd: None,
-                        status: "idle".into(),
-                        output_channel_id: Some(format!("task-package-{name}")),
-                    });
-                }
+    }
+    slug.trim_matches('-').to_string()
+}
+
+fn suggested_task(
+    id: String,
+    label: String,
+    command: &str,
+    args: Vec<String>,
+    group: &str,
+) -> TaskDefinitionResult {
+    let channel = format!("task-{}", task_id_slug(&id).replace([':', '/'], "-"));
+    TaskDefinitionResult {
+        id,
+        label,
+        command: command.into(),
+        args,
+        group: group.into(),
+        cwd: None,
+        status: "idle".into(),
+        output_channel_id: Some(channel),
+        source: "suggested".into(),
+    }
+}
+
+fn read_manifest_text(path: &Path, label: &str) -> Option<String> {
+    let (bytes, _) = read_bounded_regular_file(path, MAX_MANIFEST_SCAN_BYTES, label).ok()?;
+    if bytes.len() > MAX_MANIFEST_SCAN_BYTES {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn node_script_runner(root: &Path) -> &'static str {
+    if root.join("pnpm-lock.yaml").exists() {
+        "pnpm"
+    } else if root.join("bun.lockb").exists() || root.join("bun.lock").exists() {
+        "bun"
+    } else if root.join("yarn.lock").exists() {
+        "yarn"
+    } else {
+        "npm"
+    }
+}
+
+fn discover_package_script_tasks(
+    root: &Path,
+    tasks: &mut Vec<TaskDefinitionResult>,
+) -> anyhow::Result<()> {
+    let package_json = root.join("package.json");
+    if !package_json.exists() {
+        return Ok(());
+    }
+    let (package, _) = read_bounded_regular_file(&package_json, 1024 * 1024, "package manifest")?;
+    if package.len() > 1024 * 1024 {
+        anyhow::bail!("package manifest exceeds the 1 MiB size limit");
+    }
+    let package = String::from_utf8(package).context("package manifest is not UTF-8")?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&package) else {
+        return Ok(());
+    };
+    let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
+        return Ok(());
+    };
+    let runner = node_script_runner(root);
+    for name in scripts.keys().take(MAX_TARGETS_PER_MANIFEST) {
+        tasks.push(suggested_task(
+            format!("package:{name}"),
+            format!("{runner} {name}"),
+            runner,
+            vec!["run".into(), name.to_string()],
+            task_group_for_name(name),
+        ));
+    }
+    Ok(())
+}
+
+fn discover_cargo_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    if !root.join("Cargo.toml").exists() {
+        return;
+    }
+    for (name, args, group) in [
+        ("build", vec!["build"], "build"),
+        ("test", vec!["test"], "test"),
+        ("check", vec!["check"], "build"),
+        ("clippy", vec!["clippy", "--all-targets"], "test"),
+        ("fmt", vec!["fmt", "--check"], "custom"),
+    ] {
+        tasks.push(suggested_task(
+            format!("cargo:{name}"),
+            format!("cargo {}", args.join(" ")),
+            "cargo",
+            args.into_iter().map(str::to_string).collect(),
+            group,
+        ));
+    }
+}
+
+/// Reads plain `target:` rules out of a Makefile, skipping pattern rules,
+/// variable assignments, and recipe bodies.
+fn makefile_targets(source: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut seen = HashSet::new();
+    for line in source.lines() {
+        if line.starts_with([' ', '\t']) || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let Some(colon) = line.find(':') else {
+            continue;
+        };
+        if line[colon..].starts_with(":=") {
+            continue;
+        }
+        let head = line[..colon].trim();
+        if head.is_empty()
+            || head.starts_with('.')
+            || head.contains(['%', '$', '=', '(', ')', '"'])
+        {
+            continue;
+        }
+        for target in head.split_whitespace() {
+            if !target
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "-_./".contains(character))
+            {
+                continue;
+            }
+            if seen.insert(target.to_string()) {
+                targets.push(target.to_string());
             }
         }
+        if targets.len() >= MAX_TARGETS_PER_MANIFEST {
+            break;
+        }
     }
-    if root.join("Cargo.toml").exists() {
-        tasks.push(TaskDefinitionResult {
-            id: "cargo:build".into(),
-            label: "cargo build".into(),
-            command: "cargo".into(),
-            args: vec!["build".into()],
-            group: "build".into(),
-            cwd: None,
-            status: "idle".into(),
-            output_channel_id: Some("task-cargo-build".into()),
-        });
-        tasks.push(TaskDefinitionResult {
-            id: "cargo:test".into(),
-            label: "cargo test".into(),
-            command: "cargo".into(),
-            args: vec!["test".into()],
-            group: "test".into(),
-            cwd: None,
-            status: "idle".into(),
-            output_channel_id: Some("task-cargo-test".into()),
-        });
+    targets.truncate(MAX_TARGETS_PER_MANIFEST);
+    targets
+}
+
+fn discover_makefile_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    let Some(makefile) = ["Makefile", "makefile", "GNUmakefile"]
+        .into_iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+    else {
+        return;
+    };
+    let Some(source) = read_manifest_text(&makefile, "makefile") else {
+        return;
+    };
+    for target in makefile_targets(&source) {
+        tasks.push(suggested_task(
+            format!("make:{target}"),
+            format!("make {target}"),
+            "make",
+            vec![target.clone()],
+            task_group_for_name(&target),
+        ));
     }
+}
+
+/// Reads recipe names out of a justfile, skipping assignments and settings.
+fn justfile_recipes(source: &str) -> Vec<String> {
+    let mut recipes = Vec::new();
+    let mut seen = HashSet::new();
+    for line in source.lines() {
+        if line.starts_with([' ', '\t']) || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let trimmed = line.trim_start_matches('@').trim();
+        let Some(colon) = trimmed.find(':') else {
+            continue;
+        };
+        if trimmed[colon..].starts_with(":=") {
+            continue;
+        }
+        let head = trimmed[..colon].trim();
+        let Some(name) = head.split_whitespace().next() else {
+            continue;
+        };
+        if matches!(name, "set" | "export" | "alias" | "import" | "mod") {
+            continue;
+        }
+        if !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "-_".contains(character))
+        {
+            continue;
+        }
+        if seen.insert(name.to_string()) {
+            recipes.push(name.to_string());
+        }
+        if recipes.len() >= MAX_TARGETS_PER_MANIFEST {
+            break;
+        }
+    }
+    recipes
+}
+
+fn discover_justfile_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    let Some(justfile) = ["justfile", "Justfile", ".justfile"]
+        .into_iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+    else {
+        return;
+    };
+    let Some(source) = read_manifest_text(&justfile, "justfile") else {
+        return;
+    };
+    for recipe in justfile_recipes(&source) {
+        tasks.push(suggested_task(
+            format!("just:{recipe}"),
+            format!("just {recipe}"),
+            "just",
+            vec![recipe.clone()],
+            task_group_for_name(&recipe),
+        ));
+    }
+}
+
+fn discover_python_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    let pyproject = root.join("pyproject.toml");
+    let has_project = pyproject.exists()
+        || root.join("setup.py").exists()
+        || root.join("pytest.ini").exists()
+        || root.join("tox.ini").exists();
+    if !has_project {
+        return;
+    }
+    let uses_uv = root.join("uv.lock").exists();
+    let uses_poetry = read_manifest_text(&pyproject, "python manifest")
+        .is_some_and(|source| source.contains("[tool.poetry"));
+    let (command, prefix) = if uses_uv {
+        ("uv", vec!["run".to_string()])
+    } else if uses_poetry {
+        ("poetry", vec!["run".to_string()])
+    } else {
+        ("python3", vec!["-m".to_string()])
+    };
+    let mut pytest_args = prefix.clone();
+    pytest_args.push("pytest".into());
+    tasks.push(suggested_task(
+        "python:pytest".into(),
+        format!("{command} {}", pytest_args.join(" ")),
+        command,
+        pytest_args,
+        "test",
+    ));
+    if root.join("ruff.toml").exists()
+        || read_manifest_text(&pyproject, "python manifest")
+            .is_some_and(|source| source.contains("[tool.ruff"))
+    {
+        let mut ruff_args = prefix;
+        ruff_args.push("ruff".into());
+        ruff_args.push("check".into());
+        tasks.push(suggested_task(
+            "python:ruff".into(),
+            format!("{command} {}", ruff_args.join(" ")),
+            command,
+            ruff_args,
+            "custom",
+        ));
+    }
+}
+
+fn discover_go_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    if !root.join("go.mod").exists() {
+        return;
+    }
+    for (name, args, group) in [
+        ("build", vec!["build", "./..."], "build"),
+        ("test", vec!["test", "./..."], "test"),
+        ("vet", vec!["vet", "./..."], "custom"),
+    ] {
+        tasks.push(suggested_task(
+            format!("go:{name}"),
+            format!("go {}", args.join(" ")),
+            "go",
+            args.into_iter().map(str::to_string).collect(),
+            group,
+        ));
+    }
+}
+
+fn discover_deno_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    let deno_json = root.join("deno.json");
+    if !deno_json.is_file() {
+        return;
+    }
+    let Some(source) = read_manifest_text(&deno_json, "deno manifest") else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&source) else {
+        return;
+    };
+    let Some(entries) = value.get("tasks").and_then(|value| value.as_object()) else {
+        return;
+    };
+    for name in entries.keys().take(MAX_TARGETS_PER_MANIFEST) {
+        tasks.push(suggested_task(
+            format!("deno:{name}"),
+            format!("deno task {name}"),
+            "deno",
+            vec!["task".into(), name.to_string()],
+            task_group_for_name(name),
+        ));
+    }
+}
+
+fn custom_tasks_path(root: &Path) -> PathBuf {
+    root.join(".gyro").join("tasks.json")
+}
+
+fn read_custom_tasks(root: &Path) -> anyhow::Result<Vec<CustomTaskRecord>> {
+    let path = custom_tasks_path(root);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let (bytes, _) = read_bounded_regular_file(&path, MAX_CUSTOM_TASK_FILE_BYTES, "saved commands")?;
+    if bytes.len() > MAX_CUSTOM_TASK_FILE_BYTES {
+        anyhow::bail!("saved commands file exceeds the 128 KiB size limit");
+    }
+    let text = String::from_utf8(bytes).context("saved commands file is not UTF-8")?;
+    let file: CustomTaskFile =
+        serde_json::from_str(&text).context("saved commands file is not valid JSON")?;
+    Ok(file
+        .tasks
+        .into_iter()
+        .filter(|task| {
+            !task.id.trim().is_empty()
+                && !task.command.trim().is_empty()
+                && task.args.len() <= MAX_CUSTOM_TASK_ARGS
+        })
+        .take(MAX_CUSTOM_WORKSPACE_TASKS)
+        .collect())
+}
+
+fn write_custom_tasks(root: &Path, tasks: &[CustomTaskRecord]) -> anyhow::Result<()> {
+    let path = custom_tasks_path(root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create the .gyro directory")?;
+    }
+    let mut body = serde_json::to_vec_pretty(&CustomTaskFile {
+        version: 1,
+        tasks: tasks.to_vec(),
+    })?;
+    body.push(b'\n');
+    atomic_write_workspace_file(&path, &body)
+}
+
+fn custom_task_definition(record: &CustomTaskRecord) -> TaskDefinitionResult {
+    TaskDefinitionResult {
+        id: record.id.clone(),
+        label: record.label.clone(),
+        command: record.command.clone(),
+        args: record.args.clone(),
+        group: record.group.clone(),
+        cwd: record.cwd.clone(),
+        status: "idle".into(),
+        output_channel_id: Some(format!(
+            "task-{}",
+            task_id_slug(&record.id).replace([':', '/'], "-")
+        )),
+        source: "custom".into(),
+    }
+}
+
+/// Splits a typed command line into a program and arguments without a shell,
+/// honouring single quotes, double quotes, and backslash escapes.
+fn parse_command_line(input: &str) -> anyhow::Result<(String, Vec<String>)> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut open = false;
+    let mut quote: Option<char> = None;
+    let mut characters = input.chars();
+    while let Some(character) = characters.next() {
+        match quote {
+            Some(active) => {
+                if character == active {
+                    quote = None;
+                } else if character == '\\' && active == '"' {
+                    let escaped = characters
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("command ends with a dangling escape"))?;
+                    current.push(escaped);
+                } else {
+                    current.push(character);
+                }
+            }
+            None => match character {
+                '\'' | '"' => {
+                    quote = Some(character);
+                    open = true;
+                }
+                '\\' => {
+                    let escaped = characters
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("command ends with a dangling escape"))?;
+                    current.push(escaped);
+                    open = true;
+                }
+                whitespace if whitespace.is_whitespace() => {
+                    if open {
+                        tokens.push(std::mem::take(&mut current));
+                        open = false;
+                    }
+                }
+                other => {
+                    current.push(other);
+                    open = true;
+                }
+            },
+        }
+    }
+    if quote.is_some() {
+        anyhow::bail!("command has an unclosed quote");
+    }
+    if open {
+        tokens.push(current);
+    }
+    let mut tokens = tokens.into_iter();
+    let command = tokens
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("enter a command to run"))?;
+    let args: Vec<String> = tokens.collect();
+    if command.chars().count() > MAX_CUSTOM_TASK_TOKEN_CHARS
+        || args
+            .iter()
+            .any(|arg| arg.chars().count() > MAX_CUSTOM_TASK_TOKEN_CHARS)
+    {
+        anyhow::bail!("command parts must stay under {MAX_CUSTOM_TASK_TOKEN_CHARS} characters");
+    }
+    if args.len() > MAX_CUSTOM_TASK_ARGS {
+        anyhow::bail!("commands are limited to {MAX_CUSTOM_TASK_ARGS} arguments");
+    }
+    if command.contains('\0') || args.iter().any(|arg| arg.contains('\0')) {
+        anyhow::bail!("command contains an invalid character");
+    }
+    Ok((command, args))
+}
+
+fn normalize_custom_task_group(group: Option<&str>) -> String {
+    match group.map(str::trim) {
+        Some("build") => "build".into(),
+        Some("test") => "test".into(),
+        Some("dev") => "dev".into(),
+        _ => default_custom_task_group(),
+    }
+}
+
+fn unique_custom_task_id(base: &str, existing: &[CustomTaskRecord]) -> String {
+    let slug = {
+        let slug = task_id_slug(base).replace([':', '/'], "-");
+        if slug.is_empty() {
+            "command".to_string()
+        } else {
+            slug.chars().take(48).collect::<String>()
+        }
+    };
+    let mut candidate = format!("custom:{slug}");
+    let mut suffix = 2;
+    while existing.iter().any(|task| task.id == candidate) {
+        candidate = format!("custom:{slug}-{suffix}");
+        suffix += 1;
+    }
+    candidate
+}
+
+fn custom_task_create_impl(
+    request: &CustomTaskCreateRequest,
+) -> anyhow::Result<Vec<TaskDefinitionResult>> {
+    let root = workspace_root(&request.workspace_path)?;
+    let (command, args) = parse_command_line(&request.command_line)?;
+    let mut existing = read_custom_tasks(&root)?;
+    if existing.len() >= MAX_CUSTOM_WORKSPACE_TASKS {
+        anyhow::bail!("this workspace already has {MAX_CUSTOM_WORKSPACE_TASKS} saved commands");
+    }
+    let command_line = if args.is_empty() {
+        command.clone()
+    } else {
+        format!("{command} {}", args.join(" "))
+    };
+    let label = request
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or(command_line.as_str())
+        .chars()
+        .take(MAX_CUSTOM_TASK_LABEL_CHARS)
+        .collect::<String>();
+    let cwd = match request.cwd.as_deref().map(str::trim) {
+        Some(relative) if !relative.is_empty() => {
+            let resolved = assert_workspace_path(&root, relative)?;
+            if !resolved.is_dir() {
+                anyhow::bail!("working directory does not exist in this workspace");
+            }
+            Some(relative.to_string())
+        }
+        _ => None,
+    };
+    let record = CustomTaskRecord {
+        id: unique_custom_task_id(&label, &existing),
+        label,
+        command,
+        args,
+        group: normalize_custom_task_group(request.group.as_deref()),
+        cwd,
+    };
+    existing.push(record);
+    write_custom_tasks(&root, &existing)?;
+    task_discover_impl(&request.workspace_path)
+}
+
+fn custom_task_delete_impl(
+    request: &CustomTaskDeleteRequest,
+) -> anyhow::Result<Vec<TaskDefinitionResult>> {
+    let root = workspace_root(&request.workspace_path)?;
+    let existing = read_custom_tasks(&root)?;
+    let retained: Vec<CustomTaskRecord> = existing
+        .iter()
+        .filter(|task| task.id != request.task_id)
+        .cloned()
+        .collect();
+    if retained.len() != existing.len() {
+        write_custom_tasks(&root, &retained)?;
+    }
+    task_discover_impl(&request.workspace_path)
+}
+
+fn task_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TaskDefinitionResult>> {
+    let root = workspace_root(workspace_path)?;
+    let mut tasks: Vec<TaskDefinitionResult> = read_custom_tasks(&root)
+        .unwrap_or_default()
+        .iter()
+        .map(custom_task_definition)
+        .collect();
+    discover_package_script_tasks(&root, &mut tasks)?;
+    discover_cargo_tasks(&root, &mut tasks);
+    discover_makefile_tasks(&root, &mut tasks);
+    discover_justfile_tasks(&root, &mut tasks);
+    discover_python_tasks(&root, &mut tasks);
+    discover_go_tasks(&root, &mut tasks);
+    discover_deno_tasks(&root, &mut tasks);
+    let mut seen = HashSet::new();
+    tasks.retain(|task| seen.insert(task.id.clone()));
+    tasks.truncate(MAX_DISCOVERED_TASKS);
     Ok(tasks)
 }
 
@@ -10625,258 +11360,417 @@ fn provider_usage_windows_from_xai_billing(
     let Some(used_percent) = used_percent else {
         return Vec::new();
     };
-    let status = match used_percent {
-        100 => "exhausted",
-        80..=99 => "warning",
-        _ => "ok",
-    };
     vec![ProviderRateLimitWindow {
         id: id.into(),
         label: label.into(),
-        status: status.into(),
+        status: plan_window_status(used_percent).into(),
         used_percent: Some(used_percent),
         resets_at,
     }]
 }
 
-/// Ask Kimi Code what its own `/usage` command reports, over ACP.
+/// Where Kimi Code writes the OAuth token for the managed account.
 ///
-/// Kimi exposes no plan-quota endpoint; `/usage` is the one place the CLI
-/// states the account's usage, and ACP is how Gyro already drives the CLI for
-/// chat. This runs the same sequence an IDE would — `initialize`,
-/// `authenticate`, a throwaway session, `/usage` as the prompt — and reads the
-/// answer back off the message stream. The throwaway session is deleted again
-/// so background polling does not litter the user's session list.
+/// The CLI names each slot after the sign-in it belongs to: `kimi-code` is the
+/// default host's, and a self-hosted endpoint gets its own name. Gyro reads the
+/// default slot and falls back to the only other one present, so a custom
+/// endpoint still resolves without asking for a second sign-in.
+const KIMI_CREDENTIALS_DIR: &str = ".kimi-code/credentials";
+const KIMI_DEFAULT_CREDENTIALS_FILE: &str = "kimi-code.json";
+/// The account endpoint behind Kimi Code's own usage view.
+const KIMI_USAGE_URL: &str = "https://api.kimi.com/coding/v1/usages";
+
+/// Ask Kimi what the plan meters, the way Kimi Code asks it.
+///
+/// The CLI signs in once and keeps an OAuth token; its usage view is a plain
+/// `GET /usages` carrying that token. Gyro asks the same endpoint rather than
+/// standing up a second sign-in.
+///
+/// The route this replaces drove `kimi acp` and prompted `/usage`, which only
+/// ever reads back the throwaway probe session's own context occupancy — a
+/// number that says nothing about the plan, sitting under "Plan usage limits"
+/// claiming otherwise.
 fn fetch_kimi_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let mut process = command_with_gui_path("kimi");
-    process
-        .args(["acp"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = process
-        .spawn()
-        .map_err(|error| format!("could not start the Kimi usage service: {error}"))?;
-    let result = (|| {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Kimi usage service input is unavailable".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Kimi usage service output is unavailable".to_string())?;
-        let messages = spawn_codex_app_server_reader(stdout);
-        // Session setup adds a step Grok's poll does not need; allow for spawn.
-        let deadline = Instant::now() + Duration::from_secs(20);
-
-        write_codex_app_server_message(
-            &mut stdin,
-            &serde_json::json!({
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": 1,
-                    "clientInfo": {
-                        "name": "gyro",
-                        "version": env!("CARGO_PKG_VERSION"),
-                    },
-                    "clientCapabilities": {},
-                },
-            }),
-        )?;
-        let initialize = receive_codex_app_server_response(&messages, 1, deadline)?;
-        codex_app_server_result(&initialize)?;
-
-        write_codex_app_server_message(
-            &mut stdin,
-            &serde_json::json!({
-                "id": 2,
-                "method": "authenticate",
-                "params": { "methodId": "login" },
-            }),
-        )?;
-        let auth = receive_codex_app_server_response(&messages, 2, deadline)?;
-        if auth.get("error").is_some() {
-            return Err(auth
-                .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Sign in to Kimi Code to read your plan usage.")
-                .to_string());
-        }
-
-        let cwd = user_home_directory().map_err(to_string)?;
-        write_codex_app_server_message(
-            &mut stdin,
-            &serde_json::json!({
-                "id": 3,
-                "method": "session/new",
-                "params": { "cwd": cwd, "mcpServers": [] },
-            }),
-        )?;
-        let session = receive_codex_app_server_response(&messages, 3, deadline)?;
-        let session_id = codex_app_server_result(&session)?
-            .get("sessionId")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "Kimi did not open a usage session".to_string())?
-            .to_string();
-
-        let usage = (|| {
-            write_codex_app_server_message(
-                &mut stdin,
-                &serde_json::json!({
-                    "id": 4,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id,
-                        "prompt": [{ "type": "text", "text": "/usage" }],
-                    },
-                }),
-            )?;
-            receive_kimi_usage_text(&messages, 4, deadline)
-        })();
-
-        // Best-effort cleanup: a leftover probe session would show up in the
-        // user's `/sessions` list on every poll. Wait for the acknowledgement
-        // so the delete lands before the child is killed.
-        let _ = write_codex_app_server_message(
-            &mut stdin,
-            &serde_json::json!({
-                "id": 5,
-                "method": "session/delete",
-                "params": { "sessionId": session_id },
-            }),
-        );
-        let _ = receive_codex_app_server_response(
-            &messages,
-            5,
-            Instant::now() + Duration::from_secs(3),
-        );
-
-        let text = usage?;
-        let windows = provider_usage_windows_from_kimi_usage(&text);
-        if windows.is_empty() {
-            return Err("Kimi /usage did not report a usage window".into());
-        }
-        Ok(ProviderUsageSnapshot {
-            provider_id: provider_id.into(),
-            windows,
-            fetched_at: chrono::Utc::now().to_rfc3339(),
-        })
-    })();
-    let _ = child.kill();
-    let _ = child.wait();
-    result
-}
-
-/// Read `session/prompt` to the end, keeping the text Kimi streamed back.
-///
-/// `/usage` answers through `agent_message_chunk` notifications, not the
-/// response payload, so the plain response helper cannot be used here.
-fn receive_kimi_usage_text(
-    messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
-    request_id: u64,
-    deadline: Instant,
-) -> Result<String, String> {
-    let mut text = String::new();
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err("Kimi usage request timed out".into());
-        }
-        let message = messages
-            .recv_timeout(remaining)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => "Kimi usage request timed out".to_string(),
-                mpsc::RecvTimeoutError::Disconnected => {
-                    "Kimi usage service disconnected".to_string()
-                }
-            })??;
-        if message.get("id").and_then(serde_json::Value::as_u64) == Some(request_id) {
-            codex_app_server_result(&message)?;
-            return Ok(text);
-        }
-        let update = message
-            .get("params")
-            .and_then(|params| params.get("update"));
-        if let Some(update) = update {
-            if update.get("sessionUpdate").and_then(serde_json::Value::as_str)
-                == Some("agent_message_chunk")
-            {
-                if let Some(chunk) = update
-                    .get("content")
-                    .and_then(|content| content.get("text"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    text.push_str(chunk);
-                }
+    let token = kimi_oauth_access_token()?;
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(10))
+        .build();
+    let payload: serde_json::Value = agent
+        .get(KIMI_USAGE_URL)
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Accept", "application/json")
+        .call()
+        .map_err(|error| match error {
+            ureq::Error::Status(401 | 403, _) => {
+                "Kimi Code sign-in was rejected. Run `kimi login` to read your plan usage."
+                    .to_string()
             }
+            // The endpoint belongs to the Kimi For Coding membership. An
+            // account without one is not broken; it has no plan to meter.
+            ureq::Error::Status(404, _) => {
+                "This Kimi account does not publish plan usage limits.".to_string()
+            }
+            ureq::Error::Status(status, _) => {
+                format!("Kimi could not report plan usage ({status}).")
+            }
+            other => format!("Kimi could not report plan usage: {other}"),
+        })?
+        .into_json()
+        .map_err(|error| format!("Kimi returned an unreadable usage response: {error}"))?;
+    let windows = provider_usage_windows_from_kimi_usages(&payload);
+    if windows.is_empty() {
+        return Err("Kimi did not report a plan usage window".into());
+    }
+    Ok(ProviderUsageSnapshot {
+        provider_id: provider_id.into(),
+        windows,
+        fetched_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+/// Kimi's sign-in service, which mints an access token from the refresh token
+/// the CLI stored, and the client the CLI signs in as. The refresh grant is
+/// bound to that client, so Gyro presents the same one.
+const KIMI_OAUTH_TOKEN_URL: &str = "https://auth.kimi.com/api/oauth/token";
+const KIMI_OAUTH_CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
+/// How close to expiry a stored access token counts as already spent.
+const KIMI_SIGN_IN_RENEWAL_MARGIN_MS: i64 = 60_000;
+
+/// What the stored Kimi sign-in can offer right now.
+enum KimiSignIn {
+    /// The stored access token still has life left in it.
+    Current(String),
+    /// It has not, but the refresh token beside it mints another.
+    Renewable(String),
+}
+
+/// Renewed sign-in material, as Kimi's token endpoint answers it.
+struct KimiSignInRenewal {
+    access_token: String,
+    refresh_token: String,
+    expires_in: i64,
+    scope: String,
+    token_type: String,
+}
+
+/// Read the Kimi Code OAuth access token this machine already holds, renewing
+/// it first where the stored one has run out.
+///
+/// Kimi's access tokens last a quarter of an hour, so the stored one is almost
+/// always spent by the time anything asks for it. The refresh token beside it
+/// is the durable half of the sign-in; renewing off that is the ordinary path
+/// here rather than a fallback, and it is what any `kimi` run does too.
+fn kimi_oauth_access_token() -> Result<String, String> {
+    let signed_out = || "Sign in to Kimi Code to read your plan usage.".to_string();
+    let path = kimi_credentials_path().ok_or_else(signed_out)?;
+    let raw = std::fs::read_to_string(&path).map_err(|_| signed_out())?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    match kimi_sign_in_at(&raw, now_ms)? {
+        KimiSignIn::Current(token) => Ok(token),
+        KimiSignIn::Renewable(refresh_token) => {
+            let renewal = kimi_renew_sign_in(&refresh_token)?;
+            let access_token = renewal.access_token.clone();
+            // Kimi rotates the refresh token on renewal, which would strand
+            // the CLI on one the service no longer honours. Handing the
+            // renewal back to the slot it came from keeps the single sign-in
+            // shared, exactly as another `kimi` run would leave it. A slot
+            // that cannot be written still leaves this reading good, so the
+            // usage view is not failed over a bookkeeping problem.
+            let _ = store_kimi_sign_in(&path, &renewal, now_ms);
+            Ok(access_token)
         }
     }
 }
 
-/// The first percentage a `/usage` line states, e.g. the `0` in
-/// `Context: 0 / 262144 tokens (0%)`.
-fn kimi_usage_line_percent(line: &str) -> Option<i32> {
-    let bytes = line.as_bytes();
-    let percent_at = bytes.iter().position(|byte| *byte == b'%')?;
-    let mut start = percent_at;
-    while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
-        start -= 1;
+/// The credential slot this machine's Kimi sign-in wrote.
+fn kimi_credentials_path() -> Option<PathBuf> {
+    let directory = user_home_directory().ok()?.join(KIMI_CREDENTIALS_DIR);
+    let default = directory.join(KIMI_DEFAULT_CREDENTIALS_FILE);
+    if default.is_file() {
+        return Some(default);
     }
-    if start == percent_at {
+    // A sign-in against a custom host writes one differently named slot
+    // instead. Only a lone slot is unambiguous, so several are left to the
+    // default's absence.
+    let mut slots = std::fs::read_dir(&directory)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|kind| kind == "json"));
+    let only = slots.next()?;
+    slots.next().is_none().then_some(only)
+}
+
+/// Read the stored sign-in against a fixed clock.
+fn kimi_sign_in_at(raw: &str, now_ms: i64) -> Result<KimiSignIn, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "Kimi Code credentials could not be read.")?;
+    // The CLI writes the server's own snake_case wire shape; other builds have
+    // nested it under `token` in camelCase, so each spelling is tried.
+    let record = parsed.get("token").unwrap_or(&parsed);
+    let field = |names: [&str; 2]| {
+        names
+            .into_iter()
+            .find_map(|name| record.get(name))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let expiry = ["expires_at", "expiresAt"]
+        .into_iter()
+        .find_map(|name| record.get(name))
+        .and_then(kimi_timestamp_ms);
+    // An unstamped token is treated as spent: renewing one that had life left
+    // costs a request, while trusting one that had none costs the reading.
+    let spent = match expiry {
+        Some(at) => at <= now_ms + KIMI_SIGN_IN_RENEWAL_MARGIN_MS,
+        None => true,
+    };
+    match (
+        spent,
+        field(["access_token", "accessToken"]),
+        field(["refresh_token", "refreshToken"]),
+    ) {
+        (false, Some(access_token), _) => Ok(KimiSignIn::Current(access_token)),
+        (_, _, Some(refresh_token)) => Ok(KimiSignIn::Renewable(refresh_token)),
+        (true, Some(_), None) => Err(
+            "Kimi Code's sign-in has lapsed. Run `kimi login` to read your plan usage.".to_string(),
+        ),
+        _ => Err("Kimi Code credentials do not include an access token.".to_string()),
+    }
+}
+
+/// Trade the refresh token for a fresh access token.
+fn kimi_renew_sign_in(refresh_token: &str) -> Result<KimiSignInRenewal, String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(10))
+        .build();
+    let payload: serde_json::Value = agent
+        .post(KIMI_OAUTH_TOKEN_URL)
+        .set("Accept", "application/json")
+        .send_form(&[
+            ("client_id", KIMI_OAUTH_CLIENT_ID),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ])
+        .map_err(|error| match error {
+            // A refused grant is a sign-in that has ended, not a fault: the
+            // refresh token has been spent, revoked, or has outlived its own
+            // window. Only signing in again mints another.
+            ureq::Error::Status(400 | 401 | 403, _) => {
+                "Kimi Code's sign-in has lapsed. Run `kimi login` to read your plan usage."
+                    .to_string()
+            }
+            ureq::Error::Status(status, _) => {
+                format!("Kimi could not renew the sign-in ({status}).")
+            }
+            other => format!("Kimi could not renew the sign-in: {other}"),
+        })?
+        .into_json()
+        .map_err(|error| format!("Kimi returned an unreadable sign-in response: {error}"))?;
+    kimi_sign_in_renewal(&payload, refresh_token)
+}
+
+/// Read the token endpoint's answer.
+fn kimi_sign_in_renewal(
+    payload: &serde_json::Value,
+    previous_refresh_token: &str,
+) -> Result<KimiSignInRenewal, String> {
+    let text = |key: &str| {
+        payload
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    Ok(KimiSignInRenewal {
+        access_token: text("access_token")
+            .ok_or("Kimi's sign-in renewal did not include an access token.")?,
+        // A renewal that rotates nothing keeps the refresh token it was given.
+        refresh_token: text("refresh_token").unwrap_or_else(|| previous_refresh_token.to_string()),
+        // An unstated lifetime is no lifetime: the next reading renews again
+        // rather than trusting a span the service never promised.
+        expires_in: kimi_int(payload.get("expires_in"))
+            .unwrap_or_default()
+            .max(0),
+        scope: text("scope").unwrap_or_default(),
+        token_type: text("token_type").unwrap_or_else(|| "Bearer".to_string()),
+    })
+}
+
+/// Hand a renewed sign-in back to the slot the CLI reads.
+///
+/// Same wire shape, same private file, same write-to-temporary-then-rename the
+/// CLI itself uses, so a renewal Gyro made is indistinguishable from one made
+/// by `kimi` — and a half-written file never replaces a good one.
+fn store_kimi_sign_in(path: &Path, renewal: &KimiSignInRenewal, now_ms: i64) -> Result<(), String> {
+    let body = serde_json::json!({
+        "access_token": renewal.access_token,
+        "refresh_token": renewal.refresh_token,
+        "expires_at": now_ms / 1_000 + renewal.expires_in,
+        "scope": renewal.scope,
+        "token_type": renewal.token_type,
+        "expires_in": renewal.expires_in,
+    });
+    let mut text = serde_json::to_string_pretty(&body).map_err(to_string)?;
+    text.push('\n');
+    let directory = path
+        .parent()
+        .ok_or("Kimi credentials are not in a directory")?;
+    let temporary = directory.join(format!(".gyro-kimi-sign-in-{}.tmp", Uuid::new_v4()));
+    let written = (|| -> Result<(), String> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).map_err(to_string)?;
+        file.write_all(text.as_bytes()).map_err(to_string)?;
+        file.sync_all().map_err(to_string)?;
+        fs::rename(&temporary, path).map_err(to_string)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
+}
+
+/// A moment Kimi may have written as epoch seconds, epoch millis, or a date.
+fn kimi_timestamp_ms(value: &serde_json::Value) -> Option<i64> {
+    if let Some(text) = value.as_str() {
+        return chrono::DateTime::parse_from_rfc3339(text)
+            .ok()
+            .map(|moment| moment.timestamp_millis());
+    }
+    let number = kimi_int(Some(value))?;
+    // Seconds and milliseconds are told apart by scale: an epoch in seconds
+    // stays ten digits until the year 5138.
+    Some(if number.abs() < 100_000_000_000 {
+        number * 1_000
+    } else {
+        number
+    })
+}
+
+/// A count Kimi may have sent as a number or as a string.
+fn kimi_int(value: Option<&serde_json::Value>) -> Option<i64> {
+    match value? {
+        serde_json::Value::Number(number) => number.as_f64().map(|value| value.trunc() as i64),
+        serde_json::Value::String(text) => text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|value| value.trunc() as i64),
+        _ => None,
+    }
+}
+
+/// How many minutes a Kimi usage window spans.
+fn kimi_window_minutes(window: &serde_json::Value) -> Option<i64> {
+    let duration = kimi_int(window.get("duration"))?;
+    let unit = match window.get("timeUnit").and_then(serde_json::Value::as_str)? {
+        "TIME_UNIT_MINUTE" => 1,
+        "TIME_UNIT_HOUR" => 60,
+        "TIME_UNIT_DAY" => 1_440,
+        "TIME_UNIT_WEEK" => 10_080,
+        _ => return None,
+    };
+    (duration > 0).then_some(duration * unit)
+}
+
+/// One metered window, as Gyro shows it.
+fn kimi_usage_window(
+    id: String,
+    label: String,
+    detail: &serde_json::Value,
+) -> Option<ProviderRateLimitWindow> {
+    let used = kimi_int(detail.get("used"));
+    let limit = kimi_int(detail.get("limit"));
+    if used.is_none() && limit.is_none() {
         return None;
     }
-    line[start..percent_at]
-        .parse::<f64>()
-        .ok()
-        .map(|value| value.round().clamp(0.0, 100.0) as i32)
+    // A window with no ceiling is metered but unbounded. The row still belongs
+    // in the list; the percentage it cannot honestly claim is left off.
+    let used_percent = match (used, limit) {
+        (Some(used), Some(limit)) if limit > 0 => Some(
+            (used as f64 / limit as f64 * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as i32,
+        ),
+        _ => None,
+    };
+    Some(ProviderRateLimitWindow {
+        id,
+        label,
+        status: used_percent.map_or("unknown", plan_window_status).into(),
+        used_percent,
+        resets_at: detail
+            .get("resetTime")
+            .and_then(serde_json::Value::as_str)
+            .filter(|moment| !moment.is_empty())
+            .map(str::to_string),
+    })
 }
 
-/// Map Kimi `/usage` text onto Gyro usage windows.
+/// Read Kimi's `/usages` answer into the windows Gyro shows.
 ///
-/// The command prints one line per meter — "Context: 0 / 262144 tokens (0%)"
-/// is what the current build answers over ACP, and the weekly and 5-hour plan
-/// quota lines the membership carries are picked up as soon as the CLI prints
-/// them there. A line only becomes a window when it pairs a label Gyro knows
-/// with a percentage; anything else is ignored rather than guessed at.
-fn provider_usage_windows_from_kimi_usage(text: &str) -> Vec<ProviderRateLimitWindow> {
-    let mut windows = Vec::new();
+/// Every window the plan meters arrives in `limits`, each one a `window` of
+/// `{duration, timeUnit}` beside a `detail` of `{used, limit, resetTime}`. The
+/// plan's headline allowance arrives separately as `usage`, with no window of
+/// its own — the CLI reads that one as weekly, and so does this.
+fn provider_usage_windows_from_kimi_usages(
+    payload: &serde_json::Value,
+) -> Vec<ProviderRateLimitWindow> {
+    let mut windows: Vec<(i64, ProviderRateLimitWindow)> = Vec::new();
     let mut seen = HashSet::new();
-    for line in text.lines() {
-        let lower = line.to_lowercase();
-        let (id, label) = if lower.trim_start().starts_with("context:") {
-            ("context", "Context window")
-        } else if lower.contains("week") {
-            ("weekly", "Weekly limit")
-        } else if lower.contains("5-hour") || lower.contains("5 hour") || lower.contains("5h") {
-            ("five-hour", "5-hour limit")
-        } else {
+    for entry in payload
+        .get("limits")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        let Some(minutes) = entry.get("window").and_then(kimi_window_minutes) else {
             continue;
         };
-        if !seen.insert(id) {
+        let name = entry
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty());
+        let (mut id, mut label) = plan_window_identity(minutes);
+        // Two allowances can share a span — a per-model cap beside the plan's
+        // own. Where that happens the name is the only thing telling them
+        // apart, so the second one is named after it rather than dropped.
+        if seen.contains(&id) {
+            let Some(name) = name else { continue };
+            id = name.to_lowercase().replace(' ', "-");
+            label = name.to_string();
+        }
+        if !seen.insert(id.clone()) {
             continue;
         }
-        let Some(used_percent) = kimi_usage_line_percent(line) else {
-            continue;
-        };
-        let status = match used_percent {
-            100 => "exhausted",
-            80..=99 => "warning",
-            _ => "ok",
-        };
-        windows.push(ProviderRateLimitWindow {
-            id: id.into(),
-            label: label.into(),
-            status: status.into(),
-            used_percent: Some(used_percent),
-            resets_at: None,
-        });
+        let detail = entry.get("detail").unwrap_or(entry);
+        if let Some(window) = kimi_usage_window(id, label, detail) {
+            windows.push((minutes, window));
+        }
     }
-    windows
+    if !seen.contains("weekly") {
+        if let Some(window) = payload
+            .get("usage")
+            .and_then(|usage| kimi_usage_window("weekly".into(), "Weekly limit".into(), usage))
+        {
+            windows.push((10_080, window));
+        }
+    }
+    // The window a run hits first is the one worth reading first.
+    windows.sort_by_key(|(minutes, _)| *minutes);
+    windows.into_iter().map(|(_, window)| window).collect()
 }
-
 /// Where Claude Code keeps the OAuth token Gyro reuses to read plan usage.
 ///
 /// The keychain entry is written by `claude login` and refreshed by the CLI on
@@ -10893,15 +11787,34 @@ const ANTHROPIC_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 fn claude_oauth_access_token() -> Result<String, String> {
     let raw = claude_credentials_json()
         .ok_or_else(|| "Sign in to Claude Code to read your plan usage.".to_string())?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|_| "Claude Code credentials could not be read.".to_string())?;
+    claude_oauth_access_token_at(&raw, chrono::Utc::now().timestamp_millis())
+}
+
+/// The same, against a fixed clock.
+fn claude_oauth_access_token_at(raw: &str, now_ms: i64) -> Result<String, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "Claude Code credentials could not be read.")?;
     let oauth = parsed.get("claudeAiOauth").unwrap_or(&parsed);
-    // An expired token is worth reporting plainly: the CLI refreshes it on its
-    // next run, so the user's fix is to run Claude once rather than debug Gyro.
-    if let Some(expires_at) = oauth.get("expiresAt").and_then(serde_json::Value::as_i64) {
-        if expires_at > 0 && expires_at < chrono::Utc::now().timestamp_millis() {
-            return Err("Claude Code sign-in has expired. Run Claude once to refresh it.".into());
-        }
+    // A lapsed token is worth reporting plainly: the CLI mints a new one on its
+    // next run, so the user's fix is to use Claude rather than debug Gyro.
+    //
+    // Which fix, though, depends on the refresh token beside it. While that is
+    // still good, any Claude turn — including one sent from Gyro — refreshes
+    // the access token; once it too has lapsed, nothing short of signing in
+    // again will. Telling the two apart is the difference between "keep
+    // working" and "go log in", so the message says which one this is.
+    let lapsed = |key: &str| {
+        oauth
+            .get(key)
+            .and_then(serde_json::Value::as_i64)
+            .is_some_and(|at| at > 0 && at < now_ms)
+    };
+    if lapsed("expiresAt") {
+        return Err(if lapsed("refreshTokenExpiresAt") {
+            "Claude Code is signed out. Run `claude auth login` to read your plan usage.".into()
+        } else {
+            "Claude Code's token has lapsed. Send a Claude message to refresh it.".to_string()
+        });
     }
     oauth
         .get("accessToken")
@@ -10955,7 +11868,12 @@ fn fetch_anthropic_provider_usage(provider_id: &str) -> Result<ProviderUsageSnap
         .call()
         .map_err(|error| match error {
             ureq::Error::Status(401 | 403, _) => {
-                "Claude Code sign-in was rejected. Run Claude once to refresh it.".to_string()
+                // The stored token had not lapsed by its own clock, so a refusal
+                // here means it is no longer a valid sign-in — revoked, or from
+                // an account that has since signed out. Another Claude turn will
+                // not mint a good one; only signing in again will.
+                "Claude Code sign-in was rejected. Run `claude auth login` to read your plan usage."
+                    .to_string()
             }
             ureq::Error::Status(status, _) => {
                 format!("Anthropic usage request failed (HTTP {status}).")
@@ -11044,7 +11962,11 @@ fn stored_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, Str
     })
 }
 
-/// Keep the newest reading for each window, so the next session starts informed.
+/// Store a complete poll reading, so the next session starts informed.
+///
+/// A poll names every window the account meters, so it replaces what was there
+/// rather than merging into it — otherwise a window the plan dropped (or one
+/// Gyro used to mis-name) would be replayed as real on the next failed poll.
 ///
 /// Best-effort by design: a limit Gyro could not write down must never be the
 /// reason a provider call or its usage row fails.
@@ -11052,13 +11974,43 @@ fn remember_provider_rate_limits(provider_id: &str, windows: &[ProviderRateLimit
     if windows.is_empty() {
         return;
     }
-    match open_store() {
-        Ok(store) => remember_provider_rate_limits_in(&store, provider_id, windows),
-        Err(error) => warn_unrecorded_rate_limits(&error),
+    let store = match open_store() {
+        Ok(store) => store,
+        Err(error) => {
+            warn_unrecorded_rate_limits(&error);
+            return;
+        }
+    };
+    if let Err(error) = store.replace_provider_rate_limits(
+        provider_id,
+        &provider_rate_limit_records(windows, &chrono::Utc::now().to_rfc3339()),
+    ) {
+        warn_unrecorded_rate_limits(&error.to_string());
     }
 }
 
-/// The same, for callers already holding the store open.
+/// The stored shape of a set of windows, all observed at the same moment.
+fn provider_rate_limit_records(
+    windows: &[ProviderRateLimitWindow],
+    observed_at: &str,
+) -> Vec<gyro_core::ProviderRateLimitRecord> {
+    windows
+        .iter()
+        .map(|window| gyro_core::ProviderRateLimitRecord {
+            window_id: window.id.clone(),
+            label: window.label.clone(),
+            status: window.status.clone(),
+            used_percent: window.used_percent,
+            resets_at: window.resets_at.clone(),
+            observed_at: observed_at.to_string(),
+        })
+        .collect()
+}
+
+/// What a turn reported mid-answer, for callers already holding the store open.
+///
+/// A stream names only the windows that turn touched, so this merges: the
+/// windows it did not mention are still real and keep their last reading.
 fn remember_provider_rate_limits_in(
     store: &SessionStore,
     provider_id: &str,
@@ -11067,18 +12019,7 @@ fn remember_provider_rate_limits_in(
     if windows.is_empty() {
         return;
     }
-    let observed_at = chrono::Utc::now().to_rfc3339();
-    let records = windows
-        .iter()
-        .map(|window| gyro_core::ProviderRateLimitRecord {
-            window_id: window.id.clone(),
-            label: window.label.clone(),
-            status: window.status.clone(),
-            used_percent: window.used_percent,
-            resets_at: window.resets_at.clone(),
-            observed_at: observed_at.clone(),
-        })
-        .collect::<Vec<_>>();
+    let records = provider_rate_limit_records(windows, &chrono::Utc::now().to_rfc3339());
     if let Err(error) = store.record_provider_rate_limits(provider_id, &records) {
         warn_unrecorded_rate_limits(&error.to_string());
     }
@@ -11279,6 +12220,50 @@ fn codex_app_server_result(response: &serde_json::Value) -> Result<serde_json::V
         .ok_or_else(|| "Codex usage response did not include a result".into())
 }
 
+/// The state a plan window is in, read off how full it is.
+///
+/// Providers report a level, not a state, so the state is derived. The
+/// thresholds match the ones the composer colours by.
+fn plan_window_status(used_percent: i32) -> &'static str {
+    match used_percent {
+        100.. => "exhausted",
+        80..=99 => "warning",
+        _ => "ok",
+    }
+}
+
+/// Name a plan window after the span it actually meters.
+///
+/// An account meters whatever its plan sells: 5-hour and weekly on Codex's
+/// paid tiers, a single monthly window on the free one, whatever Kimi's
+/// membership carries. Naming a window after the slot it arrived in
+/// ("primary") turned a 30-day allowance into a row labelled "5-hour window",
+/// so the duration is the only thing that gets to name it.
+fn plan_window_identity(minutes: i64) -> (String, String) {
+    match minutes {
+        300 => ("five-hour".into(), "5-hour window".into()),
+        10_080 => ("weekly".into(), "Weekly window".into()),
+        1_440 => ("daily".into(), "Daily window".into()),
+        43_200 => ("monthly".into(), "Monthly window".into()),
+        _ if minutes % 10_080 == 0 => {
+            let weeks = minutes / 10_080;
+            (format!("{weeks}-week"), format!("{weeks}-week window"))
+        }
+        _ if minutes % 1_440 == 0 => {
+            let days = minutes / 1_440;
+            (format!("{days}-day"), format!("{days}-day window"))
+        }
+        _ if minutes % 60 == 0 => {
+            let hours = minutes / 60;
+            (format!("{hours}-hour"), format!("{hours}-hour window"))
+        }
+        _ => (
+            format!("{minutes}-minute"),
+            format!("{minutes}-minute window"),
+        ),
+    }
+}
+
 fn provider_usage_windows_from_codex(
     snapshot: &CodexRateLimitSnapshot,
 ) -> Vec<ProviderRateLimitWindow> {
@@ -11292,25 +12277,19 @@ fn provider_usage_windows_from_codex(
             continue;
         };
         let (id, label) = match window.window_duration_mins {
-            Some(300) => ("five-hour", "5-hour window"),
-            Some(10_080) => ("weekly", "Weekly window"),
-            _ => (fallback_id, fallback_label),
+            Some(minutes) if minutes > 0 => plan_window_identity(minutes),
+            // Only a window that never said how long it runs falls back to the
+            // slot it arrived in.
+            _ => (fallback_id.to_string(), fallback_label.to_string()),
         };
-        if !seen.insert(id) {
+        if !seen.insert(id.clone()) {
             continue;
         }
         let used_percent = window.used_percent.clamp(0, 100);
         windows.push(ProviderRateLimitWindow {
-            id: id.into(),
-            label: label.into(),
-            // Codex reports a level, not a state, so the state is read off the
-            // level. The thresholds match the ones the composer colours by.
-            status: match used_percent {
-                100 => "exhausted",
-                80..=99 => "warning",
-                _ => "ok",
-            }
-            .into(),
+            id,
+            label,
+            status: plan_window_status(used_percent).into(),
             used_percent: Some(used_percent),
             resets_at: window
                 .resets_at
@@ -11588,7 +12567,7 @@ fn user_home_directory() -> anyhow::Result<PathBuf> {
 }
 
 fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
-    let mut top_level_command = command_with_gui_path("git");
+    let mut top_level_command = git_command();
     top_level_command
         .arg("-C")
         .arg(workspace)
@@ -11605,7 +12584,7 @@ fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
     }
     let git_top_level = PathBuf::from(top_level_output.stdout.trim()).canonicalize()?;
 
-    let mut common_dir_command = command_with_gui_path("git");
+    let mut common_dir_command = git_command();
     common_dir_command.arg("-C").arg(workspace).args([
         "rev-parse",
         "--path-format=absolute",
@@ -12834,9 +13813,7 @@ fn run_openai_codex_app_server_chat(
             // The pipe is still open (Disconnected would fire), so silence is
             // not completion — only max runtime, cancel, and real disconnect end
             // the turn.
-            let message = match messages.recv_timeout(
-                remaining.min(Duration::from_millis(250)),
-            ) {
+            let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
                 Ok(message) => message.map_err(anyhow::Error::msg)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     flush_codex_app_server_commentary(
@@ -20602,6 +21579,9 @@ pub fn run() {
             menu_bar::show_main_window,
             terminal_pane_has_foreground_job,
             task_discover,
+            task_create_custom,
+            task_delete_custom,
+            task_cancel,
             task_run,
             test_discover,
             test_notification,
@@ -21628,6 +22608,49 @@ mod tests {
     }
 
     #[test]
+    fn codex_usage_windows_name_a_plan_only_window_by_its_duration() {
+        // The free plan meters one 30-day window and sends it in the primary
+        // slot. Calling that "5-hour" would misstate the allowance by 144x.
+        let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
+            primary: Some(CodexRateLimitWindow {
+                used_percent: 7,
+                window_duration_mins: Some(43_200),
+                resets_at: None,
+            }),
+            secondary: None,
+        });
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].id, "monthly");
+        assert_eq!(windows[0].label, "Monthly window");
+        assert_eq!(windows[0].used_percent, Some(7));
+    }
+
+    #[test]
+    fn codex_usage_windows_describe_a_duration_gyro_does_not_name() {
+        let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
+            primary: Some(CodexRateLimitWindow {
+                used_percent: 3,
+                window_duration_mins: Some(180),
+                resets_at: None,
+            }),
+            secondary: Some(CodexRateLimitWindow {
+                used_percent: 4,
+                window_duration_mins: Some(4_320),
+                resets_at: None,
+            }),
+        });
+
+        assert_eq!(
+            windows
+                .iter()
+                .map(|window| (window.id.as_str(), window.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("3-hour", "3-hour window"), ("3-day", "3-day window")]
+        );
+    }
+
+    #[test]
     fn codex_usage_windows_are_clamped_ordered_and_deduplicated() {
         let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
             primary: Some(CodexRateLimitWindow {
@@ -21665,6 +22688,52 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, "Login required");
+    }
+
+    #[test]
+    fn a_lapsed_claude_token_names_the_fix_its_refresh_token_still_allows() {
+        let now = 1_000_000_000_000i64;
+        let credentials = |expires: i64, refresh_expires: i64| {
+            serde_json::json!({
+                "claudeAiOauth": {
+                    "accessToken": "token-value",
+                    "expiresAt": expires,
+                    "refreshTokenExpiresAt": refresh_expires,
+                }
+            })
+            .to_string()
+        };
+
+        assert_eq!(
+            claude_oauth_access_token_at(&credentials(now + 1, now + 2), now).unwrap(),
+            "token-value"
+        );
+        // The access token lapsed but the refresh token has not: using Claude
+        // at all is enough, and Gyro should not send the user to a login page.
+        assert_eq!(
+            claude_oauth_access_token_at(&credentials(now - 1, now + 2), now).unwrap_err(),
+            "Claude Code's token has lapsed. Send a Claude message to refresh it."
+        );
+        // Both lapsed, so nothing short of signing in again will help.
+        assert_eq!(
+            claude_oauth_access_token_at(&credentials(now - 2, now - 1), now).unwrap_err(),
+            "Claude Code is signed out. Run `claude auth login` to read your plan usage."
+        );
+    }
+
+    #[test]
+    #[ignore = "requires a locally signed-in Claude Code CLI"]
+    fn live_anthropic_provider_usage_reads_the_current_account() {
+        let snapshot = get_provider_usage_blocking("anthropic").unwrap();
+
+        assert_eq!(snapshot.provider_id, "anthropic");
+        assert!(!snapshot.windows.is_empty());
+        for window in &snapshot.windows {
+            eprintln!(
+                "{} ({}) {:?}% resets {:?}",
+                window.id, window.label, window.used_percent, window.resets_at
+            );
+        }
     }
 
     #[test]
@@ -22018,6 +23087,147 @@ while True:
         assert!(!workspace.path().join("untracked.txt").exists());
     }
 
+    /// The whole path behind the Source Control panel, against a real remote:
+    /// stage a file, commit it, and get the branch published. A branch that has
+    /// never been pushed is the state every new branch starts in, so the first
+    /// push has to set its upstream rather than fail with a hint no button can
+    /// act on.
+    #[test]
+    fn staging_committing_and_pushing_publishes_an_unpublished_branch() {
+        let temporary = tempfile::tempdir().unwrap();
+        let remote = temporary.path().join("origin.git");
+        let workspace = temporary.path().join("work");
+        std::fs::create_dir_all(&workspace).unwrap();
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&remote)
+            .output()
+            .unwrap();
+        run_git(&workspace, &["init"]);
+        run_git(&workspace, &["config", "user.email", "gyro@example.test"]);
+        run_git(&workspace, &["config", "user.name", "Gyro Tests"]);
+        run_git(
+            &workspace,
+            &["remote", "add", "origin", &remote.to_string_lossy()],
+        );
+        let workspace_path = workspace.to_string_lossy().to_string();
+
+        std::fs::write(workspace.join("note.txt"), "first\n").unwrap();
+        let staged = git_stage_blocking(GitStageRequest {
+            workspace_path: workspace_path.clone(),
+            path: "note.txt".into(),
+        })
+        .unwrap();
+        assert!(staged
+            .files
+            .iter()
+            .any(|file| file.path == "note.txt" && file.staged));
+        assert!(staged.upstream.is_none());
+
+        let committed = git_commit_blocking(GitCommitRequest {
+            workspace_path: workspace_path.clone(),
+            message: "add a note".into(),
+        })
+        .unwrap();
+        assert_eq!(committed.status, "done", "{}", committed.stderr);
+
+        // The caller has not been told to set an upstream, and there is none:
+        // publishing is what the press has to mean.
+        let published = git_push_blocking(GitSyncRequest {
+            workspace_path: workspace_path.clone(),
+            remote: None,
+            set_upstream: false,
+        })
+        .unwrap();
+        assert_eq!(
+            published.output.status, "done",
+            "{}",
+            published.output.stderr
+        );
+        let branch = git_current_branch(&workspace).unwrap();
+        assert_eq!(published.status.upstream, Some(format!("origin/{branch}")));
+        assert_eq!(published.status.ahead, 0);
+
+        // A second commit is an ordinary push against the upstream just set.
+        std::fs::write(workspace.join("note.txt"), "second\n").unwrap();
+        git_stage_blocking(GitStageRequest {
+            workspace_path: workspace_path.clone(),
+            path: "note.txt".into(),
+        })
+        .unwrap();
+        git_commit_blocking(GitCommitRequest {
+            workspace_path: workspace_path.clone(),
+            message: "revise the note".into(),
+        })
+        .unwrap();
+        let ahead = git_status_impl(&workspace_path).unwrap();
+        assert_eq!(ahead.ahead, 1);
+        let pushed = git_push_blocking(GitSyncRequest {
+            workspace_path: workspace_path.clone(),
+            remote: None,
+            set_upstream: false,
+        })
+        .unwrap();
+        assert_eq!(pushed.output.status, "done", "{}", pushed.output.stderr);
+        assert_eq!(pushed.status.ahead, 0);
+
+        // Nothing staged is a commit git refuses. It answers with output rather
+        // than an error, so the exit status is the only thing separating it
+        // from a commit that worked.
+        let empty = git_commit_blocking(GitCommitRequest {
+            workspace_path: workspace_path.clone(),
+            message: "nothing to say".into(),
+        })
+        .unwrap();
+        assert_eq!(empty.status, "failed");
+        assert!(!git_action_error(&empty).is_empty());
+    }
+
+    /// A git command a button ran must report a refusal as a refusal.
+    #[test]
+    fn a_refused_git_command_is_reported_rather_than_passed_over() {
+        let workspace = tempfile::tempdir().unwrap();
+        run_git(workspace.path(), &["init"]);
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        std::fs::write(workspace.path().join("note.txt"), "first\n").unwrap();
+        std::fs::write(workspace.path().join(".gitignore"), "note.txt\n").unwrap();
+
+        // Staging an ignored file is the everyday refusal: git says no, and the
+        // panel has to say so rather than refresh unchanged.
+        let refused = git_stage_blocking(GitStageRequest {
+            workspace_path,
+            path: "note.txt".into(),
+        })
+        .unwrap_err();
+        assert!(
+            refused.contains("note.txt") || refused.contains("ignored"),
+            "{refused}"
+        );
+
+        // Nothing said, and no exit to read: the termination is the account.
+        assert_eq!(
+            git_action_error(&IdeCommandOutput {
+                status: "timed-out".into(),
+                stdout: String::new(),
+                stderr: "   \n".into(),
+            }),
+            "the git command timed-out"
+        );
+    }
+
+    /// Nothing git runs from a window may sit waiting for an answer that can
+    /// only come from a terminal.
+    #[test]
+    fn git_never_waits_on_a_prompt_it_cannot_show() {
+        let command = git_command();
+        let prompt = command
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("GIT_TERMINAL_PROMPT"))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().to_string());
+        assert_eq!(prompt.as_deref(), Some("0"));
+    }
+
     #[test]
     fn language_server_manager_initializes_rust_analyzer_when_available() {
         if command_with_gui_path("rust-analyzer")
@@ -22130,6 +23340,86 @@ while True:
     }
 
     #[test]
+    fn command_lines_split_without_a_shell() {
+        let (command, args) = parse_command_line("  pnpm  run test --filter \"@gyro-dev/ui\" ").unwrap();
+        assert_eq!(command, "pnpm");
+        assert_eq!(args, vec!["run", "test", "--filter", "@gyro-dev/ui"]);
+
+        let (command, args) = parse_command_line("./scripts/run.sh 'one two'").unwrap();
+        assert_eq!(command, "./scripts/run.sh");
+        assert_eq!(args, vec!["one two"]);
+
+        assert!(parse_command_line("   ").is_err());
+        assert!(parse_command_line("echo \"unclosed").is_err());
+    }
+
+    #[test]
+    fn makefile_and_justfile_targets_skip_variables_and_patterns() {
+        let targets = makefile_targets(
+            "CARGO := cargo\n.PHONY: build\nbuild: deps\n\tcargo build\n%.o: %.c\n\tcc $<\ntest lint:\n\techo hi\n",
+        );
+        assert_eq!(targets, vec!["build", "test", "lint"]);
+
+        let recipes = justfile_recipes(
+            "set shell := [\"bash\"]\nversion := \"1\"\nbuild:\n  cargo build\ntest filter='':\n  cargo test\n",
+        );
+        assert_eq!(recipes, vec!["build", "test"]);
+    }
+
+    #[test]
+    fn saved_commands_round_trip_into_the_discovered_catalog() {
+        let workspace = tempfile::tempdir().unwrap();
+        let workspace_path = workspace.path().display().to_string();
+        std::fs::write(
+            workspace.path().join("package.json"),
+            r#"{"scripts":{"test":"vitest"}}"#,
+        )
+        .unwrap();
+
+        let tasks = custom_task_create_impl(&CustomTaskCreateRequest {
+            workspace_path: workspace_path.clone(),
+            command_line: "pnpm run smoke --reporter dot".into(),
+            label: Some("Smoke".into()),
+            group: Some("test".into()),
+            cwd: None,
+        })
+        .unwrap();
+        let saved = tasks
+            .iter()
+            .find(|task| task.source == "custom")
+            .expect("saved command is discoverable");
+        assert_eq!(saved.id, "custom:Smoke");
+        assert_eq!(saved.command, "pnpm");
+        assert_eq!(saved.args, vec!["run", "smoke", "--reporter", "dot"]);
+        assert_eq!(saved.group, "test");
+        assert!(tasks.iter().any(|task| task.id == "package:test"));
+        assert!(workspace.path().join(".gyro/tasks.json").is_file());
+
+        let remaining = custom_task_delete_impl(&CustomTaskDeleteRequest {
+            workspace_path: workspace_path.clone(),
+            task_id: "custom:Smoke".into(),
+        })
+        .unwrap();
+        assert!(remaining.iter().all(|task| task.source != "custom"));
+    }
+
+    #[test]
+    fn suggested_tasks_cover_common_project_manifests() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("Cargo.toml"), "[package]\nname=\"a\"\n").unwrap();
+        std::fs::write(workspace.path().join("Makefile"), "ship:\n\techo ship\n").unwrap();
+        std::fs::write(workspace.path().join("go.mod"), "module example.com/a\n").unwrap();
+
+        let tasks = task_discover_impl(&workspace.path().display().to_string()).unwrap();
+        let ids: Vec<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
+        assert!(ids.contains(&"cargo:test"));
+        assert!(ids.contains(&"cargo:clippy"));
+        assert!(ids.contains(&"make:ship"));
+        assert!(ids.contains(&"go:test"));
+        assert!(tasks.iter().all(|task| task.source == "suggested"));
+    }
+
+    #[test]
     fn test_catalog_is_derived_from_the_discovered_task_catalog() {
         let tasks = vec![
             TaskDefinitionResult {
@@ -22141,6 +23431,7 @@ while True:
                 cwd: None,
                 status: "idle".into(),
                 output_channel_id: None,
+                source: "suggested".into(),
             },
             TaskDefinitionResult {
                 id: "package:build".into(),
@@ -22151,6 +23442,7 @@ while True:
                 cwd: None,
                 status: "idle".into(),
                 output_channel_id: None,
+                source: "suggested".into(),
             },
         ];
 
@@ -23914,50 +25206,250 @@ while True:
         assert_eq!(window.status, "warning");
     }
 
-    /// What the current CLI build actually answers over ACP: the context
-    /// window, and a session total line Gyro does not turn into a window.
+    /// The shape `/usages` answers with: one entry per metered window, the
+    /// span in `window`, the reading in `detail`.
     #[test]
-    fn kimi_usage_maps_the_context_window_line() {
-        let windows = provider_usage_windows_from_kimi_usage(
-            "Context: 12345 / 262144 tokens (5%)\nSession total: 12 calls, 34000 tokens",
+    fn kimi_usages_map_every_window_the_plan_meters() {
+        let windows = provider_usage_windows_from_kimi_usages(&serde_json::json!({
+            "usage": { "used": 120, "limit": 400 },
+            "limits": [
+                {
+                    "name": "Weekly",
+                    "window": { "duration": 1, "timeUnit": "TIME_UNIT_WEEK" },
+                    "detail": {
+                        "used": 120,
+                        "limit": 400,
+                        "resetTime": "2026-08-29T00:00:00Z"
+                    }
+                },
+                {
+                    "name": "5-hour",
+                    "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },
+                    "detail": { "used": "96", "limit": "100" }
+                }
+            ]
+        }));
+        // The window a run hits first leads, whatever order the plan listed.
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].id, "five-hour");
+        assert_eq!(windows[0].label, "5-hour window");
+        assert_eq!(windows[0].used_percent, Some(96));
+        assert_eq!(windows[0].status, "warning");
+        assert_eq!(windows[1].id, "weekly");
+        assert_eq!(windows[1].used_percent, Some(30));
+        assert_eq!(windows[1].status, "ok");
+        assert_eq!(
+            windows[1].resets_at.as_deref(),
+            Some("2026-08-29T00:00:00Z")
         );
-        assert_eq!(windows.len(), 1);
-        assert_eq!(windows[0].id, "context");
-        assert_eq!(windows[0].label, "Context window");
-        assert_eq!(windows[0].used_percent, Some(5));
-        assert_eq!(windows[0].status, "ok");
+        // The headline allowance is the weekly one, so it is not listed twice.
+        assert!(!windows.iter().any(|window| window.label == "Weekly limit"));
     }
 
-    /// The membership quota lines join the same output when the CLI prints
-    /// them; each pairs its label with a percentage.
+    /// A plan that states only its headline allowance still gets a row: the
+    /// CLI reads that one as weekly, and an unmetered ceiling as no percentage
+    /// rather than as zero, which would read as a full allowance.
     #[test]
-    fn kimi_usage_picks_up_plan_quota_lines_when_printed() {
-        let windows = provider_usage_windows_from_kimi_usage(
-            "Context: 0 / 262144 tokens (0%)\n\
-             5-hour quota: 96% used\n\
-             Weekly quota: 42% used",
-        );
-        assert_eq!(windows.len(), 3);
-        assert_eq!(windows[1].id, "five-hour");
-        assert_eq!(windows[1].used_percent, Some(96));
-        assert_eq!(windows[1].status, "warning");
-        assert_eq!(windows[2].id, "weekly");
-        assert_eq!(windows[2].label, "Weekly limit");
-        assert_eq!(windows[2].used_percent, Some(42));
-        assert_eq!(windows[2].status, "ok");
-    }
-
-    /// A full window is reported as exhausted, and text without a known
-    /// labelled percentage stays windowless rather than inventing one.
-    #[test]
-    fn kimi_usage_marks_full_windows_exhausted_and_ignores_the_rest() {
-        let windows =
-            provider_usage_windows_from_kimi_usage("Weekly quota: 100% used\nhello world");
+    fn kimi_usages_fall_back_to_the_headline_allowance() {
+        let windows = provider_usage_windows_from_kimi_usages(&serde_json::json!({
+            "usage": { "used": 400, "limit": 400 }
+        }));
         assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].id, "weekly");
+        assert_eq!(windows[0].label, "Weekly limit");
         assert_eq!(windows[0].status, "exhausted");
-        assert!(provider_usage_windows_from_kimi_usage("no usage here").is_empty());
-        // A label without a percentage is not a reading.
-        assert!(provider_usage_windows_from_kimi_usage("Weekly quota: unavailable").is_empty());
+
+        let unbounded = provider_usage_windows_from_kimi_usages(&serde_json::json!({
+            "usage": { "used": 12, "limit": 0 }
+        }));
+        assert_eq!(unbounded[0].used_percent, None);
+        assert_eq!(unbounded[0].status, "unknown");
+
+        // Nothing metered is nothing to show, rather than an invented window.
+        assert!(provider_usage_windows_from_kimi_usages(&serde_json::json!({})).is_empty());
+        assert!(
+            provider_usage_windows_from_kimi_usages(&serde_json::json!({ "usage": {} })).is_empty()
+        );
+    }
+
+    /// Two allowances can share a span. The name is the only thing telling
+    /// them apart, so the second is named after it instead of overwriting the
+    /// first or vanishing.
+    #[test]
+    fn kimi_usages_keep_two_allowances_that_share_a_span() {
+        let windows = provider_usage_windows_from_kimi_usages(&serde_json::json!({
+            "limits": [
+                {
+                    "name": "Plan",
+                    "window": { "duration": 1, "timeUnit": "TIME_UNIT_WEEK" },
+                    "detail": { "used": 1, "limit": 10 }
+                },
+                {
+                    "name": "K3 Max",
+                    "window": { "duration": 7, "timeUnit": "TIME_UNIT_DAY" },
+                    "detail": { "used": 9, "limit": 10 }
+                }
+            ]
+        }));
+        assert_eq!(
+            windows
+                .iter()
+                .map(|window| (window.id.as_str(), window.used_percent))
+                .collect::<Vec<_>>(),
+            vec![("weekly", Some(10)), ("k3-max", Some(90))]
+        );
+    }
+
+    /// Kimi's access tokens last fifteen minutes, so a stored one is normally
+    /// spent. What matters is that the refresh token beside it is reached for
+    /// rather than reported as a failure — and that a sign-in with nothing
+    /// left names the one command that renews it.
+    #[test]
+    fn a_spent_kimi_token_renews_off_the_refresh_token_beside_it() {
+        let now = 1_000_000_000_000i64;
+        let stored = |expires: serde_json::Value| {
+            serde_json::json!({
+                "access_token": "access-value",
+                "refresh_token": "refresh-value",
+                "expires_at": expires
+            })
+            .to_string()
+        };
+        let reading = |raw: String| match kimi_sign_in_at(&raw, now) {
+            Ok(KimiSignIn::Current(token)) => format!("current:{token}"),
+            Ok(KimiSignIn::Renewable(token)) => format!("renewable:{token}"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            reading(stored((now / 1_000 + 600).into())),
+            "current:access-value"
+        );
+        // A token about to lapse mid-request is treated as already spent.
+        assert_eq!(
+            reading(stored((now / 1_000 + 30).into())),
+            "renewable:refresh-value"
+        );
+        assert_eq!(reading(stored((now - 1).into())), "renewable:refresh-value");
+        // Seconds, milliseconds and a date all name the same moment.
+        assert_eq!(
+            reading(stored("2001-09-09T01:46:39Z".into())),
+            "renewable:refresh-value"
+        );
+        // The wire format has moved between spellings and nesting; both read.
+        assert_eq!(
+            reading(
+                serde_json::json!({ "token": { "refreshToken": "nested", "expiresAt": 0 } })
+                    .to_string()
+            ),
+            "renewable:nested"
+        );
+
+        // Nothing left to renew with is the one case that asks for a login.
+        assert_eq!(
+            reading(
+                serde_json::json!({ "access_token": "access-value", "expires_at": 1 }).to_string()
+            ),
+            "Kimi Code's sign-in has lapsed. Run `kimi login` to read your plan usage."
+        );
+        assert_eq!(
+            reading("{}".to_string()),
+            "Kimi Code credentials do not include an access token."
+        );
+    }
+
+    /// A renewal is only as good as what it states. The refresh token it did
+    /// not rotate stays the stored one, and a lifetime it never promised is
+    /// not invented — the reading after it renews again instead.
+    #[test]
+    fn a_kimi_renewal_keeps_what_the_answer_left_out() {
+        let renewal = kimi_sign_in_renewal(
+            &serde_json::json!({
+                "access_token": "fresh",
+                "refresh_token": "rotated",
+                "expires_in": 900,
+                "scope": "coding",
+                "token_type": "Bearer"
+            }),
+            "previous",
+        )
+        .unwrap();
+        assert_eq!(renewal.access_token, "fresh");
+        assert_eq!(renewal.refresh_token, "rotated");
+        assert_eq!(renewal.expires_in, 900);
+
+        let sparse =
+            kimi_sign_in_renewal(&serde_json::json!({ "access_token": "fresh" }), "previous")
+                .unwrap();
+        assert_eq!(sparse.refresh_token, "previous");
+        assert_eq!(sparse.expires_in, 0);
+        assert_eq!(sparse.token_type, "Bearer");
+
+        // The renewal carries the sign-in itself, so it is never made
+        // printable; the failure is read off the `Err` side directly.
+        assert_eq!(
+            kimi_sign_in_renewal(&serde_json::json!({ "expires_in": 900 }), "previous")
+                .err()
+                .unwrap(),
+            "Kimi's sign-in renewal did not include an access token."
+        );
+    }
+
+    /// The renewal goes back to the slot it came from in the CLI's own wire
+    /// shape, so the next `kimi` run reads Gyro's renewal as its own.
+    #[test]
+    fn a_kimi_renewal_is_written_back_the_way_the_cli_reads_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("kimi-code.json");
+        let now = 1_000_000_000_000i64;
+        store_kimi_sign_in(
+            &path,
+            &KimiSignInRenewal {
+                access_token: "fresh".into(),
+                refresh_token: "rotated".into(),
+                expires_in: 900,
+                scope: "coding".into(),
+                token_type: "Bearer".into(),
+            },
+            now,
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(parsed["access_token"], "fresh");
+        assert_eq!(parsed["refresh_token"], "rotated");
+        assert_eq!(parsed["expires_at"], now / 1_000 + 900);
+        assert_eq!(parsed["expires_in"], 900);
+        // What was written reads back as a current sign-in, and nothing but
+        // the slot itself is left behind.
+        assert!(matches!(
+            kimi_sign_in_at(&written, now).unwrap(),
+            KimiSignIn::Current(token) if token == "fresh"
+        ));
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a locally signed-in Kimi Code CLI"]
+    fn live_kimi_provider_usage_reads_the_current_account() {
+        // The live poll, not the cached fallback around it: a stored row from
+        // an earlier build would otherwise pass for a fresh reading.
+        let snapshot = fetch_kimi_provider_usage("kimi").unwrap();
+        assert_eq!(snapshot.provider_id, "kimi");
+        assert!(!snapshot.windows.is_empty());
+        for window in &snapshot.windows {
+            eprintln!(
+                "{} ({}) {:?}% resets {:?}",
+                window.id, window.label, window.used_percent, window.resets_at
+            );
+        }
     }
 
     #[test]

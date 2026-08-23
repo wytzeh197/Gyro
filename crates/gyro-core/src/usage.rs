@@ -1,9 +1,10 @@
 //! Local usage ledger: one row per provider call.
 //!
-//! Gyro cannot rely on providers to say what a session cost. Codex reports a
-//! used percentage, Claude Code names its windows without ever measuring them,
-//! and Kimi, xAI, and Gemini report nothing at all. So the ledger is written
-//! locally, from what each run actually consumed.
+//! Gyro cannot rely on providers to say what a session cost. Codex, Kimi and
+//! xAI report a used percentage against a plan window, Claude Code names its
+//! windows without ever measuring them, and Gemini reports nothing at all. A
+//! plan percentage is not a cost either way, so the ledger is written locally,
+//! from what each run actually consumed.
 //!
 //! Rows are per *provider call*, not per user turn: one council turn is four
 //! seats plus a synthesizer, and collapsing those into a single row is exactly
@@ -940,6 +941,48 @@ pub fn record_provider_rate_limits(
     Ok(())
 }
 
+/// Replace a provider's stored windows with a complete fresh reading.
+///
+/// A poll answers with everything the account meters right now, so a window
+/// missing from it is a window the plan no longer has — a renamed slot, or a
+/// tier change. Upserting alone would leave that row behind until its old
+/// reset passed, and a failed later poll would replay it as if it were real.
+pub fn replace_provider_rate_limits(
+    conn: &Connection,
+    provider_id: &str,
+    windows: &[ProviderRateLimitRecord],
+) -> Result<()> {
+    record_provider_rate_limits(conn, provider_id, windows)?;
+    let kept = windows
+        .iter()
+        .map(|window| window.window_id.as_str())
+        .collect::<Vec<_>>();
+    if kept.is_empty() {
+        conn.execute(
+            "delete from provider_rate_limits where provider_id = ?1",
+            params![provider_id],
+        )?;
+        return Ok(());
+    }
+    let placeholders = (0..kept.len())
+        .map(|index| format!("?{}", index + 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(kept.len() + 1);
+    values.push(&provider_id);
+    for window_id in &kept {
+        values.push(window_id);
+    }
+    conn.execute(
+        &format!(
+            "delete from provider_rate_limits
+             where provider_id = ?1 and window_id not in ({placeholders})"
+        ),
+        values.as_slice(),
+    )?;
+    Ok(())
+}
+
 /// The last reading for each of a provider's windows, expired ones dropped.
 ///
 /// A window past its reset time has rolled over, so the stored status describes
@@ -1614,6 +1657,57 @@ mod tests {
         let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].window_id, "weekly");
+    }
+
+    #[test]
+    fn a_fresh_poll_drops_a_window_the_plan_no_longer_meters() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let far_off = (now + chrono::Duration::days(30)).to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "openai",
+            &[
+                window("five-hour", "ok", Some(&far_off)),
+                window("weekly", "ok", Some(&far_off)),
+            ],
+        )
+        .expect("record windows");
+
+        // The account moved to a plan metered by the month. The old rows have
+        // not expired yet, so only replacing can keep them from being replayed.
+        replace_provider_rate_limits(&conn, "openai", &[window("monthly", "ok", Some(&far_off))])
+            .expect("replace windows");
+
+        let stored = provider_rate_limits(&conn, "openai", now).expect("read windows");
+        assert_eq!(
+            stored
+                .iter()
+                .map(|record| record.window_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["monthly"]
+        );
+    }
+
+    #[test]
+    fn replacing_one_provider_leaves_another_alone() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let far_off = (now + chrono::Duration::days(30)).to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("weekly", "ok", Some(&far_off))],
+        )
+        .expect("record windows");
+        replace_provider_rate_limits(&conn, "openai", &[window("monthly", "ok", Some(&far_off))])
+            .expect("replace windows");
+        assert_eq!(
+            provider_rate_limits(&conn, "anthropic", now)
+                .expect("read windows")
+                .len(),
+            1
+        );
     }
 
     #[test]

@@ -305,26 +305,6 @@ export function ledgerWindows(
   });
 }
 
-/**
- * The ledger's spend windows in the shape the composer's limit rows read.
- *
- * Ids are prefixed so measured spend never collides with the provider's own
- * plan window of the same length — a polled "weekly" limit and the local
- * "ledger-weekly" spend can sit side by side without one overwriting the
- * other.
- */
-export function ledgerLimitWindows(
-  summary: ProviderLedgerSummary | undefined,
-  providerId?: ProviderId | string,
-): ProviderUsageWindow[] {
-  return ledgerWindows(summary, providerId).map((window) => ({
-    id: window.id === "five-hour" ? "ledger-five-hour" : "ledger-weekly",
-    label:
-      window.id === "five-hour" ? "5-hour spend · local" : "Weekly spend · local",
-    usedPercent: window.percent,
-  }));
-}
-
 /** The banner shown when Gyro is holding runs or a budget is running out. */
 export type UsageSafetyNotice = {
   tone: "paused" | "warning";
