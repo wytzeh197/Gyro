@@ -221,8 +221,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
-      // Usage windows scraped live from `kimi acp` `/usage` (context % today,
-      // plan quota lines when the CLI prints them); spend from the ledger.
+      // Plan windows read from the Kimi account endpoint behind the CLI's own
+      // usage view, using the sign-in the CLI already holds.
       supportsUsage: true,
       visibility: "standard",
     },
@@ -232,7 +232,10 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Kimi K3",
         description:
           "Kimi's flagship model for long-horizon coding and knowledge work.",
-        contextWindowTokens: 1_000_000,
+        // Every model Kimi Code defines caps at 256K, K3 included. Claiming a
+        // megatoken window made the composer meter measure against a window the
+        // run never had, and disagree with the one `/usage` reported back.
+        contextWindowTokens: 262_144,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
       },

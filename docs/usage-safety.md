@@ -38,9 +38,8 @@ spots, and they compound.
 `account/rateLimits/read` with a used percentage; Anthropic's account API
 answers `/api/oauth/usage` the same way, with `rate_limit_event` frames naming
 windows and resets mid-answer as a fallback; xAI's Grok Build reports a weekly
-credit percentage over ACP `_x.ai/billing`; Kimi's windows are scraped from its
-own `/usage` over ACP — the context window today, plan quota lines when the
-CLI starts printing them. Gemini reports nothing at all. Because
+credit percentage over ACP `_x.ai/billing`; Kimi answers `/coding/v1/usages`
+with one row per metered window. Gemini reports nothing at all. Because
 `ProviderUsageWindow.usedPercent` is deliberately optional and the ledger
 measures every provider locally, a missing reading shows as unfilled or as
 local spend rather than as an invented number.
@@ -201,9 +200,6 @@ should never be what eats the quota the user wanted for chat.
    windows carry it as `origins` but no screen renders it yet.
 2. **Automation allocations**, so a schedule draws from its own budget rather
    than competing with interactive work.
-3. **Kimi plan quota.** The ACP `/usage` scrape reports the context window
-   today; the weekly and 5-hour quota percentages appear on their own once the
-   CLI prints them there.
 
 The thresholds shipped as defaults are starting guesses. They are worth
 revisiting once there is a week of real ledger data to look at — particularly

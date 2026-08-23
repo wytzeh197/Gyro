@@ -143,6 +143,7 @@ import {
   type SystemAccessScope,
   type SystemAccessScopeId,
   type Task,
+  type CustomTaskDraft,
   type TaskDefinition,
   type TaskStatus,
   type TestTreeItem,
@@ -348,7 +349,14 @@ type WorkspaceFileWriteRequest = {
 };
 
 type IdeCommandOutput = {
-  status: "done" | "failed";
+  /** Mirrors the Rust bounded-command terminations, not just done/failed. */
+  status:
+    | "done"
+    | "failed"
+    | "cancelled"
+    | "timed-out"
+    | "inactive"
+    | "output-limit";
   stdout: string;
   stderr: string;
 };
@@ -619,6 +627,20 @@ function suggestedBranchName(commitMessage: string) {
   return slug ? `gyro/${slug}` : "gyro/review";
 }
 
+/**
+ * What a git command that did not succeed actually said.
+ *
+ * Git explains itself on stderr, but not always — a rejected commit hook can
+ * write its reason to stdout instead — so both are read before falling back
+ * to nothing, which lets the caller supply wording of its own.
+ */
+function gitOutputDetail(output: IdeCommandOutput) {
+  const spoken = [output.stderr, output.stdout]
+    .map((text) => text?.trim())
+    .find(Boolean);
+  return spoken ? spoken.split("\n")[0] : undefined;
+}
+
 function waitFor(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -750,6 +772,8 @@ export function App() {
   const [workspacePath, setWorkspacePath] = useState<string>();
   const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
   const [isBranchLoading, setIsBranchLoading] = useState(false);
+  /** A push or pull is in flight, so the sync control stays a single press. */
+  const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
   const [selectedWorkspaceRoot, setSelectedWorkspaceRoot] = useState<string>();
@@ -3272,13 +3296,34 @@ export function App() {
           type: "ide-set-tasks",
           tasks: [
             {
-              id: "preview:typecheck",
+              id: "package:typecheck",
               label: "pnpm typecheck",
               command: "pnpm",
-              args: ["typecheck"],
+              args: ["run", "typecheck"],
               group: "build",
               status: "idle",
-              outputChannelId: "task-preview-typecheck",
+              source: "suggested",
+              outputChannelId: "task-package-typecheck",
+            },
+            {
+              id: "package:test",
+              label: "pnpm test",
+              command: "pnpm",
+              args: ["run", "test"],
+              group: "test",
+              status: "idle",
+              source: "suggested",
+              outputChannelId: "task-package-test",
+            },
+            {
+              id: "package:dev",
+              label: "pnpm dev",
+              command: "pnpm",
+              args: ["run", "dev"],
+              group: "dev",
+              status: "idle",
+              source: "suggested",
+              outputChannelId: "task-package-dev",
             },
           ],
         });
@@ -3876,16 +3921,10 @@ export function App() {
         testStatus?: "running" | "passed" | "failed",
       ) => {
         dispatchWorkbench({
-          type: "ide-set-tasks",
-          tasks: workbench.ide.taskDefinitions.map((candidate) =>
-            candidate.id === task.id
-              ? {
-                  ...candidate,
-                  status,
-                  lastRunAt: new Date().toISOString(),
-                }
-              : candidate,
-          ),
+          type: "ide-set-task-status",
+          taskId: task.id,
+          status,
+          lastRunAt: new Date().toISOString(),
         });
         if (task.group === "test" && testStatus) {
           const currentChildren =
@@ -3957,7 +3996,11 @@ export function App() {
           lines: [output.stdout, output.stderr].filter(Boolean),
         });
         setTaskStatus(
-          output.status === "done" ? "done" : "failed",
+          output.status === "done"
+            ? "done"
+            : output.status === "cancelled"
+              ? "cancelled"
+              : "failed",
           task.group === "test"
             ? output.status === "done"
               ? "passed"
@@ -3975,11 +4018,114 @@ export function App() {
     },
     [
       notify,
-      workbench.ide.taskDefinitions,
       workbench.ide.testTree,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
+  );
+
+  const stopIdeTask = useCallback(
+    async (task: TaskDefinition) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-task-status",
+          taskId: task.id,
+          status: "cancelled",
+        });
+        return;
+      }
+      try {
+        const stopped = await invoke<boolean>("task_cancel", {
+          request: { workspacePath: root, taskId: task.id },
+        });
+        if (!stopped) {
+          dispatchWorkbench({
+            type: "ide-set-task-status",
+            taskId: task.id,
+            status: "cancelled",
+          });
+        }
+      } catch (error) {
+        notify("command-failed", "Could not stop the command", String(error));
+      }
+    },
+    [notify, workspaceActionRoot],
+  );
+
+  const createCustomIdeTask = useCallback(
+    async (draft: CustomTaskDraft) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        notify("command-failed", "Save blocked", "Open a workspace first");
+        return;
+      }
+      if (!isTauriRuntime()) {
+        const commandLine = draft.commandLine.trim();
+        const [command = commandLine, ...args] = commandLine.split(/\s+/);
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: [
+            {
+              id: `custom:preview-${workbench.ide.taskDefinitions.length + 1}`,
+              label: draft.label?.trim() || commandLine,
+              command,
+              args,
+              group: draft.group ?? "custom",
+              status: "idle",
+              source: "custom",
+            },
+            ...workbench.ide.taskDefinitions,
+          ],
+        });
+        return;
+      }
+      try {
+        const tasks = await invoke<TaskDefinition[]>("task_create_custom", {
+          request: {
+            workspacePath: root,
+            commandLine: draft.commandLine,
+            label: draft.label,
+            group: draft.group,
+            cwd: draft.cwd,
+          },
+        });
+        dispatchWorkbench({ type: "ide-set-tasks", tasks });
+      } catch (error) {
+        notify("command-failed", "Could not save the command", String(error));
+      }
+    },
+    [notify, workbench.ide.taskDefinitions, workspaceActionRoot],
+  );
+
+  const deleteCustomIdeTask = useCallback(
+    async (task: TaskDefinition) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: workbench.ide.taskDefinitions.filter(
+            (candidate) => candidate.id !== task.id,
+          ),
+        });
+        return;
+      }
+      try {
+        const tasks = await invoke<TaskDefinition[]>("task_delete_custom", {
+          request: { workspacePath: root, taskId: task.id },
+        });
+        dispatchWorkbench({ type: "ide-set-tasks", tasks });
+      } catch (error) {
+        notify("command-failed", "Could not remove the command", String(error));
+      }
+    },
+    [notify, workbench.ide.taskDefinitions, workspaceActionRoot],
   );
 
   const startIdeDebugSession = useCallback(
@@ -4590,6 +4736,18 @@ export function App() {
         });
         refreshIdeServices(root);
         void refreshWorkspaceBranches(root);
+        // A commit git refused — an identity it does not know, a hook that
+        // said no — still answers with output rather than an error. Reporting
+        // it as created would leave the user believing work was saved that
+        // was not, so the exit status is what decides which notice this is.
+        if (output.status !== "done") {
+          notify(
+            "command-failed",
+            "Commit failed",
+            gitOutputDetail(output) ?? "git could not create the commit",
+          );
+          return;
+        }
         notify("tests-passed", "Commit created", message.trim());
       } catch (error) {
         notify("command-failed", "Commit failed", String(error));
@@ -4606,6 +4764,142 @@ export function App() {
       workspaceActionRoot,
     ],
   );
+
+  /**
+   * Send the branch's commits to its remote.
+   *
+   * A commit only reaches GitHub when it is pushed, so this is the other half
+   * of the commit button rather than a separate feature. A branch that has
+   * never been published is published here, which is the state a new branch
+   * spends its first push in.
+   */
+  const pushSourceControl = useCallback(async () => {
+    const root = workspaceActionRoot;
+    if (!root || !isTauriRuntime()) {
+      return;
+    }
+    if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+      notify(
+        "command-failed",
+        "Push blocked in Restricted Mode",
+        workspaceName(root),
+      );
+      return;
+    }
+    const publishing = !workbench.ide.sourceControl.upstream;
+    setSourceControlSyncing(true);
+    try {
+      const result = await invoke<GitSyncResult>("git_push", {
+        request: { workspacePath: root, setUpstream: publishing },
+      });
+      dispatchWorkbench({
+        type: "ide-set-source-control",
+        sourceControl: result.status,
+      });
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: "git",
+          label: "Git",
+          kind: "system",
+          lines: [result.output.stdout, result.output.stderr].filter(Boolean),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      if (result.output.status !== "done") {
+        notify(
+          "command-failed",
+          publishing ? "Publish failed" : "Push failed",
+          gitOutputDetail(result.output) ?? "git could not reach the remote",
+        );
+        return;
+      }
+      void refreshWorkspaceBranches(root);
+      notify(
+        "tests-passed",
+        publishing ? "Branch published" : "Pushed to remote",
+        result.status.upstream ?? result.status.branch ?? workspaceName(root),
+      );
+    } catch (error) {
+      notify("command-failed", "Push failed", String(error));
+      refreshIdeSourceControl(root);
+    } finally {
+      setSourceControlSyncing(false);
+    }
+  }, [
+    notify,
+    refreshIdeSourceControl,
+    refreshWorkspaceBranches,
+    workbench.ide.sourceControl.upstream,
+    workbench.preferences.workspaceTrust,
+    workspaceActionRoot,
+  ]);
+
+  /**
+   * Bring the branch level with its remote before pushing on top of it.
+   *
+   * The pull is fast-forward only, so a branch that has genuinely diverged
+   * says so instead of quietly growing a merge commit nobody asked for.
+   */
+  const pullSourceControl = useCallback(async () => {
+    const root = workspaceActionRoot;
+    if (!root || !isTauriRuntime()) {
+      return;
+    }
+    if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+      notify(
+        "command-failed",
+        "Pull blocked in Restricted Mode",
+        workspaceName(root),
+      );
+      return;
+    }
+    setSourceControlSyncing(true);
+    try {
+      const result = await invoke<GitSyncResult>("git_pull", {
+        request: { workspacePath: root },
+      });
+      dispatchWorkbench({
+        type: "ide-set-source-control",
+        sourceControl: result.status,
+      });
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: "git",
+          label: "Git",
+          kind: "system",
+          lines: [result.output.stdout, result.output.stderr].filter(Boolean),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      if (result.output.status !== "done") {
+        notify(
+          "command-failed",
+          "Pull failed",
+          gitOutputDetail(result.output) ?? "git could not reach the remote",
+        );
+        return;
+      }
+      refreshIdeServices(root);
+      notify(
+        "tests-passed",
+        "Pulled from remote",
+        result.status.upstream ?? result.status.branch ?? workspaceName(root),
+      );
+    } catch (error) {
+      notify("command-failed", "Pull failed", String(error));
+      refreshIdeSourceControl(root);
+    } finally {
+      setSourceControlSyncing(false);
+    }
+  }, [
+    notify,
+    refreshIdeServices,
+    refreshIdeSourceControl,
+    workbench.preferences.workspaceTrust,
+    workspaceActionRoot,
+  ]);
 
   /**
    * Refresh GitHub availability, workflow runs, and pull requests for a
@@ -13481,7 +13775,6 @@ export function App() {
         onLoadModelFocusPeek={loadModelFocusPeek}
         onOpenModelFocus={openModelFocus}
         providerUsageByProvider={providerUsageByProvider}
-        providerLedgerById={providerLedgerById}
         sessionUsage={paneSessionUsage}
         usageSafety={usageSafety}
         onResumeUsage={() => void resumeUsage()}
@@ -13912,6 +14205,9 @@ export function App() {
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}
+      onPullSourceControl={() => void pullSourceControl()}
+      onPushSourceControl={() => void pushSourceControl()}
+      isSourceControlSyncing={sourceControlSyncing}
       onRefreshSourceControl={refreshSourceControl}
       onStageAllSourceControl={stageAllSourceControl}
       branchCatalog={branchCatalog}
@@ -13931,6 +14227,10 @@ export function App() {
       onOpenGithubUrl={openGithubUrl}
       onDiscardSourceControlFile={discardSourceControlFile}
       onRunIdeTask={runIdeTask}
+      onStopIdeTask={stopIdeTask}
+      onRefreshIdeTasks={() => refreshIdeServices(workspaceActionRoot)}
+      onCreateCustomTask={createCustomIdeTask}
+      onDeleteCustomTask={deleteCustomIdeTask}
       onStartDebugSession={startIdeDebugSession}
       onSendDebugCommand={sendIdeDebugCommand}
       onStopDebugSession={stopIdeDebugSession}
@@ -14067,7 +14367,6 @@ export function App() {
                     onLoadModelFocusPeek={loadModelFocusPeek}
                     onOpenModelFocus={openModelFocus}
                     providerUsageByProvider={providerUsageByProvider}
-        providerLedgerById={providerLedgerById}
                     sessionUsage={activeSessionUsage}
                     usageSafety={usageSafety}
                     onResumeUsage={() => void resumeUsage()}
@@ -14639,7 +14938,6 @@ export function App() {
           capabilityPolicy={activeCapabilityPolicy}
           config={config}
           providerUsageByProvider={providerUsageByProvider}
-          providerLedgerById={providerLedgerById}
           sessionUsage={activeSessionUsage}
           usageSafety={usageSafety}
           onResumeUsage={() => void resumeUsage()}

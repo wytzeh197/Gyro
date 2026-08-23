@@ -2105,6 +2105,44 @@ expect(
   "Staged files should make the commit action available.",
 );
 
+// A branch that has never been pushed reports no ahead count — git has no
+// upstream to count against — so the push has to stay available on the fact
+// that it is unpublished, which is when pushing matters most.
+const unpublishedState = workbenchReducer(gitStateBase, {
+  type: "ide-set-source-control",
+  sourceControl: { ...sourceControlBase, ahead: 0, upstream: undefined },
+});
+expect(
+  statusIn(unpublishedState, "push") === "ready",
+  "An unpublished branch should still allow a push that publishes it.",
+);
+
+// Committing writes local history; the panel has to offer the press that gets
+// it to the remote, and say where the branch stands until it does.
+expect(
+  surfaceSource.includes("function ScmSyncRow") &&
+    surfaceSource.includes("<ScmSyncRow") &&
+    surfaceSource.includes('"Publish branch"') &&
+    surfaceSource.includes("onPushSourceControl") &&
+    surfaceSource.includes("onPullSourceControl"),
+  "The source control panel should offer push, pull, and publish.",
+);
+expect(
+  appSource.includes('invoke<GitSyncResult>("git_push"') &&
+    appSource.includes('invoke<GitSyncResult>("git_pull"') &&
+    appSource.includes("pushSourceControl") &&
+    appSource.includes("pullSourceControl"),
+  "The desktop app should run the panel's push and pull through git.",
+);
+
+// A commit git refused still answers with output rather than an error, so the
+// exit status is the only thing separating it from one that worked.
+expect(
+  appSource.includes('if (output.status !== "done") {') &&
+    appSource.includes("function gitOutputDetail"),
+  "A refused commit should be reported as a failure, not as a commit.",
+);
+
 state = workbenchReducer(state, {
   type: "browser-navigate",
   url: "http://localhost:1421",
