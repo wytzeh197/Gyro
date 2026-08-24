@@ -143,6 +143,7 @@ import {
   type SystemAccessScope,
   type SystemAccessScopeId,
   type Task,
+  type CustomTaskDraft,
   type TaskDefinition,
   type TaskStatus,
   type TestTreeItem,
@@ -348,7 +349,14 @@ type WorkspaceFileWriteRequest = {
 };
 
 type IdeCommandOutput = {
-  status: "done" | "failed";
+  /** Mirrors the Rust bounded-command terminations, not just done/failed. */
+  status:
+    | "done"
+    | "failed"
+    | "cancelled"
+    | "timed-out"
+    | "inactive"
+    | "output-limit";
   stdout: string;
   stderr: string;
 };
@@ -619,6 +627,20 @@ function suggestedBranchName(commitMessage: string) {
   return slug ? `gyro/${slug}` : "gyro/review";
 }
 
+/**
+ * What a git command that did not succeed actually said.
+ *
+ * Git explains itself on stderr, but not always — a rejected commit hook can
+ * write its reason to stdout instead — so both are read before falling back
+ * to nothing, which lets the caller supply wording of its own.
+ */
+function gitOutputDetail(output: IdeCommandOutput) {
+  const spoken = [output.stderr, output.stdout]
+    .map((text) => text?.trim())
+    .find(Boolean);
+  return spoken ? spoken.split("\n")[0] : undefined;
+}
+
 function waitFor(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -750,6 +772,8 @@ export function App() {
   const [workspacePath, setWorkspacePath] = useState<string>();
   const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
   const [isBranchLoading, setIsBranchLoading] = useState(false);
+  /** A push or pull is in flight, so the sync control stays a single press. */
+  const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
   const [selectedWorkspaceRoot, setSelectedWorkspaceRoot] = useState<string>();
@@ -994,6 +1018,15 @@ export function App() {
             provider.authStatus === "connected" &&
             providerSupportsUsage(provider.id),
         )
+        .map((provider) => provider.id),
+    [config],
+  );
+  // The ledger is local, so every connected provider has spend to read —
+  // including the ones with no plan-window API to poll.
+  const backgroundLedgerProviderIds = useMemo(
+    () =>
+      providersForConfig(config)
+        .filter((provider) => provider.authStatus === "connected")
         .map((provider) => provider.id),
     [config],
   );
@@ -1536,11 +1569,7 @@ export function App() {
       setSystemAccess(scopes);
       return scopes;
     } catch (error) {
-      notify(
-        "command-failed",
-        "Could not check macOS access",
-        String(error),
-      );
+      notify("command-failed", "Could not check macOS access", String(error));
       return [] as SystemAccessScope[];
     } finally {
       setIsCheckingSystemAccess(false);
@@ -1707,10 +1736,18 @@ export function App() {
   );
 
   useEffect(() => {
-    if (backgroundUsageProviderIds.length === 0) return undefined;
+    if (
+      backgroundUsageProviderIds.length === 0 &&
+      backgroundLedgerProviderIds.length === 0
+    ) {
+      return undefined;
+    }
     const refreshInBackground = () => {
       for (const providerId of backgroundUsageProviderIds) {
         void refreshProviderUsage(providerId);
+      }
+      for (const providerId of backgroundLedgerProviderIds) {
+        void refreshProviderLedger(providerId);
       }
     };
     const refreshWhenVisible = () => {
@@ -1730,7 +1767,12 @@ export function App() {
       window.removeEventListener("focus", refreshInBackground);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [backgroundUsageProviderIds, refreshProviderUsage]);
+  }, [
+    backgroundLedgerProviderIds,
+    backgroundUsageProviderIds,
+    refreshProviderLedger,
+    refreshProviderUsage,
+  ]);
 
   useEffect(() => {
     if (
@@ -3254,13 +3296,34 @@ export function App() {
           type: "ide-set-tasks",
           tasks: [
             {
-              id: "preview:typecheck",
+              id: "package:typecheck",
               label: "pnpm typecheck",
               command: "pnpm",
-              args: ["typecheck"],
+              args: ["run", "typecheck"],
               group: "build",
               status: "idle",
-              outputChannelId: "task-preview-typecheck",
+              source: "suggested",
+              outputChannelId: "task-package-typecheck",
+            },
+            {
+              id: "package:test",
+              label: "pnpm test",
+              command: "pnpm",
+              args: ["run", "test"],
+              group: "test",
+              status: "idle",
+              source: "suggested",
+              outputChannelId: "task-package-test",
+            },
+            {
+              id: "package:dev",
+              label: "pnpm dev",
+              command: "pnpm",
+              args: ["run", "dev"],
+              group: "dev",
+              status: "idle",
+              source: "suggested",
+              outputChannelId: "task-package-dev",
             },
           ],
         });
@@ -3858,16 +3921,10 @@ export function App() {
         testStatus?: "running" | "passed" | "failed",
       ) => {
         dispatchWorkbench({
-          type: "ide-set-tasks",
-          tasks: workbench.ide.taskDefinitions.map((candidate) =>
-            candidate.id === task.id
-              ? {
-                  ...candidate,
-                  status,
-                  lastRunAt: new Date().toISOString(),
-                }
-              : candidate,
-          ),
+          type: "ide-set-task-status",
+          taskId: task.id,
+          status,
+          lastRunAt: new Date().toISOString(),
         });
         if (task.group === "test" && testStatus) {
           const currentChildren =
@@ -3939,7 +3996,11 @@ export function App() {
           lines: [output.stdout, output.stderr].filter(Boolean),
         });
         setTaskStatus(
-          output.status === "done" ? "done" : "failed",
+          output.status === "done"
+            ? "done"
+            : output.status === "cancelled"
+              ? "cancelled"
+              : "failed",
           task.group === "test"
             ? output.status === "done"
               ? "passed"
@@ -3957,11 +4018,114 @@ export function App() {
     },
     [
       notify,
-      workbench.ide.taskDefinitions,
       workbench.ide.testTree,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
+  );
+
+  const stopIdeTask = useCallback(
+    async (task: TaskDefinition) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-task-status",
+          taskId: task.id,
+          status: "cancelled",
+        });
+        return;
+      }
+      try {
+        const stopped = await invoke<boolean>("task_cancel", {
+          request: { workspacePath: root, taskId: task.id },
+        });
+        if (!stopped) {
+          dispatchWorkbench({
+            type: "ide-set-task-status",
+            taskId: task.id,
+            status: "cancelled",
+          });
+        }
+      } catch (error) {
+        notify("command-failed", "Could not stop the command", String(error));
+      }
+    },
+    [notify, workspaceActionRoot],
+  );
+
+  const createCustomIdeTask = useCallback(
+    async (draft: CustomTaskDraft) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        notify("command-failed", "Save blocked", "Open a workspace first");
+        return;
+      }
+      if (!isTauriRuntime()) {
+        const commandLine = draft.commandLine.trim();
+        const [command = commandLine, ...args] = commandLine.split(/\s+/);
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: [
+            {
+              id: `custom:preview-${workbench.ide.taskDefinitions.length + 1}`,
+              label: draft.label?.trim() || commandLine,
+              command,
+              args,
+              group: draft.group ?? "custom",
+              status: "idle",
+              source: "custom",
+            },
+            ...workbench.ide.taskDefinitions,
+          ],
+        });
+        return;
+      }
+      try {
+        const tasks = await invoke<TaskDefinition[]>("task_create_custom", {
+          request: {
+            workspacePath: root,
+            commandLine: draft.commandLine,
+            label: draft.label,
+            group: draft.group,
+            cwd: draft.cwd,
+          },
+        });
+        dispatchWorkbench({ type: "ide-set-tasks", tasks });
+      } catch (error) {
+        notify("command-failed", "Could not save the command", String(error));
+      }
+    },
+    [notify, workbench.ide.taskDefinitions, workspaceActionRoot],
+  );
+
+  const deleteCustomIdeTask = useCallback(
+    async (task: TaskDefinition) => {
+      const root = workspaceActionRoot;
+      if (!root) {
+        return;
+      }
+      if (!isTauriRuntime()) {
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: workbench.ide.taskDefinitions.filter(
+            (candidate) => candidate.id !== task.id,
+          ),
+        });
+        return;
+      }
+      try {
+        const tasks = await invoke<TaskDefinition[]>("task_delete_custom", {
+          request: { workspacePath: root, taskId: task.id },
+        });
+        dispatchWorkbench({ type: "ide-set-tasks", tasks });
+      } catch (error) {
+        notify("command-failed", "Could not remove the command", String(error));
+      }
+    },
+    [notify, workbench.ide.taskDefinitions, workspaceActionRoot],
   );
 
   const startIdeDebugSession = useCallback(
@@ -4572,6 +4736,18 @@ export function App() {
         });
         refreshIdeServices(root);
         void refreshWorkspaceBranches(root);
+        // A commit git refused — an identity it does not know, a hook that
+        // said no — still answers with output rather than an error. Reporting
+        // it as created would leave the user believing work was saved that
+        // was not, so the exit status is what decides which notice this is.
+        if (output.status !== "done") {
+          notify(
+            "command-failed",
+            "Commit failed",
+            gitOutputDetail(output) ?? "git could not create the commit",
+          );
+          return;
+        }
         notify("tests-passed", "Commit created", message.trim());
       } catch (error) {
         notify("command-failed", "Commit failed", String(error));
@@ -4588,6 +4764,142 @@ export function App() {
       workspaceActionRoot,
     ],
   );
+
+  /**
+   * Send the branch's commits to its remote.
+   *
+   * A commit only reaches GitHub when it is pushed, so this is the other half
+   * of the commit button rather than a separate feature. A branch that has
+   * never been published is published here, which is the state a new branch
+   * spends its first push in.
+   */
+  const pushSourceControl = useCallback(async () => {
+    const root = workspaceActionRoot;
+    if (!root || !isTauriRuntime()) {
+      return;
+    }
+    if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+      notify(
+        "command-failed",
+        "Push blocked in Restricted Mode",
+        workspaceName(root),
+      );
+      return;
+    }
+    const publishing = !workbench.ide.sourceControl.upstream;
+    setSourceControlSyncing(true);
+    try {
+      const result = await invoke<GitSyncResult>("git_push", {
+        request: { workspacePath: root, setUpstream: publishing },
+      });
+      dispatchWorkbench({
+        type: "ide-set-source-control",
+        sourceControl: result.status,
+      });
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: "git",
+          label: "Git",
+          kind: "system",
+          lines: [result.output.stdout, result.output.stderr].filter(Boolean),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      if (result.output.status !== "done") {
+        notify(
+          "command-failed",
+          publishing ? "Publish failed" : "Push failed",
+          gitOutputDetail(result.output) ?? "git could not reach the remote",
+        );
+        return;
+      }
+      void refreshWorkspaceBranches(root);
+      notify(
+        "tests-passed",
+        publishing ? "Branch published" : "Pushed to remote",
+        result.status.upstream ?? result.status.branch ?? workspaceName(root),
+      );
+    } catch (error) {
+      notify("command-failed", "Push failed", String(error));
+      refreshIdeSourceControl(root);
+    } finally {
+      setSourceControlSyncing(false);
+    }
+  }, [
+    notify,
+    refreshIdeSourceControl,
+    refreshWorkspaceBranches,
+    workbench.ide.sourceControl.upstream,
+    workbench.preferences.workspaceTrust,
+    workspaceActionRoot,
+  ]);
+
+  /**
+   * Bring the branch level with its remote before pushing on top of it.
+   *
+   * The pull is fast-forward only, so a branch that has genuinely diverged
+   * says so instead of quietly growing a merge commit nobody asked for.
+   */
+  const pullSourceControl = useCallback(async () => {
+    const root = workspaceActionRoot;
+    if (!root || !isTauriRuntime()) {
+      return;
+    }
+    if (!isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)) {
+      notify(
+        "command-failed",
+        "Pull blocked in Restricted Mode",
+        workspaceName(root),
+      );
+      return;
+    }
+    setSourceControlSyncing(true);
+    try {
+      const result = await invoke<GitSyncResult>("git_pull", {
+        request: { workspacePath: root },
+      });
+      dispatchWorkbench({
+        type: "ide-set-source-control",
+        sourceControl: result.status,
+      });
+      dispatchWorkbench({
+        type: "ide-upsert-output-channel",
+        channel: {
+          id: "git",
+          label: "Git",
+          kind: "system",
+          lines: [result.output.stdout, result.output.stderr].filter(Boolean),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+      if (result.output.status !== "done") {
+        notify(
+          "command-failed",
+          "Pull failed",
+          gitOutputDetail(result.output) ?? "git could not reach the remote",
+        );
+        return;
+      }
+      refreshIdeServices(root);
+      notify(
+        "tests-passed",
+        "Pulled from remote",
+        result.status.upstream ?? result.status.branch ?? workspaceName(root),
+      );
+    } catch (error) {
+      notify("command-failed", "Pull failed", String(error));
+      refreshIdeSourceControl(root);
+    } finally {
+      setSourceControlSyncing(false);
+    }
+  }, [
+    notify,
+    refreshIdeServices,
+    refreshIdeSourceControl,
+    workbench.preferences.workspaceTrust,
+    workspaceActionRoot,
+  ]);
 
   /**
    * Refresh GitHub availability, workflow runs, and pull requests for a
@@ -5792,7 +6104,8 @@ export function App() {
       const layout = chatGrid.layouts[projectKey];
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
-        pane.kind === "session" && activeSessionIdRef.current === pane.sessionId;
+        pane.kind === "session" &&
+        activeSessionIdRef.current === pane.sessionId;
       // Grid slots call this on every pointerdown inside the pane. When the
       // user is already in that chat, re-selecting + reloading events only
       // re-lays out the surface mid-click — which was able to land a stop on
@@ -8422,6 +8735,9 @@ export function App() {
           if (usageProviderId && providerSupportsUsage(usageProviderId)) {
             void refreshProviderUsage(usageProviderId);
           }
+          if (usageProviderId) {
+            void refreshProviderLedger(usageProviderId);
+          }
         } catch (error) {
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
@@ -8598,10 +8914,12 @@ export function App() {
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
         optimisticEventsRef.current.delete(activeSessionId);
-        const usageProviderId =
-          sessionModel.providerId ?? selectedProvider?.id;
+        const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
         if (usageProviderId && providerSupportsUsage(usageProviderId)) {
           void refreshProviderUsage(usageProviderId);
+        }
+        if (usageProviderId) {
+          void refreshProviderLedger(usageProviderId);
         }
       } catch (error) {
         const errorMessage = String(error);
@@ -10602,7 +10920,10 @@ export function App() {
         void invoke("close_terminal_pane", { paneId: modelPaneId }).catch(
           () => undefined,
         );
-        dispatchWorkbench({ type: "remove-terminal-pane", paneId: modelPaneId });
+        dispatchWorkbench({
+          type: "remove-terminal-pane",
+          paneId: modelPaneId,
+        });
       }
     }
     closeChatPane(candidate);
@@ -10736,12 +11057,15 @@ export function App() {
     isCommandPaletteOpen || Boolean(modelStandardPrompt);
 
   const ensureSessionBrowser = useCallback(
-    async (url: string, bounds?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    } | null) => {
+    async (
+      url: string,
+      bounds?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      } | null,
+    ) => {
       if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
         return;
       }
@@ -10840,7 +11164,8 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    let unlisten: Promise<(() => void) | undefined> = Promise.resolve(undefined);
+    let unlisten: Promise<(() => void) | undefined> =
+      Promise.resolve(undefined);
     try {
       unlisten = listen<{ sessionId: string; url: string }>(
         "session-browser-opened",
@@ -11879,7 +12204,7 @@ export function App() {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        workbench.preferences.theme === "light" ? "#f6f7f8" : "#101010",
+        workbench.preferences.theme === "light" ? "#f2f4f7" : "#0e0e0e",
       );
     safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
   }, [workbench.preferences.density, workbench.preferences.theme]);
@@ -13123,7 +13448,8 @@ export function App() {
         action: `${path} rejected`,
       }),
     onRunGitAction: (actionId) => void runGitReviewAction(actionId),
-    onSelectFile: (path) => dispatchWorkbench({ type: "select-diff-file", path }),
+    onSelectFile: (path) =>
+      dispatchWorkbench({ type: "select-diff-file", path }),
     onToggleDirectory: (directory) =>
       dispatchWorkbench({ type: "toggle-diff-directory", directory }),
     onUndo: () =>
@@ -13207,42 +13533,43 @@ export function App() {
   const cliUpdateCheckingRef = useRef(false);
   const cliUpdatePhaseRef = useRef(cliUpdatePhase);
   cliUpdatePhaseRef.current = cliUpdatePhase;
-  const checkCliUpdates = useCallback(async (userInitiated = false) => {
-    if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
-      return;
-    }
-    if (cliUpdatePhaseRef.current === "updating") {
-      return;
-    }
-    cliUpdateCheckingRef.current = true;
-    if (userInitiated) {
-      setCliUpdatePhase("checking");
-    }
-    try {
-      const report = await invoke<CliUpdateCheckReport>(
-        "check_cli_updates_command",
-      );
-      const offers = report.offers.filter((offer) => offer.updateAvailable);
-      const dismissKey = cliUpdateDismissKey(offers);
-      const dismissed =
-        typeof localStorage !== "undefined"
-          ? localStorage.getItem("gyro.cli-updates.dismissed.v1")
-          : null;
-      setCliUpdateOffers(
-        dismissed && dismissed === dismissKey ? [] : offers,
-      );
-      setCliUpdatePhase("idle");
-      setCliUpdateError(undefined);
-    } catch (error) {
-      setCliUpdatePhase(userInitiated ? "failed" : "idle");
-      setCliUpdateError(String(error));
-      if (userInitiated) {
-        notify("command-failed", "CLI update check failed", String(error));
+  const checkCliUpdates = useCallback(
+    async (userInitiated = false) => {
+      if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
+        return;
       }
-    } finally {
-      cliUpdateCheckingRef.current = false;
-    }
-  }, [notify]);
+      if (cliUpdatePhaseRef.current === "updating") {
+        return;
+      }
+      cliUpdateCheckingRef.current = true;
+      if (userInitiated) {
+        setCliUpdatePhase("checking");
+      }
+      try {
+        const report = await invoke<CliUpdateCheckReport>(
+          "check_cli_updates_command",
+        );
+        const offers = report.offers.filter((offer) => offer.updateAvailable);
+        const dismissKey = cliUpdateDismissKey(offers);
+        const dismissed =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem("gyro.cli-updates.dismissed.v1")
+            : null;
+        setCliUpdateOffers(dismissed && dismissed === dismissKey ? [] : offers);
+        setCliUpdatePhase("idle");
+        setCliUpdateError(undefined);
+      } catch (error) {
+        setCliUpdatePhase(userInitiated ? "failed" : "idle");
+        setCliUpdateError(String(error));
+        if (userInitiated) {
+          notify("command-failed", "CLI update check failed", String(error));
+        }
+      } finally {
+        cliUpdateCheckingRef.current = false;
+      }
+    },
+    [notify],
+  );
 
   const applyCliUpdates = useCallback(async () => {
     if (!isTauriRuntime() || cliUpdateOffers.length === 0) {
@@ -13265,7 +13592,9 @@ export function App() {
           failed.length === results.length
             ? "CLI update failed"
             : "Some CLI updates failed",
-          failed.map((item) => `${item.displayName}: ${item.message}`).join("\n"),
+          failed
+            .map((item) => `${item.displayName}: ${item.message}`)
+            .join("\n"),
         );
       } else {
         notify(
@@ -13876,6 +14205,9 @@ export function App() {
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}
+      onPullSourceControl={() => void pullSourceControl()}
+      onPushSourceControl={() => void pushSourceControl()}
+      isSourceControlSyncing={sourceControlSyncing}
       onRefreshSourceControl={refreshSourceControl}
       onStageAllSourceControl={stageAllSourceControl}
       branchCatalog={branchCatalog}
@@ -13895,6 +14227,10 @@ export function App() {
       onOpenGithubUrl={openGithubUrl}
       onDiscardSourceControlFile={discardSourceControlFile}
       onRunIdeTask={runIdeTask}
+      onStopIdeTask={stopIdeTask}
+      onRefreshIdeTasks={() => refreshIdeServices(workspaceActionRoot)}
+      onCreateCustomTask={createCustomIdeTask}
+      onDeleteCustomTask={deleteCustomIdeTask}
       onStartDebugSession={startIdeDebugSession}
       onSendDebugCommand={sendIdeDebugCommand}
       onStopDebugSession={stopIdeDebugSession}
@@ -15380,7 +15716,7 @@ function LiveTerminalPaneBody({
 function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
   if (theme === "light") {
     return {
-      background: "#ffffff",
+      background: "#f6f8fa",
       black: "#1f242c",
       blue: "#1f66d1",
       brightBlack: "#5b6470",
@@ -15405,7 +15741,7 @@ function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
   }
 
   return {
-    background: "#0b0b0b",
+    background: "#0c0c0c",
     black: "#080808",
     blue: "#6ea8ff",
     brightBlack: "#858585",
@@ -16444,11 +16780,7 @@ function deriveActiveTurn(
       const payloadKind = stringFromRecord(payload, "kind");
       const proposalId = stringFromRecord(payload, "proposalId");
       const status = stringFromRecord(payload, "status");
-      if (
-        proposalId &&
-        status &&
-        payloadKind === "mutation-approval"
-      ) {
+      if (proposalId && status && payloadKind === "mutation-approval") {
         mutationApprovalStatuses.set(proposalId, status);
       }
       // Backend status is the source of truth for whether the turn is still
@@ -16640,7 +16972,9 @@ function deriveSessionPlan(
       const updates = new Map(
         payloadItems
           .map((item) => recordFromUnknown(item))
-          .filter((record): record is Record<string, unknown> => Boolean(record))
+          .filter((record): record is Record<string, unknown> =>
+            Boolean(record),
+          )
           .map((record) => [stringFromRecord(record, "id"), record] as const)
           .filter(([id]) => Boolean(id)),
       );
@@ -17414,7 +17748,7 @@ function MonacoEditorPane({
         onMount={handleMount}
         options={editorOptions}
         path={path}
-        theme={theme === "light" ? "vs" : "gyro-dark"}
+        theme={theme === "light" ? "gyro-light" : "gyro-dark"}
         value={buffer?.content ?? fileContent?.content ?? ""}
       />
     </Suspense>
@@ -17675,11 +18009,7 @@ function sessionModelSelectionFromSession(
     | "reasoningEffort"
   > | null,
 ): SessionModelSelection | undefined {
-  if (
-    !session?.providerId &&
-    !session?.modelId &&
-    !session?.modelLabel
-  ) {
+  if (!session?.providerId && !session?.modelId && !session?.modelLabel) {
     return undefined;
   }
   return {

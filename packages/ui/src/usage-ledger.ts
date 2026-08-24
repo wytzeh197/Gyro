@@ -2,6 +2,7 @@ import type {
   BudgetState,
   ProviderId,
   ProviderLedgerSummary,
+  ProviderUsageWindow,
   SessionUsageTotals,
   UsageOriginTotals,
   UsageSafetySnapshot,

@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/workspace",
-  "version": "0.1.0-alpha.38",
+  "version": "0.1.0-alpha.39",
   "private": true,
   "description": "Open-source local-first coding agent workspace.",
   "license": "Apache-2.0",
@@ -28,7 +28,7 @@
     "site:build": "node scripts/build-download-site.mjs",
     "site:check": "node scripts/check-download-site.mjs",
     "site:deploy": "node scripts/build-download-site.mjs && npx --yes wrangler@4 deploy --config site/wrangler.toml",
-    "smoke:workbench": "node scripts/check-workbench-ui.mjs",
+    "smoke:workbench": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs",
     "test": "pnpm test:reliability && pnpm -r test",
     "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs && node --experimental-strip-types scripts/check-menu-bar-state.mjs && node --experimental-strip-types scripts/check-global-search.mjs && node --experimental-strip-types scripts/check-chat-timeline.mjs && node --experimental-strip-types scripts/check-chat-run.mjs && node --experimental-strip-types scripts/check-chat-pane-close.mjs && node --experimental-strip-types scripts/check-usage-ledger.mjs && node --experimental-strip-types scripts/check-provider-identity.mjs && node --experimental-strip-types scripts/check-council-freeze.mjs && node --experimental-strip-types scripts/check-clean-machine-path.mjs && node scripts/check-browser-capability.mjs",
     "typecheck": "pnpm -r typecheck"

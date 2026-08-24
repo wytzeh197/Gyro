@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["-y", "serve", "site", "-l", "4173"],
       "port": 4173
+    },
+    {
+      "name": "desktop",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@gyro-dev/desktop", "dev"],
+      "port": 1420
     }
   ]
 }

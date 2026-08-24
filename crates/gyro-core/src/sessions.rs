@@ -1685,6 +1685,15 @@ impl SessionStore {
         crate::usage::record_provider_rate_limits(&self.conn, provider_id, windows)
     }
 
+    /// Swap in a complete poll reading, dropping windows it no longer names.
+    pub fn replace_provider_rate_limits(
+        &self,
+        provider_id: &str,
+        windows: &[crate::usage::ProviderRateLimitRecord],
+    ) -> Result<()> {
+        crate::usage::replace_provider_rate_limits(&self.conn, provider_id, windows)
+    }
+
     /// The last plan-limit reading for each of a provider's live windows.
     pub fn provider_rate_limits(
         &self,

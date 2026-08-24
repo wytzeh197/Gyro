@@ -6,6 +6,7 @@ export type {
   AutomationStatus,
   AutomationTriageState,
   CommandProfile,
+  CustomTaskDraft,
   AppDestination,
   BrowserHostBounds,
   BrowserPreview,

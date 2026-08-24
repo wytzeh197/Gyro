@@ -352,4 +352,28 @@ assert.equal(
   0,
 );
 
+// Kimi meters the same pair Claude and Codex do, so it lists them before the
+// first reading arrives rather than a context bar standing in for a plan.
+const kimiDefaults = composerLimitWindows([], { providerId: "kimi" }, [], now);
+assert.deepEqual(
+  kimiDefaults.map((window) => [window.id, window.label, window.percentLabel]),
+  [
+    ["five-hour", "5-hour limit", "—"],
+    ["weekly", "Weekly limit", "—"],
+  ],
+);
+
+// A window Gyro does not model is the provider describing its own allowance,
+// so the standard pair is not invented alongside it.
+const customWindow = composerLimitWindows(
+  [],
+  { providerId: "openai" },
+  [{ id: "monthly-credits", label: "Monthly credits", usedPercent: 12 }],
+  now,
+);
+assert.deepEqual(
+  customWindow.map((window) => window.id),
+  ["monthly-credits"],
+);
+
 console.log("Composer context usage checks passed.");

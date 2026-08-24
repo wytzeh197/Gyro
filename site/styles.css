@@ -1691,6 +1691,10 @@ pre {
   padding: 102px 0 70px;
 }
 
+.page-hero h1 {
+  font-weight: 640;
+}
+
 .page-hero .eyebrow {
   justify-content: flex-start;
 }
