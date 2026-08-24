@@ -66,7 +66,8 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_approvals: true,
         supports_images: true,
         supports_resume: true,
-        supports_usage: false,
+        // Usage windows scraped live from `kimi acp` `/usage`.
+        supports_usage: true,
     },
     ProviderDescriptor {
         id: "xai",

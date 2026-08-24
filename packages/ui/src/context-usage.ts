@@ -39,7 +39,7 @@ export type ComposerContextUsage = {
 const PROVIDER_CONTEXT_WINDOW_FALLBACKS: Partial<Record<ProviderId, number>> = {
   anthropic: 200_000,
   gemini: 1_000_000,
-  kimi: 1_000_000,
+  kimi: 262_144,
   openai: 128_000,
   xai: 131_072,
 };
@@ -277,11 +277,12 @@ const LIMIT_WINDOW_ORDER = ["five-hour", "weekly"];
 /**
  * Providers whose accounts actually meter plan windows we can surface.
  *
- * OpenAI/Claude: 5h + weekly. xAI/Grok Build: weekly credit window only.
- * Kimi/Gemini: no plan-window API — local ledger only.
+ * OpenAI/Claude/Kimi: 5h + weekly. xAI/Grok Build: weekly credit window only.
+ * Gemini: no plan-window API — local ledger only.
  */
 const PLAN_LIMIT_PROVIDERS = new Set<ProviderId>([
   "anthropic",
+  "kimi",
   "openai",
   "xai",
 ]);

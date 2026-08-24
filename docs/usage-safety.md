@@ -11,7 +11,7 @@ Status: layers 0 through 3 are implemented. Layer 4 is partial.
 | 1 — Budgets | Built | `UsageBudget`, `budget_state`, `budget_decision` |
 | 2 — Preflight | Built | `estimateTurnCost` + composer confirm |
 | 3 — Breakers | Built | `guard_decision`, enforced in `run_provider_chat_with_retry` |
-| 4 — Visibility | Partial | Cost line and safety banner built; breakdown screen not |
+| 4 — Visibility | Partial | Cost line, safety banner, and per-provider windows (plan or ledger) built; origin breakdown screen not |
 
 ## The pause is a state, not a switch
 
@@ -34,13 +34,15 @@ the user stopped on purpose would be the worst possible bug in this system.
 Gyro currently has no idea what it has spent. It has three separate blind
 spots, and they compound.
 
-**1. Four of five providers report nothing.** `supportsUsage` is true only for
-OpenAI, whose Codex CLI answers `account/rateLimits/read` with a used
-percentage. Anthropic names its windows and their reset times on
-`rate_limit_event` frames but never says how full they are — which is why
-`ProviderUsageWindow.usedPercent` is deliberately optional. Kimi, xAI, and
-Gemini report nothing at all. So for most providers the usage meter cannot
-warn, because it is never told anything to warn about.
+**1. Providers report their limits unevenly.** OpenAI's Codex CLI answers
+`account/rateLimits/read` with a used percentage; Anthropic's account API
+answers `/api/oauth/usage` the same way, with `rate_limit_event` frames naming
+windows and resets mid-answer as a fallback; xAI's Grok Build reports a weekly
+credit percentage over ACP `_x.ai/billing`; Kimi answers `/coding/v1/usages`
+with one row per metered window. Gemini reports nothing at all. Because
+`ProviderUsageWindow.usedPercent` is deliberately optional and the ledger
+measures every provider locally, a missing reading shows as unfilled or as
+local spend rather than as an invented number.
 
 **2. One keystroke can buy many turns.** The multipliers are invisible at the
 moment they are committed:
@@ -178,6 +180,13 @@ should never be what eats the quota the user wanted for chat.
 
 - **Composer meter** reads from the ledger, so it works for providers that
   report nothing. Measured and estimated are visually distinct.
+- **Composer limit rows** sit under the context bar: the provider's own plan
+  windows where it reports them (OpenAI, Anthropic, xAI, Kimi), otherwise a
+  local spend row from the ledger (`ledger-*` ids, labelled "· local").
+- **Settings → Usage Limits** shows plan-window cards for providers with a
+  usage source and ledger spend cards for the rest, so every provider in the
+  catalog has something measured on screen (`ledgerWindows`,
+  `ledgerWindowsCaption`).
 - **Per-session cost line**: "this chat: 1.2M tokens over 14 turns, 5 of them
   council seats."
 - **Where it went**: a breakdown by origin for the current window. When quota
@@ -186,14 +195,10 @@ should never be what eats the quota the user wanted for chat.
 
 ## What is left
 
-1. **Editing budgets in Settings.** They are enforced and displayed, but a
-   budget can only be created by editing config today. Settings → Usage Limits
-   is the destination; `usage_guard.budgets` is the field.
-2. **A manual pause control.** `set_usage_paused` accepts a scope and the
-   banner resumes, but nothing in the UI starts a pause yet.
-3. **The "where it went" breakdown**, grouped by origin for the current window.
-   `UsageTotals.by_origin` already returns exactly this shape.
-4. **Automation allocations**, so a schedule draws from its own budget rather
+1. **The "where it went" breakdown**, grouped by origin for the current window.
+   `UsageTotals.by_origin` already returns exactly this shape; the ledger
+   windows carry it as `origins` but no screen renders it yet.
+2. **Automation allocations**, so a schedule draws from its own budget rather
    than competing with interactive work.
 
 The thresholds shipped as defaults are starting guesses. They are worth

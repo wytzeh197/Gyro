@@ -412,7 +412,7 @@ where
     // Grok (and some other ACP agents) do not implement every session method
     // Kimi does. Prefer the reopen method the agent advertises; if reopen fails
     // with Method not found, fall back to session/new and inject history.
-    let (session_id, resumed, reopened_as_fresh) = open_acp_session(
+    let (session_id, resumed, reopened_as_fresh, offered_models) = open_acp_session(
         &mut connection,
         &request,
         &initialize,
@@ -433,7 +433,10 @@ where
     {
         let model_id = connection.send_request(
             "session/set_model",
-            json!({"sessionId": session_id, "modelId": request.model}),
+            json!({
+                "sessionId": session_id,
+                "modelId": acp_model_id(&request.model, &offered_models),
+            }),
         )?;
         let _ = wait_for_response(
             &mut connection,
@@ -595,7 +598,7 @@ fn open_acp_session<Delta, Activity, Approval, WriteFile>(
     on_activity: &mut Activity,
     on_approval: &mut Approval,
     on_write_file: &mut WriteFile,
-) -> Result<(String, bool, bool)>
+) -> Result<(String, bool, bool, Vec<String>)>
 where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
@@ -603,7 +606,7 @@ where
     WriteFile: FnMut(&Path, &str) -> Result<()>,
 {
     let Some(resume_session_id) = request.resume_session_id.as_deref() else {
-        let session_id = create_acp_session(
+        let (session_id, offered_models) = create_acp_session(
             connection,
             request,
             response,
@@ -612,7 +615,7 @@ where
             on_approval,
             on_write_file,
         )?;
-        return Ok((session_id, false, false));
+        return Ok((session_id, false, false, offered_models));
     };
 
     let (supports_resume, supports_load) = acp_session_reopen_methods(initialize);
@@ -649,8 +652,15 @@ where
             on_approval,
             on_write_file,
         ) {
-            Ok(_) => {
-                return Ok((resume_session_id.to_string(), true, false));
+            Ok(result) => {
+                // A reopen answers with the same session shape as session/new,
+                // so the model list is there to read when the agent sends it.
+                return Ok((
+                    resume_session_id.to_string(),
+                    true,
+                    false,
+                    acp_offered_model_ids(&result),
+                ));
             }
             Err(error) => {
                 let detail = error.to_string();
@@ -671,7 +681,7 @@ where
 
     // Reopen unavailable — start a fresh ACP session and let the caller inject
     // Gyro's transcript so the second message still has context.
-    let session_id = create_acp_session(
+    let (session_id, offered_models) = create_acp_session(
         connection,
         request,
         response,
@@ -680,7 +690,7 @@ where
         on_approval,
         on_write_file,
     )?;
-    Ok((session_id, false, true))
+    Ok((session_id, false, true, offered_models))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -692,7 +702,7 @@ fn create_acp_session<Delta, Activity, Approval, WriteFile>(
     on_activity: &mut Activity,
     on_approval: &mut Approval,
     on_write_file: &mut WriteFile,
-) -> Result<String>
+) -> Result<(String, Vec<String>)>
 where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
@@ -713,12 +723,60 @@ where
         on_approval,
         on_write_file,
     )?;
-    result
+    let session_id = result
         .get("sessionId")
         .and_then(Value::as_str)
         .filter(|id| !id.trim().is_empty())
         .map(str::to_string)
-        .ok_or_else(|| anyhow!("{} ACP did not return a session id", request.provider_label))
+        .ok_or_else(|| anyhow!("{} ACP did not return a session id", request.provider_label))?;
+    Ok((session_id, acp_offered_model_ids(&result)))
+}
+
+/// The model ids this agent says it will accept, as `session/new` listed them.
+///
+/// An agent names its models however its own config does — Kimi calls its
+/// flagship `kimi-code/k3`, not `k3` — so the list is what makes a selection
+/// translatable instead of a guess.
+fn acp_offered_model_ids(session: &Value) -> Vec<String> {
+    session
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|option| option.get("id").and_then(Value::as_str) == Some("model"))
+        .and_then(|option| option.get("options"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|option| option.get("value").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Name a selected model the way the agent names it.
+///
+/// Gyro's catalog ids are its own (`k3`); the agent's are namespaced by the
+/// config that defines them (`kimi-code/k3`). Sending Gyro's id verbatim made
+/// `session/set_model` fail with "not configured in config.toml", and because
+/// that failure is not allowed to end the turn, the run silently continued on
+/// whichever model the CLI defaulted to — a different context window than the
+/// one the composer was measuring against.
+fn acp_model_id(selected: &str, offered: &[String]) -> String {
+    if offered.iter().any(|option| option == selected) {
+        return selected.to_string();
+    }
+    offered
+        .iter()
+        .find(|option| {
+            option
+                .rsplit('/')
+                .next()
+                .is_some_and(|leaf| leaf.eq_ignore_ascii_case(selected))
+        })
+        .cloned()
+        // Nothing advertised matches, so the agent is the one who gets to
+        // reject it. Rewriting the id further would only invent a new guess.
+        .unwrap_or_else(|| selected.to_string())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1329,12 +1387,60 @@ fn append_bounded(target: &mut String, text: &str, max_chars: usize) {
 
 #[cfg(test)]
 mod tests {
+
     use super::{
-        acp_activity_id_slug, acp_session_reopen_methods, check_kimi_acp_health, classify_approval,
-        is_acp_method_not_found, permission_option_id, resolve_workspace_write_path, run_kimi_acp,
-        KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode,
-        KimiAcpRequest,
+        acp_activity_id_slug, acp_model_id, acp_offered_model_ids, acp_session_reopen_methods,
+        check_kimi_acp_health, classify_approval, is_acp_method_not_found, permission_option_id,
+        resolve_workspace_write_path, run_kimi_acp, KimiAcpApprovalDecision, KimiAcpApprovalKind,
+        KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
     };
+
+    #[test]
+    fn a_selected_model_is_renamed_to_the_id_the_agent_advertises() {
+        let offered = vec![
+            "kimi-code/kimi-for-coding".to_string(),
+            "kimi-code/k3-256k".to_string(),
+            "kimi-code/k3".to_string(),
+        ];
+
+        // Gyro's catalog id is the leaf of the agent's namespaced id.
+        assert_eq!(acp_model_id("k3", &offered), "kimi-code/k3");
+        // An id the agent already speaks is left exactly as it is.
+        assert_eq!(
+            acp_model_id("kimi-code/k3-256k", &offered),
+            "kimi-code/k3-256k"
+        );
+        // Nothing advertised matches, so the agent gets to reject it itself.
+        assert_eq!(acp_model_id("gpt-5.6", &offered), "gpt-5.6");
+        // An agent that advertises nothing is sent the selection unchanged.
+        assert_eq!(acp_model_id("k3", &[]), "k3");
+    }
+
+    #[test]
+    fn model_options_are_read_from_the_session_the_agent_opened() {
+        let session = serde_json::json!({
+            "sessionId": "session_1",
+            "configOptions": [
+                { "id": "thinking", "options": [{ "value": "high" }] },
+                {
+                    "id": "model",
+                    "currentValue": "kimi-code/k3-256k",
+                    "options": [
+                        { "value": "kimi-code/k3-256k", "name": "K3-256k" },
+                        { "value": "kimi-code/k3", "name": "K3" }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(
+            acp_offered_model_ids(&session),
+            vec!["kimi-code/k3-256k".to_string(), "kimi-code/k3".to_string()]
+        );
+        // An agent that lists no models leaves the selection untranslatable.
+        assert!(acp_offered_model_ids(&serde_json::json!({ "sessionId": "s" })).is_empty());
+    }
+
     use crate::CancellationToken;
     use serde_json::json;
     use std::ffi::OsString;

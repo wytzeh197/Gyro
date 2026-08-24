@@ -57,6 +57,7 @@ import {
   CLAUDE_REASONING_EFFORTS,
   isProviderExecutable,
   isProviderRuntimeUsable,
+  KIMI_K3_REASONING_EFFORTS,
   normalizedConfig,
   providerCatalog,
   providerAuthStatusAfterHealth,
@@ -577,7 +578,7 @@ expect(
     // into a collapsed group the way the old activity groups did.
     // Work steps stay flat; a repeated beat folds via optional `repeat` rather
     // than a nested group or a collapsed preview mode.
-    runSource.includes("kind: \"work\"") &&
+    runSource.includes('kind: "work"') &&
     runSource.includes("item: WorkItem") &&
     runSource.includes("repeat?: number") &&
     !runSource.includes("batchWorkSteps") &&
@@ -973,13 +974,16 @@ expect(
 );
 const kimiCatalog = providerCatalog.find((provider) => provider.id === "kimi");
 expect(
-  kimiCatalog?.selectedModelId === "k3" &&
+  // The Kimi Code service provisions k3 with low/high/max thinking efforts
+  // (default high); anything else is rejected at turn time.
+  KIMI_K3_REASONING_EFFORTS.join(",") === "low,high,max" &&
+    kimiCatalog?.selectedModelId === "k3" &&
     kimiCatalog.models[0]?.displayName === "Kimi K3" &&
-    kimiCatalog.models[0]?.supportedReasoningEfforts?.join(",") === "max" &&
-    isProviderExecutable("kimi") &&
-    !isProviderExecutable("xai") &&
-    !isProviderExecutable("gemini"),
-  "Kimi should default to K3/Max while xAI and Gemini remain readiness-only.",
+    kimiCatalog.models[0]?.defaultReasoningEffort === "high" &&
+    kimiCatalog.models[0]?.supportedReasoningEfforts?.join(",") ===
+      KIMI_K3_REASONING_EFFORTS.join(",") &&
+    isProviderExecutable("kimi"),
+  "Kimi should default to K3 with the low/high/max effort levels it accepts.",
 );
 
 const streamRegressionEvents = [
@@ -2099,6 +2103,44 @@ const stagedState = workbenchReducer(gitStateBase, {
 expect(
   statusIn(stagedState, "commit") === "ready",
   "Staged files should make the commit action available.",
+);
+
+// A branch that has never been pushed reports no ahead count — git has no
+// upstream to count against — so the push has to stay available on the fact
+// that it is unpublished, which is when pushing matters most.
+const unpublishedState = workbenchReducer(gitStateBase, {
+  type: "ide-set-source-control",
+  sourceControl: { ...sourceControlBase, ahead: 0, upstream: undefined },
+});
+expect(
+  statusIn(unpublishedState, "push") === "ready",
+  "An unpublished branch should still allow a push that publishes it.",
+);
+
+// Committing writes local history; the panel has to offer the press that gets
+// it to the remote, and say where the branch stands until it does.
+expect(
+  surfaceSource.includes("function ScmSyncRow") &&
+    surfaceSource.includes("<ScmSyncRow") &&
+    surfaceSource.includes('"Publish branch"') &&
+    surfaceSource.includes("onPushSourceControl") &&
+    surfaceSource.includes("onPullSourceControl"),
+  "The source control panel should offer push, pull, and publish.",
+);
+expect(
+  appSource.includes('invoke<GitSyncResult>("git_push"') &&
+    appSource.includes('invoke<GitSyncResult>("git_pull"') &&
+    appSource.includes("pushSourceControl") &&
+    appSource.includes("pullSourceControl"),
+  "The desktop app should run the panel's push and pull through git.",
+);
+
+// A commit git refused still answers with output rather than an error, so the
+// exit status is the only thing separating it from one that worked.
+expect(
+  appSource.includes('if (output.status !== "done") {') &&
+    appSource.includes("function gitOutputDetail"),
+  "A refused commit should be reported as a failure, not as a commit.",
 );
 
 state = workbenchReducer(state, {
@@ -3332,9 +3374,7 @@ expect(
     styleSource.includes(".gyro-run-problem.is-cancelled") &&
     !surfaceSource.includes('className="gyro-composer-stop-button"') &&
     // Pane focus no longer re-renders mid-gesture when already focused.
-    workbenchSource.includes(
-      "current.focusedPaneId !== action.paneId &&",
-    ) &&
+    workbenchSource.includes("current.focusedPaneId !== action.paneId &&") &&
     appSource.includes(
       'alreadyFocused && (pane.kind === "draft" || alreadyActiveSession)',
     ) &&
@@ -3676,7 +3716,7 @@ expect(
       "(value) => setEventsForSession(streamEvent.sessionId, value)",
     ) &&
     surfaceSource.includes("sendingSessionIds.includes(session.id)") &&
-    surfaceSource.includes('aria-label={') &&
+    surfaceSource.includes("aria-label={") &&
     surfaceSource.includes('"Chat working"') &&
     surfaceSource.includes("is-working") &&
     surfaceSource.includes("gyro-session-time") &&
@@ -4632,9 +4672,7 @@ expect(
         rule.includes("grid-template-columns: minmax(0, 1fr)"),
     ) &&
     // Dock children center via margin, not align-self:center (shrink-to-fit).
-    styleSource.includes(
-      ".gyro-chat-composer-dock > .gyro-composer-shell",
-    ) &&
+    styleSource.includes(".gyro-chat-composer-dock > .gyro-composer-shell") &&
     styleSource.includes("margin-inline: auto") &&
     !/\.gyro-chat-composer-dock\s*>\s*\.gyro-composer-shell[\s\S]{0,400}?align-self:\s*center/.test(
       styleSource,
@@ -5210,9 +5248,7 @@ expect(
     surfaceSource.includes('authStatus === "connected"') &&
     surfaceSource.includes("clearModelFlyoutPreviewTimer") &&
     surfaceSource.includes("modelFlyoutPreviewTimerRef") &&
-    surfaceSource.includes(
-      "modelPickerProvider.id === effectiveProviderId",
-    ) &&
+    surfaceSource.includes("modelPickerProvider.id === effectiveProviderId") &&
     appSource.includes("selectProvider(providerId);") &&
     appSource.includes("{ notifySuccess: false }") &&
     !appSource.includes('"Model selected"') &&
@@ -5258,12 +5294,16 @@ expect(
 // injects local history so the new model can continue the same thread.
 expect(
   coreSessionsSource.includes("clear_all_provider_session_bindings") &&
-    coreSessionsSource.includes("model_handoff_clears_provider_resume_bindings") &&
+    coreSessionsSource.includes(
+      "model_handoff_clears_provider_resume_bindings",
+    ) &&
     tauriSource.includes("compatible_provider_session_binding") &&
     kimiAcpSource.includes(
       "fresh_session_injects_local_history_for_model_handoff",
     ) &&
-    kimiAcpSource.includes("this is a fresh agent session for a local Gyro chat handoff"),
+    kimiAcpSource.includes(
+      "this is a fresh agent session for a local Gyro chat handoff",
+    ),
   "Model handoff should clear provider resume bindings and inject local history into a fresh agent session.",
 );
 
@@ -5275,10 +5315,12 @@ expect(
     tauriSource.includes("fn provider_tool_activity_note") &&
     tauriSource.includes("fn extract_provider_activities") &&
     tauriSource.includes('"note": activity.note') &&
-    tauriSource.includes("tool_use_activities_carry_specifics_not_just_the_tool_name") &&
+    tauriSource.includes(
+      "tool_use_activities_carry_specifics_not_just_the_tool_name",
+    ) &&
     typeSource.includes("activityNote?: string | null") &&
     providerStreamSource.includes("note: streamEvent.activityNote") &&
-    runSource.includes("note: text(payload, \"note\")") &&
+    runSource.includes('note: text(payload, "note")') &&
     runSource.includes("item.note") &&
     runSource.includes("toolIdentity"),
   "Provider tool activities should carry a note so the run rail can name what each tool ran on.",
@@ -5972,7 +6014,7 @@ expect(
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 8px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
-    styleSource.includes("--gyro-app: #101010") &&
+    styleSource.includes("--gyro-app: #0e0e0e") &&
     styleSource.includes("--gyro-pane: #121212") &&
     styleSource.includes("--gyro-hero-composer: #1a1a1a") &&
     styleSource.includes("--gyro-accent: #7aa7ff") &&
@@ -6163,8 +6205,8 @@ expect(
   appSource.includes("theme={workbench.preferences.theme}") &&
     appSource.includes("function terminalThemeFor") &&
     appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
-    appSource.includes('background: "#ffffff"') &&
-    appSource.includes('background: "#0b0b0b"') &&
+    appSource.includes('background: "#f6f8fa"') &&
+    appSource.includes('background: "#0c0c0c"') &&
     appSource.includes('brightMagenta: "#f08cff"') &&
     appSource.includes('brightYellow: "#ffd166"'),
   "Live terminals should update their xterm palette in place for dark and light themes.",
@@ -6172,12 +6214,15 @@ expect(
 
 expect(
   monacoEditorSource.includes('monaco.editor.defineTheme("gyro-dark"') &&
-    monacoEditorSource.includes('"editor.background": "#101010"') &&
+    monacoEditorSource.includes('monaco.editor.defineTheme("gyro-light"') &&
+    monacoEditorSource.includes('"editor.background": "#0C0C0C"') &&
     monacoEditorSource.includes(
-      '"editor.lineHighlightBackground": "#181818"',
+      '"editor.lineHighlightBackground": "#161616"',
     ) &&
     appSource.includes("stickyScroll: { enabled: true, maxLineCount: 3 }") &&
-    appSource.includes('theme={theme === "light" ? "vs" : "gyro-dark"}'),
+    appSource.includes(
+      'theme={theme === "light" ? "gyro-light" : "gyro-dark"}',
+    ),
   "The IDE editor should match the Sessions neutral palette and retain built-in navigation aids.",
 );
 

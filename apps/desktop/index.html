@@ -11,8 +11,8 @@
          chat shell from main.tsx. */
       html,
       body {
-        background: #0b0c0e;
-        color: #e8e8e8;
+        background: #0e0e0e;
+        color: #f0f0f0;
         height: 100%;
         margin: 0;
       }
@@ -21,8 +21,8 @@
       }
       html[data-theme="light"],
       html[data-theme="light"] body {
-        background: #f6f7f8;
-        color: #1d2329;
+        background: #f2f4f7;
+        color: #161b23;
       }
     </style>
     <script>
@@ -32,7 +32,7 @@
         document.documentElement.dataset.theme = theme;
         document
           .querySelector('meta[name="theme-color"]')
-          ?.setAttribute("content", theme === "light" ? "#f6f7f8" : "#101010");
+          ?.setAttribute("content", theme === "light" ? "#f2f4f7" : "#0e0e0e");
       } catch (_) {}
     </script>
   </head>

@@ -43,6 +43,19 @@ export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "high",
 ];
 
+/**
+ * The thinking effort levels Kimi K3 accepts.
+ *
+ * The Kimi Code service provisions k3 with `support_efforts` of low, high,
+ * and max (default high); any other value is rejected at turn time and the
+ * session falls back to the model default.
+ */
+export const KIMI_K3_REASONING_EFFORTS: ReasoningEffort[] = [
+  "low",
+  "high",
+  "max",
+];
+
 type ProviderCatalogEntry = ModelProviderConfig & {
   capabilities: ProviderCapabilities;
   defaultModelId: string;
@@ -201,15 +214,16 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "k3",
     selectedModelId: "k3",
-    selectedReasoningEffort: "max",
+    selectedReasoningEffort: "high",
     capabilities: {
       executionKind: "kimi-acp",
       executable: true,
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
-      // No plan-window API; spend is the local ledger only (not fake 5h/weekly).
-      supportsUsage: false,
+      // Plan windows read from the Kimi account endpoint behind the CLI's own
+      // usage view, using the sign-in the CLI already holds.
+      supportsUsage: true,
       visibility: "standard",
     },
     models: [
@@ -218,9 +232,12 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Kimi K3",
         description:
           "Kimi's flagship model for long-horizon coding and knowledge work.",
-        contextWindowTokens: 1_000_000,
-        defaultReasoningEffort: "max",
-        supportedReasoningEfforts: ["max"],
+        // Every model Kimi Code defines caps at 256K, K3 included. Claiming a
+        // megatoken window made the composer meter measure against a window the
+        // run never had, and disagree with the one `/usage` reported back.
+        contextWindowTokens: 262_144,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
       },
     ],
     effort: "extra-high",
