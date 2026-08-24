@@ -8255,18 +8255,22 @@ fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String
 async fn task_create_custom(
     request: CustomTaskCreateRequest,
 ) -> Result<Vec<TaskDefinitionResult>, String> {
-    tauri::async_runtime::spawn_blocking(move || custom_task_create_impl(&request).map_err(to_string))
-        .await
-        .map_err(|error| format!("custom task create worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        custom_task_create_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("custom task create worker failed: {error}"))?
 }
 
 #[tauri::command]
 async fn task_delete_custom(
     request: CustomTaskDeleteRequest,
 ) -> Result<Vec<TaskDefinitionResult>, String> {
-    tauri::async_runtime::spawn_blocking(move || custom_task_delete_impl(&request).map_err(to_string))
-        .await
-        .map_err(|error| format!("custom task delete worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        custom_task_delete_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("custom task delete worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -9788,9 +9792,7 @@ fn makefile_targets(source: &str) -> Vec<String> {
             continue;
         }
         let head = line[..colon].trim();
-        if head.is_empty()
-            || head.starts_with('.')
-            || head.contains(['%', '$', '=', '(', ')', '"'])
+        if head.is_empty() || head.starts_with('.') || head.contains(['%', '$', '=', '(', ')', '"'])
         {
             continue;
         }
@@ -9993,7 +9995,8 @@ fn read_custom_tasks(root: &Path) -> anyhow::Result<Vec<CustomTaskRecord>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let (bytes, _) = read_bounded_regular_file(&path, MAX_CUSTOM_TASK_FILE_BYTES, "saved commands")?;
+    let (bytes, _) =
+        read_bounded_regular_file(&path, MAX_CUSTOM_TASK_FILE_BYTES, "saved commands")?;
     if bytes.len() > MAX_CUSTOM_TASK_FILE_BYTES {
         anyhow::bail!("saved commands file exceeds the 128 KiB size limit");
     }
@@ -23341,7 +23344,8 @@ while True:
 
     #[test]
     fn command_lines_split_without_a_shell() {
-        let (command, args) = parse_command_line("  pnpm  run test --filter \"@gyro-dev/ui\" ").unwrap();
+        let (command, args) =
+            parse_command_line("  pnpm  run test --filter \"@gyro-dev/ui\" ").unwrap();
         assert_eq!(command, "pnpm");
         assert_eq!(args, vec!["run", "test", "--filter", "@gyro-dev/ui"]);
 
@@ -23406,7 +23410,11 @@ while True:
     #[test]
     fn suggested_tasks_cover_common_project_manifests() {
         let workspace = tempfile::tempdir().unwrap();
-        std::fs::write(workspace.path().join("Cargo.toml"), "[package]\nname=\"a\"\n").unwrap();
+        std::fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[package]\nname=\"a\"\n",
+        )
+        .unwrap();
         std::fs::write(workspace.path().join("Makefile"), "ship:\n\techo ship\n").unwrap();
         std::fs::write(workspace.path().join("go.mod"), "module example.com/a\n").unwrap();
 
