@@ -1,4 +1,41 @@
+/*
+ * Gyro menu bar popover.
+ *
+ * The popover window is transparent and undecorated, so the drop shadow is
+ * drawn in CSS and the window has to be big enough to contain it — otherwise
+ * macOS clips the shadow square against the window edge. The shadow points
+ * down, so the gutter that holds it is asymmetric, and the top gutter doubles
+ * as the gap between the menu bar and the card.
+ *
+ * Every size below comes from the token block on the surface root;
+ * `menu_bar.rs` mirrors the gutters, row, header and footer values when it
+ * sizes the window. Change them together.
+ */
+
 :root[data-surface="menu-bar"] {
+  /* Geometry — mirrored by popover_height() in menu_bar.rs. Declared here, not
+     on the card, because .gyro-menu-bar-shell is the card's parent and has to
+     read the gutters too. */
+  --menu-gutter-top: 8px;
+  --menu-gutter-x: 16px;
+  --menu-gutter-bottom: 24px;
+  --menu-header: 64px;
+  --menu-row: 60px;
+  --menu-overflow: 32px;
+  --menu-footer: 44px;
+  --menu-inset: 16px;
+  --menu-gap: 12px;
+  --menu-tile: 28px;
+  --menu-stop: 40px;
+  --menu-radius: 12px;
+  --menu-radius-sm: 8px;
+  --menu-radius-xs: 6px;
+
+  /* Type — three sizes, three weights, nothing else. */
+  --menu-text-lg: 13px;
+  --menu-text-md: 12px;
+  --menu-text-sm: 11px;
+
   color-scheme: dark;
   font-family:
     Inter,
@@ -29,148 +66,88 @@
   overflow: hidden;
 }
 
-.gyro-menu-bar-shell {
+/* Fixed row heights only add up if nothing here is content-box. */
+:root[data-surface="menu-bar"] *,
+:root[data-surface="menu-bar"] *::before,
+:root[data-surface="menu-bar"] *::after {
   box-sizing: border-box;
+}
+
+.gyro-menu-bar-shell {
   height: 100%;
-  padding: 8px;
+  padding: var(--menu-gutter-top) var(--menu-gutter-x) var(--menu-gutter-bottom);
   width: 100%;
 }
 
 .gyro-menu-bar-popover {
-  --menu-bg: rgba(20, 20, 21, 0.985);
+  /* Colour — themed; the light block below re-declares only these. */
+  --menu-bg: #161617;
   --menu-border: rgba(255, 255, 255, 0.11);
-  --menu-border-soft: rgba(255, 255, 255, 0.075);
+  --menu-rule: rgba(255, 255, 255, 0.075);
   --menu-copy: #f4f4f5;
   --menu-muted: #a1a1a6;
-  --menu-faint: #7c7c82;
   --menu-hover: rgba(255, 255, 255, 0.065);
   --menu-pressed: rgba(255, 255, 255, 0.095);
+  --menu-neutral: #77818c;
+  --menu-accent: #6f9df4;
+  --menu-warn: #e4aa52;
+  --menu-ok: #65c68f;
+  --menu-danger: #de7474;
+  --menu-brand-anthropic: #d97757;
+  --menu-brand-gemini: #6d9bf5;
+  --menu-brand-kimi: #3d7eff;
+
   background: var(--menu-bg);
   border: 1px solid var(--menu-border);
-  border-radius: 16px;
+  border-radius: var(--menu-radius);
+  /* Reach: 20px below, 14px sideways, 8px above — each within its gutter. */
   box-shadow:
-    0 24px 64px rgba(0, 0, 0, 0.42),
-    0 4px 14px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  box-sizing: border-box;
+    0 6px 14px rgba(0, 0, 0, 0.34),
+    0 2px 4px rgba(0, 0, 0, 0.2);
   color: var(--menu-copy);
   height: 100%;
   overflow: hidden;
 }
 
 :root[data-surface="menu-bar"][data-theme="light"] .gyro-menu-bar-popover {
-  --menu-bg: rgba(250, 250, 251, 0.98);
+  --menu-bg: #fdfdfd;
   --menu-border: rgba(20, 27, 34, 0.13);
-  --menu-border-soft: rgba(20, 27, 34, 0.085);
+  --menu-rule: rgba(20, 27, 34, 0.085);
   --menu-copy: #171b20;
   --menu-muted: #67717d;
-  --menu-faint: #818a94;
   --menu-hover: rgba(24, 30, 37, 0.06);
   --menu-pressed: rgba(24, 30, 37, 0.09);
+  --menu-neutral: #8a929b;
+  --menu-accent: #3b6fd4;
+  --menu-warn: #a8761f;
+  --menu-ok: #2f9463;
+  --menu-danger: #c5514e;
+  --menu-brand-gemini: #3267d6;
+
   box-shadow:
-    0 18px 42px rgba(28, 33, 40, 0.18),
-    0 2px 8px rgba(28, 33, 40, 0.12);
+    0 6px 14px rgba(24, 30, 37, 0.16),
+    0 2px 4px rgba(24, 30, 37, 0.1);
 }
+
+/* Buttons are chrome-free; :where() keeps the reset at zero specificity so
+   .gyro-menu-bar-stop can restyle its own border without !important. */
+:where(.gyro-menu-bar-popover) button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+
+/* Header */
 
 .gyro-menu-bar-header {
   align-items: center;
   display: grid;
-  gap: 12px;
-  grid-template-columns: 36px minmax(0, 1fr) 8px;
-  height: 72px;
-  padding: 12px 16px 11px;
-}
-
-.gyro-menu-bar-brand-mark {
-  align-items: center;
-  background: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 10px;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.18),
-    inset 0 0 0 0.5px rgba(0, 0, 0, 0.05);
-  display: flex;
-  height: 36px;
-  justify-content: center;
-  overflow: hidden;
-  width: 36px;
-}
-
-.gyro-menu-bar-brand-mark img {
-  display: block;
-  height: 49px;
-  max-width: none;
-  width: 49px;
-}
-
-.gyro-menu-bar-brand-mark.is-compact {
-  border-radius: 8px;
-  box-shadow: none;
-  height: 28px;
-  width: 28px;
-}
-
-.gyro-menu-bar-brand-mark.is-compact img {
-  height: 39px;
-  width: 39px;
-}
-
-.gyro-menu-bar-model-mark {
-  align-items: center;
-  background: var(--menu-hover);
-  border: 1px solid var(--menu-border);
-  border-radius: 8px;
-  color: var(--menu-copy);
-  display: inline-flex;
-  flex: 0 0 auto;
-  height: 28px;
-  justify-content: center;
-  overflow: hidden;
-  width: 28px;
-}
-
-.gyro-menu-bar-model-mark svg {
-  fill: currentColor;
-  height: 18px;
-  width: 18px;
-}
-
-.gyro-menu-bar-model-mark strong {
-  font-size: 14px;
-  font-weight: 720;
-  line-height: 1;
-}
-
-.gyro-menu-bar-model-mark.is-openai {
-  background: #f4f4f4;
-  border-color: rgba(255, 255, 255, 0.28);
-  color: #111;
-}
-
-.gyro-menu-bar-model-mark.is-anthropic {
-  background: #f4eee8;
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #d97757;
-}
-
-.gyro-menu-bar-model-mark.is-kimi {
-  background: #080808;
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
-
-.gyro-menu-bar-model-mark.is-kimi .kimi-dot {
-  fill: #3d7eff;
-}
-
-.gyro-menu-bar-model-mark.is-xai {
-  background: #f2f2f2;
-  color: #0d0d0d;
-}
-
-.gyro-menu-bar-model-mark.is-gemini {
-  background: #eef3ff;
-  color: #3267d6;
+  gap: var(--menu-gap);
+  grid-template-columns: var(--menu-tile) minmax(0, 1fr) 8px;
+  height: var(--menu-header);
+  padding: 0 var(--menu-inset);
 }
 
 .gyro-menu-bar-header-copy,
@@ -182,72 +159,124 @@
 }
 
 .gyro-menu-bar-header strong {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.012em;
-  line-height: 19px;
+  font-size: var(--menu-text-lg);
+  font-weight: 600;
+  line-height: 18px;
 }
 
 .gyro-menu-bar-header span,
 .gyro-menu-bar-idle small,
 .gyro-menu-bar-outcome small {
   color: var(--menu-muted);
-  font-size: 11px;
+  font-size: var(--menu-text-sm);
   line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-menu-bar-header > i {
-  background: #77818c;
+  background: var(--menu-neutral);
   border-radius: 999px;
-  height: 7px;
-  width: 7px;
+  height: 8px;
+  width: 8px;
 }
 
 .gyro-menu-bar-header > i[data-state="working"] {
-  background: #6f9df4;
-  box-shadow: 0 0 0 3px rgba(111, 157, 244, 0.12);
+  background: var(--menu-accent);
 }
 
 .gyro-menu-bar-header > i[data-state="attention"] {
-  background: #e4aa52;
-  box-shadow: 0 0 0 3px rgba(228, 170, 82, 0.12);
+  background: var(--menu-warn);
 }
 
 .gyro-menu-bar-header > i[data-state="complete"] {
-  background: #65c68f;
+  background: var(--menu-ok);
 }
 
-.gyro-menu-bar-jobs {
-  border-top: 1px solid var(--menu-border-soft);
+/* Icon tiles — one shape for the app mark, provider marks and automations. */
+
+.gyro-menu-bar-brand-mark,
+.gyro-menu-bar-model-mark,
+.gyro-menu-bar-job-icon {
+  align-items: center;
+  border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius-sm);
+  display: flex;
+  flex: 0 0 auto;
+  height: var(--menu-tile);
+  justify-content: center;
+  overflow: hidden;
+  width: var(--menu-tile);
 }
+
+.gyro-menu-bar-model-mark,
+.gyro-menu-bar-job-icon {
+  background: var(--menu-hover);
+  color: var(--menu-copy);
+}
+
+/* The mark ships as an opaque square with built-in padding, so it is scaled
+   past the tile and cropped rather than sized by hand per call site. */
+.gyro-menu-bar-brand-mark img {
+  display: block;
+  height: 136%;
+  max-width: none;
+  width: 136%;
+}
+
+.gyro-menu-bar-model-mark svg,
+.gyro-menu-bar-job-icon svg {
+  fill: currentColor;
+  height: 16px;
+  width: 16px;
+}
+
+.gyro-menu-bar-model-mark strong {
+  font-size: var(--menu-text-md);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.gyro-menu-bar-model-mark.is-anthropic {
+  color: var(--menu-brand-anthropic);
+}
+
+.gyro-menu-bar-model-mark.is-gemini {
+  color: var(--menu-brand-gemini);
+}
+
+.gyro-menu-bar-model-mark.is-kimi .kimi-dot {
+  fill: var(--menu-brand-kimi);
+}
+
+.gyro-menu-bar-job-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+/* Job rows */
 
 .gyro-menu-bar-job {
-  align-items: stretch;
-  border-bottom: 1px solid var(--menu-border-soft);
-  display: flex;
-  height: 66px;
-}
-
-.gyro-menu-bar-job button,
-.gyro-menu-bar-footer button,
-.gyro-menu-bar-outcome,
-.gyro-menu-bar-overflow {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font: inherit;
+  border-top: 1px solid var(--menu-rule);
+  display: grid;
+  /* The trailing slot is reserved whether or not the job can be stopped, so
+     the status column keeps a straight right edge down the list. */
+  grid-template-columns: minmax(0, 1fr) var(--menu-stop);
+  height: var(--menu-row);
 }
 
 .gyro-menu-bar-job-main {
   align-items: center;
   cursor: pointer;
   display: grid;
-  flex: 1;
-  gap: 11px;
-  grid-template-columns: 28px minmax(0, 1fr) 60px;
+  gap: var(--menu-gap);
+  grid-template-columns: var(--menu-tile) minmax(0, 1fr) 64px;
   min-width: 0;
-  padding: 9px 10px 9px 16px;
+  padding: 0 0 0 var(--menu-inset);
   text-align: left;
 }
 
@@ -266,29 +295,6 @@
   background: var(--menu-pressed);
 }
 
-.gyro-menu-bar-job-icon {
-  align-items: center;
-  background: var(--menu-hover);
-  border: 1px solid var(--menu-border);
-  border-radius: 8px;
-  display: flex;
-  font-size: 11px;
-  font-weight: 750;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
-.gyro-menu-bar-job-icon.is-automation svg {
-  fill: none;
-  height: 15px;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-  width: 15px;
-}
-
 .gyro-menu-bar-job-copy,
 .gyro-menu-bar-job-meta {
   display: flex;
@@ -297,20 +303,20 @@
 }
 
 .gyro-menu-bar-job-copy strong {
-  font-size: 12px;
-  font-weight: 610;
-  letter-spacing: -0.006em;
+  font-size: var(--menu-text-md);
+  font-weight: 600;
   line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.gyro-menu-bar-job-copy small {
+.gyro-menu-bar-job-copy small,
+.gyro-menu-bar-job-meta small {
   color: var(--menu-muted);
-  font-size: 10px;
-  line-height: 15px;
-  max-width: 100%;
+  font-size: var(--menu-text-sm);
+  line-height: 16px;
+}
+
+.gyro-menu-bar-job-copy strong,
+.gyro-menu-bar-job-copy small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -318,54 +324,51 @@
 
 .gyro-menu-bar-job-meta {
   align-items: flex-end;
-  gap: 3px;
-  justify-content: center;
 }
 
 .gyro-menu-bar-job-meta em {
-  color: #79a7f7;
-  font-size: 9px;
+  color: var(--menu-accent);
+  font-size: var(--menu-text-sm);
   font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.065em;
-  text-transform: uppercase;
+  font-weight: 600;
+  line-height: 18px;
 }
 
 .gyro-menu-bar-job-meta em[data-status="waiting"] {
-  color: #e4aa52;
+  color: var(--menu-warn);
 }
 
 .gyro-menu-bar-job-meta em[data-status="finished"] {
-  color: #62c991;
+  color: var(--menu-ok);
+}
+
+.gyro-menu-bar-job-meta em[data-status="queued"] {
+  color: var(--menu-muted);
 }
 
 .gyro-menu-bar-job-meta small {
-  color: var(--menu-muted);
-  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
+/* No divider: only some rows can be stopped, and a rule that comes and goes
+   down the list reads as noise. The reserved gutter does the separating. */
 .gyro-menu-bar-stop {
-  border-left: 1px solid var(--menu-border-soft) !important;
-  color: var(--menu-muted) !important;
+  color: var(--menu-muted);
   cursor: pointer;
   display: grid;
   place-items: center;
-  width: 40px;
 }
 
 .gyro-menu-bar-stop-icon {
   background: currentColor;
-  border-radius: 1.5px;
-  height: 7px;
-  opacity: 0.86;
-  width: 7px;
+  border-radius: 2px;
+  height: 8px;
+  width: 8px;
 }
 
 .gyro-menu-bar-stop-progress {
-  font-size: 9px;
-  letter-spacing: 1px;
-  transform: translateX(0.5px);
+  font-size: var(--menu-text-sm);
+  line-height: 1;
 }
 
 .gyro-menu-bar-stop:disabled {
@@ -374,27 +377,27 @@
 }
 
 .gyro-menu-bar-overflow {
-  border-bottom: 1px solid var(--menu-border-soft);
+  border-top: 1px solid var(--menu-rule);
   color: var(--menu-muted);
   cursor: pointer;
-  font-size: 10px;
-  height: 32px;
-  padding: 8px 16px;
+  font-size: var(--menu-text-sm);
+  height: var(--menu-overflow);
+  padding: 0 var(--menu-inset);
   text-align: left;
   width: 100%;
 }
 
+/* Single-row states: recent outcome, and the empty state */
+
 .gyro-menu-bar-outcome,
 .gyro-menu-bar-idle {
   align-items: center;
-  border-bottom: 1px solid var(--menu-border-soft);
-  border-top: 1px solid var(--menu-border-soft);
-  box-sizing: border-box;
+  border-top: 1px solid var(--menu-rule);
   display: grid;
-  gap: 10px;
-  grid-template-columns: 26px minmax(0, 1fr);
-  height: 68px;
-  padding: 10px 16px;
+  gap: var(--menu-gap);
+  grid-template-columns: var(--menu-tile) minmax(0, 1fr);
+  height: var(--menu-row);
+  padding: 0 var(--menu-inset);
   text-align: left;
   width: 100%;
 }
@@ -406,51 +409,57 @@
 .gyro-menu-bar-outcome > span:first-child,
 .gyro-menu-bar-idle > span {
   align-items: center;
-  background: rgba(101, 198, 143, 0.13);
+  background: color-mix(in srgb, currentColor 14%, transparent);
   border-radius: 999px;
-  color: #65c68f;
+  color: var(--menu-ok);
   display: flex;
-  font-size: 12px;
-  font-weight: 800;
-  height: 25px;
+  font-size: var(--menu-text-sm);
+  font-weight: 600;
+  height: var(--menu-tile);
   justify-content: center;
-  width: 25px;
+  width: var(--menu-tile);
 }
 
 .gyro-menu-bar-outcome[data-status="failed"] > span:first-child {
-  background: rgba(222, 116, 116, 0.13);
-  color: #de7474;
+  color: var(--menu-danger);
 }
 
 .gyro-menu-bar-outcome strong,
 .gyro-menu-bar-idle strong {
-  font-size: 11px;
-  line-height: 16px;
+  font-size: var(--menu-text-md);
+  font-weight: 600;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gyro-menu-bar-idle p {
   margin: 0;
 }
 
+/* Footer */
+
 .gyro-menu-bar-footer {
   align-items: center;
+  border-top: 1px solid var(--menu-rule);
   display: flex;
+  height: var(--menu-footer);
   justify-content: space-between;
-  height: 44px;
   padding: 0 8px;
 }
 
 .gyro-menu-bar-footer button {
-  border-radius: 8px;
+  border-radius: var(--menu-radius-xs);
   cursor: pointer;
-  font-size: 10px;
-  line-height: 16px;
-  min-height: 30px;
-  padding: 7px 9px;
+  font-size: var(--menu-text-md);
+  font-weight: 500;
+  height: 28px;
+  padding: 0 8px;
 }
 
 :root[data-surface="menu-bar"] button:focus-visible {
-  outline: 2px solid #6f9df4;
+  outline: 2px solid var(--menu-accent);
   outline-offset: -2px;
 }
 
