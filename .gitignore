@@ -6,6 +6,9 @@
 # Maintainer-local product notes (kept on disk, not published).
 /GOVERNANCE.md
 /ROADMAP.md
+/docs/product-entry-and-workbench-plan.md
+/docs/product-readiness-audit.md
+/docs/cli-missions.md
 
 node_modules/
 .pnpm-store/
