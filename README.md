@@ -1,22 +1,16 @@
 # Gyro
 
-**Chat, CLI, and IDE in one place.**
+**The open-source workspace for coding with AI.**
 
-Gyro brings agent chat, subscription CLIs, files, diffs, terminals, tasks, and
-provider state into one macOS workspace. Start in Chat, move into the CLI or
-Workspace, and keep the same local session and context with you.
-
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml/badge.svg)](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml)
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://github.com/wytzeh197/Gyro)
+Gyro is a cockpit for your coding agent — chat, CLI, and IDE together in one
+macOS app, with the same session and context following you the whole way.
+Apache-2.0 licensed, macOS 14+.
 
 [Download the latest Alpha](https://usegyro.io/) ·
 [GitHub Releases](https://github.com/wytzeh197/Gyro/releases/latest) ·
 [Watch the launch film](docs/media/launch/gyro-launch-film.mp4) ·
 [Read the architecture](docs/architecture.md) ·
 [Contribute](CONTRIBUTING.md)
-
-[![Watch the Gyro launch film](docs/media/launch/gyro-launch-poster.png)](docs/media/launch/gyro-launch-film.mp4)
 
 > [!IMPORTANT]
 > Gyro is currently a public alpha for macOS and is not recommended for
@@ -28,50 +22,34 @@ Workspace, and keep the same local session and context with you.
 
 ## Why Gyro
 
-Coding with agents is needlessly fragmented: the conversation lives in one
-window, commands in another, and the code and diff somewhere else. Gyro keeps
-that whole loop together. Its local-first engine, visible state, and approval
-policy are what make it safe to trust one place with the work.
+Coding with AI usually means juggling windows: the conversation in one place,
+commands in a terminal, the diff somewhere else. Gyro keeps that whole loop
+together, so you never lose the thread.
 
-- **Chat, CLI, and IDE together.** Sessions unifies Chat and subscription CLI
-  work; Workspace keeps files, diffs, Git, tests, and diagnostics in the same
-  run context.
+- **One workspace, every surface.** Chat with your agent, run its CLI, and
+  work through files, diffs, Git, and terminals — all in the same session.
 - **Bring your own agent.** Codex CLI, Claude Code, Kimi Code, Gemini CLI, and
-  Grok Build run through provider-owned local logins. Cursor and OpenCode remain
-  clearly marked until their approval-safe adapters exist.
-- **Local by default.** Session history, configuration, and worktrees stay on
-  your Mac. Gyro does not send telemetry by default.
-- **Visible control.** Commands and file changes follow an explicit approval
-  policy, with diffs and run state kept in view.
-- **Safe parallel work.** Create isolated Git worktrees for risky or concurrent
-  runs without changing the default local workflow.
-
-## Product Tour
-
-<p align="center">
-  <img src="docs/screenshots/chat-thread.png" alt="Gyro agent chat and run activity" width="49%">
-  <img src="docs/screenshots/ide.png" alt="Gyro Workspace" width="49%">
-</p>
-<p align="center">
-  <img src="docs/screenshots/cli-workbench.png" alt="Gyro CLI workbench" width="49%">
-  <img src="docs/screenshots/diff-review.png" alt="Gyro diff review" width="49%">
-</p>
+  Grok Build all work through their own local logins — no new accounts, no
+  API keys to hand over to Gyro.
+- **Local by default.** Your history, config, and worktrees stay on your Mac.
+  No telemetry.
+- **You stay in control.** Every command and file change goes through an
+  explicit approval step, so nothing happens without you seeing it first.
+- **Safe to experiment.** Spin up isolated Git worktrees for parallel or
+  risky runs without touching your main branch.
 
 ## What Works Today
 
-- Provider-backed conversations through local Codex CLI, Claude Code, Kimi
-  Code, Gemini CLI, and Grok Build.
-- Shared local sessions across Gyro.app and the `gyro` CLI.
-- PTY terminals with profiles, restore, input, resize, stop, and restart.
-- Workspace browsing, Monaco editing, guarded saves, search, Git status, tasks,
-  tests, output, diagnostics, diffs, and browser preview.
-- Provider setup checks, approval policies, redacted diagnostics, local
-  worktrees, and persisted automations.
-- Gated Codex and supported Claude CLI and desktop Chat text changes applied by a shared
-  workspace-bound transaction with fresh-hash checks, multi-file rollback, and
-  durable approval events. A pre-commit journal in Gyro Application Support lets
-  CLI and desktop startup finish recorded changes or roll interrupted changes
-  back without adding metadata to the repository.
+- Real conversations with Codex CLI, Claude Code, Kimi Code, Gemini CLI, and
+  Grok Build.
+- The same sessions shared between Gyro.app and the `gyro` CLI.
+- Built-in terminals with profiles, restore, and resize.
+- A full workspace: file browsing and editing, search, Git status, tasks,
+  tests, diagnostics, diffs, and browser preview.
+- Setup checks, approval policies, redacted diagnostics, local worktrees, and
+  persisted automations.
+- File edits from Codex and Claude are applied safely and can be rolled back
+  if a run is interrupted — your files are never left half-written.
 
 ## Install the Public Alpha
 
