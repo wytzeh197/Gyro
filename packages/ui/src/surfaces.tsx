@@ -1779,6 +1779,14 @@ export function AppChrome({
         </aside>
       )}
       <main className="gyro-main" tabIndex={-1}>
+        {/* The curve where the content pane meets the sidebar; see the
+            "Sidebar seam" block in styles.css. Decorative only. */}
+        {!isSidebarHidden ? (
+          <>
+            <span aria-hidden="true" className="gyro-seam-corner is-top" />
+            <span aria-hidden="true" className="gyro-seam-corner is-bottom" />
+          </>
+        ) : null}
         {activeDestination !== "settings" &&
         cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
           <CliUpdateBanner

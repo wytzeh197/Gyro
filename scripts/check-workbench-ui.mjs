@@ -314,23 +314,26 @@ const menuBarRustSource = readRepoFile(
 );
 const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 expect(
-  cssRules(menuBarStyleSource, ".gyro-menu-bar-header").some((rule) =>
-    rule.includes("height: 72px"),
-  ) &&
-    cssRules(menuBarStyleSource, ".gyro-menu-bar-job").some((rule) =>
-      rule.includes("height: 66px"),
-    ) &&
-    cssRules(
-      menuBarStyleSource,
-      ".gyro-menu-bar-outcome,\n.gyro-menu-bar-idle",
-    ).some((rule) => rule.includes("height: 68px")) &&
-    cssRules(menuBarStyleSource, ".gyro-menu-bar-footer").some((rule) =>
-      rule.includes("height: 44px"),
-    ) &&
+  // Row heights live in tokens on the surface root and menu_bar.rs mirrors
+  // them; the point of the check is that the two still agree, so it asserts
+  // the tokens and the Rust constants rather than literals in each rule.
+  // Everything on the surface is border-box, so these are the whole row.
+  menuBarStyleSource.includes("--menu-header: 64px") &&
+    menuBarStyleSource.includes("--menu-row: 60px") &&
+    menuBarStyleSource.includes("--menu-footer: 44px") &&
+    menuBarStyleSource.includes("--menu-gutter-top: 8px") &&
+    menuBarStyleSource.includes("--menu-gutter-bottom: 24px") &&
     cssRules(menuBarStyleSource, ".gyro-menu-bar-idle p").some((rule) =>
       rule.includes("margin: 0"),
     ) &&
-    menuBarRustSource.includes("16.0 + 72.0 + content + 44.0"),
+    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 64.0") &&
+    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 60.0") &&
+    menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_GUTTER_TOP: f64 = 8.0") &&
+    menuBarRustSource.includes("const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0") &&
+    // The gutter exists so the CSS drop shadow is not clipped by the window.
+    menuBarStyleSource.includes("--menu-gutter-x: 16px") &&
+    menuBarRustSource.includes("const MENU_BAR_GUTTER_X: f64 = 16.0"),
   "The macOS menu-bar popover should use bounded rows that match its native window-height calculation.",
 );
 expect(
@@ -5700,7 +5703,7 @@ expect(
         rule.includes("overflow-y: auto"),
     ) &&
     styleSource.includes("margin-right: -3px") &&
-    styleSource.includes("padding: 0 9px 0") &&
+    styleSource.includes("padding: 0 8px") &&
     styleSource.includes("height: 58px") &&
     cssRules(styleSource, ".gyro-sidebar-windowbar").some(
       (rule) =>
@@ -5716,7 +5719,7 @@ expect(
     ) &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
-    styleSource.includes("margin: auto -9px 0"),
+    styleSource.includes("margin: auto -8px 0"),
   "Collapsed panel handle should be minimal and the unified sidebar should keep compact chrome, aligned section labels, mode switcher, and bottom settings.",
 );
 expect(
