@@ -99,6 +99,7 @@
   --gyro-premium-radius-lg: 8px;
   --gyro-premium-radius-xl: 10px;
   --gyro-premium-radius-composer: 12px;
+  --gyro-seam-radius: 12px;
   --gyro-radius-xs: var(--gyro-premium-radius-xs);
   --gyro-radius-sm: var(--gyro-premium-radius-sm);
   --gyro-radius-md: var(--gyro-premium-radius-md);
@@ -1302,10 +1303,10 @@ button {
 
 .gyro-sidebar-small-title {
   color: #8b8e95;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 18px;
-  padding: 13px 8px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  padding: 14px 8px 4px;
 }
 
 .gyro-sidebar-project-chat-list .gyro-sidebar-small-title:first-child {
@@ -1730,7 +1731,7 @@ button {
 }
 
 .gyro-sidebar-footer-row .gyro-account-button {
-  grid-template-columns: 18px auto;
+  grid-template-columns: 16px auto;
   justify-self: start;
   width: auto;
 }
@@ -1784,7 +1785,9 @@ button {
 
 .gyro-account-button > svg {
   color: var(--gyro-muted);
+  height: 14px;
   justify-self: center;
+  width: 14px;
 }
 
 .gyro-account-menu {
@@ -8505,14 +8508,14 @@ textarea:focus-visible {
 
 /* Global navigation search: quiet, grouped, and keyboard-first. */
 .gyro-sidebar-action .gyro-sidebar-shortcut {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-soft);
-  border-radius: 6px;
+  border-radius: 4px;
   color: var(--gyro-faint);
   font-family: inherit;
-  font-size: 9px;
-  font-weight: 620;
-  line-height: 18px;
+  font-size: 10px;
+  font-weight: 550;
+  line-height: 16px;
   margin-left: auto;
   padding: 0 5px;
 }
@@ -12966,7 +12969,7 @@ textarea:focus-visible {
   background: #202124;
   border-right: 1px solid #35383d;
   gap: 0;
-  padding: 0 9px 0;
+  padding: 0 8px;
 }
 
 .gyro-sidebar-windowbar {
@@ -13113,9 +13116,9 @@ textarea:focus-visible {
   color: #d8d9dc;
   font-size: 13px;
   font-weight: 400;
-  gap: 9px;
+  gap: 8px;
   min-height: 30px;
-  padding: 0 9px;
+  padding: 0 8px;
 }
 
 .gyro-sidebar-action,
@@ -13124,7 +13127,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row {
-  grid-template-columns: 17px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
 }
 
 .gyro-sidebar-action svg,
@@ -13238,18 +13241,20 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
   background: #202124;
   border-top: 0;
-  margin: auto -9px 0;
-  padding: 8px 9px 10px;
+  margin: auto -8px 0;
+  padding: 8px 8px 10px;
 }
 
 .gyro-account-button,
 .gyro-app-shell.is-chat-shell .gyro-account-button {
   background: transparent;
-  border-color: transparent;
+  /* Same transparent 1px border the sidebar rows carry, so the gear lands on
+     the same icon rail as everything above it. */
+  border: 1px solid transparent;
   border-radius: 8px;
   color: #d8d9dc;
-  min-height: 32px;
-  padding: 0 9px;
+  min-height: 30px;
+  padding: 0 8px;
 }
 
 .gyro-account-button:hover,
@@ -13507,7 +13512,7 @@ body {
 .gyro-sidebar-windowbar {
   border-bottom: 1px solid
     color-mix(in srgb, var(--gyro-premium-line) 46%, transparent);
-  margin: 0 -9px 9px;
+  margin: 0 -8px 8px;
   padding-left: 93px;
   padding-right: 12px;
 }
@@ -15035,7 +15040,7 @@ body {
 .gyro-session-row.is-nested:focus-within .gyro-sidebar-thread-main,
 .gyro-session-row.is-nested.is-menu-open .gyro-sidebar-thread-main,
 .gyro-session-row.is-nested.is-pinned .gyro-sidebar-thread-main {
-  padding-left: 16px;
+  padding-left: 12px;
 }
 
 .gyro-sidebar-mode-group,
@@ -29823,6 +29828,65 @@ button.gyro-account-menu-row:hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * Sidebar seam.
+ *
+ * The content pane curves away from the sidebar at the top and bottom, so the
+ * sidebar reads as the surface the content sits on rather than a strip beside
+ * it. The curve is painted as two corner wedges on top of the content rather
+ * than by rounding .gyro-main: the pane is full of descendants that paint their
+ * own opaque backgrounds, and several are scroll containers and popover
+ * anchors, so clipping the pane would mean either fighting every one of those
+ * backgrounds or cutting off menus that legitimately overflow it.
+ *
+ * Each wedge clips a circle of the seam radius centred on the corner's arc
+ * centre. Inside the circle nothing is painted and the content shows through;
+ * the ring's spread shadow fills the rest of the wedge with sidebar colour, and
+ * its border carries the seam hairline around the curve. The sidebar and the
+ * content pane are within a few percent of each other, so it is that hairline
+ * rather than the tonal step that makes the curve read.
+ *
+ * The wedge is a pixel wider than the radius and offset by one so it also
+ * covers the sidebar's straight border where the curve takes over from it.
+ */
+.gyro-seam-corner {
+  height: var(--gyro-seam-radius);
+  left: -1px;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  width: calc(var(--gyro-seam-radius) + 1px);
+  z-index: 6;
+}
+
+.gyro-seam-corner::before {
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: 50%;
+  box-shadow: 0 0 0 var(--gyro-seam-radius) var(--gyro-sidebar);
+  box-sizing: border-box;
+  content: "";
+  height: calc(var(--gyro-seam-radius) * 2);
+  left: 1px;
+  position: absolute;
+  width: calc(var(--gyro-seam-radius) * 2);
+}
+
+.gyro-seam-corner.is-top {
+  top: 0;
+}
+
+.gyro-seam-corner.is-top::before {
+  top: 0;
+}
+
+.gyro-seam-corner.is-bottom {
+  bottom: 0;
+}
+
+.gyro-seam-corner.is-bottom::before {
+  bottom: 0;
 }
 
 /* ==========================================================================
