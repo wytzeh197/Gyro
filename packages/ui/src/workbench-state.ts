@@ -1449,6 +1449,8 @@ export type WorkbenchAction =
       profileId: string;
       command: string;
       output: string;
+      /** Explicit terminal actions reveal the pane; background work does not. */
+      reveal?: boolean;
     }
   | { type: "rename-terminal-pane"; paneId: string; title: string }
   | { type: "select-task"; taskId: string }
@@ -3006,16 +3008,7 @@ export function workbenchReducer(
     case "set-terminal-template":
       return { ...state, terminalTemplate: action.template };
     case "set-terminal-pane-status": {
-      const nextActivePaneTab =
-        (state.isToolPanelOpen ||
-          state.activeWorkspaceLayout === "terminal-grid") &&
-        (action.status === "running" ||
-          action.status === "waiting" ||
-          action.status === "failed")
-          ? "terminal"
-          : state.activePaneTab;
       if (
-        state.activePaneTab === nextActivePaneTab &&
         state.terminalPanes.some(
           (pane) =>
             pane.id === action.paneId &&
@@ -3027,7 +3020,6 @@ export function workbenchReducer(
       }
       return {
         ...state,
-        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3066,17 +3058,8 @@ export function workbenchReducer(
         action.governedSessionId ?? existingPane?.governedSessionId;
       const nextGovernedProviderId =
         action.governedProviderId ?? existingPane?.governedProviderId;
-      const nextActivePaneTab =
-        (state.isToolPanelOpen ||
-          state.activeWorkspaceLayout === "terminal-grid") &&
-        (action.status === "running" ||
-          action.status === "waiting" ||
-          action.status === "failed")
-          ? "terminal"
-          : state.activePaneTab;
       if (
         existingPane &&
-        state.activePaneTab === nextActivePaneTab &&
         existingPane.command === nextCommand &&
         existingPane.projectPath === nextProjectPath &&
         existingPane.workingDirectory === nextWorkingDirectory &&
@@ -3091,7 +3074,6 @@ export function workbenchReducer(
       }
       return {
         ...state,
-        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3170,9 +3152,13 @@ export function workbenchReducer(
     case "run-terminal-pane":
       return {
         ...state,
-        activeDestination: "workspace",
-        activePaneTab: "terminal",
-        isToolPanelOpen: true,
+        ...(action.reveal === false
+          ? {}
+          : {
+              activeDestination: "workspace" as const,
+              activePaneTab: "terminal" as const,
+              isToolPanelOpen: true,
+            }),
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3215,7 +3201,7 @@ export function workbenchReducer(
     case "dispatch-task":
       return {
         ...workbenchReducer(state, {
-          type: "add-terminal-pane",
+          type: "upsert-background-terminal-pane",
           pane: action.pane,
         }),
         selectedTaskId: action.taskId,

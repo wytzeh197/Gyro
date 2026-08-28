@@ -3745,7 +3745,13 @@ export function App() {
   const workspaceContextSnapshot = useMemo<
     WorkspaceContextSnapshot | undefined
   >(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    // A chat can start before any editor file is selected.  The workspace is
+    // still known from the active session/root, so never make project signals
+    // contingent on editor focus.
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      workspaceActionRoot ??
+      activeWorkspaceRoot;
     if (!root) return undefined;
     const contextPath = (path?: string) =>
       path ? workspaceContextRelativePath(path, root) : undefined;
@@ -3762,6 +3768,7 @@ export function App() {
       workspaceKey: root,
       revision: Date.now(),
       capturedAt: new Date().toISOString(),
+      availability: "available",
       activePath: undefined,
       activeView: undefined,
       visibleTabs: [],
@@ -3800,7 +3807,10 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      workspaceActionRoot ??
+      activeWorkspaceRoot;
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
@@ -3811,6 +3821,8 @@ export function App() {
     });
   }, [
     selectedFile,
+    workspaceActionRoot,
+    activeWorkspaceRoot,
     workbench.ide.diagnostics,
     workspaceContextSnapshot,
     workspaceRoots,
@@ -6449,6 +6461,7 @@ export function App() {
       template,
       workspacePathOverride,
       missionSessionId,
+      reveal = true,
       taskTitle,
     }: {
       commandOverride?: string;
@@ -6458,6 +6471,8 @@ export function App() {
       template?: TerminalTemplate;
       workspacePathOverride?: string;
       missionSessionId?: string;
+      /** Background tasks stay visible in the task rail until explicitly opened. */
+      reveal?: boolean;
       taskTitle?: string;
     }) => {
       const process = terminalProcessForProfile(profile, commandOverride);
@@ -6501,8 +6516,10 @@ export function App() {
         });
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
-        } else {
+        } else if (reveal) {
           dispatchWorkbench({ type: "add-terminal-pane", pane });
+        } else {
+          dispatchWorkbench({ type: "upsert-background-terminal-pane", pane });
         }
       }
       dispatchWorkbench({
@@ -6511,6 +6528,7 @@ export function App() {
         profileId: profile.id,
         command: process.displayCommand,
         output: startingOutput,
+        reveal,
       });
       setTerminalOutput(startingOutput);
 
@@ -7942,6 +7960,28 @@ export function App() {
         applyWorkspaceMode();
       };
 
+      if (action.startsWith("handoff-provider:")) {
+        const providerId = action.replace("handoff-provider:", "");
+        const target = providersForConfig(config).find(
+          (provider) => provider.id === providerId,
+        );
+        if (!isProviderId(providerId) || target?.authStatus !== "connected") {
+          notify(
+            "command-failed",
+            "Handoff unavailable",
+            "Connect another provider before continuing this conversation with it.",
+          );
+          return;
+        }
+        selectProvider(providerId);
+        notify(
+          "provider",
+          "Conversation handed off",
+          `Continuing this thread with ${target.displayName}. Your chat context stays in place.`,
+        );
+        return;
+      }
+
       if (action.startsWith("select-provider:")) {
         const providerId = action.replace("select-provider:", "");
         if (isProviderId(providerId)) {
@@ -8386,6 +8426,14 @@ export function App() {
           ? workspaceContextSnapshot
           : undefined);
       if (message === "") {
+        return false;
+      }
+      if (isBranchLoading) {
+        notify(
+          "command-failed",
+          "Branch is switching",
+          "Wait for the selected branch to finish checking out before sending.",
+        );
         return false;
       }
       if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
@@ -9064,6 +9112,7 @@ export function App() {
       activeChatAttachments,
       activeChatDraft,
       activeChatMode,
+      isBranchLoading,
       activeSessionGoal,
       activeSessionPlan,
       applyCouncilChatResponse,
@@ -11624,6 +11673,7 @@ export function App() {
           args: [...profile.args, task.title],
         },
         startingOutput: `Starting ${profile.displayName}: ${task.title}`,
+        reveal: false,
       });
       if (!started) {
         dispatchWorkbench({

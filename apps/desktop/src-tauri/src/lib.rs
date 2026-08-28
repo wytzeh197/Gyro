@@ -5147,7 +5147,7 @@ fn provider_context_message_with_history(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if gyro_core::provider_capability_support(&request.provider_id).available {
-        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
+        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy. If context is unavailable or stale, continue with bounded Workspace tools and describe the evidence you found, never internal workspace mechanics.".into());
         // The file the user happens to have open in Workspace is not context.
         // Only what the user attaches from the composer, or names in the
         // message, puts a file in front of the model.

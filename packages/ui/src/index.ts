@@ -303,11 +303,14 @@ export {
   ledgerWindowSpecsForProvider,
   ledgerWindows,
   ledgerWindowsCaption,
+  PLAN_USAGE_NOTICE_THRESHOLDS,
+  planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
 } from "./usage-ledger";
 export type {
   LedgerWindowView,
+  PlanUsageNotice,
   SessionCostSummary,
   TurnCostEstimate,
   UsageSafetyNotice,

@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  Globe2,
   Image as ImageIcon,
   type LucideIcon,
   Lightbulb,
@@ -47,6 +48,7 @@ const WORK_ICON = {
   read: Eye,
   search: Search,
   context: Minimize2,
+  browser: Globe2,
   tool: Wrench,
 } as const satisfies Record<WorkItem["kind"], LucideIcon>;
 
@@ -60,6 +62,8 @@ function workIcon(item: WorkItem): LucideIcon {
 
 export type ChatRunProps = {
   model: RunModel;
+  /** Turn-wide line delta for a provider's generic “files” activity. */
+  aggregateFileStats?: { additions: number; deletions: number };
   onOpenChanges?: () => void;
   onRetry?: () => void;
   onReconnect?: () => void;
@@ -78,6 +82,7 @@ export type ChatRunProps = {
 
 export function ChatRun({
   model,
+  aggregateFileStats,
   onOpenChanges,
   onRetry,
   onReconnect,
@@ -167,6 +172,7 @@ export function ChatRun({
                     renderAsk(step.event)
                   ) : (
                     <RunRow
+                      aggregateFileStats={aggregateFileStats}
                       onOpenChanges={onOpenChanges}
                       renderSay={renderSay}
                       step={step}
@@ -245,10 +251,12 @@ function RunHeader({
 }
 
 function RunRow({
+  aggregateFileStats,
   onOpenChanges,
   renderSay,
   step,
 }: {
+  aggregateFileStats?: { additions: number; deletions: number };
   onOpenChanges?: () => void;
   renderSay?: (text: string) => ReactNode;
   step: RunStep;
@@ -263,6 +271,7 @@ function RunRow({
   const status = item?.status ?? "done";
   const file = item?.kind === "file" ? item : undefined;
   const repeat = step.kind === "work" ? (step.repeat ?? 1) : 1;
+  const lineStats = fileLineStats(file, aggregateFileStats);
   const className = [
     "gyro-run-row",
     `is-${step.kind}`,
@@ -292,13 +301,13 @@ function RunRow({
         ) : null}
         {/* A side with no lines is left off entirely: the reference shows a bare
             `+73`, and a trailing `-0` is noise on every new file. */}
-        {file && ((file.additions ?? 0) > 0 || (file.deletions ?? 0) > 0) ? (
+        {lineStats ? (
           <span className="gyro-run-row-stat">
-            {(file.additions ?? 0) > 0 ? (
-              <em className="is-added">+{file.additions}</em>
+            {lineStats.additions > 0 ? (
+              <em className="is-added">+{lineStats.additions}</em>
             ) : null}
-            {(file.deletions ?? 0) > 0 ? (
-              <em className="is-removed">-{file.deletions}</em>
+            {lineStats.deletions > 0 ? (
+              <em className="is-removed">-{lineStats.deletions}</em>
             ) : null}
           </span>
         ) : null}
@@ -331,6 +340,25 @@ function RunRow({
       {body}
     </div>
   );
+}
+
+function fileLineStats(
+  file: Extract<WorkItem, { kind: "file" }> | undefined,
+  aggregate: { additions: number; deletions: number } | undefined,
+) {
+  if (!file) return undefined;
+  const additions = file.additions ?? 0;
+  const deletions = file.deletions ?? 0;
+  if (additions > 0 || deletions > 0) {
+    return { additions, deletions };
+  }
+  // Some provider streams report a batch as “Edited files” instead of naming
+  // each path. The source-control delta still gives that row a useful result.
+  if (file.path.trim().toLowerCase() !== "files") return undefined;
+  if (!aggregate || (aggregate.additions === 0 && aggregate.deletions === 0)) {
+    return undefined;
+  }
+  return aggregate;
 }
 
 /**

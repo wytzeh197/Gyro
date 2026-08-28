@@ -5598,11 +5598,8 @@ expect(
     surfaceSource.includes(
       "<PlanDocument content={sessionPlan.content} title={sessionPlan.title}",
     ) &&
-    surfaceSource.includes('chatMode === "plan"') &&
-    surfaceSource.includes("latestPlanModeEnabledAt") &&
-    surfaceSource.includes(
-      "sessionPlan.updatedAt >= latestPlanModeEnabledAt",
-    ) &&
+    surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
+    surfaceSource.includes("planDecisionKey !== dismissedPlanDecisionKey") &&
     surfaceSource.includes("!isComposerSending") &&
     appSource.includes("const handlePlanDecision = useCallback") &&
     appSource.includes('await changeChatMode("normal")') &&

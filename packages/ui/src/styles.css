@@ -157,6 +157,12 @@
   --gyro-hero-shadow: 0 20px 48px rgba(0, 0, 0, 0.38);
   --gyro-hero-shadow-focus: 0 22px 52px rgba(0, 0, 0, 0.42);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  /* Start-card icon hues. One per opening, so the four cards read as four
+     kinds of work at a glance rather than four identical rectangles. */
+  --gyro-start-icon-explore: #7aa7ff;
+  --gyro-start-icon-build: #a98cc8;
+  --gyro-start-icon-review: #70d39f;
+  --gyro-start-icon-fix: #e8b45f;
   --gyro-page-header-bg: var(--gyro-surface-raised);
   --gyro-page-canvas: var(--gyro-app);
   --gyro-page-card: var(--gyro-surface);
@@ -924,6 +930,10 @@
   --gyro-hero-shadow: 0 20px 46px rgba(32, 40, 52, 0.16);
   --gyro-hero-shadow-focus: 0 22px 50px rgba(32, 40, 52, 0.19);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  --gyro-start-icon-explore: #356fd6;
+  --gyro-start-icon-build: #6a4a94;
+  --gyro-start-icon-review: #197a4c;
+  --gyro-start-icon-fix: #9a5b0e;
 }
 
 * {
@@ -12663,8 +12673,8 @@ textarea:focus-visible {
   min-width: 0;
 }
 
-.gyro-chat-thread-topbar strong,
-.gyro-chat-thread-topbar span {
+.gyro-chat-thread-identity > strong,
+.gyro-chat-thread-identity > span {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -12672,13 +12682,13 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.gyro-chat-thread-topbar strong {
+.gyro-chat-thread-identity > strong {
   color: #f1eee9;
   font-size: 14px;
   font-weight: 640;
 }
 
-.gyro-chat-thread-topbar span {
+.gyro-chat-thread-identity > span {
   color: #90959d;
   font-size: 11px;
   margin-top: 1px;
@@ -12696,7 +12706,6 @@ textarea:focus-visible {
   min-width: 0;
 }
 
-.gyro-chat-thread-topbar .gyro-thread-pills span,
 .gyro-chat-thread-topbar .gyro-thread-pill-button {
   background: #17191d;
   border-color: #2b2f35;
@@ -13966,7 +13975,7 @@ body {
 .gyro-chat-transcript .gyro-message,
 .gyro-chat-transcript .gyro-agent-run-card,
 .gyro-chat-transcript .gyro-provider-status-row {
-  max-width: 736px;
+  max-width: 760px;
 }
 
 .gyro-chat-transcript .gyro-message {
@@ -13991,7 +14000,7 @@ body {
 
 .gyro-chat-transcript .gyro-message.is-user {
   justify-items: end;
-  max-width: 736px;
+  max-width: 760px;
 }
 
 .gyro-chat-transcript .gyro-message.is-user > div:last-child {
@@ -14058,7 +14067,7 @@ body {
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.055);
-  max-width: 736px;
+  max-width: 760px;
   min-height: 142px;
   overflow: visible;
   padding: 0;
@@ -22113,6 +22122,117 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-start-brand-word {
   color: var(--gyro-hero-brand);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--gyro-hero-brand) 42%,
+    transparent
+  );
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 6px;
+}
+
+/*
+ * Start cards. Four openings on one row, sized by the widest label rather than
+ * by content, so the row reads as a set. The card carries the composer's own
+ * surface and hairline — the start screen is one material, not a card style
+ * plus a composer style.
+ */
+.gyro-chat-start-suggestions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-width: var(--gyro-composer-width);
+  width: min(var(--gyro-composer-width), 100%);
+}
+
+.gyro-chat-start:has(.gyro-chat-start-suggestions) h1 {
+  margin-bottom: 0;
+}
+
+.gyro-chat-start-suggestion {
+  align-content: space-between;
+  background: var(--gyro-hero-composer);
+  border: 1px solid var(--gyro-hero-border);
+  border-radius: var(--gyro-radius-composer);
+  color: var(--gyro-hero-text);
+  display: grid;
+  font-size: 13px;
+  font-weight: 460;
+  gap: 22px;
+  justify-items: start;
+  line-height: 1.32;
+  min-height: 112px;
+  padding: 13px 13px 14px;
+  text-align: left;
+  transition:
+    background var(--gyro-premium-motion) var(--gyro-premium-ease),
+    border-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-chat-start-suggestion:hover {
+  background: color-mix(
+    in srgb,
+    var(--gyro-hero-composer) 94%,
+    var(--gyro-hero-text)
+  );
+  border-color: var(--gyro-hero-focus-border);
+}
+
+.gyro-chat-start-suggestion:focus-visible {
+  border-color: var(--gyro-hero-focus-border);
+  outline: 2px solid var(--gyro-premium-focus);
+  outline-offset: 1px;
+}
+
+.gyro-chat-start-suggestion span {
+  display: block;
+  min-width: 0;
+}
+
+.gyro-chat-start-suggestion.is-explore svg {
+  color: var(--gyro-start-icon-explore);
+}
+
+.gyro-chat-start-suggestion.is-build svg {
+  color: var(--gyro-start-icon-build);
+}
+
+.gyro-chat-start-suggestion.is-review svg {
+  color: var(--gyro-start-icon-review);
+}
+
+.gyro-chat-start-suggestion.is-fix svg {
+  color: var(--gyro-start-icon-fix);
+}
+
+/*
+ * Below the width where four cards still hold a readable label, and whenever a
+ * rail panel or a tile has taken the column, the row folds to a 2x2 block
+ * rather than orphaning a fourth card on its own line.
+ */
+.gyro-chat-surface.has-environment .gyro-chat-start-suggestions,
+.gyro-chat-surface.is-tiled .gyro-chat-start-suggestions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Two across, the card is wide enough that the tall icon-to-label gap reads
+   as a hole rather than as breathing room. */
+.gyro-chat-surface.has-environment .gyro-chat-start-suggestion,
+.gyro-chat-surface.is-tiled .gyro-chat-start-suggestion {
+  gap: 14px;
+  min-height: 88px;
+}
+
+@media (max-width: 1100px) {
+  .gyro-chat-start-suggestions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gyro-chat-start-suggestion {
+    gap: 14px;
+    min-height: 88px;
+  }
 }
 
 .gyro-chat-start .gyro-composer-shell.is-hero.has-provider {
@@ -22120,6 +22240,10 @@ button.gyro-settings-row em::after {
   border: 1px solid var(--gyro-hero-border);
   border-radius: 16px;
   box-shadow: var(--gyro-hero-shadow), var(--gyro-hero-highlight);
+  /* Column flex so the standing context can take the top slot: where the work
+     happens reads before what to type. */
+  display: flex;
+  flex-direction: column;
   max-width: var(--gyro-composer-width);
   overflow: visible;
   width: min(var(--gyro-composer-width), 100%);
@@ -22128,6 +22252,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-start .gyro-composer-shell.is-hero.has-provider > textarea {
   caret-color: var(--gyro-hero-text);
   color: var(--gyro-hero-text);
+  flex: 0 0 auto;
   font-size: 13px;
   min-height: 67px;
   padding: 14px 13px 4px;
@@ -22144,11 +22269,13 @@ button.gyro-settings-row em::after {
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-context-row {
   background: var(--gyro-hero-context);
+  border-bottom: 1px solid var(--gyro-hero-border);
+  border-radius: 16px 16px 0 0;
   border-top: 0;
-  border-radius: 0 0 16px 16px;
   box-shadow: none;
   min-height: 38px;
-  padding: 4px 13px 5px;
+  order: -1;
+  padding: 5px 13px 4px;
 }
 
 .gyro-chat-start .gyro-composer-shell textarea::placeholder {
@@ -23387,6 +23514,85 @@ button.gyro-settings-row em::after {
 .gyro-chat-run .gyro-response-body strong {
   color: var(--gyro-text);
   font-weight: 550;
+}
+
+.gyro-response-changed-files {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--gyro-surface-raised) 82%, transparent);
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: 8px;
+  color: var(--gyro-text);
+  display: grid;
+  font: inherit;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+button.gyro-response-changed-files {
+  cursor: pointer;
+}
+
+button.gyro-response-changed-files:hover {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 7%,
+    var(--gyro-surface-raised)
+  );
+  border-color: color-mix(in srgb, var(--gyro-accent) 32%, var(--gyro-border));
+}
+
+.gyro-response-changed-files-heading {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.gyro-response-changed-files-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+
+.gyro-response-changed-files-list > span {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gyro-response-changed-files-list code {
+  color: var(--gyro-text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-response-changed-files-list em,
+.gyro-response-changed-files-list small {
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.gyro-response-changed-files-list .is-added {
+  color: var(--gyro-success);
+}
+
+.gyro-response-changed-files-list .is-removed {
+  color: var(--gyro-danger);
+}
+
+.gyro-response-changed-files-list small {
+  color: var(--gyro-faint);
 }
 
 :root[data-theme="light"] .gyro-chat-run .gyro-response-body,
@@ -25004,6 +25210,103 @@ button.gyro-account-menu-row:hover,
   flex-direction: column;
   gap: 10px;
   padding: 10px 11px 12px;
+}
+
+.gyro-plan-usage-notice {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--gyro-accent) 10%, var(--gyro-surface));
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-accent) 34%, var(--gyro-border));
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin: 0 0 10px;
+  padding: 11px 12px;
+}
+
+.gyro-plan-usage-notice > svg {
+  color: var(--gyro-accent);
+  margin-top: 1px;
+}
+
+.gyro-plan-usage-notice > div:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.gyro-plan-usage-notice strong {
+  color: var(--gyro-text);
+  font-size: 12px;
+}
+
+.gyro-plan-usage-notice span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.gyro-plan-usage-notice.is-warning {
+  background: color-mix(in srgb, var(--gyro-warn) 12%, var(--gyro-surface));
+  border-color: color-mix(in srgb, var(--gyro-warn) 42%, var(--gyro-border));
+}
+
+.gyro-plan-usage-notice.is-warning > svg {
+  color: var(--gyro-warn);
+}
+
+.gyro-plan-usage-notice.is-critical {
+  background: color-mix(in srgb, var(--gyro-danger) 12%, var(--gyro-surface));
+  border-color: color-mix(in srgb, var(--gyro-danger) 45%, var(--gyro-border));
+}
+
+.gyro-plan-usage-notice.is-critical > svg {
+  color: var(--gyro-danger);
+}
+
+.gyro-plan-usage-notice-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.gyro-plan-usage-notice-actions .gyro-secondary-button {
+  align-items: center;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.gyro-plan-usage-notice-dismiss {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px;
+}
+
+.gyro-plan-usage-notice-dismiss:hover,
+.gyro-plan-usage-notice-dismiss:focus-visible {
+  background: color-mix(in srgb, var(--gyro-muted) 16%, transparent);
+  color: var(--gyro-text);
+}
+
+@media (max-width: 620px) {
+  .gyro-plan-usage-notice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .gyro-plan-usage-notice-actions {
+    grid-column: 2;
+    justify-content: space-between;
+  }
 }
 
 .gyro-composer-limit-title,
@@ -27408,11 +27711,12 @@ button.gyro-account-menu-row:hover,
   background: transparent;
 }
 
-/* Open grid chats stay subdued in the sidebar; focus owns the selection cue. */
+/* Split chats need two distinct, quiet states: open means visible somewhere;
+   active means this is the pane currently receiving the user's attention. */
 .gyro-session-row.is-open:not(.is-active) {
-  background: color-mix(in srgb, var(--gyro-premium-control) 24%, transparent);
+  background: color-mix(in srgb, var(--gyro-premium-control) 34%, transparent);
   box-shadow: none;
-  opacity: 0.68;
+  opacity: 0.8;
 }
 
 .gyro-session-row.is-open:not(.is-active):hover,
@@ -27423,28 +27727,38 @@ button.gyro-account-menu-row:hover,
 .gyro-session-row.is-active {
   background: color-mix(
     in srgb,
-    var(--gyro-accent) 12%,
-    var(--gyro-sidebar-soft) 88%
+    var(--gyro-accent) 14%,
+    var(--gyro-sidebar-soft) 86%
   );
-  box-shadow: inset 2px 0 0 var(--gyro-accent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--gyro-accent) 20%, transparent),
+    inset 3px 0 0 var(--gyro-accent);
   opacity: 1;
+}
+
+.gyro-session-row.is-active .gyro-sidebar-thread-title > span:first-child {
+  color: var(--gyro-premium-text);
+  font-weight: 600;
 }
 
 .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
   .gyro-session-row.is-active {
   background: color-mix(
     in srgb,
-    var(--gyro-accent) 18%,
-    var(--gyro-sidebar-soft) 82%
+    var(--gyro-accent) 16%,
+    var(--gyro-sidebar-soft) 84%
   );
-  box-shadow: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--gyro-accent) 24%, transparent),
+    inset 3px 0 0 var(--gyro-accent);
 }
 
 .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
   .gyro-session-row.is-active::before {
-  box-shadow: 0 0 8px color-mix(in srgb, var(--gyro-accent) 54%, transparent);
-  inset: 3px auto 3px 0;
-  width: 4px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--gyro-accent) 46%, transparent);
+  inset: 6px auto 6px 0;
+  opacity: 1;
+  width: 3px;
 }
 
 .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
@@ -27574,10 +27888,10 @@ button.gyro-account-menu-row:hover,
 .gyro-thread-context-control > .gyro-thread-workspace-menu {
   gap: 0;
   max-height: min(360px, calc(100vh - 48px));
-  max-width: min(260px, calc(100vw - 24px));
-  padding: 4px;
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 6px;
   top: calc(100% + 4px);
-  width: min(260px, calc(100vw - 24px));
+  width: min(300px, calc(100vw - 24px));
 }
 
 .gyro-thread-workspace-menu .gyro-composer-popover-title {
@@ -27596,12 +27910,24 @@ button.gyro-account-menu-row:hover,
 .gyro-thread-workspace-menu .gyro-composer-menu-item {
   border-radius: 6px;
   gap: 6px;
-  min-height: 36px;
-  padding: 3px 6px;
+  min-height: 40px;
+  padding: 5px 7px;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item.is-active {
   background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+}
+
+/* Current project and mode are informational rather than unavailable. Keep
+   their selected rows legible while still preventing accidental changes. */
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active:disabled,
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active:disabled strong {
+  color: var(--gyro-text);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active:disabled small,
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active:disabled svg {
+  color: var(--gyro-muted);
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item span {
@@ -29716,6 +30042,19 @@ button.gyro-account-menu-row:hover,
   position: relative;
 }
 
+/* The empty-chat surface has no thread topbar. Keep the same recent-chat
+   control in its top-left corner so a fresh AI Space can still switch chats. */
+.gyro-chat-start-switcher {
+  left: clamp(18px, 4vw, 34px);
+  position: absolute;
+  top: 14px;
+  z-index: 3;
+}
+
+.gyro-chat-start-switcher .gyro-chat-switcher-menu {
+  top: calc(100% + 8px);
+}
+
 .gyro-chat-switcher-trigger {
   align-items: center;
   background: transparent;
@@ -29887,6 +30226,119 @@ button.gyro-account-menu-row:hover,
 
 .gyro-seam-corner.is-bottom::before {
   bottom: 0;
+}
+
+/*
+ * Sidebar rhythm.
+ *
+ * One row shape for every list in the rail: a 32px row, a 17px icon column,
+ * and a full-bleed hover pill. The mode tabs drop their box so the rail reads
+ * as a single column of rows instead of a control parked on top of a list, and
+ * the section labels take the air that tells you which list they head.
+ */
+.gyro-sidebar-mode-group,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group,
+:root[data-theme="light"] .gyro-sidebar-mode-group,
+:root[data-theme="light"]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar-mode-group {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 0;
+}
+
+.gyro-sidebar-mode-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
+  border-radius: var(--gyro-radius-md);
+  min-height: 30px;
+}
+
+.gyro-sidebar-action,
+.gyro-sidebar-row,
+.gyro-footer-button,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row {
+  gap: 9px;
+  min-height: 32px;
+  padding: 6px 7px;
+}
+
+.gyro-sidebar-action,
+.gyro-sidebar-row,
+.gyro-footer-button,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row {
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+}
+
+/* Rail glyphs sat at 14px against 13px labels, which read as decoration
+   rather than as the row's subject. 15px and the muted text colour puts them
+   on the same footing as the label — and works on a light rail. */
+.gyro-sidebar-action svg,
+.gyro-sidebar-row svg,
+.gyro-sidebar-project-row svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-action svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-row svg,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row svg {
+  color: var(--gyro-premium-faint);
+  height: 15px;
+  width: 15px;
+}
+
+.gyro-sidebar-project-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-project-row {
+  gap: 9px;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  min-height: 32px;
+  padding: 6px 7px;
+}
+
+.gyro-sidebar-thread,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-thread {
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.gyro-sidebar-section {
+  margin-top: 18px;
+}
+
+/* These three carried hardcoded greys that only ever read on a dark rail. */
+.gyro-sidebar-small-title,
+.gyro-sidebar-collapse-icon,
+.gyro-sidebar-more-button {
+  color: var(--gyro-premium-faint);
+}
+
+.gyro-sidebar-more-button:hover {
+  background: var(--gyro-premium-control);
+  color: var(--gyro-premium-text);
+}
+
+/* The active rail row is marked by its pill. The accent bar next to it was a
+   second signal for the same state, and it broke the rail's left edge. */
+.gyro-sidebar-action.is-active::before,
+.gyro-sidebar-row.is-active::before,
+.gyro-sidebar-thread.is-active::before,
+.gyro-session-row.is-active::before {
+  display: none;
+}
+
+/* A single chat needs only its selected pill. In a split chat layout, bring
+   back a compact accent rail so the focused conversation remains identifiable
+   at a glance among the other open sessions. */
+.gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
+  .gyro-session-row.is-active::before {
+  background: var(--gyro-accent);
+  border-radius: 999px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--gyro-accent) 46%, transparent);
+  display: block;
+  inset: 6px auto 6px 0;
+  opacity: 1;
+  width: 3px;
 }
 
 /* ==========================================================================

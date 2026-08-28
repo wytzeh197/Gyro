@@ -154,6 +154,10 @@ export type WorkspaceContextSnapshot = {
   workspaceKey: string;
   revision: number;
   capturedAt: string;
+  /** Whether Workspace supplied a usable project-signal snapshot for this turn. */
+  availability?: "available" | "unavailable";
+  /** A safe, user-actionable explanation when no project signals are available. */
+  unavailableReason?: string;
   activePath?: string;
   activeView?: IdeViewId;
   visibleTabs: string[];

@@ -121,7 +121,7 @@ assert.deepEqual(
       }),
     ),
   }),
-  { label: "Ran command", description: "Run the suite" },
+  { label: "Ran tests", description: "Run the suite" },
   "a Bash description reclassified as note should win over the raw command",
 );
 
@@ -172,7 +172,7 @@ assert.deepEqual(
   ),
   [
     "say:Adding subscription options.",
-    "work:command",
+    "work:read",
     "say:Updating the business plan document.",
     "work:file",
   ],
@@ -718,7 +718,7 @@ const rowText = (activityKind, label, extra) =>
   });
 
 assert.deepEqual(rowText("command", "Ran it", { detail: "pnpm test" }), {
-  label: "Ran command",
+  label: "Ran tests",
   description: "pnpm test",
 });
 assert.deepEqual(
@@ -726,7 +726,7 @@ assert.deepEqual(
     detail: "pnpm test",
     intent: "Check the suite",
   }),
-  { label: "Ran command", description: "Check the suite" },
+  { label: "Ran tests", description: "Check the suite" },
   "a provider intent should win over the raw command",
 );
 assert.deepEqual(rowText("file", "Updated create_gyro_bp.js"), {
@@ -830,7 +830,7 @@ assert.deepEqual(
 // persisted before that change keep rendering.
 assert.deepEqual(
   rowText("command", "Ran it", { command: "pnpm build", detail: "ignored" }),
-  { label: "Ran command", description: "pnpm build" },
+  { label: "Built project", description: "pnpm build" },
   "the named command field should win over detail",
 );
 assert.deepEqual(
@@ -858,6 +858,29 @@ assert.equal(
   "commentary should not become a work row",
 );
 
+const shellSearch = workItemFromEvent(
+  activity("command", "rg -n \"workspace\" packages/ui/src", {
+    command: "cd /tmp/project && rg -n \"workspace\" packages/ui/src",
+  }),
+);
+assert.equal(shellSearch?.kind, "search", "ripgrep should read as workspace search");
+
+const shellRead = workItemFromEvent(
+  activity("command", "sed -n '1,80p' src/app.ts", {
+    command: "sed -n '1,80p' src/app.ts",
+  }),
+);
+assert.equal(shellRead?.kind, "read", "range reads should read as file inspection");
+
+const shellTest = workItemFromEvent(
+  activity("command", "pnpm test", { command: "pnpm test" }),
+);
+assert.deepEqual(
+  shellTest && runRowText({ kind: "work", id: "test", at: at(0), item: shellTest }),
+  { label: "Ran tests", description: "pnpm test" },
+  "test commands should use a purpose-first label",
+);
+
 // The hidden title marker is an instruction to the app, not a beat.
 assert.equal(
   buildRunModel([
@@ -866,6 +889,15 @@ assert.equal(
   ]).steps.length,
   1,
   "the session title marker should be dropped",
+);
+
+assert.equal(
+  buildRunModel([
+    activity("commentary", 'GYRO_ARTIFACTS: {"items":[]}', {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "the artifact marker should be dropped",
 );
 
 // A non-activity system event becomes an approval beat rather than being lost.

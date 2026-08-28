@@ -23,6 +23,7 @@ import type { SessionEvent } from "./types.ts";
  */
 
 export type WorkStatus = "running" | "done" | "failed";
+type CommandCategory = "inspect" | "test" | "build";
 
 export type WorkItem =
   | {
@@ -30,6 +31,7 @@ export type WorkItem =
       id: string;
       status: WorkStatus;
       command: string;
+      category?: CommandCategory;
       /** What the command was for, when the provider says. Falls back to the command. */
       intent?: string;
     }
@@ -62,6 +64,13 @@ export type WorkItem =
     }
   | { kind: "memory"; id: string; status: WorkStatus }
   | { kind: "context"; id: string; status: WorkStatus }
+  | {
+      kind: "browser";
+      id: string;
+      status: WorkStatus;
+      action: "browse" | "inspect" | "capture";
+      target?: string;
+    }
   | {
       kind: "tool";
       id: string;
@@ -504,6 +513,61 @@ function runPhase(
   return { name: "done", durationMs: options.durationMs };
 }
 
+function classifyCommandActivity({
+  command,
+  id,
+  intent,
+  status,
+}: {
+  command: string;
+  id: string;
+  intent?: string;
+  status: WorkStatus;
+}): WorkItem {
+  const normalized = command
+    .replace(/^\s*(?:cd\s+[^;&|]+\s*(?:&&|;)\s*)+/i, "")
+    .trim();
+  if (/^(?:rg|grep)\b/i.test(normalized)) {
+    return {
+      kind: "search",
+      id,
+      status,
+      scope: "project",
+      query: commandTarget(normalized),
+    };
+  }
+  if (/^(?:sed|head|tail|cat|awk)\b/i.test(normalized)) {
+    const path = commandFileTarget(normalized);
+    return {
+      kind: "read",
+      id,
+      status,
+      path,
+      media: isImagePath(path) ? "image" : "file",
+    };
+  }
+  const category: CommandCategory | undefined =
+    /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?test\b|\bcargo\s+test\b/i.test(normalized)
+      ? "test"
+      : /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?build\b|\bcargo\s+build\b/i.test(normalized)
+        ? "build"
+        : /^(?:git\s+(?:status|diff|log|branch)|ls\b|find\b|pwd\b)/i.test(normalized)
+          ? "inspect"
+          : undefined;
+  return { kind: "command", id, status, command, intent, category };
+}
+
+function commandTarget(command: string) {
+  const quoted = command.match(/["']([^"']+)["']/)?.[1];
+  return quoted ?? command.replace(/^(?:rg|grep)\s+[^\s]+\s*/i, "").slice(0, 160);
+}
+
+function commandFileTarget(command: string) {
+  const tokens = command.match(/(?:["'][^"']+["']|\S+)/g) ?? [];
+  const candidate = tokens.at(-1)?.replace(/^['"]|['"]$/g, "");
+  return candidate && !candidate.startsWith("-") ? candidate : undefined;
+}
+
 /**
  * The single place an untyped provider-activity payload becomes a typed item.
  *
@@ -536,15 +600,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
 
   switch (text(payload, "activityKind")) {
     case "command":
-      return {
-        kind: "command",
-        id,
-        status,
+      return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
-        // Prefer an explicit intent; fall back to the free-form note when the
-        // backend reclassified Bash with a description in the note slot.
+        id,
         intent: text(payload, "intent") ?? text(payload, "note"),
-      };
+        status,
+      });
     case "file":
       return {
         kind: "file",
@@ -604,13 +665,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
       };
     case "execute":
-      return {
-        kind: "command",
-        id,
-        status,
+      return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
+        id,
         intent: text(payload, "intent") ?? text(payload, "note"),
-      };
+        status,
+      });
     case "fetch":
       return {
         kind: "search",
@@ -661,13 +721,12 @@ function workItemFromCapabilityCall(
     capabilityId === "workspace-run-task" ||
     capabilityId === "workspace-run-test"
   ) {
-    return {
-      kind: "command",
-      id,
-      status,
+    return classifyCommandActivity({
       command: summary ?? resourceLabel ?? humanizeCapabilityId(capabilityId),
+      id,
       intent: summary,
-    };
+      status,
+    });
   }
 
   // Project search → search row.
@@ -700,6 +759,19 @@ function workItemFromCapabilityCall(
       status,
       tool: humanizeCapabilityId(capabilityId),
     };
+  }
+
+  if (capabilityId.startsWith("browser-")) {
+    const action = capabilityId === "browser-screenshot"
+      ? "capture"
+      : capabilityId === "browser-inspect" ||
+          capabilityId === "browser-read-page" ||
+          capabilityId === "browser-find" ||
+          capabilityId === "browser-console" ||
+          capabilityId === "browser-network"
+        ? "inspect"
+        : "browse";
+    return { kind: "browser", id, status, action, target: resourceLabel ?? summary };
   }
 
   // Everything else (workspace-context, browser-*, ide-*, git, diff, …)
@@ -890,10 +962,10 @@ export function runRowText(step: RunStep): RunRowText {
       return {
         label:
           item.status === "running"
-            ? "Running command"
+            ? commandVerb(item.category, true)
             : item.status === "failed"
-              ? "Command failed"
-              : "Ran command",
+              ? commandFailedVerb(item.category)
+              : commandVerb(item.category, false),
         // Intent (why) wins over the raw command (what). A provider note is the
         // same shape as intent when Bash was reclassified with a description.
         description: item.intent ?? item.command,
@@ -925,6 +997,22 @@ export function runRowText(step: RunStep): RunRowText {
           item.status === "running"
             ? "Compacting context"
             : "Compacted context",
+      };
+    case "browser":
+      return {
+        label:
+          item.status === "running"
+            ? item.action === "capture"
+              ? "Capturing preview"
+              : item.action === "inspect"
+                ? "Inspecting page"
+                : "Browsing"
+            : item.action === "capture"
+              ? "Captured preview"
+              : item.action === "inspect"
+                ? "Inspected page"
+                : "Browsed page",
+        description: item.target,
       };
     case "tool": {
       const toolLabel = item.server
@@ -963,6 +1051,19 @@ export function runRowText(step: RunStep): RunRowText {
       );
     }
   }
+}
+
+function commandVerb(category: CommandCategory | undefined, running: boolean) {
+  if (category === "inspect") return running ? "Inspecting workspace" : "Inspected workspace";
+  if (category === "test") return running ? "Running tests" : "Ran tests";
+  if (category === "build") return running ? "Building project" : "Built project";
+  return running ? "Running command" : "Ran command";
+}
+
+function commandFailedVerb(category: CommandCategory | undefined) {
+  if (category === "test") return "Tests failed";
+  if (category === "build") return "Build failed";
+  return category === "inspect" ? "Inspection failed" : "Command failed";
 }
 
 /** In-flight wording for the tools users see every turn. */
@@ -1220,6 +1321,8 @@ function workIdentity(item: WorkItem): string | undefined {
       return `command:${item.command}`;
     case "search":
       return item.query ? `search:${item.scope}:${item.query}` : undefined;
+    case "browser":
+      return item.target ? `browser:${item.action}:${item.target}` : undefined;
     case "tool":
       return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
     case "memory":
@@ -1265,7 +1368,7 @@ function mergeFileChange(
   existing.deletions = item.deletions ?? existing.deletions;
 }
 
-/** The title marker is an instruction to the app, never a beat in the run. */
+/** Control markers are instructions to the app, never beats in the run. */
 function isHiddenRunEvent(event: SessionEvent) {
   if (event.kind !== "system-event") {
     return false;
@@ -1274,8 +1377,10 @@ function isHiddenRunEvent(event: SessionEvent) {
   if (text(payload, "kind") !== "provider-activity") {
     return false;
   }
-  return (text(payload, "label") ?? event.message).includes(
-    "GYRO_SESSION_TITLE:",
+  const label = text(payload, "label") ?? event.message;
+  return (
+    label.includes("GYRO_SESSION_TITLE:") ||
+    label.includes("GYRO_ARTIFACTS:")
   );
 }
 

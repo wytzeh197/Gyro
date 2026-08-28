@@ -9,6 +9,7 @@ import {
   Binary,
   Blocks,
   Braces,
+  Bug,
   CalendarClock,
   Camera,
   Check,
@@ -33,9 +34,11 @@ import {
   GitBranch,
   GitBranchPlus,
   GitPullRequest,
+  GitPullRequestArrow,
   Globe2,
   Goal,
   GripVertical,
+  Hammer,
   HardDrive,
   Hash,
   HelpCircle,
@@ -77,6 +80,7 @@ import {
   Sun,
   Tablet,
   Target,
+  Telescope,
   Terminal,
   TriangleAlert,
   Trash2,
@@ -127,7 +131,9 @@ import {
   estimateTurnCost,
   formatTokenCount,
   ledgerWindows,
+  planUsageNotices,
   summarizeUsageSafety,
+  type PlanUsageNotice,
 } from "./usage-ledger";
 import {
   createGlobalSearchTarget,
@@ -368,6 +374,82 @@ function ChatSwitcherIcon({ size = 15 }: { size?: number }) {
         y="9.2"
       />
     </svg>
+  );
+}
+
+function ChatSwitcher({
+  chatSwitcher,
+}: {
+  chatSwitcher: NonNullable<ChatSurfaceProps["chatSwitcher"]>;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const switcherRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
+    setIsOpen(false),
+  );
+
+  return (
+    <div className="gyro-chat-switcher" ref={switcherRef}>
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label="Recent chats"
+        className="gyro-chat-switcher-trigger"
+        onClick={() => setIsOpen((open) => !open)}
+        title="Recent chats"
+        type="button"
+      >
+        <ChatSwitcherIcon />
+      </button>
+      {isOpen ? (
+        <div className="gyro-chat-switcher-menu" role="menu">
+          <button
+            className="gyro-chat-switcher-item is-action"
+            onClick={() => {
+              setIsOpen(false);
+              chatSwitcher.onNewChat();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Plus size={13} />
+            New chat
+          </button>
+          {chatSwitcher.chats.length > 0 ? (
+            <>
+              <span className="gyro-chat-switcher-label">Recent</span>
+              {chatSwitcher.chats.map((chat) => (
+                <button
+                  aria-current={
+                    chat.id === chatSwitcher.activeChatId ? "true" : undefined
+                  }
+                  className={
+                    chat.id === chatSwitcher.activeChatId
+                      ? "gyro-chat-switcher-item is-active"
+                      : "gyro-chat-switcher-item"
+                  }
+                  key={chat.id}
+                  onClick={() => {
+                    setIsOpen(false);
+                    chatSwitcher.onSelect(chat.id);
+                  }}
+                  role="menuitem"
+                  title={chat.title}
+                  type="button"
+                >
+                  <MessageSquare size={13} />
+                  <span>{chat.title}</span>
+                  {chat.meta ? <small>{chat.meta}</small> : null}
+                </button>
+              ))}
+            </>
+          ) : (
+            <div className="gyro-chat-switcher-empty">
+              No other chats in this project
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -5022,6 +5104,7 @@ function SessionSidebarRow({
       onDragStart={onDragStart}
     >
       <button
+        aria-current={isActive ? "page" : undefined}
         aria-label={ariaTitle}
         className={
           sessionProviderId
@@ -6543,6 +6626,74 @@ type ChatSurfaceProps = {
   onToggleToolPanel?: () => void;
 };
 
+/**
+ * Start-screen openings.
+ *
+ * Four cards for the four reasons people open a coding agent, in the order
+ * they tend to arrive in: read, build, review, fix. Picking one seeds the
+ * composer and puts the caret at the end — the prompt stays the user's to
+ * edit, so a card is a head start rather than a canned request.
+ */
+const chatStartSuggestions: Array<{
+  id: string;
+  icon: IconComponent;
+  label: string;
+  prompt: string;
+}> = [
+  {
+    id: "explore",
+    icon: Telescope,
+    label: "Explore and understand code",
+    prompt:
+      "Explore this project and explain how it fits together — entry points, the main modules, and how they talk to each other.",
+  },
+  {
+    id: "build",
+    icon: Hammer,
+    label: "Build a new feature, app, or tool",
+    prompt: "Build ",
+  },
+  {
+    id: "review",
+    icon: GitPullRequestArrow,
+    label: "Review code and suggest changes",
+    prompt:
+      "Review the changes on this branch: correctness first, then anything worth simplifying.",
+  },
+  {
+    id: "fix",
+    icon: Bug,
+    label: "Fix issues and failures",
+    prompt: "Find and fix ",
+  },
+];
+
+function ChatStartSuggestions({
+  onPick,
+}: {
+  onPick: (prompt: string) => void;
+}) {
+  return (
+    <div
+      aria-label="Ways to start"
+      className="gyro-chat-start-suggestions"
+      role="group"
+    >
+      {chatStartSuggestions.map(({ id, icon: Icon, label, prompt }) => (
+        <button
+          className={`gyro-chat-start-suggestion is-${id}`}
+          key={id}
+          onClick={() => onPick(prompt)}
+          type="button"
+        >
+          <Icon aria-hidden="true" size={17} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ChatSurface({
   events,
   draft = "",
@@ -6675,11 +6826,6 @@ export function ChatSurface({
     activeThreadContextMenu !== null,
     () => setActiveThreadContextMenu(null),
   );
-  const [isChatSwitcherOpen, setIsChatSwitcherOpen] = useState(false);
-  const chatSwitcherRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isChatSwitcherOpen,
-    () => setIsChatSwitcherOpen(false),
-  );
   const [activePeek, setActivePeek] = useState<{
     focus: ModelFocus;
     isLoading: boolean;
@@ -6754,6 +6900,27 @@ export function ChatSurface({
     },
     [handleDraftChange, isGoalComposerActive],
   );
+  const startSectionRef = useRef<HTMLElement | null>(null);
+  /**
+   * A start card seeds the composer instead of sending: fill the draft, then
+   * put the caret at the end so the next keystroke continues the sentence.
+   * Scoped to this pane's section — tiled chats each own a start screen.
+   */
+  const handleStartSuggestion = useCallback(
+    (prompt: string) => {
+      handleComposerDraftChange(prompt);
+      requestAnimationFrame(() => {
+        const field =
+          startSectionRef.current?.querySelector<HTMLTextAreaElement>(
+            "textarea",
+          );
+        if (!field) return;
+        field.focus();
+        field.setSelectionRange(field.value.length, field.value.length);
+      });
+    },
+    [handleComposerDraftChange],
+  );
   const cancelGoalComposer = useCallback(() => {
     setGoalDraft("");
     onCancelGoalComposer?.();
@@ -6812,20 +6979,9 @@ export function ChatSurface({
     },
     [onAttachMediaFiles],
   );
-  const latestPlanModeEnabledAt = useMemo(() => {
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (!event || event.kind !== "chat-mode-changed") {
-        continue;
-      }
-      const mode = stringFromRecord(recordFromUnknown(event.payload), "mode");
-      return mode === "plan" ? event.createdAt : undefined;
-    }
-    return undefined;
-  }, [events]);
   const planDecisionKey = useMemo(() => {
-    // A plan-mode turn that wrote the document but skipped the checklist
-    // marker is still approvable; only an empty plan is not.
+    // A plan that wrote the document but skipped the checklist marker is still
+    // approvable; only an empty plan is not.
     if (
       !sessionPlan?.updatedAt ||
       (sessionPlan.items.length === 0 && !sessionPlan.content)
@@ -6841,11 +6997,7 @@ export function ChatSurface({
     ].join(":");
   }, [sessionPlan]);
   const isPlanReadyForDecision = Boolean(
-    chatMode === "plan" &&
     !isComposerSending &&
-    latestPlanModeEnabledAt &&
-    sessionPlan?.updatedAt &&
-    sessionPlan.updatedAt >= latestPlanModeEnabledAt &&
     planDecisionKey &&
     planDecisionKey !== dismissedPlanDecisionKey,
   );
@@ -7179,6 +7331,11 @@ export function ChatSurface({
           className="gyro-chat-empty-drag-region"
           data-tauri-drag-region
         />
+        {chatSwitcher ? (
+          <div className="gyro-chat-start-switcher">
+            <ChatSwitcher chatSwitcher={chatSwitcher} />
+          </div>
+        ) : null}
         <section
           className={[
             "gyro-chat-start",
@@ -7188,7 +7345,8 @@ export function ChatSurface({
             .filter(Boolean)
             .join(" ")}
           aria-label={isMission ? "New mission" : "New Chat"}
-          style={{ width: "min(860px, 100%)" }}
+          ref={startSectionRef}
+          style={{ width: "min(760px, 100%)" }}
         >
           {isMission && missionHasWorkers ? null : (
             <span className="gyro-brand-logo">
@@ -7228,6 +7386,9 @@ export function ChatSurface({
               <span>What should we work on?</span>
             )}
           </h1>
+          {isMission || localDraft.trim().length > 0 ? null : (
+            <ChatStartSuggestions onPick={handleStartSuggestion} />
+          )}
           {isMission ? (
             <MissionWorkersBoard
               defaultProfileLabel={missionDefaultProfileLabel}
@@ -7371,72 +7532,7 @@ export function ChatSurface({
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
-          {chatSwitcher ? (
-            <div className="gyro-chat-switcher" ref={chatSwitcherRef}>
-              <button
-                aria-expanded={isChatSwitcherOpen}
-                aria-haspopup="menu"
-                aria-label="Recent chats"
-                className="gyro-chat-switcher-trigger"
-                onClick={() => setIsChatSwitcherOpen((open) => !open)}
-                title="Recent chats"
-                type="button"
-              >
-                <ChatSwitcherIcon />
-              </button>
-              {isChatSwitcherOpen ? (
-                <div className="gyro-chat-switcher-menu" role="menu">
-                  <button
-                    className="gyro-chat-switcher-item is-action"
-                    onClick={() => {
-                      setIsChatSwitcherOpen(false);
-                      chatSwitcher.onNewChat();
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <Plus size={13} />
-                    New chat
-                  </button>
-                  {chatSwitcher.chats.length > 0 ? (
-                    <>
-                      <span className="gyro-chat-switcher-label">Recent</span>
-                      {chatSwitcher.chats.map((chat) => (
-                        <button
-                          aria-current={
-                            chat.id === chatSwitcher.activeChatId
-                              ? "true"
-                              : undefined
-                          }
-                          className={
-                            chat.id === chatSwitcher.activeChatId
-                              ? "gyro-chat-switcher-item is-active"
-                              : "gyro-chat-switcher-item"
-                          }
-                          key={chat.id}
-                          onClick={() => {
-                            setIsChatSwitcherOpen(false);
-                            chatSwitcher.onSelect(chat.id);
-                          }}
-                          role="menuitem"
-                          title={chat.title}
-                          type="button"
-                        >
-                          <MessageSquare size={13} />
-                          <span>{chat.title}</span>
-                          {chat.meta ? <small>{chat.meta}</small> : null}
-                        </button>
-                      ))}
-                    </>
-                  ) : (
-                    <div className="gyro-chat-switcher-empty">
-                      No other chats in this project
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          {chatSwitcher ? <ChatSwitcher chatSwitcher={chatSwitcher} /> : null}
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           {workspaceMode === "worktree" ? (
             <span
@@ -18277,6 +18373,128 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
   );
 }
 
+const PLAN_USAGE_NOTICE_STORAGE_KEY = "gyro.plan-usage-notices.v1";
+
+function usageNoticeKey(notice: PlanUsageNotice) {
+  return [
+    notice.providerId,
+    notice.windowId,
+    notice.cycleId,
+    notice.threshold,
+  ].join(":");
+}
+
+function loadShownPlanUsageNotices() {
+  if (typeof window === "undefined") return {} as Record<string, true>;
+  try {
+    const value = window.localStorage.getItem(PLAN_USAGE_NOTICE_STORAGE_KEY);
+    const parsed = value ? JSON.parse(value) : undefined;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, true>)
+      : {};
+  } catch {
+    return {} as Record<string, true>;
+  }
+}
+
+/** A progressive, once-per-window notice for provider-reported plan usage. */
+function PlanUsageNotification({
+  onHandoff,
+  providerId,
+  providers,
+  windows,
+}: {
+  onHandoff: (providerId: ProviderId) => void;
+  providerId: ProviderId;
+  providers: Array<{ id: ProviderId; label: string }>;
+  windows: ProviderUsageState["windows"];
+}) {
+  const [shown, setShown] = useState(loadShownPlanUsageNotices);
+  const [notice, setNotice] = useState<PlanUsageNotice>();
+  const candidates = useMemo(
+    () => planUsageNotices(providerId, windows),
+    [providerId, windows],
+  );
+
+  useEffect(() => {
+    const next = candidates.find(
+      (candidate) => !shown[usageNoticeKey(candidate)],
+    );
+    if (!next) return;
+    const key = usageNoticeKey(next);
+    setShown((current) => {
+      const updated: Record<string, true> = { ...current, [key]: true };
+      try {
+        window.localStorage.setItem(
+          PLAN_USAGE_NOTICE_STORAGE_KEY,
+          JSON.stringify(updated),
+        );
+      } catch {
+        // Notifications remain correct for this open chat even when storage is unavailable.
+      }
+      return updated;
+    });
+    setNotice(next);
+  }, [candidates, shown]);
+
+  if (!notice) return null;
+  const handoffTarget = notice.threshold >= 95 ? providers[0] : undefined;
+  const tone =
+    notice.threshold >= 95
+      ? "critical"
+      : notice.threshold >= 80
+        ? "warning"
+        : "info";
+  const title =
+    notice.threshold >= 95
+      ? "Plan limit nearly reached"
+      : notice.threshold >= 90
+        ? "Plan limit is close"
+        : notice.threshold >= 80
+          ? "Plan usage is getting high"
+          : "Half of this plan window is used";
+
+  return (
+    <section
+      aria-live="polite"
+      className={`gyro-plan-usage-notice is-${tone}`}
+      role="status"
+    >
+      <TriangleAlert aria-hidden="true" size={17} />
+      <div>
+        <strong>{title}</strong>
+        <span>
+          {notice.windowLabel} is {notice.percent}% used.
+          {notice.threshold >= 90 ? " Consider wrapping up this window." : ""}
+        </span>
+      </div>
+      <div className="gyro-plan-usage-notice-actions">
+        {handoffTarget ? (
+          <button
+            className="gyro-secondary-button"
+            onClick={() => {
+              onHandoff(handoffTarget.id);
+              setNotice(undefined);
+            }}
+            type="button"
+          >
+            Continue with {handoffTarget.label}
+            <ChevronRight aria-hidden="true" size={15} />
+          </button>
+        ) : null}
+        <button
+          aria-label="Dismiss usage notice"
+          className="gyro-plan-usage-notice-dismiss"
+          onClick={() => setNotice(undefined)}
+          type="button"
+        >
+          <X aria-hidden="true" size={16} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
 type ComposerPopoverId =
   "approval" | "branch" | "context" | "project" | "provider" | "workspace-mode";
 
@@ -19342,7 +19560,8 @@ function Composer({
         (councilResolution?.seats.length ?? 0) >= 2 &&
         hasUserWorkspace
       : canSendChat(hasReadyProvider, workspacePath));
-  const canSubmitComposer = isGoalComposerActive || canSubmitChat;
+  const canSubmitComposer =
+    !isBranchLoading && (isGoalComposerActive || canSubmitChat);
   const preferredConnect = preferredCleanMachineConnectProvider(
     providerConfigs
       .filter((provider) => isProviderExecutable(provider.id))
@@ -19409,6 +19628,13 @@ function Composer({
         };
       }),
   ];
+  const handoffProviders = providerConfigs
+    .filter(
+      (provider) =>
+        provider.authStatus === "connected" &&
+        provider.id !== effectiveProviderId,
+    )
+    .map((provider) => ({ id: provider.id, label: provider.displayName }));
   const activeModelIdForPicker =
     modelPickerProvider && modelPickerProvider.id === effectiveProviderId
       ? (effectiveModelId ?? modelPickerProvider.selectedModelId)
@@ -20106,6 +20332,16 @@ function Composer({
           })}
         </div>
       ) : null}
+      {effectiveProviderId ? (
+        <PlanUsageNotification
+          onHandoff={(providerId) =>
+            onComposerAction?.(`handoff-provider:${providerId}`)
+          }
+          providerId={effectiveProviderId}
+          providers={handoffProviders}
+          windows={providerUsage?.windows ?? []}
+        />
+      ) : null}
       {/* Portalled to the body: the hero composer carries a drop-shadow
           filter, which would otherwise become the containing block for this
           fixed bubble and offset it by the composer's own position. */}
@@ -20649,9 +20885,11 @@ function Composer({
                   ? "Choose a folder before sending"
                   : !hasReadyProvider
                     ? "Connect a provider before sending"
-                    : isSending
-                      ? "Queue message"
-                      : "Send"
+                    : isBranchLoading
+                      ? "Wait for the branch switch to finish"
+                      : isSending
+                        ? "Queue message"
+                        : "Send"
           }
           type="button"
         >
@@ -21684,7 +21922,55 @@ function ChatTurn({
         ? { reason: "Reconnecting to the provider" }
         : undefined,
   });
+  const aggregateFileStats = useMemo(() => {
+    if (!sourceControl) return undefined;
+    const totals = sourceControl.files.reduce(
+      (current, file) => {
+        const delta = sourceControlFileDelta(
+          file,
+          sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
+        );
+        return {
+          additions: current.additions + delta.additions,
+          deletions: current.deletions + delta.deletions,
+        };
+      },
+      { additions: 0, deletions: 0 },
+    );
+    return totals.additions > 0 || totals.deletions > 0 ? totals : undefined;
+  }, [sourceControl, sourceControlBaseline]);
+  const changedFiles = useMemo(() => {
+    const files = new Map<
+      string,
+      { path: string; additions: number; deletions: number }
+    >();
+    for (const file of runModel.files) {
+      if (file.path.trim().toLowerCase() === "files") continue;
+      files.set(file.path, {
+        path: file.path,
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+      });
+    }
+    for (const file of sourceControl?.files ?? []) {
+      const delta = sourceControlFileDelta(
+        file,
+        sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
+      );
+      if (delta.additions === 0 && delta.deletions === 0) continue;
+      files.set(file.path, { path: file.path, ...delta });
+    }
+    return [...files.values()];
+  }, [runModel.files, sourceControl, sourceControlBaseline]);
   const responseEvent = runModel.response;
+  // Once a turn has performed Workspace work, the run rail is the useful
+  // record: commands, reads, edits, and validation stay there. Repeating the
+  // model's closing prose below it makes completed-task inspection needlessly
+  // long. Pure chat and plan turns still show their response normally.
+  const shouldShowFinalResponse =
+    Boolean(responseEvent) &&
+    (isPlanResponseTurn ||
+      !runModel.steps.some((step) => step.kind === "work"));
   // Offer Continue when the turn produced anything the user might resume from —
   // a text answer, or work that stopped before an answer (empty void + tools).
   const canContinue =
@@ -21716,6 +22002,7 @@ function ChatTurn({
       ) : null}
       <div className="gyro-chat-run">
         <ChatRun
+          aggregateFileStats={aggregateFileStats}
           headerActions={
             canContinue ? (
               <button
@@ -21765,7 +22052,7 @@ function ChatTurn({
           )}
           renderSay={(text) => renderAssistantInlineContent(text)}
         />
-        {responseEvent ? (
+        {responseEvent && shouldShowFinalResponse ? (
           <div
             className="gyro-chat-run-sequence is-response"
             aria-label="Final response"
@@ -21788,12 +22075,18 @@ function ChatTurn({
                       title={plan?.title ?? "Implementation plan"}
                     />
                   ) : (
-                    <AssistantResponse
-                      actions={artifactActions}
-                      event={responseEvent}
-                      onCouncilAction={onCouncilAction}
-                      previewCapture={previewCapture}
-                    />
+                    <>
+                      <AssistantResponse
+                        actions={artifactActions}
+                        event={responseEvent}
+                        onCouncilAction={onCouncilAction}
+                        previewCapture={previewCapture}
+                      />
+                      <ChangedFilesSummary
+                        files={changedFiles}
+                        onOpenChanges={onOpenChanges}
+                      />
+                    </>
                   )}
                 </div>
               </article>
@@ -21802,6 +22095,49 @@ function ChatTurn({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function ChangedFilesSummary({
+  files,
+  onOpenChanges,
+}: {
+  files: Array<{ path: string; additions: number; deletions: number }>;
+  onOpenChanges?: () => void;
+}) {
+  if (!files.length) return null;
+  const body = (
+    <>
+      <span className="gyro-response-changed-files-heading">
+        <FileCode2 aria-hidden="true" size={14} />
+        Changed files
+      </span>
+      <span className="gyro-response-changed-files-list">
+        {files.slice(0, 4).map((file) => (
+          <span key={file.path}>
+            <code>{file.path}</code>
+            {file.additions > 0 ? (
+              <em className="is-added">+{file.additions}</em>
+            ) : null}
+            {file.deletions > 0 ? (
+              <em className="is-removed">-{file.deletions}</em>
+            ) : null}
+          </span>
+        ))}
+        {files.length > 4 ? <small>+{files.length - 4} more</small> : null}
+      </span>
+    </>
+  );
+  return onOpenChanges ? (
+    <button
+      className="gyro-response-changed-files"
+      onClick={onOpenChanges}
+      type="button"
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="gyro-response-changed-files">{body}</div>
   );
 }
 
