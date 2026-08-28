@@ -7770,6 +7770,9 @@ function PlanDecisionCard({
       className={`gyro-plan-decision-card${isPending ? " is-pending" : ""}`}
     >
       <header>
+        <span aria-hidden="true" className="gyro-plan-decision-mark">
+          <ListChecks size={14} />
+        </span>
         <div>
           <strong>{plan.title || "Implementation plan"}</strong>
           <small>{stepLabel} · read-only until you approve</small>
@@ -7885,6 +7888,7 @@ function PlanArtifactCard({
   onOpen,
   onPlanDecision,
   showDecision,
+  stepCount,
   title,
 }: {
   content: string;
@@ -7893,8 +7897,12 @@ function PlanArtifactCard({
   onOpen?: () => void;
   onPlanDecision?: (decision: "approve" | "reject") => void;
   showDecision: boolean;
+  stepCount?: number;
   title: string;
 }) {
+  const steps = stepCount ?? 0;
+  const stepLabel =
+    steps > 0 ? `${steps} ${steps === 1 ? "step" : "steps"}` : "Proposal";
   return (
     <div className="gyro-plan-artifact">
       <section className="gyro-plan-artifact-card" aria-label="Plan">
@@ -7905,15 +7913,34 @@ function PlanArtifactCard({
           onClick={onOpen}
           type="button"
         >
-          <span>
-            <Lightbulb size={15} />
-            <strong>Plan</strong>
+          <span aria-hidden="true" className="gyro-plan-artifact-mark">
+            <Lightbulb size={14} />
           </span>
-          {isOpen ? <PanelLeftClose size={14} /> : <Maximize2 size={14} />}
+          {/* The card is one of many in a long transcript, so it leads with the
+              plan's own title rather than the word "Plan". */}
+          <span className="gyro-plan-artifact-identity">
+            <small>Plan</small>
+            <strong>{title || "Implementation plan"}</strong>
+          </span>
+          <span className="gyro-plan-artifact-meta">
+            <em>{stepLabel}</em>
+            {isOpen ? <PanelLeftClose size={14} /> : <Maximize2 size={14} />}
+          </span>
         </button>
         <div className="gyro-plan-artifact-preview">
           <PlanDocument content={content} title={title} />
         </div>
+        {/* The preview fades out mid-document; this row is the read-more the
+            fade implies, since the preview itself is not clickable. */}
+        <button
+          className="gyro-plan-artifact-open"
+          onClick={onOpen}
+          tabIndex={-1}
+          type="button"
+        >
+          <ListChecks size={12} />
+          {isOpen ? "Showing in the plan panel" : "Read the full plan"}
+        </button>
       </section>
       {showDecision ? (
         <div className="gyro-plan-artifact-actions">
@@ -22072,6 +22099,7 @@ function ChatTurn({
                       onOpen={onOpenPlan}
                       onPlanDecision={onPlanDecision}
                       showDecision={false}
+                      stepCount={plan?.items.length}
                       title={plan?.title ?? "Implementation plan"}
                     />
                   ) : (

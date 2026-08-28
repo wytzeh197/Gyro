@@ -1744,6 +1744,31 @@ expect(
     state.isToolPanelOpen === true,
   "Opening a tool panel tab should route through the workspace shell.",
 );
+
+// The chat's bottom tray is terminal-only (`terminalOnly` pins its tab), so a
+// browser reveal from a thread has to land in the chat's side rail. Opening the
+// tray instead dropped an empty terminal over the thread and hid the page.
+let chatBrowserState = workbenchReducer(createInitialWorkbenchState(), {
+  type: "select-workspace-layout",
+  layout: "thread",
+});
+chatBrowserState = workbenchReducer(chatBrowserState, {
+  type: "browser-navigate",
+  url: "http://127.0.0.1:5173",
+});
+expect(
+  chatBrowserState.isToolPanelOpen === false &&
+    chatBrowserState.preferences.activeChatPanel === "browser" &&
+    workbenchReducer(chatBrowserState, {
+      type: "open-tool-panel",
+      tab: "browser",
+    }).isToolPanelOpen === false &&
+    workbenchReducer(chatBrowserState, {
+      type: "open-tool-panel",
+      tab: "terminal",
+    }).isToolPanelOpen === true,
+  "A browser reveal inside a chat should open the chat browser rail and leave the terminal-only tray closed.",
+);
 state = workbenchReducer(state, { type: "close-tool-panel" });
 expect(state.isToolPanelOpen === false, "Tool panel close action failed.");
 state = workbenchReducer(state, { type: "select-surface", surface: "cli" });

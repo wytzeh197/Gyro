@@ -498,9 +498,9 @@ export function chatGridReducer(
       slots,
       // A lone pane is no longer a split — clear the two-pane direction so a
       // later drop can establish a fresh Left/Right arrangement.
-      splitDirection: remaining.length === 2 ? current.splitDirection : undefined,
-      arrangement:
-        remaining.length <= 1 ? undefined : current.arrangement,
+      splitDirection:
+        remaining.length === 2 ? current.splitDirection : undefined,
+      arrangement: remaining.length <= 1 ? undefined : current.arrangement,
     });
   } else if (action.type === "move-pane") {
     const fromIndex = current.slots.findIndex(
@@ -1711,13 +1711,18 @@ export function workbenchReducer(
       };
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
-    case "open-tool-panel":
+    case "open-tool-panel": {
+      const tab = action.tab ?? state.activePaneTab;
+      if (tab === "browser") {
+        return { ...state, ...browserRevealState(state) };
+      }
       return {
         ...state,
         activeDestination: "workspace",
-        activePaneTab: action.tab ?? state.activePaneTab,
+        activePaneTab: tab,
         isToolPanelOpen: true,
       };
+    }
     case "close-tool-panel":
       return { ...state, isToolPanelOpen: false };
     case "set-workbench-mode":
@@ -1972,9 +1977,7 @@ export function workbenchReducer(
     case "toggle-chat-browser":
       return chatPanelState(
         state,
-        state.preferences.activeChatPanel === "browser"
-          ? undefined
-          : "browser",
+        state.preferences.activeChatPanel === "browser" ? undefined : "browser",
       );
     case "set-chat-panel":
       return chatPanelState(state, action.panel);
@@ -3586,9 +3589,7 @@ export function workbenchReducer(
       ];
       return {
         ...state,
-        activeDestination: "workspace",
-        activePaneTab: "browser",
-        isToolPanelOpen: true,
+        ...browserRevealState(state),
         browserPreview: {
           ...state.browserPreview,
           history: nextHistory,
@@ -4755,6 +4756,31 @@ function isSessionsLayout(
   return layout === "thread" || layout === "terminal-grid";
 }
 
+/**
+ * Reveal the browser on the surface that can actually draw it.
+ *
+ * In the `thread` layout the bottom tray is terminal-only (`terminalOnly` in
+ * WorkspaceToolPanel pins its tab to "terminal"), so forcing it open for a
+ * browser navigation dropped an empty terminal over the thread and left the
+ * page nowhere to be seen. A chat shows the browser in its side rail instead.
+ */
+function browserRevealState(state: WorkbenchState): Partial<WorkbenchState> {
+  if (state.activeWorkspaceLayout === "thread") {
+    return {
+      preferences: {
+        ...state.preferences,
+        activeChatPanel: "browser",
+        chatEnvironmentRailOpen: true,
+      },
+    };
+  }
+  return {
+    activeDestination: "workspace",
+    activePaneTab: "browser",
+    isToolPanelOpen: true,
+  };
+}
+
 function chatPanelState(
   state: WorkbenchState,
   panel?: ChatSidePanelId,
@@ -4802,9 +4828,7 @@ function browserHistoryState(
 
   return {
     ...state,
-    activeDestination: "workspace",
-    activePaneTab: "browser",
-    isToolPanelOpen: true,
+    ...browserRevealState(state),
     browserPreview: {
       ...state.browserPreview,
       historyIndex,
