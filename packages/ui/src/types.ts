@@ -618,10 +618,22 @@ export type ProviderConnectionStatus =
   "not-configured" | "checking" | "connected" | "failed" | "disconnected";
 
 export type ProviderId =
-  "openai" | "anthropic" | "kimi" | "xai" | "cursor" | "gemini" | "opencode";
+  | "openai"
+  | "anthropic"
+  | "kimi"
+  | "xai"
+  | "cursor"
+  | "gemini"
+  | "opencode"
+  | "ollama";
 
 export type ProviderExecutionKind =
-  "codex-cli" | "claude-code" | "kimi-acp" | "acp-cli" | "readiness-only";
+  | "codex-cli"
+  | "claude-code"
+  | "kimi-acp"
+  | "acp-cli"
+  | "ollama-api"
+  | "readiness-only";
 
 export type ProviderCapabilities = {
   executionKind: ProviderExecutionKind;
@@ -664,6 +676,8 @@ export type ProviderModel = {
   contextWindowTokens?: number;
   defaultReasoningEffort?: ReasoningEffort;
   supportedReasoningEfforts?: ReasoningEffort[];
+  /** Runtime-discovered capability; absent for static provider catalogs. */
+  supportsTools?: boolean;
 };
 
 export type ReasoningEffort =

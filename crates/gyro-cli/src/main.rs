@@ -11,20 +11,21 @@ use codex_app_server::{
 use gyro_core::{
     begin_provider_mutation_transaction, begin_provider_mutation_transaction_with_cancellation,
     config::CommandProfile,
-    create_worktree,
+    create_worktree, discover_ollama_models,
     doctor::run_doctor,
     ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
-    keychain, prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
-    prepare_provider_text_replacement_transaction, provider_descriptor,
-    recover_provider_mutation_transactions, run_kimi_acp, slugify_worktree_name, AppNotification,
-    AppNotificationKind, ApprovalRequestPayload, CancellationToken, CreateSessionContext,
-    DoctorStatus, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths,
-    HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest,
-    KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal, MutationProposalOperation,
-    MutationProposalStatus, PendingProviderMutationCommit, ProviderFileChange,
-    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
-    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode, TerminalRequestPayload,
+    keychain, ollama_chat, prepare_claude_provider_mutation_transaction,
+    prepare_provider_mutation_transaction, prepare_provider_text_replacement_transaction,
+    provider_descriptor, recover_provider_mutation_transactions, run_kimi_acp,
+    slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
+    CancellationToken, CreateSessionContext, DoctorStatus, ExecutionRequest, ExecutionStream,
+    ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision,
+    KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpMode, KimiAcpRequest, MutationDecision,
+    MutationProposal, MutationProposalOperation, MutationProposalStatus, OllamaChatRequest,
+    PendingProviderMutationCommit, ProviderFileChange, ProviderHealthRequest,
+    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload, ProviderTextChunk,
+    Session, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
+    TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::error::Error as StdError;
@@ -1417,7 +1418,7 @@ fn select_execution_profile<'a>(
                         .model_providers
                         .iter()
                         .any(|provider| provider.id == *provider_id && provider.enabled)
-                }) && command_in_path(&profile.command).is_some()
+                }) && (profile_is_http_provider(profile) || command_in_path(&profile.command).is_some())
             })
             .ok_or_else(|| {
                 cli_failure(
@@ -1456,6 +1457,16 @@ fn select_execution_profile<'a>(
     Ok(profile)
 }
 
+fn profile_is_http_provider(profile: &CommandProfile) -> bool {
+    profile
+        .provider_id
+        .as_deref()
+        .and_then(provider_descriptor)
+        .is_some_and(|descriptor| {
+            descriptor.execution_kind == gyro_core::ProviderExecutionKind::OllamaApi
+        })
+}
+
 fn command_in_path(command: &str) -> Option<PathBuf> {
     let command_path = Path::new(command);
     if command_path.components().count() > 1 {
@@ -1479,6 +1490,17 @@ fn profile_status(profile: Option<&CommandProfile>) -> (CliStatus, Option<String
             ),
         );
     };
+
+    if profile_is_http_provider(profile) {
+        return (
+            CliStatus::Waiting,
+            Some(format!(
+                "{} checks the local Ollama HTTP service",
+                profile.display_name
+            )),
+            Some("start Ollama and run `ollama pull <model>`, then run `gyro setup`".into()),
+        );
+    }
 
     if let Some(path) = command_in_path(&profile.command) {
         return (
@@ -1663,6 +1685,7 @@ enum CliProviderKind {
     Claude,
     Kimi,
     Acp,
+    Ollama,
 }
 
 #[derive(Clone, Copy)]
@@ -2072,6 +2095,7 @@ fn cli_provider_kind(profile: &CommandProfile) -> Result<CliProviderKind> {
         Some(gyro_core::ProviderExecutionKind::ClaudeCode) => Ok(CliProviderKind::Claude),
         Some(gyro_core::ProviderExecutionKind::KimiAcp) => Ok(CliProviderKind::Kimi),
         Some(gyro_core::ProviderExecutionKind::AcpCli) => Ok(CliProviderKind::Acp),
+        Some(gyro_core::ProviderExecutionKind::OllamaApi) => Ok(CliProviderKind::Ollama),
         Some(gyro_core::ProviderExecutionKind::ReadinessOnly) => Err(cli_failure(
             CliErrorCategory::ProviderUnavailable,
             format!(
@@ -3324,6 +3348,183 @@ fn execute_kimi_acp_provider(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn execute_ollama_provider(
+    store: &SessionStore,
+    session: &Session,
+    profile: &CommandProfile,
+    model: Option<String>,
+    prompt: &str,
+    mode: &str,
+    config: &GyroConfig,
+    turn_id: Uuid,
+    attempt_id: Uuid,
+    cancellation: &CancellationToken,
+) -> Result<CliRunOutput> {
+    let started = std::time::Instant::now();
+    let provider = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == "ollama")
+        .ok_or_else(|| {
+            cli_failure(
+                CliErrorCategory::ProviderUnavailable,
+                "Ollama is not configured",
+            )
+        })?;
+    let model = model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            cli_failure(
+                CliErrorCategory::InvalidInput,
+                "select an installed model with `--model <ollama-model>`",
+            )
+        })?;
+    let discovery = discover_ollama_models(provider.base_url.as_deref()).map_err(|error| {
+        cli_failure(
+            CliErrorCategory::ProviderUnavailable,
+            format!("Ollama is unavailable: {error}. Start Ollama and run `ollama pull <model>` if needed."),
+        )
+    })?;
+    if !discovery
+        .models
+        .iter()
+        .any(|candidate| candidate.id == model)
+    {
+        return Err(cli_failure(
+            CliErrorCategory::InvalidInput,
+            format!(
+                "Ollama model `{model}` is not installed; run `ollama pull {model}` and retry."
+            ),
+        ));
+    }
+    if cancellation.is_cancelled() {
+        return Err(cli_failure(
+            CliErrorCategory::Cancelled,
+            "Ollama run cancelled",
+        ));
+    }
+    let history = cli_ollama_history(store, session.id)?;
+    let system = "You are a local Ollama model in Gyro. Respond in concise Markdown. This CLI integration is text-only: do not claim to have executed commands, read files, opened a browser, or edited files.";
+    let user = if history.is_empty() {
+        prompt.to_string()
+    } else {
+        format!("Prior conversation in this Gyro session:\n{history}\n\nUser message:\n{prompt}")
+    };
+    let result = ollama_chat(OllamaChatRequest {
+        base_url: provider.base_url.as_deref(),
+        model,
+        system,
+        user: &user,
+    });
+    let duration_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let response = match result {
+        Ok(result) if !cancellation.is_cancelled() => result.content,
+        Ok(_) => {
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                HarnessRunStatus::Cancelled,
+                profile,
+                Some(model.to_string()),
+                "Ollama run cancelled.",
+                None,
+                Some(duration_ms),
+            )?;
+            return Err(cli_failure(
+                CliErrorCategory::Cancelled,
+                "Ollama run cancelled",
+            ));
+        }
+        Err(error) => {
+            let detail = gyro_core::sanitize_harness_text(&error.to_string());
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                HarnessRunStatus::Failed,
+                profile,
+                Some(model.to_string()),
+                "Ollama run failed.",
+                Some(&detail),
+                Some(duration_ms),
+            )?;
+            return Err(cli_failure(CliErrorCategory::ExecutionFailed, detail));
+        }
+    };
+    let response = gyro_core::sanitize_harness_text(&response);
+    store.append_event_with_turn_id(
+        session.id,
+        SessionEventKind::AssistantMessage,
+        response.clone(),
+        cli_provider_run_payload(
+            turn_id,
+            attempt_id,
+            mode,
+            HarnessRunStatus::Done,
+            Some(profile),
+            Some(model.to_string()),
+            session,
+        )?,
+        Some(turn_id),
+    )?;
+    append_cli_run_status(
+        store,
+        session,
+        turn_id,
+        attempt_id,
+        mode,
+        HarnessRunStatus::Done,
+        profile,
+        Some(model.to_string()),
+        "Ollama run completed.",
+        None,
+        Some(duration_ms),
+    )?;
+    Ok(CliRunOutput {
+        run_id: turn_id,
+        attempt_id,
+        provider_id: "ollama".into(),
+        duration_ms,
+        exit_code: Some(0),
+        resumed: !history.is_empty(),
+        response,
+    })
+}
+
+fn cli_ollama_history(store: &SessionStore, session_id: Uuid) -> Result<String> {
+    let mut messages = store
+        .read_recent_events(session_id, 24)?
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            SessionEventKind::UserMessage => Some(("User", event.message)),
+            SessionEventKind::AssistantMessage => Some(("Assistant", event.message)),
+            _ => None,
+        })
+        .filter(|(_, message)| !message.trim().is_empty())
+        .collect::<Vec<_>>();
+    if matches!(messages.last(), Some(("User", _))) {
+        messages.pop();
+    }
+    Ok(messages
+        .into_iter()
+        .map(|(role, message)| {
+            format!(
+                "{role}: {}",
+                message.chars().take(2_000).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n"))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn execute_cli_provider(
     store: &SessionStore,
     mutation_journal_dir: &Path,
@@ -3372,6 +3573,20 @@ fn execute_cli_provider(
             "Running {} in {}...",
             profile.display_name,
             session.workspace_path.display()
+        );
+    }
+    if provider_kind == CliProviderKind::Ollama {
+        return execute_ollama_provider(
+            store,
+            session,
+            profile,
+            model,
+            prompt,
+            mode,
+            config,
+            turn_id,
+            attempt_id,
+            &cancellation,
         );
     }
     if provider_kind == CliProviderKind::Codex {
@@ -3624,6 +3839,7 @@ fn execute_cli_provider(
                             CliProviderKind::Claude => "Claude",
                             CliProviderKind::Kimi => "Kimi",
                             CliProviderKind::Acp => "ACP provider",
+                            CliProviderKind::Ollama => "Ollama",
                         };
                         let resume = format!("`gyro resume {}`", session.id);
                         match failure.kind {
@@ -3637,6 +3853,7 @@ fn execute_cli_provider(
                                         CliProviderKind::Claude => "claude auth login",
                                         CliProviderKind::Kimi => "kimi login",
                                         CliProviderKind::Acp => "the provider login command",
+                                        CliProviderKind::Ollama => "start the local Ollama service",
                                     }
                                 ),
                             ),
@@ -3674,6 +3891,7 @@ fn execute_cli_provider(
                 CliProviderKind::Claude => "claude-session",
                 CliProviderKind::Kimi => "kimi-acp-session",
                 CliProviderKind::Acp => "acp-session",
+                CliProviderKind::Ollama => "ollama-local-history",
             };
             let binding_status = if matches!(
                 outcome.termination,
@@ -3724,6 +3942,7 @@ fn execute_cli_provider(
             CliProviderKind::Claude => "claude-session",
             CliProviderKind::Kimi => "kimi-acp-session",
             CliProviderKind::Acp => "acp-session",
+            CliProviderKind::Ollama => "ollama-local-history",
         };
         store.upsert_provider_session_binding(
             session.id,

@@ -37,8 +37,9 @@ policy are what make it safe to trust one place with the work.
   work; Workspace keeps files, diffs, Git, tests, and diagnostics in the same
   run context.
 - **Bring your own agent.** Codex CLI, Claude Code, Kimi Code, Gemini CLI, and
-  Grok Build run through provider-owned local logins. Cursor and OpenCode remain
-  clearly marked until their approval-safe adapters exist.
+  Grok Build run through provider-owned local logins. Ollama runs downloaded
+  models through a loopback-only local API. Cursor and OpenCode remain clearly
+  marked until their approval-safe adapters exist.
 - **Local by default.** Session history, configuration, and worktrees stay on
   your Mac. Gyro does not send telemetry by default.
 - **Visible control.** Commands and file changes follow an explicit approval
@@ -60,7 +61,7 @@ policy are what make it safe to trust one place with the work.
 ## What Works Today
 
 - Provider-backed conversations through local Codex CLI, Claude Code, Kimi
-  Code, Gemini CLI, and Grok Build.
+  Code, Gemini CLI, Grok Build, and Ollama.
 - Shared local sessions across Gyro.app and the `gyro` CLI.
 - PTY terminals with profiles, restore, input, resize, stop, and restart.
 - Workspace browsing, Monaco editing, guarded saves, search, Git status, tasks,
@@ -146,6 +147,26 @@ cargo run -p gyro-cli -- approvals
 `gyro doctor` labels checks as required or optional and prints the next recovery
 action when one is available. `gyro setup` combines that guidance with live app,
 profile, agent, and provider readiness checks.
+
+### Use local Ollama models
+
+Gyro can use models already downloaded by [Ollama](https://ollama.com/) without
+an API key. It contacts only `http://localhost:11434/api` by default (or another
+explicit loopback URL); remote, credentialed, and redirected endpoints are
+rejected. Install and start Ollama, then download a model yourself:
+
+```bash
+ollama pull qwen3-coder
+gyro config enable-provider ollama
+gyro setup
+gyro chat --profile ollama --model qwen3-coder
+```
+
+Gyro discovers installed models when the desktop app connects or refreshes its
+provider settings. Models that advertise function calling can use Gyro's normal
+desktop workspace capability and approval bridge; models without verified tool
+support remain chat-only. Direct image and file attachments are not sent to
+Ollama in this release.
 
 Use `--worktree` with `gyro run` or `gyro app attach` when you explicitly want
 an isolated Git worktree. Local mode is the default.
@@ -238,6 +259,7 @@ Gyro is licensed under [Apache-2.0](LICENSE). Contributions use
 [Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin)
 signoff instead of a CLA.
 
+- [Roadmap to v1.0](docs/roadmap.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Support](SUPPORT.md)

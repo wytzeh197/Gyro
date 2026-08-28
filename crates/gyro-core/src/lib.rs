@@ -14,6 +14,7 @@ pub mod ipc;
 pub mod keychain;
 pub mod kimi_acp;
 pub mod mutations;
+pub mod ollama;
 pub mod paths;
 pub mod policy;
 pub mod provider_contract;
@@ -106,6 +107,11 @@ pub use mutations::{
     PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProviderFileChange,
     ProviderFileChangeKind, ProviderMutationJournalContext, ProviderMutationRecoveryReport,
     ProviderMutationResult,
+};
+pub use ollama::{
+    discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat, OllamaChatRequest,
+    OllamaChatResponse, OllamaDiscovery, OllamaModel, OllamaRuntimeStatus, OllamaToolCall,
+    OllamaToolChatRequest, DEFAULT_OLLAMA_BASE_URL,
 };
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};

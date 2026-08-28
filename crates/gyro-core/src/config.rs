@@ -217,6 +217,14 @@ impl Default for GyroConfig {
                     enabled: false,
                     default_model_id: None,
                 },
+                ModelProviderConfig {
+                    id: "ollama".into(),
+                    display_name: "Ollama".into(),
+                    base_url: Some("http://localhost:11434/api".into()),
+                    api_key_ref: "local-runtime:ollama".into(),
+                    enabled: false,
+                    default_model_id: None,
+                },
             ],
             command_profiles: vec![
                 CommandProfile {
@@ -277,6 +285,18 @@ impl Default for GyroConfig {
                     working_directory: None,
                     provider_id: Some("gemini".into()),
                     default_model: Some("gemini-default".into()),
+                    readiness: CommandProfileReadiness::Waiting,
+                },
+                // Ollama is an HTTP-backed profile: the command value is a
+                // human-readable profile marker and is never spawned.
+                CommandProfile {
+                    id: "ollama".into(),
+                    display_name: "Ollama (local)".into(),
+                    command: "ollama-api".into(),
+                    args: Vec::new(),
+                    working_directory: None,
+                    provider_id: Some("ollama".into()),
+                    default_model: None,
                     readiness: CommandProfileReadiness::Waiting,
                 },
             ],
@@ -379,6 +399,7 @@ impl GyroConfig {
                     "kimi" | "kimi-code" => Some("kimi".into()),
                     "grok" | "grok-build" => Some("xai".into()),
                     "gemini" | "gemini-cli" => Some("gemini".into()),
+                    "ollama" => Some("ollama".into()),
                     _ => None,
                 };
             }
@@ -406,6 +427,14 @@ impl GyroConfig {
                 display_name: "Gemini".into(),
                 base_url: None,
                 api_key_ref: "provider-cli:gemini".into(),
+                enabled: false,
+                default_model_id: None,
+            },
+            ModelProviderConfig {
+                id: "ollama".into(),
+                display_name: "Ollama".into(),
+                base_url: Some("http://localhost:11434/api".into()),
+                api_key_ref: "local-runtime:ollama".into(),
                 enabled: false,
                 default_model_id: None,
             },
@@ -448,6 +477,16 @@ impl GyroConfig {
                 working_directory: None,
                 provider_id: Some("gemini".into()),
                 default_model: Some("gemini-default".into()),
+                readiness: CommandProfileReadiness::Waiting,
+            },
+            CommandProfile {
+                id: "ollama".into(),
+                display_name: "Ollama (local)".into(),
+                command: "ollama-api".into(),
+                args: Vec::new(),
+                working_directory: None,
+                provider_id: Some("ollama".into()),
+                default_model: None,
                 readiness: CommandProfileReadiness::Waiting,
             },
         ] {

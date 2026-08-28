@@ -299,7 +299,13 @@ const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
 const launchDocsSource = readRepoFile("docs/launch.md");
 const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
-const readinessAuditSource = readRepoFile("docs/product-readiness-audit.md");
+// This audit is intentionally local-only and is therefore absent from clean
+// repository clones (including CI). When present, retain its structural check;
+// its absence must not make the public release check depend on private notes.
+const readinessAuditPath = resolve(repoRoot, "docs/product-readiness-audit.md");
+const readinessAuditSource = existsSync(readinessAuditPath)
+  ? readFileSync(readinessAuditPath, "utf8")
+  : null;
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
@@ -801,8 +807,8 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,kimi,xai,gemini",
-  "Provider catalog should include executable Kimi between Anthropic and readiness-only providers.",
+    "openai,anthropic,kimi,xai,gemini,ollama",
+  "Provider catalog should include executable local Ollama after the CLI-backed providers.",
 );
 const orderedStreamState = new Map();
 const orderedStreamBase = {
@@ -1276,10 +1282,11 @@ expect(
   "Initial workbench state should start without demo diff review files.",
 );
 expect(
-  initialState.providerStatuses.length === 5 &&
+  initialState.providerStatuses.length === 6 &&
     initialState.providerStatuses.some((provider) => provider.id === "kimi") &&
-    initialState.providerStatuses.some((provider) => provider.id === "xai"),
-  "Initial workbench state should include Kimi and the readiness-only provider statuses.",
+    initialState.providerStatuses.some((provider) => provider.id === "xai") &&
+    initialState.providerStatuses.some((provider) => provider.id === "ollama"),
+  "Initial workbench state should include the executable provider statuses, including local Ollama.",
 );
 expect(
   initialState.browserPreview.status === "idle",
@@ -4198,9 +4205,10 @@ expect(
 );
 
 expect(
-  readinessAuditSource.includes("Functional Readiness Matrix") &&
-    readinessAuditSource.includes("Highest-Risk Gaps"),
-  "The product readiness audit should distinguish implemented foundations from private-alpha blockers.",
+  readinessAuditSource === null ||
+    (readinessAuditSource.includes("Functional Readiness Matrix") &&
+      readinessAuditSource.includes("Highest-Risk Gaps")),
+  "The local product readiness audit should distinguish implemented foundations from private-alpha blockers.",
 );
 expect(
   surfaceSource.includes('className="gyro-ide-project-empty"') &&
@@ -4559,7 +4567,11 @@ expect(
     surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
     surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
     surfaceSource.includes("Open files in Workspace") &&
-    surfaceSource.includes("<small>Open</small>") &&
+    // Launcher rows spend their detail slot on a state worth knowing and go
+    // quiet otherwise. "Open" was neither — it restated the button it sat on.
+    surfaceSource.includes('changesLabel === "No changes" ? null') &&
+    surfaceSource.includes('terminalLabel === "Ready" ? null') &&
+    !surfaceSource.includes("<small>Open</small>") &&
     surfaceSource.includes('"has-activity"') &&
     surfaceSource.includes('"has-warning"') &&
     !surfaceSource.includes('(browserPreview?.status ?? "Ready")') &&
@@ -5357,26 +5369,63 @@ expect(
     styleSource.includes('[data-flyout-side="stacked"]'),
   "The model flyout should stay inside the panel that clips it, flipping left or stacking when it cannot dock right.",
 );
+// One chip carries model and effort together, still under the provider's own
+// brand mark. It opens a drill-down menu that names each setting's current
+// value, with the provider switch folded under Advanced — and no second effort
+// chip beside it.
 expect(
-  surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
-    /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
-      surfaceSource,
-    ) &&
+  /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
+    surfaceSource,
+  ) &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
     surfaceSource.includes("{modelChipLabel}") &&
-    surfaceSource.includes('togglePopover("effort")') &&
-    surfaceSource.includes('className="gyro-effort-picker"') &&
+    surfaceSource.includes('className="gyro-model-chip-effort"') &&
     surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
-    surfaceSource.includes('title="Provider"') &&
-    !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
+    !surfaceSource.includes('className="gyro-composer-chip gyro-effort-chip"') &&
+    surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
     styleSource.includes(".gyro-model-chip .gyro-provider-logo") &&
+    surfaceSource.includes("const modelMenuItems: ComposerPopoverItem[]") &&
+    surfaceSource.includes('menuPane: "effort" as const') &&
+    surfaceSource.includes('kind: "disclosure" as const') &&
+    surfaceSource.includes('modelMenuBackItem("Provider")') &&
+    surfaceSource.includes('modelMenuPane === "provider"') &&
+    surfaceSource.includes('"gyro-model-menu gyro-effort-picker"') &&
+    !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
+    styleSource.includes(".gyro-composer-menu-item.is-setting") &&
+    styleSource.includes(".gyro-composer-menu-item.is-disclosure") &&
+    styleSource.includes(".gyro-model-chip-effort") &&
     !styleSource.includes(
       ".gyro-composer-menu-item:has(.gyro-provider-logo.is-anthropic):hover",
     ) &&
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer should expose separate compact model and effort selectors.",
+  "Composer should expose one model chip whose menu drills into model, effort, and provider.",
+);
+
+// Drilling should feel like one card changing its mind, not a stack of
+// differently sized popovers: every pane holds the chip's width, the panel
+// grows from the edge it is anchored to, and the menu measures whether it has
+// room below before it commits to opening down. Navigation carets stay quiet so
+// the accent belongs to the checkmark alone.
+expect(
+  styleSource.includes(".gyro-composer-control-model > .gyro-composer-popover") &&
+    styleSource.includes(".gyro-composer-control-model .gyro-provider-picker-menu") &&
+    styleSource.includes("transform-origin: bottom right") &&
+    styleSource.includes("@keyframes gyro-model-menu-in-up") &&
+    styleSource.includes("@keyframes gyro-model-menu-in-down") &&
+    styleSource.includes("@keyframes gyro-model-flyout-in") &&
+    styleSource.includes(
+      ".gyro-composer-popover .gyro-composer-menu-item > svg.gyro-composer-menu-caret",
+    ) &&
+    styleSource.includes('.gyro-model-chip[aria-expanded="true"]') &&
+    surfaceSource.includes('className="gyro-composer-menu-caret"') &&
+    surfaceSource.includes("const preferredProviderPlacement") &&
+    surfaceSource.includes("setProviderPopoverPlacement") &&
+    !surfaceSource.includes(
+      'const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up")',
+    ),
+  "The model menu should hold one width, animate from its anchor, keep carets neutral, and flip when it cannot open down.",
 );
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&
@@ -5412,7 +5461,6 @@ expect(
       "context",
       "approval",
       "provider",
-      "effort",
       "project",
       "workspace-mode",
       "branch",
