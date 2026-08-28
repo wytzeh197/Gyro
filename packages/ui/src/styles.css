@@ -12188,6 +12188,80 @@ textarea:focus-visible {
   min-width: 176px;
 }
 
+/* Model and effort share one chip. The effort qualifies the model, so it
+   trails the name in muted weight instead of claiming a chip of its own. */
+.gyro-model-chip-effort {
+  color: color-mix(in srgb, currentcolor 60%, transparent);
+  flex: 0 0 auto;
+}
+
+/* Root menu behind the chip: each setting names its current value and drills
+   into its own list, with the rarer provider switch folded under Advanced. */
+.gyro-model-menu {
+  max-width: min(288px, calc(100vw - 32px));
+  min-width: 232px;
+}
+
+.gyro-model-menu.gyro-model-list,
+.gyro-model-menu.gyro-effort-picker {
+  min-width: 196px;
+}
+
+.gyro-composer-menu-item.is-setting,
+.gyro-composer-menu-item.is-setting.has-no-icon {
+  grid-template-columns: minmax(0, 1fr) auto 14px;
+  min-height: 30px;
+  padding: 4px 7px 4px 9px;
+}
+
+.gyro-composer-menu-item.is-setting .gyro-composer-menu-trailing {
+  font-size: 12px;
+}
+
+.gyro-composer-menu-item.is-setting strong,
+.gyro-composer-menu-item.is-disclosure strong {
+  font-weight: 500;
+}
+
+.gyro-composer-menu-item.is-disclosure,
+.gyro-composer-menu-item.is-disclosure.has-no-icon {
+  border-radius: 0;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  color: #8f949c;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  margin-top: 4px;
+  min-height: 30px;
+  padding: 6px 7px 4px 9px;
+}
+
+.gyro-composer-menu-item.is-disclosure:hover {
+  background: transparent;
+  color: #d9d6d0;
+}
+
+/* Drill-down header — a way back to the root menu, not another choice. */
+.gyro-composer-menu-item.is-back {
+  color: #8f949c;
+  grid-template-columns: 14px minmax(0, 1fr);
+  min-height: 26px;
+  padding: 2px 7px;
+}
+
+.gyro-composer-menu-item.is-back strong {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+:root[data-theme="light"] .gyro-composer-menu-item.is-disclosure {
+  border-top-color: rgb(31 41 55 / 10%);
+}
+
+:root[data-theme="light"] .gyro-composer-menu-item.is-back strong,
+:root[data-theme="light"] .gyro-composer-menu-item.is-disclosure strong {
+  color: #596270;
+}
+
 .gyro-composer-popover-section-title {
   border-top: 1px solid rgb(255 255 255 / 8%);
   color: #8f949c;
@@ -27244,10 +27318,9 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar
   .gyro-composer-control,
-.gyro-composer-shell.is-hero.has-provider > .gyro-composer-bar .gyro-model-chip,
 .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar
-  .gyro-effort-chip {
+  .gyro-model-chip {
   min-width: 0;
 }
 
@@ -27293,12 +27366,12 @@ button.gyro-account-menu-row:hover,
 }
 
 @container (max-width: 470px) {
+  /* Tightest bar: the model name has to survive, so the effort qualifier is
+     the first thing to go — the menu still names it. */
   .gyro-composer-shell.is-hero.has-provider
     > .gyro-composer-bar
-    .gyro-effort-chip
-    .gyro-composer-label {
-    max-width: 0;
-    overflow: hidden;
+    .gyro-model-chip-effort {
+    display: none;
   }
 
   .gyro-composer-shell.is-hero.has-provider
@@ -30253,4 +30326,468 @@ button.gyro-account-menu-row:hover,
   .gyro-settings-nav {
     flex-wrap: nowrap;
   }
+}
+
+/* ---- Chat side rail: browser, changes, launcher ---- */
+
+/*
+ * `.gyro-chat-surface.has-environment .gyro-environment-rail` (three classes)
+ * outranks the `.is-tool` rule that asks a hosted tool to fill the column, so
+ * Changes and Terminal hugged their content: the terminal rail rendered as a
+ * 110px stub and the diff rail grew past the viewport instead of scrolling its
+ * own body. Restate the intent at matching specificity.
+ */
+.gyro-chat-surface.has-environment .gyro-environment-rail.is-tool {
+  align-self: stretch;
+  max-height: none;
+  overflow: hidden;
+}
+
+/*
+ * The rail column is pinned at ~316px for the launcher and the tool panels,
+ * but the browser card carries its own drag-resized width. Letting the track
+ * follow that width is what keeps the card's close button and its whole
+ * actions group (view mode, device, capture, open externally) on screen
+ * instead of clipped past the right edge. Tiled panes float the card instead,
+ * and the narrow layout stacks the rail under the transcript, so neither
+ * wants an auto track.
+ */
+@media (min-width: 981px) {
+  .gyro-chat-surface.has-environment:not(.is-tiled):has(.gyro-browser-rail) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/*
+ * The browser toolbar is one non-wrapping row, which needs ~576px. The rail
+ * starts at 380px and drags down to 280px, so reflow it against the card's own
+ * width: navigation and actions share the first row, the URL bar takes the
+ * second. Nothing is hidden — a narrow rail is still a complete browser.
+ */
+.gyro-browser-preview {
+  container-name: gyro-browser;
+  container-type: inline-size;
+}
+
+@container gyro-browser (max-width: 470px) {
+  .gyro-browser-preview-toolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .gyro-browser-preview-toolbar > .gyro-browser-nav-group {
+    order: 1;
+  }
+
+  .gyro-browser-preview-toolbar > .gyro-browser-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+    order: 2;
+  }
+
+  .gyro-browser-preview-toolbar > .gyro-url-bar {
+    flex: 1 1 100%;
+    min-width: 0;
+    order: 3;
+  }
+}
+
+/*
+ * At the rail's 280px floor the two control groups no longer fit side by side
+ * at full size, and letting them wrap leaves navigation alone on a row with
+ * dead space beside it. Tighten the hit targets instead so the toolbar stays
+ * two rows deep with every control still reachable.
+ */
+@container gyro-browser (max-width: 340px) {
+  .gyro-browser-preview-toolbar {
+    column-gap: 4px;
+  }
+
+  .gyro-browser-preview-toolbar > .gyro-browser-nav-group,
+  .gyro-browser-preview-toolbar > .gyro-browser-actions {
+    flex-wrap: nowrap;
+    gap: 3px;
+  }
+
+  .gyro-browser-preview-toolbar button {
+    height: 26px;
+    min-width: 26px;
+  }
+
+  .gyro-browser-device-group > button,
+  .gyro-browser-view-group > button {
+    height: 22px;
+    min-width: 24px;
+  }
+}
+
+/*
+ * `.gyro-environment-rail header` spreads its children apart, which is right
+ * for the launcher (title left, close right) and wrong for a tool that opened
+ * with a back chevron: the two-child header shoved "Changes 9 uncommitted"
+ * against the right edge while the Browser rail's identical header sat left.
+ * The tool header reads left to right, like the row that opened it.
+ */
+.gyro-environment-rail header.gyro-chat-tool-header {
+  justify-content: flex-start;
+}
+
+/*
+ * The compact diff review also runs in the chat rail, where its 280px file
+ * list left the diff column about 40px wide and broke every label onto one
+ * character per line. Stack the two columns there; the workbench pane is wide
+ * enough to keep them side by side.
+ */
+.gyro-environment-rail.is-tool .gyro-diff-review,
+.gyro-environment-rail.is-tool .gyro-diff-review.is-compact {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* Enough room for the header plus a few entries, never more than a third of
+   the rail — the diff itself is what the panel is for. */
+.gyro-environment-rail.is-tool .gyro-diff-file-list {
+  border-bottom: 1px solid var(--gyro-border);
+  border-right: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: 38%;
+  min-height: 96px;
+}
+
+.gyro-environment-rail.is-tool .gyro-diff-file-list header {
+  padding-inline: 10px;
+}
+
+/*
+ * An empty review already says so in the middle of the panel; a second empty
+ * list above it just spends a third of a narrow rail saying it again.
+ */
+.gyro-environment-rail.is-tool .gyro-diff-review.is-empty .gyro-diff-file-list {
+  display: none;
+}
+
+.gyro-environment-rail.is-tool .gyro-diff-review.is-empty {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/*
+ * `.gyro-diff-main` reserves three rows — toolbar, diff, footer — and an empty
+ * review drops the toolbar, which slid the footer into the flexible row and
+ * left it stretched over half the panel with its buttons drifting apart.
+ * Two rows for two children.
+ */
+.gyro-diff-review.is-empty .gyro-diff-main {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.gyro-environment-rail.is-tool .gyro-diff-review-toolbar,
+.gyro-environment-rail.is-tool .gyro-diff-review-footer {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.gyro-environment-rail.is-tool .gyro-diff-actions {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/*
+ * Right-aligned wrapping turns the footer into a staircase at rail width. Give
+ * both button groups their own two-up grid so the rows line up instead.
+ */
+.gyro-environment-rail.is-tool .gyro-diff-review-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gyro-environment-rail.is-tool .gyro-git-action-strip,
+.gyro-environment-rail.is-tool .gyro-diff-review-footer > div:last-child {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.gyro-environment-rail.is-tool .gyro-git-action-strip > button,
+.gyro-environment-rail.is-tool
+  .gyro-diff-review-footer
+  > div:last-child
+  > button {
+  justify-content: center;
+  min-width: 0;
+  /* 11px each side leaves "Approve changes" about two characters short of its
+     half of the footer, so it breaks across two lines while its neighbour sits
+     on one. The label is the whole button here; the padding can give. */
+  padding-inline: 8px;
+  width: 100%;
+}
+
+/*
+ * At two-up rail width the trailing status word squeezes the action's own name
+ * into an ellipsis. The button is already drawn and disabled by that status, and
+ * it keeps the full text in its tooltip, so the name is what should survive.
+ */
+.gyro-environment-rail.is-tool .gyro-git-action-strip > button > small {
+  display: none;
+}
+
+.gyro-environment-rail.is-tool .gyro-git-action-strip > button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The empty-state launcher card sizes itself to its two labels and refuses to
+ * shrink, which is 292px — wider than the 282px rail interior, so it bled past
+ * both edges. Tighten its padding here and let it cap at the rail width.
+ */
+.gyro-environment-rail.is-tool .gyro-terminal-toolbar.is-empty {
+  max-width: 100%;
+}
+
+.gyro-environment-rail.is-tool
+  .gyro-terminal-toolbar.is-empty
+  .gyro-terminal-agent-button,
+.gyro-environment-rail.is-tool
+  .gyro-terminal-toolbar.is-empty
+  .gyro-terminal-preset-button {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+/*
+ * The frame was a flex row centred on its child before it became a grid, and
+ * `justify-content: center` survived that change: an auto track stops absorbing
+ * free space, so the page sat at its 280px content width with stage colour
+ * bleeding down both sides of every desktop preview. Let the track stretch —
+ * tablet and mobile still centre, through the page's own auto margins and
+ * device max-width. The stage itself follows the theme instead of staying a
+ * hardcoded near-black that only worked in dark mode.
+ */
+.gyro-browser-frame {
+  background: var(--gyro-code-bg);
+  justify-content: stretch;
+}
+
+/*
+ * Model chip menu — positioning, weight, and motion.
+ *
+ * One chip now owns model, effort, and provider, which makes its menu the
+ * composer surface people open most, and three things were working against it.
+ * Every pane sized itself to its own contents, so drilling in resized the card
+ * under the cursor. The navigation carets borrowed the accent colour that
+ * should only ever mark the current selection, leaving five orange arrows on a
+ * list where nothing was chosen. And each pane appeared instantly, with nothing
+ * tying it back to the chip it came from.
+ */
+
+/* One width across every pane, so drilling in and back never resizes the card
+   or moves the row the pointer is already on. */
+.gyro-composer-control-model > .gyro-composer-popover,
+.gyro-composer-control-model > .gyro-provider-picker,
+.gyro-composer-control-model .gyro-provider-picker-menu {
+  max-width: min(220px, calc(100vw - 24px));
+  min-width: 0;
+  width: min(220px, calc(100vw - 24px));
+}
+
+/* Close enough to the chip to read as hanging off it. */
+.gyro-composer-control-model > .gyro-composer-popover[data-placement="down"],
+.gyro-composer-control-model > .gyro-provider-picker[data-placement="down"] {
+  animation: gyro-model-menu-in-down 140ms var(--gyro-premium-ease) both;
+  top: calc(100% + 6px);
+  transform-origin: top right;
+}
+
+.gyro-composer-control-model > .gyro-composer-popover[data-placement="up"],
+.gyro-composer-control-model > .gyro-provider-picker[data-placement="up"] {
+  animation: gyro-model-menu-in-up 140ms var(--gyro-premium-ease) both;
+  bottom: calc(100% + 6px);
+  transform-origin: bottom right;
+}
+
+/* Models arrive from the list they belong to, on the side they open. */
+.gyro-provider-model-flyout {
+  animation: gyro-model-flyout-in 110ms var(--gyro-premium-ease) both;
+}
+
+.gyro-provider-picker[data-flyout-side="left"] .gyro-provider-model-flyout {
+  animation-name: gyro-model-flyout-in-left;
+}
+
+.gyro-provider-picker[data-flyout-side="stacked"] .gyro-provider-model-flyout {
+  animation-name: gyro-model-menu-in-down;
+}
+
+@keyframes gyro-model-menu-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gyro-model-menu-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gyro-model-flyout-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes gyro-model-flyout-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-composer-control-model > .gyro-composer-popover,
+  .gyro-composer-control-model > .gyro-provider-picker,
+  .gyro-provider-model-flyout {
+    animation: none;
+  }
+}
+
+/* A caret is navigation, not a state: the accent stays with the checkmark that
+   marks what is actually selected, and the arrows only brighten under the
+   pointer. */
+.gyro-composer-popover .gyro-composer-menu-item > svg.gyro-composer-menu-caret {
+  color: var(--gyro-faint);
+  transition:
+    color var(--gyro-premium-motion) var(--gyro-premium-ease),
+    transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-composer-popover
+  .gyro-composer-menu-item:hover
+  > svg.gyro-composer-menu-caret,
+.gyro-composer-popover
+  .gyro-composer-menu-item:focus-visible
+  > svg.gyro-composer-menu-caret {
+  color: var(--gyro-text);
+}
+
+.gyro-composer-popover .gyro-composer-menu-item {
+  transition:
+    background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-composer-popover .gyro-composer-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-strong);
+  outline: 0;
+}
+
+/* Current value of a setting: bright enough to read at a glance. The label
+   takes the width it needs and the value takes what is left, so only a value
+   too long for the panel ever truncates — and it truncates instead of pushing
+   the caret off the row. */
+.gyro-composer-menu-item.is-setting,
+.gyro-composer-menu-item.is-setting.has-no-icon {
+  grid-template-columns: auto minmax(0, 1fr) 14px;
+}
+
+.gyro-composer-menu-item.is-setting .gyro-composer-menu-trailing {
+  color: var(--gyro-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Full-bleed rule above Advanced — drawn, not bordered, so the row keeps its
+   padding inside the panel while the line runs the panel's whole width. */
+.gyro-composer-menu-item.is-disclosure,
+.gyro-composer-menu-item.is-disclosure.has-no-icon {
+  border-top: 0;
+  position: relative;
+}
+
+.gyro-composer-menu-item.is-disclosure::before {
+  background: var(--gyro-premium-hairline-soft);
+  content: "";
+  height: 1px;
+  left: -5px;
+  position: absolute;
+  right: -5px;
+  top: -2px;
+}
+
+/* Drill-down header: a way back, so it brightens and leans left instead of
+   lighting up like one more thing to choose. */
+.gyro-composer-menu-item.is-back > svg:first-child {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-composer-menu-item.is-back:hover,
+.gyro-composer-menu-item.is-back:focus-visible {
+  background: transparent;
+  color: var(--gyro-text);
+}
+
+.gyro-composer-menu-item.is-back:hover > svg:first-child {
+  transform: translateX(-2px);
+}
+
+/* The chip stays lit while its menu is open, and its caret turns over — the
+   panel below is otherwise the only sign the chip is the thing that opened it. */
+.gyro-model-chip > svg:last-child {
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-model-chip[aria-expanded="true"] {
+  background: var(--gyro-premium-control-hover);
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-premium-line) 86%,
+    var(--gyro-premium-text) 14%
+  );
+  color: var(--gyro-premium-text);
+}
+
+.gyro-model-chip[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+
+/* Effort qualifies the model rather than continuing its name, so a hairline
+   separates them the way the second chip used to. */
+.gyro-model-chip-effort {
+  border-left: 1px solid color-mix(in srgb, currentcolor 22%, transparent);
+  color: color-mix(in srgb, currentcolor 62%, transparent);
+  padding-left: 7px;
+}
+
+/* Room for name plus qualifier before either has to truncate. */
+.gyro-composer-control-model {
+  max-width: 212px;
 }

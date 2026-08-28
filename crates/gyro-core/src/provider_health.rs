@@ -2,8 +2,8 @@ use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
 use crate::{
-    check_acp_health, check_kimi_acp_health, provider_descriptor, KimiAcpHealthStatus,
-    ProviderHealthKind,
+    check_acp_health, check_kimi_acp_health, discover_ollama_models, provider_descriptor,
+    KimiAcpHealthStatus, ProviderHealthKind,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,9 @@ impl ProviderHealthService {
                 Some("opencode auth login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
+            ProviderHealthKind::OllamaApi => {
+                Ok(ollama_provider_health(request.base_url.as_deref()))
+            }
         }
     }
 
@@ -148,6 +151,54 @@ impl ProviderHealthService {
             diagnostics_opt_in: false,
             output,
         })
+    }
+}
+
+fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
+    match discover_ollama_models(base_url) {
+        Ok(discovery) => {
+            let model_summary = if discovery.models.is_empty() {
+                "Ollama is running, but no models are installed. Run `ollama pull <model>` and refresh Gyro."
+                    .to_string()
+            } else {
+                format!(
+                    "Ollama is running at {}; {} local model{} discovered.",
+                    discovery.base_url,
+                    discovery.models.len(),
+                    if discovery.models.len() == 1 { "" } else { "s" }
+                )
+            };
+            ProviderHealthCheck {
+                provider_id: "ollama".into(),
+                output: model_summary,
+                runtime_status: "ready".into(),
+                auth_owner: "provider-sdk".into(),
+                auth_command: None,
+                login_command: None,
+                account_label: None,
+                subscription_label: None,
+                provider_mode: Some("local Ollama runtime".into()),
+                secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
+                privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
+                diagnostics_opt_in: false,
+            }
+        }
+        Err(error) => ProviderHealthCheck {
+            provider_id: "ollama".into(),
+            output: crate::security::redact_secrets(&format!(
+                "Ollama is unavailable: {error}. Install and start Ollama, then run `ollama pull <model>`."
+            )),
+            runtime_status: "not-installed".into(),
+            auth_owner: "provider-sdk".into(),
+            auth_command: None,
+            login_command: None,
+            account_label: None,
+            subscription_label: None,
+            provider_mode: Some("local Ollama runtime".into()),
+            secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
+            privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
+            diagnostics_opt_in: false,
+        },
     }
 }
 

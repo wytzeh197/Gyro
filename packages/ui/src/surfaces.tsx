@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleDashed,
   Columns2,
   Command,
@@ -92,6 +93,7 @@ import {
   useDeferredValue,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -8392,16 +8394,22 @@ function ChatSidePanel({
 
   const pendingDiffs =
     diffReview?.files.filter((file) => file.state === "pending").length ?? 0;
-  const changedFiles =
-    sourceControl?.files.length ?? diffReview?.files.length ?? 0;
+  // The Changes rail reviews proposed edits, so its count has to come from the
+  // review set. The working tree is a different number entirely — naming it
+  // separately keeps the row from promising files the review panel never shows.
+  const reviewFiles = diffReview?.files.length ?? 0;
+  const uncommittedFiles = sourceControl?.files.length ?? 0;
+  const changedFiles = reviewFiles || uncommittedFiles;
   const runningPanes = terminalPanes.filter(terminalPaneHasActiveWork).length;
   const planItemCount = sessionPlan?.items.length ?? 0;
   const changesLabel =
     pendingDiffs > 0
       ? `${pendingDiffs} pending`
-      : changedFiles > 0
-        ? `${changedFiles} ${changedFiles === 1 ? "file" : "files"}`
-        : "No changes";
+      : reviewFiles > 0
+        ? `${reviewFiles} ${reviewFiles === 1 ? "file" : "files"}`
+        : uncommittedFiles > 0
+          ? `${uncommittedFiles} uncommitted`
+          : "No changes";
   const terminalLabel =
     runningPanes > 0
       ? `${runningPanes} running`
@@ -8490,6 +8498,7 @@ function ChatSidePanel({
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded}
         browserPreview={browserPreview}
+        onBack={onSelectPanel ? backToLauncher : undefined}
         onBrowserBack={onBrowserBack}
         onBrowserDeviceChange={onBrowserDeviceChange}
         onBrowserForward={onBrowserForward}
@@ -9280,7 +9289,7 @@ function ChatEnvironmentLauncher({
       >
         <Globe2 size={15} />
         <span>Browser</span>
-        {browserLabel === "Ready" ? null : <small>{browserLabel}</small>}
+        {browserLabel === "Idle" ? null : <small>{browserLabel}</small>}
       </button>
       <button
         aria-label={`Open files in Workspace, ${workspaceName(workspacePath)}`}
@@ -9289,7 +9298,11 @@ function ChatEnvironmentLauncher({
       >
         <Folder size={15} />
         <span>Files</span>
-        <small>Open</small>
+        {/*
+         * Every other row spends its detail slot on a state worth knowing and
+         * goes quiet otherwise. Files has no such state: "Open" restated the
+         * button, and the folder it opens is already in the rail header.
+         */}
       </button>
       <button
         aria-expanded={planExpanded}
@@ -13755,7 +13768,13 @@ export function DiffReviewSurface({
 
   return (
     <div
-      className={compact ? "gyro-diff-review is-compact" : "gyro-diff-review"}
+      className={[
+        "gyro-diff-review",
+        compact ? "is-compact" : "",
+        hasFiles ? "" : "is-empty",
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <aside className="gyro-diff-file-list" aria-label="Changed files">
         <header>
@@ -13781,59 +13800,70 @@ export function DiffReviewSurface({
         </div>
       </aside>
       <section className="gyro-diff-main" aria-label="Diff review">
-        <div className="gyro-diff-review-toolbar">
-          <div>
-            <strong>{selectedFile?.path ?? "No file selected"}</strong>
-            {selectedFile ? (
-              <span>
-                Safety: {selectedFile.source} · {review.approvalState} ·{" "}
-                {review.lastAction}
-              </span>
-            ) : (
-              <span>No changes proposed</span>
-            )}
+        {/*
+         * Every control in this strip acts on a reviewed file, so with an empty
+         * review it is four dead buttons above an empty state that already says
+         * there is nothing to review. Drop it until there is something to act on.
+         */}
+        {hasFiles ? (
+          <div className="gyro-diff-review-toolbar">
+            <div>
+              <strong>{selectedFile?.path ?? "No file selected"}</strong>
+              {selectedFile ? (
+                <span>
+                  Safety: {selectedFile.source} · {review.approvalState} ·{" "}
+                  {review.lastAction}
+                </span>
+              ) : (
+                <span>No changes proposed</span>
+              )}
+            </div>
+            <div className="gyro-diff-actions">
+              <button
+                className="gyro-secondary-button"
+                disabled={!selectedFile}
+                onClick={() =>
+                  selectedFile && onOpenInEditor?.(selectedFile.path)
+                }
+                type="button"
+              >
+                <FileCode2 size={15} />
+                Open editor
+              </button>
+              <button
+                className="gyro-secondary-button"
+                disabled={!hasFiles}
+                onClick={onUndo}
+                type="button"
+              >
+                <RefreshCw size={15} />
+                Undo
+              </button>
+              <button
+                className="gyro-secondary-button"
+                disabled={!selectedFile}
+                onClick={() =>
+                  selectedFile && onRejectFile?.(selectedFile.path)
+                }
+                type="button"
+              >
+                <X size={15} />
+                Reject file
+              </button>
+              <button
+                className="gyro-primary-button"
+                disabled={!selectedFile}
+                onClick={() =>
+                  selectedFile && onAcceptFile?.(selectedFile.path)
+                }
+                type="button"
+              >
+                <Check size={15} />
+                Accept file
+              </button>
+            </div>
           </div>
-          <div className="gyro-diff-actions">
-            <button
-              className="gyro-secondary-button"
-              disabled={!selectedFile}
-              onClick={() =>
-                selectedFile && onOpenInEditor?.(selectedFile.path)
-              }
-              type="button"
-            >
-              <FileCode2 size={15} />
-              Open editor
-            </button>
-            <button
-              className="gyro-secondary-button"
-              disabled={!hasFiles}
-              onClick={onUndo}
-              type="button"
-            >
-              <RefreshCw size={15} />
-              Undo
-            </button>
-            <button
-              className="gyro-secondary-button"
-              disabled={!selectedFile}
-              onClick={() => selectedFile && onRejectFile?.(selectedFile.path)}
-              type="button"
-            >
-              <X size={15} />
-              Reject file
-            </button>
-            <button
-              className="gyro-primary-button"
-              disabled={!selectedFile}
-              onClick={() => selectedFile && onAcceptFile?.(selectedFile.path)}
-              type="button"
-            >
-              <Check size={15} />
-              Accept file
-            </button>
-          </div>
-        </div>
+        ) : null}
         <div className="gyro-inline-diff">
           {selectedFile ? (
             <>
@@ -13862,10 +13892,14 @@ export function DiffReviewSurface({
           )}
         </div>
         <footer className="gyro-diff-review-footer">
-          <div>
-            <strong>Commit message preview</strong>
-            <span>{review.commitMessage}</span>
-          </div>
+          {/* A "Commit message preview" heading with nothing under it is worse
+              than no heading at all, so it waits for an actual message. */}
+          {review.commitMessage.trim() ? (
+            <div>
+              <strong>Commit message preview</strong>
+              <span>{review.commitMessage}</span>
+            </div>
+          ) : null}
           <div className="gyro-git-action-strip" aria-label="Git actions">
             {review.gitActions.map((action) => {
               const Icon = gitReviewActionIcon(action.id);
@@ -14452,6 +14486,7 @@ function ResizableBrowserRail({
   browserPreview,
   browserNativeHost,
   browserOverlayOccluded,
+  onBack,
   onClose,
   onBrowserBack,
   onBrowserForward,
@@ -14466,6 +14501,7 @@ function ResizableBrowserRail({
   browserPreview?: BrowserPreview;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
+  onBack?: () => void;
   onClose?: () => void;
   onBrowserBack?: () => void;
   onBrowserForward?: () => void;
@@ -14497,6 +14533,30 @@ function ResizableBrowserRail({
     const max = Math.min(BROWSER_RAIL_MAX_WIDTH, parentCap);
     return Math.min(max, Math.max(BROWSER_RAIL_MIN_WIDTH, Math.round(value)));
   }, []);
+
+  // A stored width outlives the window it was chosen in: reopening the rail on
+  // a narrower window (or shrinking the window while it is open) must not push
+  // the card's own controls past the right edge, so re-clamp against the space
+  // the surface actually has rather than trusting the persisted number.
+  useEffect(() => {
+    const parent = railRef.current?.parentElement;
+    if (!parent) {
+      return;
+    }
+    const fit = () => {
+      const parentWidth = parent.getBoundingClientRect().width;
+      if (parentWidth <= 0) {
+        return;
+      }
+      setWidth((current) => {
+        const next = clampWidth(current, parentWidth);
+        return next === current ? current : next;
+      });
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [clampWidth]);
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) {
@@ -14614,15 +14674,27 @@ function ResizableBrowserRail({
         <span />
       </button>
       <header>
-        <div className="gyro-chat-tool-title">
-          <Globe2 aria-hidden="true" size={15} />
-          <div>
-            <strong>Browser</strong>
-            <span>
-              {browserPreview?.title?.trim() ||
-                browserPreviewHostLabel(browserPreview?.url) ||
-                "Session preview"}
-            </span>
+        <div className="gyro-chat-tool-header">
+          {onBack ? (
+            <button
+              aria-label="Back to environment"
+              className="gyro-chat-tool-back"
+              onClick={onBack}
+              type="button"
+            >
+              <ChevronLeft aria-hidden="true" size={15} />
+            </button>
+          ) : null}
+          <div className="gyro-chat-tool-title">
+            <Globe2 aria-hidden="true" size={15} />
+            <div>
+              <strong>Browser</strong>
+              <span>
+                {browserPreview?.title?.trim() ||
+                  browserPreviewHostLabel(browserPreview?.url) ||
+                  "Session preview"}
+              </span>
+            </div>
           </div>
         </div>
         <button
@@ -18198,13 +18270,7 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
 }
 
 type ComposerPopoverId =
-  | "approval"
-  | "branch"
-  | "context"
-  | "effort"
-  | "project"
-  | "provider"
-  | "workspace-mode";
+  "approval" | "branch" | "context" | "project" | "provider" | "workspace-mode";
 
 type ComposerPopoverItem = {
   label: string;
@@ -18214,13 +18280,24 @@ type ComposerPopoverItem = {
   removeAction?: string;
   icon: IconComponent;
   kind?:
+    | "back"
+    | "disclosure"
     | "effort"
     | "model"
     | "permission-direct"
     | "project"
     | "provider"
+    | "setting"
     | "warning"
     | "workspace-mode";
+  /** Disclosure rows draw a caret instead of a value; which way it points. */
+  caret?: "up" | "down";
+  /**
+   * Navigation inside a drill-down menu. These rows move between panels
+   * rather than doing anything, so they carry a destination instead of an
+   * action string the composer would have to pretend to handle.
+   */
+  menuPane?: "root" | "model" | "effort" | "provider";
   sectionLabel?: string;
   providerId?: ProviderId;
   active?: boolean;
@@ -18406,14 +18483,38 @@ function ComposerPopover({
               </span>
               {item.detail ? <small>{item.detail}</small> : null}
             </span>
-            {item.trailingLabel ? (
+            {item.kind === "setting" || item.kind === "disclosure" ? (
+              <>
+                {item.trailingLabel ? (
+                  <em className="gyro-composer-menu-trailing">
+                    {item.trailingLabel}
+                  </em>
+                ) : null}
+                {/* Settings rows drill into their own list; disclosure rows
+                    fold a section open in place, so they point differently.
+                    Both are navigation, so they carry the caret class that
+                    keeps them quiet — the accent belongs to the checkmark. */}
+                {item.kind === "disclosure" ? (
+                  item.caret === "up" ? (
+                    <ChevronUp className="gyro-composer-menu-caret" size={13} />
+                  ) : (
+                    <ChevronDown
+                      className="gyro-composer-menu-caret"
+                      size={13}
+                    />
+                  )
+                ) : (
+                  <ChevronRight className="gyro-composer-menu-caret" size={13} />
+                )}
+              </>
+            ) : item.trailingLabel ? (
               <em className="gyro-composer-menu-trailing">
                 {item.trailingLabel}
               </em>
             ) : item.active ? (
               <Check size={13} />
             ) : item.providerId && item.showChevron !== false ? (
-              <ChevronRight size={13} />
+              <ChevronRight className="gyro-composer-menu-caret" size={13} />
             ) : null}
           </>
         );
@@ -18512,6 +18613,9 @@ function reasoningEffortLabel(effort: ReasoningEffort) {
 }
 
 function providerAuthOwnershipDetail(providerId: ProviderId) {
+  if (providerId === "ollama") {
+    return "Connects only to a local loopback Ollama service. Gyro stores no Ollama credentials and never downloads models for you.";
+  }
   if (providerId === "openai") {
     return "Uses your existing local Codex sign-in with ChatGPT for subscription access. Gyro does not store OpenAI tokens.";
   }
@@ -18531,6 +18635,9 @@ function providerAuthOwnershipDetail(providerId: ProviderId) {
 }
 
 function providerAuthSummary(providerId: ProviderId) {
+  if (providerId === "ollama") {
+    return "Local Ollama runtime";
+  }
   if (providerId === "openai") {
     return "Codex sign-in";
   }
@@ -18590,6 +18697,9 @@ function providerConnectionLabel(
   if (provider.authStatus === "connected" && provider.id === "gemini") {
     return "verified via Gemini CLI";
   }
+  if (provider.authStatus === "connected" && provider.id === "ollama") {
+    return "verified locally";
+  }
   if (provider.authStatus === "connected") {
     return "verified";
   }
@@ -18612,6 +18722,9 @@ function providerConnectedHealthCopy(provider: { id: ProviderId }) {
   if (provider.id === "gemini") {
     return "Gemini is available through the local Gemini CLI sign-in on this Mac.";
   }
+  if (provider.id === "ollama") {
+    return "Ollama is available through the local loopback service on this Mac.";
+  }
   return "Provider-owned credentials were verified on this Mac.";
 }
 
@@ -18631,6 +18744,9 @@ function providerPrimaryActionLabel(provider: {
   }
   if (provider.id === "kimi") {
     return "Use Kimi sign-in";
+  }
+  if (provider.id === "ollama") {
+    return "Check local runtime";
   }
   if (provider.authMode === "cli") {
     return "Start CLI sign-in";
@@ -19010,6 +19126,17 @@ function Composer({
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
+  /**
+   * One chip now owns model and effort together, so the panel it opens is a
+   * small settings menu that drills down rather than a flat list: Model and
+   * Effort name their current value on the root, and each row swaps the panel
+   * for its own choices. Switching provider is the rarer move, so it folds
+   * away under Advanced instead of leading.
+   */
+  const [modelMenuPane, setModelMenuPane] = useState<
+    "root" | "model" | "effort" | "provider"
+  >("root");
+  const [isModelMenuAdvancedOpen, setIsModelMenuAdvancedOpen] = useState(false);
   const [modelFlyoutVertical, setModelFlyoutVertical] = useState<"down" | "up">(
     "down",
   );
@@ -19093,6 +19220,14 @@ function Composer({
     },
   );
   const popoverBaseId = useId();
+  // Closing the chip forgets where the drill-down was, so it always reopens on
+  // the root menu rather than mid-way through a list the user already left.
+  useEffect(() => {
+    if (activePopover !== "provider") {
+      setModelMenuPane("root");
+      setIsModelMenuAdvancedOpen(false);
+    }
+  }, [activePopover]);
   useEffect(() => {
     if (isGoalComposerActive) {
       composerTextareaRef.current?.focus();
@@ -19299,6 +19434,85 @@ function Composer({
         label: reasoningEffortLabel(effort),
       }))
     : [];
+  // Models for the provider already in use. The provider list keeps its own
+  // hover flyout for cross-provider browsing; this is the one-click path to a
+  // sibling model of the model already selected.
+  const currentModelItems: ComposerPopoverItem[] = displayProvider
+    ? displayProvider.models.map((model) => ({
+        action: `select-provider-model:${displayProvider.id}:${model.id}`,
+        active: model.id === effectiveModelId,
+        hideIcon: true,
+        icon: Sparkles,
+        kind: "model" as const,
+        label: model.displayName,
+      }))
+    : [];
+  const hasEffortChoice = Boolean(
+    providerReasoningEffort && effortItems.length > 0,
+  );
+  const modelMenuItems: ComposerPopoverItem[] = [
+    ...(providerErrorMessage
+      ? [
+          {
+            disabled: true,
+            detail: providerErrorMessage,
+            icon: ShieldCheck,
+            kind: "warning" as const,
+            label: "Provider needs attention",
+          },
+        ]
+      : []),
+    {
+      hideIcon: true,
+      icon: Sparkles,
+      kind: "setting" as const,
+      label: "Model",
+      // With no provider chosen there is no model list to show, so the row
+      // leads to the providers instead of dead-ending on an empty panel.
+      menuPane:
+        currentModelItems.length > 0
+          ? ("model" as const)
+          : ("provider" as const),
+      trailingLabel: modelChipLabel,
+    },
+    ...(hasEffortChoice && providerReasoningEffort
+      ? [
+          {
+            hideIcon: true,
+            icon: Gauge,
+            kind: "setting" as const,
+            label: "Effort",
+            menuPane: "effort" as const,
+            trailingLabel: reasoningEffortLabel(providerReasoningEffort),
+          },
+        ]
+      : []),
+    {
+      caret: isModelMenuAdvancedOpen ? ("up" as const) : ("down" as const),
+      hideIcon: true,
+      icon: Sparkles,
+      kind: "disclosure" as const,
+      label: "Advanced",
+    },
+    ...(isModelMenuAdvancedOpen
+      ? [
+          {
+            hideIcon: true,
+            icon: Sparkles,
+            kind: "setting" as const,
+            label: "Provider",
+            menuPane: "provider" as const,
+            trailingLabel: displayProvider?.displayName ?? "Choose",
+          },
+        ]
+      : []),
+  ];
+  const modelMenuBackItem = (label: string): ComposerPopoverItem => ({
+    icon: ChevronLeft,
+    kind: "back" as const,
+    label,
+    menuPane: "root" as const,
+  });
   const contextItems: ComposerPopoverItem[] = [
     {
       action: "attach-editor-snapshot",
@@ -19503,7 +19717,25 @@ function Composer({
   };
   const toggleProviderPopover = () => {
     setModelPickerProviderIdSticky(undefined);
+    setModelMenuPane("root");
+    setIsModelMenuAdvancedOpen(false);
     togglePopover("provider");
+  };
+  // Navigation inside the chip's menu must not reach the composer's action
+  // handler — only leaf choices (a model, an effort, a provider) do.
+  const runModelMenuAction = (action?: string, item?: ComposerPopoverItem) => {
+    if (item?.kind === "disclosure") {
+      setIsModelMenuAdvancedOpen((current) => !current);
+      return;
+    }
+    if (item?.menuPane) {
+      if (item.menuPane === "root") {
+        setModelPickerProviderIdSticky(undefined);
+      }
+      setModelMenuPane(item.menuPane);
+      return;
+    }
+    runPopoverAction(action, item);
   };
   const runPopoverAction = (action?: string, item?: ComposerPopoverItem) => {
     if (item?.providerId) {
@@ -19566,7 +19798,51 @@ function Composer({
     "aria-expanded": activePopover === popover,
     "aria-haspopup": "menu" as const,
   });
-  const providerPopoverPlacement = popoverPlacement ?? (isHero ? "down" : "up");
+  const preferredProviderPlacement =
+    popoverPlacement ?? (isHero ? "down" : "up");
+  // The hero composer sits mid-canvas, so its menu opens downward — but on a
+  // short window, or once Advanced unfolds another row, that runs the panel off
+  // the bottom edge. Measure the panel that is actually up and put it on the
+  // side that has the room, falling back to the preferred side when neither
+  // does. Docked composers keep opening upward for the same reason.
+  const [providerPopoverPlacement, setProviderPopoverPlacement] = useState<
+    "up" | "down"
+  >(preferredProviderPlacement);
+  useLayoutEffect(() => {
+    if (activePopover !== "provider") {
+      setProviderPopoverPlacement(preferredProviderPlacement);
+      return;
+    }
+    const scope = popoverScopeRef.current;
+    const panel = scope?.querySelector<HTMLElement>(
+      ":scope > .gyro-composer-popover, :scope > .gyro-provider-picker",
+    );
+    if (!scope || !panel) {
+      return;
+    }
+    const anchor = scope.getBoundingClientRect();
+    const bounds = clippingBounds(panel);
+    const height = panel.offsetHeight;
+    const gap = 6;
+    const edgePad = 12;
+    const fitsBelow = anchor.bottom + gap + height <= bounds.bottom - edgePad;
+    const fitsAbove = anchor.top - gap - height >= bounds.top + edgePad;
+    setProviderPopoverPlacement(
+      preferredProviderPlacement === "down"
+        ? fitsBelow || !fitsAbove
+          ? "down"
+          : "up"
+        : fitsAbove || !fitsBelow
+          ? "up"
+          : "down",
+    );
+  }, [
+    activePopover,
+    isModelMenuAdvancedOpen,
+    modelMenuPane,
+    preferredProviderPlacement,
+    popoverScopeRef,
+  ]);
 
   // Models open to the right of the provider list. If that would clip, nudge
   // the whole picker left just enough to fit, and flip the flyout to the left
@@ -20184,7 +20460,11 @@ function Composer({
           <button
             /* Narrow panes hide .gyro-composer-label, so the visible text
                cannot be the only name this control has. */
-            aria-label={`Model: ${modelChipLabel}`}
+            aria-label={
+              hasEffortChoice && providerReasoningEffort
+                ? `Model: ${modelChipLabel}, reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`
+                : `Model: ${modelChipLabel}`
+            }
             className="gyro-composer-chip gyro-model-chip"
             onClick={toggleProviderPopover}
             type="button"
@@ -20194,9 +20474,16 @@ function Composer({
               <ProviderLogo providerId={displayProvider.id} />
             ) : null}
             <span className="gyro-composer-label">{modelChipLabel}</span>
+            {/* Effort rides on the model's own chip: it only ever qualifies a
+                model, and a second chip for it spent bar width saying so. */}
+            {hasEffortChoice && providerReasoningEffort ? (
+              <span className="gyro-model-chip-effort">
+                {reasoningEffortLabel(providerReasoningEffort)}
+              </span>
+            ) : null}
             <ChevronDown size={13} />
           </button>
-          {activePopover === "provider" ? (
+          {activePopover === "provider" && modelMenuPane === "provider" ? (
             <div
               className={[
                 "gyro-provider-picker",
@@ -20218,8 +20505,8 @@ function Composer({
               <ComposerPopover
                 className="gyro-provider-picker-menu"
                 id={`${popoverBaseId}-provider-menu`}
-                items={providerItems}
-                onAction={runPopoverAction}
+                items={[modelMenuBackItem("Provider"), ...providerItems]}
+                onAction={runModelMenuAction}
                 onItemPreview={(item) => {
                   // Disconnected rows still carry providerId (brand logos) but
                   // must not collapse the models panel while the pointer
@@ -20235,7 +20522,6 @@ function Composer({
                   }
                 }}
                 placement={providerPopoverPlacement}
-                title="Provider"
               />
               {modelPickerProvider ? (
                 <ComposerPopover
@@ -20251,39 +20537,29 @@ function Composer({
                 />
               ) : null}
             </div>
+          ) : activePopover === "provider" ? (
+            <ComposerPopover
+              align="end"
+              className={
+                modelMenuPane === "model"
+                  ? "gyro-model-menu gyro-model-list"
+                  : modelMenuPane === "effort"
+                    ? "gyro-model-menu gyro-effort-picker"
+                    : "gyro-model-menu"
+              }
+              id={`${popoverBaseId}-provider`}
+              items={
+                modelMenuPane === "model"
+                  ? [modelMenuBackItem("Model"), ...currentModelItems]
+                  : modelMenuPane === "effort"
+                    ? [modelMenuBackItem("Effort"), ...effortItems]
+                    : modelMenuItems
+              }
+              onAction={runModelMenuAction}
+              placement={providerPopoverPlacement}
+            />
           ) : null}
         </div>
-        {providerReasoningEffort && effortItems.length > 0 ? (
-          <div
-            className="gyro-composer-control gyro-composer-control-effort"
-            ref={activePopover === "effort" ? popoverScopeRef : undefined}
-          >
-            <button
-              aria-label={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
-              className="gyro-composer-chip gyro-effort-chip"
-              onClick={() => togglePopover("effort")}
-              title={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
-              type="button"
-              {...menuProps("effort")}
-            >
-              <Gauge className="gyro-effort-chip-icon" size={14} />
-              <span className="gyro-composer-label">
-                {reasoningEffortLabel(providerReasoningEffort)}
-              </span>
-              <ChevronDown size={13} />
-            </button>
-            {activePopover === "effort" ? (
-              <ComposerPopover
-                align="end"
-                className="gyro-effort-picker"
-                id={`${popoverBaseId}-effort`}
-                items={effortItems}
-                onAction={runPopoverAction}
-                placement={providerPopoverPlacement}
-              />
-            ) : null}
-          </div>
-        ) : null}
         <button
           aria-label={
             isStopAction

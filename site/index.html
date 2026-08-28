@@ -145,6 +145,18 @@
 
         <figure class="product-stage">
           <div class="product-stage-frame">
+            <!--
+              The shot is a bare crop of the app surface, so the window chrome
+              is drawn here instead of photographed. Keeping it in markup means
+              it follows the theme and stays crisp, and the capture never has to
+              carry a title bar that would date the moment macOS restyles one.
+            -->
+            <div class="stage-chrome" aria-hidden="true">
+              <span class="stage-light"></span>
+              <span class="stage-light"></span>
+              <span class="stage-light"></span>
+              <span class="stage-chrome-title">Gyro — aurora — main</span>
+            </div>
             <img
               class="hero-shot hero-shot-dark"
               src="assets/screenshots/hero-1200.webp"
@@ -159,8 +171,8 @@
                 1152px
               "
               width="1200"
-              height="675"
-              alt="Gyro workspace with sessions sidebar and empty chat ready for a task"
+              height="750"
+              alt="The Gyro window: a sessions sidebar, a finished six-minute run showing the search it made, the test command it ran, and the three files it edited, and an environment panel listing nine changed files beside the conversation."
             />
             <img
               class="hero-shot hero-shot-light"
@@ -176,8 +188,8 @@
                 1152px
               "
               width="1200"
-              height="675"
-              alt="Gyro workspace with sessions sidebar and empty chat ready for a task"
+              height="750"
+              alt="The Gyro window: a sessions sidebar, a finished six-minute run showing the search it made, the test command it ran, and the three files it edited, and an environment panel listing nine changed files beside the conversation."
             />
           </div>
           <figcaption>One window. Full context.</figcaption>
@@ -257,61 +269,123 @@
               <!--
                 The surfaces are drawn in markup rather than photographed. They
                 stay sharp at any density, follow the theme, and never fall out
-                of date with a screenshot pipeline.
+                of date with a screenshot pipeline. Each one carries the same
+                left rail the app does, so the three read as one window shown
+                three times rather than three unrelated products.
               -->
               <div
                 class="mock mock-chat"
                 role="img"
-                aria-label="A Gyro chat thread: the request, a six-minute run showing its search, edit, and test steps, and a card listing three changed files with 73 lines added and 6 removed."
+                aria-label="Gyro's chat surface: a sessions rail listing three projects, and a thread where a six-minute run is expanded into the search it made, the test command it ran, and the three files it edited, above a composer set to Claude Opus 5 on high effort."
               >
-                <div class="mock-bar">
-                  <span class="mock-bar-title"
-                    >Bound the sync queue retries</span
-                  >
-                  <span class="mock-bar-meta">main</span>
-                </div>
-                <div class="mock-body">
-                  <p class="mock-ask">
-                    The sync queue retries forever when the server returns 503.
-                    Add a bounded retry with backoff, and cover it with a test.
-                  </p>
-                  <div class="mock-run">
-                    <span class="mock-run-label">Worked for 6m 1s</span>
-                    <span class="mock-steps">
-                      <span>search</span>
-                      <span>edit</span>
-                      <span>test</span>
-                    </span>
+                <div class="mock-rail">
+                  <div class="mock-segment">
+                    <span class="is-active">Sessions</span>
+                    <span>Workspace</span>
                   </div>
-                  <p class="mock-say">
-                    Capped it at 5 attempts with exponential backoff, and
-                    surfaced the last error instead of swallowing it.
-                  </p>
-                  <div class="mock-card">
-                    <div class="mock-card-head">
-                      <span class="mock-card-title">Edited 3 files</span>
-                      <span class="mock-delta">
-                        <span class="mock-add">+73</span>
-                        <span class="mock-remove">−6</span>
-                      </span>
+                  <ul class="mock-rail-list">
+                    <li><span class="mock-glyph">+</span>New Session</li>
+                    <li>
+                      <span class="mock-glyph">⌕</span>Search
+                      <span class="mock-key">⌘K</span>
+                    </li>
+                  </ul>
+                  <p class="mock-rail-label">Projects</p>
+                  <ul class="mock-rail-list mock-sessions">
+                    <li class="is-active">
+                      <span class="mock-dot mock-dot-claude"></span>
+                      <span class="mock-truncate"
+                        >Bound the sync queue retries</span
+                      >
+                      <span class="mock-age">30d</span>
+                    </li>
+                    <li>
+                      <span class="mock-dot mock-dot-codex"></span>
+                      <span class="mock-truncate">Fix flaky tree</span>
+                      <span class="mock-age">30d</span>
+                    </li>
+                    <li>
+                      <span class="mock-dot mock-dot-gemini"></span>
+                      <span class="mock-truncate">Audit provider args</span>
+                      <span class="mock-age">31d</span>
+                    </li>
+                  </ul>
+                </div>
+                <div class="mock-main">
+                  <div class="mock-bar">
+                    <span class="mock-bar-title"
+                      >Bound the sync queue retries</span
+                    >
+                    <span class="mock-pill">main</span>
+                  </div>
+                  <div class="mock-body">
+                    <p class="mock-ask">
+                      The sync queue retries forever when the server returns
+                      503. Add a bounded retry with backoff, and cover it with a
+                      test.
+                    </p>
+                    <div class="mock-run">
+                      <span class="mock-run-label">Worked for 6m 1s</span>
+                      <span class="mock-run-continue">Continue</span>
                     </div>
-                    <ul class="mock-files">
+                    <!--
+                      The activity rows are the argument of this surface: the
+                      run is not a spinner and a summary, it is the list of what
+                      the agent actually did, still there after it finished.
+                    -->
+                    <ul class="mock-activity">
                       <li>
-                        <span class="mock-path">src/sync.js</span>
+                        <span class="mock-glyph">⌕</span>
+                        <span class="mock-act">Searched the web</span>
+                        <span class="mock-act-detail">sync.js, queue/*.js</span>
+                      </li>
+                      <li>
+                        <span class="mock-glyph">▤</span>
+                        <span class="mock-act">Ran command</span>
+                        <span class="mock-act-detail">2 passed in 1.42s</span>
+                      </li>
+                      <li>
+                        <span class="mock-glyph">✎</span>
+                        <span class="mock-act">Edited file</span>
+                        <span class="mock-act-detail mock-mono"
+                          >src/sync.js</span
+                        >
                         <span class="mock-add">+24</span>
                         <span class="mock-remove">−6</span>
                       </li>
                       <li>
-                        <span class="mock-path">src/sync.test.js</span>
+                        <span class="mock-glyph">✎</span>
+                        <span class="mock-act">Edited file</span>
+                        <span class="mock-act-detail mock-mono"
+                          >src/sync.test.js</span
+                        >
                         <span class="mock-add">+31</span>
-                        <span class="mock-remove">−0</span>
                       </li>
                       <li>
-                        <span class="mock-path">src/queue/backoff.js</span>
+                        <span class="mock-glyph">✎</span>
+                        <span class="mock-act">Edited file</span>
+                        <span class="mock-act-detail mock-mono"
+                          >src/queue/backoff.js</span
+                        >
                         <span class="mock-add">+18</span>
-                        <span class="mock-remove">−0</span>
                       </li>
                     </ul>
+                    <p class="mock-say">
+                      Done. <code>drain()</code> stops after 5 attempts and
+                      backs off between them, and both cases are covered.
+                    </p>
+                  </div>
+                  <div class="mock-composer">
+                    <p class="mock-composer-field">
+                      Ask for a follow-up change…
+                    </p>
+                    <div class="mock-composer-controls">
+                      <span class="mock-chip">Ask first</span>
+                      <span class="mock-composer-spacer"></span>
+                      <span class="mock-chip">Claude Opus 5</span>
+                      <span class="mock-chip">High</span>
+                      <span class="mock-send" aria-hidden="true">↑</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -331,30 +405,57 @@
               <div
                 class="mock mock-terminal"
                 role="img"
-                aria-label="A terminal pane running the test suite, with an approval gate holding the agent's next command until it is allowed once, always allowed, or denied."
+                aria-label="Gyro's CLI surface: a rail of command profiles showing Shell running, Codex waiting and Claude Code restored, a terminal pane that has run the test suite, and an approval gate holding the agent's next command until it is allowed once, always allowed, or denied."
               >
-                <div class="mock-bar">
-                  <span class="mock-tab is-active">Shell</span>
-                  <span class="mock-tab">Agent</span>
-                  <span class="mock-bar-meta">gyro@local</span>
+                <div class="mock-rail">
+                  <ul class="mock-rail-list">
+                    <li><span class="mock-glyph">▦</span>Terminal grid</li>
+                    <li><span class="mock-glyph">▷</span>Run command</li>
+                    <li><span class="mock-glyph">⑂</span>Review diffs</li>
+                  </ul>
+                  <p class="mock-rail-label">Profiles</p>
+                  <ul class="mock-rail-list mock-profiles">
+                    <li class="is-active">
+                      <span class="mock-truncate">Shell</span>
+                      <span class="mock-state is-live">running</span>
+                    </li>
+                    <li>
+                      <span class="mock-truncate">Codex</span>
+                      <span class="mock-state">waiting</span>
+                    </li>
+                    <li>
+                      <span class="mock-truncate">Claude Code</span>
+                      <span class="mock-state">restored</span>
+                    </li>
+                  </ul>
                 </div>
-                <div class="mock-body mock-body-term">
-                  <p class="mock-cmd">
-                    <span class="mock-prompt">$</span> node --test
-                  </p>
-                  <p class="mock-pass">✓ syncs every queued note</p>
-                  <p class="mock-pass">✓ retries a temporary send failure</p>
-                  <p class="mock-out">tests 2 · pass 2 · fail 0 · 102ms</p>
-                  <div class="mock-gate">
-                    <div class="mock-gate-head">
-                      <span class="mock-gate-dot" aria-hidden="true"></span>
-                      <span class="mock-gate-title">Approval required</span>
-                    </div>
-                    <p class="mock-gate-cmd">git commit -am "bound retries"</p>
-                    <div class="mock-gate-actions">
-                      <span class="mock-btn is-primary">Allow once</span>
-                      <span class="mock-btn">Always</span>
-                      <span class="mock-btn">Deny</span>
+                <div class="mock-main">
+                  <div class="mock-bar">
+                    <span class="mock-tab">Diff</span>
+                    <span class="mock-tab is-active">Terminal</span>
+                    <span class="mock-tab">Browser</span>
+                    <span class="mock-bar-meta">gyro@local</span>
+                  </div>
+                  <div class="mock-body mock-body-term">
+                    <p class="mock-cmd">
+                      <span class="mock-prompt">$</span> node --test
+                    </p>
+                    <p class="mock-pass">✓ syncs every queued note</p>
+                    <p class="mock-pass">✓ retries a temporary send failure</p>
+                    <p class="mock-out">tests 2 · pass 2 · fail 0 · 1.42s</p>
+                    <div class="mock-gate">
+                      <div class="mock-gate-head">
+                        <span class="mock-gate-dot" aria-hidden="true"></span>
+                        <span class="mock-gate-title">Approval required</span>
+                      </div>
+                      <p class="mock-gate-cmd">
+                        git commit -am "bound retries"
+                      </p>
+                      <div class="mock-gate-actions">
+                        <span class="mock-btn is-primary">Allow once</span>
+                        <span class="mock-btn">Always</span>
+                        <span class="mock-btn">Deny</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -375,40 +476,70 @@
               <div
                 class="mock mock-diff"
                 role="img"
-                aria-label="A diff of src/sync.js showing the unbounded retry loop replaced by a bounded loop with exponential backoff, with keep and discard controls."
+                aria-label="Gyro's review surface: a changed-files rail totalling 73 added and 6 removed lines across three files, and a diff of src/sync.js showing the unbounded retry loop replaced by a bounded loop with exponential backoff, above Reject file and Accept file controls."
               >
-                <div class="mock-bar">
-                  <span class="mock-bar-title mock-mono">src/sync.js</span>
-                  <span class="mock-delta">
-                    <span class="mock-add">+24</span>
-                    <span class="mock-remove">−6</span>
-                  </span>
+                <div class="mock-rail">
+                  <p class="mock-rail-label">
+                    Changed files
+                    <span class="mock-delta">
+                      <span class="mock-add">+73</span>
+                      <span class="mock-remove">−6</span>
+                    </span>
+                  </p>
+                  <ul class="mock-rail-list mock-changed">
+                    <li class="is-active">
+                      <span class="mock-truncate mock-mono">src/sync.js</span>
+                      <span class="mock-add">+24</span>
+                      <span class="mock-remove">−6</span>
+                    </li>
+                    <li>
+                      <span class="mock-truncate mock-mono"
+                        >src/sync.test.js</span
+                      >
+                      <span class="mock-add">+31</span>
+                    </li>
+                    <li>
+                      <span class="mock-truncate mock-mono"
+                        >src/queue/backoff.js</span
+                      >
+                      <span class="mock-add">+18</span>
+                    </li>
+                  </ul>
                 </div>
-                <div class="mock-body mock-body-diff">
-                  <!--
-                    Every space inside <code> is rendered: the rows are set `white-space:
-                    pre` so the code keeps its nesting. prettier-ignore stops the formatter
-                    wrapping a long row onto the next source line, which would then show up
-                    as that line’s own source indentation.
-                  -->
-                  <!-- prettier-ignore -->
-                  <ol class="mock-diff-lines">
-                    <li><span class="mock-ln">6</span><span class="mock-mk"></span><code>  const item = queue.shift();</code></li>
-                    <li class="is-remove"><span class="mock-ln">7</span><span class="mock-mk">−</span><code>  for (;;) {</code></li>
-                    <li class="is-remove"><span class="mock-ln">8</span><span class="mock-mk">−</span><code>    try {</code></li>
-                    <li class="is-remove"><span class="mock-ln">9</span><span class="mock-mk">−</span><code>      return await send(item);</code></li>
-                    <li class="is-add"><span class="mock-ln">7</span><span class="mock-mk">+</span><code>  for (let n = 0; n &lt;= MAX_RETRIES; n += 1) {</code></li>
-                    <li class="is-add"><span class="mock-ln">8</span><span class="mock-mk">+</span><code>    try { return await send(item); }</code></li>
-                    <li class="is-add"><span class="mock-ln">9</span><span class="mock-mk">+</span><code>    catch (error) {</code></li>
-                    <li class="is-add"><span class="mock-ln">10</span><span class="mock-mk">+</span><code>      if (n === MAX_RETRIES) throw error;</code></li>
-                    <li class="is-add"><span class="mock-ln">11</span><span class="mock-mk">+</span><code>      await wait(2 ** n * 100);</code></li>
-                    <li class="is-add"><span class="mock-ln">12</span><span class="mock-mk">+</span><code>    }</code></li>
-                    <li><span class="mock-ln">13</span><span class="mock-mk"></span><code>  }</code></li>
-                  </ol>
-                  <div class="mock-review">
-                    <span class="mock-review-note">3 files · 1 of 3</span>
-                    <span class="mock-btn is-primary">Keep</span>
-                    <span class="mock-btn">Discard</span>
+                <div class="mock-main">
+                  <div class="mock-bar">
+                    <span class="mock-bar-title mock-mono">src/sync.js</span>
+                    <span class="mock-delta">
+                      <span class="mock-add">+24</span>
+                      <span class="mock-remove">−6</span>
+                    </span>
+                  </div>
+                  <div class="mock-body mock-body-diff">
+                    <!--
+                      Every space inside <code> is rendered: the rows are set `white-space:
+                      pre` so the code keeps its nesting. prettier-ignore stops the formatter
+                      wrapping a long row onto the next source line, which would then show up
+                      as that line’s own source indentation.
+                    -->
+                    <!-- prettier-ignore -->
+                    <ol class="mock-diff-lines">
+                      <li><span class="mock-ln">6</span><span class="mock-mk"></span><code>  const item = queue.shift();</code></li>
+                      <li class="is-remove"><span class="mock-ln">7</span><span class="mock-mk">−</span><code>  for (;;) {</code></li>
+                      <li class="is-remove"><span class="mock-ln">8</span><span class="mock-mk">−</span><code>    try {</code></li>
+                      <li class="is-remove"><span class="mock-ln">9</span><span class="mock-mk">−</span><code>      return await send(item);</code></li>
+                      <li class="is-add"><span class="mock-ln">7</span><span class="mock-mk">+</span><code>  for (let n = 0; n &lt;= MAX_RETRIES; n += 1) {</code></li>
+                      <li class="is-add"><span class="mock-ln">8</span><span class="mock-mk">+</span><code>    try { return await send(item); }</code></li>
+                      <li class="is-add"><span class="mock-ln">9</span><span class="mock-mk">+</span><code>    catch (error) {</code></li>
+                      <li class="is-add"><span class="mock-ln">10</span><span class="mock-mk">+</span><code>      if (n === MAX_RETRIES) throw error;</code></li>
+                      <li class="is-add"><span class="mock-ln">11</span><span class="mock-mk">+</span><code>      await wait(2 ** n * 100);</code></li>
+                      <li class="is-add"><span class="mock-ln">12</span><span class="mock-mk">+</span><code>    }</code></li>
+                      <li><span class="mock-ln">13</span><span class="mock-mk"></span><code>  }</code></li>
+                    </ol>
+                    <div class="mock-review">
+                      <span class="mock-review-note">1 of 3 files</span>
+                      <span class="mock-btn">Reject file</span>
+                      <span class="mock-btn is-primary">Accept file</span>
+                    </div>
                   </div>
                 </div>
               </div>

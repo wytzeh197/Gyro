@@ -6,22 +6,23 @@ use gyro_core::user_cli_paths;
 use gyro_core::{
     apply_cli_updates, apply_provider_mutation_transaction_with_cancellation, barrier_decision,
     begin_provider_mutation_transaction, build_synthesizer_user_prompt, check_cli_updates,
-    council_run_dir, create_worktree, decide_mutation_proposal, final_run_status,
+    council_run_dir, create_worktree, decide_mutation_proposal, discover_ollama_models,
+    final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
         request_desktop_provider_capability, versions_compatible, AppNotification,
         DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
-    logout_account as account_logout, mutation_approval_payload, parse_council_synthesis,
-    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
-    prepare_provider_text_replacement_transaction, provider_descriptor,
-    recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
-    run_kimi_acp, seat_label_map, start_account_login as account_start_login,
-    stored_account_session as account_stored_session, successful_seat_answers,
-    write_council_run_manifest, write_council_snapshot, write_seat_artifact,
-    write_synthesis_artifact, AccountSessionState, AppNotificationKind, Automation,
-    AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
+    logout_account as account_logout, mutation_approval_payload, ollama_chat, ollama_tool_chat,
+    parse_council_synthesis, prepare_claude_provider_mutation_transaction,
+    prepare_provider_mutation_transaction, prepare_provider_text_replacement_transaction,
+    provider_descriptor, recover_provider_mutation_transactions,
+    refresh_account_session as account_refresh_session, run_kimi_acp, seat_label_map,
+    start_account_login as account_start_login, stored_account_session as account_stored_session,
+    successful_seat_answers, write_council_run_manifest, write_council_snapshot,
+    write_seat_artifact, write_synthesis_artifact, AccountSessionState, AppNotificationKind,
+    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
     CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
     CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
     CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
@@ -30,15 +31,15 @@ use gyro_core::{
     CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
     CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
     GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
-    KimiAcpRequest, MutationDecision, MutationProposal, PendingProviderMutationCommit,
-    PreparedProviderMutationTransaction, ProjectCapabilityGrant, ProjectCapabilityPolicy,
-    ProviderCapabilitySupport, ProviderDiagnosticsPayload, ProviderExecutionKind,
-    ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
-    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
-    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode, UsageEntry,
-    UsageOrigin, UsageOutcome, UsageTokens, UsageTotals, WorkspaceContextSnapshot,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
+    KimiAcpRequest, MutationDecision, MutationProposal, OllamaChatRequest, OllamaToolChatRequest,
+    PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProjectCapabilityGrant,
+    ProjectCapabilityPolicy, ProviderCapabilitySupport, ProviderDiagnosticsPayload,
+    ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest,
+    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload,
+    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens, UsageTotals,
+    WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS,
+    COUNCIL_MIN_SEATS, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -1618,6 +1619,7 @@ enum ProviderAdapterKind {
     OpenAiCodex,
     AnthropicClaude,
     KimiAcp,
+    Ollama,
     ReadinessOnly,
 }
 
@@ -10586,6 +10588,20 @@ async fn check_provider_health(
         .map_err(|error| format!("provider health worker failed: {error}"))?
 }
 
+/// Discover models installed in the configured loopback Ollama runtime.
+/// This result is transient: a model installed on one Mac is not persisted as
+/// though it were available on another one.
+#[tauri::command]
+async fn discover_ollama_models_command(
+    base_url: Option<String>,
+) -> Result<gyro_core::OllamaDiscovery, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        discover_ollama_models(base_url.as_deref()).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("Ollama discovery worker failed: {error}"))?
+}
+
 /// Scan installed provider CLIs for available updates (npm + native checks).
 #[tauri::command]
 async fn check_cli_updates_command() -> Result<CliUpdateCheckReport, String> {
@@ -13029,11 +13045,215 @@ fn run_provider_chat_once(
         // The ACP runners only learn their session id from the completed run,
         // so there is nothing to record before one finishes.
         ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor),
+        ProviderAdapterKind::Ollama => run_ollama_chat(app, request),
         ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
             "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
             request.provider_label.as_deref().unwrap_or("Provider")
         ),
     }
+}
+
+fn run_ollama_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    if !request.attachments.is_empty() {
+        anyhow::bail!(
+            "Ollama in Gyro currently supports text-only chats; remove attachments and retry."
+        );
+    }
+    let cancellation = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
+        .get(&request.session_id)
+        .map(|control| control.cancellation.clone())
+        .ok_or_else(|| anyhow::anyhow!("provider run control is unavailable"))?;
+    if cancellation.is_cancelled() {
+        anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled before Ollama started");
+    }
+    let paths = GyroPaths::for_current_user()?;
+    let config = GyroConfig::load(&paths)?;
+    let provider = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == "ollama")
+        .ok_or_else(|| anyhow::anyhow!("Ollama is not configured"))?;
+    let model = request
+        .model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("select an installed Ollama model before sending"))?;
+    let discovery = discover_ollama_models(provider.base_url.as_deref())?;
+    let discovered = discovery
+        .models
+        .iter()
+        .find(|candidate| candidate.id == model)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Ollama model `{model}` is not installed; refresh the model picker or run `ollama pull {model}`"
+            )
+        })?;
+    let system = if discovered.supports_tools {
+        "You are a local Ollama model in Gyro. Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it."
+    } else {
+        "You are a local Ollama model in Gyro. Respond in concise Markdown. This model is chat-only; do not claim to have executed files, commands, browser actions, or edits."
+    };
+    let user = provider_context_message_with_history(
+        request,
+        local_conversation_history_for_request(request).as_deref(),
+    );
+    let mut messages = vec![
+        serde_json::json!({ "role": "system", "content": system }),
+        serde_json::json!({ "role": "user", "content": user }),
+    ];
+    let tools = discovered
+        .supports_tools
+        .then(|| {
+            CAPABILITY_DESCRIPTORS
+                .iter()
+                .map(|descriptor| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": descriptor.id.provider_tool_name(),
+                            "description": descriptor.description,
+                            "parameters": desktop_capability_tool_schema(descriptor.id),
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let bound = if discovered.supports_tools {
+        Some(active_provider_capability_context(
+            app,
+            &request.session_id,
+        )?)
+    } else {
+        None
+    };
+    let nonce = if discovered.supports_tools {
+        Some(active_provider_approval_nonce(app, &request.session_id)?)
+    } else {
+        None
+    };
+    let mut response = None;
+    for _ in 0..12 {
+        let turn = if tools.is_empty() {
+            ollama_chat(OllamaChatRequest {
+                base_url: provider.base_url.as_deref(),
+                model,
+                system,
+                user: messages
+                    .last()
+                    .and_then(|message| message.get("content"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default(),
+            })?
+        } else {
+            ollama_tool_chat(OllamaToolChatRequest {
+                base_url: provider.base_url.as_deref(),
+                model,
+                messages: messages.clone(),
+                tools: tools.clone(),
+            })?
+        };
+        if turn.tool_calls.is_empty() {
+            response = Some(turn);
+            break;
+        }
+        let tool_calls = turn
+            .tool_calls
+            .iter()
+            .map(|call| {
+                serde_json::json!({
+                    "function": { "name": call.name, "arguments": call.arguments }
+                })
+            })
+            .collect::<Vec<_>>();
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": turn.content,
+            "tool_calls": tool_calls,
+        }));
+        for call in turn.tool_calls {
+            let capability_id =
+                CapabilityId::from_provider_tool_name(&call.name).ok_or_else(|| {
+                    anyhow::anyhow!("Ollama requested an unknown Gyro tool `{}`", call.name)
+                })?;
+            let bound = bound
+                .as_ref()
+                .expect("tools require bound capability context");
+            let response = app.state::<ProviderCapabilityBroker>().invoke(
+                app,
+                CapabilityRequest {
+                    schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
+                    sender_version: env!("CARGO_PKG_VERSION").into(),
+                    context: CapabilityInvocationContext {
+                        session_id: bound.session_id.clone(),
+                        turn_id: bound.turn_id.clone(),
+                        provider_id: bound.provider_id.clone(),
+                        run_nonce: nonce.as_deref().unwrap_or_default().to_string(),
+                        call_id: Uuid::new_v4(),
+                        workspace_key: bound.workspace_key.clone(),
+                        mode: bound.policy.mode,
+                        policy_revision: bound.policy.revision,
+                        workspace_context_revision: bound.workspace_context.revision,
+                    },
+                    capability_id,
+                    arguments: call.arguments,
+                },
+            );
+            messages.push(serde_json::json!({
+                "role": "tool",
+                "tool_name": call.name,
+                "content": serde_json::to_string(&response)?,
+            }));
+        }
+    }
+    let response = response
+        .ok_or_else(|| anyhow::anyhow!("Ollama exceeded Gyro's tool-call limit for one turn"))?;
+    if cancellation.is_cancelled() {
+        anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
+    }
+    emit_provider_chat_event(
+        app,
+        request,
+        "delta",
+        Some(HarnessRunStatus::Running),
+        Some(response.content.clone()),
+        None,
+        None,
+    );
+    let response_chars = response.content.chars().count();
+    Ok(ProviderRunnerOutput {
+        activities: provider_activities_for_response(Vec::new(), &response.content),
+        context_usage: Some(ProviderContextUsage {
+            input_tokens: response.input_tokens,
+            output_tokens: response.output_tokens,
+            total_tokens: response
+                .input_tokens
+                .zip(response.output_tokens)
+                .map(|(input, output)| input + output),
+            model_context_window: discovered.context_window_tokens,
+            ..ProviderContextUsage::default()
+        }),
+        billed_usage: None,
+        rate_limits: Vec::new(),
+        response: response.content,
+        resume_cursor: None,
+        retry_count: 0,
+        resumed: false,
+        output_summary: Some(provider_output_summary(
+            "ollama-api",
+            "completed",
+            None,
+            response_chars,
+        )),
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -18481,6 +18701,7 @@ fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
         ProviderExecutionKind::ClaudeCode => ProviderAdapterKind::AnthropicClaude,
         ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
         ProviderExecutionKind::AcpCli => ProviderAdapterKind::KimiAcp,
+        ProviderExecutionKind::OllamaApi => ProviderAdapterKind::Ollama,
         ProviderExecutionKind::ReadinessOnly => ProviderAdapterKind::ReadinessOnly,
     };
     ProviderAdapterDescriptor {
@@ -21495,6 +21716,7 @@ pub fn run() {
             debug_send,
             debug_start,
             debug_stop,
+            discover_ollama_models_command,
             delete_session,
             delete_workspace_path,
             export_diagnostics,

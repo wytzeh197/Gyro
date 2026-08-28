@@ -522,13 +522,19 @@ check(
   `Site text must be at least 13px; found ${undersizedPixelFonts.join(", ")}`,
 );
 
+/*
+ * 16:10, not 16:9. The app puts a sidebar, a conversation and an environment
+ * panel side by side, and a 16:9 crop of that either loses a column or pads
+ * the thread with empty space. These numbers match the capture scenes in
+ * scripts/capture-site-screenshots.mjs; change them together.
+ */
 const screenshotSpecs = [
-  ["site/assets/screenshots/hero-600.webp", 600, 338],
-  ["site/assets/screenshots/hero-1200.webp", 1200, 675],
-  ["site/assets/screenshots/hero-2400.webp", 2400, 1350],
-  ["site/assets/screenshots/hero-light-600.webp", 600, 338],
-  ["site/assets/screenshots/hero-light-1200.webp", 1200, 675],
-  ["site/assets/screenshots/hero-light-2400.webp", 2400, 1350],
+  ["site/assets/screenshots/hero-600.webp", 600, 375],
+  ["site/assets/screenshots/hero-1200.webp", 1200, 750],
+  ["site/assets/screenshots/hero-2400.webp", 2400, 1500],
+  ["site/assets/screenshots/hero-light-600.webp", 600, 375],
+  ["site/assets/screenshots/hero-light-1200.webp", 1200, 750],
+  ["site/assets/screenshots/hero-light-2400.webp", 2400, 1500],
 ];
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));

@@ -92,6 +92,15 @@ instead of pretending to start. Provider credentials stay outside Gyro in
 provider CLIs, SDKs, environment variables, Keychain references, or
 provider-owned files.
 
+Ollama is the exception to the CLI/ACP adapter family: Gyro talks directly to
+its loopback HTTP API and keeps conversation continuity in the local session
+log instead of storing an Ollama session cursor. The default endpoint is
+`http://localhost:11434/api`; URL validation permits only loopback HTTP hosts,
+does not follow redirects, and rejects URL credentials. Model discovery stays
+ephemeral. Models that advertise native function calling receive the desktop
+capability broker and approval policy; unverified models are chat-only.
+Attachments are rejected for this provider in V1.
+
 Provider diagnostics are redacted and metadata-only: provider id, model id,
 timing, retry count, resumed/not-resumed state, timeout/failure reason, and
 sanitized output summary. The diagnostics export command bundles config summary,

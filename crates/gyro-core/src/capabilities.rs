@@ -783,7 +783,7 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
     let available = matches!(
         provider_id,
-        "openai" | "anthropic" | "kimi" | "xai" | "gemini"
+        "openai" | "anthropic" | "kimi" | "xai" | "gemini" | "ollama"
     );
     ProviderCapabilitySupport {
         provider_id: provider_id.into(),
@@ -970,7 +970,7 @@ mod tests {
     fn every_chat_capable_provider_can_receive_tools() {
         // Providers that run a chat adapter get the tools; readiness-only
         // providers have no runner to attach an MCP server to.
-        for provider_id in ["openai", "anthropic", "kimi", "xai", "gemini"] {
+        for provider_id in ["openai", "anthropic", "kimi", "xai", "gemini", "ollama"] {
             let support = provider_capability_support(provider_id);
             assert!(support.available, "{provider_id} should support Gyro tools");
             assert_eq!(support.capabilities.len(), CAPABILITY_DESCRIPTORS.len());

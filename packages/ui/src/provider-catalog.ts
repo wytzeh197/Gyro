@@ -317,6 +317,31 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     effort: "medium",
     allowedTools: ["files", "terminal", "diff"],
   },
+  {
+    id: "ollama",
+    displayName: "Ollama",
+    apiKeyRef: "local-runtime:ollama",
+    enabled: false,
+    authMode: "sdk",
+    authStatus: "not-connected",
+    baseUrl: "http://localhost:11434/api",
+    // The installed-model list is supplied by the local runtime rather than
+    // shipping a catalog that could advertise a model this Mac does not have.
+    defaultModelId: "",
+    selectedModelId: "",
+    capabilities: {
+      executionKind: "ollama-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "standard",
+    },
+    models: [],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
 ];
 
 export function isProviderId(value: unknown): value is ProviderId {

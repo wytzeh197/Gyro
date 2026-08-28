@@ -7,6 +7,7 @@ pub enum ProviderExecutionKind {
     ClaudeCode,
     KimiAcp,
     AcpCli,
+    OllamaApi,
     ReadinessOnly,
 }
 
@@ -18,6 +19,7 @@ pub enum ProviderHealthKind {
     Environment,
     CursorCli,
     OpenCodeCli,
+    OllamaApi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,6 +95,17 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_usage: false,
     },
     ProviderDescriptor {
+        id: "ollama",
+        execution_kind: ProviderExecutionKind::OllamaApi,
+        health_kind: ProviderHealthKind::OllamaApi,
+        runner: "ollama-api",
+        auth_owner: "local-ollama-runtime",
+        supports_approvals: true,
+        supports_images: false,
+        supports_resume: true,
+        supports_usage: false,
+    },
+    ProviderDescriptor {
         id: "cursor",
         execution_kind: ProviderExecutionKind::ReadinessOnly,
         health_kind: ProviderHealthKind::CursorCli,
@@ -140,6 +153,7 @@ mod tests {
         assert!(provider_is_executable("kimi"));
         assert!(provider_is_executable("xai"));
         assert!(provider_is_executable("gemini"));
+        assert!(provider_is_executable("ollama"));
         assert!(!provider_is_executable("cursor"));
         assert!(!provider_is_executable("opencode"));
         assert_eq!(

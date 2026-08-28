@@ -15,7 +15,9 @@
 
 type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 
-const scene = new URLSearchParams(location.search).get("scene") ?? "chat";
+const parameters = new URLSearchParams(location.search);
+const scene = parameters.get("scene") ?? "chat";
+const theme = parameters.get("theme") === "light" ? "light" : "dark";
 const WORKSPACE = "/Users/dev/Projects/aurora";
 const SESSION_ID = "ses_capture_1";
 const NOW = "2026-07-25T09:41:00.000Z";
@@ -156,7 +158,7 @@ const config = {
       apiKeyRef: "cli",
       enabled: true,
       authMode: "cli",
-      authStatus: "ready",
+      authStatus: "connected",
       defaultModelId: "claude-opus-5",
       selectedModelId: "claude-opus-5",
       selectedReasoningEffort: "high",
@@ -180,7 +182,7 @@ const config = {
       apiKeyRef: "cli",
       enabled: true,
       authMode: "cli",
-      authStatus: "ready",
+      authStatus: "connected",
       defaultModelId: "gpt-5.6",
       models: [{ id: "gpt-5.6", displayName: "GPT-5.6" }],
       capabilities: {
@@ -644,4 +646,9 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
 });
 
 document.documentElement.dataset.captureScene = scene;
-localStorage.setItem("gyro.theme", "dark");
+/*
+ * The harness owns the theme so a scene is reproducible no matter what the
+ * profile carries. Dark is the default because most scenes are shot dark; the
+ * light hero passes ?theme=light.
+ */
+localStorage.setItem("gyro.theme", theme);

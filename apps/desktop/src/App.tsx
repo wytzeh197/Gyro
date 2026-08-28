@@ -481,6 +481,17 @@ type ProviderUsageSnapshot = {
   windows: ProviderUsageState["windows"];
   fetchedAt: string;
 };
+
+type OllamaDiscovery = {
+  baseUrl: string;
+  models: Array<{
+    id: string;
+    displayName: string;
+    description: string;
+    contextWindowTokens?: number;
+    supportsTools: boolean;
+  }>;
+};
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
 const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
 const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
@@ -2896,7 +2907,48 @@ export function App() {
     }
     try {
       const nextConfig = await invoke<GyroConfig>("load_config");
-      setConfig(withCouncilConfig(nextConfig));
+      let resolvedConfig = withCouncilConfig(nextConfig);
+      const ollama = providersForConfig(resolvedConfig).find(
+        (provider) => provider.id === "ollama",
+      );
+      if (ollama) {
+        const discovery = await invoke<OllamaDiscovery>(
+          "discover_ollama_models_command",
+          { baseUrl: ollama.baseUrl },
+        ).catch(() => undefined);
+        if (discovery) {
+          const models = discovery.models.map((model) => ({
+            id: model.id,
+            displayName: model.displayName,
+            description: model.description,
+            contextWindowTokens: model.contextWindowTokens,
+            supportsTools: model.supportsTools,
+          }));
+          resolvedConfig = {
+            ...resolvedConfig,
+            modelProviders: providersForConfig(resolvedConfig).map((provider) =>
+              provider.id === "ollama"
+                ? {
+                    ...provider,
+                    baseUrl: discovery.baseUrl,
+                    models,
+                    defaultModelId:
+                      provider.defaultModelId &&
+                      models.some((model) => model.id === provider.defaultModelId)
+                        ? provider.defaultModelId
+                        : models[0]?.id,
+                    selectedModelId:
+                      provider.selectedModelId &&
+                      models.some((model) => model.id === provider.selectedModelId)
+                        ? provider.selectedModelId
+                        : models[0]?.id,
+                  }
+                : provider,
+            ),
+          };
+        }
+      }
+      setConfig(resolvedConfig);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
     } catch {
       setConfig(withCouncilConfig(EMPTY_CONFIG));
@@ -6902,6 +6954,50 @@ export function App() {
           // the sign-in flow outright instead of believing this answer and
           // sending someone back into the same failure.
           if (!forceLogin && result.connectionStatus === "connected") {
+            if (providerId === "ollama") {
+              const discovery = await invoke<OllamaDiscovery>(
+                "discover_ollama_models_command",
+                { baseUrl: provider?.baseUrl },
+              ).catch(() => undefined);
+              if (discovery) {
+                const models = discovery.models.map((model) => ({
+                  id: model.id,
+                  displayName: model.displayName,
+                  description: model.description,
+                  contextWindowTokens: model.contextWindowTokens,
+                  supportsTools: model.supportsTools,
+                }));
+                const currentConfig = configRef.current;
+                const nextConfig = {
+                  ...currentConfig,
+                  modelProviders: providersForConfig(currentConfig).map(
+                    (candidate) =>
+                      candidate.id === "ollama"
+                        ? {
+                            ...candidate,
+                            baseUrl: discovery.baseUrl,
+                            models,
+                            defaultModelId:
+                              candidate.defaultModelId &&
+                              models.some(
+                                (model) => model.id === candidate.defaultModelId,
+                              )
+                                ? candidate.defaultModelId
+                                : models[0]?.id,
+                            selectedModelId:
+                              candidate.selectedModelId &&
+                              models.some(
+                                (model) => model.id === candidate.selectedModelId,
+                              )
+                                ? candidate.selectedModelId
+                                : models[0]?.id,
+                          }
+                        : candidate,
+                  ),
+                };
+                await persistConfig(nextConfig, { notifySuccess: false });
+              }
+            }
             notify(
               "provider",
               providerId === "openai"
@@ -6934,6 +7030,15 @@ export function App() {
           "approval",
           "Provider env setup needed",
           `${provider.displayName} auth stays in ${provider.apiKeyRef}; configure it outside Gyro and test again.`,
+        );
+        return false;
+      }
+
+      if (providerId === "ollama") {
+        notify(
+          "approval",
+          "Ollama needs setup",
+          "Install and start Ollama locally, then run `ollama pull <model>` before refreshing Gyro.",
         );
         return false;
       }
