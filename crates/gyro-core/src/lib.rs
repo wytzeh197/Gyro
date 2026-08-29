@@ -5,6 +5,7 @@ pub mod cli_path;
 pub mod cli_updates;
 pub mod config;
 pub mod council;
+pub mod credentials;
 pub mod diff;
 pub mod doctor;
 pub mod execution;
@@ -66,6 +67,10 @@ pub use council::{
     CouncilSeat, CouncilSeatAnswer, CouncilSeatStatus, CouncilSynthesis, CouncilToolPolicy,
     CouncilUniqueInsight, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, COUNCIL_SCHEMA_V1,
     DEFAULT_SEAT_TIMEOUT_SECONDS, DEFAULT_SYNTHESIZER_TIMEOUT_SECONDS, SYNTHESIZER_SYSTEM_PROMPT,
+};
+pub use credentials::{
+    credential_store_paths, env_name_is_credential, path_is_credential_store,
+    relative_path_is_in_credential_store, CredentialPolicy,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{

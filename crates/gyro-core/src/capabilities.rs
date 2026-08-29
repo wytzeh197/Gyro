@@ -870,6 +870,10 @@ pub fn capability_path_is_sensitive(path: &str) -> bool {
         || file_name.ends_with(".key")
         || normalized.starts_with(".git/")
         || normalized.contains("/.git/")
+        // Covers credential stores whose file names give nothing away, which
+        // become ordinary relative paths when the workspace is the home
+        // directory. See `credentials`.
+        || crate::credentials::relative_path_is_in_credential_store(&normalized)
 }
 
 pub fn sanitize_capability_summary(value: &str) -> String {
@@ -1059,6 +1063,8 @@ mod tests {
             "src/main.rs"
         );
         assert!(capability_path_is_sensitive(".env.local"));
+        assert!(capability_path_is_sensitive(".config/gh/hosts.yml"));
+        assert!(capability_path_is_sensitive(".ssh/config"));
         assert!(capability_path_is_sensitive("config/private.pem"));
         assert!(!capability_path_is_sensitive("src/main.rs"));
     }

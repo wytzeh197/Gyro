@@ -102,6 +102,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MutableRefObject,
   type KeyboardEvent as ReactKeyboardEvent,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
@@ -261,6 +262,14 @@ import {
   isUserSelectedWorkspacePath,
   resolveChatGridDropSlot,
 } from "./workbench-state";
+import {
+  CHAT_COMPANION_DEFAULT_WIDTH,
+  chatCompanionTabIds,
+  chatCompanionTabLabels,
+  clampChatCompanionWidth,
+  isChatCompanionTabId,
+} from "./chat-companion";
+import type { ChatCompanionTabId } from "./chat-companion";
 import {
   preferredCleanMachineConnectProvider,
   resolveCleanMachinePath,
@@ -1765,14 +1774,12 @@ export function AppChrome({
               onToggleSourceControlFile={onToggleSourceControlFile}
               onDiscardSourceControlFile={onDiscardSourceControlFile}
               onToggleSidebar={() => setIsSidebarHidden(true)}
-              onUpdateAction={onUpdateAction}
               pinnedSessionIds={pinnedSessionIds}
               openChatSessionIds={openChatSessionIds}
               savedProjects={savedProjects}
               selectedTerminalPaneId={selectedTerminalPaneId}
               sessions={sessions}
               terminalPanes={terminalPanes}
-              updateState={showSidebarUpdate ? updateState : undefined}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -1815,6 +1822,12 @@ export function AppChrome({
                     <strong>Settings</strong>
                   </span>
                 </button>
+                {showSidebarUpdate && updateState ? (
+                  <SidebarUpdateControl
+                    onAction={onUpdateAction}
+                    state={updateState}
+                  />
+                ) : null}
                 {isShellOptimizing ? (
                   <span
                     className="gyro-shell-optimizing"
@@ -2165,9 +2178,6 @@ function WorkspacePreparationControl({
   );
 }
 
-/** Roughly the tooltip's own height — enough to pick a side before it paints. */
-const UPDATE_TIP_CLEARANCE = 76;
-
 function SidebarUpdateControl({
   state,
   onAction,
@@ -2175,40 +2185,35 @@ function SidebarUpdateControl({
   state: UpdateState;
   onAction?: (state: UpdateState) => void;
 }) {
-  const [placement, setPlacement] = useState<"above" | "below">("below");
-  const controlRef = useRef<HTMLDivElement>(null);
+  const [isReleaseCardDismissed, setIsReleaseCardDismissed] = useState(false);
   const tipId = useId();
   const isBusy =
     state.status === "downloading" || state.status === "installing";
-  const label = updateSidebarLabel(state);
+  const actionLabel = updateSidebarLabel(state);
   const tag = updateVersionTag(state);
   const size = updateSizeLabel(state);
+  const buttonLabel =
+    state.status === "downloading"
+      ? `Updating ${state.progressPercent ?? 0}%`
+      : state.status === "ready"
+        ? "Restart"
+        : state.status === "installing"
+          ? "Installing"
+          : state.status === "failed"
+            ? "Retry"
+            : "Update";
+  const showReleaseCard = state.status === "ready" && !isReleaseCardDismissed;
 
-  /* The button lives in the titlebar, so the tip drops down unless the window
-     is too short for it to land on screen. */
-  const measurePlacement = useCallback(() => {
-    const rect = controlRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const roomBelow = window.innerHeight - rect.bottom;
-    setPlacement(
-      roomBelow < UPDATE_TIP_CLEARANCE && rect.top > UPDATE_TIP_CLEARANCE
-        ? "above"
-        : "below",
-    );
-  }, []);
+  useEffect(() => {
+    setIsReleaseCardDismissed(false);
+  }, [state.nextVersion, state.status]);
 
   return (
-    <div
-      className="gyro-sidebar-update is-windowbar"
-      data-tip-placement={placement}
-      onFocus={measurePlacement}
-      onPointerEnter={measurePlacement}
-      ref={controlRef}
-    >
+    <div className="gyro-sidebar-update" data-status={state.status}>
       <button
         aria-busy={isBusy}
         aria-describedby={tipId}
-        aria-label={label}
+        aria-label={actionLabel}
         className="gyro-sidebar-update-button"
         data-status={state.status}
         disabled={isBusy}
@@ -2216,22 +2221,55 @@ function SidebarUpdateControl({
         type="button"
       >
         {state.status === "downloading" ? (
-          <span className="gyro-sidebar-update-percent">
-            {state.progressPercent ?? 0}%
-          </span>
+          <RefreshCw className="is-spinning" size={13} />
         ) : state.status === "ready" || state.status === "installing" ? (
           <RefreshCw
             className={state.status === "installing" ? "is-spinning" : ""}
-            size={11}
+            size={13}
           />
         ) : (
-          <Download size={11} />
+          <Download size={13} />
         )}
+        <span>{buttonLabel}</span>
       </button>
       <div className="gyro-sidebar-update-tip" id={tipId} role="tooltip">
-        <strong>{tag ?? label}</strong>
+        <strong>{tag ?? actionLabel}</strong>
         <span>{size}</span>
       </div>
+      {showReleaseCard ? (
+        <section
+          aria-label="Update ready"
+          className="gyro-update-release-card"
+          role="status"
+        >
+          <button
+            aria-label="Dismiss update ready card"
+            className="gyro-update-release-card-dismiss"
+            onClick={() => setIsReleaseCardDismissed(true)}
+            type="button"
+          >
+            <X size={14} />
+          </button>
+          <span className="gyro-update-release-mark" aria-hidden="true">
+            <img alt="" className="is-light" src={gyroLogoTransparentDark} />
+            <img alt="" className="is-dark" src={gyroLogoTransparentLight} />
+          </span>
+          <div>
+            <span>{tag ? `Ready · ${tag}` : "Update ready"}</span>
+            <strong>Restart to finish updating Gyro</strong>
+            <small>
+              {size ?? "The update has downloaded and is ready to install."}
+            </small>
+          </div>
+          <button
+            className="gyro-update-release-card-action"
+            onClick={() => onAction?.(state)}
+            type="button"
+          >
+            Restart now
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -2834,8 +2872,6 @@ function WorkspaceSidebarContent({
   onToggleChatsCollapsed,
   onToggleSidebar,
   canHideSidebar = true,
-  updateState,
-  onUpdateAction,
   workspacePreparation,
   isWorkspacePreparationOpen,
   onToggleWorkspacePreparation,
@@ -2944,8 +2980,6 @@ function WorkspaceSidebarContent({
   onToggleSidebar: () => void;
   /** When false, the hide control is omitted (Workspace code layout). */
   canHideSidebar?: boolean;
-  updateState?: UpdateState;
-  onUpdateAction?: (state: UpdateState) => void;
   workspacePreparation?: WorkspacePreparationProgress;
   isWorkspacePreparationOpen: boolean;
   onToggleWorkspacePreparation: () => void;
@@ -3022,6 +3056,18 @@ function WorkspaceSidebarContent({
     discoveredProjectGroups,
     projectOrder,
   );
+  const initializedProjectIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const projectKeys = new Set(projectGroups.map((project) => project.key));
+    const newlyDiscovered = [...projectKeys].filter(
+      (key) => !initializedProjectIdsRef.current.has(key),
+    );
+    initializedProjectIdsRef.current = projectKeys;
+    if (!newlyDiscovered.length) return;
+    setCollapsedProjectIds((current) => [
+      ...new Set([...current, ...newlyDiscovered]),
+    ]);
+  }, [projectGroups]);
   const [expandedWorkspaceDirectories, setExpandedWorkspaceDirectories] =
     useState<Set<string>>(() => new Set());
   const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
@@ -3434,12 +3480,6 @@ function WorkspaceSidebarContent({
             onToggle={onToggleWorkspacePreparation}
             progress={workspacePreparation}
           />
-          {updateState ? (
-            <SidebarUpdateControl
-              onAction={onUpdateAction}
-              state={updateState}
-            />
-          ) : null}
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
@@ -4977,6 +5017,7 @@ function SidebarProjectRow({
         "gyro-sidebar-project-row",
         draggable ? "is-draggable" : "",
         isDragging ? "is-dragging" : "",
+        onRemove ? "has-remove" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -4992,21 +5033,18 @@ function SidebarProjectRow({
     >
       <button
         aria-expanded={isCollapsed === undefined ? undefined : !isCollapsed}
+        aria-label={
+          isCollapsed === undefined
+            ? undefined
+            : `${isCollapsed ? "Expand" : "Collapse"} ${label}`
+        }
         className="gyro-sidebar-project-toggle"
         onClick={onClick}
         type="button"
       >
         <Icon size={15} />
         <span>{label}</span>
-        {isCollapsed === undefined ? (
-          meta ? (
-            <small>{meta}</small>
-          ) : null
-        ) : isCollapsed ? (
-          <ChevronRight className="gyro-sidebar-collapse-icon" size={13} />
-        ) : (
-          <ChevronDown className="gyro-sidebar-collapse-icon" size={13} />
-        )}
+        {isCollapsed === undefined ? meta ? <small>{meta}</small> : null : null}
       </button>
       {onRemove ? (
         <button
@@ -6460,6 +6498,29 @@ function MissionWorkersBoard({
   );
 }
 
+export type SideChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+};
+
+/**
+ * Everything the Side chat companion needs. The transient session behind it
+ * lives in the app, which is also what deletes it when the tab closes.
+ */
+export type SideChatState = {
+  sessionId?: string;
+  messages: SideChatMessage[];
+  /** Partial assistant text while a reply is still arriving. */
+  streamingMessage?: string;
+  isSending?: boolean;
+  error?: string;
+  /** Inherited from the chat this dock is attached to. */
+  modelLabel?: string;
+  /** Absent when no provider is ready, which disables the composer. */
+  onSend?: (message: string) => void;
+};
+
 type ChatSurfaceProps = {
   events: SessionEvent[];
   draft?: string;
@@ -6537,6 +6598,9 @@ type ChatSurfaceProps = {
     detail: string;
     sessionCount: number;
   }>;
+  /** Workspace tree rendered in the chat companion Files tab. */
+  files?: WorkspaceFile[];
+  onOpenCompanionFile?: (path: string) => void;
   branchName?: string;
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
@@ -6562,6 +6626,24 @@ type ChatSurfaceProps = {
   isTiled?: boolean;
   maxDraftLength?: number;
   activeChatPanel?: ChatSidePanelId;
+  /**
+   * Companion tabs this chat has open, in strip order. The active one comes
+   * from `activeChatPanel`, so a chat with tabs open but no active one shows
+   * the transcript alone until the dock is reopened.
+   */
+  companionTabs?: ChatCompanionTabId[];
+  onOpenCompanionTab?: (tab: ChatCompanionTabId) => void;
+  onCloseCompanionTab?: (tab: ChatCompanionTabId) => void;
+  onCloseCompanionDock?: () => void;
+  onReopenCompanionDock?: () => void;
+  companionWidth?: number;
+  onCompanionWidthChange?: (width: number) => void;
+  /**
+   * The transient Side chat companion. It inherits this chat's workspace,
+   * branch, provider and permission policy but not its transcript, and its
+   * session is destroyed when the tab closes.
+   */
+  sideChat?: SideChatState;
   planEditorRequest?: {
     kind: "goal" | "item";
     token: number;
@@ -6668,6 +6750,27 @@ const chatStartSuggestions: Array<{
   },
 ];
 
+const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
+  review: GitPullRequest,
+  terminal: Terminal,
+  browser: Globe2,
+  files: Folder,
+  "side-chat": MessageSquare,
+};
+
+/** Strip order for the "+" launcher; open tabs keep the order they were added. */
+const chatCompanionTabs = chatCompanionTabIds.map((id) => ({
+  id,
+  label: chatCompanionTabLabels[id],
+  icon: chatCompanionTabIcons[id],
+}));
+
+function isChatCompanionTab(
+  panel?: ChatSidePanelId,
+): panel is ChatCompanionTabId {
+  return isChatCompanionTabId(panel);
+}
+
 function ChatStartSuggestions({
   onPick,
 }: {
@@ -6745,6 +6848,8 @@ export function ChatSurface({
   attachments = [],
   queuedMessages = [],
   savedProjects = [],
+  files = [],
+  onOpenCompanionFile,
   branchName,
   branchCatalog,
   worktreeName,
@@ -6752,6 +6857,14 @@ export function ChatSurface({
   workspaceMode = "local",
   showOnboardingSteps = false,
   activeChatPanel,
+  companionTabs,
+  onOpenCompanionTab,
+  onCloseCompanionTab,
+  onCloseCompanionDock,
+  onReopenCompanionDock,
+  companionWidth,
+  onCompanionWidthChange,
+  sideChat,
   planEditorRequest,
   isEnvironmentRailOpen,
   isToolPanelOpen,
@@ -7200,6 +7313,7 @@ export function ChatSurface({
             key={turn.id}
             onLoadChangeDiff={onLoadChangeDiff}
             onOpenChanges={() => onOpenToolPanel?.("diff")}
+            onUndoChanges={railDiffTools?.onUndo}
             onCouncilAction={onCouncilAction}
             onMutationApprovalAction={onMutationApprovalAction}
             onProviderApprovalAction={onProviderApprovalAction}
@@ -7244,6 +7358,7 @@ export function ChatSurface({
       onOpenToolPanel,
       onProviderApprovalAction,
       onProviderStatusAction,
+      railDiffTools?.onUndo,
       handlePlanDecision,
       handleArtifactPrompt,
       browserPreview?.latestCapture?.path,
@@ -7265,9 +7380,30 @@ export function ChatSurface({
   // back. Closing the plan or browser panel closes the rail outright rather
   // than falling back to the environment panel.
   const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
-  const sidePanel = activeRailPanel ? (
+  const isCompanionPanel = isChatCompanionTab(railPanel);
+  // Hiding the dock leaves the strip intact, so reopening returns to the tab
+  // that was on screen. Closing the last tab is what empties it.
+  const closeCompanion = () => {
+    if (onCloseCompanionDock) {
+      onCloseCompanionDock();
+      return;
+    }
+    if (railPanel === "browser") {
+      onToggleBrowserPanel?.();
+      return;
+    }
+    onToggleEnvironmentRail?.();
+  };
+  const openTabs: ChatCompanionTabId[] =
+    companionTabs && companionTabs.length
+      ? companionTabs
+      : isCompanionPanel
+        ? [railPanel]
+        : [];
+  const legacySidePanel = activeRailPanel ? (
     <ChatSidePanel
-      activePanel={railPanel}
+      activePanel={railPanel === "review" ? "changes" : railPanel}
+      chromeless={isCompanionPanel}
       browserPreview={browserPreview}
       browserNativeHost={browserNativeHost}
       browserOverlayOccluded={browserOverlayOccluded}
@@ -7281,10 +7417,10 @@ export function ChatSurface({
       editorRequest={planEditorRequest}
       onEditorRequestHandled={onPlanEditorRequestHandled}
       onClose={
-        railPanel === "environment"
-          ? onToggleEnvironmentRail
-          : railPanel === "browser"
-            ? onToggleBrowserPanel
+        isCompanionPanel
+          ? closeCompanion
+          : railPanel === "environment"
+            ? onToggleEnvironmentRail
             : onTogglePlanPanel
       }
       onComposerAction={onComposerAction}
@@ -7309,6 +7445,36 @@ export function ChatSurface({
       worktreeName={worktreeName}
     />
   ) : null;
+  const sidePanel = !activeRailPanel ? null : isCompanionPanel ? (
+    <ChatCompanionDock
+      activeTab={railPanel}
+      onClose={closeCompanion}
+      onCloseTab={onCloseCompanionTab}
+      onOpenTab={onOpenCompanionTab ?? onSelectChatPanel}
+      onSelectTab={onSelectChatPanel}
+      onWidthChange={onCompanionWidthChange}
+      openTabs={openTabs}
+      width={companionWidth}
+    >
+      {railPanel === "files" ? (
+        <CompanionFiles
+          files={files}
+          onOpenFile={onOpenCompanionFile}
+          workspacePath={workspacePath}
+        />
+      ) : railPanel === "side-chat" ? (
+        <SideChatPanel
+          branchName={branchName}
+          sideChat={sideChat}
+          workspacePath={workspacePath}
+        />
+      ) : (
+        legacySidePanel
+      )}
+    </ChatCompanionDock>
+  ) : (
+    legacySidePanel
+  );
   const missionHasWorkers = missionWorkers.length > 0;
   if (turns.length === 0 && looseEvents.length === 0) {
     return (
@@ -7598,14 +7764,24 @@ export function ChatSurface({
             </div>
           </div>
           <ChatSurfaceControls
-            activePanel={activeRailPanel}
-            isToolPanelOpen={Boolean(isToolPanelOpen)}
+            activeTab={isCompanionPanel ? railPanel : undefined}
+            isDockOpen={isCompanionPanel}
+            isPlanOpen={activeRailPanel === "plan"}
+            isToolPanelOpen={isToolPanelOpen === true}
             modelFocus={visibleModelFocus}
             onCloseChat={onCloseChat}
-            onToggleToolPanel={onToggleToolPanel}
+            onOpenTab={(tab) =>
+              onOpenCompanionTab
+                ? onOpenCompanionTab(tab)
+                : onSelectChatPanel?.(tab)
+            }
+            onToggleDock={
+              isCompanionPanel ? closeCompanion : onReopenCompanionDock
+            }
             onToggleEnvironmentRail={onToggleEnvironmentRail}
             onTogglePlanPanel={onTogglePlanPanel}
-            onToggleBrowserPanel={onToggleBrowserPanel}
+            onToggleToolPanel={onToggleToolPanel}
+            openTabs={openTabs}
             planItemCount={sessionPlan?.items.length ?? 0}
           />
         </div>
@@ -8269,112 +8445,178 @@ function ModelFocusPeek({
   );
 }
 
+/**
+ * The header's right-hand controls: a launcher for the companion tools, a
+ * show/hide toggle once the dock has tabs, and an overflow menu for the
+ * surfaces that are not companion tabs (the plan checklist, the bottom drawer,
+ * the environment rail).
+ */
 function ChatSurfaceControls({
-  activePanel,
+  activeTab,
+  isDockOpen,
+  isPlanOpen,
   isToolPanelOpen,
   modelFocus,
   onCloseChat,
-  onToggleToolPanel,
+  onOpenTab,
+  onToggleDock,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
-  onToggleBrowserPanel,
+  onToggleToolPanel,
+  openTabs,
   planItemCount,
 }: {
-  activePanel?: ChatSidePanelId;
+  activeTab?: ChatCompanionTabId;
+  isDockOpen: boolean;
+  isPlanOpen: boolean;
   isToolPanelOpen: boolean;
   modelFocus?: ModelFocus;
   onCloseChat?: () => void;
-  onToggleToolPanel?: () => void;
+  onOpenTab?: (tab: ChatCompanionTabId) => void;
+  onToggleDock?: () => void;
   onToggleEnvironmentRail?: () => void;
   onTogglePlanPanel?: () => void;
-  onToggleBrowserPanel?: () => void;
+  onToggleToolPanel?: () => void;
+  openTabs: ChatCompanionTabId[];
   planItemCount: number;
 }) {
+  const [openMenu, setOpenMenu] = useState<"launcher" | "overflow">();
+  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
+    openMenu !== undefined,
+    () => setOpenMenu(undefined),
+  );
   // Peripheral awareness: the surface holding the model's latest work gets a
   // dot, so it can be found without anything moving on its own.
   const drawerHasModelActivity = Boolean(
     modelFocus?.paneTab && !isToolPanelOpen,
   );
+
   return (
-    <div className="gyro-chat-surface-controls" aria-label="Chat surfaces">
-      <button
-        aria-label={
-          isToolPanelOpen ? "Close bottom drawer" : "Open bottom drawer"
-        }
-        aria-pressed={isToolPanelOpen}
-        className={[
-          "gyro-chat-surface-button",
-          isToolPanelOpen ? "is-active" : "",
-          drawerHasModelActivity ? "has-model-activity" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        onClick={onToggleToolPanel}
-        title={
-          drawerHasModelActivity
-            ? `Bottom drawer · model activity in ${modelFocus?.paneTab}`
-            : "Bottom drawer"
-        }
-        type="button"
-      >
-        <PanelBottom size={15} />
-        {drawerHasModelActivity ? (
-          <span aria-hidden="true" className="gyro-model-activity-dot" />
+    <div
+      className="gyro-chat-surface-controls"
+      aria-label="Chat surfaces"
+      ref={menuRef}
+    >
+      {openTabs.length ? (
+        <button
+          aria-label={isDockOpen ? "Hide companion" : "Show companion"}
+          aria-pressed={isDockOpen}
+          className={["gyro-chat-surface-button", isDockOpen ? "is-active" : ""]
+            .filter(Boolean)
+            .join(" ")}
+          onClick={onToggleDock}
+          title={isDockOpen ? "Hide companion" : "Show companion"}
+          type="button"
+        >
+          <PanelRight size={15} />
+        </button>
+      ) : null}
+      <div className="gyro-chat-surface-menu-anchor">
+        <button
+          aria-expanded={openMenu === "launcher"}
+          aria-haspopup="menu"
+          aria-label="Open a companion tool"
+          className="gyro-chat-surface-button"
+          onClick={() =>
+            setOpenMenu((current) =>
+              current === "launcher" ? undefined : "launcher",
+            )
+          }
+          title="Open a companion tool"
+          type="button"
+        >
+          <Plus size={15} />
+        </button>
+        {openMenu === "launcher" ? (
+          <div className="gyro-chat-companion-menu is-header" role="menu">
+            {chatCompanionTabs.map(({ icon: Icon, id, label }) => (
+              <button
+                key={id}
+                onClick={() => {
+                  setOpenMenu(undefined);
+                  onOpenTab?.(id);
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+                {openTabs.includes(id) ? (
+                  <small>{id === activeTab ? "Open" : "In dock"}</small>
+                ) : null}
+              </button>
+            ))}
+          </div>
         ) : null}
-      </button>
-      <button
-        aria-label={
-          activePanel ? "Close right side panel" : "Open right side panel"
-        }
-        aria-pressed={Boolean(activePanel)}
-        className={["gyro-chat-surface-button", activePanel ? "is-active" : ""]
-          .filter(Boolean)
-          .join(" ")}
-        onClick={onToggleEnvironmentRail}
-        title="Right side panel"
-        type="button"
-      >
-        <PanelRight size={15} />
-      </button>
-      <button
-        aria-label={
-          activePanel === "browser" ? "Close browser rail" : "Open browser rail"
-        }
-        aria-pressed={activePanel === "browser"}
-        className={[
-          "gyro-chat-surface-button",
-          activePanel === "browser" ? "is-active" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        onClick={onToggleBrowserPanel}
-        title="Browser"
-        type="button"
-      >
-        <Globe2 size={15} />
-      </button>
-      <button
-        aria-label={
-          activePanel === "plan"
-            ? "Close plan checklist"
-            : "Open plan checklist"
-        }
-        aria-pressed={activePanel === "plan"}
-        className={[
-          "gyro-chat-surface-button",
-          activePanel === "plan" ? "is-active" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        onClick={onTogglePlanPanel}
-        title="Plan checklist"
-        type="button"
-      >
-        <ListChecks size={15} />
-        {planItemCount > 0 ? (
-          <span className="gyro-chat-surface-count">{planItemCount}</span>
+      </div>
+      <div className="gyro-chat-surface-menu-anchor">
+        <button
+          aria-expanded={openMenu === "overflow"}
+          aria-haspopup="menu"
+          aria-label="More chat surfaces"
+          className={[
+            "gyro-chat-surface-button",
+            drawerHasModelActivity ? "has-model-activity" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onClick={() =>
+            setOpenMenu((current) =>
+              current === "overflow" ? undefined : "overflow",
+            )
+          }
+          title="More"
+          type="button"
+        >
+          <MoreHorizontal size={15} />
+          {drawerHasModelActivity ? (
+            <span aria-hidden="true" className="gyro-model-activity-dot" />
+          ) : null}
+        </button>
+        {openMenu === "overflow" ? (
+          <div className="gyro-chat-companion-menu is-header" role="menu">
+            <button
+              aria-pressed={isPlanOpen}
+              onClick={() => {
+                setOpenMenu(undefined);
+                onTogglePlanPanel?.();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <ListChecks size={14} />
+              <span>Plan checklist</span>
+              {planItemCount > 0 ? <small>{planItemCount}</small> : null}
+            </button>
+            <button
+              aria-pressed={isToolPanelOpen}
+              onClick={() => {
+                setOpenMenu(undefined);
+                onToggleToolPanel?.();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <PanelBottom size={14} />
+              <span>Bottom drawer</span>
+              {drawerHasModelActivity ? (
+                <small>{modelFocus?.paneTab}</small>
+              ) : null}
+            </button>
+            <button
+              onClick={() => {
+                setOpenMenu(undefined);
+                onToggleEnvironmentRail?.();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <HardDrive size={14} />
+              <span>Environment</span>
+            </button>
+          </div>
         ) : null}
-      </button>
+      </div>
       {onCloseChat ? (
         <button
           aria-label="Close chat"
@@ -8397,6 +8639,7 @@ function ChatSurfaceControls({
 
 function ChatSidePanel({
   activePanel,
+  chromeless = false,
   browserPreview,
   browserNativeHost = false,
   browserOverlayOccluded = false,
@@ -8431,6 +8674,12 @@ function ChatSidePanel({
   workspacePath,
 }: {
   activePanel: ChatSidePanelId;
+  /**
+   * Rendered inside the companion dock, which already supplies the tab strip
+   * and the close control. The panel drops its own title row so the two do not
+   * stack, and leaves resizing to the dock.
+   */
+  chromeless?: boolean;
   browserPreview?: BrowserPreview;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
@@ -8580,13 +8829,18 @@ function ChatSidePanel({
 
   if (activePanel === "changes") {
     return (
-      <aside className="gyro-environment-rail is-tool" aria-label="Changes">
-        <ChatRailToolHeader
-          icon={<GitPullRequest aria-hidden="true" size={15} />}
-          detail={changesLabel}
-          onBack={backToLauncher}
-          title="Changes"
-        />
+      <aside
+        className={`gyro-environment-rail is-tool${chromeless ? " is-chromeless" : ""}`}
+        aria-label="Changes"
+      >
+        {chromeless ? null : (
+          <ChatRailToolHeader
+            icon={<GitPullRequest aria-hidden="true" size={15} />}
+            detail={changesLabel}
+            onBack={backToLauncher}
+            title="Changes"
+          />
+        )}
         <DiffReviewSurface
           compact
           diffReview={diffReview}
@@ -8607,13 +8861,18 @@ function ChatSidePanel({
 
   if (activePanel === "terminal" && railTerminalTools) {
     return (
-      <aside className="gyro-environment-rail is-tool" aria-label="Terminal">
-        <ChatRailToolHeader
-          icon={<Terminal aria-hidden="true" size={15} />}
-          detail={terminalLabel}
-          onBack={backToLauncher}
-          title="Terminal"
-        />
+      <aside
+        className={`gyro-environment-rail is-tool${chromeless ? " is-chromeless" : ""}`}
+        aria-label="Terminal"
+      >
+        {chromeless ? null : (
+          <ChatRailToolHeader
+            icon={<Terminal aria-hidden="true" size={15} />}
+            detail={terminalLabel}
+            onBack={backToLauncher}
+            title="Terminal"
+          />
+        )}
         <TerminalPanel
           {...railTerminalTools}
           terminalPanes={terminalPanes}
@@ -8626,6 +8885,7 @@ function ChatSidePanel({
   if (activePanel === "browser") {
     return (
       <ResizableBrowserRail
+        chromeless={chromeless}
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded}
         browserPreview={browserPreview}
@@ -9090,6 +9350,409 @@ function ChatSidePanel({
         </details>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * The chat companion: one bordered column beside the transcript with a strip of
+ * tool tabs across its top. It owns no persisted state — the caller holds the
+ * strip and the active tab, so the dock follows whichever chat pane has focus —
+ * and closing it returns the chat to an uninterrupted canvas without discarding
+ * the tabs that were open.
+ */
+function ChatCompanionDock({
+  activeTab,
+  children,
+  onClose,
+  onCloseTab,
+  onOpenTab,
+  onSelectTab,
+  onWidthChange,
+  openTabs,
+  width,
+}: {
+  activeTab: ChatCompanionTabId;
+  children: ReactNode;
+  onClose: () => void;
+  onCloseTab?: (tab: ChatCompanionTabId) => void;
+  onOpenTab?: (tab: ChatCompanionTabId) => void;
+  onSelectTab?: (panel: ChatSidePanelId) => void;
+  onWidthChange?: (width: number) => void;
+  openTabs: ChatCompanionTabId[];
+  width?: number;
+}) {
+  const [isLauncherOpen, setIsLauncherOpen] = useState(false);
+  const launcherRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isLauncherOpen,
+    () => setIsLauncherOpen(false),
+  );
+  const dockRef = useRef<HTMLElement | null>(null);
+  const { beginResize, isResizing, resizeWidth } = useCompanionResize(
+    dockRef,
+    width,
+    onWidthChange,
+  );
+  const activeLabel = chatCompanionTabLabels[activeTab];
+  // Everything not already in the strip; when all five are open the launcher
+  // has nothing left to add, so the "+" is dropped rather than shown inert.
+  const addableTabs = chatCompanionTabs.filter(
+    (tab) => !openTabs.includes(tab.id),
+  );
+
+  return (
+    <aside
+      aria-label="Chat companion"
+      className={[
+        "gyro-chat-companion",
+        isResizing ? "is-resizing" : "",
+        `is-${activeTab}`,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      ref={dockRef}
+      style={{ width: `${resizeWidth}px` }}
+    >
+      <button
+        aria-label="Resize companion"
+        className="gyro-chat-companion-resizer"
+        onPointerDown={beginResize}
+        tabIndex={-1}
+        type="button"
+      />
+      <header className="gyro-chat-companion-tabs">
+        <div className="gyro-chat-companion-tab-list" role="tablist">
+          {openTabs.map((id) => {
+            const Icon = chatCompanionTabIcons[id];
+            const isActive = id === activeTab;
+            return (
+              <span
+                className={[
+                  "gyro-chat-companion-tab",
+                  isActive ? "is-active" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                key={id}
+              >
+                <button
+                  aria-selected={isActive}
+                  onClick={() => onSelectTab?.(id)}
+                  role="tab"
+                  title={chatCompanionTabLabels[id]}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={14} />
+                  <span>{chatCompanionTabLabels[id]}</span>
+                </button>
+                {onCloseTab ? (
+                  <button
+                    aria-label={`Close ${chatCompanionTabLabels[id]}`}
+                    className="gyro-chat-companion-tab-close"
+                    onClick={() => onCloseTab(id)}
+                    title={`Close ${chatCompanionTabLabels[id]}`}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={11} />
+                  </button>
+                ) : null}
+              </span>
+            );
+          })}
+        </div>
+        {addableTabs.length ? (
+          <div className="gyro-chat-companion-add" ref={launcherRef}>
+            <button
+              aria-expanded={isLauncherOpen}
+              aria-haspopup="menu"
+              aria-label="Add companion tab"
+              onClick={() => setIsLauncherOpen((open) => !open)}
+              title="Add companion tab"
+              type="button"
+            >
+              <Plus size={15} />
+            </button>
+            {isLauncherOpen ? (
+              <div className="gyro-chat-companion-menu" role="menu">
+                {addableTabs.map(({ icon: Icon, id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => {
+                      onOpenTab?.(id);
+                      setIsLauncherOpen(false);
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Icon size={14} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <button
+          aria-label="Hide companion"
+          className="gyro-chat-companion-close"
+          onClick={onClose}
+          title="Hide companion"
+          type="button"
+        >
+          <PanelRight size={14} />
+        </button>
+      </header>
+      <section
+        aria-label={activeLabel}
+        className="gyro-chat-companion-content"
+        role="tabpanel"
+      >
+        {children}
+      </section>
+    </aside>
+  );
+}
+
+/**
+ * Drag the dock's left edge to trade width with the transcript. The width is
+ * lifted to the caller so it survives moving between chat panes, but the drag
+ * itself stays local so a pointer move does not re-render the whole chat.
+ */
+function useCompanionResize(
+  dockRef: MutableRefObject<HTMLElement | null>,
+  width: number | undefined,
+  onWidthChange?: (width: number) => void,
+) {
+  const [draftWidth, setDraftWidth] = useState<number>();
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+  const committedWidth = clampChatCompanionWidth(
+    width ?? CHAT_COMPANION_DEFAULT_WIDTH,
+  );
+
+  const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const dock = dockRef.current;
+    if (!dock) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: dock.getBoundingClientRect().width,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const clamp = (value: number) =>
+      clampChatCompanionWidth(
+        value,
+        dockRef.current?.parentElement?.getBoundingClientRect().width,
+      );
+    const move = (event: PointerEvent) => {
+      const resize = resizeRef.current;
+      if (!resize || event.pointerId !== resize.pointerId) return;
+      // The dock is on the right, so dragging left widens it.
+      setDraftWidth(clamp(resize.startWidth + (resize.startX - event.clientX)));
+    };
+    const finish = (event: PointerEvent) => {
+      const resize = resizeRef.current;
+      if (!resize || event.pointerId !== resize.pointerId) return;
+      const next = clamp(resize.startWidth + (resize.startX - event.clientX));
+      resizeRef.current = null;
+      setIsResizing(false);
+      setDraftWidth(undefined);
+      onWidthChange?.(next);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [dockRef, isResizing, onWidthChange]);
+
+  return {
+    beginResize,
+    isResizing,
+    resizeWidth: draftWidth ?? committedWidth,
+  };
+}
+
+/** The workspace tree, docked. Picking a file opens it in the editor. */
+function CompanionFiles({
+  files,
+  onOpenFile,
+  workspacePath,
+}: {
+  files: WorkspaceFile[];
+  onOpenFile?: (path: string) => void;
+  workspacePath?: string;
+}) {
+  if (!workspacePath) {
+    return (
+      <div className="gyro-companion-empty">
+        <Folder size={22} />
+        <strong>No project selected</strong>
+        <span>Open a folder to browse its files here.</span>
+      </div>
+    );
+  }
+  if (!files.length) {
+    return (
+      <div className="gyro-companion-empty">
+        <Folder size={22} />
+        <strong>Nothing to show yet</strong>
+        <span>{workspaceName(workspacePath)} has no readable files.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="gyro-companion-files">
+      <FileTree files={files} onSelectFile={(path) => onOpenFile?.(path)} />
+    </div>
+  );
+}
+
+/**
+ * The Side chat companion: a full composer and transcript for a throwaway
+ * question, kept beside the main chat rather than inside it.
+ *
+ * It runs against a session of its own so the model answers with the same
+ * workspace, branch and permissions as the chat it sits next to, and reads none
+ * of that chat's transcript. That session is transient — it never reaches the
+ * sidebar or history, and closing the tab deletes it.
+ */
+function SideChatPanel({
+  branchName,
+  sideChat,
+  workspacePath,
+}: {
+  branchName?: string;
+  sideChat?: SideChatState;
+  workspacePath?: string;
+}) {
+  const [draft, setDraft] = useState("");
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const messages = sideChat?.messages ?? [];
+  const isSending = sideChat?.isSending === true;
+  const canSend = Boolean(sideChat?.onSend) && draft.trim().length > 0;
+
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    transcript.scrollTop = transcript.scrollHeight;
+  }, [messages.length, sideChat?.streamingMessage]);
+
+  const send = () => {
+    const message = draft.trim();
+    if (!message || !sideChat?.onSend) return;
+    sideChat.onSend(message);
+    setDraft("");
+  };
+
+  return (
+    <div className="gyro-side-chat">
+      <div className="gyro-side-chat-transcript" ref={transcriptRef}>
+        {messages.length === 0 && !sideChat?.streamingMessage ? (
+          <div className="gyro-companion-empty">
+            <MessageSquare size={22} />
+            <strong>Side chat</strong>
+            <span>
+              A throwaway thread on{" "}
+              {workspaceName(workspacePath) || "this project"}
+              {branchName ? ` · ${branchName}` : ""}. It knows the project but
+              not this conversation, and it disappears when you close the tab.
+            </span>
+          </div>
+        ) : (
+          <>
+            {messages.map((message) => (
+              <article
+                className={`gyro-side-chat-message is-${message.role}`}
+                key={message.id}
+              >
+                <small>{message.role === "user" ? "You" : "Gyro"}</small>
+                {message.role === "assistant" ? (
+                  <div className="gyro-response-body">
+                    {assistantResponseBlocks(message.text).map(
+                      (block, index) => (
+                        <AssistantResponseBlockView
+                          block={block}
+                          key={`${block.kind}-${index}`}
+                        />
+                      ),
+                    )}
+                  </div>
+                ) : (
+                  <p>{message.text}</p>
+                )}
+              </article>
+            ))}
+            {sideChat?.streamingMessage ? (
+              <article className="gyro-side-chat-message is-assistant">
+                <small>Gyro</small>
+                <p className="gyro-response-streaming-text">
+                  {sideChat.streamingMessage}
+                </p>
+              </article>
+            ) : null}
+          </>
+        )}
+      </div>
+      {sideChat?.error ? (
+        <p className="gyro-side-chat-error" role="alert">
+          {sideChat.error}
+        </p>
+      ) : null}
+      <div className="gyro-side-chat-composer">
+        <textarea
+          aria-label="Side chat message"
+          disabled={!sideChat?.onSend}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              send();
+            }
+          }}
+          placeholder={
+            sideChat?.onSend
+              ? "Ask a side question"
+              : "Connect a provider to use side chat"
+          }
+          rows={2}
+          value={draft}
+        />
+        <button
+          aria-label="Send side chat message"
+          className="gyro-send-button"
+          disabled={!canSend || isSending}
+          onClick={send}
+          type="button"
+        >
+          {isSending ? (
+            <RefreshCw className="is-spinning" size={15} />
+          ) : (
+            <ArrowUp size={15} />
+          )}
+        </button>
+      </div>
+      <footer className="gyro-side-chat-note">
+        <Sparkles aria-hidden="true" size={12} />
+        {sideChat?.modelLabel
+          ? `${sideChat.modelLabel} · temporary, not saved to history`
+          : "Temporary — this thread is not saved to history"}
+      </footer>
+    </div>
   );
 }
 
@@ -13600,7 +14263,7 @@ export function ProvidersSurface({
                       <span
                         className={`is-${status?.connectionStatus ?? "not-configured"}`}
                       />
-                      <div>
+                      <div aria-live="polite">
                         <strong>Health</strong>
                         <small>
                           {status?.healthSummary ??
@@ -13643,10 +14306,16 @@ export function ProvidersSurface({
                       </button>
                       <button
                         className="gyro-secondary-button"
+                        disabled={
+                          provider.authStatus === "connecting" ||
+                          status?.connectionStatus === "checking"
+                        }
                         onClick={() => onTestProvider?.(provider.id)}
                         type="button"
                       >
-                        {providerTestActionLabel(provider)}
+                        {status?.connectionStatus === "checking"
+                          ? "Checking…"
+                          : providerTestActionLabel(provider)}
                       </button>
                     </div>
                   </div>
@@ -14614,6 +15283,7 @@ function readBrowserRailWidth(): number {
  * or narrow it (into the transcript), not to free-float the panel.
  */
 function ResizableBrowserRail({
+  chromeless = false,
   browserPreview,
   browserNativeHost,
   browserOverlayOccluded,
@@ -14629,6 +15299,11 @@ function ResizableBrowserRail({
   onBrowserOpenExternal,
   onBrowserHostBoundsChange,
 }: {
+  /**
+   * Inside the companion dock the dock owns the width and the close control,
+   * so the rail drops its own handle and title row and simply fills its slot.
+   */
+  chromeless?: boolean;
   browserPreview?: BrowserPreview;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
@@ -14749,94 +15424,102 @@ function ResizableBrowserRail({
   return (
     <aside
       aria-label="Browser"
-      className={["gyro-browser-rail", isResizing ? "is-resizing" : ""]
+      className={[
+        "gyro-browser-rail",
+        isResizing ? "is-resizing" : "",
+        chromeless ? "is-chromeless" : "",
+      ]
         .filter(Boolean)
         .join(" ")}
       ref={railRef}
-      style={{ width }}
+      style={chromeless ? undefined : { width }}
     >
-      <button
-        aria-label="Resize browser panel. Drag left to enlarge, right to shrink."
-        aria-orientation="vertical"
-        aria-valuemax={BROWSER_RAIL_MAX_WIDTH}
-        aria-valuemin={BROWSER_RAIL_MIN_WIDTH}
-        aria-valuenow={width}
-        className="gyro-browser-rail-resize-handle"
-        onKeyDown={(event) => {
-          const parentWidth =
-            railRef.current?.parentElement?.getBoundingClientRect().width;
-          if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            setWidth((current) => {
-              const next = clampWidth(current + 24, parentWidth);
-              try {
-                window.localStorage.setItem(
-                  BROWSER_RAIL_WIDTH_KEY,
-                  String(next),
-                );
-              } catch {
-                // ignore
-              }
-              return next;
-            });
-          } else if (event.key === "ArrowRight") {
-            event.preventDefault();
-            setWidth((current) => {
-              const next = clampWidth(current - 24, parentWidth);
-              try {
-                window.localStorage.setItem(
-                  BROWSER_RAIL_WIDTH_KEY,
-                  String(next),
-                );
-              } catch {
-                // ignore
-              }
-              return next;
-            });
-          }
-        }}
-        onPointerCancel={endResize}
-        onPointerDown={beginResize}
-        onPointerMove={onResizeMove}
-        onPointerUp={endResize}
-        title="Drag to resize"
-        type="button"
-      >
-        <span />
-      </button>
-      <header>
-        <div className="gyro-chat-tool-header">
-          {onBack ? (
-            <button
-              aria-label="Back to environment"
-              className="gyro-chat-tool-back"
-              onClick={onBack}
-              type="button"
-            >
-              <ChevronLeft aria-hidden="true" size={15} />
-            </button>
-          ) : null}
-          <div className="gyro-chat-tool-title">
-            <Globe2 aria-hidden="true" size={15} />
-            <div>
-              <strong>Browser</strong>
-              <span>
-                {browserPreview?.title?.trim() ||
-                  browserPreviewHostLabel(browserPreview?.url) ||
-                  "Session preview"}
-              </span>
-            </div>
-          </div>
-        </div>
+      {chromeless ? null : (
         <button
-          aria-label="Close browser"
-          className="gyro-chat-tool-close"
-          onClick={onClose}
+          aria-label="Resize browser panel. Drag left to enlarge, right to shrink."
+          aria-orientation="vertical"
+          aria-valuemax={BROWSER_RAIL_MAX_WIDTH}
+          aria-valuemin={BROWSER_RAIL_MIN_WIDTH}
+          aria-valuenow={width}
+          className="gyro-browser-rail-resize-handle"
+          onKeyDown={(event) => {
+            const parentWidth =
+              railRef.current?.parentElement?.getBoundingClientRect().width;
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              setWidth((current) => {
+                const next = clampWidth(current + 24, parentWidth);
+                try {
+                  window.localStorage.setItem(
+                    BROWSER_RAIL_WIDTH_KEY,
+                    String(next),
+                  );
+                } catch {
+                  // ignore
+                }
+                return next;
+              });
+            } else if (event.key === "ArrowRight") {
+              event.preventDefault();
+              setWidth((current) => {
+                const next = clampWidth(current - 24, parentWidth);
+                try {
+                  window.localStorage.setItem(
+                    BROWSER_RAIL_WIDTH_KEY,
+                    String(next),
+                  );
+                } catch {
+                  // ignore
+                }
+                return next;
+              });
+            }
+          }}
+          onPointerCancel={endResize}
+          onPointerDown={beginResize}
+          onPointerMove={onResizeMove}
+          onPointerUp={endResize}
+          title="Drag to resize"
           type="button"
         >
-          <X size={14} />
+          <span />
         </button>
-      </header>
+      )}
+      {chromeless ? null : (
+        <header>
+          <div className="gyro-chat-tool-header">
+            {onBack ? (
+              <button
+                aria-label="Back to environment"
+                className="gyro-chat-tool-back"
+                onClick={onBack}
+                type="button"
+              >
+                <ChevronLeft aria-hidden="true" size={15} />
+              </button>
+            ) : null}
+            <div className="gyro-chat-tool-title">
+              <Globe2 aria-hidden="true" size={15} />
+              <div>
+                <strong>Browser</strong>
+                <span>
+                  {browserPreview?.title?.trim() ||
+                    browserPreviewHostLabel(browserPreview?.url) ||
+                    "Session preview"}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            aria-label="Close browser"
+            className="gyro-chat-tool-close"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={14} />
+          </button>
+        </header>
+      )}
       <BrowserPreviewSurface
         browserPreview={browserPreview}
         nativeHost={browserNativeHost}
@@ -21853,6 +22536,7 @@ function ChatTurn({
   isActive,
   onLoadChangeDiff,
   onOpenChanges,
+  onUndoChanges,
   onCouncilAction,
   onMutationApprovalAction,
   onProviderApprovalAction,
@@ -21874,6 +22558,7 @@ function ChatTurn({
   isActive: boolean;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: () => void;
+  onUndoChanges?: () => void;
   onMutationApprovalAction?: (
     proposalId: string,
     decision: "approve" | "reject",
@@ -22110,10 +22795,6 @@ function ChatTurn({
                         onCouncilAction={onCouncilAction}
                         previewCapture={previewCapture}
                       />
-                      <ChangedFilesSummary
-                        files={changedFiles}
-                        onOpenChanges={onOpenChanges}
-                      />
                     </>
                   )}
                 </div>
@@ -22121,51 +22802,112 @@ function ChatTurn({
             </div>
           </div>
         ) : null}
+        {!isRunning && runModel.phase.name === "done" ? (
+          <ChatRunChangeSummary
+            files={changedFiles}
+            onReview={onOpenChanges}
+            onUndo={onUndoChanges}
+          />
+        ) : null}
       </div>
     </section>
   );
 }
 
-function ChangedFilesSummary({
+function ChatRunChangeSummary({
   files,
-  onOpenChanges,
+  onReview,
+  onUndo,
 }: {
   files: Array<{ path: string; additions: number; deletions: number }>;
-  onOpenChanges?: () => void;
+  onReview?: () => void;
+  onUndo?: () => void;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   if (!files.length) return null;
-  const body = (
-    <>
-      <span className="gyro-response-changed-files-heading">
-        <FileCode2 aria-hidden="true" size={14} />
-        Changed files
-      </span>
-      <span className="gyro-response-changed-files-list">
-        {files.slice(0, 4).map((file) => (
-          <span key={file.path}>
-            <code>{file.path}</code>
-            {file.additions > 0 ? (
-              <em className="is-added">+{file.additions}</em>
-            ) : null}
-            {file.deletions > 0 ? (
-              <em className="is-removed">-{file.deletions}</em>
-            ) : null}
-          </span>
-        ))}
-        {files.length > 4 ? <small>+{files.length - 4} more</small> : null}
-      </span>
-    </>
+  const visibleFiles = isExpanded ? files : files.slice(0, 3);
+  const hiddenCount = files.length - 3;
+  const totals = files.reduce(
+    (current, file) => ({
+      additions: current.additions + file.additions,
+      deletions: current.deletions + file.deletions,
+    }),
+    { additions: 0, deletions: 0 },
   );
-  return onOpenChanges ? (
-    <button
-      className="gyro-response-changed-files"
-      onClick={onOpenChanges}
-      type="button"
-    >
-      {body}
-    </button>
-  ) : (
-    <div className="gyro-response-changed-files">{body}</div>
+  const fileLabel = files.length === 1 ? "file" : "files";
+
+  return (
+    <section className="gyro-chat-run-change-summary" aria-label="Edited files">
+      <header>
+        <span className="gyro-chat-run-change-icon">
+          <FileCode2 aria-hidden="true" size={17} />
+        </span>
+        <div>
+          <strong>
+            Edited {files.length} {fileLabel}
+          </strong>
+          <small className="gyro-change-totals">
+            <em className="is-added">+{totals.additions}</em>
+            <em className="is-removed">-{totals.deletions}</em>
+          </small>
+        </div>
+        <span className="gyro-change-summary-actions">
+          {onUndo ? (
+            <button onClick={onUndo} type="button">
+              Undo <RotateCcw aria-hidden="true" size={13} />
+            </button>
+          ) : null}
+          {onReview ? (
+            <button onClick={onReview} type="button">
+              Review
+            </button>
+          ) : null}
+        </span>
+      </header>
+      <div className="gyro-change-summary-files">
+        {visibleFiles.map((file) => {
+          const contents = (
+            <>
+              <span title={file.path}>{file.path}</span>
+              <small>
+                <em className="is-added">+{file.additions}</em>
+                <em className="is-removed">-{file.deletions}</em>
+              </small>
+            </>
+          );
+          return (
+            <div className="gyro-change-summary-file" key={file.path}>
+              {onReview ? (
+                <button
+                  onClick={onReview}
+                  title={`Review ${file.path}`}
+                  type="button"
+                >
+                  {contents}
+                </button>
+              ) : (
+                <div className="gyro-change-summary-file-static">
+                  {contents}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {hiddenCount > 0 ? (
+        <button
+          aria-expanded={isExpanded}
+          className="gyro-change-summary-more"
+          onClick={() => setIsExpanded((current) => !current)}
+          type="button"
+        >
+          {isExpanded
+            ? "Show fewer files"
+            : `Show ${hiddenCount} more ${hiddenCount === 1 ? "file" : "files"}`}
+          <ChevronDown aria-hidden="true" size={15} />
+        </button>
+      ) : null}
+    </section>
   );
 }
 

@@ -8,11 +8,18 @@ use crate::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
+use std::thread;
 use std::time::Duration;
 
 const PROVIDER_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_HEALTH_MAX_STDOUT_CHARS: usize = 32 * 1024;
 const PROVIDER_HEALTH_MAX_STDERR_CHARS: usize = 16 * 1024;
+// Local provider CLIs can briefly lose their socket while their own updater,
+// keychain helper, or device-code flow is settling. One short retry keeps that
+// transient state from being presented as a broken provider, without making a
+// settings refresh slow or hiding persistent setup failures.
+const PROVIDER_HEALTH_ATTEMPTS: usize = 2;
+const PROVIDER_HEALTH_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -454,13 +461,60 @@ enum CommandOutputError {
 }
 
 fn command_output(command: &str, args: &[&str]) -> std::result::Result<String, CommandOutputError> {
-    command_output_with_limits(
+    let mut result = command_output_with_limits(
         command,
         args,
         PROVIDER_HEALTH_TIMEOUT,
         PROVIDER_HEALTH_MAX_STDOUT_CHARS,
         PROVIDER_HEALTH_MAX_STDERR_CHARS,
-    )
+    );
+
+    for attempt in 1..PROVIDER_HEALTH_ATTEMPTS {
+        if !is_transient_health_result(&result) {
+            break;
+        }
+        // A bounded, deterministic delay avoids retry storms when settings
+        // checks several providers at once. Do not retry authentication or
+        // installation problems: neither can recover without user action.
+        thread::sleep(PROVIDER_HEALTH_RETRY_DELAY * attempt as u32);
+        result = command_output_with_limits(
+            command,
+            args,
+            PROVIDER_HEALTH_TIMEOUT,
+            PROVIDER_HEALTH_MAX_STDOUT_CHARS,
+            PROVIDER_HEALTH_MAX_STDERR_CHARS,
+        );
+    }
+
+    result
+}
+
+fn is_transient_health_result(result: &std::result::Result<String, CommandOutputError>) -> bool {
+    let output = match result {
+        Ok(output) => output,
+        Err(CommandOutputError::Unavailable(output) | CommandOutputError::Terminated(output)) => {
+            output
+        }
+    }
+    .to_ascii_lowercase();
+
+    [
+        "timed out",
+        "temporarily unavailable",
+        "resource temporarily unavailable",
+        "connection reset",
+        "connection refused",
+        "network is unreachable",
+        "broken pipe",
+        "econnreset",
+        "eagain",
+        "rate limit",
+        "too many requests",
+        "service unavailable",
+        "try again",
+    ]
+    .iter()
+    .any(|marker| output.contains(marker))
 }
 
 fn command_output_with_limits(
@@ -640,5 +694,21 @@ mod tests {
             ),
             "warning"
         );
+    }
+
+    #[test]
+    fn retries_only_transient_provider_health_failures() {
+        assert!(is_transient_health_result(&Err(
+            CommandOutputError::Terminated("timed out after 10s".into())
+        )));
+        assert!(is_transient_health_result(&Ok(
+            "provider health check failed: connection reset by peer".into()
+        )));
+        assert!(!is_transient_health_result(&Ok(
+            "not authenticated; run provider login".into()
+        )));
+        assert!(!is_transient_health_result(&Err(
+            CommandOutputError::Unavailable("No such file or directory".into())
+        )));
     }
 }

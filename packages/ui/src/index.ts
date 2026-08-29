@@ -248,6 +248,29 @@ export {
   sanitizeStoredChatGridState,
 } from "./workbench-state";
 export {
+  activeChatCompanionTab,
+  CHAT_COMPANION_DEFAULT_WIDTH,
+  CHAT_COMPANION_MAX_WIDTH,
+  CHAT_COMPANION_MIN_WIDTH,
+  CHAT_COMPANION_OVERLAY_BELOW,
+  chatCompanionPane,
+  chatCompanionReducer,
+  chatCompanionTabIds,
+  chatCompanionTabLabels,
+  clampChatCompanionWidth,
+  createInitialChatCompanionState,
+  discardedSideChatSessionIds,
+  isChatCompanionTabId,
+  staleSideChatSessionIds,
+  withoutSideChatSessions,
+} from "./chat-companion";
+export type {
+  ChatCompanionAction,
+  ChatCompanionPaneState,
+  ChatCompanionState,
+  ChatCompanionTabId,
+} from "./chat-companion";
+export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
   preferredCleanMachineConnectProvider,
   resolveCleanMachinePath,
@@ -292,10 +315,7 @@ export {
   readyCouncilProviders,
   resolveCouncilSeatRequests,
 } from "./council";
-export type {
-  CouncilSeatRequest,
-  CouncilSeatResolution,
-} from "./council";
+export type { CouncilSeatRequest, CouncilSeatResolution } from "./council";
 export {
   estimateTurnCost,
   formatTokenCount,
@@ -423,4 +443,6 @@ export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,
   ModelFocusPeekContent,
+  SideChatMessage,
+  SideChatState,
 } from "./surfaces";

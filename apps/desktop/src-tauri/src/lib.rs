@@ -29,9 +29,10 @@ use gyro_core::{
     CapabilityRunMode, CapabilityStatus, CliUpdateApplyResult, CliUpdateCheckReport,
     CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
     CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
-    CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
-    GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
-    KimiAcpRequest, MutationDecision, MutationProposal, OllamaChatRequest, OllamaToolChatRequest,
+    CreateSessionContext, CredentialPolicy, ExecutionRequest, ExecutionStream,
+    ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision,
+    KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal,
+    OllamaChatRequest, OllamaToolChatRequest,
     PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProjectCapabilityGrant,
     ProjectCapabilityPolicy, ProviderCapabilitySupport, ProviderDiagnosticsPayload,
     ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest,
@@ -84,7 +85,7 @@ const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
-const MAX_CHAT_IMAGES: usize = 4;
+const MAX_CHAT_IMAGES: usize = 10;
 const MAX_CHAT_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_CHAT_VIDEOS: usize = 2;
 const MAX_CHAT_ATTACHMENTS: usize = 16;
@@ -13437,6 +13438,7 @@ fn run_kimi_acp_chat(
     );
     let output = run_kimi_acp(
         KimiAcpRequest {
+            credentials: CredentialPolicy::for_provider(&request.provider_id),
             provider_label: provider_label.into(),
             program: runtime.program.into(),
             program_args,
@@ -17434,6 +17436,10 @@ fn run_streaming_command(
         .map(|(key, value)| (key.to_os_string(), value.map(|value| value.to_os_string())))
         .collect();
     execution.timeout = max_runtime;
+    // An agent run keeps only the provider's own auth: the CLI spawns the
+    // agent's tool calls as its children, so anything left here is reachable
+    // by everything the agent runs. See gyro_core::credentials.
+    execution.credentials = CredentialPolicy::for_provider(&request.provider_id);
     // Silence is not completion for chat provider CLIs.
     execution.inactivity_timeout = None;
     execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;

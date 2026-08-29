@@ -96,6 +96,14 @@ function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
+// Some docs are deliberately kept out of the repo. Their checks still run for
+// the working copies that have them, and skip everywhere else rather than
+// taking the whole suite down with an ENOENT.
+function readLocalOnlyFile(path) {
+  const full = resolve(repoRoot, path);
+  return existsSync(full) ? readFileSync(full, "utf8") : undefined;
+}
+
 const gridPane = (sessionId, workspacePath = "/Users/example/Gyro") => ({
   paneId: `pane:${sessionId}`,
   kind: "session",
@@ -299,13 +307,9 @@ const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
 const launchDocsSource = readRepoFile("docs/launch.md");
 const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
-// This audit is intentionally local-only and is therefore absent from clean
-// repository clones (including CI). When present, retain its structural check;
-// its absence must not make the public release check depend on private notes.
-const readinessAuditPath = resolve(repoRoot, "docs/product-readiness-audit.md");
-const readinessAuditSource = existsSync(readinessAuditPath)
-  ? readFileSync(readinessAuditPath, "utf8")
-  : null;
+const readinessAuditSource = readLocalOnlyFile(
+  "docs/product-readiness-audit.md",
+);
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
@@ -4232,12 +4236,13 @@ expect(
   "Visible task, automation, provider, chat, and IDE controls should execute or be omitted instead of acting as placeholders.",
 );
 
-expect(
-  readinessAuditSource === null ||
-    (readinessAuditSource.includes("Functional Readiness Matrix") &&
-      readinessAuditSource.includes("Highest-Risk Gaps")),
-  "The local product readiness audit should distinguish implemented foundations from private-alpha blockers.",
-);
+if (readinessAuditSource !== undefined) {
+  expect(
+    readinessAuditSource.includes("Functional Readiness Matrix") &&
+      readinessAuditSource.includes("Highest-Risk Gaps"),
+    "The product readiness audit should distinguish implemented foundations from private-alpha blockers.",
+  );
+}
 expect(
   surfaceSource.includes('className="gyro-ide-project-empty"') &&
     surfaceSource.includes("Open a project to start coding") &&
@@ -4522,7 +4527,7 @@ expect(
     surfaceSource.includes(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
-    surfaceSource.includes("const sidePanel = activeRailPanel ? (") &&
+    surfaceSource.includes("const sidePanel = !activeRailPanel ? null :") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
     /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
@@ -4577,6 +4582,73 @@ expect(
     styleSource.includes("cursor: pointer;"),
   "AI model checklist plan events should be typed, persisted, derived, and visible in chat.",
 );
+
+// The companion dock replaces the old right rail and the Environment launcher,
+// so the tools it hosts have to keep reaching their real surfaces rather than
+// becoming five empty panels that only look like Codex.
+const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
+expect(
+  surfaceSource.includes('aria-label="Chat companion"') &&
+    surfaceSource.includes(
+      "const isCompanionPanel = isChatCompanionTab(railPanel)",
+    ) &&
+    surfaceSource.includes(
+      'activePanel={railPanel === "review" ? "changes" : railPanel}',
+    ) &&
+    surfaceSource.includes("chromeless={isCompanionPanel}") &&
+    surfaceSource.includes('railPanel === "files" ? (') &&
+    surfaceSource.includes("<CompanionFiles") &&
+    surfaceSource.includes('railPanel === "side-chat" ? (') &&
+    surfaceSource.includes("<SideChatPanel") &&
+    surfaceSource.includes("onOpenFile={onOpenCompanionFile}") &&
+    surfaceSource.includes('className="gyro-chat-companion-tab-list"') &&
+    surfaceSource.includes('aria-label="Add companion tab"') &&
+    surfaceSource.includes('className="gyro-chat-companion-resizer"') &&
+    surfaceSource.includes("clampChatCompanionWidth") &&
+    chatCompanionSource.includes('"review"') &&
+    chatCompanionSource.includes('"terminal"') &&
+    chatCompanionSource.includes('"browser"') &&
+    chatCompanionSource.includes('"files"') &&
+    chatCompanionSource.includes('"side-chat"') &&
+    appSource.includes("onOpenCompanionTab: (tab: ChatCompanionTabId)") &&
+    appSource.includes("onCloseCompanionTab: (tab: ChatCompanionTabId)") &&
+    appSource.includes(
+      'dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId })',
+    ) &&
+    styleSource.includes(".gyro-chat-companion {") &&
+    styleSource.includes(".gyro-chat-companion-tabs {") &&
+    styleSource.includes(
+      ".gyro-chat-companion-content > .gyro-environment-rail",
+    ) &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-tiled.has-environment:has(> .gyro-chat-companion)",
+    ) &&
+    styleSource.includes(':root[data-theme="light"] .gyro-chat-companion {'),
+  "The companion dock should host Review, Terminal, Browser, Files, and Side chat against their real surfaces and follow the focused pane.",
+);
+
+// Side chat is a throwaway thread: it inherits the focused chat's project and
+// model but none of its transcript, never reaches the sidebar, and is deleted
+// on close and again on the next launch after an unclean exit.
+expect(
+  appSource.includes('title: "Side chat"') &&
+    appSource.includes("...sessionModelSelectionFromSession(parent)") &&
+    appSource.includes(
+      "const workspace = parent?.workspacePath ?? workspacePath",
+    ) &&
+    appSource.includes("[paneId]: { messages: [] }") &&
+    appSource.includes('type: "register-side-chat-session"') &&
+    appSource.includes("staleSideChatSessionIds(") &&
+    appSource.includes("discardedSideChatSessionIds(") &&
+    appSource.includes("withoutSideChatSessions(") &&
+    appSource.includes(
+      'await invoke<boolean>("delete_session", { sessionId })',
+    ) &&
+    workbenchSource.includes("sideChatSessionIds") &&
+    surfaceSource.includes("not saved to history") &&
+    styleSource.includes(".gyro-side-chat-composer {"),
+  "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
+);
 expect(
   surfaceSource.includes(
     '"is-thread",\n        activeRailPanel ? "has-environment" : "",',
@@ -4607,13 +4679,13 @@ expect(
     surfaceSource.includes('onOpenTool("terminal")') &&
     surfaceSource.includes('onOpenTool("browser")') &&
     surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
-    surfaceSource.includes('"Close bottom drawer"') &&
-    surfaceSource.includes('"Open bottom drawer"') &&
+    surfaceSource.includes("<span>Bottom drawer</span>") &&
+    surfaceSource.includes("aria-pressed={isToolPanelOpen}") &&
     appSource.includes("const toggleChatToolPanel = useCallback") &&
     appSource.includes("openToolPanel(workbench.activePaneTab)") &&
     appSource.includes('openToolPanel("terminal")') &&
     !surfaceSource.includes('"Open last used panel"') &&
-    surfaceSource.includes("onClick={onToggleToolPanel}") &&
+    surfaceSource.includes("onToggleToolPanel?.();") &&
     surfaceSource.includes('onComposerAction?.("open-files")') &&
     appSource.includes('case "open-files":') &&
     appSource.includes('layout: "code"') &&

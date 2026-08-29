@@ -10,6 +10,9 @@
 /docs/product-readiness-audit.md
 /docs/cli-missions.md
 
+# Maintainer-local planning docs — never published to the OSS repo.
+/docs/internal/
+
 node_modules/
 .pnpm-store/
 dist/

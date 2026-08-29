@@ -27,10 +27,18 @@ import {
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
+  activeChatCompanionTab,
+  chatCompanionPane,
+  chatCompanionReducer,
   chatGridReducer,
   createChatProjectLayout,
+  createInitialChatCompanionState,
   createInitialChatGridState,
   createInitialWorkbenchState,
+  discardedSideChatSessionIds,
+  isChatCompanionTabId,
+  staleSideChatSessionIds,
+  withoutSideChatSessions,
   createNotification,
   createTerminalPane,
   isMissionSession,
@@ -91,6 +99,9 @@ import {
   type ChatPaneRef,
   type ChatRailDiffTools,
   type ChatRailTerminalTools,
+  type ChatCompanionTabId,
+  type SideChatMessage,
+  type SideChatState,
   type ChatSidePanelId,
   type CliLaunchPreset,
   type CommandProfile,
@@ -351,12 +362,7 @@ type WorkspaceFileWriteRequest = {
 type IdeCommandOutput = {
   /** Mirrors the Rust bounded-command terminations, not just done/failed. */
   status:
-    | "done"
-    | "failed"
-    | "cancelled"
-    | "timed-out"
-    | "inactive"
-    | "output-limit";
+    "done" | "failed" | "cancelled" | "timed-out" | "inactive" | "output-limit";
   stdout: string;
   stderr: string;
 };
@@ -458,6 +464,8 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 // means dropping the message that was waiting on it.
 const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
+const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
+const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
 const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
@@ -711,6 +719,9 @@ function saveModelUsageMap(usage: ModelUsageMap) {
   safeSetLocalStorage(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
 }
 
+/** Pane key for the chat surfaces that render outside the tiled grid. */
+const SOLO_CHAT_PANE_ID = "solo-chat";
+
 export function App() {
   const [workbench, dispatchWorkbench] = useReducer(
     workbenchReducer,
@@ -905,9 +916,23 @@ export function App() {
     paneId: string;
     message: string;
   }>();
-  const [chatPanelByPaneId, setChatPanelByPaneId] = useState<
+  // The companion dock: one strip of tool tabs per chat pane, following
+  // whichever pane has focus. The solo chat surfaces (workspace AI view, empty
+  // grid, onboarding) all share one pane key, since only one of them is ever on
+  // screen at a time.
+  // Plan and Environment are not companion tabs — they still take a pane's rail
+  // on their own, so each pane keeps its own toggle alongside the dock.
+  const [paneLegacyPanelByPaneId, setPaneLegacyPanelByPaneId] = useState<
     Record<string, ChatSidePanelId | undefined>
   >({});
+  const [companion, dispatchCompanion] = useReducer(
+    chatCompanionReducer,
+    workbench.preferences.chatCompanionWidth,
+    (width) => ({
+      ...createInitialChatCompanionState(width),
+      focusedPaneId: SOLO_CHAT_PANE_ID,
+    }),
+  );
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [commandPaletteMode, setCommandPaletteMode] = useState<
@@ -1041,9 +1066,18 @@ export function App() {
         .map((provider) => provider.id),
     [config],
   );
+  // Plan and Environment are not companion tabs: they still take the rail on
+  // their own, and take precedence while open so the toggle that opened them
+  // has a visible effect. Closing one hands the rail back to the dock.
+  const legacyRailPanel: ChatSidePanelId | undefined =
+    workbench.preferences.activeChatPanel &&
+    !isChatCompanionTabId(workbench.preferences.activeChatPanel)
+      ? workbench.preferences.activeChatPanel
+      : workbench.preferences.chatEnvironmentRailOpen
+        ? "environment"
+        : undefined;
   const activeChatPanel: ChatSidePanelId | undefined =
-    workbench.preferences.activeChatPanel ??
-    (workbench.preferences.chatEnvironmentRailOpen ? "environment" : undefined);
+    legacyRailPanel ?? activeChatCompanionTab(companion, SOLO_CHAT_PANE_ID);
   const commandProfiles =
     config.commandProfiles.length > 0
       ? config.commandProfiles
@@ -1134,6 +1168,285 @@ export function App() {
   const activeChatPane = activeChatLayout?.slots.find(
     (pane) => pane?.paneId === activeChatLayout.focusedPaneId,
   );
+  const companionFocusPaneId =
+    activeChatLayout?.focusedPaneId ?? SOLO_CHAT_PANE_ID;
+  // The dock speaks for whichever chat pane has focus, including the solo
+  // surfaces outside the grid.
+  useEffect(() => {
+    dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId });
+  }, [companionFocusPaneId]);
+  // Anything that still asks for a companion tool the old way — the browser
+  // opening itself mid-run, a panel restored from preferences — lands here and
+  // becomes a tab in the focused pane's strip.
+  useEffect(() => {
+    const panel = workbench.preferences.activeChatPanel;
+    if (!panel || !isChatCompanionTabId(panel)) return;
+    dispatchCompanion({ type: "open-tab", tab: panel });
+    dispatchWorkbench({ type: "set-chat-panel" });
+  }, [workbench.preferences.activeChatPanel]);
+  const closeLegacyRail = useCallback(() => {
+    dispatchWorkbench({ type: "set-chat-panel" });
+  }, []);
+  const setCompanionWidth = useCallback((width: number) => {
+    dispatchCompanion({ type: "resize-dock", width });
+    dispatchWorkbench({ type: "set-chat-companion-width", width });
+  }, []);
+  // --- Transient side chats -------------------------------------------------
+  // The Side chat tab runs against a session of its own so the model answers
+  // with the same workspace, branch, model and permissions as the chat it sits
+  // beside — and with none of its transcript. That session never reaches the
+  // sidebar or history, and it is deleted when the tab closes.
+  const [sideChatThreads, setSideChatThreads] = useState<
+    Record<
+      string,
+      { messages: SideChatMessage[]; isSending?: boolean; error?: string }
+    >
+  >({});
+  const sideChatSessionIdsRef = useRef<string[]>(
+    workbench.preferences.sideChatSessionIds,
+  );
+  sideChatSessionIdsRef.current = workbench.preferences.sideChatSessionIds;
+  const deleteSideChatSession = useCallback(async (sessionId: string) => {
+    if (!isTauriRuntime()) return;
+    try {
+      await invoke<boolean>("delete_session", { sessionId });
+    } catch {
+      // A side chat that outlives its tab is swept on the next launch.
+    }
+  }, []);
+  // Sweep side chats left behind by an unclean exit. Nothing is bound this
+  // early, so every id still on record belongs to a process that is gone.
+  const sweptSideChatsRef = useRef(false);
+  useEffect(() => {
+    if (sweptSideChatsRef.current) return;
+    sweptSideChatsRef.current = true;
+    const stale = staleSideChatSessionIds(
+      workbench.preferences.sideChatSessionIds,
+      companion,
+    );
+    if (!stale.length) return;
+    dispatchWorkbench({ type: "forget-side-chat-sessions", sessionIds: stale });
+    for (const sessionId of stale) {
+      void deleteSideChatSession(sessionId);
+    }
+  }, [
+    companion,
+    deleteSideChatSession,
+    workbench.preferences.sideChatSessionIds,
+  ]);
+  // Closing the tab, closing the pane, or starting a fresh side chat all retire
+  // the session that was bound — each one is deleted outright.
+  const previousCompanionRef = useRef(companion);
+  useEffect(() => {
+    const discarded = discardedSideChatSessionIds(
+      previousCompanionRef.current,
+      companion,
+    );
+    previousCompanionRef.current = companion;
+    if (!discarded.length) return;
+    dispatchWorkbench({
+      type: "forget-side-chat-sessions",
+      sessionIds: discarded,
+    });
+    setSideChatThreads((current) => {
+      const next = { ...current };
+      for (const paneId of Object.keys(next)) {
+        if (!chatCompanionPane(companion, paneId).sideChatSessionId) {
+          delete next[paneId];
+        }
+      }
+      return next;
+    });
+    for (const sessionId of discarded) {
+      void deleteSideChatSession(sessionId);
+    }
+  }, [companion, deleteSideChatSession]);
+  const chatSessionForPane = useCallback(
+    (paneId: string) => {
+      const pane = activeChatLayout?.slots.find(
+        (slot) => slot?.paneId === paneId,
+      );
+      if (pane?.kind === "session") {
+        return sessions.find((session) => session.id === pane.sessionId);
+      }
+      return activeSession;
+    },
+    [activeChatLayout, activeSession, sessions],
+  );
+  const openingSideChatsRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const [paneId, pane] of Object.entries(companion.panes)) {
+      if (!pane.openTabs.includes("side-chat")) continue;
+      if (pane.sideChatSessionId) continue;
+      if (openingSideChatsRef.current.has(paneId)) continue;
+      openingSideChatsRef.current.add(paneId);
+      void (async () => {
+        try {
+          const parent = chatSessionForPane(paneId);
+          const workspace = parent?.workspacePath ?? workspacePath ?? "";
+          if (!isTauriRuntime()) {
+            return;
+          }
+          const session = await invoke<Session>("create_desktop_session", {
+            ...newSessionModelFromConfig(config),
+            ...sessionModelSelectionFromSession(parent),
+            title: "Side chat",
+            workspacePath: workspace,
+          });
+          dispatchWorkbench({
+            type: "register-side-chat-session",
+            sessionId: session.id,
+          });
+          dispatchCompanion({
+            type: "bind-side-chat",
+            sessionId: session.id,
+            paneId,
+          });
+          setSideChatThreads((current) => ({
+            ...current,
+            [paneId]: { messages: [] },
+          }));
+        } catch (error) {
+          setSideChatThreads((current) => ({
+            ...current,
+            [paneId]: {
+              messages: current[paneId]?.messages ?? [],
+              error: `Side chat could not start: ${String(error)}`,
+            },
+          }));
+        } finally {
+          openingSideChatsRef.current.delete(paneId);
+        }
+      })();
+    }
+  }, [chatSessionForPane, companion.panes, config, workspacePath]);
+  const sendSideChatMessage = useCallback(
+    async (paneId: string, sessionId: string, message: string) => {
+      const parent = chatSessionForPane(paneId);
+      const sessionModel = {
+        ...selectedSessionModelFromConfig(config),
+        ...sessionModelSelectionFromSession(parent),
+      };
+      const turnId = crypto.randomUUID();
+      setSideChatThreads((current) => ({
+        ...current,
+        [paneId]: {
+          messages: [
+            ...(current[paneId]?.messages ?? []),
+            { id: turnId, role: "user" as const, text: message },
+          ],
+          isSending: true,
+        },
+      }));
+      try {
+        await invoke<SessionEvent>("append_user_message", {
+          attachments: [],
+          sessionId,
+          message,
+          turnId,
+        });
+        const response = await invoke<ProviderChatResponse>(
+          "run_provider_chat",
+          {
+            request: {
+              sessionId,
+              message,
+              turnId,
+              providerId: sessionModel.providerId ?? config.selectedProviderId,
+              providerLabel: sessionModel.providerLabel,
+              modelId: sessionModel.modelId,
+              modelLabel: sessionModel.modelLabel,
+              reasoningEffort: sessionModel.reasoningEffort,
+              requireCommandApproval: config.requireCommandApproval,
+              requireFileEditApproval: config.requireFileEditApproval,
+              fullAccess: Boolean(config.fullAccess),
+              mode: "normal",
+              attachments: [],
+              suggestTitle: false,
+              workspacePath: parent?.workspacePath ?? workspacePath ?? "",
+            },
+          },
+        );
+        setSideChatThreads((current) => ({
+          ...current,
+          [paneId]: {
+            messages: [
+              ...(current[paneId]?.messages ?? []),
+              {
+                id: response.assistantEvent.id,
+                role: "assistant" as const,
+                text: response.assistantEvent.message,
+              },
+            ],
+            isSending: false,
+          },
+        }));
+      } catch (error) {
+        setSideChatThreads((current) => ({
+          ...current,
+          [paneId]: {
+            messages: current[paneId]?.messages ?? [],
+            isSending: false,
+            error: String(error),
+          },
+        }));
+      }
+    },
+    [chatSessionForPane, config, workspacePath],
+  );
+  const sideChatFor = (paneId: string): SideChatState => {
+    const sessionId = chatCompanionPane(companion, paneId).sideChatSessionId;
+    const thread = sideChatThreads[paneId];
+    const parent = chatSessionForPane(paneId);
+    const sessionModel = {
+      ...selectedSessionModelFromConfig(config),
+      ...sessionModelSelectionFromSession(parent),
+    };
+    return {
+      sessionId,
+      messages: thread?.messages ?? [],
+      isSending: thread?.isSending,
+      error: thread?.error,
+      modelLabel: sessionModel.modelLabel ?? sessionModel.providerLabel,
+      onSend: sessionId
+        ? (message: string) => {
+            void sendSideChatMessage(paneId, sessionId, message);
+          }
+        : undefined,
+    };
+  };
+  const selectSoloChatPanel = useCallback((panel?: ChatSidePanelId) => {
+    if (panel && isChatCompanionTabId(panel)) {
+      dispatchWorkbench({ type: "set-chat-panel" });
+      dispatchCompanion({
+        type: "open-tab",
+        tab: panel,
+        paneId: SOLO_CHAT_PANE_ID,
+      });
+      return;
+    }
+    dispatchWorkbench({ type: "set-chat-panel", panel });
+  }, []);
+  const companionSurfaceProps = (paneId: string) => ({
+    sideChat: sideChatFor(paneId),
+    companionTabs: chatCompanionPane(companion, paneId).openTabs,
+    companionWidth: companion.dockWidth,
+    onCompanionWidthChange: setCompanionWidth,
+    onOpenCompanionTab: (tab: ChatCompanionTabId) => {
+      closeLegacyRail();
+      dispatchCompanion({ type: "open-tab", tab, paneId });
+    },
+    onCloseCompanionTab: (tab: ChatCompanionTabId) => {
+      dispatchCompanion({ type: "close-tab", tab, paneId });
+    },
+    onCloseCompanionDock: () => {
+      dispatchCompanion({ type: "close-dock", paneId });
+    },
+    onReopenCompanionDock: () => {
+      closeLegacyRail();
+      dispatchCompanion({ type: "reopen-dock", paneId });
+    },
+  });
   const sidebarActiveSessionId =
     activeWorkspaceLayout === "thread" && activeChatLayout?.slots.some(Boolean)
       ? activeChatPane?.kind === "session"
@@ -2085,7 +2398,10 @@ export function App() {
       return;
     }
     try {
-      const nextSessions = await invoke<Session[]>("list_sessions");
+      const nextSessions = withoutSideChatSessions(
+        await invoke<Session[]>("list_sessions"),
+        sideChatSessionIdsRef.current,
+      );
       const nextVisibleSessions = visibleSessionsForProjects(
         nextSessions,
         removedProjectPaths,
@@ -7617,11 +7933,13 @@ export function App() {
         const remaining = {
           image: Math.max(
             0,
-            4 - existing.filter((item) => item.kind === "image").length,
+            MAX_CHAT_IMAGES_PER_MESSAGE -
+              existing.filter((item) => item.kind === "image").length,
           ),
           video: Math.max(
             0,
-            2 - existing.filter((item) => item.kind === "video").length,
+            MAX_CHAT_VIDEOS_PER_MESSAGE -
+              existing.filter((item) => item.kind === "video").length,
           ),
         };
         const prepared: ChatAttachment[] = [];
@@ -7672,7 +7990,7 @@ export function App() {
           notify(
             "command-failed",
             "Media limit reached",
-            "Attach up to four images and two videos per message",
+            `Attach up to ${MAX_CHAT_IMAGES_PER_MESSAGE} images and ${MAX_CHAT_VIDEOS_PER_MESSAGE} videos per message`,
           );
         }
       } catch (error) {
@@ -7758,11 +8076,13 @@ export function App() {
       const remaining = {
         image: Math.max(
           0,
-          4 - existing.filter((item) => item.kind === "image").length,
+          MAX_CHAT_IMAGES_PER_MESSAGE -
+            existing.filter((item) => item.kind === "image").length,
         ),
         video: Math.max(
           0,
-          2 - existing.filter((item) => item.kind === "video").length,
+          MAX_CHAT_VIDEOS_PER_MESSAGE -
+            existing.filter((item) => item.kind === "video").length,
         ),
       };
       const prepared: ChatAttachment[] = [];
@@ -7815,7 +8135,7 @@ export function App() {
         notify(
           "command-failed",
           "Media limit reached",
-          "Attach up to four images and two videos per message",
+          `Attach up to ${MAX_CHAT_IMAGES_PER_MESSAGE} images and ${MAX_CHAT_VIDEOS_PER_MESSAGE} videos per message`,
         );
       } else if (rejectedCount > 0) {
         notify(
@@ -10980,7 +11300,8 @@ export function App() {
         activeSessionIdRef.current = undefined;
         setActiveSessionId(undefined);
       }
-      setChatPanelByPaneId((current) => {
+      dispatchCompanion({ type: "forget-pane", paneId: candidate.paneId });
+      setPaneLegacyPanelByPaneId((current) => {
         const next = { ...current };
         delete next[candidate.paneId];
         return next;
@@ -11313,7 +11634,12 @@ export function App() {
   }, [sessionBrowserKey]);
 
   const toggleBrowserPanel = useCallback(() => {
-    dispatchWorkbench({ type: "toggle-chat-browser" });
+    dispatchWorkbench({ type: "set-chat-panel" });
+    dispatchCompanion({
+      type: "open-tab",
+      tab: "browser",
+      paneId: SOLO_CHAT_PANE_ID,
+    });
   }, []);
 
   useEffect(() => {
@@ -11965,14 +12291,25 @@ export function App() {
         provider?.displayName ?? providerId,
       );
 
-      const check =
-        isProviderId(providerId) && isTauriRuntime()
-          ? await invoke<ProviderHealthCheck>("check_provider_health", {
-              request: providerHealthRequest(provider, providerId),
-            }).catch((error) => undefined)
-          : undefined;
-      const output =
-        check?.output ?? createProviderHealthOutput(providerId, provider);
+      // A desktop probe failure is meaningful. Falling back to the preview
+      // fixture here used to turn a failed native request into a fabricated
+      // "authenticated" result, which could make an unavailable provider look
+      // ready and send the next turn into the same failure. Preview still uses
+      // the fixture; the desktop always reports the actual probe outcome.
+      let check: ProviderHealthCheck | undefined;
+      let output: string;
+      if (isProviderId(providerId) && isTauriRuntime()) {
+        try {
+          check = await invoke<ProviderHealthCheck>("check_provider_health", {
+            request: providerHealthRequest(provider, providerId),
+          });
+          output = check.output;
+        } catch (error) {
+          output = `Provider health check unavailable: ${String(error)}`;
+        }
+      } else {
+        output = createProviderHealthOutput(providerId, provider);
+      }
       const result = isProviderId(providerId)
         ? recordProviderHealthOutput(providerId, output, check)
         : parseProviderHealthOutput(providerId, output);
@@ -13863,7 +14200,12 @@ export function App() {
       pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
-    const panePanel = chatPanelByPaneId[pane.paneId];
+    const paneCompanion = chatCompanionPane(companion, pane.paneId);
+    // Plan and Environment still take the rail on their own; the dock's tab
+    // shows through whenever neither is open.
+    const paneLegacyPanel = paneLegacyPanelByPaneId[pane.paneId];
+    const panePanel: ChatSidePanelId | undefined =
+      paneLegacyPanel ?? paneCompanion.activeTab;
     const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
     const queue =
       pane.kind === "session" ? (chatMessageQueues[pane.sessionId] ?? []) : [];
@@ -13877,21 +14219,54 @@ export function App() {
     };
     const togglePanePanel = (panel: ChatSidePanelId) => {
       focusChatPane(pane);
-      setChatPanelByPaneId((current) => ({
+      setPaneLegacyPanelByPaneId((current) => ({
         ...current,
         [pane.paneId]: current[pane.paneId] === panel ? undefined : panel,
       }));
     };
+    const selectPanePanel = (panel: ChatSidePanelId) => {
+      focusChatPane(pane);
+      if (isChatCompanionTabId(panel)) {
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({
+          type: "open-tab",
+          tab: panel,
+          paneId: pane.paneId,
+        });
+        return;
+      }
+      setPaneLegacyPanelByPaneId((current) => ({
+        ...current,
+        [pane.paneId]: panel,
+      }));
+    };
+    const paneCompanionProps = {
+      ...companionSurfaceProps(pane.paneId),
+      onOpenCompanionTab: (tab: ChatCompanionTabId) => {
+        focusChatPane(pane);
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({ type: "open-tab", tab, paneId: pane.paneId });
+      },
+      onReopenCompanionDock: () => {
+        focusChatPane(pane);
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({ type: "reopen-dock", paneId: pane.paneId });
+      },
+    };
     return (
       <ChatSurface
         activeChatPanel={panePanel}
-        onSelectChatPanel={(panel) => {
-          focusChatPane(pane);
-          setChatPanelByPaneId((current) => ({
-            ...current,
-            [pane.paneId]: panel,
-          }));
-        }}
+        onSelectChatPanel={selectPanePanel}
+        {...paneCompanionProps}
         railDiffTools={railDiffTools}
         railTerminalTools={railTerminalTools}
         browserPreview={workbench.browserPreview}
@@ -13910,7 +14285,9 @@ export function App() {
         onBrowserUrlChange={(url) =>
           dispatchWorkbench({ type: "set-browser-url", url })
         }
-        onToggleBrowserPanel={() => togglePanePanel("browser")}
+        onToggleBrowserPanel={() =>
+          paneCompanionProps.onOpenCompanionTab("browser")
+        }
         capabilityActivities={
           pane.kind === "session"
             ? Object.values(capabilityRunsBySessionId[pane.sessionId] ?? {})
@@ -13920,6 +14297,8 @@ export function App() {
           capabilityPoliciesByProject[normalizeProjectPath(pane.workspacePath)]
         }
         config={config}
+        files={files}
+        onOpenCompanionFile={openEditorFile}
         modelFocus={
           pane.kind === "session" &&
           workbench.modelFocus?.sessionId === pane.sessionId
@@ -14171,9 +14550,8 @@ export function App() {
     <ChatSurface
       chatSwitcher={workspaceChatSwitcher}
       activeChatPanel={activeChatPanel}
-      onSelectChatPanel={(panel) =>
-        dispatchWorkbench({ type: "set-chat-panel", panel })
-      }
+      onSelectChatPanel={selectSoloChatPanel}
+      {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
       railDiffTools={railDiffTools}
       railTerminalTools={railTerminalTools}
       browserPreview={workbench.browserPreview}
@@ -14195,6 +14573,8 @@ export function App() {
       onToggleBrowserPanel={toggleBrowserPanel}
       capabilityPolicy={activeCapabilityPolicy}
       config={config}
+      files={files}
+      onOpenCompanionFile={openEditorFile}
       modelFocus={
         workbench.modelFocus?.sessionId === activeSessionId
           ? workbench.modelFocus
@@ -14505,14 +14885,15 @@ export function App() {
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
                     activeChatPanel={activeChatPanel}
-                    onSelectChatPanel={(panel) =>
-                      dispatchWorkbench({ type: "set-chat-panel", panel })
-                    }
+                    onSelectChatPanel={selectSoloChatPanel}
+                    {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
                     railDiffTools={railDiffTools}
                     railTerminalTools={railTerminalTools}
                     browserPreview={workbench.browserPreview}
                     capabilityPolicy={activeCapabilityPolicy}
                     config={config}
+                    files={files}
+                    onOpenCompanionFile={openEditorFile}
                     modelFocus={
                       workbench.modelFocus?.sessionId === activeSessionId
                         ? workbench.modelFocus
@@ -15080,9 +15461,8 @@ export function App() {
       {activeDestination === "onboarding" ? (
         <ChatSurface
           activeChatPanel={activeChatPanel}
-          onSelectChatPanel={(panel) =>
-            dispatchWorkbench({ type: "set-chat-panel", panel })
-          }
+          onSelectChatPanel={selectSoloChatPanel}
+          {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
           railDiffTools={railDiffTools}
           railTerminalTools={railTerminalTools}
           capabilityActivities={
@@ -15092,6 +15472,8 @@ export function App() {
           }
           capabilityPolicy={activeCapabilityPolicy}
           config={config}
+          files={files}
+          onOpenCompanionFile={openEditorFile}
           providerUsageByProvider={providerUsageByProvider}
           sessionUsage={activeSessionUsage}
           usageSafety={usageSafety}

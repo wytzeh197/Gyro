@@ -18,14 +18,14 @@ use gyro_core::{
     prepare_provider_mutation_transaction, prepare_provider_text_replacement_transaction,
     provider_descriptor, recover_provider_mutation_transactions, run_kimi_acp,
     slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
-    CancellationToken, CreateSessionContext, DoctorStatus, ExecutionRequest, ExecutionStream,
-    ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision,
-    KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpMode, KimiAcpRequest, MutationDecision,
-    MutationProposal, MutationProposalOperation, MutationProposalStatus, OllamaChatRequest,
-    PendingProviderMutationCommit, ProviderFileChange, ProviderHealthRequest,
-    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload, ProviderTextChunk,
-    Session, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
-    TerminalRequestPayload,
+    CancellationToken, CreateSessionContext, CredentialPolicy, DoctorStatus, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpMode,
+    KimiAcpRequest, MutationDecision, MutationProposal, MutationProposalOperation,
+    MutationProposalStatus, OllamaChatRequest, PendingProviderMutationCommit, ProviderFileChange,
+    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
+    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin,
+    SessionStore, SessionWorkspaceMode, TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::error::Error as StdError;
@@ -2204,6 +2204,10 @@ fn build_cli_provider_invocation(
     let mut request = ExecutionRequest::new(profile.command.clone());
     request.args = args.into_iter().map(Into::into).collect();
     request.current_dir = Some(workspace.to_path_buf());
+    // See gyro_core::credentials: the agent's tool calls inherit this
+    // environment, so it keeps only the provider's own auth.
+    request.credentials =
+        CredentialPolicy::for_provider(profile.provider_id.as_deref().unwrap_or_default());
     request.timeout = Duration::from_secs(timeout_seconds);
     request.max_stdout_chars = 256_000;
     request.max_stderr_chars = 64_000;
@@ -3122,6 +3126,7 @@ fn execute_kimi_acp_provider(
     program_args.extend(runtime.args.iter().map(Into::into));
     let result = run_kimi_acp(
         KimiAcpRequest {
+            credentials: CredentialPolicy::for_provider(&provider_id),
             provider_label: provider_label.into(),
             program: profile.command.clone().into(),
             program_args,

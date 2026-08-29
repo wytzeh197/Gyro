@@ -1,3 +1,4 @@
+use crate::credentials::CredentialPolicy;
 use crate::execution::{configure_process_group, terminate_process_group};
 use crate::security::redact_secrets;
 use crate::CancellationToken;
@@ -76,6 +77,10 @@ pub struct KimiAcpRequest {
     pub timeout: Duration,
     pub inactivity_timeout: Duration,
     pub cancellation: CancellationToken,
+    /// Which inherited credentials the agent process may keep. ACP agents run
+    /// tool calls as their own children, so this is the point where an agent's
+    /// whole subprocess tree stops seeing the user's unrelated secrets.
+    pub credentials: CredentialPolicy,
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +145,9 @@ impl KimiAcpConnection {
             .stderr(Stdio::piped());
         if !request.program.to_string_lossy().contains('/') {
             command.env("PATH", crate::cli_path::augmented_gui_path());
+        }
+        for (key, _) in request.credentials.env_overrides() {
+            command.env_remove(key);
         }
         configure_process_group(&mut command);
         let mut child = command.spawn().map_err(|error| {
@@ -1288,6 +1296,8 @@ pub fn check_acp_health(
         timeout,
         inactivity_timeout: timeout,
         cancellation: CancellationToken::default(),
+        // Gyro's own auth probe, not an agent run.
+        credentials: CredentialPolicy::Inherit,
     };
     let mut connection = match KimiAcpConnection::start(&request) {
         Ok(connection) => connection,
@@ -1391,8 +1401,8 @@ mod tests {
     use super::{
         acp_activity_id_slug, acp_model_id, acp_offered_model_ids, acp_session_reopen_methods,
         check_kimi_acp_health, classify_approval, is_acp_method_not_found, permission_option_id,
-        resolve_workspace_write_path, run_kimi_acp, KimiAcpApprovalDecision, KimiAcpApprovalKind,
-        KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
+        resolve_workspace_write_path, run_kimi_acp, CredentialPolicy, KimiAcpApprovalDecision,
+        KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
     };
 
     #[test]
@@ -1483,6 +1493,7 @@ mod tests {
             timeout: Duration::from_secs(3),
             inactivity_timeout: Duration::from_secs(3),
             cancellation,
+            credentials: CredentialPolicy::for_provider("kimi"),
         }
     }
 

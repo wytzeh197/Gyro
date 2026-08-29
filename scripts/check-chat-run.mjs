@@ -968,7 +968,11 @@ assert.ok(railStart > 0, "the run rail block should be findable in styles.css");
 // quoting the selector. Start past the banner, then drop the remaining comments,
 // so only declarations are measured.
 const bannerEnd = stylesheet.indexOf("*/", railStart);
-const rail = stylesheet.slice(bannerEnd).replace(/\/\*[\s\S]*?\*\//g, "");
+const railEnd = stylesheet.indexOf("End run rail (gyro-run-*)", bannerEnd);
+assert.ok(railEnd > bannerEnd, "the run rail end marker should be findable");
+const rail = stylesheet
+  .slice(bannerEnd, railEnd)
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 const literalColour = rail.match(
   /(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/gi,

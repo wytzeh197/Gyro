@@ -79,6 +79,7 @@ import {
   defaultProviderStatuses as catalogDefaultProviderStatuses,
   providerHealthAfterSignInRejection,
 } from "./provider-catalog.ts";
+import { clampChatCompanionWidth } from "./chat-companion.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
   MAX_WORKSPACE_FOLDERS,
@@ -1388,6 +1389,9 @@ export type WorkbenchAction =
   | { type: "ide-set-contribution-enabled"; id: string; enabled: boolean }
   | { type: "ide-remove-contribution"; id: string }
   | { type: "ide-record-ai-tool-call"; toolCall: IdeAiToolCall }
+  | { type: "register-side-chat-session"; sessionId: string }
+  | { type: "forget-side-chat-sessions"; sessionIds: string[] }
+  | { type: "set-chat-companion-width"; width: number }
   | { type: "set-model-focus"; focus: ModelFocus }
   | { type: "clear-model-focus" }
   | { type: "set-model-follow"; mode: ModelFollowMode }
@@ -1944,6 +1948,42 @@ export function workbenchReducer(
           ...state.preferences,
           missionSessionIds: [...existing, sessionId].slice(-500),
         },
+      };
+    }
+    case "register-side-chat-session": {
+      const sessionId = action.sessionId.trim();
+      const existing = state.preferences.sideChatSessionIds ?? [];
+      if (!sessionId || existing.includes(sessionId)) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          sideChatSessionIds: [...existing, sessionId].slice(-100),
+        },
+      };
+    }
+    case "forget-side-chat-sessions": {
+      const discarded = new Set(action.sessionIds);
+      const existing = state.preferences.sideChatSessionIds ?? [];
+      const next = existing.filter((id) => !discarded.has(id));
+      if (next.length === existing.length) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, sideChatSessionIds: next },
+      };
+    }
+    case "set-chat-companion-width": {
+      const width = clampChatCompanionWidth(action.width);
+      if (state.preferences.chatCompanionWidth === width) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, chatCompanionWidth: width },
       };
     }
     case "set-mission-default-profile":
@@ -4109,6 +4149,21 @@ function normalizeWorkbenchPreferences(
       typeof preferences?.missionDefaultProfileId === "string" &&
       preferences.missionDefaultProfileId.trim()
         ? preferences.missionDefaultProfileId.trim()
+        : undefined,
+    sideChatSessionIds: Array.isArray(preferences?.sideChatSessionIds)
+      ? [
+          ...new Set(
+            preferences.sideChatSessionIds.filter(
+              (id): id is string =>
+                typeof id === "string" && id.trim().length > 0,
+            ),
+          ),
+        ].slice(0, 100)
+      : [],
+    chatCompanionWidth:
+      typeof preferences?.chatCompanionWidth === "number" &&
+      Number.isFinite(preferences.chatCompanionWidth)
+        ? clampChatCompanionWidth(preferences.chatCompanionWidth)
         : undefined,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
