@@ -496,6 +496,41 @@ export type DiffFile = {
 export type DiffApprovalState =
   "pending" | "approved" | "rejected" | "partially-approved";
 
+/**
+ * End-of-turn file review.
+ *
+ * This is a reading record, not an apply queue. In "Ask first" the agent has
+ * already asked before each edit, so by the time the card appears the change is
+ * on disk. Keeping a file says the user read it and is fine with it; a file
+ * nobody marks is unread, which is why there is no "pending" badge and no
+ * decision that removes anything.
+ */
+export type FileReviewDecision = "kept";
+
+/** Where a file's one-line summary came from, so the card never oversells it. */
+export type FileReviewSummarySource = "provider" | "intent" | "fallback";
+
+/** The identity of the reviewed content: it retires stale summaries and Keeps. */
+export const FILE_REVIEW_SCHEMA = "gyro.file-review.v1";
+
+export type FileReviewSummary = {
+  path: string;
+  /** Hash of the exact diff the summary describes. A later edit changes it. */
+  contentHash: string;
+  summary: string;
+  source: FileReviewSummarySource;
+};
+
+/** What the review card knows about one file, once summaries and Keeps merge. */
+export type FileReviewEntry = {
+  path: string;
+  turnId?: string;
+  contentHash?: string;
+  summary?: string;
+  summarySource?: FileReviewSummarySource;
+  decision?: FileReviewDecision;
+};
+
 export type GitReviewActionId = "create-branch" | "commit" | "push" | "open-pr";
 
 export type GitReviewActionStatus =

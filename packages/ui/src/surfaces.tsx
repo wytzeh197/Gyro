@@ -115,6 +115,14 @@ import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import { structuredCommentaryBlocks } from "./chat-commentary";
 import { buildRunModel, elapsedMsBetween } from "./chat-run";
+import {
+  askAboutFilePrompt,
+  changeSummaryLine,
+  diffPreviewLines,
+  fileReviewDecisions,
+  isKeptCurrent,
+} from "./file-review";
+import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
 import { ChatRun } from "./chat-run-view";
 import {
   ChatArtifacts,
@@ -241,6 +249,7 @@ import type {
   CliUpdateOffer,
   CliUpdatePhase,
   WorkbenchDensity,
+  FileReviewSummary,
   WorkbenchMode,
   WorkbenchPaneTab,
   WorkbenchTurn,
@@ -279,6 +288,7 @@ import {
   getProviderModel,
   isProviderExecutable,
   isProviderId,
+  isProviderRuntimeUsable,
   providerCapabilities,
   providerDefaultModelId,
   providerNeedsSignInRepair,
@@ -526,6 +536,12 @@ type AppChromeProps = {
   cliUpdatePhase?: CliUpdatePhase;
   onUpdateClis?: () => void;
   onDismissCliUpdates?: () => void;
+  /** A blocked provider belongs with the other app-level status notices. */
+  providerReadinessNotice?: {
+    message: string;
+    actionLabel?: string;
+  };
+  onProviderReadinessAction?: () => void;
   workspaceSidebarHidden?: boolean;
   workspaceSidebarWidth?: number;
   workspacePreparation?: WorkspacePreparationProgress;
@@ -1228,6 +1244,46 @@ export function CliUpdateBanner({
   );
 }
 
+/**
+ * Provider readiness blocks the whole chat surface, so present it in the same
+ * center-top notice area as CLI updates instead of shrinking the composer.
+ */
+function ProviderReadinessBanner({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className="gyro-cli-update-banner gyro-provider-readiness-banner"
+      data-phase="blocked"
+      role="status"
+    >
+      <span className="gyro-cli-update-banner-icon" aria-hidden="true">
+        <TriangleAlert size={13} />
+      </span>
+      <span className="gyro-cli-update-banner-copy">
+        <strong>{message}</strong>
+      </span>
+      {actionLabel ? (
+        <button
+          className="gyro-cli-update-banner-action"
+          disabled={!onAction}
+          onClick={() => onAction?.()}
+          type="button"
+        >
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function AppChrome({
   sessions,
   commandProfiles,
@@ -1253,6 +1309,8 @@ export function AppChrome({
   cliUpdatePhase = "idle",
   onUpdateClis,
   onDismissCliUpdates,
+  providerReadinessNotice,
+  onProviderReadinessAction,
   workspaceSidebarHidden,
   workspaceSidebarWidth,
   onSelectSession,
@@ -1885,13 +1943,25 @@ export function AppChrome({
           </>
         ) : null}
         {activeDestination !== "settings" &&
-        cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
-          <CliUpdateBanner
-            offers={cliUpdateOffers}
-            onDismiss={onDismissCliUpdates}
-            onUpdate={onUpdateClis}
-            phase={cliUpdatePhase}
-          />
+        (providerReadinessNotice ||
+          cliUpdateOffers.some((offer) => offer.updateAvailable)) ? (
+          <div className="gyro-global-status-notices">
+            {providerReadinessNotice ? (
+              <ProviderReadinessBanner
+                actionLabel={providerReadinessNotice.actionLabel}
+                message={providerReadinessNotice.message}
+                onAction={onProviderReadinessAction}
+              />
+            ) : null}
+            {cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
+              <CliUpdateBanner
+                offers={cliUpdateOffers}
+                onDismiss={onDismissCliUpdates}
+                onUpdate={onUpdateClis}
+                phase={cliUpdatePhase}
+              />
+            ) : null}
+          </div>
         ) : null}
         {activeDestination === "settings" ? (
           <div className="gyro-settings-topbar">
@@ -3028,7 +3098,9 @@ function WorkspaceSidebarContent({
     newSessionMenuView !== "closed",
     () => setNewSessionMenuView("closed"),
   );
-  const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>([]);
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>(
+    loadCollapsedSidebarProjectIds,
+  );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
   const discoveredSessionNavigation = useMemo(
     () =>
@@ -3056,18 +3128,16 @@ function WorkspaceSidebarContent({
     discoveredProjectGroups,
     projectOrder,
   );
-  const initializedProjectIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const projectKeys = new Set(projectGroups.map((project) => project.key));
-    const newlyDiscovered = [...projectKeys].filter(
-      (key) => !initializedProjectIdsRef.current.has(key),
-    );
-    initializedProjectIdsRef.current = projectKeys;
-    if (!newlyDiscovered.length) return;
-    setCollapsedProjectIds((current) => [
-      ...new Set([...current, ...newlyDiscovered]),
-    ]);
-  }, [projectGroups]);
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY,
+        JSON.stringify(collapsedProjectIds),
+      );
+    } catch {
+      // The current sidebar state still works if local storage is unavailable.
+    }
+  }, [collapsedProjectIds]);
   const [expandedWorkspaceDirectories, setExpandedWorkspaceDirectories] =
     useState<Set<string>>(() => new Set());
   const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
@@ -5286,6 +5356,8 @@ type SidebarProjectGroupData = {
 };
 
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
+const SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY =
+  "gyro.sidebar-project-collapse-v1";
 
 function sidebarProjectGroups(
   sessions: Session[],
@@ -5469,6 +5541,23 @@ function loadSidebarProjectOrder() {
   try {
     const value = window.localStorage.getItem(
       SIDEBAR_PROJECT_ORDER_STORAGE_KEY,
+    );
+    const parsed: unknown = value ? JSON.parse(value) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((key): key is string => typeof key === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadCollapsedSidebarProjectIds() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const value = window.localStorage.getItem(
+      SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY,
     );
     const parsed: unknown = value ? JSON.parse(value) : [];
     return Array.isArray(parsed)
@@ -6114,7 +6203,12 @@ export function ChatGridSurface({
   onToggleMaximize: (paneId: string) => void;
   renderPane: (
     pane: ChatPaneRef,
-    options: { isMaximized: boolean; isTiled: boolean },
+    options: {
+      isMaximized: boolean;
+      isTiled: boolean;
+      onPaneDragEnd: () => void;
+      onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+    },
   ) => ReactNode;
 }) {
   const [dragSource, setDragSource] = useState<"session" | "pane">();
@@ -6165,8 +6259,14 @@ export function ChatGridSurface({
     let didDrop = false;
     const paneId = event.dataTransfer.getData(CHAT_PANE_DRAG_MIME);
     if (paneId) {
-      onMovePane(paneId, zone.slotIndex);
-      didDrop = true;
+      // A drop back on the source tile should leave even maximized mode alone.
+      // Without this guard, a harmless cancelled move restored the grid.
+      if (
+        slots.findIndex((pane) => pane?.paneId === paneId) !== zone.slotIndex
+      ) {
+        onMovePane(paneId, zone.slotIndex);
+        didDrop = true;
+      }
     } else {
       const raw = event.dataTransfer.getData(CHAT_SESSION_DRAG_MIME);
       if (raw) {
@@ -6217,7 +6317,11 @@ export function ChatGridSurface({
       }
       onDragEnd={finishDrag}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        // When the overlay mounts beneath a native macOS drag, WebKit reports
+        // a leave with a null relatedTarget even though the pointer never left
+        // this grid. Use pointer bounds as the authoritative fallback so that
+        // mounting a target cannot immediately tear it down again.
+        if (dragPointerIsOutside(event)) {
           finishDrag();
         }
       }}
@@ -6262,6 +6366,20 @@ export function ChatGridSurface({
               ? renderPane(pane, {
                   isMaximized: paneMaximized,
                   isTiled: occupiedCount > 1 && !paneMaximized,
+                  onPaneDragEnd: finishDrag,
+                  onPaneDragStart: (event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData(
+                      CHAT_PANE_DRAG_MIME,
+                      pane.paneId,
+                    );
+                    // Render the targets before the pointer leaves the title
+                    // bar. Previously the grid consumed pane drops but no
+                    // chat ever produced this payload, so reordering a split
+                    // was impossible.
+                    setDragSource("pane");
+                    setDropTargetId(undefined);
+                  },
                 })
               : null}
           </section>
@@ -6310,7 +6428,9 @@ export function ChatGridSurface({
                 <span
                   aria-label={zone.label}
                   className="gyro-chat-grid-drop-tile"
-                />
+                >
+                  {zone.label}
+                </span>
               </div>
             ))}
           </div>
@@ -6376,13 +6496,48 @@ function chatGridDropZones(
 }
 
 function chatDragSource(dataTransfer: DataTransfer) {
-  if (dataTransfer.types.includes(CHAT_PANE_DRAG_MIME)) {
+  if (dataTransferHasType(dataTransfer, CHAT_PANE_DRAG_MIME)) {
     return "pane" as const;
   }
-  if (dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME)) {
+  if (dataTransferHasType(dataTransfer, CHAT_SESSION_DRAG_MIME)) {
     return "session" as const;
   }
   return undefined;
+}
+
+/**
+ * WebKit exposes DataTransfer.types as a DOMStringList, whereas Chromium uses
+ * an array. DOMStringList has `contains`, but no `includes`; calling the
+ * latter made dragover throw on macOS before the grid could enable its drop
+ * target.
+ */
+function dataTransferHasType(dataTransfer: DataTransfer, type: string) {
+  const types = dataTransfer.types as unknown as {
+    readonly [index: number]: string | undefined;
+    readonly length: number;
+    contains?: (value: string) => boolean;
+    item?: (index: number) => string | null;
+  };
+  if (typeof types.contains === "function") {
+    return types.contains(type);
+  }
+  return Array.from(
+    { length: types.length },
+    (_, index) => types[index] ?? types.item?.(index),
+  ).includes(type);
+}
+
+function dragPointerIsOutside(event: ReactDragEvent<HTMLElement>) {
+  if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+    return false;
+  }
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return (
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom
+  );
 }
 
 // Pin every slot to its own cell of the 2×2 grid, and let a pane whose column
@@ -6623,7 +6778,12 @@ type ChatSurfaceProps = {
   isComposerSending?: boolean;
   /** False while desktop shell warm-up is still running. */
   shellReady?: boolean;
+  /** A provider executable is being updated, so sending must wait briefly. */
+  isCliUpdating?: boolean;
   isTiled?: boolean;
+  /** Optional title-bar handle used to rearrange a chat inside a split grid. */
+  onPaneDragStart?: (event: ReactDragEvent<HTMLSpanElement>) => void;
+  onPaneDragEnd?: () => void;
   maxDraftLength?: number;
   activeChatPanel?: ChatSidePanelId;
   /**
@@ -6699,6 +6859,23 @@ type ChatSurfaceProps = {
   onSetOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
   onCompleteOnboardingStep?: (step: OnboardingState["activeStep"]) => void;
   onAgentAction?: (action: string) => void;
+  /**
+   * End-of-turn file review, shown only in "Ask first".
+   *
+   * `summaries` is keyed by turn id and holds one plain sentence per changed
+   * file. `onKeep` records that a file has been read — the edit itself was
+   * already approved and written, so nothing here applies or reverts anything.
+   */
+  fileReview?: {
+    summaries?: Record<string, FileReviewSummary[]>;
+    pendingTurnIds?: string[];
+    onKeep?: (input: {
+      turnId: string;
+      path: string;
+      contentHash?: string;
+    }) => void;
+    onAsk?: (path: string) => void;
+  };
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenToolPanel?: (tab: WorkbenchPaneTab) => void;
   /** Moves the right pane between the launcher and a tool without closing it. */
@@ -6870,7 +7047,10 @@ export function ChatSurface({
   isToolPanelOpen,
   isComposerSending,
   shellReady = true,
+  isCliUpdating = false,
   isTiled = false,
+  onPaneDragStart,
+  onPaneDragEnd,
   isBranchLoading,
   maxDraftLength,
   providerStatuses,
@@ -6895,6 +7075,7 @@ export function ChatSurface({
   onProviderStatusAction,
   onSetOnboardingStep,
   onCompleteOnboardingStep,
+  fileReview,
   onLoadChangeDiff,
   onOpenToolPanel,
   onSelectChatPanel,
@@ -7288,6 +7469,13 @@ export function ChatSurface({
   const activeTurnId = isComposerSending
     ? (activeTranscriptTurnId(turns) ?? turns.at(-1)?.id)
     : undefined;
+  // Reviewing per file is what "Ask first" is for. The other modes were chosen
+  // precisely to stop being asked, so they keep the plain summary card.
+  const isFileReviewEnabled = approvalModeForConfig(config) === "gated";
+  const fileReviewSummaries = fileReview?.summaries;
+  const fileReviewPendingTurnIds = fileReview?.pendingTurnIds;
+  const onFileReviewKeep = fileReview?.onKeep;
+  const onFileReviewAsk = fileReview?.onAsk;
   const transcriptContent = useMemo(
     () => (
       <>
@@ -7310,6 +7498,24 @@ export function ChatSurface({
               onSendPrompt: handleArtifactPrompt,
             }}
             isActive={turn.id === activeTurnId}
+            fileReview={
+              isFileReviewEnabled
+                ? {
+                    summaries: fileReviewSummaries?.[turn.id],
+                    isSummarizing:
+                      fileReviewPendingTurnIds?.includes(turn.id) ?? false,
+                    onKeep: onFileReviewKeep
+                      ? (path, contentHash) =>
+                          onFileReviewKeep({
+                            turnId: turn.id,
+                            path,
+                            contentHash,
+                          })
+                      : undefined,
+                    onAsk: onFileReviewAsk,
+                  }
+                : undefined
+            }
             key={turn.id}
             onLoadChangeDiff={onLoadChangeDiff}
             onOpenChanges={() => onOpenToolPanel?.("diff")}
@@ -7354,6 +7560,11 @@ export function ChatSurface({
       onComposerAction,
       onCouncilAction,
       onContinueChat,
+      fileReviewPendingTurnIds,
+      fileReviewSummaries,
+      isFileReviewEnabled,
+      onFileReviewAsk,
+      onFileReviewKeep,
       onLoadChangeDiff,
       onOpenToolPanel,
       onProviderApprovalAction,
@@ -7586,6 +7797,7 @@ export function ChatSurface({
             limitWindows={composerLimits}
             savedProjects={savedProjects}
             shellReady={shellReady}
+            isCliUpdating={isCliUpdating}
             variant="hero"
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
@@ -7698,6 +7910,22 @@ export function ChatSurface({
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
+          {onPaneDragStart ? (
+            <span
+              aria-label="Drag chat to rearrange split"
+              className="gyro-chat-pane-drag-handle"
+              draggable
+              onDragEnd={onPaneDragEnd}
+              onDragStart={(event) => {
+                event.stopPropagation();
+                onPaneDragStart(event);
+              }}
+              role="img"
+              title="Drag to rearrange split"
+            >
+              <GripVertical aria-hidden="true" size={14} />
+            </span>
+          ) : null}
           {chatSwitcher ? <ChatSwitcher chatSwitcher={chatSwitcher} /> : null}
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           {workspaceMode === "worktree" ? (
@@ -7894,6 +8122,7 @@ export function ChatSurface({
             limitWindows={composerLimits}
             savedProjects={savedProjects}
             shellReady={shellReady}
+            isCliUpdating={isCliUpdating}
             workspaceMode={workspaceMode}
             workspacePath={workspacePath}
             worktreeName={worktreeName}
@@ -8509,6 +8738,7 @@ function ChatSurfaceControls({
           type="button"
         >
           <PanelRight size={15} />
+          <span className="gyro-chat-surface-button-label">Panel</span>
         </button>
       ) : null}
       <div className="gyro-chat-surface-menu-anchor">
@@ -8526,6 +8756,7 @@ function ChatSurfaceControls({
           type="button"
         >
           <Plus size={15} />
+          <span className="gyro-chat-surface-button-label">Tools</span>
         </button>
         {openMenu === "launcher" ? (
           <div className="gyro-chat-companion-menu is-header" role="menu">
@@ -9524,6 +9755,7 @@ function useCompanionResize(
 ) {
   const [draftWidth, setDraftWidth] = useState<number>();
   const [isResizing, setIsResizing] = useState(false);
+  const [availableWidth, setAvailableWidth] = useState<number>();
   const resizeRef = useRef<{
     pointerId: number;
     startX: number;
@@ -9531,7 +9763,21 @@ function useCompanionResize(
   } | null>(null);
   const committedWidth = clampChatCompanionWidth(
     width ?? CHAT_COMPANION_DEFAULT_WIDTH,
+    availableWidth,
   );
+
+  // Persisted widths used to be re-applied without knowing the chat's current
+  // width. Observe the parent so a previously wide browser cannot collapse a
+  // newly focused transcript, including after a window resize.
+  useEffect(() => {
+    const parent = dockRef.current?.parentElement;
+    if (!parent) return;
+    const report = () => setAvailableWidth(parent.getBoundingClientRect().width);
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [dockRef]);
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -11709,7 +11955,10 @@ function EditorGroupPane({
         className="gyro-editor-tabs"
         onDragOver={(event) => {
           if (
-            event.dataTransfer.types.includes("application/x-gyro-editor-tab")
+            dataTransferHasType(
+              event.dataTransfer,
+              "application/x-gyro-editor-tab",
+            )
           ) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
@@ -15699,6 +15948,11 @@ export function BrowserPreviewSurface({
     compact,
     isChat,
     preview.device,
+    // The first bounds report can run before Tauri creates its child webview.
+    // Report again after navigation settles so the new child receives the host
+    // rectangle instead of staying hidden at its initial 1×1 size.
+    preview.status,
+    preview.url,
   ]);
 
   const reloadFrame = () => {
@@ -19991,6 +20245,7 @@ function Composer({
   popoverPlacement,
   /** False while the desktop shell is still warming the backend. */
   shellReady = true,
+  isCliUpdating = false,
   showContextRow,
   variant = "thread",
 }: {
@@ -20042,6 +20297,8 @@ function Composer({
   maxDraftLength?: number;
   popoverPlacement?: "down" | "up";
   shellReady?: boolean;
+  /** A provider executable is updating; wait before starting a run. */
+  isCliUpdating?: boolean;
   /** Defaults to the hero layout: project, mode, and branch only at the start. */
   showContextRow?: boolean;
   variant?: "thread" | "hero";
@@ -20165,6 +20422,12 @@ function Composer({
     }
   }, [activePopover]);
   useEffect(() => {
+    if (activePopover !== "provider") {
+      setModelMenuPane("root");
+      setIsModelMenuAdvancedOpen(false);
+    }
+  }, [activePopover]);
+  useEffect(() => {
     if (isGoalComposerActive) {
       composerTextareaRef.current?.focus();
     }
@@ -20208,9 +20471,17 @@ function Composer({
   const hasSelectedProvider = Boolean(
     selectedProvider ?? sessionModel?.modelLabel ?? sessionModel?.modelId,
   );
+  const selectedProviderHealth = providerStatuses?.find(
+    (status) => status.id === selectedProvider?.id,
+  );
+  const sessionProviderHealth = providerStatuses?.find(
+    (status) => status.id === sessionProvider?.id,
+  );
   const hasReadyProvider = Boolean(
-    selectedProvider?.authStatus === "connected" ||
-    sessionProvider?.authStatus === "connected",
+    (selectedProvider &&
+      isProviderRuntimeUsable(selectedProvider, selectedProviderHealth)) ||
+      (sessionProvider &&
+        isProviderRuntimeUsable(sessionProvider, sessionProviderHealth)),
   );
   const effectiveModelId = boundToSession
     ? sessionModel?.modelId
@@ -20259,11 +20530,12 @@ function Composer({
   }, [chatMode, config, providerStatuses]);
   const councilEnabled = config.council?.enabled !== false;
   const providerErrorMessage =
-    providerReadiness?.status === "blocked"
+    providerReadiness?.status === "blocked" && !hasReadyProvider
       ? providerReadiness.message
       : undefined;
   const canSubmitChat =
     shellReady &&
+    !isCliUpdating &&
     (chatMode === "council"
       ? councilEnabled &&
         !councilResolution?.error &&
@@ -21183,13 +21455,42 @@ function Composer({
               : chatMode === "council"
                 ? "Ask for architecture, review, or alternatives — models answer in parallel"
                 : !canSubmitChat
-                  ? cleanMachinePath.placeholder
+                  ? isCliUpdating
+                    ? "Updating a provider CLI — sending unlocks when it finishes…"
+                    : cleanMachinePath.placeholder
                   : variant === "hero"
                     ? "Describe a task or attach images"
                     : "Ask for follow-up changes or attach images"
         }
         value={draft}
       />
+      {!isGoalComposerActive &&
+      shellReady &&
+      !canSubmitChat &&
+      chatMode !== "council" &&
+      !isCliUpdating &&
+      !hasUserWorkspace ? (
+        <div className="gyro-composer-blocker" role="status">
+          <span>
+            {isCliUpdating
+              ? "Updating a provider CLI. Sending will unlock when it finishes."
+              : cleanMachinePath.readinessLabel}
+          </span>
+          {!isCliUpdating &&
+          cleanMachinePath.nextAction &&
+          cleanMachinePath.nextActionLabel ? (
+            <button
+              onClick={() => {
+                const action = cleanMachinePath.nextAction;
+                if (action) onComposerAction?.(action);
+              }}
+              type="button"
+            >
+              {cleanMachinePath.nextActionLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="gyro-composer-bar">
         {hasSelectedProvider || isHero ? (
           <>
@@ -21593,6 +21894,8 @@ function Composer({
                 ? "Set goal"
                 : !hasUserWorkspace
                   ? "Choose a folder before sending"
+                : isCliUpdating
+                  ? "Wait for the CLI update to finish"
                   : !hasReadyProvider
                     ? "Connect a provider before sending"
                     : isBranchLoading
@@ -22406,6 +22709,16 @@ function deriveTranscriptState(events: SessionEvent[]) {
        * are work the turn did; they belong in its timeline, in order.
        */
       turn.timelineEvents.push(event);
+    } else if (payloadKind === "file-review") {
+      /*
+       * A Keep belongs to the turn it was made about: the review card replays
+       * its decisions out of that turn's events, and the run rail already knows
+       * to leave it out of the beats. Falling through to `looseEvents` would
+       * instead print "Kept src/a.ts" as a bare system event above the whole
+       * transcript, which is neither a beat of the run nor something the user
+       * asked to see again.
+       */
+      turn.timelineEvents.push(event);
     } else if (providerStatusFromEvent(event)) {
       turn.statusEvent = event;
       const providerStatus = providerStatusFromEvent(event);
@@ -22533,6 +22846,7 @@ function useNetworkOnline(): boolean {
 
 function ChatTurn({
   artifactActions,
+  fileReview,
   isActive,
   onLoadChangeDiff,
   onOpenChanges,
@@ -22555,6 +22869,13 @@ function ChatTurn({
   turn,
 }: {
   artifactActions?: ChatArtifactActions;
+  /** Present only in "Ask first"; absent means the plain summary card. */
+  fileReview?: {
+    summaries?: FileReviewSummary[];
+    isSummarizing?: boolean;
+    onKeep?: (path: string, contentHash?: string) => void;
+    onAsk?: (path: string) => void;
+  };
   isActive: boolean;
   onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: () => void;
@@ -22654,7 +22975,12 @@ function ChatTurn({
   const changedFiles = useMemo(() => {
     const files = new Map<
       string,
-      { path: string; additions: number; deletions: number }
+      {
+        path: string;
+        additions: number;
+        deletions: number;
+        intent?: string;
+      }
     >();
     for (const file of runModel.files) {
       if (file.path.trim().toLowerCase() === "files") continue;
@@ -22662,6 +22988,7 @@ function ChatTurn({
         path: file.path,
         additions: file.additions ?? 0,
         deletions: file.deletions ?? 0,
+        intent: file.intent,
       });
     }
     for (const file of sourceControl?.files ?? []) {
@@ -22670,10 +22997,26 @@ function ChatTurn({
         sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
       );
       if (delta.additions === 0 && delta.deletions === 0) continue;
-      files.set(file.path, { path: file.path, ...delta });
+      // Git knows the size of the change; only the run knows why it was made,
+      // so a path the agent narrated keeps its note here.
+      files.set(file.path, {
+        path: file.path,
+        ...delta,
+        intent: files.get(file.path)?.intent,
+      });
     }
     return [...files.values()];
   }, [runModel.files, sourceControl, sourceControlBaseline]);
+  const fileReviewRecords = useMemo(
+    () => (fileReview ? fileReviewDecisions(turn.timelineEvents) : undefined),
+    [fileReview, turn.timelineEvents],
+  );
+  const fileReviewSummaries = useMemo(() => {
+    if (!fileReview?.summaries) return undefined;
+    return new Map(
+      fileReview.summaries.map((summary) => [summary.path, summary]),
+    );
+  }, [fileReview?.summaries]);
   const responseEvent = runModel.response;
   // Once a turn has performed Workspace work, the run rail is the useful
   // record: commands, reads, edits, and validation stay there. Repeating the
@@ -22804,9 +23147,16 @@ function ChatTurn({
         ) : null}
         {!isRunning && runModel.phase.name === "done" ? (
           <ChatRunChangeSummary
+            decisions={fileReviewRecords}
             files={changedFiles}
+            isReviewable={Boolean(fileReview)}
+            isSummarizing={fileReview?.isSummarizing}
+            onAsk={fileReview?.onAsk}
+            onKeep={fileReview?.onKeep}
+            onLoadChangeDiff={onLoadChangeDiff}
             onReview={onOpenChanges}
             onUndo={onUndoChanges}
+            summaries={fileReviewSummaries}
           />
         ) : null}
       </div>
@@ -22814,16 +23164,46 @@ function ChatTurn({
   );
 }
 
+/**
+ * The end-of-turn review card.
+ *
+ * In "Ask first" this is where a turn gets read: one line per file saying what
+ * changed in plain words, the diff itself one click away, and a Keep that
+ * records the file as read. Keep applies nothing and removes nothing — by the
+ * time this renders the change is already on disk, having been approved before
+ * it was made — so a file nobody marks is simply unread, and gets no badge that
+ * would imply it is waiting on something.
+ */
 function ChatRunChangeSummary({
+  decisions,
   files,
+  isReviewable = false,
+  isSummarizing = false,
+  onAsk,
+  onKeep,
+  onLoadChangeDiff,
   onReview,
   onUndo,
+  summaries,
 }: {
-  files: Array<{ path: string; additions: number; deletions: number }>;
+  decisions?: Map<string, FileReviewRecord>;
+  files: Array<{
+    path: string;
+    additions: number;
+    deletions: number;
+    intent?: string;
+  }>;
+  isReviewable?: boolean;
+  isSummarizing?: boolean;
+  onAsk?: (path: string) => void;
+  onKeep?: (path: string, contentHash?: string) => void;
+  onLoadChangeDiff?: (path: string) => Promise<string>;
   onReview?: () => void;
   onUndo?: () => void;
+  summaries?: Map<string, FileReviewSummary>;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [openPath, setOpenPath] = useState<string>();
   if (!files.length) return null;
   const visibleFiles = isExpanded ? files : files.slice(0, 3);
   const hiddenCount = files.length - 3;
@@ -22835,6 +23215,15 @@ function ChatRunChangeSummary({
     { additions: 0, deletions: 0 },
   );
   const fileLabel = files.length === 1 ? "file" : "files";
+  const canExpandDiff = isReviewable && Boolean(onLoadChangeDiff);
+  const keptCount = isReviewable
+    ? files.filter((file) =>
+        isKeptCurrent(
+          decisions?.get(file.path),
+          summaries?.get(file.path)?.contentHash,
+        ),
+      ).length
+    : 0;
 
   return (
     <section className="gyro-chat-run-change-summary" aria-label="Edited files">
@@ -22849,6 +23238,11 @@ function ChatRunChangeSummary({
           <small className="gyro-change-totals">
             <em className="is-added">+{totals.additions}</em>
             <em className="is-removed">-{totals.deletions}</em>
+            {keptCount > 0 ? (
+              <em className="is-kept">
+                {keptCount} of {files.length} kept
+              </em>
+            ) : null}
           </small>
         </div>
         <span className="gyro-change-summary-actions">
@@ -22866,30 +23260,118 @@ function ChatRunChangeSummary({
       </header>
       <div className="gyro-change-summary-files">
         {visibleFiles.map((file) => {
-          const contents = (
-            <>
-              <span title={file.path}>{file.path}</span>
-              <small>
-                <em className="is-added">+{file.additions}</em>
-                <em className="is-removed">-{file.deletions}</em>
-              </small>
-            </>
+          const summary = summaries?.get(file.path);
+          const line = changeSummaryLine(file, summary);
+          const isOpen = openPath === file.path;
+          const kept = isKeptCurrent(
+            decisions?.get(file.path),
+            summary?.contentHash,
           );
+          const stats = (
+            <small>
+              <em className="is-added">+{file.additions}</em>
+              <em className="is-removed">-{file.deletions}</em>
+            </small>
+          );
+
+          if (!isReviewable) {
+            const contents = (
+              <>
+                <span title={file.path}>{file.path}</span>
+                {stats}
+              </>
+            );
+            return (
+              <div className="gyro-change-summary-file" key={file.path}>
+                {onReview ? (
+                  <button
+                    onClick={onReview}
+                    title={`Review ${file.path}`}
+                    type="button"
+                  >
+                    {contents}
+                  </button>
+                ) : (
+                  <div className="gyro-change-summary-file-static">
+                    {contents}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
-            <div className="gyro-change-summary-file" key={file.path}>
-              {onReview ? (
-                <button
-                  onClick={onReview}
-                  title={`Review ${file.path}`}
-                  type="button"
-                >
-                  {contents}
-                </button>
-              ) : (
-                <div className="gyro-change-summary-file-static">
-                  {contents}
-                </div>
-              )}
+            <div
+              className="gyro-change-summary-file is-reviewable"
+              key={file.path}
+            >
+              <button
+                aria-expanded={canExpandDiff ? isOpen : undefined}
+                onClick={() => {
+                  if (canExpandDiff) {
+                    setOpenPath(isOpen ? undefined : file.path);
+                    return;
+                  }
+                  onReview?.();
+                }}
+                title={
+                  canExpandDiff
+                    ? isOpen
+                      ? `Hide the change to ${file.path}`
+                      : `Show the change to ${file.path}`
+                    : `Review ${file.path}`
+                }
+                type="button"
+              >
+                <span className="gyro-change-summary-file-text">
+                  <span
+                    className="gyro-change-summary-file-path"
+                    title={file.path}
+                  >
+                    {file.path}
+                  </span>
+                  {line ? (
+                    <span
+                      className={`gyro-change-summary-file-line${
+                        line.source === "fallback" ? " is-measured" : ""
+                      }`}
+                    >
+                      {line.text}
+                    </span>
+                  ) : isSummarizing ? (
+                    // Said only while a summary call is genuinely in flight.
+                    <span className="gyro-change-summary-file-line is-pending">
+                      Working out what changed…
+                    </span>
+                  ) : null}
+                </span>
+                {stats}
+              </button>
+              <span className="gyro-change-summary-file-actions">
+                {onAsk ? (
+                  <button onClick={() => onAsk(file.path)} type="button">
+                    <MessageSquare aria-hidden="true" size={13} /> Ask AI
+                  </button>
+                ) : null}
+                {onKeep ? (
+                  kept ? (
+                    <span className="gyro-change-summary-kept">
+                      <Check aria-hidden="true" size={13} /> Kept
+                    </span>
+                  ) : (
+                    <button
+                      className="is-keep"
+                      onClick={() => onKeep(file.path, summary?.contentHash)}
+                      type="button"
+                    >
+                      Keep
+                    </button>
+                  )
+                ) : null}
+              </span>
+              {isOpen && onLoadChangeDiff ? (
+                <ChangeSummaryDiff onLoad={onLoadChangeDiff} path={file.path} />
+              ) : null}
             </div>
           );
         })}
@@ -22909,6 +23391,97 @@ function ChatRunChangeSummary({
       ) : null}
     </section>
   );
+}
+
+/** The change itself, inline, so reading a file does not leave the thread. */
+function ChangeSummaryDiff({
+  onLoad,
+  path,
+}: {
+  onLoad: (path: string) => Promise<string>;
+  path: string;
+}) {
+  const [state, setState] = useState<{
+    status: "loading" | "ready" | "failed";
+    lines?: DiffPreviewLine[];
+    truncated?: boolean;
+    error?: string;
+  }>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ status: "loading" });
+    onLoad(path).then(
+      (diff) => {
+        if (cancelled) return;
+        const { lines, truncated } = diffPreviewLines(diff);
+        setState({ status: "ready", lines, truncated });
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        setState({
+          status: "failed",
+          error:
+            error instanceof Error
+              ? error.message
+              : "The change could not be loaded.",
+        });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoad, path]);
+
+  return (
+    <div className="gyro-change-summary-diff">
+      {state.status === "loading" ? (
+        <p className="gyro-change-summary-diff-note">Loading the change…</p>
+      ) : null}
+      {state.status === "failed" ? (
+        <p className="gyro-change-summary-diff-note">{state.error}</p>
+      ) : null}
+      {state.status === "ready" && state.lines?.length ? (
+        <div className="gyro-change-summary-diff-scroll">
+          <code>
+            {state.lines.map((line, index) => (
+              <span
+                className={diffPreviewLineClass(line.kind)}
+                key={`${index}-${line.text}`}
+              >
+                {line.text || " "}
+              </span>
+            ))}
+          </code>
+        </div>
+      ) : null}
+      {state.status === "ready" && !state.lines?.length ? (
+        <p className="gyro-change-summary-diff-note">
+          No text change to show here.
+        </p>
+      ) : null}
+      {state.truncated ? (
+        <p className="gyro-change-summary-diff-note">
+          Shortened. Open Changes for the whole file.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function diffPreviewLineClass(kind: DiffPreviewLine["kind"]) {
+  switch (kind) {
+    case "added":
+      return "is-added";
+    case "removed":
+      return "is-removed";
+    case "hunk":
+      return "is-hunk";
+    case "meta":
+      return "is-meta";
+    default:
+      return undefined;
+  }
 }
 
 function formatMessageTime(value: string) {

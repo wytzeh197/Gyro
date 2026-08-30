@@ -58,9 +58,11 @@ export type ChatCompanionState = {
   panes: Record<string, ChatCompanionPaneState>;
 };
 
-export const CHAT_COMPANION_MIN_WIDTH = 320;
-export const CHAT_COMPANION_MAX_WIDTH = 900;
-export const CHAT_COMPANION_DEFAULT_WIDTH = 420;
+/** The transcript remains the primary work surface, even with a wide tool open. */
+export const CHAT_COMPANION_MIN_WIDTH = 360;
+export const CHAT_COMPANION_MAX_WIDTH = 720;
+export const CHAT_COMPANION_DEFAULT_WIDTH = 520;
+const CHAT_TRANSCRIPT_MIN_WIDTH = 480;
 
 /**
  * Below this the dock would leave the transcript unreadable, so a pane narrower
@@ -92,14 +94,18 @@ export function createInitialChatCompanionState(
 }
 
 export function clampChatCompanionWidth(width: number, available?: number) {
-  // Leave the transcript at least its own minimum when a container width is
-  // known; otherwise only the hard bounds apply.
+  // A tool must never squeeze an active conversation into a narrow vertical
+  // strip. The dock is secondary, so give the transcript a readable floor
+  // before applying the dock's own bounds.
   const cap =
     available === undefined
       ? CHAT_COMPANION_MAX_WIDTH
       : Math.max(
           CHAT_COMPANION_MIN_WIDTH,
-          Math.min(CHAT_COMPANION_MAX_WIDTH, available - 280),
+          Math.min(
+            CHAT_COMPANION_MAX_WIDTH,
+            available - CHAT_TRANSCRIPT_MIN_WIDTH,
+          ),
         );
   if (!Number.isFinite(width)) {
     return Math.min(cap, CHAT_COMPANION_DEFAULT_WIDTH);

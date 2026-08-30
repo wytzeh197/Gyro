@@ -227,8 +227,8 @@ assert.equal(clampChatCompanionWidth(10_000), CHAT_COMPANION_MAX_WIDTH);
 assert.equal(clampChatCompanionWidth(Number.NaN), CHAT_COMPANION_DEFAULT_WIDTH);
 assert.equal(
   clampChatCompanionWidth(800, 900),
-  620,
-  "a known container leaves the transcript its own 280px minimum",
+  420,
+  "a known container leaves the transcript its readable 480px minimum",
 );
 assert.equal(
   clampChatCompanionWidth(800, 400),

@@ -457,6 +457,27 @@ expect(
   "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
 );
 expect(
+  surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
+    surfaceSource.includes("onPaneDragStart: (event) =>") &&
+    surfaceSource.includes("event.dataTransfer.setData(") &&
+    surfaceSource.includes("CHAT_PANE_DRAG_MIME,") &&
+    surfaceSource.includes("function dataTransferHasType") &&
+    surfaceSource.includes("types.contains(type)") &&
+    !surfaceSource.includes(
+      "dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME)",
+    ) &&
+    surfaceSource.includes("function dragPointerIsOutside") &&
+    surfaceSource.includes("event.clientX < bounds.left") &&
+    surfaceSource.includes("Updating a provider CLI. Sending will unlock") &&
+    surfaceSource.includes("!isCliUpdating &&") &&
+    appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
+    styleSource.includes("Sessions/Workspace is navigation") &&
+    styleSource.includes("background: var(--gyro-segment-bg);") &&
+    appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    surfaceSource.includes("{zone.label}"),
+  "Each tiled chat should publish a pane drag payload and label every split drop target.",
+);
+expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
     surfaceSource.includes("gyro-sidebar-scm-directory") &&
     surfaceSource.includes("gyro-sidebar-scm-state is-") &&

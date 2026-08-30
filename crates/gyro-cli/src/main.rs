@@ -24,8 +24,8 @@ use gyro_core::{
     KimiAcpRequest, MutationDecision, MutationProposal, MutationProposalOperation,
     MutationProposalStatus, OllamaChatRequest, PendingProviderMutationCommit, ProviderFileChange,
     ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
-    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin,
-    SessionStore, SessionWorkspaceMode, TerminalRequestPayload,
+    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::error::Error as StdError;

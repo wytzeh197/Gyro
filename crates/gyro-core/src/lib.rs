@@ -9,6 +9,7 @@ pub mod credentials;
 pub mod diff;
 pub mod doctor;
 pub mod execution;
+pub mod file_review;
 pub mod github;
 pub mod harness;
 pub mod ipc;
@@ -76,6 +77,12 @@ pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
     run_command, CancellationToken, ExecutionChunk, ExecutionOutcome, ExecutionRequest,
     ExecutionStream, ExecutionTermination,
+};
+pub use file_review::{
+    build_summary_prompt, cached_summaries, content_hash as file_review_content_hash,
+    ensure_file_review_schema, fallback_summary, parse_summary_response, store_summaries,
+    FileChangeInput, FileChangeSummary, FileReviewDecision, SummarySource,
+    CHANGE_SUMMARY_SYSTEM_PROMPT, FILE_REVIEW_SCHEMA, MAX_SUMMARY_FILES,
 };
 pub use github::{
     create_pull_request, github_availability, list_pull_requests, list_workflow_runs,

@@ -18,6 +18,8 @@ import {
   CommandPaletteOverlay,
   IdeStatusBar,
   IdeSurface,
+  askAboutFilePrompt,
+  latestFileReviewTurn,
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
@@ -74,6 +76,7 @@ import {
   providerHealthAfterSignInRejection,
   providerSupportsUsage,
   providersForConfig,
+  resolveCleanMachinePath,
   resolvedWorkspaceSettings,
   persistableChatGridState,
   sanitizeStoredIdeState,
@@ -181,6 +184,7 @@ import {
   type WorkspaceScopedSettings,
   type WorkspaceSettingScope,
   type WorkspaceLayoutId,
+  type FileReviewSummary,
 } from "@gyro-dev/ui";
 import {
   lazy,
@@ -193,6 +197,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
 } from "react";
 import {
   applyProviderChatStreamDeltas,
@@ -2921,6 +2926,21 @@ export function App() {
       }
       if (streamEvent.phase === "completed") {
         clearProviderSignInRejection(streamEvent.providerId);
+        // A completed turn is stronger evidence than a CLI status probe: this
+        // exact provider just authenticated and produced a response. Keep the
+        // UI's readiness state in sync so an old blocked banner cannot survive
+        // above a successful chat.
+        if (isProviderId(streamEvent.providerId)) {
+          const provider = providersForConfig(configRef.current).find(
+            (item) => item.id === streamEvent.providerId,
+          );
+          dispatchWorkbench({
+            type: "set-provider-readiness",
+            status: "ready",
+            message: `${provider?.displayName ?? streamEvent.providerId} ready for chat`,
+            providerId: streamEvent.providerId,
+          });
+        }
       }
       if (
         streamEvent.phase === "started" ||
@@ -2981,6 +3001,7 @@ export function App() {
     },
     [
       clearProviderSignInRejection,
+      dispatchWorkbench,
       flushProviderStreamBatches,
       recordProviderSignInRejection,
       scheduleProviderStreamFlush,
@@ -5043,6 +5064,120 @@ export function App() {
       workbench.ide.sourceControl.files,
     ],
   );
+
+  /**
+   * End-of-turn file review, in "Ask first" only.
+   *
+   * Every edit in this mode was approved before it was written, so the card at
+   * the end of a turn is a reading pass over work that already landed. Keeping
+   * a file records that it was read; it applies and reverts nothing.
+   */
+  const isFileReviewEnabled =
+    !config.fullAccess &&
+    config.requireCommandApproval &&
+    config.requireFileEditApproval;
+  const [fileReviewSummariesBySession, setFileReviewSummariesBySession] =
+    useState<Record<string, Record<string, FileReviewSummary[]>>>({});
+  const [fileReviewPendingTurnIds, setFileReviewPendingTurnIds] = useState<
+    string[]
+  >([]);
+  /**
+   * Turns whose summary call has already been made, keyed by what was actually
+   * described. A turn that keeps editing produces a new key; a turn that is
+   * merely re-rendered does not, so the user is billed once per state.
+   */
+  const fileReviewRequestedRef = useRef(new Set<string>());
+  const activeFileReviewSummaries = activeSessionId
+    ? fileReviewSummariesBySession[activeSessionId]
+    : undefined;
+
+  useEffect(() => {
+    if (!isFileReviewEnabled || !isTauriRuntime()) return;
+    // A summary describes a finished turn. Asking while the provider is still
+    // working would describe a half-written file and would compete with the
+    // run itself for the session's single provider slot.
+    if (!activeSessionId || isActiveSessionSending) return;
+    const target = latestFileReviewTurn(events);
+    if (!target) return;
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root) return;
+    const sessionId = activeSessionId;
+    const { turnId } = target;
+    const key = [
+      sessionId,
+      turnId,
+      ...target.files.map(
+        (file) => `${file.path}:${file.additions}:${file.deletions}`,
+      ),
+    ].join("|");
+    if (fileReviewRequestedRef.current.has(key)) return;
+    fileReviewRequestedRef.current.add(key);
+
+    const sessionModel = {
+      ...selectedSessionModelFromConfig(config),
+      ...sessionModelSelectionFromSession(
+        sessions.find((session) => session.id === sessionId),
+      ),
+    };
+
+    setFileReviewPendingTurnIds((current) =>
+      current.includes(turnId) ? current : [...current, turnId],
+    );
+    void (async () => {
+      try {
+        const files = await Promise.all(
+          target.files.map(async (file) => {
+            // A file whose diff cannot be read still gets a row; it just falls
+            // back to its counts rather than borrowing another file's prose.
+            const diff = await loadInlineChangeDiff(file.path).catch(() => "");
+            return {
+              path: file.path,
+              diff,
+              additions: file.additions,
+              deletions: file.deletions,
+            };
+          }),
+        );
+        const summaries = await invoke<FileReviewSummary[]>(
+          "summarize_file_changes",
+          {
+            request: {
+              sessionId,
+              turnId,
+              workspacePath: root,
+              providerId: sessionModel.providerId ?? config.selectedProviderId,
+              providerLabel: sessionModel.providerLabel,
+              modelId: sessionModel.modelId,
+              modelLabel: sessionModel.modelLabel,
+              files,
+            },
+          },
+        );
+        setFileReviewSummariesBySession((current) => ({
+          ...current,
+          [sessionId]: { ...current[sessionId], [turnId]: summaries },
+        }));
+      } catch (error) {
+        // The card renders from counts without this, so a failed description is
+        // not worth a notification.
+        console.warn("could not summarize the turn's changes", error);
+      } finally {
+        setFileReviewPendingTurnIds((current) =>
+          current.filter((id) => id !== turnId),
+        );
+      }
+    })();
+  }, [
+    activeSession?.workspacePath,
+    activeSessionId,
+    config,
+    events,
+    isActiveSessionSending,
+    isFileReviewEnabled,
+    loadInlineChangeDiff,
+    sessions,
+    workspacePath,
+  ]);
 
   const reviewTerminalChanges = useCallback(
     (file?: SourceControlState["files"][number]) => {
@@ -7857,6 +7992,81 @@ export function App() {
     [activeDraftKey],
   );
 
+  const keepReviewedFile = useCallback(
+    ({
+      turnId,
+      path,
+      contentHash,
+    }: {
+      turnId: string;
+      path: string;
+      contentHash?: string;
+    }) => {
+      const sessionId = activeSessionIdRef.current;
+      if (!sessionId) return;
+      // Changes already treats an accepted file as read; keeping one here is
+      // the same statement made from the thread.
+      dispatchWorkbench({
+        type: "set-diff-file-state",
+        path,
+        state: "accepted",
+        action: `${path} kept`,
+      });
+      if (!isTauriRuntime()) return;
+      void (async () => {
+        try {
+          const event = await invoke<SessionEvent>(
+            "record_file_review_decision",
+            {
+              request: {
+                sessionId,
+                turnId,
+                path,
+                contentHash: contentHash ?? "",
+                decision: "kept",
+              },
+            },
+          );
+          setEventsForSession(sessionId, (current) =>
+            current.some((item) => item.id === event.id)
+              ? current
+              : [...current, event],
+          );
+        } catch (error) {
+          notify("terminal", "Could not record that", String(error));
+        }
+      })();
+    },
+    [dispatchWorkbench, notify, setEventsForSession],
+  );
+
+  const askAboutReviewedFile = useCallback(
+    (path: string) => {
+      // Prefilled, not sent: the question is the user's to finish and send.
+      updateActiveChatDraft(askAboutFilePrompt(path));
+    },
+    [updateActiveChatDraft],
+  );
+
+  const fileReviewTools = useMemo(
+    () =>
+      isFileReviewEnabled
+        ? {
+            summaries: activeFileReviewSummaries,
+            pendingTurnIds: fileReviewPendingTurnIds,
+            onKeep: keepReviewedFile,
+            onAsk: askAboutReviewedFile,
+          }
+        : undefined,
+    [
+      activeFileReviewSummaries,
+      askAboutReviewedFile,
+      fileReviewPendingTurnIds,
+      isFileReviewEnabled,
+      keepReviewedFile,
+    ],
+  );
+
   const removeChatAttachment = useCallback(
     (attachmentId: string) => {
       setChatAttachments((current) => ({
@@ -8660,6 +8870,73 @@ export function App() {
       workspacePath,
     ],
   );
+
+  const providerReadinessNotice = useMemo(() => {
+    const selectedModel = activeSession
+      ? sessionModelSelectionFromSession(activeSession)
+      : chatDraftModels[activeDraftKey];
+    const providerConfigs = providersForConfig(config);
+    const selectedProvider = providerConfigs.find(
+      (provider) =>
+        provider.id ===
+        (selectedModel?.providerId ?? config.selectedProviderId),
+    );
+    const blockedProvider =
+      workbench.providerReadiness.status === "blocked"
+        ? providerConfigs.find(
+            (provider) => provider.id === workbench.providerReadiness.providerId,
+          )
+        : undefined;
+    const preferredProvider =
+      blockedProvider ??
+      selectedProvider ??
+      providerConfigs.find((provider) => provider.id === "openai") ??
+      providerConfigs.find((provider) => isProviderExecutable(provider.id));
+    const selectedProviderHealth = workbench.providerStatuses.find(
+      (status) => status.id === selectedProvider?.id,
+    );
+    const readyFromRuntime = Boolean(
+      selectedProvider &&
+        isProviderRuntimeUsable(selectedProvider, selectedProviderHealth),
+    );
+    const readyFromCompletedTurn =
+      workbench.providerReadiness.status === "ready" &&
+      workbench.providerReadiness.providerId === selectedProvider?.id;
+    const hasReadyProvider = readyFromRuntime || readyFromCompletedTurn;
+    const cleanMachinePath = resolveCleanMachinePath({
+      hasReadyProvider,
+      preferredProviderId: preferredProvider?.id,
+      preferredProviderLabel: preferredProvider?.displayName,
+      providerBlockMessage:
+        workbench.providerReadiness.status === "blocked"
+          ? workbench.providerReadiness.message
+          : undefined,
+      workspacePath: activeSession?.workspacePath ?? workspacePath,
+    });
+
+    if (
+      !cleanMachinePath.hasProject ||
+      cleanMachinePath.hasReadyProvider ||
+      !cleanMachinePath.blockedReason ||
+      !cleanMachinePath.nextAction?.startsWith("connect-provider:")
+    ) {
+      return undefined;
+    }
+
+    return {
+      action: cleanMachinePath.nextAction,
+      actionLabel: cleanMachinePath.nextActionLabel,
+      message: cleanMachinePath.blockedReason,
+    };
+  }, [
+    activeDraftKey,
+    activeSession,
+    chatDraftModels,
+    config,
+    workbench.providerStatuses,
+    workbench.providerReadiness,
+    workspacePath,
+  ]);
 
   const splitTerminalPane = useCallback(
     (template: TerminalTemplate) => {
@@ -11542,7 +11819,7 @@ export function App() {
       } | null,
     ) => {
       if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
-        return;
+        return false;
       }
       try {
         await invoke("session_browser_open", {
@@ -11560,8 +11837,16 @@ export function App() {
           message: `Native · ${normalizedPreviewUrl(url)}`,
           nativeHost: true,
         });
+        return true;
       } catch (error) {
         notify("command-failed", "Browser open failed", String(error));
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "verification-failed",
+          message: "Gyro could not open the native browser. Retry or open it externally.",
+          nativeHost: true,
+        });
+        return false;
       }
     },
     [notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
@@ -11837,19 +12122,10 @@ export function App() {
     let disposed = false;
     const url = normalizedPreviewUrl(workbench.browserPreview.url);
 
-    // Native host navigates itself; mark ready without the loopback-only probe.
+    // Native host navigates itself. `ensureSessionBrowser` owns its terminal
+    // state so an open failure cannot be overwritten as a healthy blank page.
     if (isTauriRuntime() && browserNativeHost) {
-      void ensureSessionBrowser(url).finally(() => {
-        if (disposed) return;
-        dispatchWorkbench({
-          type: "browser-status",
-          status: "ready",
-          message: `Native · ${url}`,
-          nativeHost: true,
-          diagnosticsSupported: true,
-          diagnosticsCaptured: false,
-        });
-      });
+      void ensureSessionBrowser(url);
       return () => {
         disposed = true;
         window.clearTimeout(timeout);
@@ -14178,7 +14454,12 @@ export function App() {
 
   const renderChatPane = (
     pane: ChatPaneRef,
-    options: { isMaximized: boolean; isTiled: boolean },
+    options: {
+      isMaximized: boolean;
+      isTiled: boolean;
+      onPaneDragEnd: () => void;
+      onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+    },
   ) => {
     const paneSession =
       pane.kind === "session"
@@ -14331,10 +14612,13 @@ export function App() {
             ? sendingSessionIds.includes(pane.sessionId)
             : isFocused && isStartingFirstTurn
         }
+        isCliUpdating={cliUpdatePhase === "updating"}
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isTiled={options.isTiled}
+        onPaneDragEnd={options.onPaneDragEnd}
+        onPaneDragStart={options.onPaneDragStart}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onboarding={workbench.onboarding}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
@@ -14422,6 +14706,14 @@ export function App() {
           return changeGoal(action, value);
         }}
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+        fileReview={
+          // The summaries and the Keep both belong to the focused session, so a
+          // background pane keeps the plain summary card rather than showing
+          // another chat's reading state.
+          pane.kind === "session" && pane.sessionId === activeSessionId
+            ? fileReviewTools
+            : undefined
+        }
         onLoadChangeDiff={loadInlineChangeDiff}
         onEditQueuedMessage={(messageId) => {
           focusChatPane(pane);
@@ -14607,6 +14899,7 @@ export function App() {
       isEnvironmentRailOpen={activeChatPanel === "environment"}
       isGoalComposerActive={isGoalComposerActive}
       isComposerSending={isActiveSessionSending}
+      isCliUpdating={cliUpdatePhase === "updating"}
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
@@ -14628,6 +14921,7 @@ export function App() {
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+      fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
       onEditQueuedMessage={editQueuedChatMessage}
       onRemoveQueuedMessage={removeQueuedChatMessage}
@@ -14691,6 +14985,12 @@ export function App() {
       cliUpdatePhase={cliUpdateError ? "failed" : cliUpdatePhase}
       onUpdateClis={() => void applyCliUpdates()}
       onDismissCliUpdates={dismissCliUpdates}
+      providerReadinessNotice={providerReadinessNotice}
+      onProviderReadinessAction={() => {
+        if (providerReadinessNotice) {
+          handleComposerAction(providerReadinessNotice.action);
+        }
+      }}
       workspaceSidebarHidden={workbench.preferences.workspaceSidebarHidden}
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
@@ -14928,6 +15228,7 @@ export function App() {
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
                     isComposerSending={isActiveSessionSending}
+                    isCliUpdating={cliUpdatePhase === "updating"}
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
@@ -14961,6 +15262,7 @@ export function App() {
                     }
                     onGoalAction={changeGoal}
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                    fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
                     onEditQueuedMessage={editQueuedChatMessage}
                     onRemoveQueuedMessage={removeQueuedChatMessage}
@@ -15492,6 +15794,7 @@ export function App() {
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isGoalComposerActive={isGoalComposerActive}
           isComposerSending={isActiveSessionSending}
+          isCliUpdating={cliUpdatePhase === "updating"}
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}

@@ -337,7 +337,7 @@ fn model_context_window(value: &serde_json::Value) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
     #[test]
@@ -373,10 +373,11 @@ mod tests {
         let server = std::thread::spawn(move || {
             for _ in 0..2 {
                 let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0_u8; 4096];
-                let bytes = stream.read(&mut request).unwrap();
-                let request = String::from_utf8_lossy(&request[..bytes]);
-                let body = if request.starts_with("GET /api/tags") {
+                let mut request_line = String::new();
+                BufReader::new(&mut stream)
+                    .read_line(&mut request_line)
+                    .unwrap();
+                let body = if request_line.starts_with("GET /api/tags") {
                     r#"{"models":[{"name":"qwen3-coder:latest","details":{"family":"qwen3","parameter_size":"8B","quantization_level":"Q4"}}]}"#
                 } else {
                     r#"{"capabilities":["completion","tools"],"model_info":{"qwen3.context_length":32768}}"#

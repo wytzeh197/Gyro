@@ -136,7 +136,9 @@ export function resolveCleanMachinePath(
       "Connect a local provider before sending.";
     nextAction = connectAction;
     nextActionLabel = `Connect ${connectLabel}`;
-    placeholder = `Connect ${connectLabel} (or another provider), then describe a task…`;
+    placeholder = input.providerBlockMessage?.trim()
+      ? `${connectLabel} needs attention — reconnect to send…`
+      : `Connect ${connectLabel} to send a message…`;
     readinessLabel = blockedReason;
   } else {
     placeholder = "Describe a task or attach images";

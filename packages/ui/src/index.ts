@@ -69,6 +69,10 @@ export type {
   DiffLineKind,
   DiffReview,
   DiffSource,
+  FileReviewDecision,
+  FileReviewEntry,
+  FileReviewSummary,
+  FileReviewSummarySource,
   EditorBuffer,
   EditorBufferStatus,
   EditorGroup,
@@ -220,6 +224,23 @@ export type {
   CliUpdatePhase,
   CliUpdateNoticeState,
 } from "./types";
+export { FILE_REVIEW_SCHEMA } from "./types";
+export {
+  askAboutFilePrompt,
+  changeSummaryLine,
+  diffPreviewLines,
+  fileReviewDecisions,
+  isKeptCurrent,
+  latestFileReviewTurn,
+} from "./file-review";
+export type {
+  DiffPreviewKind,
+  DiffPreviewLine,
+  FileReviewFile,
+  FileReviewLine,
+  FileReviewRecord,
+  FileReviewTurn,
+} from "./file-review";
 export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
   createInitialWorkbenchState,
