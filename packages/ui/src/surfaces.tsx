@@ -1838,6 +1838,8 @@ export function AppChrome({
               selectedTerminalPaneId={selectedTerminalPaneId}
               sessions={sessions}
               terminalPanes={terminalPanes}
+              updateState={showSidebarUpdate ? updateState : undefined}
+              onUpdateAction={onUpdateAction}
               isWorkspacePreparationOpen={isWorkspacePreparationOpen}
               onCloseWorkspacePreparation={() =>
                 setIsWorkspacePreparationOpen(false)
@@ -1880,12 +1882,6 @@ export function AppChrome({
                     <strong>Settings</strong>
                   </span>
                 </button>
-                {showSidebarUpdate && updateState ? (
-                  <SidebarUpdateControl
-                    onAction={onUpdateAction}
-                    state={updateState}
-                  />
-                ) : null}
                 {isShellOptimizing ? (
                   <span
                     className="gyro-shell-optimizing"
@@ -2248,6 +2244,9 @@ function WorkspacePreparationControl({
   );
 }
 
+/** Roughly the tooltip's own height — enough to pick a side before it paints. */
+const UPDATE_TIP_CLEARANCE = 76;
+
 function SidebarUpdateControl({
   state,
   onAction,
@@ -2255,35 +2254,37 @@ function SidebarUpdateControl({
   state: UpdateState;
   onAction?: (state: UpdateState) => void;
 }) {
-  const [isReleaseCardDismissed, setIsReleaseCardDismissed] = useState(false);
+  const [placement, setPlacement] = useState<"above" | "below">("below");
+  const controlRef = useRef<HTMLDivElement>(null);
   const tipId = useId();
   const isBusy =
     state.status === "downloading" || state.status === "installing";
-  const actionLabel = updateSidebarLabel(state);
+  const label = updateSidebarLabel(state);
   const tag = updateVersionTag(state);
   const size = updateSizeLabel(state);
-  const buttonLabel =
-    state.status === "downloading"
-      ? `Updating ${state.progressPercent ?? 0}%`
-      : state.status === "ready"
-        ? "Restart"
-        : state.status === "installing"
-          ? "Installing"
-          : state.status === "failed"
-            ? "Retry"
-            : "Update";
-  const showReleaseCard = state.status === "ready" && !isReleaseCardDismissed;
-
-  useEffect(() => {
-    setIsReleaseCardDismissed(false);
-  }, [state.nextVersion, state.status]);
+  const measurePlacement = useCallback(() => {
+    const rect = controlRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const roomBelow = window.innerHeight - rect.bottom;
+    setPlacement(
+      roomBelow < UPDATE_TIP_CLEARANCE && rect.top > UPDATE_TIP_CLEARANCE
+        ? "above"
+        : "below",
+    );
+  }, []);
 
   return (
-    <div className="gyro-sidebar-update" data-status={state.status}>
+    <div
+      className="gyro-sidebar-update is-windowbar"
+      data-tip-placement={placement}
+      onFocus={measurePlacement}
+      onPointerEnter={measurePlacement}
+      ref={controlRef}
+    >
       <button
         aria-busy={isBusy}
         aria-describedby={tipId}
-        aria-label={actionLabel}
+        aria-label={label}
         className="gyro-sidebar-update-button"
         data-status={state.status}
         disabled={isBusy}
@@ -2291,55 +2292,22 @@ function SidebarUpdateControl({
         type="button"
       >
         {state.status === "downloading" ? (
-          <RefreshCw className="is-spinning" size={13} />
+          <span className="gyro-sidebar-update-percent">
+            {state.progressPercent ?? 0}%
+          </span>
         ) : state.status === "ready" || state.status === "installing" ? (
           <RefreshCw
             className={state.status === "installing" ? "is-spinning" : ""}
-            size={13}
+            size={11}
           />
         ) : (
-          <Download size={13} />
+          <Download size={11} />
         )}
-        <span>{buttonLabel}</span>
       </button>
       <div className="gyro-sidebar-update-tip" id={tipId} role="tooltip">
-        <strong>{tag ?? actionLabel}</strong>
+        <strong>{tag ?? label}</strong>
         <span>{size}</span>
       </div>
-      {showReleaseCard ? (
-        <section
-          aria-label="Update ready"
-          className="gyro-update-release-card"
-          role="status"
-        >
-          <button
-            aria-label="Dismiss update ready card"
-            className="gyro-update-release-card-dismiss"
-            onClick={() => setIsReleaseCardDismissed(true)}
-            type="button"
-          >
-            <X size={14} />
-          </button>
-          <span className="gyro-update-release-mark" aria-hidden="true">
-            <img alt="" className="is-light" src={gyroLogoTransparentDark} />
-            <img alt="" className="is-dark" src={gyroLogoTransparentLight} />
-          </span>
-          <div>
-            <span>{tag ? `Ready · ${tag}` : "Update ready"}</span>
-            <strong>Restart to finish updating Gyro</strong>
-            <small>
-              {size ?? "The update has downloaded and is ready to install."}
-            </small>
-          </div>
-          <button
-            className="gyro-update-release-card-action"
-            onClick={() => onAction?.(state)}
-            type="button"
-          >
-            Restart now
-          </button>
-        </section>
-      ) : null}
     </div>
   );
 }
@@ -2942,6 +2910,8 @@ function WorkspaceSidebarContent({
   onToggleChatsCollapsed,
   onToggleSidebar,
   canHideSidebar = true,
+  updateState,
+  onUpdateAction,
   workspacePreparation,
   isWorkspacePreparationOpen,
   onToggleWorkspacePreparation,
@@ -3050,6 +3020,8 @@ function WorkspaceSidebarContent({
   onToggleSidebar: () => void;
   /** When false, the hide control is omitted (Workspace code layout). */
   canHideSidebar?: boolean;
+  updateState?: UpdateState;
+  onUpdateAction?: (state: UpdateState) => void;
   workspacePreparation?: WorkspacePreparationProgress;
   isWorkspacePreparationOpen: boolean;
   onToggleWorkspacePreparation: () => void;
@@ -3550,6 +3522,12 @@ function WorkspaceSidebarContent({
             onToggle={onToggleWorkspacePreparation}
             progress={workspacePreparation}
           />
+          {updateState ? (
+            <SidebarUpdateControl
+              onAction={onUpdateAction}
+              state={updateState}
+            />
+          ) : null}
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
@@ -7723,7 +7701,7 @@ export function ChatSurface({
             .join(" ")}
           aria-label={isMission ? "New mission" : "New Chat"}
           ref={startSectionRef}
-          style={{ width: "min(760px, 100%)" }}
+          style={{ width: "min(860px, 100%)" }}
         >
           {isMission && missionHasWorkers ? null : (
             <span className="gyro-brand-logo">
@@ -20536,14 +20514,14 @@ function Composer({
   const canSubmitChat =
     shellReady &&
     !isCliUpdating &&
+    !isBranchLoading &&
     (chatMode === "council"
       ? councilEnabled &&
         !councilResolution?.error &&
         (councilResolution?.seats.length ?? 0) >= 2 &&
         hasUserWorkspace
       : canSendChat(hasReadyProvider, workspacePath));
-  const canSubmitComposer =
-    !isBranchLoading && (isGoalComposerActive || canSubmitChat);
+  const canSubmitComposer = isGoalComposerActive || canSubmitChat;
   const preferredConnect = preferredCleanMachineConnectProvider(
     providerConfigs
       .filter((provider) => isProviderExecutable(provider.id))

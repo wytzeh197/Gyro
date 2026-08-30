@@ -563,8 +563,10 @@ expect(
     // opacity); a second means a value went off-token.
     const start = styleSource.indexOf("Run rail (gyro-run-*)");
     if (start < 0) return false;
+    const end = styleSource.indexOf("End run rail (gyro-run-*)", start);
+    if (end < 0) return false;
     const rail = styleSource
-      .slice(styleSource.indexOf("*/", start))
+      .slice(styleSource.indexOf("*/", start), end)
       .replace(/\/\*[\s\S]*?\*\//g, "");
     return (
       !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(

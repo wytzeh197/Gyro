@@ -28737,9 +28737,9 @@ button.gyro-account-menu-row:hover,
 .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
   .gyro-session-row.is-active::before {
   box-shadow: 0 0 10px color-mix(in srgb, var(--gyro-accent) 46%, transparent);
-  inset: 6px auto 6px 0;
+  inset: 3px auto 3px 0;
   opacity: 1;
-  width: 3px;
+  width: 4px;
 }
 
 .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
@@ -33133,6 +33133,7 @@ button.gyro-account-menu-row:hover,
 /* Room for name plus qualifier before either has to truncate. */
 .gyro-composer-control-model {
   max-width: 212px;
+}
 /* -------------------------------------------------------------------------
  * Conversation readability
  * ---------------------------------------------------------------------- */
