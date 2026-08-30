@@ -9,6 +9,7 @@ import {
   expandAssistantMessageSegments,
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
+import { FILE_REVIEW_SCHEMA } from "./types.ts";
 import type { SessionEvent } from "./types.ts";
 
 /**
@@ -23,6 +24,7 @@ import type { SessionEvent } from "./types.ts";
  */
 
 export type WorkStatus = "running" | "done" | "failed";
+type CommandCategory = "inspect" | "test" | "build";
 
 export type WorkItem =
   | {
@@ -30,6 +32,7 @@ export type WorkItem =
       id: string;
       status: WorkStatus;
       command: string;
+      category?: CommandCategory;
       /** What the command was for, when the provider says. Falls back to the command. */
       intent?: string;
     }
@@ -47,6 +50,12 @@ export type WorkItem =
       path: string;
       additions?: number;
       deletions?: number;
+      /**
+       * What the agent said it was doing to this file, in its own words. Free
+       * and already true, so the review card prefers it over a line count when
+       * no summary has been bought.
+       */
+      intent?: string;
     }
   /**
    * The agent looked at something. Deliberately not a `file` item: a read is
@@ -62,6 +71,13 @@ export type WorkItem =
     }
   | { kind: "memory"; id: string; status: WorkStatus }
   | { kind: "context"; id: string; status: WorkStatus }
+  | {
+      kind: "browser";
+      id: string;
+      status: WorkStatus;
+      action: "browse" | "inspect" | "capture";
+      target?: string;
+    }
   | {
       kind: "tool";
       id: string;
@@ -130,6 +146,8 @@ export type FileChange = {
   status: WorkStatus;
   additions?: number;
   deletions?: number;
+  /** The agent's own note about this edit, when it left one. */
+  intent?: string;
 };
 
 export type RunModel = {
@@ -492,7 +510,7 @@ function runPhase(
     return {
       name: "failed",
       message: cancelled
-        ? (status.message?.trim() || "Stopped")
+        ? status.message?.trim() || "Stopped"
         : (status.message ?? status.error ?? "The run stopped early"),
       // Normalize so the header and problem tone can tell user-stop from crash.
       recoveryKind: cancelled
@@ -502,6 +520,69 @@ function runPhase(
     };
   }
   return { name: "done", durationMs: options.durationMs };
+}
+
+function classifyCommandActivity({
+  command,
+  id,
+  intent,
+  status,
+}: {
+  command: string;
+  id: string;
+  intent?: string;
+  status: WorkStatus;
+}): WorkItem {
+  const normalized = command
+    .replace(/^\s*(?:cd\s+[^;&|]+\s*(?:&&|;)\s*)+/i, "")
+    .trim();
+  if (/^(?:rg|grep)\b/i.test(normalized)) {
+    return {
+      kind: "search",
+      id,
+      status,
+      scope: "project",
+      query: commandTarget(normalized),
+    };
+  }
+  if (/^(?:sed|head|tail|cat|awk)\b/i.test(normalized)) {
+    const path = commandFileTarget(normalized);
+    return {
+      kind: "read",
+      id,
+      status,
+      path,
+      media: isImagePath(path) ? "image" : "file",
+    };
+  }
+  const category: CommandCategory | undefined =
+    /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?test\b|\bcargo\s+test\b/i.test(
+      normalized,
+    )
+      ? "test"
+      : /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?build\b|\bcargo\s+build\b/i.test(
+            normalized,
+          )
+        ? "build"
+        : /^(?:git\s+(?:status|diff|log|branch)|ls\b|find\b|pwd\b)/i.test(
+              normalized,
+            )
+          ? "inspect"
+          : undefined;
+  return { kind: "command", id, status, command, intent, category };
+}
+
+function commandTarget(command: string) {
+  const quoted = command.match(/["']([^"']+)["']/)?.[1];
+  return (
+    quoted ?? command.replace(/^(?:rg|grep)\s+[^\s]+\s*/i, "").slice(0, 160)
+  );
+}
+
+function commandFileTarget(command: string) {
+  const tokens = command.match(/(?:["'][^"']+["']|\S+)/g) ?? [];
+  const candidate = tokens.at(-1)?.replace(/^['"]|['"]$/g, "");
+  return candidate && !candidate.startsWith("-") ? candidate : undefined;
 }
 
 /**
@@ -536,15 +617,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
 
   switch (text(payload, "activityKind")) {
     case "command":
-      return {
-        kind: "command",
-        id,
-        status,
+      return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
-        // Prefer an explicit intent; fall back to the free-form note when the
-        // backend reclassified Bash with a description in the note slot.
+        id,
         intent: text(payload, "intent") ?? text(payload, "note"),
-      };
+        status,
+      });
     case "file":
       return {
         kind: "file",
@@ -553,6 +631,7 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
         additions: count(payload, "additions"),
         deletions: count(payload, "deletions"),
+        intent: text(payload, "intent") ?? text(payload, "note"),
       };
     case "search": {
       // Prefer the structured query; a note is a secondary scope (path) and is
@@ -604,13 +683,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
       };
     case "execute":
-      return {
-        kind: "command",
-        id,
-        status,
+      return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
+        id,
         intent: text(payload, "intent") ?? text(payload, "note"),
-      };
+        status,
+      });
     case "fetch":
       return {
         kind: "search",
@@ -661,13 +739,12 @@ function workItemFromCapabilityCall(
     capabilityId === "workspace-run-task" ||
     capabilityId === "workspace-run-test"
   ) {
-    return {
-      kind: "command",
-      id,
-      status,
+    return classifyCommandActivity({
       command: summary ?? resourceLabel ?? humanizeCapabilityId(capabilityId),
+      id,
       intent: summary,
-    };
+      status,
+    });
   }
 
   // Project search → search row.
@@ -683,7 +760,10 @@ function workItemFromCapabilityCall(
 
   // Reading a workspace file is the same beat as a provider read, so it gets
   // the same row rather than a generic wrench.
-  if (capabilityId === "workspace-read" || capabilityId === "workspace-read-range") {
+  if (
+    capabilityId === "workspace-read" ||
+    capabilityId === "workspace-read-range"
+  ) {
     const path = resourceLabel ?? summary;
     return {
       kind: "read",
@@ -702,6 +782,26 @@ function workItemFromCapabilityCall(
     };
   }
 
+  if (capabilityId.startsWith("browser-")) {
+    const action =
+      capabilityId === "browser-screenshot"
+        ? "capture"
+        : capabilityId === "browser-inspect" ||
+            capabilityId === "browser-read-page" ||
+            capabilityId === "browser-find" ||
+            capabilityId === "browser-console" ||
+            capabilityId === "browser-network"
+          ? "inspect"
+          : "browse";
+    return {
+      kind: "browser",
+      id,
+      status,
+      action,
+      target: resourceLabel ?? summary,
+    };
+  }
+
   // Everything else (workspace-context, browser-*, ide-*, git, diff, …)
   // is a single tool beat with a human label.
   return {
@@ -713,18 +813,10 @@ function workItemFromCapabilityCall(
 }
 
 function capabilityWorkStatus(value: string | undefined): WorkStatus {
-  if (
-    value === "requested" ||
-    value === "waiting" ||
-    value === "running"
-  ) {
+  if (value === "requested" || value === "waiting" || value === "running") {
     return "running";
   }
-  if (
-    value === "failed" ||
-    value === "denied" ||
-    value === "cancelled"
-  ) {
+  if (value === "failed" || value === "denied" || value === "cancelled") {
     return "failed";
   }
   return "done";
@@ -890,10 +982,10 @@ export function runRowText(step: RunStep): RunRowText {
       return {
         label:
           item.status === "running"
-            ? "Running command"
+            ? commandVerb(item.category, true)
             : item.status === "failed"
-              ? "Command failed"
-              : "Ran command",
+              ? commandFailedVerb(item.category)
+              : commandVerb(item.category, false),
         // Intent (why) wins over the raw command (what). A provider note is the
         // same shape as intent when Bash was reclassified with a description.
         description: item.intent ?? item.command,
@@ -926,6 +1018,22 @@ export function runRowText(step: RunStep): RunRowText {
             ? "Compacting context"
             : "Compacted context",
       };
+    case "browser":
+      return {
+        label:
+          item.status === "running"
+            ? item.action === "capture"
+              ? "Capturing preview"
+              : item.action === "inspect"
+                ? "Inspecting page"
+                : "Browsing"
+            : item.action === "capture"
+              ? "Captured preview"
+              : item.action === "inspect"
+                ? "Inspected page"
+                : "Browsed page",
+        description: item.target,
+      };
     case "tool": {
       const toolLabel = item.server
         ? `${item.server} · ${item.tool}`
@@ -942,9 +1050,7 @@ export function runRowText(step: RunStep): RunRowText {
       // ACP fallbacks look like "xAI tool" / "Kimi tool". Showing
       // "Used tool · xAI tool" is noise — drop the redundant description.
       if (isGenericProviderToolLabel(toolLabel)) {
-        return withNote(
-          item.status === "running" ? "Using tool" : "Used tool",
-        );
+        return withNote(item.status === "running" ? "Using tool" : "Used tool");
       }
       // Familiar capability labels get a progressive verb while in flight.
       if (item.status === "running") {
@@ -958,11 +1064,24 @@ export function runRowText(step: RunStep): RunRowText {
       if (toolLabel && !isRawToolPayload(toolLabel)) {
         return withNote(toolLabel);
       }
-      return withNote(
-        item.status === "running" ? "Using tool" : "Used tool",
-      );
+      return withNote(item.status === "running" ? "Using tool" : "Used tool");
     }
   }
+}
+
+function commandVerb(category: CommandCategory | undefined, running: boolean) {
+  if (category === "inspect")
+    return running ? "Inspecting workspace" : "Inspected workspace";
+  if (category === "test") return running ? "Running tests" : "Ran tests";
+  if (category === "build")
+    return running ? "Building project" : "Built project";
+  return running ? "Running command" : "Ran command";
+}
+
+function commandFailedVerb(category: CommandCategory | undefined) {
+  if (category === "test") return "Tests failed";
+  if (category === "build") return "Build failed";
+  return category === "inspect" ? "Inspection failed" : "Command failed";
 }
 
 /** In-flight wording for the tools users see every turn. */
@@ -1077,7 +1196,9 @@ export function splitToolName(raw: string): { tool: string; server?: string } {
       return { tool: humanizeCapabilityTool(tool) };
     }
     return {
-      server: humanizeToolSegment(server.replace(/^gyro_capabilities$/i, "gyro")),
+      server: humanizeToolSegment(
+        server.replace(/^gyro_capabilities$/i, "gyro"),
+      ),
       tool: humanizeToolSegment(tool),
     };
   }
@@ -1220,6 +1341,8 @@ function workIdentity(item: WorkItem): string | undefined {
       return `command:${item.command}`;
     case "search":
       return item.query ? `search:${item.scope}:${item.query}` : undefined;
+    case "browser":
+      return item.target ? `browser:${item.action}:${item.target}` : undefined;
     case "tool":
       return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
     case "memory":
@@ -1257,25 +1380,38 @@ function mergeFileChange(
       status: item.status,
       additions: item.additions,
       deletions: item.deletions,
+      // Only when the agent actually left a note — an empty key would read as a
+      // note that says nothing.
+      ...(item.intent ? { intent: item.intent } : {}),
     });
     return;
   }
   existing.status = item.status;
   existing.additions = item.additions ?? existing.additions;
   existing.deletions = item.deletions ?? existing.deletions;
+  // The first note explains the edit; later touches of the same file are
+  // usually follow-ups, so an existing note is not overwritten by a vaguer one.
+  if (!existing.intent && item.intent) existing.intent = item.intent;
 }
 
-/** The title marker is an instruction to the app, never a beat in the run. */
+/** Control markers are instructions to the app, never beats in the run. */
 function isHiddenRunEvent(event: SessionEvent) {
   if (event.kind !== "system-event") {
     return false;
   }
   const payload = record(event.payload);
+  // A "Kept" is the user's reading record, not something the run did. Without
+  // this it would fall through to the unrecognized-event branch and draw as an
+  // approval row the agent never asked for.
+  if (text(payload, "schema") === FILE_REVIEW_SCHEMA) {
+    return true;
+  }
   if (text(payload, "kind") !== "provider-activity") {
     return false;
   }
-  return (text(payload, "label") ?? event.message).includes(
-    "GYRO_SESSION_TITLE:",
+  const label = text(payload, "label") ?? event.message;
+  return (
+    label.includes("GYRO_SESSION_TITLE:") || label.includes("GYRO_ARTIFACTS:")
   );
 }
 

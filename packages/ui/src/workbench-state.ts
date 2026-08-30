@@ -79,6 +79,7 @@ import {
   defaultProviderStatuses as catalogDefaultProviderStatuses,
   providerHealthAfterSignInRejection,
 } from "./provider-catalog.ts";
+import { clampChatCompanionWidth } from "./chat-companion.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
   MAX_WORKSPACE_FOLDERS,
@@ -498,9 +499,9 @@ export function chatGridReducer(
       slots,
       // A lone pane is no longer a split — clear the two-pane direction so a
       // later drop can establish a fresh Left/Right arrangement.
-      splitDirection: remaining.length === 2 ? current.splitDirection : undefined,
-      arrangement:
-        remaining.length <= 1 ? undefined : current.arrangement,
+      splitDirection:
+        remaining.length === 2 ? current.splitDirection : undefined,
+      arrangement: remaining.length <= 1 ? undefined : current.arrangement,
     });
   } else if (action.type === "move-pane") {
     const fromIndex = current.slots.findIndex(
@@ -1388,6 +1389,9 @@ export type WorkbenchAction =
   | { type: "ide-set-contribution-enabled"; id: string; enabled: boolean }
   | { type: "ide-remove-contribution"; id: string }
   | { type: "ide-record-ai-tool-call"; toolCall: IdeAiToolCall }
+  | { type: "register-side-chat-session"; sessionId: string }
+  | { type: "forget-side-chat-sessions"; sessionIds: string[] }
+  | { type: "set-chat-companion-width"; width: number }
   | { type: "set-model-focus"; focus: ModelFocus }
   | { type: "clear-model-focus" }
   | { type: "set-model-follow"; mode: ModelFollowMode }
@@ -1449,6 +1453,8 @@ export type WorkbenchAction =
       profileId: string;
       command: string;
       output: string;
+      /** Explicit terminal actions reveal the pane; background work does not. */
+      reveal?: boolean;
     }
   | { type: "rename-terminal-pane"; paneId: string; title: string }
   | { type: "select-task"; taskId: string }
@@ -1709,13 +1715,18 @@ export function workbenchReducer(
       };
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
-    case "open-tool-panel":
+    case "open-tool-panel": {
+      const tab = action.tab ?? state.activePaneTab;
+      if (tab === "browser") {
+        return { ...state, ...browserRevealState(state) };
+      }
       return {
         ...state,
         activeDestination: "workspace",
-        activePaneTab: action.tab ?? state.activePaneTab,
+        activePaneTab: tab,
         isToolPanelOpen: true,
       };
+    }
     case "close-tool-panel":
       return { ...state, isToolPanelOpen: false };
     case "set-workbench-mode":
@@ -1939,6 +1950,42 @@ export function workbenchReducer(
         },
       };
     }
+    case "register-side-chat-session": {
+      const sessionId = action.sessionId.trim();
+      const existing = state.preferences.sideChatSessionIds ?? [];
+      if (!sessionId || existing.includes(sessionId)) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          sideChatSessionIds: [...existing, sessionId].slice(-100),
+        },
+      };
+    }
+    case "forget-side-chat-sessions": {
+      const discarded = new Set(action.sessionIds);
+      const existing = state.preferences.sideChatSessionIds ?? [];
+      const next = existing.filter((id) => !discarded.has(id));
+      if (next.length === existing.length) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, sideChatSessionIds: next },
+      };
+    }
+    case "set-chat-companion-width": {
+      const width = clampChatCompanionWidth(action.width);
+      if (state.preferences.chatCompanionWidth === width) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, chatCompanionWidth: width },
+      };
+    }
     case "set-mission-default-profile":
       return {
         ...state,
@@ -1970,9 +2017,7 @@ export function workbenchReducer(
     case "toggle-chat-browser":
       return chatPanelState(
         state,
-        state.preferences.activeChatPanel === "browser"
-          ? undefined
-          : "browser",
+        state.preferences.activeChatPanel === "browser" ? undefined : "browser",
       );
     case "set-chat-panel":
       return chatPanelState(state, action.panel);
@@ -3006,16 +3051,7 @@ export function workbenchReducer(
     case "set-terminal-template":
       return { ...state, terminalTemplate: action.template };
     case "set-terminal-pane-status": {
-      const nextActivePaneTab =
-        (state.isToolPanelOpen ||
-          state.activeWorkspaceLayout === "terminal-grid") &&
-        (action.status === "running" ||
-          action.status === "waiting" ||
-          action.status === "failed")
-          ? "terminal"
-          : state.activePaneTab;
       if (
-        state.activePaneTab === nextActivePaneTab &&
         state.terminalPanes.some(
           (pane) =>
             pane.id === action.paneId &&
@@ -3027,7 +3063,6 @@ export function workbenchReducer(
       }
       return {
         ...state,
-        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3066,17 +3101,8 @@ export function workbenchReducer(
         action.governedSessionId ?? existingPane?.governedSessionId;
       const nextGovernedProviderId =
         action.governedProviderId ?? existingPane?.governedProviderId;
-      const nextActivePaneTab =
-        (state.isToolPanelOpen ||
-          state.activeWorkspaceLayout === "terminal-grid") &&
-        (action.status === "running" ||
-          action.status === "waiting" ||
-          action.status === "failed")
-          ? "terminal"
-          : state.activePaneTab;
       if (
         existingPane &&
-        state.activePaneTab === nextActivePaneTab &&
         existingPane.command === nextCommand &&
         existingPane.projectPath === nextProjectPath &&
         existingPane.workingDirectory === nextWorkingDirectory &&
@@ -3091,7 +3117,6 @@ export function workbenchReducer(
       }
       return {
         ...state,
-        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3170,9 +3195,13 @@ export function workbenchReducer(
     case "run-terminal-pane":
       return {
         ...state,
-        activeDestination: "workspace",
-        activePaneTab: "terminal",
-        isToolPanelOpen: true,
+        ...(action.reveal === false
+          ? {}
+          : {
+              activeDestination: "workspace" as const,
+              activePaneTab: "terminal" as const,
+              isToolPanelOpen: true,
+            }),
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3215,7 +3244,7 @@ export function workbenchReducer(
     case "dispatch-task":
       return {
         ...workbenchReducer(state, {
-          type: "add-terminal-pane",
+          type: "upsert-background-terminal-pane",
           pane: action.pane,
         }),
         selectedTaskId: action.taskId,
@@ -3600,9 +3629,7 @@ export function workbenchReducer(
       ];
       return {
         ...state,
-        activeDestination: "workspace",
-        activePaneTab: "browser",
-        isToolPanelOpen: true,
+        ...browserRevealState(state),
         browserPreview: {
           ...state.browserPreview,
           history: nextHistory,
@@ -4122,6 +4149,21 @@ function normalizeWorkbenchPreferences(
       typeof preferences?.missionDefaultProfileId === "string" &&
       preferences.missionDefaultProfileId.trim()
         ? preferences.missionDefaultProfileId.trim()
+        : undefined,
+    sideChatSessionIds: Array.isArray(preferences?.sideChatSessionIds)
+      ? [
+          ...new Set(
+            preferences.sideChatSessionIds.filter(
+              (id): id is string =>
+                typeof id === "string" && id.trim().length > 0,
+            ),
+          ),
+        ].slice(0, 100)
+      : [],
+    chatCompanionWidth:
+      typeof preferences?.chatCompanionWidth === "number" &&
+      Number.isFinite(preferences.chatCompanionWidth)
+        ? clampChatCompanionWidth(preferences.chatCompanionWidth)
         : undefined,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
@@ -4769,6 +4811,31 @@ function isSessionsLayout(
   return layout === "thread" || layout === "terminal-grid";
 }
 
+/**
+ * Reveal the browser on the surface that can actually draw it.
+ *
+ * In the `thread` layout the bottom tray is terminal-only (`terminalOnly` in
+ * WorkspaceToolPanel pins its tab to "terminal"), so forcing it open for a
+ * browser navigation dropped an empty terminal over the thread and left the
+ * page nowhere to be seen. A chat shows the browser in its side rail instead.
+ */
+function browserRevealState(state: WorkbenchState): Partial<WorkbenchState> {
+  if (state.activeWorkspaceLayout === "thread") {
+    return {
+      preferences: {
+        ...state.preferences,
+        activeChatPanel: "browser",
+        chatEnvironmentRailOpen: true,
+      },
+    };
+  }
+  return {
+    activeDestination: "workspace",
+    activePaneTab: "browser",
+    isToolPanelOpen: true,
+  };
+}
+
 function chatPanelState(
   state: WorkbenchState,
   panel?: ChatSidePanelId,
@@ -4816,9 +4883,7 @@ function browserHistoryState(
 
   return {
     ...state,
-    activeDestination: "workspace",
-    activePaneTab: "browser",
-    isToolPanelOpen: true,
+    ...browserRevealState(state),
     browserPreview: {
       ...state.browserPreview,
       historyIndex,

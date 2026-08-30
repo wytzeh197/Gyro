@@ -15,8 +15,35 @@ pub const MENU_BAR_NAVIGATION_EVENT: &str = "gyro://menu-bar-navigation";
 const MENU_BAR_TRAY_ID: &str = "gyro-menu-bar";
 #[cfg(target_os = "macos")]
 const MENU_BAR_POPOVER_LABEL: &str = "menu-bar-popover";
+/// Window geometry mirrors the token block in `menu-bar.css`; change both
+/// together. The window is transparent and the card's drop shadow is drawn in
+/// CSS, so the window carries a transparent gutter for the shadow to land in —
+/// without it macOS clips the shadow square against the window edge. The
+/// shadow points down, hence the asymmetry; the top gutter also serves as the
+/// gap between the menu bar and the card, so the popover is positioned flush
+/// under the tray icon.
 #[cfg(target_os = "macos")]
-const MENU_BAR_POPOVER_WIDTH: f64 = 388.0;
+const MENU_BAR_GUTTER_TOP: f64 = 8.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_GUTTER_X: f64 = 16.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_CARD_WIDTH: f64 = 372.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_POPOVER_WIDTH: f64 = MENU_BAR_CARD_WIDTH + MENU_BAR_GUTTER_X * 2.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_HEADER_HEIGHT: f64 = 64.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_ROW_HEIGHT: f64 = 60.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_OVERFLOW_HEIGHT: f64 = 32.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_FOOTER_HEIGHT: f64 = 44.0;
+/// Kept in step with the same cap in `MenuBarPopover.tsx`; jobs past it are
+/// summarised by the "+N more" row.
+#[cfg(target_os = "macos")]
+const MENU_BAR_MAX_VISIBLE_JOBS: usize = 4;
 /// A tray press that dismisses the popover also blurs it, so the blur handler
 /// closes the window before the tray click arrives. Within this window the
 /// pending tray press is treated as the close, not as a fresh open.
@@ -241,13 +268,23 @@ fn emit_snapshot(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn popover_height(snapshot: &MenuBarSnapshot) -> f64 {
-    let visible_jobs = snapshot.jobs.len().min(3) as f64;
-    let content = if visible_jobs > 0.0 {
-        visible_jobs * 66.0 + if snapshot.jobs.len() > 3 { 32.0 } else { 0.0 }
+    let visible_jobs = snapshot.jobs.len().min(MENU_BAR_MAX_VISIBLE_JOBS);
+    // With no jobs the popover shows a single recent-outcome or empty row.
+    let content = if visible_jobs > 0 {
+        visible_jobs as f64 * MENU_BAR_ROW_HEIGHT
+            + if snapshot.jobs.len() > MENU_BAR_MAX_VISIBLE_JOBS {
+                MENU_BAR_OVERFLOW_HEIGHT
+            } else {
+                0.0
+            }
     } else {
-        68.0
+        MENU_BAR_ROW_HEIGHT
     };
-    16.0 + 72.0 + content + 44.0
+    MENU_BAR_GUTTER_TOP
+        + MENU_BAR_HEADER_HEIGHT
+        + content
+        + MENU_BAR_FOOTER_HEIGHT
+        + MENU_BAR_GUTTER_BOTTOM
 }
 
 #[cfg(target_os = "macos")]
@@ -315,12 +352,16 @@ fn position_popover(app: &AppHandle, rect: tauri::Rect, pointer: tauri::Physical
     let icon_size = rect.size.to_physical::<f64>(scale);
     let popup_width = MENU_BAR_POPOVER_WIDTH * scale;
     let work_area = monitor.work_area();
-    let work_left = work_area.position.x as f64 + 8.0 * scale;
+    // The window's side gutters are transparent, so the screen margin is
+    // measured against the visible card rather than the window box.
+    let edge_margin = (8.0 - MENU_BAR_GUTTER_X) * scale;
+    let work_left = work_area.position.x as f64 + edge_margin;
     let work_right =
-        (work_area.position.x as f64 + work_area.size.width as f64) - popup_width - 8.0 * scale;
+        (work_area.position.x as f64 + work_area.size.width as f64) - popup_width - edge_margin;
     let x = (icon_position.x + icon_size.width / 2.0 - popup_width / 2.0)
         .clamp(work_left, work_right.max(work_left));
-    let y = icon_position.y + icon_size.height + 4.0 * scale;
+    // MENU_BAR_GUTTER_TOP is the visible gap between the tray icon and the card.
+    let y = icon_position.y + icon_size.height;
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
@@ -621,14 +662,20 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn popover_height_caps_visible_jobs_at_three() {
+    fn popover_height_caps_visible_jobs() {
+        // gutters 8 + 24, header 64, footer 44 -> 140 plus the rows.
         assert_eq!(popover_height(&snapshot_with_jobs(&[])), 200.0);
-        assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 198.0);
+        assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 200.0);
+        assert_eq!(
+            popover_height(&snapshot_with_jobs(&["running", "running"])),
+            260.0
+        );
+        // Capped at four rows, plus the 32px "+N more" row.
         assert_eq!(
             popover_height(&snapshot_with_jobs(&[
-                "running", "running", "running", "running"
+                "running", "running", "running", "running", "running"
             ])),
-            362.0
+            412.0
         );
     }
 }

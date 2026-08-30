@@ -5,9 +5,9 @@ use gyro_core::augmented_gui_path;
 use gyro_core::user_cli_paths;
 use gyro_core::{
     apply_cli_updates, apply_provider_mutation_transaction_with_cancellation, barrier_decision,
-    begin_provider_mutation_transaction, build_synthesizer_user_prompt, check_cli_updates,
-    council_run_dir, create_worktree, decide_mutation_proposal, discover_ollama_models,
-    final_run_status,
+    begin_provider_mutation_transaction, build_summary_prompt, build_synthesizer_user_prompt,
+    check_cli_updates, council_run_dir, create_worktree, decide_mutation_proposal,
+    discover_ollama_models, fallback_summary, file_review_content_hash, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
         request_desktop_provider_capability, versions_compatible, AppNotification,
@@ -15,7 +15,7 @@ use gyro_core::{
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
     logout_account as account_logout, mutation_approval_payload, ollama_chat, ollama_tool_chat,
-    parse_council_synthesis, prepare_claude_provider_mutation_transaction,
+    parse_council_synthesis, parse_summary_response, prepare_claude_provider_mutation_transaction,
     prepare_provider_mutation_transaction, prepare_provider_text_replacement_transaction,
     provider_descriptor, recover_provider_mutation_transactions,
     refresh_account_session as account_refresh_session, run_kimi_acp, seat_label_map,
@@ -29,7 +29,8 @@ use gyro_core::{
     CapabilityRunMode, CapabilityStatus, CliUpdateApplyResult, CliUpdateCheckReport,
     CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
     CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
-    CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
+    CreateSessionContext, CredentialPolicy, ExecutionRequest, ExecutionStream,
+    ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision, GyroConfig,
     GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
     KimiAcpRequest, MutationDecision, MutationProposal, OllamaChatRequest, OllamaToolChatRequest,
     PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProjectCapabilityGrant,
@@ -37,9 +38,10 @@ use gyro_core::{
     ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest,
     ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload,
     ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens, UsageTotals,
-    WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS,
-    COUNCIL_MIN_SEATS, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
+    SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens,
+    UsageTotals, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
+    CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, FILE_REVIEW_SCHEMA,
+    MAX_SUMMARY_FILES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -84,7 +86,7 @@ const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
-const MAX_CHAT_IMAGES: usize = 4;
+const MAX_CHAT_IMAGES: usize = 10;
 const MAX_CHAT_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_CHAT_VIDEOS: usize = 2;
 const MAX_CHAT_ATTACHMENTS: usize = 16;
@@ -305,8 +307,45 @@ impl Drop for HiddenWebviewGuard {
 struct WorkspaceWatchManager {
     snapshots: Arc<Mutex<HashMap<PathBuf, WorkspaceTreeSnapshot>>>,
     watchers: Arc<Mutex<HashMap<PathBuf, RecommendedWatcher>>>,
-    debounce_serials: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    rescan_state: Arc<Mutex<WorkspaceRescanState>>,
     next_generation: Arc<AtomicU64>,
+}
+
+#[derive(Default)]
+struct WorkspaceRescanState {
+    serials: HashMap<PathBuf, u64>,
+    active_roots: HashSet<PathBuf>,
+}
+
+impl WorkspaceRescanState {
+    /// Returns true only for the event that needs to start a worker. Later
+    /// events for the same workspace update the serial and are coalesced into
+    /// that worker's next debounced scan.
+    fn request(&mut self, root: PathBuf) -> bool {
+        let serial = self.serials.entry(root.clone()).or_default();
+        *serial = serial.saturating_add(1);
+        self.active_roots.insert(root)
+    }
+
+    fn serial(&self, root: &Path) -> Option<u64> {
+        self.serials.get(root).copied()
+    }
+
+    /// Returns true when an event arrived while a scan was in progress.
+    /// Leaving the root active means the already-running worker will debounce
+    /// and scan once more instead of spawning another thread.
+    fn finish_round(&mut self, root: &Path, serial: u64) -> bool {
+        if self.serial(root) != Some(serial) {
+            return true;
+        }
+        self.active_roots.remove(root);
+        false
+    }
+
+    fn remove(&mut self, root: &Path) {
+        self.serials.remove(root);
+        self.active_roots.remove(root);
+    }
 }
 
 #[derive(Clone)]
@@ -4330,6 +4369,243 @@ fn retry_council_synthesis_blocking(
     })
 }
 
+/// What the end-of-turn review card asks for: one plain sentence per file.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SummarizeFileChangesRequest {
+    session_id: String,
+    /// The turn whose edits these are, so the call lands on that turn's line in
+    /// the usage ledger instead of floating free.
+    turn_id: Option<String>,
+    workspace_path: String,
+    provider_id: String,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+    files: Vec<FileChangeInput>,
+}
+
+#[tauri::command]
+async fn summarize_file_changes(
+    app: tauri::AppHandle,
+    request: SummarizeFileChangesRequest,
+) -> Result<Vec<FileChangeSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || summarize_file_changes_blocking(app, request))
+        .await
+        .map_err(|error| format!("change summary worker failed: {error}"))?
+}
+
+/// Describe a turn's changed files in one batched provider call.
+///
+/// The card has to render either way, so every file leaves here with a line:
+/// a sentence already bought for this exact content, a sentence from this
+/// call, or a count of what moved. A provider that is offline, paused by the
+/// budget guard, or busy with the next turn costs the user prose, not their
+/// review card, so those are not errors — see `fallback_summary`.
+fn summarize_file_changes_blocking(
+    app: tauri::AppHandle,
+    request: SummarizeFileChangesRequest,
+) -> Result<Vec<FileChangeSummary>, String> {
+    let store = open_store()?;
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let workspace_key = root.display().to_string();
+
+    let files: Vec<FileChangeInput> = request
+        .files
+        .iter()
+        .filter(|file| !file.path.trim().is_empty())
+        .take(MAX_SUMMARY_FILES)
+        .cloned()
+        .collect();
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // The hash is the identity of the reviewed content: it is what lets a
+    // summary be bought once, and what retires it the moment the file moves on.
+    let hashes: Vec<String> = files
+        .iter()
+        .map(|file| file_review_content_hash(&file.path, &file.diff))
+        .collect();
+    let wanted: Vec<(String, String)> = files
+        .iter()
+        .zip(&hashes)
+        .map(|(file, hash)| (file.path.clone(), hash.clone()))
+        .collect();
+
+    let mut resolved: HashMap<String, FileChangeSummary> = store
+        .cached_file_change_summaries(&workspace_key, &wanted)
+        .map_err(to_string)?
+        .into_iter()
+        .map(|summary| (summary.path.clone(), summary))
+        .collect();
+
+    let pending: Vec<FileChangeInput> = files
+        .iter()
+        .filter(|file| !resolved.contains_key(&file.path))
+        .cloned()
+        .collect();
+
+    if !pending.is_empty() {
+        let (prompt, requested) = build_summary_prompt(&pending);
+        if !requested.is_empty() {
+            match run_change_summary_call(&store, &app, &request, prompt) {
+                Ok(raw) => {
+                    let mut fresh: Vec<FileChangeSummary> = Vec::new();
+                    for (path, summary) in parse_summary_response(&raw, &requested) {
+                        let Some(index) = files.iter().position(|file| file.path == path) else {
+                            continue;
+                        };
+                        fresh.push(FileChangeSummary {
+                            path,
+                            content_hash: hashes[index].clone(),
+                            summary,
+                            source: SummarySource::Provider,
+                        });
+                    }
+                    let _ = store.store_file_change_summaries(&workspace_key, &fresh);
+                    for summary in fresh {
+                        resolved.insert(summary.path.clone(), summary);
+                    }
+                }
+                Err(error) => eprintln!("could not summarize file changes: {error}"),
+            }
+        }
+    }
+
+    Ok(files
+        .into_iter()
+        .zip(hashes)
+        .map(|(file, content_hash)| {
+            resolved.remove(&file.path).unwrap_or_else(|| {
+                let summary = fallback_summary(&file.diff, file.additions, file.deletions);
+                FileChangeSummary {
+                    path: file.path,
+                    content_hash,
+                    summary,
+                    source: SummarySource::Fallback,
+                }
+            })
+        })
+        .collect())
+}
+
+/// One metered provider call for a whole turn's worth of files.
+fn run_change_summary_call(
+    store: &SessionStore,
+    app: &tauri::AppHandle,
+    request: &SummarizeFileChangesRequest,
+    prompt: String,
+) -> Result<String, String> {
+    // A summarizer must not touch the workspace it is describing. Council mode
+    // is Gyro's existing shape for exactly that — deny-all at the capability
+    // gate, no tools, no approvals — so this borrows it rather than inventing a
+    // weaker policy of its own.
+    let summary_request = ProviderChatRequest {
+        session_id: request.session_id.clone(),
+        message: format!("{CHANGE_SUMMARY_SYSTEM_PROMPT}\n\n---\n\n{prompt}"),
+        turn_id: request.turn_id.clone(),
+        provider_id: request.provider_id.clone(),
+        provider_label: request
+            .provider_label
+            .clone()
+            .or_else(|| Some(request.provider_id.clone())),
+        model_id: request.model_id.clone(),
+        model_label: request.model_label.clone(),
+        reasoning_effort: None,
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: Some(request.workspace_path.clone()),
+        mode: ChatMode::Council,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+    };
+
+    // The runners read their cancellation control out of this map, and the chat
+    // command refuses a second run for the same session. Reserving here means a
+    // message sent during the (short) summary call is refused rather than run
+    // twice; skipping when the session is already busy means the next turn
+    // always wins over a description of the last one.
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&request.session_id) {
+            return Err("the session is busy, so the change summary was skipped".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err("too many provider runs are active for a change summary".into());
+        }
+        flags.insert(
+            request.session_id.clone(),
+            Arc::new(ProviderRunControl::default()),
+        );
+    }
+    let result = run_provider_chat_with_retry(
+        store,
+        app,
+        &summary_request,
+        None,
+        UsageContext::new(UsageOrigin::ChangeSummary),
+    )
+    .map(|output| output.response)
+    .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&request.session_id));
+    result
+}
+
+/// What the user did with one file on the review card.
+///
+/// Keeping is a reading record, not an apply step: the change is already on
+/// disk, and a file nobody marks is unread rather than rejected or pending.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileReviewDecisionRequest {
+    session_id: String,
+    turn_id: String,
+    path: String,
+    content_hash: String,
+    decision: FileReviewDecision,
+}
+
+#[tauri::command]
+async fn record_file_review_decision(
+    request: FileReviewDecisionRequest,
+) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_id = parse_uuid(&request.session_id)?;
+        let turn_id = parse_uuid(&request.turn_id)?;
+        store
+            .append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                format!("Kept {}", request.path),
+                serde_json::json!({
+                    "schema": FILE_REVIEW_SCHEMA,
+                    "kind": "file-review",
+                    "path": request.path,
+                    "contentHash": request.content_hash,
+                    "decision": request.decision.as_str(),
+                }),
+                Some(turn_id),
+            )
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("file review worker failed: {error}"))?
+}
+
 /// Run one chat turn to completion.
 ///
 /// `origin` says whether this is an interactive turn or an unattended
@@ -5147,7 +5423,7 @@ fn provider_context_message_with_history(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if gyro_core::provider_capability_support(&request.provider_id).available {
-        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
+        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy. If context is unavailable or stale, continue with bounded Workspace tools and describe the evidence you found, never internal workspace mechanics.".into());
         // The file the user happens to have open in Workspace is not context.
         // Only what the user attaches from the composer, or names in the
         // message, puts a file in front of the model.
@@ -6372,8 +6648,8 @@ impl WorkspaceWatchManager {
             if let Ok(mut watchers) = self.watchers.lock() {
                 watchers.remove(&path);
             }
-            if let Ok(mut serials) = self.debounce_serials.lock() {
-                serials.remove(&path);
+            if let Ok(mut rescan_state) = self.rescan_state.lock() {
+                rescan_state.remove(&path);
             }
         }
         Ok(snapshot)
@@ -6454,39 +6730,57 @@ impl WorkspaceWatchManager {
         if !workspace_watch_event_is_relevant(&root, &event) {
             return;
         }
-        let serial = {
-            let Ok(mut serials) = self.debounce_serials.lock() else {
+        let should_start_worker = {
+            let Ok(mut rescan_state) = self.rescan_state.lock() else {
                 return;
             };
-            let serial = serials.entry(root.clone()).or_default();
-            *serial = serial.saturating_add(1);
-            *serial
+            rescan_state.request(root.clone())
         };
+        if !should_start_worker {
+            return;
+        }
         let manager = self.clone();
-        std::thread::spawn(move || {
+        std::thread::spawn(move || loop {
             std::thread::sleep(WORKSPACE_CHANGE_DEBOUNCE);
-            let is_latest = manager
-                .debounce_serials
+            let serial = manager
+                .rescan_state
                 .lock()
                 .ok()
-                .and_then(|serials| serials.get(&root).copied())
-                == Some(serial);
-            if !is_latest {
-                return;
-            }
-            let Ok(snapshot) = scan_workspace_tree(&root, 5)
-                .and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
-            else {
+                .and_then(|rescan_state| rescan_state.serial(&root));
+            let Some(serial) = serial else {
                 return;
             };
-            let _ = app.emit(
-                WORKSPACE_CHANGED_EVENT,
-                WorkspaceChangedEvent {
-                    workspace_path: root.display().to_string(),
-                    generation: snapshot.generation,
-                    files: snapshot.files,
-                },
-            );
+
+            let scanned = scan_workspace_tree(&root, 5);
+            let superseded = manager
+                .rescan_state
+                .lock()
+                .map(|rescan_state| rescan_state.serial(&root) != Some(serial))
+                .unwrap_or(true);
+            if superseded {
+                continue;
+            }
+            if let Ok(snapshot) =
+                scanned.and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
+            {
+                let _ = app.emit(
+                    WORKSPACE_CHANGED_EVENT,
+                    WorkspaceChangedEvent {
+                        workspace_path: root.display().to_string(),
+                        generation: snapshot.generation,
+                        files: snapshot.files,
+                    },
+                );
+            }
+
+            let should_rescan = manager
+                .rescan_state
+                .lock()
+                .map(|mut rescan_state| rescan_state.finish_round(&root, serial))
+                .unwrap_or(false);
+            if !should_rescan {
+                return;
+            }
         });
     }
 }
@@ -13437,6 +13731,7 @@ fn run_kimi_acp_chat(
     );
     let output = run_kimi_acp(
         KimiAcpRequest {
+            credentials: CredentialPolicy::for_provider(&request.provider_id),
             provider_label: provider_label.into(),
             program: runtime.program.into(),
             program_args,
@@ -17281,10 +17576,25 @@ impl StreamingCommandState {
     fn take_stdout_lines(&mut self, chunk: &str) -> Vec<String> {
         self.push_stdout(chunk);
         self.stdout_line_buffer.push_str(chunk);
-        let mut lines = Vec::new();
-        while let Some(newline) = self.stdout_line_buffer.find('\n') {
-            lines.push(self.stdout_line_buffer.drain(..=newline).collect());
-        }
+        // Provider CLIs can flush thousands of JSON frames in one OS chunk.
+        // Draining one line at a time repeatedly shifts the remaining string
+        // and becomes quadratic under a busy stream. Separate every complete
+        // line with one front-drain, leaving an unterminated tail intact for
+        // the next chunk.
+        let complete_bytes = self
+            .stdout_line_buffer
+            .rfind('\n')
+            .map(|newline| newline + 1)
+            .unwrap_or_default();
+        let lines = if complete_bytes == 0 {
+            Vec::new()
+        } else {
+            let complete = self
+                .stdout_line_buffer
+                .drain(..complete_bytes)
+                .collect::<String>();
+            complete.split_inclusive('\n').map(str::to_owned).collect()
+        };
         if self.stdout_line_buffer.chars().count() > MAX_CHAT_RESPONSE_CHARS * 4 {
             self.stdout_line_buffer.clear();
         }
@@ -17434,6 +17744,10 @@ fn run_streaming_command(
         .map(|(key, value)| (key.to_os_string(), value.map(|value| value.to_os_string())))
         .collect();
     execution.timeout = max_runtime;
+    // An agent run keeps only the provider's own auth: the CLI spawns the
+    // agent's tool calls as its children, so anything left here is reachable
+    // by everything the agent runs. See gyro_core::credentials.
+    execution.credentials = CredentialPolicy::for_provider(&request.provider_id);
     // Silence is not completion for chat provider CLIs.
     execution.inactivity_timeout = None;
     execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;
@@ -21780,6 +22094,7 @@ pub fn run() {
             resolve_file_mutation_proposal,
             resolve_provider_approval,
             resolve_capability_approval,
+            record_file_review_decision,
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
@@ -21796,6 +22111,7 @@ pub fn run() {
             set_session_branch,
             set_automation_status,
             stat_workspace_file,
+            summarize_file_changes,
             start_account_login,
             stop_terminal_pane,
             stop_model_terminal_resource,
@@ -23565,6 +23881,31 @@ while True:
     }
 
     #[test]
+    fn workspace_rescan_state_coalesces_event_bursts_per_root() {
+        let root = PathBuf::from("/tmp/gyro-workspace");
+        let mut state = WorkspaceRescanState::default();
+
+        assert!(state.request(root.clone()));
+        let first_serial = state.serial(&root).unwrap();
+        for _ in 0..256 {
+            assert!(!state.request(root.clone()));
+        }
+        let latest_serial = state.serial(&root).unwrap();
+        assert!(latest_serial > first_serial);
+
+        // The original worker remains responsible after a later event rather
+        // than allowing an event storm to create one thread per notification.
+        assert!(state.finish_round(&root, first_serial));
+        assert!(state.active_roots.contains(&root));
+        assert!(!state.finish_round(&root, latest_serial));
+        assert!(!state.active_roots.contains(&root));
+
+        // A later, settled change starts exactly one new worker.
+        assert!(state.request(root.clone()));
+        assert!(!state.request(root));
+    }
+
+    #[test]
     fn command_lines_split_without_a_shell() {
         let (command, args) =
             parse_command_line("  pnpm  run test --filter \"@gyro-dev/ui\" ").unwrap();
@@ -24828,6 +25169,28 @@ while True:
 
         assert_eq!(state.assistant_text, "hello");
         assert_eq!(state.take_pending_delta(), "hello");
+    }
+
+    #[test]
+    fn streaming_state_splits_large_stdout_batches_without_losing_the_tail() {
+        let mut state = StreamingCommandState::new();
+        let batch = (0..2_048)
+            .map(|index| format!("{{\"frame\":{index}}}\n"))
+            .collect::<String>();
+
+        let lines = state.take_stdout_lines(&batch);
+        assert_eq!(lines.len(), 2_048);
+        assert_eq!(lines.first().map(String::as_str), Some("{\"frame\":0}\n"));
+        assert_eq!(lines.last().map(String::as_str), Some("{\"frame\":2047}\n"));
+        assert!(state.stdout_line_buffer.is_empty());
+
+        let lines = state.take_stdout_lines("partial");
+        assert!(lines.is_empty());
+        assert_eq!(
+            state.take_stdout_lines(" frame\n"),
+            vec!["partial frame\n".to_string()]
+        );
+        assert!(state.stdout_line_buffer.is_empty());
     }
 
     #[test]

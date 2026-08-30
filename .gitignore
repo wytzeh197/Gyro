@@ -6,6 +6,12 @@
 # Maintainer-local product notes (kept on disk, not published).
 /GOVERNANCE.md
 /ROADMAP.md
+/docs/product-entry-and-workbench-plan.md
+/docs/product-readiness-audit.md
+/docs/cli-missions.md
+
+# Maintainer-local planning docs — never published to the OSS repo.
+/docs/internal/
 
 node_modules/
 .pnpm-store/

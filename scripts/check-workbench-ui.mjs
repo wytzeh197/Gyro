@@ -96,6 +96,14 @@ function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
+// Some docs are deliberately kept out of the repo. Their checks still run for
+// the working copies that have them, and skip everywhere else rather than
+// taking the whole suite down with an ENOENT.
+function readLocalOnlyFile(path) {
+  const full = resolve(repoRoot, path);
+  return existsSync(full) ? readFileSync(full, "utf8") : undefined;
+}
+
 const gridPane = (sessionId, workspacePath = "/Users/example/Gyro") => ({
   paneId: `pane:${sessionId}`,
   kind: "session",
@@ -299,13 +307,9 @@ const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
 const launchDocsSource = readRepoFile("docs/launch.md");
 const installLocalSource = readRepoFile("scripts/install-local-app.mjs");
-// This audit is intentionally local-only and is therefore absent from clean
-// repository clones (including CI). When present, retain its structural check;
-// its absence must not make the public release check depend on private notes.
-const readinessAuditPath = resolve(repoRoot, "docs/product-readiness-audit.md");
-const readinessAuditSource = existsSync(readinessAuditPath)
-  ? readFileSync(readinessAuditPath, "utf8")
-  : null;
+const readinessAuditSource = readLocalOnlyFile(
+  "docs/product-readiness-audit.md",
+);
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
@@ -320,23 +324,26 @@ const menuBarRustSource = readRepoFile(
 );
 const desktopRustSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
 expect(
-  cssRules(menuBarStyleSource, ".gyro-menu-bar-header").some((rule) =>
-    rule.includes("height: 72px"),
-  ) &&
-    cssRules(menuBarStyleSource, ".gyro-menu-bar-job").some((rule) =>
-      rule.includes("height: 66px"),
-    ) &&
-    cssRules(
-      menuBarStyleSource,
-      ".gyro-menu-bar-outcome,\n.gyro-menu-bar-idle",
-    ).some((rule) => rule.includes("height: 68px")) &&
-    cssRules(menuBarStyleSource, ".gyro-menu-bar-footer").some((rule) =>
-      rule.includes("height: 44px"),
-    ) &&
+  // Row heights live in tokens on the surface root and menu_bar.rs mirrors
+  // them; the point of the check is that the two still agree, so it asserts
+  // the tokens and the Rust constants rather than literals in each rule.
+  // Everything on the surface is border-box, so these are the whole row.
+  menuBarStyleSource.includes("--menu-header: 64px") &&
+    menuBarStyleSource.includes("--menu-row: 60px") &&
+    menuBarStyleSource.includes("--menu-footer: 44px") &&
+    menuBarStyleSource.includes("--menu-gutter-top: 8px") &&
+    menuBarStyleSource.includes("--menu-gutter-bottom: 24px") &&
     cssRules(menuBarStyleSource, ".gyro-menu-bar-idle p").some((rule) =>
       rule.includes("margin: 0"),
     ) &&
-    menuBarRustSource.includes("16.0 + 72.0 + content + 44.0"),
+    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 64.0") &&
+    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 60.0") &&
+    menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_GUTTER_TOP: f64 = 8.0") &&
+    menuBarRustSource.includes("const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0") &&
+    // The gutter exists so the CSS drop shadow is not clipped by the window.
+    menuBarStyleSource.includes("--menu-gutter-x: 16px") &&
+    menuBarRustSource.includes("const MENU_BAR_GUTTER_X: f64 = 16.0"),
   "The macOS menu-bar popover should use bounded rows that match its native window-height calculation.",
 );
 expect(
@@ -450,6 +457,27 @@ expect(
   "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
 );
 expect(
+  surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
+    surfaceSource.includes("onPaneDragStart: (event) =>") &&
+    surfaceSource.includes("event.dataTransfer.setData(") &&
+    surfaceSource.includes("CHAT_PANE_DRAG_MIME,") &&
+    surfaceSource.includes("function dataTransferHasType") &&
+    surfaceSource.includes("types.contains(type)") &&
+    !surfaceSource.includes(
+      "dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME)",
+    ) &&
+    surfaceSource.includes("function dragPointerIsOutside") &&
+    surfaceSource.includes("event.clientX < bounds.left") &&
+    surfaceSource.includes("Updating a provider CLI. Sending will unlock") &&
+    surfaceSource.includes("!isCliUpdating &&") &&
+    appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
+    styleSource.includes("Sessions/Workspace is navigation") &&
+    styleSource.includes("background: var(--gyro-segment-bg);") &&
+    appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    surfaceSource.includes("{zone.label}"),
+  "Each tiled chat should publish a pane drag payload and label every split drop target.",
+);
+expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
     surfaceSource.includes("gyro-sidebar-scm-directory") &&
     surfaceSource.includes("gyro-sidebar-scm-state is-") &&
@@ -535,8 +563,10 @@ expect(
     // opacity); a second means a value went off-token.
     const start = styleSource.indexOf("Run rail (gyro-run-*)");
     if (start < 0) return false;
+    const end = styleSource.indexOf("End run rail (gyro-run-*)", start);
+    if (end < 0) return false;
     const rail = styleSource
-      .slice(styleSource.indexOf("*/", start))
+      .slice(styleSource.indexOf("*/", start), end)
       .replace(/\/\*[\s\S]*?\*\//g, "");
     return (
       !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(
@@ -1740,6 +1770,31 @@ expect(
     state.activePaneTab === "browser" &&
     state.isToolPanelOpen === true,
   "Opening a tool panel tab should route through the workspace shell.",
+);
+
+// The chat's bottom tray is terminal-only (`terminalOnly` pins its tab), so a
+// browser reveal from a thread has to land in the chat's side rail. Opening the
+// tray instead dropped an empty terminal over the thread and hid the page.
+let chatBrowserState = workbenchReducer(createInitialWorkbenchState(), {
+  type: "select-workspace-layout",
+  layout: "thread",
+});
+chatBrowserState = workbenchReducer(chatBrowserState, {
+  type: "browser-navigate",
+  url: "http://127.0.0.1:5173",
+});
+expect(
+  chatBrowserState.isToolPanelOpen === false &&
+    chatBrowserState.preferences.activeChatPanel === "browser" &&
+    workbenchReducer(chatBrowserState, {
+      type: "open-tool-panel",
+      tab: "browser",
+    }).isToolPanelOpen === false &&
+    workbenchReducer(chatBrowserState, {
+      type: "open-tool-panel",
+      tab: "terminal",
+    }).isToolPanelOpen === true,
+  "A browser reveal inside a chat should open the chat browser rail and leave the terminal-only tray closed.",
 );
 state = workbenchReducer(state, { type: "close-tool-panel" });
 expect(state.isToolPanelOpen === false, "Tool panel close action failed.");
@@ -4204,12 +4259,13 @@ expect(
   "Visible task, automation, provider, chat, and IDE controls should execute or be omitted instead of acting as placeholders.",
 );
 
-expect(
-  readinessAuditSource === null ||
-    (readinessAuditSource.includes("Functional Readiness Matrix") &&
-      readinessAuditSource.includes("Highest-Risk Gaps")),
-  "The local product readiness audit should distinguish implemented foundations from private-alpha blockers.",
-);
+if (readinessAuditSource !== undefined) {
+  expect(
+    readinessAuditSource.includes("Functional Readiness Matrix") &&
+      readinessAuditSource.includes("Highest-Risk Gaps"),
+    "The product readiness audit should distinguish implemented foundations from private-alpha blockers.",
+  );
+}
 expect(
   surfaceSource.includes('className="gyro-ide-project-empty"') &&
     surfaceSource.includes("Open a project to start coding") &&
@@ -4494,7 +4550,7 @@ expect(
     surfaceSource.includes(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
-    surfaceSource.includes("const sidePanel = activeRailPanel ? (") &&
+    surfaceSource.includes("const sidePanel = !activeRailPanel ? null :") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
     /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
@@ -4549,6 +4605,73 @@ expect(
     styleSource.includes("cursor: pointer;"),
   "AI model checklist plan events should be typed, persisted, derived, and visible in chat.",
 );
+
+// The companion dock replaces the old right rail and the Environment launcher,
+// so the tools it hosts have to keep reaching their real surfaces rather than
+// becoming five empty panels that only look like Codex.
+const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
+expect(
+  surfaceSource.includes('aria-label="Chat companion"') &&
+    surfaceSource.includes(
+      "const isCompanionPanel = isChatCompanionTab(railPanel)",
+    ) &&
+    surfaceSource.includes(
+      'activePanel={railPanel === "review" ? "changes" : railPanel}',
+    ) &&
+    surfaceSource.includes("chromeless={isCompanionPanel}") &&
+    surfaceSource.includes('railPanel === "files" ? (') &&
+    surfaceSource.includes("<CompanionFiles") &&
+    surfaceSource.includes('railPanel === "side-chat" ? (') &&
+    surfaceSource.includes("<SideChatPanel") &&
+    surfaceSource.includes("onOpenFile={onOpenCompanionFile}") &&
+    surfaceSource.includes('className="gyro-chat-companion-tab-list"') &&
+    surfaceSource.includes('aria-label="Add companion tab"') &&
+    surfaceSource.includes('className="gyro-chat-companion-resizer"') &&
+    surfaceSource.includes("clampChatCompanionWidth") &&
+    chatCompanionSource.includes('"review"') &&
+    chatCompanionSource.includes('"terminal"') &&
+    chatCompanionSource.includes('"browser"') &&
+    chatCompanionSource.includes('"files"') &&
+    chatCompanionSource.includes('"side-chat"') &&
+    appSource.includes("onOpenCompanionTab: (tab: ChatCompanionTabId)") &&
+    appSource.includes("onCloseCompanionTab: (tab: ChatCompanionTabId)") &&
+    appSource.includes(
+      'dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId })',
+    ) &&
+    styleSource.includes(".gyro-chat-companion {") &&
+    styleSource.includes(".gyro-chat-companion-tabs {") &&
+    styleSource.includes(
+      ".gyro-chat-companion-content > .gyro-environment-rail",
+    ) &&
+    styleSource.includes(
+      ".gyro-chat-surface.is-tiled.has-environment:has(> .gyro-chat-companion)",
+    ) &&
+    styleSource.includes(':root[data-theme="light"] .gyro-chat-companion {'),
+  "The companion dock should host Review, Terminal, Browser, Files, and Side chat against their real surfaces and follow the focused pane.",
+);
+
+// Side chat is a throwaway thread: it inherits the focused chat's project and
+// model but none of its transcript, never reaches the sidebar, and is deleted
+// on close and again on the next launch after an unclean exit.
+expect(
+  appSource.includes('title: "Side chat"') &&
+    appSource.includes("...sessionModelSelectionFromSession(parent)") &&
+    appSource.includes(
+      "const workspace = parent?.workspacePath ?? workspacePath",
+    ) &&
+    appSource.includes("[paneId]: { messages: [] }") &&
+    appSource.includes('type: "register-side-chat-session"') &&
+    appSource.includes("staleSideChatSessionIds(") &&
+    appSource.includes("discardedSideChatSessionIds(") &&
+    appSource.includes("withoutSideChatSessions(") &&
+    appSource.includes(
+      'await invoke<boolean>("delete_session", { sessionId })',
+    ) &&
+    workbenchSource.includes("sideChatSessionIds") &&
+    surfaceSource.includes("not saved to history") &&
+    styleSource.includes(".gyro-side-chat-composer {"),
+  "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
+);
 expect(
   surfaceSource.includes(
     '"is-thread",\n        activeRailPanel ? "has-environment" : "",',
@@ -4579,13 +4702,13 @@ expect(
     surfaceSource.includes('onOpenTool("terminal")') &&
     surfaceSource.includes('onOpenTool("browser")') &&
     surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
-    surfaceSource.includes('"Close bottom drawer"') &&
-    surfaceSource.includes('"Open bottom drawer"') &&
+    surfaceSource.includes("<span>Bottom drawer</span>") &&
+    surfaceSource.includes("aria-pressed={isToolPanelOpen}") &&
     appSource.includes("const toggleChatToolPanel = useCallback") &&
     appSource.includes("openToolPanel(workbench.activePaneTab)") &&
     appSource.includes('openToolPanel("terminal")') &&
     !surfaceSource.includes('"Open last used panel"') &&
-    surfaceSource.includes("onClick={onToggleToolPanel}") &&
+    surfaceSource.includes("onToggleToolPanel?.();") &&
     surfaceSource.includes('onComposerAction?.("open-files")') &&
     appSource.includes('case "open-files":') &&
     appSource.includes('layout: "code"') &&
@@ -5595,11 +5718,8 @@ expect(
     surfaceSource.includes(
       "<PlanDocument content={sessionPlan.content} title={sessionPlan.title}",
     ) &&
-    surfaceSource.includes('chatMode === "plan"') &&
-    surfaceSource.includes("latestPlanModeEnabledAt") &&
-    surfaceSource.includes(
-      "sessionPlan.updatedAt >= latestPlanModeEnabledAt",
-    ) &&
+    surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
+    surfaceSource.includes("planDecisionKey !== dismissedPlanDecisionKey") &&
     surfaceSource.includes("!isComposerSending") &&
     appSource.includes("const handlePlanDecision = useCallback") &&
     appSource.includes('await changeChatMode("normal")') &&
@@ -5748,7 +5868,7 @@ expect(
         rule.includes("overflow-y: auto"),
     ) &&
     styleSource.includes("margin-right: -3px") &&
-    styleSource.includes("padding: 0 9px 0") &&
+    styleSource.includes("padding: 0 8px") &&
     styleSource.includes("height: 58px") &&
     cssRules(styleSource, ".gyro-sidebar-windowbar").some(
       (rule) =>
@@ -5764,7 +5884,7 @@ expect(
     ) &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
-    styleSource.includes("margin: auto -9px 0"),
+    styleSource.includes("margin: auto -8px 0"),
   "Collapsed panel handle should be minimal and the unified sidebar should keep compact chrome, aligned section labels, mode switcher, and bottom settings.",
 );
 expect(

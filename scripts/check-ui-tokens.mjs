@@ -72,6 +72,9 @@ const allowedGradient = [
   /45deg,\s*transparent 50%/,
   /135deg,/,
   /circle at \d+px \d+px/,
+  // Theme picker thumbnails use solid token strokes to preview hierarchy;
+  // these are content samples, not decorative surface washes.
+  /linear-gradient\(var\(--gyro-(?:surface-raised|border-strong)\) 0 0\)/,
 ];
 
 const styleLines = styles.split("\n");

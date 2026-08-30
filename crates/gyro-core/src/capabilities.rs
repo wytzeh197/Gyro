@@ -392,6 +392,10 @@ pub struct WorkspaceContextSnapshot {
     pub workspace_key: String,
     pub revision: u64,
     pub captured_at: DateTime<Utc>,
+    #[serde(default = "workspace_context_available")]
+    pub availability: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
     pub active_path: Option<String>,
     pub active_view: Option<String>,
     #[serde(default)]
@@ -415,6 +419,10 @@ impl WorkspaceContextSnapshot {
             workspace_key: workspace_key.into(),
             revision: 0,
             captured_at: Utc::now(),
+            availability: "unavailable".into(),
+            unavailable_reason: Some(
+                "Workspace project signals have not been collected yet.".into(),
+            ),
             active_path: None,
             active_view: None,
             visible_tabs: Vec::new(),
@@ -433,6 +441,16 @@ impl WorkspaceContextSnapshot {
         if self.workspace_key.trim().is_empty() {
             return Err(anyhow!("Workspace context requires a workspace key"));
         }
+        if !matches!(self.availability.as_str(), "available" | "unavailable") {
+            return Err(anyhow!(
+                "Workspace context has an invalid availability state"
+            ));
+        }
+        if self.availability == "available" && self.unavailable_reason.is_some() {
+            return Err(anyhow!(
+                "Available Workspace context cannot include an unavailable reason"
+            ));
+        }
         if self.visible_tabs.len() > 64
             || self.buffers.len() > 64
             || self.diagnostics.len() > 1_000
@@ -443,6 +461,10 @@ impl WorkspaceContextSnapshot {
         validate_capability_result_data(serde_json::to_value(self)?)?;
         Ok(())
     }
+}
+
+fn workspace_context_available() -> String {
+    "available".into()
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -848,6 +870,10 @@ pub fn capability_path_is_sensitive(path: &str) -> bool {
         || file_name.ends_with(".key")
         || normalized.starts_with(".git/")
         || normalized.contains("/.git/")
+        // Covers credential stores whose file names give nothing away, which
+        // become ordinary relative paths when the workspace is the home
+        // directory. See `credentials`.
+        || crate::credentials::relative_path_is_in_credential_store(&normalized)
 }
 
 pub fn sanitize_capability_summary(value: &str) -> String {
@@ -884,12 +910,24 @@ mod tests {
     #[test]
     fn workspace_context_is_versioned_and_bounded() {
         let mut context = WorkspaceContextSnapshot::empty("/tmp/project");
+        assert_eq!(context.availability, "unavailable");
+        assert!(context.unavailable_reason.is_some());
         context.active_path = Some("src/main.rs".into());
         context.visible_tabs = vec!["src/main.rs".into()];
         context.validate().unwrap();
 
         context.schema = "gyro.workspace-context.v0".into();
         assert!(context.validate().is_err());
+    }
+
+    #[test]
+    fn available_workspace_context_cannot_claim_to_be_unavailable() {
+        let mut context = WorkspaceContextSnapshot::empty("/tmp/project");
+        context.availability = "available".into();
+        assert!(context.validate().is_err());
+
+        context.unavailable_reason = None;
+        context.validate().unwrap();
     }
 
     #[test]
@@ -1025,6 +1063,8 @@ mod tests {
             "src/main.rs"
         );
         assert!(capability_path_is_sensitive(".env.local"));
+        assert!(capability_path_is_sensitive(".config/gh/hosts.yml"));
+        assert!(capability_path_is_sensitive(".ssh/config"));
         assert!(capability_path_is_sensitive("config/private.pem"));
         assert!(!capability_path_is_sensitive("src/main.rs"));
     }

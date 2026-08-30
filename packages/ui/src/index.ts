@@ -69,6 +69,10 @@ export type {
   DiffLineKind,
   DiffReview,
   DiffSource,
+  FileReviewDecision,
+  FileReviewEntry,
+  FileReviewSummary,
+  FileReviewSummarySource,
   EditorBuffer,
   EditorBufferStatus,
   EditorGroup,
@@ -220,6 +224,23 @@ export type {
   CliUpdatePhase,
   CliUpdateNoticeState,
 } from "./types";
+export { FILE_REVIEW_SCHEMA } from "./types";
+export {
+  askAboutFilePrompt,
+  changeSummaryLine,
+  diffPreviewLines,
+  fileReviewDecisions,
+  isKeptCurrent,
+  latestFileReviewTurn,
+} from "./file-review";
+export type {
+  DiffPreviewKind,
+  DiffPreviewLine,
+  FileReviewFile,
+  FileReviewLine,
+  FileReviewRecord,
+  FileReviewTurn,
+} from "./file-review";
 export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
   createInitialWorkbenchState,
@@ -247,6 +268,29 @@ export {
   persistableChatGridState,
   sanitizeStoredChatGridState,
 } from "./workbench-state";
+export {
+  activeChatCompanionTab,
+  CHAT_COMPANION_DEFAULT_WIDTH,
+  CHAT_COMPANION_MAX_WIDTH,
+  CHAT_COMPANION_MIN_WIDTH,
+  CHAT_COMPANION_OVERLAY_BELOW,
+  chatCompanionPane,
+  chatCompanionReducer,
+  chatCompanionTabIds,
+  chatCompanionTabLabels,
+  clampChatCompanionWidth,
+  createInitialChatCompanionState,
+  discardedSideChatSessionIds,
+  isChatCompanionTabId,
+  staleSideChatSessionIds,
+  withoutSideChatSessions,
+} from "./chat-companion";
+export type {
+  ChatCompanionAction,
+  ChatCompanionPaneState,
+  ChatCompanionState,
+  ChatCompanionTabId,
+} from "./chat-companion";
 export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
   preferredCleanMachineConnectProvider,
@@ -292,10 +336,7 @@ export {
   readyCouncilProviders,
   resolveCouncilSeatRequests,
 } from "./council";
-export type {
-  CouncilSeatRequest,
-  CouncilSeatResolution,
-} from "./council";
+export type { CouncilSeatRequest, CouncilSeatResolution } from "./council";
 export {
   estimateTurnCost,
   formatTokenCount,
@@ -303,11 +344,14 @@ export {
   ledgerWindowSpecsForProvider,
   ledgerWindows,
   ledgerWindowsCaption,
+  PLAN_USAGE_NOTICE_THRESHOLDS,
+  planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
 } from "./usage-ledger";
 export type {
   LedgerWindowView,
+  PlanUsageNotice,
   SessionCostSummary,
   TurnCostEstimate,
   UsageSafetyNotice,
@@ -420,4 +464,6 @@ export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,
   ModelFocusPeekContent,
+  SideChatMessage,
+  SideChatState,
 } from "./surfaces";

@@ -34,6 +34,12 @@ pub enum UsageOrigin {
     CouncilSynthesis,
     /// A synthesis the user asked to run again.
     CouncilResynthesis,
+    /// The one-line "what changed" pass over a turn's edited files.
+    ///
+    /// Small and attended, but still a provider call: it is metered separately
+    /// so a user can see what the review card costs rather than finding it
+    /// folded into their chat total.
+    ChangeSummary,
 }
 
 impl UsageOrigin {
@@ -44,6 +50,7 @@ impl UsageOrigin {
             Self::CouncilSeat => "council-seat",
             Self::CouncilSynthesis => "council-synthesis",
             Self::CouncilResynthesis => "council-resynthesis",
+            Self::ChangeSummary => "change-summary",
         }
     }
 
@@ -53,6 +60,7 @@ impl UsageOrigin {
             "council-seat" => Self::CouncilSeat,
             "council-synthesis" => Self::CouncilSynthesis,
             "council-resynthesis" => Self::CouncilResynthesis,
+            "change-summary" => Self::ChangeSummary,
             _ => Self::Chat,
         }
     }
@@ -65,6 +73,7 @@ impl UsageOrigin {
             Self::CouncilSeat => "Council seats",
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
+            Self::ChangeSummary => "Change summaries",
         }
     }
 }
@@ -564,7 +573,7 @@ pub fn budget_decision(state: &BudgetState, origin: UsageOrigin) -> GuardVerdict
                 GuardVerdict::Allow
             } else {
                 GuardVerdict::Block(format!(
-                    "The {} budget is {}% spent, so Gyro is holding council runs and automations until it frees up. Ordinary turns still work.",
+                    "The {} budget is {}% spent, so Gyro is holding council runs, automations, and change summaries until it frees up. Ordinary turns still work.",
                     state.provider_id, state.percent
                 ))
             }

@@ -314,6 +314,48 @@ export type UsageSafetyNotice = {
   canResume: boolean;
 };
 
+/** The points at which a measured plan allowance becomes worth interrupting for. */
+export const PLAN_USAGE_NOTICE_THRESHOLDS = [50, 80, 90, 95] as const;
+
+export type PlanUsageNotice = {
+  providerId: ProviderId;
+  windowId: string;
+  windowLabel: string;
+  percent: number;
+  threshold: (typeof PLAN_USAGE_NOTICE_THRESHOLDS)[number];
+  /** A new reset timestamp starts a new notification cycle. */
+  cycleId: string;
+};
+
+/**
+ * Return the highest reached threshold for each provider allowance window.
+ * Callers persist the returned cycle/threshold pair after presenting it, which
+ * keeps a refreshed usage response from repeating the same interruption.
+ */
+export function planUsageNotices(
+  providerId: ProviderId,
+  windows: ProviderUsageWindow[],
+): PlanUsageNotice[] {
+  return windows
+    .flatMap((window) => {
+      const percent = window.usedPercent;
+      if (percent === undefined || !Number.isFinite(percent)) return [];
+      const threshold = [...PLAN_USAGE_NOTICE_THRESHOLDS]
+        .reverse()
+        .find((value) => percent >= value);
+      if (!threshold) return [];
+      return [{
+        cycleId: window.resetsAt ?? "rolling",
+        percent: Math.min(100, Math.max(0, Math.round(percent))),
+        providerId,
+        threshold,
+        windowId: window.id,
+        windowLabel: window.label,
+      }];
+    })
+    .sort((left, right) => right.threshold - left.threshold);
+}
+
 function budgetHeadline(budget: BudgetState) {
   const used = formatTokenCount(budget.usedTokens);
   const cap = formatTokenCount(budget.maxTokens);

@@ -5,9 +5,25 @@ import {
   ledgerWindows,
   formatTokenCount,
   isOutsizedTurn,
+  planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
 } from "../packages/ui/src/usage-ledger.ts";
+
+assert.deepEqual(
+  planUsageNotices("openai", [
+    { id: "five-hour", label: "5-hour window", usedPercent: 82, resetsAt: "2026-08-29T00:00:00.000Z" },
+    { id: "week", label: "Weekly window", usedPercent: 49 },
+  ]),
+  [{
+    providerId: "openai",
+    windowId: "five-hour",
+    windowLabel: "5-hour window",
+    percent: 82,
+    threshold: 80,
+    cycleId: "2026-08-29T00:00:00.000Z",
+  }],
+);
 
 function totals(overrides = {}) {
   return {
