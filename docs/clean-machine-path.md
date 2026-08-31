@@ -16,12 +16,12 @@ Signing and notarization remain a separate distribution gate.
 
 ## What the product enforces
 
-| Gate | Behavior |
-| ---- | -------- |
-| Project | `canSendChat` requires a user-selected workspace path. Auto session folders do not count. |
+| Gate     | Behavior                                                                                                            |
+| -------- | ------------------------------------------------------------------------------------------------------------------- |
+| Project  | `canSendChat` requires a user-selected workspace path. Auto session folders do not count.                           |
 | Provider | Send requires a connected executable provider. Disconnected rows in the model picker start `connect-provider:{id}`. |
-| Honesty | Blocked send disables the send control and states the next step in the composer placeholder. |
-| Mutation | Supported Codex/Claude text edits use the journaled propose/review/apply/reject/recover path in `gyro-core`. |
+| Honesty  | Blocked send disables the send control and states the next step in the composer placeholder.                        |
+| Mutation | Supported Codex/Claude text edits use the journaled propose/review/apply/reject/recover path in `gyro-core`.        |
 
 Shared logic lives in `packages/ui/src/clean-machine-path.ts` so UI and checks
 cannot drift.

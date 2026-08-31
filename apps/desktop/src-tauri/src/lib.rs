@@ -8524,6 +8524,19 @@ fn task_working_directory(root: &Path, cwd: Option<&str>) -> Result<PathBuf, Str
     }
 }
 
+/// A task started from the desktop has no terminal available for package-manager
+/// prompts. pnpm documents `CI=1` as the noninteractive mode, which lets a
+/// user-requested task repair its module layout instead of aborting before it
+/// runs.
+fn configure_noninteractive_task_environment(command: &mut Command, program: &str) {
+    if Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == "pnpm")
+    {
+        command.env("CI", "1");
+    }
+}
+
 fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
     let _admission = IdeCommandAdmission::acquire()?;
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
@@ -8538,6 +8551,7 @@ fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String
     let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
     command.current_dir(working_directory).args(&task.args);
+    configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
         run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
@@ -8622,6 +8636,7 @@ fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String
     let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
     command.current_dir(working_directory).args(&task.args);
+    configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
         run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
@@ -23767,6 +23782,58 @@ while True:
             .and_then(|(_, value)| value)
             .map(|value| value.to_string_lossy().to_string());
         assert_eq!(prompt.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn desktop_pnpm_tasks_run_without_an_interactive_prompt() {
+        let mut pnpm = command_with_gui_path("pnpm");
+        configure_noninteractive_task_environment(&mut pnpm, "pnpm");
+        let ci = pnpm
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("CI"))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().to_string());
+        assert_eq!(ci.as_deref(), Some("1"));
+
+        let mut npm = command_with_gui_path("npm");
+        configure_noninteractive_task_environment(&mut npm, "npm");
+        assert!(npm
+            .get_envs()
+            .all(|(key, _)| key != std::ffi::OsStr::new("CI")));
+    }
+
+    #[test]
+    fn desktop_task_runner_passes_ci_to_a_real_pnpm_script() {
+        if command_with_gui_path("pnpm")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            workspace.path().join("package.json"),
+            r#"{"scripts":{"verify-ci":"node -e \"process.exit(process.env.CI === '1' ? 0 : 1)\""}}"#,
+        )
+        .unwrap();
+        // This asks discovery for pnpm without requiring any dependency install.
+        std::fs::write(
+            workspace.path().join("pnpm-lock.yaml"),
+            "lockfileVersion: '9.0'\n",
+        )
+        .unwrap();
+
+        let output = task_run_blocking(TaskRunRequest {
+            workspace_path: workspace.path().display().to_string(),
+            task_id: "package:verify-ci".into(),
+            command: "pnpm".into(),
+            args: vec!["run".into(), "verify-ci".into()],
+        })
+        .unwrap();
+
+        assert_eq!(output.status, "done", "{}{}", output.stdout, output.stderr);
     }
 
     #[test]

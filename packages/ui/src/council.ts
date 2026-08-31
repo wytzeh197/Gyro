@@ -93,10 +93,11 @@ export function normalizedCouncilConfig(
       (preset) => !defaults.presets.some((builtIn) => builtIn.id === preset.id),
     ),
   ];
-  const defaultPresetId =
-    presets.some((preset) => preset.id === council.defaultPresetId)
-      ? council.defaultPresetId
-      : defaults.defaultPresetId;
+  const defaultPresetId = presets.some(
+    (preset) => preset.id === council.defaultPresetId,
+  )
+    ? council.defaultPresetId
+    : defaults.defaultPresetId;
   return {
     defaultPresetId,
     presets,
@@ -231,7 +232,9 @@ export function resolveCouncilSeatRequests(
   };
 }
 
-export function councilPreflightLabel(resolution: CouncilSeatResolution): string {
+export function councilPreflightLabel(
+  resolution: CouncilSeatResolution,
+): string {
   const seatCount = resolution.seats.length;
   const names = resolution.seats
     .map((seat) => seat.providerLabel ?? seat.providerId)

@@ -283,7 +283,12 @@ assert.equal(repeatedCommand.steps[0].repeat, 3);
 
 const separatedCommand = buildRunModel([
   activity("command", "pnpm test", { detail: "pnpm test" }, 0),
-  activity("search", "Searched project", { query: "rail", scope: "project" }, 1),
+  activity(
+    "search",
+    "Searched project",
+    { query: "rail", scope: "project" },
+    1,
+  ),
   activity("command", "pnpm test", { detail: "pnpm test" }, 2),
 ]);
 assert.deepEqual(
@@ -610,7 +615,10 @@ assert.ok(
   "peeled plan lines should remain visible on the run rail",
 );
 assert.equal(isOrphanAssistantFragment("e."), true);
-assert.equal(isOrphanAssistantFragment("Chat, CLI, and IDE in one place."), false);
+assert.equal(
+  isOrphanAssistantFragment("Chat, CLI, and IDE in one place."),
+  false,
+);
 assert.equal(isTransientStatusGreeting("Gyro chat mode is up."), true);
 assert.equal(
   isTransientStatusGreeting("Chat, CLI, and IDE in one place."),
@@ -859,24 +867,33 @@ assert.equal(
 );
 
 const shellSearch = workItemFromEvent(
-  activity("command", "rg -n \"workspace\" packages/ui/src", {
-    command: "cd /tmp/project && rg -n \"workspace\" packages/ui/src",
+  activity("command", 'rg -n "workspace" packages/ui/src', {
+    command: 'cd /tmp/project && rg -n "workspace" packages/ui/src',
   }),
 );
-assert.equal(shellSearch?.kind, "search", "ripgrep should read as workspace search");
+assert.equal(
+  shellSearch?.kind,
+  "search",
+  "ripgrep should read as workspace search",
+);
 
 const shellRead = workItemFromEvent(
   activity("command", "sed -n '1,80p' src/app.ts", {
     command: "sed -n '1,80p' src/app.ts",
   }),
 );
-assert.equal(shellRead?.kind, "read", "range reads should read as file inspection");
+assert.equal(
+  shellRead?.kind,
+  "read",
+  "range reads should read as file inspection",
+);
 
 const shellTest = workItemFromEvent(
   activity("command", "pnpm test", { command: "pnpm test" }),
 );
 assert.deepEqual(
-  shellTest && runRowText({ kind: "work", id: "test", at: at(0), item: shellTest }),
+  shellTest &&
+    runRowText({ kind: "work", id: "test", at: at(0), item: shellTest }),
   { label: "Ran tests", description: "pnpm test" },
   "test commands should use a purpose-first label",
 );

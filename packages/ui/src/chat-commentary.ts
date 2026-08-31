@@ -142,8 +142,8 @@ function announcesOwnNextStep(value: string): boolean {
   const closing = lastSentence(value);
   return Boolean(
     closing &&
-      OWN_NEXT_STEP.test(closing) &&
-      !OWN_NEXT_STEP_EXCEPTION.test(closing),
+    OWN_NEXT_STEP.test(closing) &&
+    !OWN_NEXT_STEP_EXCEPTION.test(closing),
   );
 }
 
@@ -195,7 +195,10 @@ export function isAssistantPreambleBlock(value: string): boolean {
     return false;
   }
   // Multi-sentence blocks are usually the answer, even if they open with "I'll".
-  if ((trimmed.match(/[.!?](?:\s|$)/g) ?? []).length >= 2 && trimmed.length > 100) {
+  if (
+    (trimmed.match(/[.!?](?:\s|$)/g) ?? []).length >= 2 &&
+    trimmed.length > 100
+  ) {
     return false;
   }
   return PREAMBLE_BLOCK.test(trimmed) || closingSentenceIntroducesWork(trimmed);

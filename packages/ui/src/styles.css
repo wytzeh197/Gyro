@@ -57,6 +57,16 @@
   --gyro-segment-bg: #1a1a1a;
   --gyro-segment-active: #2a2a2a;
   --gyro-segment-active-text: #f3f3f3;
+  /* The System preference thumbnail must show both palettes at once. */
+  --gyro-theme-preview-dark-canvas: #30302d;
+  --gyro-theme-preview-dark-content: #5c5c58;
+  --gyro-theme-preview-light-canvas: #f8f9fb;
+  --gyro-theme-preview-light-content: #e9eef5;
+  --gyro-sidebar-mode-track: #181817;
+  --gyro-sidebar-mode-track-border: rgba(255, 255, 255, 0.11);
+  --gyro-sidebar-mode-active: #292927;
+  --gyro-sidebar-mode-active-border: rgba(255, 255, 255, 0.15);
+  --gyro-sidebar-mode-active-shadow: rgba(0, 0, 0, 0.28);
   --gyro-shadow: rgba(0, 0, 0, 0.34);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
   --gyro-focus-ring: rgba(122, 167, 255, 0.34);
@@ -136,6 +146,7 @@
   --gyro-provider-anthropic: #ff8a3d;
   --gyro-provider-kimi: #1783ff;
   --gyro-provider-kimi-logo: #fff;
+  --gyro-provider-ollama: #f6f2ea;
   --gyro-provider-xai: #f6f2ea;
   --gyro-provider-gemini: #8bb8ff;
   --gyro-provider-cursor: #f2efe9;
@@ -909,9 +920,14 @@
   --gyro-provider-anthropic: #c15d12;
   --gyro-provider-kimi: #1783ff;
   --gyro-provider-kimi-logo: #000;
+  --gyro-provider-ollama: #1c2027;
   --gyro-provider-xai: #1c2027;
   --gyro-provider-gemini: #2457c5;
   --gyro-provider-cursor: #1c2027;
+  --gyro-theme-preview-dark-canvas: #30302d;
+  --gyro-theme-preview-dark-content: #5c5c58;
+  --gyro-theme-preview-light-canvas: #f8f9fb;
+  --gyro-theme-preview-light-content: #e9eef5;
   --gyro-provider-opencode: #1c2027;
   --gyro-hero-heading: #181d25;
   --gyro-hero-brand: #667282;
@@ -6122,19 +6138,28 @@ button.gyro-account-menu-row:hover {
   color: var(--gyro-provider-opencode);
 }
 
-/* Grok: monochrome mark that follows theme (dark ink on light, light on dark). */
+/* Ollama and Grok are monochrome marks: dark ink on light, light ink on dark. */
+.gyro-provider-logo.is-ollama {
+  color: var(--gyro-provider-ollama);
+}
+
 .gyro-provider-logo.is-xai {
   color: var(--gyro-provider-xai);
 }
 
-/* Light popovers force muted item color; keep the Grok mark solid so it does
-   not wash out to a faint X-shaped smudge on white. */
+/* Light popovers force muted item color; keep monochrome marks solid. */
 :root[data-theme="light"] .gyro-composer-menu-item .gyro-provider-logo.is-xai,
+:root[data-theme="light"]
+  .gyro-composer-menu-item
+  .gyro-provider-logo.is-ollama,
+:root[data-theme="light"] .gyro-model-chip .gyro-provider-logo.is-ollama,
 :root[data-theme="light"] .gyro-model-chip .gyro-provider-logo.is-xai {
   color: #111418;
 }
 
 :root[data-theme="dark"] .gyro-composer-menu-item .gyro-provider-logo.is-xai,
+:root[data-theme="dark"] .gyro-composer-menu-item .gyro-provider-logo.is-ollama,
+:root[data-theme="dark"] .gyro-model-chip .gyro-provider-logo.is-ollama,
 :root[data-theme="dark"] .gyro-model-chip .gyro-provider-logo.is-xai {
   color: #f2f0ea;
 }
@@ -14233,6 +14258,12 @@ body {
   }
 }
 
+@media (max-width: 780px) {
+  .gyro-theme-picker {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Plan-mode document presentation. */
 .gyro-chat-surface.is-thread.has-plan {
   grid-template-columns: minmax(340px, 0.92fr) minmax(500px, 1.08fr);
@@ -17193,8 +17224,20 @@ textarea,
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
-/* Grok's brand token flips near-white to near-ink across themes, so a lighter
-   mix keeps the monochrome mark clear of its own backdrop. */
+/* Monochrome provider marks need a quiet matching well, not a logo tile. */
+.gyro-provider-icon:has(.gyro-provider-logo.is-ollama),
+.gyro-model-standard-icon:has(.gyro-provider-logo.is-ollama) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-provider-ollama) 8%,
+    var(--gyro-premium-panel-strong)
+  );
+  box-shadow:
+    inset 0 0 0 0.5px
+      color-mix(in srgb, var(--gyro-provider-ollama) 26%, transparent),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+}
+
 .gyro-provider-icon:has(.gyro-provider-logo.is-xai),
 .gyro-model-standard-icon:has(.gyro-provider-logo.is-xai) {
   background: color-mix(
@@ -18428,7 +18471,7 @@ textarea,
 }
 
 :root[data-theme="light"] .gyro-workspace-tool-panel.is-resizable {
-  background: #f5f5f3;
+  background: #f5f7fa;
   border-top-color: rgba(32, 34, 38, 0.12);
 }
 
@@ -18444,7 +18487,7 @@ textarea,
   .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-workspace,
 :root[data-theme="light"] .gyro-terminal-workspace {
-  background: #f5f5f3;
+  background: #f5f7fa;
   color: #1f2937;
 }
 
@@ -24123,9 +24166,16 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-companion-resizer:hover,
+.gyro-chat-companion-resizer:focus-visible,
 .gyro-chat-companion.is-resizing > .gyro-chat-companion-resizer {
   background: var(--gyro-accent);
   opacity: 0.5;
+}
+
+.gyro-chat-companion-resizer:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--gyro-accent);
+  opacity: 1;
+  outline: 0;
 }
 
 .gyro-chat-companion.is-resizing {
@@ -27578,9 +27628,8 @@ button.gyro-account-menu-row:hover,
 
 .gyro-workspace-route.is-code .gyro-editor-tabs > button.is-active {
   background: var(--gyro-ide-editor-bg);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--gyro-text) 3%, transparent),
-    inset 0 -1.5px 0 var(--gyro-accent);
+  border-radius: 0;
+  box-shadow: inset 0 -1.5px 0 var(--gyro-accent);
 }
 
 .gyro-workspace-route.is-code .gyro-editor-contextbar {
@@ -30362,6 +30411,48 @@ button.gyro-account-menu-row:hover,
   opacity: 0.38;
 }
 
+/* The compact SCM form nests its actions in a grid. Keep its disabled commit
+   control visibly unavailable instead of leaving it in the normal accent
+   treatment, which looked actionable beside the message field. */
+.gyro-scm-panel .gyro-sidebar-commit-actions > button:not(.is-secondary),
+.gyro-sidebar-section:has(.gyro-scm-panel)
+  .gyro-sidebar-commit-actions
+  > button:not(.is-secondary) {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-accent) 88%, transparent);
+  border: 0;
+  border-radius: 6px;
+  color: var(--gyro-primary-text, #fff);
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.gyro-scm-panel
+  .gyro-sidebar-commit-actions
+  > button:not(.is-secondary):disabled,
+.gyro-sidebar-section:has(.gyro-scm-panel)
+  .gyro-sidebar-commit-actions
+  > button:not(.is-secondary):disabled {
+  background: color-mix(in srgb, var(--gyro-muted) 18%, transparent);
+  color: var(--gyro-muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.gyro-scm-panel .gyro-sidebar-commit-actions > button.is-secondary:disabled,
+.gyro-sidebar-section:has(.gyro-scm-panel)
+  .gyro-sidebar-commit-actions
+  > button.is-secondary:disabled {
+  color: var(--gyro-muted) !important;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .gyro-scm-panel .gyro-sidebar-mini-copy,
 .gyro-sidebar-section:has(.gyro-scm-panel) .gyro-sidebar-mini-copy {
   color: var(--gyro-muted);
@@ -31273,6 +31364,12 @@ button.gyro-account-menu-row:hover,
   top: 0;
 }
 
+/* Code editor tabs are deliberately square. Do not paint the decorative
+   sidebar curve over the empty-file tab's top-left edge. */
+.gyro-main:has(.gyro-workspace-route.is-code) > .gyro-seam-corner.is-top {
+  display: none;
+}
+
 .gyro-seam-corner.is-bottom {
   bottom: 0;
 }
@@ -31896,45 +31993,45 @@ button.gyro-account-menu-row:hover,
 /* --------------------------------------------------------------------------
  * Light mode refinement
  *
- * The bright palette is deliberately warm-neutral rather than blue-grey. It
- * gives hierarchy through paper-like surfaces, precise hairlines, and a single
+ * The bright palette is deliberately cool-neutral rather than paper-warm. It
+ * gives hierarchy through slate-white surfaces, precise hairlines, and a single
  * confident action blue—the same visual language across the workspace,
  * provider controls, and transient menus.
  * -------------------------------------------------------------------------- */
 :root[data-theme="light"] {
-  --gyro-app: #fbfaf8;
-  --gyro-sidebar: #f6f5f2;
-  --gyro-sidebar-soft: #efeeea;
+  --gyro-app: #f7f9fc;
+  --gyro-sidebar: #f0f3f7;
+  --gyro-sidebar-soft: #e7ecf2;
   --gyro-pane: #ffffff;
   --gyro-surface: #ffffff;
-  --gyro-surface-raised: #f8f8f6;
-  --gyro-surface-soft: #f1f1ee;
-  --gyro-border: #e4e3df;
-  --gyro-border-soft: #edebe7;
-  --gyro-border-strong: #d2d0ca;
-  --gyro-text: #171716;
-  --gyro-muted: #6e6d69;
-  --gyro-faint: #91908b;
+  --gyro-surface-raised: #f5f7fa;
+  --gyro-surface-soft: #edf2f7;
+  --gyro-border: #d8e0e9;
+  --gyro-border-soft: #e4eaf1;
+  --gyro-border-strong: #bec9d6;
+  --gyro-text: #18212c;
+  --gyro-muted: #5f6d7d;
+  --gyro-faint: #7c8a9a;
   --gyro-accent: #0874df;
   --gyro-accent-strong: #0566c7;
   --gyro-primary-bg: #0874df;
   --gyro-primary-hover: #0566c7;
-  --gyro-page-canvas: #fbfaf8;
+  --gyro-page-canvas: #f7f9fc;
   --gyro-page-header-bg: #ffffff;
-  --gyro-control-bg: #f6f6f4;
-  --gyro-control-hover: #eeeeeb;
+  --gyro-control-bg: #f3f6fa;
+  --gyro-control-hover: #e8edf4;
   --gyro-topbar: rgba(255, 255, 255, 0.92);
-  --gyro-topbar-border: #eceae6;
-  --gyro-premium-shadow: rgba(30, 29, 26, 0.14);
-  --gyro-premium-shadow-soft: rgba(30, 29, 26, 0.08);
-  --gyro-premium-shadow-lift: rgba(30, 29, 26, 0.12);
-  --gyro-premium-hairline: rgba(25, 24, 22, 0.1);
-  --gyro-premium-hairline-soft: rgba(25, 24, 22, 0.065);
-  --gyro-premium-hairline-strong: rgba(25, 24, 22, 0.16);
+  --gyro-topbar-border: #e1e7ee;
+  --gyro-premium-shadow: rgba(28, 39, 52, 0.14);
+  --gyro-premium-shadow-soft: rgba(28, 39, 52, 0.08);
+  --gyro-premium-shadow-lift: rgba(28, 39, 52, 0.12);
+  --gyro-premium-hairline: rgba(24, 33, 44, 0.1);
+  --gyro-premium-hairline-soft: rgba(24, 33, 44, 0.065);
+  --gyro-premium-hairline-strong: rgba(24, 33, 44, 0.16);
   --gyro-premium-focus: rgba(8, 116, 223, 0.3);
-  --gyro-hero-border: #e4e3df;
-  --gyro-hero-shadow: 0 20px 45px rgba(30, 29, 26, 0.11);
-  --gyro-hero-shadow-focus: 0 24px 52px rgba(30, 29, 26, 0.15);
+  --gyro-hero-border: #d8e0e9;
+  --gyro-hero-shadow: 0 20px 45px rgba(28, 39, 52, 0.11);
+  --gyro-hero-shadow-focus: 0 24px 52px rgba(28, 39, 52, 0.15);
 }
 
 :root[data-theme="light"] .gyro-app-shell,
@@ -31954,12 +32051,12 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="light"] .gyro-sidebar-row.is-active,
 :root[data-theme="light"] .gyro-sidebar-thread:hover,
 :root[data-theme="light"] .gyro-sidebar-thread.is-active {
-  background: #ebeae6;
+  background: #e7edf4;
 }
 
 :root[data-theme="light"] .gyro-chat-start h1,
 :root[data-theme="light"] .gyro-chat-thread-topbar strong {
-  color: #161615;
+  color: #18212c;
   letter-spacing: -0.035em;
 }
 
@@ -31971,8 +32068,8 @@ button.gyro-account-menu-row:hover,
   .gyro-composer-shell.is-provider-collapsed,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-shell {
   background: #ffffff;
-  border-color: #e4e3df;
-  box-shadow: 0 14px 32px rgba(30, 29, 26, 0.08);
+  border-color: #d9e1ea;
+  box-shadow: 0 14px 32px rgba(28, 39, 52, 0.08);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-shell:focus-within,
@@ -31982,13 +32079,13 @@ button.gyro-account-menu-row:hover,
   border-color: #0874df;
   box-shadow:
     0 0 0 3px rgba(8, 116, 223, 0.12),
-    0 16px 36px rgba(30, 29, 26, 0.1);
+    0 16px 36px rgba(28, 39, 52, 0.1);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-context-row,
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-context-row {
-  background: #f7f7f5;
-  border-color: #edebe7;
+  background: #f5f7fa;
+  border-color: #e3e9f0;
 }
 
 :root[data-theme="light"] .gyro-overlay,
@@ -31997,40 +32094,40 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="light"] .gyro-scm-branch-menu,
 :root[data-theme="light"] .gyro-chat-switcher-menu {
   background: rgba(255, 255, 255, 0.98);
-  border-color: #e5e3de;
+  border-color: #d9e1ea;
   box-shadow:
-    0 18px 42px rgba(30, 29, 26, 0.14),
+    0 18px 42px rgba(28, 39, 52, 0.14),
     inset 0 1px 0 #ffffff;
 }
 
 :root[data-theme="light"] .gyro-provider-hero {
-  border-bottom-color: #e8e6e1;
+  border-bottom-color: #e1e7ee;
 }
 
 :root[data-theme="light"] .gyro-provider-card,
 :root[data-theme="light"] .gyro-settings-surface .gyro-provider-list {
   background: #ffffff;
-  border-color: #e6e4df;
+  border-color: #dfe6ee;
   box-shadow:
-    0 8px 22px rgba(30, 29, 26, 0.045),
+    0 8px 22px rgba(28, 39, 52, 0.045),
     inset 0 1px 0 #ffffff;
 }
 
 :root[data-theme="light"] .gyro-provider-card-head,
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row {
-  border-color: #eceae5;
+  border-color: #e5eaf0;
 }
 
 :root[data-theme="light"] .gyro-provider-icon {
-  background: #f7f7f5;
-  border-color: #e8e6e1;
+  background: #f5f7fa;
+  border-color: #e1e7ee;
   box-shadow: none;
 }
 
 :root[data-theme="light"] .gyro-provider-state {
-  background: #f7f7f5;
-  border-color: #e5e3de;
-  color: #777570;
+  background: #f5f7fa;
+  border-color: #d9e1ea;
+  color: #647181;
   box-shadow: none;
 }
 
@@ -32045,17 +32142,17 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-provider-actions .gyro-secondary-button {
-  background: #f8f8f6;
-  border-color: #e3e1dc;
+  background: #f7f9fc;
+  border-color: #d9e1ea;
   box-shadow: none;
-  color: #292825;
+  color: #263241;
 }
 
 :root[data-theme="light"]
   .gyro-provider-actions
   .gyro-secondary-button:hover:not(:disabled) {
-  background: #f0f0ed;
-  border-color: #d6d3cd;
+  background: #edf2f7;
+  border-color: #cbd5e0;
 }
 
 @keyframes gyro-provider-checking {
@@ -32355,9 +32452,9 @@ button.gyro-account-menu-row:hover,
 
 :root[data-theme="light"] .gyro-update-release-card {
   background: #ffffff;
-  border-color: #e2e0db;
+  border-color: #d6dee8;
   box-shadow:
-    0 22px 52px rgba(30, 29, 26, 0.16),
+    0 22px 52px rgba(28, 39, 52, 0.16),
     inset 0 1px 0 #ffffff;
 }
 
@@ -32590,7 +32687,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-theme-picker {
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 14px;
 }
 
@@ -32606,8 +32703,21 @@ button.gyro-account-menu-row:hover,
   text-align: left;
 }
 
-.gyro-theme-picker button svg {
-  display: none;
+.gyro-theme-picker button > svg {
+  color: var(--gyro-muted);
+  display: block;
+  margin-bottom: -3px;
+}
+
+.gyro-theme-picker button > span {
+  color: var(--gyro-text);
+  font-weight: 650;
+}
+
+.gyro-theme-picker button > small {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .gyro-theme-picker button::before {
@@ -32621,7 +32731,25 @@ button.gyro-account-menu-row:hover,
   position: relative;
 }
 
-.gyro-theme-picker button:first-child::before {
+.gyro-theme-picker button.is-system::before {
+  background:
+    linear-gradient(var(--gyro-theme-preview-light-content) 0 0)
+      calc(50% + 12px) 16px / 30% 5px no-repeat,
+    linear-gradient(var(--gyro-theme-preview-light-content) 0 0)
+      calc(50% + 12px) 31px / 38% 3px no-repeat,
+    linear-gradient(var(--gyro-theme-preview-dark-content) 0 0) calc(50% - 14px)
+      16px / 30% 5px no-repeat,
+    linear-gradient(var(--gyro-theme-preview-dark-content) 0 0) calc(50% - 14px)
+      31px / 38% 3px no-repeat,
+    linear-gradient(
+      90deg,
+      var(--gyro-theme-preview-dark-canvas) 0 50%,
+      var(--gyro-theme-preview-light-canvas) 50% 100%
+    );
+  border-color: color-mix(in srgb, var(--gyro-text) 16%, transparent);
+}
+
+.gyro-theme-picker button.is-dark::before {
   background:
     linear-gradient(var(--gyro-surface-raised) 0 0) 16px 16px / 58% 5px
       no-repeat,
@@ -32633,12 +32761,12 @@ button.gyro-account-menu-row:hover,
   border-color: color-mix(in srgb, #fff 16%, transparent);
 }
 
-.gyro-theme-picker button:nth-child(2)::before {
+.gyro-theme-picker button.is-light::before {
   background:
     linear-gradient(var(--gyro-border-strong) 0 0) 16px 16px / 58% 5px no-repeat,
     linear-gradient(var(--gyro-border-strong) 0 0) 16px 31px / 72% 3px no-repeat,
     linear-gradient(var(--gyro-border-strong) 0 0) 16px 44px / 40% 3px no-repeat,
-    #f8f8f6;
+    #f8f9fb;
 }
 
 .gyro-theme-picker button.is-active {
@@ -32649,6 +32777,16 @@ button.gyro-account-menu-row:hover,
   );
   border-color: var(--gyro-accent);
   box-shadow: inset 0 0 0 1px var(--gyro-accent);
+}
+
+@media (max-width: 980px) and (min-width: 781px) {
+  .gyro-theme-picker {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .gyro-theme-picker button {
+    min-height: 132px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -33201,7 +33339,8 @@ button.gyro-account-menu-row:hover,
 .gyro-run-problem {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-danger) 8%, var(--gyro-surface));
-  border: 1px solid color-mix(in srgb, var(--gyro-danger) 28%, var(--gyro-border));
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-danger) 28%, var(--gyro-border));
   border-radius: 10px;
   gap: 14px;
   margin-top: 10px;
@@ -33250,26 +33389,31 @@ button.gyro-account-menu-row:hover,
 
 /* Sessions/Workspace is navigation, but it is also a two-way switch. Keep the
    shared track visible in both themes so the selected pill has a stable home. */
+:root[data-theme="light"] {
+  --gyro-sidebar-mode-track: #e6ecf3;
+  --gyro-sidebar-mode-track-border: rgba(24, 33, 44, 0.12);
+  --gyro-sidebar-mode-active: #ffffff;
+  --gyro-sidebar-mode-active-border: rgba(24, 33, 44, 0.16);
+  --gyro-sidebar-mode-active-shadow: rgba(24, 33, 44, 0.1);
+}
+
 .gyro-sidebar-mode-group,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group,
 :root[data-theme="light"] .gyro-sidebar-mode-group,
 :root[data-theme="light"]
   .gyro-app-shell.is-chat-shell
   .gyro-sidebar-mode-group {
-  /* --gyro-segment-bg is intentionally cool for editor controls. The
-     Sessions/Workspace switcher is navigation, so use a neutral paper track
-     in light mode instead of inheriting that blue-grey tint. */
-  background: #ece9e4;
-  border: 1px solid color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  background: var(--gyro-sidebar-mode-track);
+  border: 1px solid var(--gyro-sidebar-mode-track-border);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
   gap: 2px;
   padding: 2px;
 }
 
 .gyro-sidebar-mode-group::before {
-  background: var(--gyro-segment-active);
-  border-color: color-mix(in srgb, var(--gyro-text) 16%, transparent);
+  background: var(--gyro-sidebar-mode-active);
+  border-color: var(--gyro-sidebar-mode-active-border);
   box-shadow:
     inset 0 1px 0 var(--gyro-premium-inset-highlight),
-    0 1px 2px color-mix(in srgb, var(--gyro-text) 10%, transparent);
+    0 1px 2px var(--gyro-sidebar-mode-active-shadow);
 }

@@ -22,6 +22,7 @@ import {
   sanitizeStoredChatGridState,
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
+import { resolveCleanMachinePath } from "../packages/ui/src/clean-machine-path.ts";
 import {
   globalSearchMatchScore,
   normalizedGlobalSearchText,
@@ -296,6 +297,9 @@ expect(
 );
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const captureFixtureSource = readRepoFile(
+  "apps/desktop/src/capture-fixtures.ts",
+);
 const workbenchSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
 const providerStreamSource = readRepoFile(
@@ -429,13 +433,13 @@ expect(
     surfaceSource.includes('className="gyro-chat-grid-empty"') &&
     surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
-    surfaceSource.includes('label: "Above"') &&
+    surfaceSource.includes('label: "Open here"') &&
+    surfaceSource.includes('label: "Left"') &&
+    surfaceSource.includes('label: "Right"') &&
     surfaceSource.includes('"Top left"') &&
     surfaceSource.includes('"Top right"') &&
     surfaceSource.includes('"Bottom left"') &&
     surfaceSource.includes('"Bottom right"') &&
-    surfaceSource.includes('label: "Next"') &&
-    surfaceSource.includes('label: "Below"') &&
     surfaceSource.includes("chatGridDropZones(slots)") &&
     surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
     surfaceSource.includes('window.addEventListener("dragend", finishDrag)') &&
@@ -497,6 +501,14 @@ expect(
       rule.includes("grid-template-columns"),
     ),
   "Workspace Source Control files should use compact single-line rows with stable actions.",
+);
+const compactStyleSource = styleSource.replace(/\s+/g, " ");
+expect(
+  surfaceSource.includes('className="gyro-sidebar-commit-actions"') &&
+    compactStyleSource.includes(
+      ".gyro-scm-panel .gyro-sidebar-commit-actions > button:not(.is-secondary):disabled, .gyro-sidebar-section:has(.gyro-scm-panel) .gyro-sidebar-commit-actions > button:not(.is-secondary):disabled { background: color-mix(in srgb, var(--gyro-muted) 18%, transparent); color: var(--gyro-muted); cursor: not-allowed;",
+    ),
+  "Disabled Source Control commits should look unavailable instead of like a primary action.",
 );
 
 // Source Control reads the way VS Code's does: staged and unstaged changes in
@@ -812,9 +824,10 @@ const emittedComposerActions = new Set([
   ].map((match) => match[1] ?? match[2]),
 ]);
 const handledComposerActions = new Set(
-  [...composerHandlerSource.matchAll(/case\s+"([^"]+)"\s*:/g)].map(
-    (match) => match[1],
-  ),
+  [
+    ...composerHandlerSource.matchAll(/case\s+"([^"]+)"\s*:/g),
+    ...composerHandlerSource.matchAll(/action === "([^"]+)"/g),
+  ].map((match) => match[1]),
 );
 const handledComposerPrefixes = [
   ...composerHandlerSource.matchAll(/action\.startsWith\("([^"]+)"\)/g),
@@ -1008,6 +1021,10 @@ expect(
   )?.authStatus === "connected",
   "Saved enabled providers should rehydrate as connected when backend config omits authStatus.",
 );
+expect(
+  restoredEnabledConfig.selectedProviderId === "openai",
+  "A restored config with an enabled provider should select it for new chats instead of falsely blocking the composer.",
+);
 const kimiCatalog = providerCatalog.find((provider) => provider.id === "kimi");
 expect(
   // The Kimi Code service provisions k3 with low/high/max thinking efforts
@@ -1106,6 +1123,19 @@ expect(
 );
 
 const initialState = createInitialWorkbenchState();
+const invalidThemeState = createInitialWorkbenchState({
+  preferences: { theme: "not-a-theme" },
+});
+const systemThemeState = workbenchReducer(initialState, {
+  type: "set-theme",
+  theme: "system",
+});
+expect(
+  initialState.preferences.theme === "system" &&
+    invalidThemeState.preferences.theme === "system" &&
+    systemThemeState.preferences.theme === "system",
+  "Theme preferences should default to System, reject invalid stored values, and remain selectable.",
+);
 const { languageServers: _legacyLanguageServers, ...legacyIdeState } =
   initialState.ide;
 const migratedIdeState = createInitialWorkbenchState({
@@ -2320,8 +2350,9 @@ expect(
 expect(
   providerConnectionStatusFromRuntime("ready") === "connected" &&
     providerConnectionStatusFromRuntime("not-logged-in") === "not-configured" &&
+    providerConnectionStatusFromRuntime("no-models") === "not-configured" &&
     providerConnectionStatusFromRuntime("warning") === "failed",
-  "Typed backend runtime status should drive the provider connection result.",
+  "Typed backend runtime status should distinguish an Ollama runtime with no installed models.",
 );
 expect(
   providerAuthStatusAfterHealth("connected", "failed") === "connected" &&
@@ -2343,8 +2374,50 @@ expect(
     !isProviderRuntimeUsable(enabledOpenAiProvider, {
       connectionStatus: "not-configured",
       runtimeStatus: "not-logged-in",
+    }) &&
+    !isProviderRuntimeUsable(enabledOpenAiProvider, {
+      connectionStatus: "not-configured",
+      runtimeStatus: "no-models",
     }),
-  "Transient health warnings should retain enabled providers while definitive auth failures block execution.",
+  "Transient health warnings should retain enabled providers while missing authentication or local models blocks execution.",
+);
+const ollamaNeedsModelPath = resolveCleanMachinePath({
+  hasReadyProvider: false,
+  preferredProviderId: "ollama",
+  preferredProviderLabel: "Ollama",
+  providerBlockAction: "open-settings:providers",
+  providerBlockActionLabel: "Open provider settings",
+  providerBlockMessage:
+    "Ollama is running, but no models are installed. Run `ollama pull <model>`, then test Ollama in provider settings.",
+  providerBlockPlaceholder: "Run ollama pull <model>, then test Ollama…",
+  providerBlockStepLabel: "Ollama needs a model",
+  workspacePath: "/Users/example/Gyro",
+});
+expect(
+  ollamaNeedsModelPath.blockedReason?.includes("no models are installed") &&
+    ollamaNeedsModelPath.nextAction === "open-settings:providers" &&
+    ollamaNeedsModelPath.nextActionLabel === "Open provider settings" &&
+    ollamaNeedsModelPath.placeholder ===
+      "Run ollama pull <model>, then test Ollama…" &&
+    ollamaNeedsModelPath.steps.find((step) => step.id === "provider")?.label ===
+      "Ollama needs a model",
+  "A running Ollama service without models should explain the repair and never offer a misleading reconnect action.",
+);
+const connectedOllama = {
+  ...providerCatalog.find((provider) => provider.id === "ollama"),
+  authStatus: "connected",
+  enabled: true,
+};
+expect(
+  !providerNeedsSignInRepair(connectedOllama, {
+    connectionStatus: "not-configured",
+    runtimeStatus: "no-models",
+  }) &&
+    surfaceSource.includes("const needsModelInstall =") &&
+    surfaceSource.includes('? "Model required"') &&
+    surfaceSource.includes('"Test after install"') &&
+    surfaceSource.includes("ollama pull &lt;model&gt;"),
+  "A missing Ollama model should point to model installation, never trigger a sign-in repair.",
 );
 state = workbenchReducer(state, {
   type: "record-provider-health",
@@ -3345,7 +3418,10 @@ expect(
     appSource.includes("isStreamingAssistantSessionEvent") &&
     !appSource.includes("[...events]\n    .reverse()") &&
     appSource.includes(
-      "}, [workbench.preferences.density, workbench.preferences.theme]);",
+      "}, [resolvedTheme, themePreference, workbench.preferences.density]);",
+    ) &&
+    appSource.includes(
+      "safeSetLocalStorage(THEME_STORAGE_KEY, themePreference)",
     ) &&
     appSource.includes("WORKBENCH_PERSIST_DEBOUNCE_MS") &&
     appSource.includes("WORKBENCH_PERSIST_IDLE_TIMEOUT_MS") &&
@@ -4062,7 +4138,7 @@ expect(
     typeSource.includes("GyroAccountStatus") &&
     typeSource.includes("GyroAccountOidcConfig") &&
     reducerSource.includes('"account"') &&
-    surfaceSource.includes("Allow this device") &&
+    surfaceSource.includes("Gyro local access") &&
     surfaceSource.includes("Gyro local access stays separate") &&
     !appSource.includes("GyroAccountGate") &&
     !appSource.includes("gyro-account-gate") &&
@@ -5074,7 +5150,9 @@ expect(
   typeSource.includes("export type GitBranchCatalog") &&
     surfaceSource.includes("function branchPopoverItems") &&
     surfaceSource.includes("select-branch:${encodeURIComponent(branch)}") &&
-    surfaceSource.includes("This isolated chat keeps its worktree branch") &&
+    surfaceSource.includes(
+      "Agent workspace keeps this private branch for the chat",
+    ) &&
     appSource.includes('action.startsWith("select-branch:")') &&
     appSource.includes('invoke<GitBranchCatalog>("git_checkout_branch"') &&
     appSource.includes('invoke<Session>("set_session_branch"') &&
@@ -5334,6 +5412,17 @@ expect(
   "Provider readiness should stay quiet when ready and show blocked errors inside the provider picker.",
 );
 expect(
+  surfaceSource.includes("const dismissActiveComposerPopover = useCallback") &&
+    surfaceSource.includes(
+      'document.addEventListener("keydown", handleComposerPopoverKeyDown)',
+    ) &&
+    surfaceSource.includes(
+      'document.removeEventListener("keydown", handleComposerPopoverKeyDown)',
+    ) &&
+    surfaceSource.includes('if (event.key !== "Escape") return;'),
+  "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
+);
+expect(
   surfaceSource.includes("gyro-provider-picker") &&
     surfaceSource.includes("gyro-provider-model-flyout") &&
     surfaceSource.includes('modelPickerProvider ? "has-flyout" : ""') &&
@@ -5504,8 +5593,12 @@ expect(
     surfaceSource.includes("{modelChipLabel}") &&
     surfaceSource.includes('className="gyro-model-chip-effort"') &&
     surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
-    !surfaceSource.includes('className="gyro-composer-chip gyro-effort-chip"') &&
-    surfaceSource.includes("<ProviderLogo providerId={displayProvider.id} />") &&
+    !surfaceSource.includes(
+      'className="gyro-composer-chip gyro-effort-chip"',
+    ) &&
+    surfaceSource.includes(
+      "<ProviderLogo providerId={displayProvider.id} />",
+    ) &&
     styleSource.includes(".gyro-model-chip .gyro-provider-logo") &&
     surfaceSource.includes("const modelMenuItems: ComposerPopoverItem[]") &&
     surfaceSource.includes('menuPane: "effort" as const') &&
@@ -5532,8 +5625,12 @@ expect(
 // room below before it commits to opening down. Navigation carets stay quiet so
 // the accent belongs to the checkmark alone.
 expect(
-  styleSource.includes(".gyro-composer-control-model > .gyro-composer-popover") &&
-    styleSource.includes(".gyro-composer-control-model .gyro-provider-picker-menu") &&
+  styleSource.includes(
+    ".gyro-composer-control-model > .gyro-composer-popover",
+  ) &&
+    styleSource.includes(
+      ".gyro-composer-control-model .gyro-provider-picker-menu",
+    ) &&
     styleSource.includes("transform-origin: bottom right") &&
     styleSource.includes("@keyframes gyro-model-menu-in-up") &&
     styleSource.includes("@keyframes gyro-model-menu-in-down") &&
@@ -5739,7 +5836,10 @@ expect(
     timelineSource.includes("const firstFileEvent = fileEvents[0]") &&
     runSource.includes('case "file":') &&
     runViewSource.includes("model.steps.map((step)") &&
-    surfaceSource.includes("changeSummary={chatTurnChangeSummary(") &&
+    surfaceSource.includes("<ChatRunChangeSummary") &&
+    surfaceSource.includes('!isRunning && runModel.phase.name === "done"') &&
+    surfaceSource.includes("const reviewFiles = () => {") &&
+    surfaceSource.includes("setOpenPath(files[0]?.path)") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
@@ -5747,9 +5847,8 @@ expect(
     styleSource.includes("backdrop-filter: none") &&
     surfaceSource.includes(") : sessionGoal?.text ? (") &&
     appSource.includes("const changeChatMode = useCallback") &&
-    appSource.includes(
-      'const shouldClearGoal = mode === "plan" && Boolean(activeSessionGoal)',
-    ) &&
+    appSource.includes('mode === "plan" || mode === "council"') &&
+    appSource.includes("Boolean(activeSessionGoal)") &&
     appSource.includes(
       'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
     ) &&
@@ -5785,9 +5884,9 @@ expect(
 expect(
   surfaceSource.includes("OpenAI permissions") &&
     surfaceSource.includes("Anthropic permissions") &&
-    surfaceSource.includes("Ask Before Executing") &&
-    surfaceSource.includes("Auto Approve") &&
-    surfaceSource.includes("Full Access") &&
+    surfaceSource.includes('gatedLabel: "Ask first"') &&
+    surfaceSource.includes('autoLabel: "Allow in project"') &&
+    surfaceSource.includes('directLabel: "Full access"') &&
     !surfaceSource.includes('action: "toggle-access"') &&
     !surfaceSource.includes("Codex settings") &&
     !surfaceSource.includes("Claude settings") &&
@@ -6228,10 +6327,22 @@ expect(
   "Workspace shell views, panels, and palette actions should share registries and render in an independent Activity Rail.",
 );
 
+const workspaceRailFoundationStart = styleSource.indexOf(
+  "/* Workspace shell foundation: an animated Activity Rail beside shared navigation. */",
+);
+const workspaceRailFoundationEnd = styleSource.indexOf(
+  "/* ==========================================================================\n" +
+    "   Split screen: tiled chat panes",
+  workspaceRailFoundationStart,
+);
+// Keep this assertion focused on the Activity Rail section. Other workspace
+// refinements legitimately use :has(), so scanning the entire tail of the
+// stylesheet turned a later editor-seam rule into a false rail regression.
 const workspaceRailFoundation = styleSource.slice(
-  styleSource.indexOf(
-    "/* Workspace shell foundation: an animated Activity Rail beside shared navigation. */",
-  ),
+  workspaceRailFoundationStart,
+  workspaceRailFoundationEnd === -1
+    ? styleSource.length
+    : workspaceRailFoundationEnd,
 );
 expect(
   surfaceSource.includes(
@@ -6370,14 +6481,71 @@ expect(
 );
 
 expect(
-  appSource.includes("theme={workbench.preferences.theme}") &&
+  appSource.includes("theme={resolvedTheme}") &&
+    appSource.includes('themePreference === "system"') &&
+    appSource.includes("function storedThemeMode") &&
+    surfaceSource.includes("Matches macOS") &&
+    surfaceSource.includes('onThemeChange("system")') &&
     appSource.includes("function terminalThemeFor") &&
     appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
     appSource.includes('background: "#f6f8fa"') &&
     appSource.includes('background: "#0c0c0c"') &&
     appSource.includes('brightMagenta: "#f08cff"') &&
     appSource.includes('brightYellow: "#ffd166"'),
-  "Live terminals should update their xterm palette in place for dark and light themes.",
+  "System, dark, and light preferences should resolve before live terminals update their palette in place.",
+);
+
+expect(
+  appSource.includes(
+    'cleanMachinePath.nextAction === "open-settings:providers"',
+  ) && surfaceSource.includes("Run ollama pull <model>, then test Ollama…"),
+  "The global readiness notice and composer should give Ollama no-models states the same repair path.",
+);
+
+expect(
+  captureFixtureSource.includes('command === "create_desktop_session"') &&
+    captureFixtureSource.includes('command === "append_user_message"') &&
+    captureFixtureSource.includes('command === "run_provider_chat"') &&
+    captureFixtureSource.includes('command === "set_session_model"') &&
+    captureFixtureSource.includes('command === "delete_session"') &&
+    captureFixtureSource.includes('command === "get_session_usage_totals"') &&
+    captureFixtureSource.includes("captureEventsBySessionId") &&
+    captureFixtureSource.includes("__TAURI_EVENT_PLUGIN_INTERNALS__") &&
+    captureFixtureSource.includes(
+      "unregisterListener(_event: string, id: number)",
+    ) &&
+    captureFixtureSource.includes("Capture response:") &&
+    captureFixtureSource.includes("no provider was contacted"),
+  "The browser capture fixture should exercise a completed local send without contacting a provider or leaving Tauri listener cleanup broken.",
+);
+
+expect(
+  appSource.includes("const retireSideChatSessions = useCallback") &&
+    appSource.includes("deleteSideChatSession(sessionId).then((deleted) =>") &&
+    appSource.includes("if (!deleted) return;") &&
+    appSource.includes('type: "forget-side-chat-sessions"') &&
+    appSource.includes(
+      "removing it here would let a failed deletion leak into history",
+    ),
+  "Temporary Side chats should stay hidden until their backend session deletion succeeds.",
+);
+
+expect(
+  surfaceSource.includes('aria-label="Resize companion"') &&
+    surfaceSource.includes('aria-orientation="vertical"') &&
+    surfaceSource.includes("aria-valuenow={resizeWidth}") &&
+    surfaceSource.includes("onKeyDown={resizeWithKeyboard}") &&
+    surfaceSource.includes('role="separator"') &&
+    surfaceSource.includes("keyboardChatCompanionWidth(") &&
+    styleSource.includes(".gyro-chat-companion-resizer:focus-visible"),
+  "The companion dock resizer should be keyboard-operable and visibly focused like other adjustable workspace surfaces.",
+);
+
+expect(
+  appSource.includes(
+    'Array.isArray(activeOutput.lines) ? activeOutput.lines : [])\n              .filter((line) => typeof line === "string")',
+  ),
+  "Workspace context capture should tolerate malformed persisted output channels instead of crashing the app.",
 );
 
 expect(
@@ -6520,15 +6688,14 @@ expect(
 
 expect(
   surfaceSource.includes("gyro-usage-provider-select") &&
+    surfaceSource.includes('aria-label="Usage provider"') &&
     surfaceSource.includes('aria-label="Refresh provider usage"') &&
     surfaceSource.includes('label="Usage visualization"') &&
-    surfaceSource.includes("aria-label={`${remaining}% remaining`}") &&
-    surfaceSource.includes("<small>remaining</small>") &&
-    surfaceSource.includes('"--usage": `${remaining * 3.6}deg`') &&
-    surfaceSource.includes("Usage unavailable from this provider") &&
-    surfaceSource.includes(
-      "Gyro does not estimate allowance from local activity",
-    ) &&
+    surfaceSource.includes("`${usedLabel}% used`") &&
+    surfaceSource.includes("<small>used</small>") &&
+    surfaceSource.includes('"--usage": `${(used ?? 0) * 3.6}deg`') &&
+    surfaceSource.includes("No plan window API on this provider") &&
+    surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
     surfaceSource.includes('className="gyro-composer-limit-summary"') &&
     surfaceSource.includes("limitWindows.map((window)") &&

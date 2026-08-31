@@ -125,6 +125,21 @@ const scenes = [
   },
 ];
 
+// Manual-only visual regression scenes. They are deliberately excluded from
+// the normal marketing capture, but `--scene <name>` gives release validation
+// a clean-profile way to inspect states that should never become site assets.
+const testScenes = [
+  {
+    name: "ollama-empty",
+    urlScene: "ollama-empty",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: [],
+    outputs: [],
+  },
+];
+
 /**
  * Clicks the first control whose visible text, aria-label, or title matches.
  * Icon-only buttons in the activity bar have no text, so the label fallbacks
@@ -291,7 +306,9 @@ function encodeWebp(sourcePng, target, width, height) {
 
 async function main() {
   const only = argument("--scene");
-  const selected = only ? scenes.filter((s) => s.name === only) : scenes;
+  const selected = only
+    ? [...scenes, ...testScenes].filter((scene) => scene.name === only)
+    : scenes;
   if (!selected.length) fail(`unknown scene ${only}`);
 
   try {

@@ -338,7 +338,7 @@ fn model_context_window(value: &serde_json::Value) -> Option<u64> {
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
+    use std::net::{Shutdown, TcpListener};
 
     #[test]
     fn permits_only_loopback_http_endpoints() {
@@ -389,6 +389,12 @@ mod tests {
                     body
                 )
                 .unwrap();
+                stream.flush().unwrap();
+                // The discovery client uses a fresh request for /api/show. End
+                // this response before accepting it so a parallel test cannot
+                // leave the client waiting on a connection that advertises
+                // `Connection: close` but is still open in this fixture.
+                let _ = stream.shutdown(Shutdown::Both);
             }
         });
         let discovery = discover_ollama_models(Some(&format!("http://{address}/api"))).unwrap();

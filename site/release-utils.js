@@ -201,7 +201,7 @@ export function renderReleaseNotes(target, markdown, options = {}) {
 
   if (!target.childElementCount) {
     const empty = document.createElement("p");
-    empty.textContent = "Read the complete release notes on GitHub.";
+    empty.textContent = "Read the full notes on GitHub.";
     target.append(empty);
   }
 }

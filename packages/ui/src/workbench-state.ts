@@ -4167,7 +4167,12 @@ function normalizeWorkbenchPreferences(
         : undefined,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
-    theme: preferences?.theme === "dark" ? "dark" : "light",
+    theme:
+      preferences?.theme === "dark" ||
+      preferences?.theme === "light" ||
+      preferences?.theme === "system"
+        ? preferences.theme
+        : "system",
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",

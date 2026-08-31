@@ -18,7 +18,11 @@ export type AppDestination =
   | "providers"
   | "onboarding";
 
-export type ThemeMode = "dark" | "light";
+/** The persisted appearance preference. System is the new-install default. */
+export type ThemeMode = "system" | "dark" | "light";
+
+/** The concrete palette currently painted by the application. */
+export type ResolvedTheme = Exclude<ThemeMode, "system">;
 
 export type WorkbenchPaneTab =
   "diff" | "terminal" | "browser" | "problems" | "output" | "test-results";
@@ -466,7 +470,7 @@ export type MenuBarSnapshot = {
   jobs: MenuBarJob[];
   totalActive: number;
   recentOutcome?: MenuBarOutcome;
-  theme: ThemeMode;
+  theme: ResolvedTheme;
   reduceMotion: boolean;
 };
 
@@ -689,7 +693,12 @@ export type ProviderAuthStatus =
   "not-connected" | "connecting" | "connected" | "failed";
 
 export type ProviderRuntimeStatus =
-  "not-installed" | "not-logged-in" | "ready" | "warning" | "unknown";
+  | "not-installed"
+  | "not-logged-in"
+  | "no-models"
+  | "ready"
+  | "warning"
+  | "unknown";
 
 export type ProviderAuthOwner =
   "provider-cli" | "provider-env" | "provider-sdk";
