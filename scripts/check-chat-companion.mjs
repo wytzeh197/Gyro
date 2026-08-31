@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   CHAT_COMPANION_DEFAULT_WIDTH,
+  CHAT_COMPANION_KEYBOARD_STEP,
   CHAT_COMPANION_MAX_WIDTH,
   CHAT_COMPANION_MIN_WIDTH,
   activeChatCompanionTab,
@@ -10,6 +11,7 @@ import {
   clampChatCompanionWidth,
   createInitialChatCompanionState,
   discardedSideChatSessionIds,
+  keyboardChatCompanionWidth,
   staleSideChatSessionIds,
   withoutSideChatSessions,
 } from "../packages/ui/src/chat-companion.ts";
@@ -235,6 +237,31 @@ assert.equal(
   CHAT_COMPANION_MIN_WIDTH,
   "a container too narrow for both still respects the dock minimum, and the " +
     "surface falls back to the overlay presentation instead",
+);
+assert.equal(
+  keyboardChatCompanionWidth(520, "ArrowLeft"),
+  520 + CHAT_COMPANION_KEYBOARD_STEP,
+  "Left Arrow widens the right-hand companion dock",
+);
+assert.equal(
+  keyboardChatCompanionWidth(520, "ArrowRight"),
+  520 - CHAT_COMPANION_KEYBOARD_STEP,
+  "Right Arrow gives the transcript more room",
+);
+assert.equal(
+  keyboardChatCompanionWidth(520, "Home"),
+  CHAT_COMPANION_MIN_WIDTH,
+  "Home collapses the dock to its safe minimum",
+);
+assert.equal(
+  keyboardChatCompanionWidth(520, "End", 900),
+  420,
+  "End respects the transcript floor in a constrained chat surface",
+);
+assert.equal(
+  keyboardChatCompanionWidth(520, "PageUp"),
+  undefined,
+  "unrelated keys leave the dock unchanged",
 );
 
 // --- Transient side chat ----------------------------------------------------

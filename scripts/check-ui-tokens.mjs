@@ -72,9 +72,10 @@ const allowedGradient = [
   /45deg,\s*transparent 50%/,
   /135deg,/,
   /circle at \d+px \d+px/,
-  // Theme picker thumbnails use solid token strokes to preview hierarchy;
-  // these are content samples, not decorative surface washes.
-  /linear-gradient\(var\(--gyro-(?:surface-raised|border-strong)\) 0 0\)/,
+  // Theme picker thumbnails use solid tokens to preview hierarchy; these are
+  // content samples, not decorative surface washes.
+  /linear-gradient\(var\(--gyro-(?:surface-raised|border-strong|theme-preview-(?:dark|light)-(?:canvas|content))\) 0 0\)/,
+  /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/,
 ];
 
 const styleLines = styles.split("\n");

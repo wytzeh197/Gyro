@@ -115,8 +115,8 @@
           height="46"
         />
         <p class="kicker">For macOS 14+</p>
-        <h1>Download Gyro.</h1>
-        <p>Choose Apple Silicon or Intel.</p>
+        <h1>Download for macOS.</h1>
+        <p>Choose your Mac.</p>
       </section>
 
       <section
@@ -130,7 +130,7 @@
               <img src="../assets/apple.svg" alt="" width="34" height="34" />
               <div>
                 <h2 id="download-title">macOS</h2>
-                <p>DMG · macOS 14 or later</p>
+                <p>DMG · macOS 14+</p>
               </div>
             </div>
           </header>
@@ -167,7 +167,7 @@
             class="button button-download"
             data-role="download-link"
             href="https://github.com/wytzeh197/Gyro/releases/latest"
-            ><span data-role="download-label">Download DMG on GitHub</span></a
+            ><span data-role="download-label">Download DMG</span></a
           >
           <div class="release-details" aria-live="polite">
             <p>
@@ -233,35 +233,29 @@
       >
         <header class="section-heading compact-heading">
           <p class="kicker">Requirements</p>
-          <h2 id="requirements-title">What you need first.</h2>
+          <h2 id="requirements-title">What you need.</h2>
         </header>
         <div class="trust-grid">
           <article class="trust-item">
-            <h3>macOS 14 or newer</h3>
+            <h3>macOS 14+</h3>
+            <p>Choose the Apple Silicon or Intel DMG.</p>
+          </article>
+          <article class="trust-item">
+            <h3>Your own provider</h3>
+            <p>Install a supported CLI, or use Ollama locally.</p>
+          </article>
+          <article class="trust-item">
+            <h3>Open Anyway</h3>
             <p>
-              Apple Silicon and Intel ship as separate DMGs. There is no
-              universal build.
+              Approve the first alpha launch in System Settings. Keep Gatekeeper
+              on.
             </p>
           </article>
           <article class="trust-item">
-            <h3>An agent CLI of your own</h3>
+            <h3>An alpha mindset</h3>
             <p>
-              Install and sign in to Codex CLI, Claude Code, Kimi Code, Gemini
-              CLI, or Grok Build with its own tool. Gyro does not install them.
-            </p>
-          </article>
-          <article class="trust-item">
-            <h3>A one-time Open Anyway</h3>
-            <p>
-              Alpha builds are not Apple-signed or notarized. Approve the first
-              launch in System Settings rather than disabling Gatekeeper.
-            </p>
-          </article>
-          <article class="trust-item">
-            <h3>Comfort with an alpha</h3>
-            <p>
-              Gyro can read files and run commands. It is not recommended for
-              production work yet.
+              Gyro reads files and runs commands. It is not ready for production
+              work.
             </p>
           </article>
         </div>
@@ -270,16 +264,15 @@
       <section class="help-section section-shell" aria-labelledby="help-title">
         <header class="section-heading compact-heading">
           <p class="kicker">More options</p>
-          <h2 id="help-title">Help and recovery.</h2>
+          <h2 id="help-title">Help.</h2>
         </header>
         <div class="detail-list">
           <details>
             <summary>Updates and rollback</summary>
             <div class="detail-content">
               <p>
-                Gyro verifies its own updater signatures. Apple signing is
-                separate. To roll back, download a previous DMG, quit Gyro,
-                replace the app in Applications, and reopen it.
+                Gyro verifies update signatures. To roll back, install an older
+                DMG.
               </p>
               <a href="../changelog/">Browse the changelog</a>
             </div>
@@ -288,9 +281,8 @@
             <summary>Uninstall Gyro</summary>
             <div class="detail-content">
               <p>
-                Quit Gyro and move Gyro.app from Applications to the Trash. To
-                remove local sessions and settings too, delete
-                <code>~/Library/Application Support/Gyro</code>.
+                Quit Gyro, then move it to Trash. To remove local data too,
+                delete <code>~/Library/Application Support/Gyro</code>.
               </p>
             </div>
           </details>
@@ -300,7 +292,7 @@
               <pre><code>brew tap wytzeh197/tap
 brew trust --formula wytzeh197/tap/gyro
 brew install gyro</code></pre>
-              <p>The tap installs the CLI only, not Gyro.app.</p>
+              <p>This installs the CLI, not Gyro.app.</p>
             </div>
           </details>
           <details>
@@ -319,9 +311,8 @@ pnpm desktop:build</code></pre>
             <summary>Troubleshooting and support</summary>
             <div class="detail-content">
               <p>
-                If the DMG will not open, confirm macOS 14+, the correct
-                processor build, and the published SHA-256. Do not use terminal
-                quarantine bypasses.
+                Check macOS 14+, your processor, and the SHA-256. Do not use
+                Terminal quarantine bypasses.
               </p>
               <a href="https://github.com/wytzeh197/Gyro/blob/main/SUPPORT.md"
                 >Get support</a

@@ -74,7 +74,10 @@ const ready = resolveCleanMachinePath({
   workspacePath: "/Users/example/Project",
 });
 assert.equal(ready.canSend, true);
-assert.equal(ready.steps.every((step) => step.status === "done"), true);
+assert.equal(
+  ready.steps.every((step) => step.status === "done"),
+  true,
+);
 assert.equal(ready.nextAction, undefined);
 assert.equal(ready.readinessTone, "ready");
 assert.equal(canSendChat(true, "/Users/example/Project"), true);
@@ -131,9 +134,15 @@ const mutations = readFileSync(
 );
 assert.match(mutations, /recover_provider_mutation_transactions/);
 assert.match(mutations, /PROVIDER_MUTATION_JOURNAL_SCHEMA/);
-assert.match(mutations, /begin_provider_mutation_transaction|apply_provider_mutation_transaction/);
+assert.match(
+  mutations,
+  /begin_provider_mutation_transaction|apply_provider_mutation_transaction/,
+);
 
-const doctor = readFileSync(resolve(root, "crates/gyro-core/src/doctor.rs"), "utf8");
+const doctor = readFileSync(
+  resolve(root, "crates/gyro-core/src/doctor.rs"),
+  "utf8",
+);
 assert.match(doctor, /required:\s*true/);
 assert.match(doctor, /next:/);
 

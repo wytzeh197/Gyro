@@ -143,6 +143,7 @@ import {
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
   type ReasoningEffort,
+  type ResolvedTheme,
   type ProviderSession,
   type ProblemDiagnostic,
   type Session,
@@ -164,6 +165,7 @@ import {
   type TerminalPaneStatus,
   type TerminalPane,
   type TerminalTemplate,
+  type ThemeMode,
   type UpdateState,
   type CliUpdateOffer,
   type CliUpdateCheckReport,
@@ -451,6 +453,18 @@ const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
+
+function systemTheme(): ResolvedTheme {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function storedThemeMode(value: unknown): ThemeMode | undefined {
+  return value === "system" || value === "dark" || value === "light"
+    ? value
+    : undefined;
+}
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
@@ -733,6 +747,11 @@ export function App() {
     undefined,
     loadInitialWorkbenchState,
   );
+  const themePreference = workbench.preferences.theme;
+  const [systemThemeValue, setSystemThemeValue] =
+    useState<ResolvedTheme>(systemTheme);
+  const resolvedTheme: ResolvedTheme =
+    themePreference === "system" ? systemThemeValue : themePreference;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
@@ -1212,13 +1231,30 @@ export function App() {
   );
   sideChatSessionIdsRef.current = workbench.preferences.sideChatSessionIds;
   const deleteSideChatSession = useCallback(async (sessionId: string) => {
-    if (!isTauriRuntime()) return;
+    if (!isTauriRuntime()) return true;
     try {
       await invoke<boolean>("delete_session", { sessionId });
+      return true;
     } catch {
-      // A side chat that outlives its tab is swept on the next launch.
+      // Keep the id registered and hidden. The next launch retries deletion;
+      // removing it here would let a failed deletion leak into history.
+      return false;
     }
   }, []);
+  const retireSideChatSessions = useCallback(
+    (sessionIds: string[]) => {
+      for (const sessionId of [...new Set(sessionIds)]) {
+        void deleteSideChatSession(sessionId).then((deleted) => {
+          if (!deleted) return;
+          dispatchWorkbench({
+            type: "forget-side-chat-sessions",
+            sessionIds: [sessionId],
+          });
+        });
+      }
+    },
+    [deleteSideChatSession],
+  );
   // Sweep side chats left behind by an unclean exit. Nothing is bound this
   // early, so every id still on record belongs to a process that is gone.
   const sweptSideChatsRef = useRef(false);
@@ -1230,13 +1266,10 @@ export function App() {
       companion,
     );
     if (!stale.length) return;
-    dispatchWorkbench({ type: "forget-side-chat-sessions", sessionIds: stale });
-    for (const sessionId of stale) {
-      void deleteSideChatSession(sessionId);
-    }
+    retireSideChatSessions(stale);
   }, [
     companion,
-    deleteSideChatSession,
+    retireSideChatSessions,
     workbench.preferences.sideChatSessionIds,
   ]);
   // Closing the tab, closing the pane, or starting a fresh side chat all retire
@@ -1249,10 +1282,6 @@ export function App() {
     );
     previousCompanionRef.current = companion;
     if (!discarded.length) return;
-    dispatchWorkbench({
-      type: "forget-side-chat-sessions",
-      sessionIds: discarded,
-    });
     setSideChatThreads((current) => {
       const next = { ...current };
       for (const paneId of Object.keys(next)) {
@@ -1262,10 +1291,8 @@ export function App() {
       }
       return next;
     });
-    for (const sessionId of discarded) {
-      void deleteSideChatSession(sessionId);
-    }
-  }, [companion, deleteSideChatSession]);
+    retireSideChatSessions(discarded);
+  }, [companion, retireSideChatSessions]);
   const chatSessionForPane = useCallback(
     (paneId: string) => {
       const pane = activeChatLayout?.slots.find(
@@ -2182,7 +2209,7 @@ export function App() {
         sendingSessionIds,
         sessionEventsById,
         sessions,
-        theme: workbench.preferences.theme,
+        theme: resolvedTheme,
       }),
     [
       finishedMenuBarOutcomes,
@@ -2192,7 +2219,7 @@ export function App() {
       sessionEventsById,
       sessions,
       workbench.automations,
-      workbench.preferences.theme,
+      resolvedTheme,
     ],
   );
 
@@ -2203,6 +2230,17 @@ export function App() {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    if (themePreference !== "system") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setSystemThemeValue(media.matches ? "dark" : "light");
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, [themePreference]);
 
   useEffect(() => {
     if (!menuBarOutcomeInitializedRef.current) {
@@ -2327,14 +2365,19 @@ export function App() {
         (!isProviderId(targetProviderId) ||
           !isProviderExecutable(targetProviderId))
           ? `${targetProvider ?? targetProviderId} is visible for readiness only and cannot execute ${intent} runs`
-          : targetProviderId &&
-              providerSignInRejectionsRef.current[targetProviderId]
-            ? // Naming the rejection matters: the provider CLI still reports a
-              // stored login, so "not connected" would read as a Gyro mistake.
-              `${targetProvider ?? targetProviderId} rejected the sign-in Gyro sent with; sign in again to continue`
-            : targetProvider
-              ? `${targetProvider} is not connected yet`
-              : "Enable and connect a provider before sending";
+          : targetProviderId === "ollama" &&
+              workbench.providerStatuses.find(
+                (status) => status.id === targetProviderId,
+              )?.runtimeStatus === "no-models"
+            ? "Ollama is running, but no models are installed. Run `ollama pull <model>`, then check the local runtime again."
+            : targetProviderId &&
+                providerSignInRejectionsRef.current[targetProviderId]
+              ? // Naming the rejection matters: the provider CLI still reports a
+                // stored login, so "not connected" would read as a Gyro mistake.
+                `${targetProvider ?? targetProviderId} rejected the sign-in Gyro sent with; sign in again to continue`
+              : targetProvider
+                ? `${targetProvider} is not connected yet`
+                : "Enable and connect a provider before sending";
 
       dispatchWorkbench({
         type: "set-provider-readiness",
@@ -3263,24 +3306,29 @@ export function App() {
           }));
           resolvedConfig = {
             ...resolvedConfig,
-            modelProviders: providersForConfig(resolvedConfig).map((provider) =>
-              provider.id === "ollama"
-                ? {
-                    ...provider,
-                    baseUrl: discovery.baseUrl,
-                    models,
-                    defaultModelId:
-                      provider.defaultModelId &&
-                      models.some((model) => model.id === provider.defaultModelId)
-                        ? provider.defaultModelId
-                        : models[0]?.id,
-                    selectedModelId:
-                      provider.selectedModelId &&
-                      models.some((model) => model.id === provider.selectedModelId)
-                        ? provider.selectedModelId
-                        : models[0]?.id,
-                  }
-                : provider,
+            modelProviders: providersForConfig(resolvedConfig).map(
+              (provider) =>
+                provider.id === "ollama"
+                  ? {
+                      ...provider,
+                      baseUrl: discovery.baseUrl,
+                      models,
+                      defaultModelId:
+                        provider.defaultModelId &&
+                        models.some(
+                          (model) => model.id === provider.defaultModelId,
+                        )
+                          ? provider.defaultModelId
+                          : models[0]?.id,
+                      selectedModelId:
+                        provider.selectedModelId &&
+                        models.some(
+                          (model) => model.id === provider.selectedModelId,
+                        )
+                          ? provider.selectedModelId
+                          : models[0]?.id,
+                    }
+                  : provider,
             ),
           };
         }
@@ -4126,7 +4174,11 @@ export function App() {
       activeOutput: activeOutput
         ? {
             ...activeOutput,
-            lines: activeOutput.lines
+            // Output channels may have been created by an older persisted
+            // workbench or a third-party contribution. Do not let a malformed
+            // channel turn attaching Workspace context into an app-wide error.
+            lines: (Array.isArray(activeOutput.lines) ? activeOutput.lines : [])
+              .filter((line) => typeof line === "string")
               .slice(-50)
               .map((line) => line.slice(0, 500)),
           }
@@ -7449,14 +7501,16 @@ export function App() {
                             defaultModelId:
                               candidate.defaultModelId &&
                               models.some(
-                                (model) => model.id === candidate.defaultModelId,
+                                (model) =>
+                                  model.id === candidate.defaultModelId,
                               )
                                 ? candidate.defaultModelId
                                 : models[0]?.id,
                             selectedModelId:
                               candidate.selectedModelId &&
                               models.some(
-                                (model) => model.id === candidate.selectedModelId,
+                                (model) =>
+                                  model.id === candidate.selectedModelId,
                               )
                                 ? candidate.selectedModelId
                                 : models[0]?.id,
@@ -8528,6 +8582,11 @@ export function App() {
         return;
       }
 
+      if (action === "open-settings:providers") {
+        openSettingsSection("providers");
+        return;
+      }
+
       if (action.startsWith("select-provider-model:")) {
         const [, providerId, modelId] = action.split(":");
         if (isProviderId(providerId) && modelId) {
@@ -8875,6 +8934,16 @@ export function App() {
     const selectedModel = activeSession
       ? sessionModelSelectionFromSession(activeSession)
       : chatDraftModels[activeDraftKey];
+    // An empty composer deliberately has no provider target. Do not infer
+    // OpenAI (or any other configured provider) here: this notice represents
+    // a failed runtime check for a model the user chose, not initial setup.
+    const hasSelectedModel = Boolean(
+      selectedModel?.providerId &&
+      (selectedModel.modelId?.trim() || selectedModel.modelLabel?.trim()),
+    );
+    if (!hasSelectedModel) {
+      return undefined;
+    }
     const providerConfigs = providersForConfig(config);
     const selectedProvider = providerConfigs.find(
       (provider) =>
@@ -8884,12 +8953,13 @@ export function App() {
     const blockedProvider =
       workbench.providerReadiness.status === "blocked"
         ? providerConfigs.find(
-            (provider) => provider.id === workbench.providerReadiness.providerId,
+            (provider) =>
+              provider.id === workbench.providerReadiness.providerId,
           )
         : undefined;
     const preferredProvider =
-      blockedProvider ??
       selectedProvider ??
+      blockedProvider ??
       providerConfigs.find((provider) => provider.id === "openai") ??
       providerConfigs.find((provider) => isProviderExecutable(provider.id));
     const selectedProviderHealth = workbench.providerStatuses.find(
@@ -8897,34 +8967,76 @@ export function App() {
     );
     const readyFromRuntime = Boolean(
       selectedProvider &&
-        isProviderRuntimeUsable(selectedProvider, selectedProviderHealth),
+      isProviderRuntimeUsable(selectedProvider, selectedProviderHealth),
     );
     const readyFromCompletedTurn =
       workbench.providerReadiness.status === "ready" &&
       workbench.providerReadiness.providerId === selectedProvider?.id;
     const hasReadyProvider = readyFromRuntime || readyFromCompletedTurn;
+    const selectedModelLabel =
+      selectedModel?.modelLabel?.trim() || selectedModel?.modelId?.trim();
+    const selectedModelConnectionMessage =
+      selectedModelLabel && selectedProvider && !hasReadyProvider
+        ? `${selectedModelLabel} isn’t ready because ${selectedProvider.displayName} is not connected.`
+        : undefined;
+    const providerRuntimeBlock =
+      selectedProvider?.id === "ollama" &&
+      selectedProviderHealth?.runtimeStatus === "no-models"
+        ? {
+            action: "open-settings:providers",
+            actionLabel: "Open provider settings",
+            message:
+              "Ollama is running, but no models are installed. Run `ollama pull <model>`, then test Ollama in provider settings.",
+            placeholder: "Run ollama pull <model>, then test Ollama…",
+            stepLabel: "Ollama needs a model",
+          }
+        : undefined;
+    const providerReadinessBlock:
+      | {
+          action?: string;
+          actionLabel?: string;
+          message: string;
+          placeholder?: string;
+          stepLabel?: string;
+        }
+      | undefined =
+      providerRuntimeBlock ??
+      (workbench.providerReadiness.status === "blocked" &&
+      workbench.providerReadiness.providerId === selectedProvider?.id
+        ? {
+            message: selectedModelLabel
+              ? `${selectedModelLabel} isn’t ready: ${workbench.providerReadiness.message}`
+              : workbench.providerReadiness.message,
+          }
+        : selectedModelConnectionMessage
+          ? { message: selectedModelConnectionMessage }
+          : undefined);
     const cleanMachinePath = resolveCleanMachinePath({
       hasReadyProvider,
       preferredProviderId: preferredProvider?.id,
       preferredProviderLabel: preferredProvider?.displayName,
-      providerBlockMessage:
-        workbench.providerReadiness.status === "blocked"
-          ? workbench.providerReadiness.message
-          : undefined,
+      providerBlockAction: providerReadinessBlock?.action,
+      providerBlockActionLabel: providerReadinessBlock?.actionLabel,
+      providerBlockMessage: providerReadinessBlock?.message,
+      providerBlockPlaceholder: providerReadinessBlock?.placeholder,
+      providerBlockStepLabel: providerReadinessBlock?.stepLabel,
       workspacePath: activeSession?.workspacePath ?? workspacePath,
     });
 
+    const hasProviderRepairAction =
+      cleanMachinePath.nextAction?.startsWith("connect-provider:") ||
+      cleanMachinePath.nextAction === "open-settings:providers";
     if (
       !cleanMachinePath.hasProject ||
       cleanMachinePath.hasReadyProvider ||
       !cleanMachinePath.blockedReason ||
-      !cleanMachinePath.nextAction?.startsWith("connect-provider:")
+      !hasProviderRepairAction
     ) {
       return undefined;
     }
 
     return {
-      action: cleanMachinePath.nextAction,
+      action: cleanMachinePath.nextAction!,
       actionLabel: cleanMachinePath.nextActionLabel,
       message: cleanMachinePath.blockedReason,
     };
@@ -11843,7 +11955,8 @@ export function App() {
         dispatchWorkbench({
           type: "browser-status",
           status: "verification-failed",
-          message: "Gyro could not open the native browser. Retry or open it externally.",
+          message:
+            "Gyro could not open the native browser. Retry or open it externally.",
           nativeHost: true,
         });
         return false;
@@ -12812,7 +12925,7 @@ export function App() {
         case "toggle-theme":
           dispatchWorkbench({
             type: "set-theme",
-            theme: workbench.preferences.theme === "dark" ? "light" : "dark",
+            theme: resolvedTheme === "dark" ? "light" : "dark",
           });
           break;
         case "create-task":
@@ -12850,7 +12963,7 @@ export function App() {
       splitTerminalPane,
       startNewChat,
       workbench.browserPreview.url,
-      workbench.preferences.theme,
+      resolvedTheme,
       workbench.selectedAutomationId,
       workbench.selectedTaskId,
       workspaceActionRoot,
@@ -12966,16 +13079,16 @@ export function App() {
   }, [syncTerminalSnapshot]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = workbench.preferences.theme;
+    document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.density = workbench.preferences.density;
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        workbench.preferences.theme === "light" ? "#f2f4f7" : "#0e0e0e",
+        resolvedTheme === "light" ? "#f2f4f7" : "#0e0e0e",
       );
-    safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
-  }, [workbench.preferences.density, workbench.preferences.theme]);
+    safeSetLocalStorage(THEME_STORAGE_KEY, themePreference);
+  }, [resolvedTheme, themePreference, workbench.preferences.density]);
 
   useEffect(() => {
     const syncWindowFocus = () => {
@@ -14170,7 +14283,7 @@ export function App() {
           }
           onWrite={writeTerminalInputToPane}
           pane={pane}
-          theme={workbench.preferences.theme}
+          theme={resolvedTheme}
         />
       )}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
@@ -14283,7 +14396,7 @@ export function App() {
         }
         onWrite={writeTerminalInputToPane}
         pane={pane}
-        theme={workbench.preferences.theme}
+        theme={resolvedTheme}
       />
     ),
     selectedTerminalPaneId: workbench.selectedTerminalPaneId,
@@ -15517,7 +15630,7 @@ export function App() {
                   <MonacoEditorPane
                     {...props}
                     onLspRequest={requestLanguageFeature}
-                    theme={workbench.preferences.theme}
+                    theme={resolvedTheme}
                   />
                 )}
               />
@@ -15946,7 +16059,9 @@ export function App() {
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState();
-  const legacyTheme = readBoundedLocalStorage(THEME_STORAGE_KEY, 16);
+  const legacyTheme = storedThemeMode(
+    readBoundedLocalStorage(THEME_STORAGE_KEY, 16),
+  );
   const stored = readBoundedLocalStorage(
     WORKBENCH_STORAGE_KEY,
     MAX_STORED_WORKBENCH_STATE_CHARS,
@@ -15956,7 +16071,7 @@ function loadInitialWorkbenchState(): WorkbenchState {
       ...base,
       preferences: {
         ...base.preferences,
-        theme: legacyTheme === "light" ? "light" : base.preferences.theme,
+        theme: legacyTheme ?? base.preferences.theme,
       },
     };
   }
@@ -16072,9 +16187,9 @@ function loadInitialWorkbenchState(): WorkbenchState {
         activeChatPanel: undefined,
         chatEnvironmentRailOpen: false,
         theme:
-          legacyTheme === "light" || legacyTheme === "dark"
-            ? legacyTheme
-            : (parsed.preferences?.theme ?? base.preferences.theme),
+          legacyTheme ??
+          storedThemeMode(parsed.preferences?.theme) ??
+          base.preferences.theme,
       },
       providerStatuses: Array.isArray(parsed.providerStatuses)
         ? hasSeededDemoState
@@ -16293,7 +16408,7 @@ function LiveTerminalPaneBody({
   onSelect: (paneId: string) => void;
   onWrite: (paneId: string, input: string) => void;
   pane: TerminalPane;
-  theme: WorkbenchState["preferences"]["theme"];
+  theme: ResolvedTheme;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermInstance | null>(null);
@@ -16553,7 +16668,7 @@ function LiveTerminalPaneBody({
   );
 }
 
-function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
+function terminalThemeFor(theme: ResolvedTheme) {
   if (theme === "light") {
     return {
       background: "#f6f8fa",
@@ -18290,7 +18405,7 @@ function MonacoEditorPane({
   onSelectionChange: (selection?: EditorSelection) => void;
   path?: string;
   revealTarget?: EditorRevealTarget;
-  theme: WorkbenchState["preferences"]["theme"];
+  theme: ResolvedTheme;
 }) {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);

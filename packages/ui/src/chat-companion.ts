@@ -62,6 +62,8 @@ export type ChatCompanionState = {
 export const CHAT_COMPANION_MIN_WIDTH = 360;
 export const CHAT_COMPANION_MAX_WIDTH = 720;
 export const CHAT_COMPANION_DEFAULT_WIDTH = 520;
+/** One deliberate keyboard nudge, large enough to be useful without jumping. */
+export const CHAT_COMPANION_KEYBOARD_STEP = 24;
 const CHAT_TRANSCRIPT_MIN_WIDTH = 480;
 
 /**
@@ -111,6 +113,30 @@ export function clampChatCompanionWidth(width: number, available?: number) {
     return Math.min(cap, CHAT_COMPANION_DEFAULT_WIDTH);
   }
   return Math.min(cap, Math.max(CHAT_COMPANION_MIN_WIDTH, Math.round(width)));
+}
+
+/**
+ * Maps the standard separator keys to a clamped dock width. The companion sits
+ * on the right, so Left widens it and Right gives space back to the transcript.
+ */
+export function keyboardChatCompanionWidth(
+  width: number,
+  key: string,
+  available?: number,
+): number | undefined {
+  let requested: number | undefined;
+  if (key === "ArrowLeft") {
+    requested = width + CHAT_COMPANION_KEYBOARD_STEP;
+  } else if (key === "ArrowRight") {
+    requested = width - CHAT_COMPANION_KEYBOARD_STEP;
+  } else if (key === "Home") {
+    requested = CHAT_COMPANION_MIN_WIDTH;
+  } else if (key === "End") {
+    requested = CHAT_COMPANION_MAX_WIDTH;
+  }
+  return requested === undefined
+    ? undefined
+    : clampChatCompanionWidth(requested, available);
 }
 
 export function chatCompanionPane(

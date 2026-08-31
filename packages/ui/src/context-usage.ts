@@ -244,9 +244,9 @@ export function estimateComposerContextUsage(
   const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
   const isOtherModelReading = Boolean(
     isReported &&
-      reportedModelId &&
-      model.modelId &&
-      reportedModelId !== model.modelId,
+    reportedModelId &&
+    model.modelId &&
+    reportedModelId !== model.modelId,
   );
   const detail = isReported
     ? isOtherModelReading

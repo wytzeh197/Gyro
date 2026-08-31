@@ -175,6 +175,7 @@ export type {
   TerminalPaneLayout,
   TerminalPaneStatus,
   TerminalTemplate,
+  ResolvedTheme,
   TestTreeItem,
   ThemeMode,
   UpdateState,

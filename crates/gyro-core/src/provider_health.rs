@@ -178,7 +178,14 @@ fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
             ProviderHealthCheck {
                 provider_id: "ollama".into(),
                 output: model_summary,
-                runtime_status: "ready".into(),
+                // A reachable service without an installed model cannot run a
+                // chat. Keep the runtime distinct from a missing Ollama
+                // install so the UI can tell the user exactly what to do.
+                runtime_status: if discovery.models.is_empty() {
+                    "no-models".into()
+                } else {
+                    "ready".into()
+                },
                 auth_owner: "provider-sdk".into(),
                 auth_command: None,
                 login_command: None,
@@ -607,6 +614,8 @@ fn retained_stream_output(output: &str, truncated: bool, marker: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
 
     #[test]
     fn parses_redacted_cli_health_and_external_auth_ownership() {
@@ -710,5 +719,33 @@ mod tests {
         assert!(!is_transient_health_result(&Err(
             CommandOutputError::Unavailable("No such file or directory".into())
         )));
+    }
+
+    #[test]
+    fn ollama_without_installed_models_is_not_ready_to_use() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(&mut stream)
+                .read_line(&mut request_line)
+                .unwrap();
+            assert!(request_line.starts_with("GET /api/tags"));
+            let body = r#"{"models":[]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let health = ollama_provider_health(Some(&format!("http://{address}/api")));
+        server.join().unwrap();
+
+        assert_eq!(health.runtime_status, "no-models");
+        assert!(health.output.contains("no models are installed"));
     }
 }

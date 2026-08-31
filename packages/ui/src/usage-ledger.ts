@@ -295,7 +295,8 @@ export function ledgerWindows(
       label: spec.label,
       origins: totals.byOrigin.slice(0, 4).map((origin) => ({
         label: origin.label,
-        share: biggest > 0 ? Math.round((origin.totalTokens / biggest) * 100) : 0,
+        share:
+          biggest > 0 ? Math.round((origin.totalTokens / biggest) * 100) : 0,
         tokens: formatTokenCount(origin.totalTokens),
       })),
       percent,
@@ -344,14 +345,16 @@ export function planUsageNotices(
         .reverse()
         .find((value) => percent >= value);
       if (!threshold) return [];
-      return [{
-        cycleId: window.resetsAt ?? "rolling",
-        percent: Math.min(100, Math.max(0, Math.round(percent))),
-        providerId,
-        threshold,
-        windowId: window.id,
-        windowLabel: window.label,
-      }];
+      return [
+        {
+          cycleId: window.resetsAt ?? "rolling",
+          percent: Math.min(100, Math.max(0, Math.round(percent))),
+          providerId,
+          threshold,
+          windowId: window.id,
+          windowLabel: window.label,
+        },
+      ];
     })
     .sort((left, right) => right.threshold - left.threshold);
 }
@@ -401,7 +404,9 @@ export function summarizeUsageSafety(
   }
 
   const worst = [...snapshot.budgets]
-    .filter((budget) => budget.level === "throttle" || budget.level === "notify")
+    .filter(
+      (budget) => budget.level === "throttle" || budget.level === "notify",
+    )
     .sort((left, right) => right.percent - left.percent)[0];
   if (!worst) return undefined;
 

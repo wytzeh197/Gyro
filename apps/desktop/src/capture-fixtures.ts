@@ -18,6 +18,8 @@ type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
+const isOllamaScene = scene === "ollama" || scene === "ollama-empty";
+const isOllamaEmptyScene = scene === "ollama-empty";
 const WORKSPACE = "/Users/dev/Projects/aurora";
 const SESSION_ID = "ses_capture_1";
 const NOW = "2026-07-25T09:41:00.000Z";
@@ -34,17 +36,25 @@ const session = {
   origin: "desktop",
   workspaceMode: "chat",
   branch: "main",
-  providerId: "anthropic",
-  providerLabel: "Claude Code",
-  modelId: "claude-opus-5",
-  modelLabel: "Claude Opus 5",
-  reasoningEffort: "high",
+  providerId: isOllamaScene ? "ollama" : "anthropic",
+  providerLabel: isOllamaScene ? "Ollama" : "Claude Code",
+  modelId: isOllamaScene
+    ? isOllamaEmptyScene
+      ? undefined
+      : "qwen3-coder:30b"
+    : "claude-opus-5",
+  modelLabel: isOllamaScene
+    ? isOllamaEmptyScene
+      ? undefined
+      : "Qwen3 Coder 30B"
+    : "Claude Opus 5",
+  reasoningEffort: isOllamaScene ? undefined : "high",
   createdAt: at(-18),
   updatedAt: at(0),
   eventsPath: `${WORKSPACE}/.gyro/events.jsonl`,
 };
 
-const sessions = [
+let sessions = [
   session,
   {
     ...session,
@@ -69,6 +79,7 @@ const sessions = [
 ];
 
 let sequence = 0;
+let captureSessionSequence = 0;
 function sessionEvent(
   kind: string,
   message: string,
@@ -81,6 +92,31 @@ function sessionEvent(
     sessionId: SESSION_ID,
     createdAt: at(minutes, sequence),
     turnId: "turn_1",
+    kind,
+    message,
+    payload: { timelineSequence: sequence, ...payload },
+  };
+}
+
+/**
+ * The normal capture transcript belongs to the seeded session above. A send
+ * started from the welcome composer creates a different desktop session, so
+ * its fixture events must retain that session and turn identity. Otherwise a
+ * successful local capture is rendered against the wrong conversation.
+ */
+function captureSessionEvent(
+  sessionId: string,
+  turnId: string,
+  kind: string,
+  message: string,
+  payload: Record<string, unknown> = {},
+) {
+  sequence += 1;
+  return {
+    id: `evt_capture_${sequence}`,
+    sessionId,
+    createdAt: at(0, sequence),
+    turnId,
     kind,
     message,
     payload: { timelineSequence: sequence, ...payload },
@@ -145,12 +181,21 @@ const chatEvents = [
   activity("file", "Edited src/queue/backoff.js", "src/queue/backoff.js", -12),
 ];
 
+// The capture behaves like a small in-memory desktop store. A first message
+// causes the UI to refresh that session's transcript while the response is
+// arriving; returning an empty array there would erase the optimistic turn
+// and make a successful capture look like a blank new chat.
+const captureEventsBySessionId = new Map<
+  string,
+  Array<ReturnType<typeof sessionEvent>>
+>([[SESSION_ID, chatEvents]]);
+
 const config = {
   telemetryEnabled: false,
   requireCommandApproval: true,
   requireFileEditApproval: true,
   fullAccess: false,
-  selectedProviderId: "anthropic",
+  selectedProviderId: isOllamaScene ? "ollama" : "anthropic",
   modelProviders: [
     {
       id: "anthropic",
@@ -195,6 +240,40 @@ const config = {
         visibility: "standard",
       },
     },
+    ...(isOllamaScene
+      ? [
+          {
+            id: "ollama",
+            displayName: "Ollama",
+            apiKeyRef: "local-runtime:ollama",
+            enabled: true,
+            authMode: "sdk",
+            authStatus: "connected",
+            baseUrl: "http://localhost:11434/api",
+            defaultModelId: isOllamaEmptyScene ? undefined : "qwen3-coder:30b",
+            selectedModelId: isOllamaEmptyScene ? undefined : "qwen3-coder:30b",
+            models: isOllamaEmptyScene
+              ? []
+              : [
+                  {
+                    id: "qwen3-coder:30b",
+                    displayName: "Qwen3 Coder 30B",
+                    description: "Local coding model through Ollama.",
+                    supportsTools: true,
+                  },
+                ],
+            capabilities: {
+              executionKind: "ollama-api",
+              executable: true,
+              supportsApprovals: true,
+              supportsImages: false,
+              supportsResume: true,
+              supportsUsage: false,
+              visibility: "standard",
+            },
+          },
+        ]
+      : []),
   ],
   commandProfiles: [
     {
@@ -512,8 +591,6 @@ const preparation = {
 
 const responses: Record<string, unknown> = {
   load_config: config,
-  list_sessions: sessions,
-  read_session_events: { events: chatEvents, hasMoreBefore: false },
   git_status: sourceControl,
   // Staging commands answer with the status the app re-renders from, so the
   // harness keeps showing a populated panel instead of emptying it.
@@ -576,6 +653,7 @@ const responses: Record<string, unknown> = {
   lsp_stop: null,
   lsp_request: null,
   check_browser_preview: { available: false },
+  check_system_access: [],
 };
 
 const emptyArray = new Set([
@@ -584,8 +662,240 @@ const emptyArray = new Set([
   "github_pull_requests",
 ]);
 
+const emptyUsageTotals = {
+  calls: 0,
+  measuredCalls: 0,
+  estimatedCalls: 0,
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  byOrigin: [],
+};
+
 const invoke: Invoke = (command, args) => {
   if (command.startsWith("plugin:event|")) return 0;
+  if (command === "warm_desktop_shell") {
+    return {
+      ready: true,
+      sessionCount: sessions.length,
+      providerCount: config.modelProviders.length,
+      sessionPoolWarmed: 1,
+      automationPoolWarmed: 1,
+      elapsedMs: 0,
+      integrity: "ok",
+    };
+  }
+  if (command === "get_usage_safety_snapshot") {
+    return { pause: { active: false, scope: "all" }, budgets: [] };
+  }
+  if (command === "list_sessions") {
+    return sessions;
+  }
+  if (command === "delete_session") {
+    const sessionId = String(args?.sessionId ?? "");
+    const hadSession = sessions.some((item) => item.id === sessionId);
+    sessions = sessions.filter((item) => item.id !== sessionId);
+    captureEventsBySessionId.delete(sessionId);
+    return hadSession;
+  }
+  if (command === "get_session_usage_totals") {
+    return emptyUsageTotals;
+  }
+  if (command === "check_cli_updates_command") {
+    return { offers: [] };
+  }
+  if (command === "read_session_events") {
+    const sessionId = String(args?.sessionId ?? SESSION_ID);
+    return {
+      events: captureEventsBySessionId.get(sessionId) ?? [],
+      hasMoreBefore: false,
+    };
+  }
+  if (command === "create_desktop_session") {
+    captureSessionSequence += 1;
+    const created = {
+      ...session,
+      id: `ses_capture_send_${captureSessionSequence}`,
+      title: String(args?.title ?? "New chat"),
+      workspacePath: String(args?.workspacePath ?? WORKSPACE),
+      providerId: String(args?.providerId ?? session.providerId),
+      providerLabel: String(args?.providerLabel ?? session.providerLabel),
+      modelId: String(args?.modelId ?? session.modelId),
+      modelLabel: String(args?.modelLabel ?? session.modelLabel),
+      reasoningEffort: String(
+        args?.reasoningEffort ?? session.reasoningEffort ?? "high",
+      ),
+      createdAt: at(0, captureSessionSequence),
+      updatedAt: at(0, captureSessionSequence),
+      eventsPath: `${String(args?.workspacePath ?? WORKSPACE)}/.gyro/events.jsonl`,
+    };
+    // `refreshSessions()` runs immediately after creation in the real app.
+    // Keep its capture response consistent with the just-created session.
+    sessions = [created, ...sessions];
+    captureEventsBySessionId.set(created.id, []);
+    return created;
+  }
+  if (command === "append_user_message") {
+    const request = args ?? {};
+    const sessionId = String(request.sessionId ?? SESSION_ID);
+    const event = captureSessionEvent(
+      sessionId,
+      String(request.turnId ?? "turn_capture"),
+      "user-message",
+      String(request.message ?? "Capture message"),
+    );
+    captureEventsBySessionId.set(sessionId, [
+      ...(captureEventsBySessionId.get(sessionId) ?? []),
+      event,
+    ]);
+    return event;
+  }
+  if (command === "set_session_model") {
+    const sessionId = String(args?.sessionId ?? "");
+    const current = sessions.find((item) => item.id === sessionId);
+    if (!current) {
+      throw new Error("capture session not found");
+    }
+    const updated = {
+      ...current,
+      providerId: String(args?.providerId ?? current.providerId),
+      providerLabel: String(args?.providerLabel ?? current.providerLabel),
+      modelId: String(args?.modelId ?? current.modelId),
+      modelLabel: String(args?.modelLabel ?? current.modelLabel),
+      reasoningEffort: String(
+        args?.reasoningEffort ?? current.reasoningEffort ?? "high",
+      ),
+      updatedAt: at(0, sequence),
+    };
+    sessions = sessions.map((item) => (item.id === sessionId ? updated : item));
+    return updated;
+  }
+  if (command === "summarize_file_changes") {
+    return [];
+  }
+  if (command === "run_provider_chat") {
+    const request =
+      (args?.request as Record<string, unknown> | undefined) ?? {};
+    const sessionId = String(request.sessionId ?? SESSION_ID);
+    const turnId = String(request.turnId ?? "turn_capture");
+    const providerLabel = String(request.providerLabel ?? "Claude Code");
+    const modelLabel = String(request.modelLabel ?? "Claude Opus 5");
+    const responseSession = sessions.find((item) => item.id === sessionId);
+    const activityEvent = captureSessionEvent(
+      sessionId,
+      turnId,
+      "system-event",
+      "Reviewed the requested workspace context",
+      {
+        kind: "provider-activity",
+        activityKind: "search",
+        label: "Reviewed the requested workspace context",
+        detail: "Capture fixture only; no provider is contacted.",
+        status: "done",
+      },
+    );
+    const statusEvent = captureSessionEvent(
+      sessionId,
+      turnId,
+      "system-event",
+      `${providerLabel} finished`,
+      {
+        kind: "provider-status",
+        status: "completed",
+        providerId: String(request.providerId ?? "anthropic"),
+        providerLabel,
+        modelLabel,
+        startedAt: at(0),
+        completedAt: at(0, 1),
+        durationMs: 1,
+      },
+    );
+    const assistantEvent = captureSessionEvent(
+      sessionId,
+      turnId,
+      "assistant-message",
+      "Capture response: I reviewed the requested workspace context. This is a local fixture response; no provider was contacted.",
+    );
+    captureEventsBySessionId.set(sessionId, [
+      ...(captureEventsBySessionId.get(sessionId) ?? []),
+      activityEvent,
+      statusEvent,
+      assistantEvent,
+    ]);
+    return {
+      activityEvents: [activityEvent],
+      assistantEvent,
+      session: responseSession ?? null,
+      statusEvent,
+    };
+  }
+  if (command === "get_provider_usage_ledger") {
+    const providerId = String(args?.providerId ?? "anthropic");
+    return {
+      providerId,
+      fiveHour: emptyUsageTotals,
+      week: emptyUsageTotals,
+      dailyReferenceTokens: 200_000,
+    };
+  }
+  if (command === "discover_ollama_models_command") {
+    return {
+      baseUrl: String(args?.baseUrl ?? "http://localhost:11434/api"),
+      models: isOllamaEmptyScene
+        ? []
+        : [
+            {
+              id: "qwen3-coder:30b",
+              displayName: "Qwen3 Coder 30B",
+              description: "Local coding model through Ollama.",
+              contextWindowTokens: undefined,
+              supportsTools: true,
+            },
+          ],
+    };
+  }
+  if (command === "check_provider_health") {
+    const providerId = String(
+      (args?.request as { providerId?: string } | undefined)?.providerId ?? "",
+    );
+    if (providerId === "ollama" && isOllamaEmptyScene) {
+      return {
+        providerId,
+        output:
+          "Ollama is running, but no models are installed. Run `ollama pull <model>` and refresh Gyro.",
+        runtimeStatus: "no-models",
+        authOwner: "provider-sdk",
+        authCommand: null,
+        loginCommand: null,
+        accountLabel: null,
+        subscriptionLabel: null,
+        providerMode: "local Ollama runtime",
+        secretStorage:
+          "No credentials; Ollama is contacted only over loopback.",
+        privacyNote:
+          "Gyro sends prompts only to the configured loopback Ollama runtime.",
+        diagnosticsOptIn: false,
+      };
+    }
+    return {
+      providerId,
+      output: `${providerId || "Provider"} capture fixture is ready.`,
+      runtimeStatus: "ready",
+      authOwner: providerId === "ollama" ? "provider-sdk" : "provider-cli",
+      authCommand: null,
+      loginCommand: null,
+      accountLabel: null,
+      subscriptionLabel: null,
+      providerMode: providerId === "ollama" ? "local Ollama runtime" : null,
+      secretStorage:
+        providerId === "ollama"
+          ? "No credentials; Ollama is contacted only over loopback."
+          : "Provider CLI, OS Keychain, or provider-owned files.",
+      privacyNote: "Capture fixture only; no provider is contacted.",
+      diagnosticsOptIn: false,
+    };
+  }
   if (command in responses) return responses[command];
   if (emptyArray.has(command)) return [];
   if (command === "read_terminal_output") {
@@ -641,6 +951,18 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
     },
     convertFileSrc: (path: string) => path,
     metadata: { currentWindow: { label: "main" } },
+  },
+  configurable: true,
+});
+
+// Tauri v2 keeps event-listener cleanup on a separate global. The normal
+// internals object above handles command callbacks; this companion prevents
+// React effect cleanup from throwing in the browser-only capture harness.
+Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
+  value: {
+    unregisterListener(_event: string, id: number) {
+      callbacks.delete(id);
+    },
   },
   configurable: true,
 });

@@ -13,7 +13,10 @@ const capabilities = readFileSync(
   join(root, "crates/gyro-core/src/capabilities.rs"),
   "utf8",
 );
-const lib = readFileSync(join(root, "apps/desktop/src-tauri/src/lib.rs"), "utf8");
+const lib = readFileSync(
+  join(root, "apps/desktop/src-tauri/src/lib.rs"),
+  "utf8",
+);
 const sessionBrowser = readFileSync(
   join(root, "apps/desktop/src-tauri/src/session_browser.rs"),
   "utf8",

@@ -5,12 +5,12 @@ click, and a record of what has been built against it.
 
 Status: layers 0 through 3 are implemented. Layer 4 is partial.
 
-| Layer | State | Where |
-|---|---|---|
-| 0 — Ledger | Built | `crates/gyro-core/src/usage.rs`, `usage_ledger` table |
-| 1 — Budgets | Built | `UsageBudget`, `budget_state`, `budget_decision` |
-| 2 — Preflight | Built | `estimateTurnCost` + composer confirm |
-| 3 — Breakers | Built | `guard_decision`, enforced in `run_provider_chat_with_retry` |
+| Layer          | State   | Where                                                                                                  |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| 0 — Ledger     | Built   | `crates/gyro-core/src/usage.rs`, `usage_ledger` table                                                  |
+| 1 — Budgets    | Built   | `UsageBudget`, `budget_state`, `budget_decision`                                                       |
+| 2 — Preflight  | Built   | `estimateTurnCost` + composer confirm                                                                  |
+| 3 — Breakers   | Built   | `guard_decision`, enforced in `run_provider_chat_with_retry`                                           |
 | 4 — Visibility | Partial | Cost line, safety banner, and per-provider windows (plan or ledger) built; origin breakdown screen not |
 
 ## The pause is a state, not a switch
@@ -47,12 +47,12 @@ local spend rather than as an invented number.
 **2. One keystroke can buy many turns.** The multipliers are invisible at the
 moment they are committed:
 
-| Action | Provider calls for one Enter |
-|---|---|
-| Normal turn | 1 |
-| Council turn | up to 4 seats + 1 synthesizer = **5** |
-| Council re-synthesis | +1 each retry |
-| Automation | 1 per scheduled fire, unattended, forever |
+| Action               | Provider calls for one Enter              |
+| -------------------- | ----------------------------------------- |
+| Normal turn          | 1                                         |
+| Council turn         | up to 4 seats + 1 synthesizer = **5**     |
+| Council re-synthesis | +1 each retry                             |
+| Automation           | 1 per scheduled fire, unattended, forever |
 
 Effort multiplies again inside each of those: `ultra` and `max` buy far more
 reasoning tokens per turn than `low`. A council turn at max effort across four
@@ -77,7 +77,7 @@ that retries — runs until the provider itself refuses.
 
 ## Layer 0 — The ledger
 
-One append-only table, one row per *provider call* — not per user turn, since
+One append-only table, one row per _provider call_ — not per user turn, since
 the gap between those two is the whole problem.
 
 ```
@@ -107,11 +107,11 @@ not a free one — but the user is never told a guess is a fact.
 User-set caps in config, per rolling window, with three thresholds rather than
 one cliff:
 
-| Threshold | Behaviour |
-|---|---|
-| 70% — notify | A quiet meter change. No interruption. |
+| Threshold      | Behaviour                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------ |
+| 70% — notify   | A quiet meter change. No interruption.                                                                 |
 | 90% — throttle | Expensive actions (council, max/ultra effort, automations) require confirmation. Normal turns proceed. |
-| 100% — stop | New provider calls are refused with a clear reason and a one-click override. In-flight work finishes. |
+| 100% — stop    | New provider calls are refused with a clear reason and a one-click override. In-flight work finishes.  |
 
 Defaults should be derived, not invented: when a provider reports its own
 window (Codex) the budget tracks that window. When it reports only a reset time
@@ -126,8 +126,8 @@ number across providers with different plans and prices would be a fiction.
 The disclosure happens at the composer, before Enter commits anything.
 
 Gyro already computes the frozen context size and already renders a council
-preflight strip listing the seats. Extend that strip from *who* is running to
-*what it costs*: "4 seats + synthesis ≈ 5× a normal turn, ~180K tokens of
+preflight strip listing the seats. Extend that strip from _who_ is running to
+_what it costs_: "4 seats + synthesis ≈ 5× a normal turn, ~180K tokens of
 context each." The number is an estimate and says so.
 
 Confirmation is required — a real dialog, not a toast — when a single action

@@ -422,7 +422,8 @@ function RunProblem({
   const detail = isInterrupted
     ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
     : isCancelled
-      ? (phase.recoveryMessage ?? "You stopped this response. Continue to pick it back up.")
+      ? (phase.recoveryMessage ??
+        "You stopped this response. Continue to pick it back up.")
       : (phase.recoveryMessage ?? undefined);
   const title = isInterrupted
     ? "Previous send was interrupted"

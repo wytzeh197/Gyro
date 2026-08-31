@@ -156,6 +156,12 @@ pub struct GyroConfig {
     pub account_oidc: AccountOidcConfig,
     #[serde(default)]
     pub account_session: AccountSessionState,
+    /// The provider new chats should use when they do not have a session-bound
+    /// model. This is renderer-owned selection state, but it must round-trip
+    /// through the native config writer rather than disappearing after a
+    /// settings save or relaunch.
+    #[serde(default)]
+    pub selected_provider_id: Option<String>,
     pub model_providers: Vec<ModelProviderConfig>,
     pub command_profiles: Vec<CommandProfile>,
     #[serde(default)]
@@ -174,6 +180,7 @@ impl Default for GyroConfig {
             full_access: false,
             account_oidc: AccountOidcConfig::default(),
             account_session: AccountSessionState::default(),
+            selected_provider_id: None,
             council: CouncilConfig::default(),
             usage_guard: UsageGuardConfig::default(),
             model_providers: vec![
@@ -446,6 +453,27 @@ impl GyroConfig {
             {
                 self.model_providers.push(provider);
             }
+        }
+
+        // Older config files predate the explicit provider selection. A
+        // connected provider with no selection made the desktop composer say
+        // that no provider was connected, even though provider settings had
+        // already verified one. Keep a valid enabled selection; otherwise
+        // choose the first enabled provider in the persisted order.
+        let selected_provider_is_enabled =
+            self.selected_provider_id
+                .as_deref()
+                .is_some_and(|selected| {
+                    self.model_providers
+                        .iter()
+                        .any(|provider| provider.id == selected && provider.enabled)
+                });
+        if !selected_provider_is_enabled {
+            self.selected_provider_id = self
+                .model_providers
+                .iter()
+                .find(|provider| provider.enabled)
+                .map(|provider| provider.id.clone());
         }
 
         for profile in [
@@ -833,6 +861,7 @@ mod tests {
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
         let config = GyroConfig {
             telemetry_enabled: true,
+            selected_provider_id: Some("anthropic".into()),
             ..GyroConfig::default()
         };
 
@@ -855,6 +884,35 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn loading_connected_legacy_provider_selects_it_for_new_chats() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        paths.ensure().unwrap();
+        std::fs::write(
+            &paths.config_path,
+            r#"{
+              "telemetryEnabled": false,
+              "requireCommandApproval": true,
+              "requireFileEditApproval": true,
+              "modelProviders": [
+                {
+                  "id":"openai",
+                  "displayName":"OpenAI",
+                  "apiKeyRef":"provider:openai",
+                  "enabled":true
+                }
+              ],
+              "commandProfiles": []
+            }"#,
+        )
+        .unwrap();
+
+        let config = GyroConfig::load(&paths).unwrap();
+
+        assert_eq!(config.selected_provider_id.as_deref(), Some("openai"));
     }
 
     #[test]
