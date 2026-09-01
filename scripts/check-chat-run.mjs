@@ -10,6 +10,7 @@ import {
 import {
   buildRunModel,
   formatRunDuration,
+  groupRunSteps,
   isGenericProviderToolLabel,
   isRunPhaseLive,
   runHeaderLabel,
@@ -137,10 +138,10 @@ assert.equal(
   "tools that share a name but not a target should not coalesce",
 );
 
-// --- distinct work never batches ----------------------------------------------
+// --- exact work is preserved; the view groups it --------------------------------
 
-// Parallel calls arrive milliseconds apart. The reference design is a flat rail,
-// so each distinct one is its own row; nothing collapses work that differs.
+// Parallel calls arrive milliseconds apart. The run model preserves each exact
+// action, while the view can summarize them into meaningful phases.
 const parallel = buildRunModel([
   activity("tool", "Read a.ts", {}, 0),
   activity("tool", "Read b.ts", {}, 0),
@@ -150,6 +151,18 @@ assert.equal(parallel.steps.length, 3, "each activity should be its own beat");
 assert.ok(
   parallel.steps.every((step) => step.kind === "work"),
   "activities should all be work steps",
+);
+assert.deepEqual(
+  groupRunSteps(parallel.steps).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind,
+  ),
+  [
+    ["review", 2],
+    ["verify", 1],
+  ],
+  "consecutive review work should become one expandable summary before checks",
 );
 
 // --- the rail interleaves prose and work --------------------------------------
@@ -859,11 +872,20 @@ assert.deepEqual(
 
 // --- what never reaches the rail ----------------------------------------------------
 
-// Commentary is prose; it arrives as an assistant message, never as a work row.
+// Commentary is prose, never a work row or a generic system-event card.
 assert.equal(
   workItemFromEvent(activity("commentary", "Let me check the config.")),
   undefined,
   "commentary should not become a work row",
+);
+const commentary = buildRunModel([
+  activity("commentary", "I’ll inspect the existing sidebar first.", {}, 0),
+  activity("command", "rg sidebar", { detail: "rg sidebar" }, 1),
+]);
+assert.deepEqual(
+  commentary.steps.map((step) => step.kind),
+  ["say", "work"],
+  "provider commentary should render as a plain-language update",
 );
 
 const shellSearch = workItemFromEvent(
@@ -934,11 +956,11 @@ assert.equal(
 assert.equal(formatRunDuration(3_600), "1h", "whole hours drop empty places");
 assert.equal(formatRunDuration(3_661), "1h 1m 1s");
 
-assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working for 12s");
-assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working for 1s");
+assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working · 12s");
+assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working · 1s");
 assert.equal(
   runHeaderLabel({ name: "done", durationMs: 231_000 }, "3m 51s"),
-  "Worked for 3m 51s",
+  "Worked · 3m 51s",
 );
 
 // A failed or interrupted turn has no recorded end, so the header must not

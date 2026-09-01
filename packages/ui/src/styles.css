@@ -28124,6 +28124,13 @@ button.gyro-account-menu-row:hover,
   margin-top: 0;
   width: min(560px, 100%);
 }
+/* Empty chats use the start composer while existing chats use the docked
+   composer. In a split, both need the dock's content-driven height. */
+.gyro-chat-surface.is-empty.is-tiled
+  .gyro-chat-start
+  .gyro-composer-shell.is-hero.has-provider {
+  min-height: 0;
+}
 .gyro-chat-surface.is-tiled .gyro-brand-logo {
   height: clamp(40px, 11cqi, 56px);
   margin-bottom: 4px;
@@ -31494,11 +31501,11 @@ button.gyro-account-menu-row:hover,
 /* ==========================================================================
    Run rail (gyro-run-*)
    --------------------------------------------------------------------------
-   The rebuilt in-chat run timeline: a flat list of beats, no timestamps, no
-   grouping, no cards. Every value is a --gyro-* token so light mode falls out
-   of the token flip at :root[data-theme="light"]. The single light override at
-   the end of this block is optical, not chromatic — a second one means
-   something in here went off-token.
+   The rebuilt in-chat run timeline: a small set of human-readable phases with
+   exact technical details available on demand. Every value is a --gyro-* token
+   so light mode falls out of the token flip at :root[data-theme="light"]. The
+   single light override at the end of this block is optical, not chromatic — a
+   second one means something in here went off-token.
    ========================================================================== */
 
 .gyro-run {
@@ -31506,7 +31513,7 @@ button.gyro-account-menu-row:hover,
   width: 100%;
 }
 
-/* Live runs lift the header half a step so Working for … is easy to trust. */
+/* Live runs lift the header half a step so the current activity is easy to trust. */
 .gyro-run.is-live .gyro-run-header,
 .gyro-run.is-retrying .gyro-run-header {
   color: var(--gyro-muted);
@@ -31592,6 +31599,92 @@ button.gyro-account-menu-row:hover,
   padding: 7px 0;
   text-align: left;
   width: 100%;
+}
+
+/* The summary tells the story of a run. Its command-by-command trail is kept
+   under an explicit disclosure instead of becoming the default visual noise. */
+.gyro-run-group {
+  min-width: 0;
+}
+
+.gyro-run-group-toggle {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 12px;
+  grid-template-columns: 19px minmax(0, 1fr) auto;
+  padding: 7px 0;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-run-group-text {
+  align-items: baseline;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.gyro-run-group .gyro-run-row-label {
+  color: var(--gyro-muted);
+}
+
+.gyro-run-group.is-running .gyro-run-row-label {
+  color: var(--gyro-text);
+}
+
+.gyro-run-group.is-failed .gyro-run-row-label,
+.gyro-run-group.is-failed .gyro-run-row-icon {
+  color: var(--gyro-danger);
+}
+
+.gyro-run-group-disclosure {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: 12px;
+  gap: 3px;
+  line-height: 1;
+  padding-top: 1px;
+}
+
+.gyro-run-group-toggle:hover .gyro-run-row-label,
+.gyro-run-group-toggle:hover .gyro-run-group-disclosure {
+  color: var(--gyro-text);
+}
+
+.gyro-run-group.is-running .gyro-run-row-icon {
+  animation: gyro-run-breathe 1.6s ease-in-out infinite;
+}
+
+.gyro-run-group-details {
+  border-left: 1px solid var(--gyro-premium-hairline-strong);
+  list-style: none;
+  margin: 0 0 5px 9px;
+  padding: 1px 0 1px 12px;
+}
+
+.gyro-run-group-details > li {
+  list-style: none;
+}
+
+.gyro-run-group-details .gyro-run-row {
+  gap: 10px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  padding: 5px 0;
+}
+
+.gyro-run-group-details .gyro-run-row-icon {
+  transform: translateY(1px);
+}
+
+.gyro-run-group-details .gyro-run-row-label,
+.gyro-run-group-details .gyro-run-row-detail {
+  font-size: 13px;
 }
 
 .gyro-run-row.is-actionable {

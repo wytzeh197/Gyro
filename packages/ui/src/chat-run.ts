@@ -91,13 +91,7 @@ export type WorkItem =
       note?: string;
     };
 
-/**
- * One beat of a run. A work step carries exactly one item: the reference design
- * is a flat rail where seven *different* commands read as seven rows, so no
- * grouping happens by time or by kind. The one thing that folds is a beat that
- * would repeat a row verbatim — see `absorbRepeatedWork`. Collapsing the rest
- * happens in the header, by hiding the list entirely.
- */
+/** One exact event in a run. Work is grouped for display below, never discarded. */
 export type RunStep =
   | { kind: "say"; id: string; at: string; text: string }
   | {
@@ -112,6 +106,119 @@ export type RunStep =
       repeat?: number;
     }
   | { kind: "ask"; id: string; at: string; event: SessionEvent };
+
+/** A plain-language phase for a consecutive stretch of work. */
+export type WorkGroupKind = "review" | "change" | "verify" | "command";
+
+export type WorkGroup = {
+  kind: "work-group";
+  id: string;
+  at: string;
+  groupKind: WorkGroupKind;
+  status: WorkStatus;
+  steps: Array<Extract<RunStep, { kind: "work" }>>;
+};
+
+/** What the run view renders: narration and approvals keep their place; tool
+ * noise becomes a compact, expandable phase. */
+export type RunDisplayStep = Exclude<RunStep, { kind: "work" }> | WorkGroup;
+
+/**
+ * Group consecutive work into the small number of phases a person can scan:
+ * review, change, verify, and generic commands. The exact steps remain nested
+ * in their group so command output is still inspectable on demand.
+ */
+export function groupRunSteps(steps: RunStep[]): RunDisplayStep[] {
+  const displayed: RunDisplayStep[] = [];
+  for (const step of steps) {
+    if (step.kind !== "work") {
+      displayed.push(step);
+      continue;
+    }
+    const groupKind = workGroupKind(step.item);
+    const previous = displayed.at(-1);
+    if (previous?.kind === "work-group" && previous.groupKind === groupKind) {
+      previous.steps.push(step);
+      previous.status = workGroupStatus(previous.steps);
+      continue;
+    }
+    displayed.push({
+      kind: "work-group",
+      id: `work-group-${step.id}`,
+      at: step.at,
+      groupKind,
+      status: step.item.status,
+      steps: [step],
+    });
+  }
+  return displayed;
+}
+
+/** Copy for the group headline. The detail deliberately counts actions rather
+ * than exposing implementation commands before someone asks for them. */
+export function runWorkGroupText(group: WorkGroup): RunRowText {
+  const running = group.status === "running";
+  const failed = group.status === "failed";
+  const labels: Record<WorkGroupKind, [string, string, string]> = {
+    review: [
+      "Reviewing workspace",
+      "Reviewed workspace",
+      "Review needs attention",
+    ],
+    change: [
+      "Updating workspace",
+      "Updated workspace",
+      "Update needs attention",
+    ],
+    verify: [
+      "Checking the result",
+      "Checked the result",
+      "Check needs attention",
+    ],
+    command: ["Running commands", "Ran commands", "Command needs attention"],
+  };
+  const [inProgress, complete, problem] = labels[group.groupKind];
+  const count = group.steps.length;
+  return {
+    label: failed ? problem : running ? inProgress : complete,
+    description: `${count} ${count === 1 ? "action" : "actions"}`,
+  };
+}
+
+function workGroupStatus(
+  steps: Array<Extract<RunStep, { kind: "work" }>>,
+): WorkStatus {
+  if (steps.some((step) => step.item.status === "failed")) return "failed";
+  if (steps.some((step) => step.item.status === "running")) return "running";
+  return "done";
+}
+
+function workGroupKind(item: WorkItem): WorkGroupKind {
+  switch (item.kind) {
+    case "file":
+    case "memory":
+      return "change";
+    case "command":
+      if (item.category === "test" || item.category === "build")
+        return "verify";
+      return item.category === "inspect" ? "review" : "command";
+    case "browser":
+      return item.action === "capture" ? "verify" : "review";
+    case "tool": {
+      const label = `${item.tool} ${item.note ?? ""}`.toLowerCase();
+      if (/(?:edit|write|update|apply|propos)/.test(label)) return "change";
+      if (/(?:test|build|check|diff|preview|screenshot)/.test(label)) {
+        return "verify";
+      }
+      if (/(?:terminal|task|command|execute)/.test(label)) return "command";
+      return "review";
+    }
+    case "read":
+    case "search":
+    case "context":
+      return "review";
+  }
+}
 
 /**
  * What the run is doing right now. The shape this replaces spread the same
@@ -213,6 +320,18 @@ export function buildRunModel(
     if (consumedResponseIds.has(event.id)) {
       continue;
     }
+    const commentary = commentaryTextFromEvent(event);
+    if (commentary) {
+      if (!isOrphanAssistantFragment(commentary)) {
+        steps.push({
+          kind: "say",
+          id: event.id,
+          at: event.createdAt,
+          text: commentary,
+        });
+      }
+      continue;
+    }
     const item = workItemFromEvent(event);
     if (item) {
       if (item.kind === "file") {
@@ -241,7 +360,7 @@ export function buildRunModel(
   }
 
   // Plan lines peeled from a trailing multi-block answer rejoin the rail as
-  // say steps so they stay under "Worked for …" instead of the response body.
+  // say steps so they stay under the work summary instead of the response body.
   for (const preamble of closing?.preambles ?? []) {
     const text = preamble.message.trim();
     if (
@@ -710,6 +829,19 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
   }
 }
 
+/** Provider commentary is user-facing narration, not a generic system event. */
+function commentaryTextFromEvent(event: SessionEvent): string | undefined {
+  if (event.kind !== "system-event") return undefined;
+  const payload = record(event.payload);
+  if (
+    text(payload, "kind") !== "provider-activity" ||
+    text(payload, "activityKind") !== "commentary"
+  ) {
+    return undefined;
+  }
+  return (text(payload, "label") ?? event.message).trim() || undefined;
+}
+
 /**
  * Map a capability-call system event onto a run-rail work item.
  * Keeps the same muted icon + breathe animation as "Thinking" / "Ran command".
@@ -878,13 +1010,13 @@ export function runHeaderLabel(
     case "thinking":
     case "working":
     case "finalizing":
-      return elapsedLabel ? `Working for ${elapsedLabel}` : "Working";
-    // The clock is still honest here — the turn never ended — but "Working for"
-    // is not, so the header names the wait and the rail row carries the detail.
+      return elapsedLabel ? `Working · ${elapsedLabel}` : "Working";
+    // The clock is still honest here — the turn never ended — and its compact
+    // placement keeps the activity itself as the header's main message.
     case "retrying":
       return elapsedLabel ? `Retrying · ${elapsedLabel}` : "Retrying";
     case "done":
-      return elapsedLabel ? `Worked for ${elapsedLabel}` : "Worked";
+      return elapsedLabel ? `Worked · ${elapsedLabel}` : "Worked";
     case "failed":
       // User cancel is "Stopped"; a real failure is "Failed" so recovery copy
       // and tone can differ without a second chrome system.
