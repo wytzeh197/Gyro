@@ -6,6 +6,7 @@ import {
   Eye,
   Globe2,
   Image as ImageIcon,
+  ListChecks,
   type LucideIcon,
   Lightbulb,
   Minimize2,
@@ -19,21 +20,29 @@ import {
 
 import {
   formatRunDuration,
+  groupRunSteps,
   isCancelledRunPhase,
   isRunPhaseLive,
   runHeaderLabel,
   runRetryText,
   runRowText,
+  runWorkGroupText,
 } from "./chat-run";
-import type { RunModel, RunPhase, RunStep, WorkItem } from "./chat-run";
+import type {
+  RunModel,
+  RunPhase,
+  RunStep,
+  WorkGroup,
+  WorkItem,
+} from "./chat-run";
 import type { SessionEvent } from "./types";
 
 /**
- * The run rail: a flat, timestamp-free list of beats.
+ * The run rail: a timestamp-free working summary.
  *
- * Every parser lives in `chat-run.ts`, so nothing here reads an event payload.
- * A row is an icon, a label, and an optional muted description — the wording
- * arrives already decided by `runRowText`.
+ * Every parser and grouping rule lives in `chat-run.ts`, so nothing here reads
+ * an event payload. The compact group tells the story; its detail preserves the
+ * exact steps for someone who needs to inspect them.
  */
 
 /**
@@ -51,6 +60,13 @@ const WORK_ICON = {
   browser: Globe2,
   tool: Wrench,
 } as const satisfies Record<WorkItem["kind"], LucideIcon>;
+
+const WORK_GROUP_ICON = {
+  review: Search,
+  change: Pencil,
+  verify: ListChecks,
+  command: SquareTerminal,
+} as const satisfies Record<WorkGroup["groupKind"], LucideIcon>;
 
 /** A read of an image is still a read, but the eye undersells what happened. */
 function workIcon(item: WorkItem): LucideIcon {
@@ -95,7 +111,7 @@ export function ChatRun({
   // A fully answered turn — work on the rail plus a final answer — is history:
   // it starts collapsed, and folds itself away the moment it settles, so the
   // answer is what stays on screen. Incomplete settles (a mid-task stop, a
-  // failure) stay open, because collapsing those leaves an empty "Worked for …"
+  // failure) stay open, because collapsing those leaves an empty "Worked · …"
   // void with no answer under it.
   const isAnswered =
     model.phase.name === "done" &&
@@ -120,6 +136,17 @@ export function ChatRun({
   }, [isAnswered, isLive]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
+  const displaySteps = groupRunSteps(model.steps);
+  // The header names the currently live phase when there is one. It keeps the
+  // elapsed time, but no longer makes the person translate a generic “Working”
+  // label into what Gyro is actually doing.
+  const activeGroup = displaySteps.findLast(
+    (step): step is WorkGroup =>
+      step.kind === "work-group" && step.status === "running",
+  );
+  const activeLabel = activeGroup
+    ? runWorkGroupText(activeGroup).label
+    : undefined;
   // Keep a thinking beat while the model is quiet between tools, not only at
   // the empty start of a run — otherwise the rail freezes on the last Done row.
   const hasRunningWork = model.steps.some(
@@ -161,25 +188,42 @@ export function ChatRun({
         headerActions={headerActions}
         isCollapsed={isCollapsed}
         model={model}
+        activeLabel={activeLabel}
         onToggle={() => setIsCollapsed((current) => !current)}
       />
       {showRail ? (
         <ol aria-label="Work timeline" className="gyro-run-rail">
           {showSteps
-            ? model.steps.map((step) => (
-                <li className="gyro-run-row-item" key={step.id}>
-                  {step.kind === "ask" && renderAsk ? (
-                    renderAsk(step.event)
-                  ) : (
-                    <RunRow
-                      aggregateFileStats={aggregateFileStats}
-                      onOpenChanges={onOpenChanges}
-                      renderSay={renderSay}
-                      step={step}
-                    />
-                  )}
-                </li>
-              ))
+            ? displaySteps.map((step) => {
+                if (step.kind === "work-group") {
+                  return (
+                    <li
+                      className="gyro-run-row-item gyro-run-group-item"
+                      key={step.id}
+                    >
+                      <RunWorkGroup
+                        aggregateFileStats={aggregateFileStats}
+                        group={step}
+                        onOpenChanges={onOpenChanges}
+                      />
+                    </li>
+                  );
+                }
+                return (
+                  <li className="gyro-run-row-item" key={step.id}>
+                    {step.kind === "ask" && renderAsk ? (
+                      renderAsk(step.event)
+                    ) : (
+                      <RunRow
+                        aggregateFileStats={aggregateFileStats}
+                        onOpenChanges={onOpenChanges}
+                        renderSay={renderSay}
+                        step={step}
+                      />
+                    )}
+                  </li>
+                );
+              })
             : null}
           {showFinalizingPulse ? (
             <li className="gyro-run-row-item">
@@ -210,13 +254,76 @@ export function ChatRun({
   );
 }
 
+function RunWorkGroup({
+  aggregateFileStats,
+  group,
+  onOpenChanges,
+}: {
+  aggregateFileStats?: { additions: number; deletions: number };
+  group: WorkGroup;
+  onOpenChanges?: () => void;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const text = runWorkGroupText(group);
+  const Icon = WORK_GROUP_ICON[group.groupKind];
+  const className = [
+    "gyro-run-group",
+    `is-${group.groupKind}`,
+    group.status === "running" ? "is-running" : "",
+    group.status === "failed" ? "is-failed" : "",
+    isExpanded ? "is-expanded" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const detailLabel = isExpanded ? "Hide details" : "Show details";
+
+  return (
+    <div className={className}>
+      <button
+        aria-expanded={isExpanded}
+        aria-label={`${text.label}, ${text.description}. ${detailLabel}`}
+        className="gyro-run-group-toggle"
+        onClick={() => setIsExpanded((current) => !current)}
+        type="button"
+      >
+        <span aria-hidden="true" className="gyro-run-row-icon">
+          <Icon size={15} />
+        </span>
+        <span className="gyro-run-group-text">
+          <span className="gyro-run-row-label">{text.label}</span>
+          <span className="gyro-run-row-detail">{text.description}</span>
+        </span>
+        <span aria-hidden="true" className="gyro-run-group-disclosure">
+          <span>{detailLabel}</span>
+          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </span>
+      </button>
+      {isExpanded ? (
+        <ol aria-label="Technical details" className="gyro-run-group-details">
+          {group.steps.map((step) => (
+            <li key={step.id}>
+              <RunRow
+                aggregateFileStats={aggregateFileStats}
+                onOpenChanges={onOpenChanges}
+                step={step}
+              />
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
 function RunHeader({
+  activeLabel,
   canCollapse,
   headerActions,
   isCollapsed,
   model,
   onToggle,
 }: {
+  activeLabel?: string;
   canCollapse: boolean;
   headerActions?: ReactNode;
   isCollapsed: boolean;
@@ -228,6 +335,10 @@ function RunHeader({
     model.phase,
     elapsed === undefined ? undefined : formatRunDuration(elapsed),
   );
+  const headerLabel =
+    activeLabel && elapsed !== undefined
+      ? `${activeLabel} · ${formatRunDuration(elapsed)}`
+      : (activeLabel ?? label);
   return (
     <div className="gyro-run-header">
       {canCollapse ? (
@@ -237,11 +348,11 @@ function RunHeader({
           onClick={onToggle}
           type="button"
         >
-          <span>{label}</span>
+          <span>{headerLabel}</span>
           {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
       ) : (
-        <span>{label}</span>
+        <span>{headerLabel}</span>
       )}
       {headerActions ? (
         <span className="gyro-run-header-actions">{headerActions}</span>

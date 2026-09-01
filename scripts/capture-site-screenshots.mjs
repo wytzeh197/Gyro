@@ -176,7 +176,7 @@ const steps = {
     })()
   `,
   /*
-   * The run summary collapses to a single "Worked for" line. Expanded, it is
+   * The run summary collapses to a single "Worked ·" line. Expanded, it is
    * the transcript: what was searched, what was run, and which files changed.
    */
   expandRun: `

@@ -14432,13 +14432,12 @@ fn run_openai_codex_app_server_chat(
                     completed_artifact_response_at = None;
                     if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str)
                     {
-                        if patches
-                            .get(item_id)
-                            .and_then(|patch| patch.get("changes"))
-                            .is_none()
-                        {
-                            insert_codex_app_server_patch(&mut patches, item_id, params.clone())?;
-                        }
+                        // A `fileChange` item can start before its patch is
+                        // available. The later patchUpdated notification is
+                        // authoritative; retaining the empty start payload
+                        // loses the paths and makes the UI fall back to the
+                        // whole workspace diff.
+                        insert_codex_app_server_patch(&mut patches, item_id, params.clone())?;
                     }
                 }
                 "item/started" => {
@@ -14510,14 +14509,19 @@ fn run_openai_codex_app_server_chat(
                             }
                             Some("fileChange") => {
                                 completed_artifact_response_at = None;
-                                let activity = codex_item_activity(item, "file", "Updated files");
-                                record_codex_app_server_activity(
-                                    app,
-                                    request,
-                                    &mut activities,
-                                    &mut completed_activity_ids,
-                                    activity,
-                                );
+                                let patch = item
+                                    .get("id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .and_then(|item_id| patches.get(item_id));
+                                for activity in codex_file_change_activities(item, patch) {
+                                    record_codex_app_server_activity(
+                                        app,
+                                        request,
+                                        &mut activities,
+                                        &mut completed_activity_ids,
+                                        activity,
+                                    );
+                                }
                             }
                             Some("contextCompaction") => {
                                 completed_artifact_response_at = None;
@@ -14845,6 +14849,50 @@ fn codex_item_activity(
         note: None,
         status,
     }
+}
+
+/// Turn a Codex app-server file-change record into path-specific activity.
+///
+/// A workspace is shared by every chat pane, so a pathless “Updated files” row
+/// has no reliable way to claim the current Git diff. Codex provides exact
+/// paths in the accumulated patch; retain those instead of attributing every
+/// dirty file to this turn.
+fn codex_file_change_activities(
+    item: &serde_json::Value,
+    patch: Option<&serde_json::Value>,
+) -> Vec<ProviderActivity> {
+    let id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("file-change");
+    let status = item
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("done");
+    let changes = patch
+        .and_then(|patch| patch.get("changes"))
+        .or_else(|| item.get("changes"))
+        .and_then(serde_json::Value::as_array);
+
+    changes
+        .into_iter()
+        .flatten()
+        .filter_map(|change| change.get("path").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .enumerate()
+        .map(|(index, path)| {
+            let path = truncate_chars(path, 1_024);
+            ProviderActivity {
+                id: format!("{id}-file-{index}"),
+                kind: "file".into(),
+                label: format!("Updated {path}"),
+                detail: Some(path),
+                note: None,
+                status: status.into(),
+            }
+        })
+        .collect()
 }
 
 fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -> ProviderActivity {
@@ -27038,6 +27086,35 @@ while True:
             serde_json::json!({ "changes": "x".repeat(MAX_CODEX_APP_SERVER_PATCH_BYTES) }),
         )
         .is_err());
+    }
+
+    #[test]
+    fn codex_file_change_activity_keeps_only_reported_paths() {
+        let item = serde_json::json!({
+            "id": "change-1",
+            "type": "fileChange",
+            "status": "completed",
+        });
+        let patch = serde_json::json!({
+            "changes": [
+                { "path": "packages/ui/src/chat-run.ts" },
+                { "path": "packages/ui/src/surfaces.tsx" },
+            ],
+        });
+
+        let activities = codex_file_change_activities(&item, Some(&patch));
+
+        assert_eq!(
+            activities
+                .iter()
+                .filter_map(|activity| activity.detail.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                "packages/ui/src/chat-run.ts",
+                "packages/ui/src/surfaces.tsx",
+            ],
+        );
+        assert!(codex_file_change_activities(&item, None).is_empty());
     }
 
     #[test]

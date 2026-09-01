@@ -652,6 +652,12 @@ expect(
   "The run rail should render above the final response.",
 );
 expect(
+  chatTurnSource.includes(
+    "const shouldShowFinalResponse = Boolean(responseEvent);",
+  ) && chatTurnSource.includes("{responseEvent && shouldShowFinalResponse ? ("),
+  "A completed workspace turn should retain its final response above the change summary.",
+);
+expect(
   runViewSource.includes('aria-label="Work timeline"') &&
     // Narration is a peer row on the rail, in the place it was spoken, and is
     // the one label allowed to wrap rather than run off the thread.
@@ -3464,12 +3470,14 @@ expect(
       'className="gyro-chat-run-timeline is-final-response"',
     ) &&
     runViewSource.includes('aria-label="Work timeline"') &&
+    runViewSource.includes("function RunWorkGroup") &&
+    runViewSource.includes('"Show details"') &&
     surfaceSource.includes("buildRunModel(") &&
     surfaceSource.includes(
       'isRunning ? "Assistant update" : "Final response"',
     ) &&
-    runSource.includes("`Working for ${elapsedLabel}`") &&
-    runSource.includes("`Worked for ${elapsedLabel}`") &&
+    runSource.includes("`Working · ${elapsedLabel}`") &&
+    runSource.includes("`Worked · ${elapsedLabel}`") &&
     runSource.includes("export function formatRunDuration") &&
     surfaceSource.includes("formatMessageTime(event.createdAt)") &&
     surfaceSource.includes('aria-label="Copy message"') &&
@@ -3575,7 +3583,7 @@ expect(
     runViewSource.includes("gyro-run-row-stat") &&
     runSource.includes("mergeFileChange(files, item)") &&
     runSource.includes('item.kind === "file"') &&
-    runViewSource.includes("model.steps.map((step)") &&
+    runViewSource.includes("displaySteps.map((step)") &&
     runSource.includes('kind: "file"') &&
     runSource.includes('status === "running"') &&
     runSource.includes('text(payload, "activityKind")') &&
@@ -3627,7 +3635,7 @@ expect(
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
     // Live runs keep a Thinking pulse between tools; settled incomplete runs
-    // stay expanded so the trail does not vanish under "Worked for …". Fully
+    // stay expanded so the trail does not vanish under "Worked · …". Fully
     // answered turns auto-collapse once so the answer is what stays on screen.
     runViewSource.includes("showThinkingPulse") &&
     runViewSource.includes("const isAnswered =") &&
@@ -5835,7 +5843,7 @@ expect(
     timelineSource.includes("fileEvents.push(event)") &&
     timelineSource.includes("const firstFileEvent = fileEvents[0]") &&
     runSource.includes('case "file":') &&
-    runViewSource.includes("model.steps.map((step)") &&
+    runViewSource.includes("displaySteps.map((step)") &&
     surfaceSource.includes("<ChatRunChangeSummary") &&
     surfaceSource.includes('!isRunning && runModel.phase.name === "done"') &&
     surfaceSource.includes("const reviewFiles = () => {") &&

@@ -30,6 +30,7 @@ import {
   FileText,
   FileType,
   Folder,
+  FolderOpen,
   Gauge,
   GitBranch,
   GitBranchPlus,
@@ -4870,7 +4871,13 @@ function WorkspaceSidebarContent({
                 >
                   <SidebarProjectRow
                     draggable
-                    icon={project.hasWorkspace ? FileText : HardDrive}
+                    icon={
+                      project.hasWorkspace
+                        ? isCollapsed
+                          ? Folder
+                          : FolderOpen
+                        : HardDrive
+                    }
                     isDragging={draggedProjectKey === project.key}
                     isCollapsed={isCollapsed}
                     label={project.label}
@@ -23046,23 +23053,10 @@ function ChatTurn({
         ? { reason: "Reconnecting to the provider" }
         : undefined,
   });
-  const aggregateFileStats = useMemo(() => {
-    if (!sourceControl) return undefined;
-    const totals = sourceControl.files.reduce(
-      (current, file) => {
-        const delta = sourceControlFileDelta(
-          file,
-          sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
-        );
-        return {
-          additions: current.additions + delta.additions,
-          deletions: current.deletions + delta.deletions,
-        };
-      },
-      { additions: 0, deletions: 0 },
-    );
-    return totals.additions > 0 || totals.deletions > 0 ? totals : undefined;
-  }, [sourceControl, sourceControlBaseline]);
+  // File summaries must be backed by paths reported by the provider. The Git
+  // working tree is shared by all chats, so using it to fill a pathless
+  // “Updated files” event falsely shows the same edit summary in every pane.
+  const aggregateFileStats = undefined;
   const changedFiles = useMemo(() => {
     const files = new Map<
       string,
@@ -23082,22 +23076,8 @@ function ChatTurn({
         intent: file.intent,
       });
     }
-    for (const file of sourceControl?.files ?? []) {
-      const delta = sourceControlFileDelta(
-        file,
-        sourceControlStatsForActivityPath(file.path, sourceControlBaseline),
-      );
-      if (delta.additions === 0 && delta.deletions === 0) continue;
-      // Git knows the size of the change; only the run knows why it was made,
-      // so a path the agent narrated keeps its note here.
-      files.set(file.path, {
-        path: file.path,
-        ...delta,
-        intent: files.get(file.path)?.intent,
-      });
-    }
     return [...files.values()];
-  }, [runModel.files, sourceControl, sourceControlBaseline]);
+  }, [runModel.files]);
   const fileReviewRecords = useMemo(
     () => (fileReview ? fileReviewDecisions(turn.timelineEvents) : undefined),
     [fileReview, turn.timelineEvents],
@@ -23109,14 +23089,10 @@ function ChatTurn({
     );
   }, [fileReview?.summaries]);
   const responseEvent = runModel.response;
-  // Once a turn has performed Workspace work, the run rail is the useful
-  // record: commands, reads, edits, and validation stay there. Repeating the
-  // model's closing prose below it makes completed-task inspection needlessly
-  // long. Pure chat and plan turns still show their response normally.
-  const shouldShowFinalResponse =
-    Boolean(responseEvent) &&
-    (isPlanResponseTurn ||
-      !runModel.steps.some((step) => step.kind === "work"));
+  // A completed run needs a conclusion as well as its evidence. The work
+  // summary and file review answer "what changed"; the final response answers
+  // whether the request is actually done and names any remaining caveat.
+  const shouldShowFinalResponse = Boolean(responseEvent);
   // Offer Continue when the turn produced anything the user might resume from —
   // a text answer, or work that stopped before an answer (empty void + tools).
   const canContinue =
