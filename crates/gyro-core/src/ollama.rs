@@ -337,7 +337,7 @@ fn model_context_window(value: &serde_json::Value) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpListener};
 
     #[test]
@@ -373,10 +373,25 @@ mod tests {
         let server = std::thread::spawn(move || {
             for _ in 0..2 {
                 let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(&mut stream);
                 let mut request_line = String::new();
-                BufReader::new(&mut stream)
-                    .read_line(&mut request_line)
-                    .unwrap();
+                reader.read_line(&mut request_line).unwrap();
+                let mut content_length = 0;
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header.is_empty() || header == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = header.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut request_body = vec![0; content_length];
+                reader.read_exact(&mut request_body).unwrap();
+                drop(reader);
                 let body = if request_line.starts_with("GET /api/tags") {
                     r#"{"models":[{"name":"qwen3-coder:latest","details":{"family":"qwen3","parameter_size":"8B","quantization_level":"Q4"}}]}"#
                 } else {
@@ -390,10 +405,8 @@ mod tests {
                 )
                 .unwrap();
                 stream.flush().unwrap();
-                // The discovery client uses a fresh request for /api/show. End
-                // this response before accepting it so a parallel test cannot
-                // leave the client waiting on a connection that advertises
-                // `Connection: close` but is still open in this fixture.
+                // Drain a POST body before closing. Otherwise a slow client
+                // can see a broken write and treat `/api/show` as unavailable.
                 let _ = stream.shutdown(Shutdown::Both);
             }
         });
