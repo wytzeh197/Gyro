@@ -288,12 +288,12 @@ function cssRules(source, selector) {
 }
 
 expect(
-  !canSendChat(true) &&
-    !canSendChat(true, "/tmp/gyro-session-1783969000000") &&
+  canSendChat(true) &&
+    canSendChat(true, "/tmp/gyro-session-1783969000000") &&
     !canSendChat(false, "/Users/example/Project") &&
     canSendChat(true, "/Users/example/Project") &&
     isUserSelectedWorkspacePath("/Users/example/Project"),
-  "Chat send requires a connected provider and a user-selected project.",
+  "Chat send requires a connected provider; a project is optional.",
 );
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
@@ -3323,7 +3323,7 @@ expect(
     appSource.includes("setSessionSending") &&
     appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
     appSource.includes("[activeSessionId, events]") &&
-    /shouldSuggestSessionTitle\(\s*activeSession,\s*activeSessionHasTranscriptEvents/.test(
+    /shouldSuggestSessionTitle\(\s*targetSession,\s*targetSessionHasTranscriptEvents/.test(
       appSource,
     ) &&
     !appSource.includes(
@@ -3335,9 +3335,7 @@ expect(
     appSource.includes(
       "sessionModel,\n          chatWorkspacePath,\n          provisionalTitle",
     ) &&
-    appSource.includes(
-      "const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY",
-    ) &&
+    appSource.includes("const draftKey = `new:${projectKey}`") &&
     appSource.includes("resetChatDraft") &&
     !appSource.includes("const [draft, setDraft]") &&
     !appSource.includes("onDraftChange={setDraft}") &&
@@ -3353,12 +3351,12 @@ expect(
       "const bySession = new Map<string, ProviderStreamBatch[]>()",
     ) &&
     appSource.includes("(value) => setEventsForSession(sessionId, value)") &&
-    appSource.includes("applyProviderChatResponse(activeSessionId") &&
+    appSource.includes("applyProviderChatResponse(targetSessionId") &&
     appSource.includes("applyProviderChatResponse(persistedSession.id") &&
     !/applyProviderChatResponse\(persistedSession\.id,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
       appSource,
     ) &&
-    !/applyProviderChatResponse\(activeSessionId,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
+    !/applyProviderChatResponse\(targetSessionId,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
       appSource,
     ) &&
     appSource.includes("ProviderChatStreamEvent") &&
@@ -3538,13 +3536,22 @@ expect(
     tauriSource.includes("run_kimi_acp_chat") &&
     tauriSource.includes("spawn_provider_chat_heartbeat") &&
     surfaceSource.includes("function ChatMessageQueue") &&
+    surfaceSource.includes("gyro-chat-message-queue-wrap") &&
     surfaceSource.includes('aria-label="Queued message options"') &&
     surfaceSource.includes("gyro-chat-message-queue-menu") &&
     surfaceSource.includes("<span>Edit</span>") &&
     surfaceSource.includes("<span>Delete</span>") &&
     appSource.includes("const editQueuedChatMessage") &&
     appSource.includes("onEditQueuedMessage={editQueuedChatMessage}") &&
+    appSource.includes("const steerQueuedChatMessage") &&
+    appSource.includes("removeQueuedChatMessage(messageId)") &&
+    !appSource.includes('"Steering next"') &&
     styleSource.includes(".gyro-chat-message-queue-menu") &&
+    styleSource.includes(".gyro-chat-message-queue-wrap") &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-message-queue-wrap > .gyro-chat-message-queue",
+    ).some((rule) => rule.includes("width: 90%")) &&
     styleSource.includes(
       ".gyro-chat-message-queue:has(.gyro-chat-message-queue-menu)",
     ) &&
@@ -3621,7 +3628,9 @@ expect(
     surfaceSource.includes("const turnsById = new Map") &&
     surfaceSource.includes("isStreamingAssistantEvent") &&
     surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
-    surfaceSource.includes('{ kind: "ordered-list"; items: string[] }') &&
+    surfaceSource.includes(
+      '{ kind: "ordered-list"; items: string[]; start: number }',
+    ) &&
     runViewSource.includes("renderSay(step.text)") &&
     surfaceSource.includes("stripHiddenSessionTitleMarker") &&
     surfaceSource.includes("isHiddenSessionTitleActivity") &&
@@ -3653,6 +3662,7 @@ expect(
     styleSource.includes("@keyframes gyro-chat-composer-dock-enter") &&
     styleSource.includes("@keyframes gyro-chat-final-response-enter") &&
     surfaceSource.includes("isHiddenTranscriptEvent") &&
+    surfaceSource.includes('payload?.surface === "desktop-ide"') &&
     surfaceSource.includes('"provider-diagnostics"') &&
     styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
@@ -3842,7 +3852,7 @@ expect(
   appSource.includes('"New chat"') &&
     appSource.includes("normalizeSessionTitleInput") &&
     appSource.includes(
-      "updateSessionTitle(activeSessionId, provisionalTitle",
+      "updateSessionTitle(targetSessionId, provisionalTitle",
     ) &&
     styleSource.includes(".gyro-session-row.is-active .gyro-session-actions") &&
     styleSource.includes(
@@ -3907,22 +3917,23 @@ expect(
   !surfaceSource.includes("mock-polish") &&
     !surfaceSource.includes("mock-shell") &&
     surfaceSource.includes('aria-label="No terminal panes"') &&
-    surfaceSource.includes('"gyro-terminal-workspace is-empty"') &&
+    surfaceSource.includes('"gyro-terminal-workspace"') &&
+    surfaceSource.includes('"is-empty"') &&
     surfaceSource.includes("gyro-terminal-toolbar is-empty") &&
     surfaceSource.includes("AgentLauncherMenu") &&
     surfaceSource.includes('className="gyro-terminal-agent-button"') &&
     surfaceSource.includes(
       'hasPanes ? (\n          <div className="gyro-terminal-tools">',
     ) &&
-    styleSource.includes(".gyro-terminal-toolbar.is-empty") &&
-    styleSource.includes("align-self: center") &&
-    styleSource.includes("justify-self: center") &&
-    styleSource.includes("var(--gyro-premium-hairline-strong)") &&
-    styleSource.includes(".gyro-terminal-preset-button > svg") &&
-    styleSource.includes("flex: 0 0 auto") &&
-    styleSource.includes("padding: 0 12px") &&
+    surfaceSource.includes("gyro-terminal-empty-icon") &&
+    surfaceSource.includes("Terminal workspace") &&
+    surfaceSource.includes("Start where the work is") &&
+    styleSource.includes(
+      ".gyro-terminal-workspace.is-empty .gyro-terminal-empty",
+    ) &&
+    styleSource.includes(".gyro-terminal-empty-icon") &&
     surfaceSource.includes("<Plus size={14} />"),
-  "CLI empty state should center only the two launch controls.",
+  "CLI empty state should orient users and keep launch controls available.",
 );
 expect(
   surfaceSource.includes("const canStopActivePane =") &&
@@ -4408,6 +4419,9 @@ expect(
     chatSidebarSource.includes("gyro-sidebar-project-chat-list") &&
     chatSidebarSource.includes("Pinned") &&
     chatSidebarSource.includes("Projects") &&
+    chatSidebarSource.includes("Recents") &&
+    chatSidebarSource.includes("gyro-sidebar-recents") &&
+    chatSidebarSource.includes("No Chats") &&
     chatSidebarSource.includes(
       "pinnedSessions.map((session) => renderSessionRow(session))",
     ) &&
@@ -4430,6 +4444,11 @@ expect(
     !chatSidebarSource.includes("Local CLI") &&
     !chatSidebarSource.includes("<small>Start one</small>") &&
     chatSidebarSource.includes("onOpenWorkspace();") &&
+    surfaceSource.includes("const unprojectedRecentSessions") &&
+    surfaceSource.includes(
+      "!isUserSelectedWorkspacePath(session.workspacePath)",
+    ) &&
+    styleSource.includes(".gyro-sidebar-recents-empty") &&
     !chatSidebarSource.includes("Scheduled") &&
     !chatSidebarSource.includes("Plugins") &&
     !chatSidebarSource.includes('title="Projects"') &&
@@ -4951,6 +4970,13 @@ expect(
   "First chat should default to a clean Codex-style thread with a fixed full-width topbar, provider status recovery, and matching docked composer.",
 );
 expect(
+  surfaceSource.includes("function safeAssistantLinkUrl") &&
+    surfaceSource.includes("onOpenBrowserUrl={onBrowserNavigate}") &&
+    surfaceSource.includes("onOpenBrowserUrl(href)") &&
+    surfaceSource.includes('target={onOpenBrowserUrl ? undefined : "_blank"}'),
+  "Reply links should open Gyro's Browser rail instead of navigating the app webview.",
+);
+expect(
   /:root\[data-theme="dark"\] \.gyro-chat-surface:not\(\.is-empty\),[\s\S]*?\.gyro-chat-composer-dock \{\s*background: var\(--gyro-app\);\s*\}/.test(
     styleSource,
   ),
@@ -5081,9 +5107,9 @@ expect(
     appSource.includes('title: "Select file"') &&
     appSource.includes("relativeFilePath") &&
     appSource.includes("isUserSelectedWorkspacePath(chatWorkspacePath)") &&
-    appSource.includes(
-      '"Select the folder Gyro should use before starting this chat."',
-    ) &&
+    appSource.includes('"Council needs a folder before starting a chat."') &&
+    appSource.includes('case "select-no-folder":') &&
+    appSource.includes('startNewChat({ workspacePath: "" })') &&
     appSource.includes("void openWorkspace();") &&
     appSource.includes('void selectChatAttachment("workspace-file");') &&
     appSource.includes('action.startsWith("start-new-chat-mode:")') &&
@@ -5120,7 +5146,9 @@ expect(
     surfaceSource.includes(
       "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
     ) &&
-    surfaceSource.includes("Choose a folder before sending") &&
+    surfaceSource.includes('action: "select-no-folder"') &&
+    surfaceSource.includes('label: "No folder"') &&
+    surfaceSource.includes("Choose a folder for Council") &&
     surfaceSource.includes("Connect a provider before sending") &&
     surfaceSource.includes("resolveCleanMachinePath") &&
     surfaceSource.includes("branchLabel") &&
@@ -5783,6 +5811,31 @@ expect(
   "Chat composer should expose a filtered, keyboard-accessible slash command menu whose actions are wired.",
 );
 expect(
+  ["/help", "/branch", "/review", "/test", "/diff", "/compact"].every(
+    (command) => surfaceSource.includes(`command: "${command}"`),
+  ) &&
+    surfaceSource.includes("description: string") &&
+    surfaceSource.includes("available?: boolean") &&
+    surfaceSource.includes("const availableSlashCommands") &&
+    surfaceSource.includes("const visibleSlashCommands") &&
+    surfaceSource.includes("const [isSlashHelpOpen, setIsSlashHelpOpen]") &&
+    surfaceSource.includes('command.command === "/help"') &&
+    surfaceSource.includes("canCompactContext = false") &&
+    surfaceSource.includes('cursor?.kind === "codex-session"') &&
+    surfaceSource.includes('event.key === "Enter" || event.key === "Tab"') &&
+    surfaceSource.includes('popover: "branch"') &&
+    surfaceSource.includes('title="Branches"') &&
+    appSource.includes('case "open-source-control":') &&
+    appSource.includes('case "run-workspace-test":') &&
+    appSource.includes('case "open-diff":') &&
+    appSource.includes('case "compact-context":') &&
+    appSource.includes("runIdeTask(testTask)") &&
+    desktopRustSource.includes("async fn compact_provider_chat") &&
+    desktopRustSource.includes('"thread/compact/start"') &&
+    desktopRustSource.includes("run_openai_codex_context_compaction"),
+  "Slash commands should discover and route workspace actions, while manual compaction remains Codex-only and visible through its lifecycle.",
+);
+expect(
   styleSource.includes(".gyro-composer-context-wheel") &&
     /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
@@ -5812,7 +5865,7 @@ expect(
   surfaceSource.includes("function PlanDecisionCard") &&
     surfaceSource.includes("{isPlanReadyForDecision && sessionPlan ? (") &&
     surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes("<span>Implement this plan?</span>") &&
+    surfaceSource.includes("<strong>Ready to implement</strong>") &&
     surfaceSource.includes('onDecision("reject")') &&
     surfaceSource.includes('onDecision("approve")') &&
     surfaceSource.includes('className="gyro-plan-artifact-actions"') &&
@@ -5820,10 +5873,10 @@ expect(
     surfaceSource.includes("Yes, implement") &&
     surfaceSource.includes('onPlanDecision?.("approve")') &&
     surfaceSource.includes('activePanel === "plan" && sessionPlan?.content') &&
-    surfaceSource.includes(
-      "<PlanDocument content={sessionPlan.content} title={sessionPlan.title}",
-    ) &&
+    surfaceSource.includes("content={sessionPlan.content}") &&
+    surfaceSource.includes("title={sessionPlan.title}") &&
     surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
+    surfaceSource.includes('chatMode === "plan"') &&
     surfaceSource.includes("planDecisionKey !== dismissedPlanDecisionKey") &&
     surfaceSource.includes("!isComposerSending") &&
     appSource.includes("const handlePlanDecision = useCallback") &&

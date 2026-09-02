@@ -59,9 +59,9 @@ export type ChatCompanionState = {
 };
 
 /** The transcript remains the primary work surface, even with a wide tool open. */
-export const CHAT_COMPANION_MIN_WIDTH = 360;
+export const CHAT_COMPANION_MIN_WIDTH = 320;
 export const CHAT_COMPANION_MAX_WIDTH = 720;
-export const CHAT_COMPANION_DEFAULT_WIDTH = 520;
+export const CHAT_COMPANION_DEFAULT_WIDTH = 420;
 /** One deliberate keyboard nudge, large enough to be useful without jumping. */
 export const CHAT_COMPANION_KEYBOARD_STEP = 24;
 const CHAT_TRANSCRIPT_MIN_WIDTH = 480;

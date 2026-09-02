@@ -359,6 +359,8 @@ export type TerminalPane = {
   missionSessionId?: string;
   /** Short task label for the mission board (not the profile display name). */
   taskTitle?: string;
+  /** Run and Test task backed by this terminal, when the command stays live. */
+  workspaceTaskId?: string;
 };
 
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
@@ -2001,6 +2003,7 @@ export type GyroConfig = {
   requireCommandApproval: boolean;
   requireFileEditApproval: boolean;
   fullAccess?: boolean;
+  changeSummariesEnabled?: boolean;
   accountOidc?: GyroAccountOidcConfig;
   accountSession?: GyroAccountSession;
   selectedProviderId?: ProviderId;

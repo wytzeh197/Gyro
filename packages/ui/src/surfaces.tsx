@@ -60,6 +60,7 @@ import {
   Monitor,
   Palette,
   PanelBottom,
+  PanelLeft,
   PanelLeftClose,
   PanelRight,
   Paperclip,
@@ -1727,7 +1728,7 @@ export function AppChrome({
             title="Show sidebar"
             type="button"
           >
-            <LayoutPanelLeft size={14} />
+            <PanelLeft size={14} />
           </button>
           <WorkspacePreparationControl
             controlRef={workspacePreparationRef}
@@ -2351,10 +2352,11 @@ function SettingsSidebarContent({
           <div className="gyro-sidebar-window-actions">
             <button
               aria-label="Hide sidebar"
+              className="gyro-sidebar-toggle-button"
               onClick={onToggleSidebar}
               type="button"
             >
-              <PanelLeftClose size={13} />
+              <PanelLeft size={14} />
             </button>
             <button
               aria-label={`Back to ${backLabel}`}
@@ -3046,6 +3048,16 @@ function WorkspaceSidebarContent({
     );
     return sessionHasStartedForSidebar(session, { hasMissionWorkers });
   });
+  const projectSessions = recentSessions.filter((session) =>
+    isUserSelectedWorkspacePath(session.workspacePath),
+  );
+  const unprojectedRecentSessions = recentSessions
+    .filter((session) => !isUserSelectedWorkspacePath(session.workspacePath))
+    .sort(
+      (first, second) =>
+        new Date(second.updatedAt).getTime() -
+        new Date(first.updatedAt).getTime(),
+    );
   const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
   const [draggedSessionId, setDraggedSessionId] = useState<string>();
   const [newSessionMenuView, setNewSessionMenuView] = useState<
@@ -3081,12 +3093,12 @@ function WorkspaceSidebarContent({
   const discoveredSessionNavigation = useMemo(
     () =>
       sidebarProjectGroups(
-        recentSessions,
+        projectSessions,
         terminalPanes,
         savedProjects,
         workspacePath,
       ),
-    [recentSessions, savedProjects, terminalPanes, workspacePath],
+    [projectSessions, savedProjects, terminalPanes, workspacePath],
   );
   const discoveredProjectGroups = discoveredSessionNavigation;
   const [projectOrder, setProjectOrder] = useState<string[]>(() =>
@@ -3505,10 +3517,11 @@ function WorkspaceSidebarContent({
             {canHideSidebar ? (
               <button
                 aria-label="Hide sidebar"
+                className="gyro-sidebar-toggle-button"
                 onClick={onToggleSidebar}
                 type="button"
               >
-                <PanelLeftClose size={13} />
+                <PanelLeft size={14} />
               </button>
             ) : null}
             <button aria-label="Back" disabled type="button">
@@ -4959,6 +4972,16 @@ function WorkspaceSidebarContent({
                 </div>
               );
             })}
+            <section aria-label="Recent chats" className="gyro-sidebar-recents">
+              <div className="gyro-sidebar-small-title">Recents</div>
+              {unprojectedRecentSessions.length > 0 ? (
+                unprojectedRecentSessions.map((session) =>
+                  renderSessionRow(session),
+                )
+              ) : (
+                <div className="gyro-sidebar-recents-empty">No Chats</div>
+              )}
+            </section>
           </div>
         </>
       ) : null}
@@ -5745,7 +5768,7 @@ export function groupedRunTasks(
 function runTaskStatusCopy(task: TaskDefinition): string | undefined {
   switch (task.status) {
     case "running":
-      return "running";
+      return task.group === "dev" ? "live" : "running";
     case "done":
       return "passed";
     case "failed":
@@ -6889,27 +6912,27 @@ const chatStartSuggestions: Array<{
   {
     id: "explore",
     icon: Telescope,
-    label: "Explore and understand code",
+    label: "Explore code",
     prompt:
       "Explore this project and explain how it fits together — entry points, the main modules, and how they talk to each other.",
   },
   {
     id: "build",
     icon: Hammer,
-    label: "Build a new feature, app, or tool",
+    label: "Build a feature",
     prompt: "Build ",
   },
   {
     id: "review",
     icon: GitPullRequestArrow,
-    label: "Review code and suggest changes",
+    label: "Review code",
     prompt:
       "Review the changes on this branch: correctness first, then anything worth simplifying.",
   },
   {
     id: "fix",
     icon: Bug,
-    label: "Fix issues and failures",
+    label: "Fix issues",
     prompt: "Find and fix ",
   },
 ];
@@ -7278,6 +7301,7 @@ export function ChatSurface({
     ].join(":");
   }, [sessionPlan]);
   const isPlanReadyForDecision = Boolean(
+    chatMode === "plan" &&
     !isComposerSending &&
     planDecisionKey &&
     planDecisionKey !== dismissedPlanDecisionKey,
@@ -7425,6 +7449,19 @@ export function ChatSurface({
       ),
     [composerProviderUsage?.windows, contextModel, transcriptEvents],
   );
+  // Manual compaction is an explicit Codex app-server feature. A provider
+  // selection alone is not enough: wait until this chat owns a resumable
+  // Codex thread, otherwise the command would promise work it cannot do.
+  const canCompactContext = useMemo(
+    () =>
+      contextModel.providerId === "openai" &&
+      transcriptEvents.some((event) => {
+        const payload = recordFromUnknown(event.payload);
+        const cursor = recordFromUnknown(payload?.resumeCursor);
+        return cursor?.kind === "codex-session";
+      }),
+    [contextModel.providerId, transcriptEvents],
+  );
   const transcriptState = useMemo(
     () => deriveTranscriptState(transcriptEvents),
     [transcriptEvents],
@@ -7472,6 +7509,7 @@ export function ChatSurface({
             key={event.id}
             onCouncilAction={onCouncilAction}
             onMutationApprovalAction={onMutationApprovalAction}
+            onOpenBrowserUrl={onBrowserNavigate}
             onProviderApprovalAction={onProviderApprovalAction}
             onProviderStatusAction={onProviderStatusAction}
           />
@@ -7480,11 +7518,24 @@ export function ChatSurface({
           <ChatTurn
             artifactActions={{
               onOpenFiles: () => onComposerAction?.("open-files"),
-              onOpenTool: onOpenToolPanel,
+              // A changed-file card belongs with the conversation. Sending its
+              // diff through the generic workspace handler opens the bottom
+              // drawer (and can restore its last Terminal tab), which loses
+              // the file the reader just selected. Codex keeps this review in
+              // the adjacent panel, so route only diffs there; other artifacts
+              // still use their native tools.
+              onOpenTool: (tab) => {
+                if (tab === "diff" && onSelectChatPanel) {
+                  onSelectChatPanel("review");
+                  return;
+                }
+                onOpenToolPanel?.(tab);
+              },
               onOpenExternalPreview: () => onBrowserOpenExternal?.(),
               onSendPrompt: handleArtifactPrompt,
             }}
             isActive={turn.id === activeTurnId}
+            onOpenBrowserUrl={onBrowserNavigate}
             fileReview={
               isFileReviewEnabled
                 ? {
@@ -7505,7 +7556,14 @@ export function ChatSurface({
             }
             key={turn.id}
             onLoadChangeDiff={onLoadChangeDiff}
-            onOpenChanges={() => onOpenToolPanel?.("diff")}
+            onOpenChanges={(path) => {
+              if (path) railDiffTools?.onSelectFile?.(path);
+              if (onSelectChatPanel) {
+                onSelectChatPanel("review");
+                return;
+              }
+              onOpenToolPanel?.("diff");
+            }}
             onUndoChanges={railDiffTools?.onUndo}
             onCouncilAction={onCouncilAction}
             onMutationApprovalAction={onMutationApprovalAction}
@@ -7543,6 +7601,7 @@ export function ChatSurface({
     ),
     [
       onMutationApprovalAction,
+      onBrowserNavigate,
       onBrowserOpenExternal,
       onComposerAction,
       onCouncilAction,
@@ -7554,9 +7613,11 @@ export function ChatSurface({
       onFileReviewKeep,
       onLoadChangeDiff,
       onOpenToolPanel,
+      onSelectChatPanel,
       onProviderApprovalAction,
       onProviderStatusAction,
       railDiffTools?.onUndo,
+      railDiffTools?.onSelectFile,
       handlePlanDecision,
       handleArtifactPrompt,
       browserPreview?.latestCapture?.path,
@@ -7663,6 +7724,7 @@ export function ChatSurface({
       ) : railPanel === "side-chat" ? (
         <SideChatPanel
           branchName={branchName}
+          onOpenBrowserUrl={onBrowserNavigate}
           sideChat={sideChat}
           workspacePath={workspacePath}
         />
@@ -7782,6 +7844,7 @@ export function ChatSurface({
             providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
             limitWindows={composerLimits}
+            canCompactContext={canCompactContext}
             savedProjects={savedProjects}
             shellReady={shellReady}
             isCliUpdating={isCliUpdating}
@@ -7801,6 +7864,7 @@ export function ChatSurface({
             sessionUsage={sessionUsage}
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
+            stabilizeEmptyHeight={isTiled}
           />
           <CleanMachineActivation
             showLegacySteps={showOnboardingSteps}
@@ -8072,12 +8136,14 @@ export function ChatSurface({
             </button>
           ) : null}
           {queuedMessages.length > 0 ? (
-            <ChatMessageQueue
-              messages={queuedMessages}
-              onEditMessage={onEditQueuedMessage}
-              onRemoveMessage={onRemoveQueuedMessage}
-              onSteerMessage={onSteerQueuedMessage}
-            />
+            <div className="gyro-chat-message-queue-wrap">
+              <ChatMessageQueue
+                messages={queuedMessages}
+                onEditMessage={onEditQueuedMessage}
+                onRemoveMessage={onRemoveQueuedMessage}
+                onSteerMessage={onSteerQueuedMessage}
+              />
+            </div>
           ) : null}
           {isPlanReadyForDecision && sessionPlan ? (
             <PlanDecisionCard
@@ -8107,6 +8173,7 @@ export function ChatSurface({
             providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
             limitWindows={composerLimits}
+            canCompactContext={canCompactContext}
             savedProjects={savedProjects}
             shellReady={shellReady}
             isCliUpdating={isCliUpdating}
@@ -8125,6 +8192,7 @@ export function ChatSurface({
             sessionUsage={sessionUsage}
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
+            stabilizeEmptyHeight={isTiled}
             popoverPlacement="up"
             showContextRow={false}
             variant="hero"
@@ -8136,8 +8204,8 @@ export function ChatSurface({
   );
 }
 
-/** Steps shown before the card defers to the plan document. */
-const PLAN_DECISION_VISIBLE_STEPS = 5;
+/** Keep approval focused: the full document remains one click away. */
+const PLAN_DECISION_VISIBLE_STEPS = 3;
 
 function PlanDecisionCard({
   isPending,
@@ -8166,9 +8234,19 @@ function PlanDecisionCard({
           <ListChecks size={14} />
         </span>
         <div>
-          <strong>{plan.title || "Implementation plan"}</strong>
-          <small>{stepLabel} · read-only until you approve</small>
+          <strong>Ready to implement</strong>
+          <small>
+            {plan.title ? `${plan.title} · ` : ""}
+            {stepLabel}
+          </small>
         </div>
+        <button
+          className="gyro-plan-decision-open"
+          onClick={onOpenPlan}
+          type="button"
+        >
+          Review plan
+        </button>
       </header>
       {visibleItems.length > 0 ? (
         <ol>
@@ -8208,25 +8286,22 @@ function PlanDecisionCard({
         </button>
       ) : null}
       <footer>
-        <span>Implement this plan?</span>
-        <div>
-          <button
-            className="is-secondary"
-            disabled={isPending}
-            onClick={() => onDecision("reject")}
-            type="button"
-          >
-            No, keep planning
-          </button>
-          <button
-            className="is-primary"
-            disabled={isPending}
-            onClick={() => onDecision("approve")}
-            type="button"
-          >
-            {isPending ? "Starting…" : "Yes, implement"}
-          </button>
-        </div>
+        <button
+          className="is-secondary"
+          disabled={isPending}
+          onClick={() => onDecision("reject")}
+          type="button"
+        >
+          Keep planning
+        </button>
+        <button
+          className="is-primary"
+          disabled={isPending}
+          onClick={() => onDecision("approve")}
+          type="button"
+        >
+          {isPending ? "Starting…" : "Implement plan"}
+        </button>
       </footer>
       {isPending ? (
         <span aria-hidden="true" className="gyro-plan-decision-progress" />
@@ -8235,11 +8310,21 @@ function PlanDecisionCard({
   );
 }
 
-function PlanDocument({ content, title }: { content: string; title: string }) {
-  const visibleContent = content
-    .replace(/^\s*<proposed_plan>\s*$/gim, "")
-    .replace(/^\s*<\/proposed_plan>\s*$/gim, "")
-    .trim();
+function PlanDocument({
+  content,
+  title,
+  onOpenBrowserUrl,
+}: {
+  content: string;
+  title: string;
+  onOpenBrowserUrl?: (url: string) => void;
+}) {
+  const visibleContent = normalizePlanDocumentOrderedSteps(
+    content
+      .replace(/^\s*<proposed_plan>\s*$/gim, "")
+      .replace(/^\s*<\/proposed_plan>\s*$/gim, "")
+      .trim(),
+  );
   const blocks = useMemo(
     () => assistantResponseBlocks(visibleContent),
     [visibleContent],
@@ -8255,17 +8340,18 @@ function PlanDocument({ content, title }: { content: string; title: string }) {
         block.kind === "heading" ? (
           index === firstHeadingIndex ? (
             <h1 key={`plan-heading-${index}`}>
-              {renderAssistantInlineContent(block.content)}
+              {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
             </h1>
           ) : (
             <h2 key={`plan-heading-${index}`}>
-              {renderAssistantInlineContent(block.content)}
+              {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
             </h2>
           )
         ) : (
           <AssistantResponseBlockView
             block={block}
             key={`${block.kind}-${index}`}
+            onOpenBrowserUrl={onOpenBrowserUrl}
           />
         ),
       )}
@@ -8273,11 +8359,34 @@ function PlanDocument({ content, title }: { content: string; title: string }) {
   );
 }
 
+/**
+ * Plan prose often contains a bullet list between top-level steps. Browsers
+ * restart every separate ordered list at one, and a few model responses also
+ * repeat "1.". Normalize only zero-indent plan steps so the document has one
+ * continuous, readable sequence without touching nested lists.
+ */
+function normalizePlanDocumentOrderedSteps(content: string) {
+  let previousStep = 0;
+  return content
+    .split("\n")
+    .map((line) => {
+      const match = line.match(/^(\s*)(\d+)([.)])(\s+.+)$/);
+      if (!match || match[1] !== "") return line;
+      const currentStep = Number(match[2]);
+      const nextStep =
+        currentStep <= previousStep ? previousStep + 1 : currentStep;
+      previousStep = nextStep;
+      return `${nextStep}${match[3]}${match[4]}`;
+    })
+    .join("\n");
+}
+
 function PlanArtifactCard({
   content,
   isOpen,
   isPending,
   onOpen,
+  onOpenBrowserUrl,
   onPlanDecision,
   showDecision,
   stepCount,
@@ -8287,6 +8396,7 @@ function PlanArtifactCard({
   isOpen: boolean;
   isPending: boolean;
   onOpen?: () => void;
+  onOpenBrowserUrl?: (url: string) => void;
   onPlanDecision?: (decision: "approve" | "reject") => void;
   showDecision: boolean;
   stepCount?: number;
@@ -8320,7 +8430,11 @@ function PlanArtifactCard({
           </span>
         </button>
         <div className="gyro-plan-artifact-preview">
-          <PlanDocument content={content} title={title} />
+          <PlanDocument
+            content={content}
+            onOpenBrowserUrl={onOpenBrowserUrl}
+            title={title}
+          />
         </div>
         {/* The preview fades out mid-document; this row is the read-more the
             fade implies, since the preview itself is not clickable. */}
@@ -8728,7 +8842,11 @@ function ChatSurfaceControls({
           <span className="gyro-chat-surface-button-label">Panel</span>
         </button>
       ) : null}
-      <div className="gyro-chat-surface-menu-anchor">
+      <div
+        className="gyro-chat-surface-menu-anchor"
+        onFocusCapture={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <button
           aria-expanded={openMenu === "launcher"}
           aria-haspopup="menu"
@@ -9139,7 +9257,11 @@ function ChatSidePanel({
             <X size={14} />
           </button>
         </header>
-        <PlanDocument content={sessionPlan.content} title={sessionPlan.title} />
+        <PlanDocument
+          content={sessionPlan.content}
+          onOpenBrowserUrl={onBrowserNavigate}
+          title={sessionPlan.title}
+        />
       </aside>
     );
   }
@@ -9647,6 +9769,7 @@ function ChatCompanionDock({
         type="button"
       />
       <header className="gyro-chat-companion-tabs">
+        <span className="gyro-chat-companion-context">Environment</span>
         <div className="gyro-chat-companion-tab-list" role="tablist">
           {openTabs.map((id) => {
             const Icon = chatCompanionTabIcons[id];
@@ -9892,10 +10015,12 @@ function CompanionFiles({
  */
 function SideChatPanel({
   branchName,
+  onOpenBrowserUrl,
   sideChat,
   workspacePath,
 }: {
   branchName?: string;
+  onOpenBrowserUrl?: (url: string) => void;
   sideChat?: SideChatState;
   workspacePath?: string;
 }) {
@@ -9947,6 +10072,7 @@ function SideChatPanel({
                         <AssistantResponseBlockView
                           block={block}
                           key={`${block.kind}-${index}`}
+                          onOpenBrowserUrl={onOpenBrowserUrl}
                         />
                       ),
                     )}
@@ -10140,21 +10266,24 @@ function ChatContextSection({
           <ComposerPopover
             id={`${popoverBaseId}-project`}
             items={[
+              ...(hasUserWorkspace && workspacePath
+                ? [
+                    {
+                      action: `select-saved-project:${encodeURIComponent(workspacePath)}`,
+                      active: true,
+                      detail: workspacePath,
+                      icon: Folder,
+                      label: projectLabel,
+                      removeAction: `remove-saved-project:${encodeURIComponent(workspacePath)}`,
+                    },
+                  ]
+                : []),
               {
-                action: hasUserWorkspace
-                  ? `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`
-                  : "select-workspace",
-                active: hasUserWorkspace,
-                detail:
-                  hasUserWorkspace && workspacePath
-                    ? workspacePath
-                    : "Select the folder Gyro should use",
-                icon: hasUserWorkspace ? Folder : HardDrive,
-                label: projectLabel,
-                removeAction:
-                  hasUserWorkspace && workspacePath
-                    ? `remove-saved-project:${encodeURIComponent(workspacePath)}`
-                    : undefined,
+                action: "select-no-folder",
+                active: !hasUserWorkspace,
+                detail: "Chat without a project folder",
+                icon: HardDrive,
+                label: "No folder",
               },
               ...savedProjectItems.filter(
                 (project) =>
@@ -12852,6 +12981,7 @@ export function TerminalPanel({
   onTerminalUtilityAction,
   onRefreshTerminalSourceControl,
   onReviewTerminalChanges,
+  onWriteTerminalInput,
   renderTerminalPaneBody,
 }: TerminalPanelProps) {
   const panes = terminalPanes ?? [];
@@ -12868,6 +12998,7 @@ export function TerminalPanel({
   );
   const canStopActivePane =
     activePane?.status === "running" || activePane?.status === "waiting";
+  const connectionIssue = terminalConnectionIssue(activePane?.output);
   const waitingPanes = panes.filter((pane) => pane.attention === "waiting");
   const failedPanes = panes.filter((pane) => pane.attention === "failed");
   const presetLabel = cliLaunchPreset
@@ -12891,11 +13022,13 @@ export function TerminalPanel({
   };
   return (
     <div
-      className={
-        hasPanes
-          ? "gyro-terminal-workspace"
-          : "gyro-terminal-workspace is-empty"
-      }
+      className={[
+        "gyro-terminal-workspace",
+        hasPanes ? "" : "is-empty",
+        connectionIssue ? "has-connection-issue" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <div
         className={
@@ -12919,6 +13052,18 @@ export function TerminalPanel({
           <Plus size={14} />
           <span>{isLaunchingCliPreset ? "Starting" : presetLabel}</span>
         </button>
+        {hasPanes && activePane ? (
+          <div className="gyro-terminal-session-summary">
+            <span
+              aria-hidden="true"
+              className={`gyro-ring is-${activePane.attention ?? activePane.status}`}
+            />
+            <strong>{activePane.title}</strong>
+            <small>
+              {activePane.profileId} · {activePane.branch || "workspace"}
+            </small>
+          </div>
+        ) : null}
         <span className="gyro-terminal-toolbar-spacer" />
         {hasPanes ? (
           <div className="gyro-terminal-awareness" aria-label="CLI awareness">
@@ -13011,6 +13156,16 @@ export function TerminalPanel({
           </div>
         ) : null}
       </div>
+      {connectionIssue ? (
+        <TerminalConnectionNotice
+          issue={connectionIssue}
+          onRunSignIn={
+            connectionIssue.command && onWriteTerminalInput
+              ? () => onWriteTerminalInput(`${connectionIssue.command}\r`)
+              : undefined
+          }
+        />
+      ) : null}
       <div className="gyro-terminal-grid" aria-label="Terminal grid">
         {panes.length > 0 ? (
           panes.map((pane) => (
@@ -13045,10 +13200,78 @@ export function TerminalPanel({
             />
           ))
         ) : (
-          <div className="gyro-terminal-empty" aria-label="No terminal panes" />
+          <section
+            className="gyro-terminal-empty"
+            aria-label="No terminal panes"
+          >
+            <span aria-hidden="true" className="gyro-terminal-empty-icon">
+              <Terminal size={20} />
+            </span>
+            <div>
+              <span className="gyro-terminal-empty-eyebrow">
+                Terminal workspace
+              </span>
+              <strong>Start where the work is</strong>
+              <p>
+                Launch a CLI to work in this project with its session and
+                workspace context already in place.
+              </p>
+            </div>
+            <span className="gyro-terminal-empty-hint">
+              Choose a CLI above or start a new terminal.
+            </span>
+          </section>
         )}
       </div>
     </div>
+  );
+}
+
+type TerminalConnectionIssue = {
+  command?: string;
+  server?: string;
+};
+
+function terminalConnectionIssue(
+  output?: string,
+): TerminalConnectionIssue | undefined {
+  if (
+    !output ||
+    !/mcp startup incomplete|mcp server is not logged in/i.test(output)
+  ) {
+    return undefined;
+  }
+  const server = output.match(
+    /(?:mcp server|failed:\s*)([a-z0-9][a-z0-9._-]*)/i,
+  )?.[1];
+  const command = output.match(/run\s*[`']([^`']+)[`']/i)?.[1];
+  return { command, server };
+}
+
+function TerminalConnectionNotice({
+  issue,
+  onRunSignIn,
+}: {
+  issue: TerminalConnectionIssue;
+  onRunSignIn?: () => void;
+}) {
+  const serviceLabel = issue.server ?? "an MCP service";
+  return (
+    <aside className="gyro-terminal-connection-notice" role="status">
+      <TriangleAlert aria-hidden="true" size={15} />
+      <div>
+        <strong>Sign in to {serviceLabel}</strong>
+        <span>
+          This CLI session started without an authenticated connection.
+        </span>
+      </div>
+      {onRunSignIn ? (
+        <button onClick={onRunSignIn} type="button">
+          Run sign-in
+          <ArrowRight size={13} />
+        </button>
+      ) : null}
+    </aside>
   );
 }
 
@@ -13363,7 +13586,9 @@ function WorkbenchPaneContent({
           <span>{activeChannel?.label ?? "Output"}</span>
         </header>
         <pre>
-          {(activeChannel?.lines ?? ["No output channel selected."]).join("\n")}
+          {formatOutputForDisplay(
+            (activeChannel?.lines ?? ["No output channel selected."]).join("\n"),
+          )}
         </pre>
       </section>
     );
@@ -13402,6 +13627,17 @@ function WorkbenchPaneContent({
       renderTerminalPaneBody={renderTerminalPaneBody}
     />
   );
+}
+
+/**
+ * Commands captured without a PTY can still emit ANSI control codes. The
+ * terminal renderer understands them; the plain Output pane must remove them
+ * rather than exposing escape bytes as visible garbage.
+ */
+export function formatOutputForDisplay(output: string) {
+  return output
+    .replace(/(?:\u001b|\u009b|\ufffd)\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, "")
+    .replace(/(?:\u001b|\u009b|\ufffd)\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 type WorkspaceToolPanelProps = {
@@ -18554,6 +18790,23 @@ export function SettingsSurface({
                 />
               </SettingsRow>
             </SettingsGroup>
+            <SettingsGroup label="Review details">
+              <SettingsRow
+                label="Post-edit summaries"
+                detail="Uses one extra provider call after an edited turn to describe each changed file."
+              >
+                <SettingsSwitch
+                  label="Generate post-edit summaries"
+                  checked={Boolean(config.changeSummariesEnabled)}
+                  onChange={(checked) =>
+                    onConfigChange?.({
+                      ...config,
+                      changeSummariesEnabled: checked,
+                    })
+                  }
+                />
+              </SettingsRow>
+            </SettingsGroup>
             <SettingsGroup label="Workspace protection">
               <SettingsRow
                 label="New chats start in"
@@ -19542,9 +19795,13 @@ type ComposerPopoverItem = {
 type ComposerSlashCommand = {
   command: string;
   label: string;
+  /** Concise copy shown in the full `/help` catalog. */
+  description: string;
   icon: IconComponent;
+  /** Commands whose provider or workspace cannot support them stay out of the menu. */
+  available?: boolean;
   action?: string;
-  popover?: Extract<ComposerPopoverId, "approval" | "provider">;
+  popover?: Extract<ComposerPopoverId, "approval" | "branch" | "provider">;
   /** Plain-language explainer shown when hovering the row's "?" marker. */
   hint?: string;
 };
@@ -20291,6 +20548,7 @@ function Composer({
   providerStatuses,
   providerUsage,
   limitWindows = [],
+  canCompactContext = false,
   onComposerAction,
   onCancelGoalComposer,
   sessionModel,
@@ -20311,6 +20569,7 @@ function Composer({
   shellReady = true,
   isCliUpdating = false,
   showContextRow,
+  stabilizeEmptyHeight = false,
   variant = "thread",
 }: {
   attachments?: ChatAttachment[];
@@ -20332,6 +20591,8 @@ function Composer({
   providerStatuses?: ProviderStatus[];
   providerUsage?: ProviderUsageState;
   limitWindows?: ComposerLimitWindow[];
+  /** This chat has a provider-backed context that can be compacted manually. */
+  canCompactContext?: boolean;
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
   sessionModel?: {
@@ -20365,6 +20626,8 @@ function Composer({
   isCliUpdating?: boolean;
   /** Defaults to the hero layout: project, mode, and branch only at the start. */
   showContextRow?: boolean;
+  /** Tiled panes keep an identical empty composer baseline. */
+  stabilizeEmptyHeight?: boolean;
   variant?: "thread" | "hero";
 }) {
   const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
@@ -20409,6 +20672,8 @@ function Composer({
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
+  /** `/help` keeps the catalog open after removing its inline trigger. */
+  const [isSlashHelpOpen, setIsSlashHelpOpen] = useState(false);
   // Hover explainer for a slash command. Positioned fixed against the "?"
   // marker so it can escape the menu's own scroll clipping.
   const [slashHint, setSlashHint] = useState<{
@@ -20518,10 +20783,17 @@ function Composer({
     if (!textarea) return;
 
     textarea.style.height = "auto";
-    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 52), 148);
+    const hasEmptyDraft = draft.trim().length === 0 && attachments.length === 0;
+    // Webview font/layout timing can make two otherwise identical empty
+    // textareas report scroll heights a few pixels apart. In a split this is
+    // conspicuous because their composer bottoms align, but their tops do not.
+    const nextHeight =
+      stabilizeEmptyHeight && hasEmptyDraft
+        ? 84
+        : Math.min(Math.max(textarea.scrollHeight, 52), 148);
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > 148 ? "auto" : "hidden";
-  }, [draft]);
+  }, [attachments.length, draft, stabilizeEmptyHeight]);
   const providerConfigs = providersForConfig(config);
   // Each chat pane may bind its own provider/model. Prefer that over the
   // workbench-wide selection so split-screen composers can diverge.
@@ -20878,8 +21150,17 @@ function Composer({
   ];
   const slashCommands: ComposerSlashCommand[] = [
     {
+      command: "/help",
+      description: "Browse every chat command",
+      icon: HelpCircle,
+      label: "Show command help",
+    },
+    {
       action: "add-goal",
       command: "/goal",
+      description: sessionGoal?.text
+        ? "Edit this chat's goal"
+        : "Set a goal for this chat",
       hint: "Say what a good result looks like, and Gyro keeps it in mind for the whole chat.",
       icon: Goal,
       label: sessionGoal?.text ? "Edit goal" : "Set goal",
@@ -20888,6 +21169,7 @@ function Composer({
       ? {
           action: "set-chat-mode-normal",
           command: "/normal",
+          description: "Return to normal chat mode",
           hint: "Go back to the usual way of working, where Gyro just does what you ask.",
           icon: Play,
           label: "Normal mode",
@@ -20895,6 +21177,7 @@ function Composer({
       : {
           action: "set-chat-mode-plan",
           command: "/plan",
+          description: "Plan before making changes",
           hint: "Gyro works out the steps and shows them to you first. Nothing on your computer changes until you agree.",
           icon: LockKeyhole,
           label: "Plan mode",
@@ -20907,6 +21190,7 @@ function Composer({
           {
             action: "set-chat-mode-council" as const,
             command: "/council",
+            description: "Ask several models for one answer",
             hint: "Asks several AI models the same question at the same time, then hands you one combined answer.",
             icon: Users,
             label: "Council mode",
@@ -20915,6 +21199,7 @@ function Composer({
     {
       action: "attach-editor-snapshot",
       command: "/editor",
+      description: "Attach the open editor file",
       hint: "Sends a copy of the file you have open, exactly as it looks right now.",
       icon: FileCode2,
       label: "Attach editor snapshot",
@@ -20922,24 +21207,28 @@ function Composer({
     {
       action: "select-image",
       command: "/image",
+      description: "Attach an image",
       icon: ImagePlus,
       label: "Attach image",
     },
     {
       action: "select-video",
       command: "/video",
+      description: "Attach a video",
       icon: Video,
       label: "Attach video",
     },
     {
       action: "select-file",
       command: "/file",
+      description: "Attach a workspace file",
       icon: Paperclip,
       label: "Attach file",
     },
     {
       action: "select-folder",
       command: "/folder",
+      description: "Choose the workspace folder",
       hint: "Pick the project folder this chat is allowed to work in.",
       icon: Folder,
       label: "Choose folder",
@@ -20947,17 +21236,20 @@ function Composer({
     {
       action: "search-workspace",
       command: "/search",
+      description: "Search workspace files",
       icon: Search,
       label: "Search workspace",
     },
     {
       command: "/model",
+      description: "Choose a provider and model",
       icon: Sparkles,
       label: "Choose model",
       popover: "provider",
     },
     {
       command: "/permissions",
+      description: "Change approval settings",
       hint: "Choose how often Gyro checks with you before it does something.",
       icon: ShieldCheck,
       label: "Change permissions",
@@ -20966,8 +21258,50 @@ function Composer({
     {
       action: "new-chat",
       command: "/new",
+      description: "Start a new chat",
       icon: Edit3,
       label: "New chat",
+    },
+    {
+      available: hasUserWorkspace,
+      command: "/branch",
+      description: "Create or switch a Git branch",
+      icon: GitBranch,
+      label: "Choose branch",
+      popover: "branch",
+    },
+    {
+      action: "open-source-control",
+      available: hasUserWorkspace,
+      command: "/review",
+      description: "Review current workspace changes",
+      icon: GitPullRequest,
+      label: "Review changes",
+    },
+    {
+      action: "run-workspace-test",
+      available: hasUserWorkspace,
+      command: "/test",
+      description: "Run the detected test task",
+      icon: Play,
+      label: "Run workspace tests",
+    },
+    {
+      action: "open-diff",
+      available: hasUserWorkspace,
+      command: "/diff",
+      description: "Open the current workspace diff",
+      icon: ScrollText,
+      label: "Show diff",
+    },
+    {
+      action: "compact-context",
+      available: canCompactContext,
+      command: "/compact",
+      description: "Summarize earlier conversation",
+      hint: "This keeps the important context while making room for the rest of the chat.",
+      icon: Archive,
+      label: "Compact context",
     },
   ];
   // What the next send is about to buy. A Council send is its seats plus a
@@ -21000,12 +21334,20 @@ function Composer({
     () => summarizeUsageSafety(usageSafety),
     [usageSafety],
   );
-  const slashMatch = isGoalComposerActive ? null : draft.match(/^\/([^\s/]*)$/);
+  // Slash commands work at the start of a draft and after whitespace, so a
+  // person can write naturally and then add `/plan`, `/image`, etc. Paths and
+  // URLs stay quiet because a slash in the middle of a word is not a command.
+  const slashMatch = isGoalComposerActive
+    ? null
+    : draft.match(/(?:^|\s)\/([^\s/]*)$/);
   const slashQuery = slashMatch?.[1]?.toLocaleLowerCase();
+  const availableSlashCommands = slashCommands.filter(
+    (command) => command.available !== false,
+  );
   const filteredSlashCommands =
     slashQuery === undefined
       ? []
-      : slashCommands.filter((command) => {
+      : availableSlashCommands.filter((command) => {
           const commandName = command.command.slice(1).toLocaleLowerCase();
           const labelWords = command.label.toLocaleLowerCase().split(/\s+/);
           return (
@@ -21013,17 +21355,23 @@ function Composer({
             labelWords.some((word) => word.startsWith(slashQuery))
           );
         });
+  const visibleSlashCommands = isSlashHelpOpen
+    ? availableSlashCommands
+    : filteredSlashCommands;
   const isSlashMenuOpen =
-    !isSlashMenuDismissed && filteredSlashCommands.length > 0;
+    !isSlashMenuDismissed && visibleSlashCommands.length > 0;
   // The slash menu is driven by the draft, so it stays open while the textarea
   // is in use and closes on a press anywhere outside the composer.
   const slashMenuScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
     isSlashMenuOpen,
-    () => setIsSlashMenuDismissed(true),
+    () => {
+      setIsSlashHelpOpen(false);
+      setIsSlashMenuDismissed(true);
+    },
   );
   const selectedSlashCommandIndex = Math.min(
     activeSlashCommandIndex,
-    Math.max(0, filteredSlashCommands.length - 1),
+    Math.max(0, visibleSlashCommands.length - 1),
   );
 
   const togglePopover = (popover: ComposerPopoverId) => {
@@ -21094,7 +21442,17 @@ function Composer({
     setSlashHint(undefined);
     setIsSlashMenuDismissed(true);
     setHistoryIndex(undefined);
-    onDraftChange("");
+    // Remove just the active `/command`, keeping the thought the person was
+    // already writing. The retained space makes the command feel like a small
+    // inline action instead of a destructive mode switch.
+    onDraftChange(draft.replace(/(^|\s)\/[^\s/]*$/, "$1"));
+    if (command.command === "/help") {
+      setIsSlashHelpOpen(true);
+      setIsSlashMenuDismissed(false);
+      composerTextareaRef.current?.focus();
+      return;
+    }
+    setIsSlashHelpOpen(false);
     if (command.popover) {
       setModelPickerProviderIdSticky(undefined);
       setActivePopover(command.popover);
@@ -21229,13 +21587,13 @@ function Composer({
   useEffect(() => {
     setActiveSlashCommandIndex(0);
     setSlashHint(undefined);
-  }, [slashQuery]);
+  }, [isSlashHelpOpen, slashQuery]);
 
   useEffect(() => {
-    if (activeSlashCommandIndex >= filteredSlashCommands.length) {
+    if (activeSlashCommandIndex >= visibleSlashCommands.length) {
       setActiveSlashCommandIndex(0);
     }
-  }, [activeSlashCommandIndex, filteredSlashCommands.length]);
+  }, [activeSlashCommandIndex, visibleSlashCommands.length]);
 
   useEffect(() => {
     if (isSlashMenuOpen) {
@@ -21368,7 +21726,13 @@ function Composer({
           onScroll={() => setSlashHint(undefined)}
           role="menu"
         >
-          {filteredSlashCommands.map((command, index) => {
+          {isSlashHelpOpen ? (
+            <header>
+              <strong>Chat commands</strong>
+              <span>↑↓ navigate · Tab select · Esc close</span>
+            </header>
+          ) : null}
+          {visibleSlashCommands.map((command, index) => {
             const Icon = command.icon;
             return (
               <button
@@ -21391,7 +21755,12 @@ function Composer({
               >
                 <Icon size={14} />
                 <code>{command.command}</code>
-                <span>{command.label}</span>
+                <span className="gyro-composer-slash-command-copy">
+                  <strong>{command.label}</strong>
+                  {isSlashHelpOpen ? (
+                    <small>{command.description}</small>
+                  ) : null}
+                </span>
                 {command.hint ? (
                   <>
                     <span
@@ -21410,6 +21779,31 @@ function Composer({
               </button>
             );
           })}
+        </div>
+      ) : null}
+      {activePopover === "branch" ? (
+        <div
+          className="gyro-composer-command-popover"
+          ref={activePopover === "branch" ? popoverScopeRef : undefined}
+        >
+          <ComposerPopover
+            align="end"
+            className="gyro-composer-branch-picker"
+            id={`${popoverBaseId}-branch`}
+            items={branchPopoverItems({
+              branchCatalog,
+              branchName:
+                branchName ??
+                (workspaceMode === "worktree" ? "New worktree branch" : "main"),
+              isDisabled: isSending,
+              isLoading: isBranchLoading,
+              workspaceMode,
+              workspacePath,
+            })}
+            onAction={runPopoverAction}
+            placement="up"
+            title="Branches"
+          />
         </div>
       ) : null}
       {effectiveProviderId ? (
@@ -21467,6 +21861,7 @@ function Composer({
         }}
         maxLength={isGoalComposerActive ? 240 : maxDraftLength}
         onChange={(event) => {
+          setIsSlashHelpOpen(false);
           setIsSlashMenuDismissed(false);
           onDraftChange(event.target.value);
         }}
@@ -21482,13 +21877,14 @@ function Composer({
               const direction = event.key === "ArrowDown" ? 1 : -1;
               setActiveSlashCommandIndex(
                 (current) =>
-                  (current + direction + filteredSlashCommands.length) %
-                  filteredSlashCommands.length,
+                  (current + direction + visibleSlashCommands.length) %
+                  visibleSlashCommands.length,
               );
               return;
             }
             if (event.key === "Escape") {
               event.preventDefault();
+              setIsSlashHelpOpen(false);
               setIsSlashMenuDismissed(true);
               return;
             }
@@ -21498,8 +21894,8 @@ function Composer({
               !event.nativeEvent.isComposing
             ) {
               const command =
-                filteredSlashCommands[selectedSlashCommandIndex] ??
-                filteredSlashCommands[0];
+                visibleSlashCommands[selectedSlashCommandIndex] ??
+                visibleSlashCommands[0];
               if (command) {
                 event.preventDefault();
                 runSlashCommand(command);
@@ -21990,12 +22386,12 @@ function Composer({
               ? "Stop response"
               : isGoalComposerActive
                 ? "Set goal"
-                : !hasUserWorkspace
-                  ? "Choose a folder before sending"
-                  : isCliUpdating
-                    ? "Wait for the CLI update to finish"
-                    : !hasReadyProvider
-                      ? "Connect a provider before sending"
+                : isCliUpdating
+                  ? "Wait for the CLI update to finish"
+                  : !hasReadyProvider
+                    ? "Connect a provider before sending"
+                    : chatMode === "council" && !hasUserWorkspace
+                      ? "Choose a folder for Council"
                       : isBranchLoading
                         ? "Wait for the branch switch to finish"
                         : isSending
@@ -22067,6 +22463,7 @@ function ComposerMediaPreview({ attachment }: { attachment: ChatAttachment }) {
 
 const ChatEvent = memo(function ChatEvent({
   event,
+  onOpenBrowserUrl,
   onCouncilAction,
   onMutationApprovalAction,
   onProviderApprovalAction,
@@ -22074,6 +22471,7 @@ const ChatEvent = memo(function ChatEvent({
   onReusePrompt,
 }: {
   event: SessionEvent;
+  onOpenBrowserUrl?: (url: string) => void;
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
@@ -22224,7 +22622,11 @@ const ChatEvent = memo(function ChatEvent({
           </div>
         )}
         {isAssistant ? (
-          <AssistantResponse event={event} onCouncilAction={onCouncilAction} />
+          <AssistantResponse
+            event={event}
+            onCouncilAction={onCouncilAction}
+            onOpenBrowserUrl={onOpenBrowserUrl}
+          />
         ) : isUser ? (
           <div className="gyro-user-message-bubble">
             <TranscriptAttachments event={event} />
@@ -22620,30 +23022,78 @@ function TranscriptAttachments({ event }: { event: SessionEvent }) {
         );
       })
     : [];
+  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment>();
+  useEffect(() => {
+    if (!previewAttachment) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewAttachment(undefined);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewAttachment]);
   if (!attachments.length) return null;
   return (
-    <div className="gyro-transcript-attachments">
-      {attachments.map((attachment) => (
-        <div
-          className={`gyro-transcript-attachment is-${attachment.kind}`}
-          key={attachment.id}
-        >
-          {attachment.kind === "image" && attachment.previewUrl ? (
-            <img alt="" src={attachment.previewUrl} />
-          ) : attachment.kind === "image" ? (
-            <ImagePlus size={14} />
-          ) : attachment.kind === "video" ? (
-            <Video size={14} />
-          ) : (
-            <FileText size={14} />
-          )}
-          <span>
-            <strong>{attachment.name}</strong>
-            <small>{formatAttachmentSize(attachment.size)}</small>
-          </span>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="gyro-transcript-attachments">
+        {attachments.map((attachment) => (
+          <div
+            className={`gyro-transcript-attachment is-${attachment.kind}`}
+            key={attachment.id}
+          >
+            {attachment.kind === "image" && attachment.previewUrl ? (
+              <button
+                aria-label={`Open ${attachment.name}`}
+                className="gyro-transcript-image-preview"
+                onClick={() => setPreviewAttachment(attachment)}
+                type="button"
+              >
+                <img alt="" src={attachment.previewUrl} />
+              </button>
+            ) : attachment.kind === "image" ? (
+              <ImagePlus size={14} />
+            ) : attachment.kind === "video" ? (
+              <Video size={14} />
+            ) : (
+              <FileText size={14} />
+            )}
+            <span>
+              <strong>{attachment.name}</strong>
+              <small>{formatAttachmentSize(attachment.size)}</small>
+            </span>
+          </div>
+        ))}
+      </div>
+      {previewAttachment?.previewUrl && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              aria-label={`Preview ${previewAttachment.name}`}
+              className="gyro-image-preview-overlay"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  setPreviewAttachment(undefined);
+                }
+              }}
+              role="dialog"
+            >
+              <figure>
+                <img
+                  alt={previewAttachment.name}
+                  src={previewAttachment.previewUrl}
+                />
+                <figcaption>{previewAttachment.name}</figcaption>
+                <button
+                  aria-label="Close image preview"
+                  onClick={() => setPreviewAttachment(undefined)}
+                  type="button"
+                >
+                  <X size={18} />
+                </button>
+              </figure>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -22946,6 +23396,7 @@ function ChatTurn({
   artifactActions,
   fileReview,
   isActive,
+  onOpenBrowserUrl,
   onLoadChangeDiff,
   onOpenChanges,
   onUndoChanges,
@@ -22975,8 +23426,9 @@ function ChatTurn({
     onAsk?: (path: string) => void;
   };
   isActive: boolean;
+  onOpenBrowserUrl?: (url: string) => void;
   onLoadChangeDiff?: (path: string) => Promise<string>;
-  onOpenChanges?: () => void;
+  onOpenChanges?: (path?: string) => void;
   onUndoChanges?: () => void;
   onMutationApprovalAction?: (
     proposalId: string,
@@ -23169,10 +23621,13 @@ function ChatTurn({
             <ChatEvent
               event={event}
               onMutationApprovalAction={onMutationApprovalAction}
+              onOpenBrowserUrl={onOpenBrowserUrl}
               onProviderApprovalAction={onProviderApprovalAction}
             />
           )}
-          renderSay={(text) => renderAssistantInlineContent(text)}
+          renderSay={(text) =>
+            renderAssistantInlineContent(text, onOpenBrowserUrl)
+          }
         />
         {responseEvent && shouldShowFinalResponse ? (
           <div
@@ -23192,6 +23647,7 @@ function ChatTurn({
                       isOpen={Boolean(isPlanPanelOpen)}
                       isPending={isPlanDecisionPending}
                       onOpen={onOpenPlan}
+                      onOpenBrowserUrl={onOpenBrowserUrl}
                       onPlanDecision={onPlanDecision}
                       showDecision={false}
                       stepCount={plan?.items.length}
@@ -23203,6 +23659,7 @@ function ChatTurn({
                         actions={artifactActions}
                         event={responseEvent}
                         onCouncilAction={onCouncilAction}
+                        onOpenBrowserUrl={onOpenBrowserUrl}
                         previewCapture={previewCapture}
                       />
                     </>
@@ -23265,7 +23722,7 @@ function ChatRunChangeSummary({
   onAsk?: (path: string) => void;
   onKeep?: (path: string, contentHash?: string) => void;
   onLoadChangeDiff?: (path: string) => Promise<string>;
-  onReview?: () => void;
+  onReview?: (path?: string) => void;
   onUndo?: () => void;
   summaries?: Map<string, FileReviewSummary>;
 }) {
@@ -23364,7 +23821,7 @@ function ChatRunChangeSummary({
               <div className="gyro-change-summary-file" key={file.path}>
                 {onReview ? (
                   <button
-                    onClick={onReview}
+                    onClick={() => onReview(file.path)}
                     title={`Review ${file.path}`}
                     type="button"
                   >
@@ -23391,7 +23848,7 @@ function ChatRunChangeSummary({
                     setOpenPath(isOpen ? undefined : file.path);
                     return;
                   }
-                  onReview?.();
+                  onReview?.(file.path);
                 }}
                 title={
                   canExpandDiff
@@ -23627,7 +24084,7 @@ type AssistantResponseBlock =
   | { kind: "commands"; items: string[] }
   | { kind: "heading"; content: string }
   | { kind: "list"; items: string[] }
-  | { kind: "ordered-list"; items: string[] }
+  | { kind: "ordered-list"; items: string[]; start: number }
   | { kind: "paragraph"; content: string };
 
 const ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS = 12_000;
@@ -23636,6 +24093,7 @@ function AssistantResponse({
   actions,
   event,
   onCouncilAction,
+  onOpenBrowserUrl,
   previewCapture,
 }: {
   actions?: ChatArtifactActions;
@@ -23643,6 +24101,7 @@ function AssistantResponse({
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
+  onOpenBrowserUrl?: (url: string) => void;
   previewCapture?: { src?: string; path?: string };
 }) {
   const council = useMemo(() => councilResponseFromEvent(event), [event]);
@@ -23671,6 +24130,7 @@ function AssistantResponse({
       <CouncilResponseCard
         event={event}
         onCouncilAction={onCouncilAction}
+        onOpenBrowserUrl={onOpenBrowserUrl}
         payload={council}
       />
     );
@@ -23682,6 +24142,7 @@ function AssistantResponse({
       <AssistantResponseBlockView
         block={block}
         key={`${block.kind}-${index}`}
+        onOpenBrowserUrl={onOpenBrowserUrl}
       />
     ))
   );
@@ -23762,12 +24223,14 @@ function CouncilResponseCard({
   event,
   payload,
   onCouncilAction,
+  onOpenBrowserUrl,
 }: {
   event: SessionEvent;
   payload: CouncilResponsePayload;
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
+  onOpenBrowserUrl?: (url: string) => void;
 }) {
   const [expandedSeatId, setExpandedSeatId] = useState<string | null>(null);
   const [seatBodies, setSeatBodies] = useState<Record<string, string>>({});
@@ -23942,6 +24405,7 @@ function CouncilResponseCard({
             <AssistantResponseBlockView
               block={block}
               key={`${block.kind}-${index}`}
+              onOpenBrowserUrl={onOpenBrowserUrl}
             />
           ))
         )}
@@ -23995,26 +24459,34 @@ function CouncilResponseCard({
 
 function AssistantResponseBlockView({
   block,
+  onOpenBrowserUrl,
 }: {
   block: AssistantResponseBlock;
+  onOpenBrowserUrl?: (url: string) => void;
 }) {
   if (block.kind === "heading") {
-    return <h3>{renderAssistantInlineContent(block.content)}</h3>;
+    return (
+      <h3>{renderAssistantInlineContent(block.content, onOpenBrowserUrl)}</h3>
+    );
   }
   if (block.kind === "list") {
     return (
       <ul>
         {block.items.map((item, index) => (
-          <li key={`${item}-${index}`}>{renderAssistantInlineContent(item)}</li>
+          <li key={`${item}-${index}`}>
+            {renderAssistantInlineContent(item, onOpenBrowserUrl)}
+          </li>
         ))}
       </ul>
     );
   }
   if (block.kind === "ordered-list") {
     return (
-      <ol>
+      <ol start={block.start}>
         {block.items.map((item, index) => (
-          <li key={`${item}-${index}`}>{renderAssistantInlineContent(item)}</li>
+          <li key={`${item}-${index}`}>
+            {renderAssistantInlineContent(item, onOpenBrowserUrl)}
+          </li>
         ))}
       </ol>
     );
@@ -24035,7 +24507,7 @@ function AssistantResponseBlockView({
       </pre>
     );
   }
-  return <p>{renderAssistantInlineContent(block.content)}</p>;
+  return <p>{renderAssistantInlineContent(block.content, onOpenBrowserUrl)}</p>;
 }
 
 function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
@@ -24043,6 +24515,7 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
   const paragraphLines: string[] = [];
   const listItems: string[] = [];
   const orderedListItems: string[] = [];
+  let orderedListStart = 1;
   const commandItems: string[] = [];
   const codeLines: string[] = [];
   let isInCodeBlock = false;
@@ -24068,8 +24541,13 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     if (orderedListItems.length === 0) {
       return;
     }
-    blocks.push({ kind: "ordered-list", items: [...orderedListItems] });
+    blocks.push({
+      kind: "ordered-list",
+      items: [...orderedListItems],
+      start: orderedListStart,
+    });
     orderedListItems.length = 0;
+    orderedListStart = 1;
   };
   const flushCommands = () => {
     if (commandItems.length === 0) {
@@ -24129,12 +24607,15 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
       continue;
     }
 
-    const orderedItem = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    const orderedItem = trimmed.match(/^(\d+)[.)]\s+(.+)$/);
     if (orderedItem) {
       flushParagraph();
       flushList();
       flushCommands();
-      orderedListItems.push(orderedItem[1] ?? "");
+      if (orderedListItems.length === 0) {
+        orderedListStart = Number(orderedItem[1]);
+      }
+      orderedListItems.push(orderedItem[2] ?? "");
       continue;
     }
 
@@ -24161,7 +24642,10 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
   return blocks.length > 0 ? blocks : [{ kind: "paragraph", content: message }];
 }
 
-function renderAssistantInlineContent(value: string): ReactNode[] {
+function renderAssistantInlineContent(
+  value: string,
+  onOpenBrowserUrl?: (url: string) => void,
+): ReactNode[] {
   return value
     .split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g)
     .filter(Boolean)
@@ -24178,11 +24662,22 @@ function renderAssistantInlineContent(value: string): ReactNode[] {
       }
       const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (link) {
+        const href = safeAssistantLinkUrl(link[2] ?? "");
+        if (!href) {
+          return <span key={`${part}-${index}`}>{link[1]}</span>;
+        }
         return (
           <a
             className="gyro-response-link"
-            href={link[2]}
+            href={href}
             key={`${part}-${index}`}
+            onClick={(event) => {
+              if (!onOpenBrowserUrl) return;
+              event.preventDefault();
+              onOpenBrowserUrl(href);
+            }}
+            rel="noreferrer"
+            target={onOpenBrowserUrl ? undefined : "_blank"}
           >
             {link[1]}
           </a>
@@ -24190,6 +24685,18 @@ function renderAssistantInlineContent(value: string): ReactNode[] {
       }
       return <span key={`${part}-${index}`}>{part}</span>;
     });
+}
+
+/** Model output may include arbitrary URLs; only web links belong in Browser. */
+function safeAssistantLinkUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function copyAssistantResponse(message: string) {
@@ -24326,6 +24833,12 @@ function isHiddenTranscriptEvent(event: SessionEvent) {
   const payload = eventPayloadRecord(event);
   const payloadKind = stringFromEventPayload(payload, "kind");
   const payloadSchema = stringFromEventPayload(payload, "schema");
+  // Opening or saving a file is workspace activity, not chat content. Keep
+  // these durable editor events for session context without replaying them as
+  // loose "system event" rows in the transcript.
+  if (event.kind === "system-event" && payload?.surface === "desktop-ide") {
+    return true;
+  }
   if (event.kind === "system-event" && payloadKind === "workspace-context") {
     return true;
   }
@@ -25024,7 +25537,7 @@ function isGeneratedGyroWorkspace(path?: string) {
 
 function composerProjectLabel(path?: string) {
   if (!path || isGeneratedGyroWorkspace(path)) {
-    return "Choose folder";
+    return "No folder";
   }
   return workspaceName(path);
 }

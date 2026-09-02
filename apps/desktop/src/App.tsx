@@ -30,6 +30,7 @@ import {
   ToolsSurface,
   WorkspaceToolPanel,
   activeChatCompanionTab,
+  chatProjectKey,
   chatCompanionPane,
   chatCompanionReducer,
   chatGridReducer,
@@ -60,7 +61,6 @@ import {
   workspaceFilesForRoot,
   workspaceRootForPath,
   workspacePathExcluded,
-  normalizedChatProjectKey,
   normalizedConfig,
   COUNCIL_COMING_SOON,
   normalizedCouncilConfig,
@@ -78,6 +78,7 @@ import {
   providersForConfig,
   resolveCleanMachinePath,
   resolvedWorkspaceSettings,
+  selectQueuedMessageDelivery,
   persistableChatGridState,
   sanitizeStoredIdeState,
   sanitizeStoredChatGridState,
@@ -308,6 +309,10 @@ type ProviderChatResponse = {
   statusEvent: SessionEvent;
 };
 
+type ProviderContextCompactionResponse = {
+  activityEvents?: SessionEvent[];
+};
+
 type CouncilChatInvokeResponse = {
   councilRun: CouncilRun;
   assistantEvent: SessionEvent;
@@ -342,6 +347,11 @@ type ChatTurnContextSnapshot = {
   sessionModel?: SessionModelSelection;
   requireCommandApproval?: boolean;
   requireFileEditApproval?: boolean;
+  /**
+   * Internal delivery target for queued turns. A queued message must keep
+   * running in its original chat after the user switches to another one.
+   */
+  sessionId?: string;
   fullAccess?: boolean;
   workspacePath?: string;
   workspaceContext?: WorkspaceContextSnapshot;
@@ -432,6 +442,7 @@ const EMPTY_CONFIG: GyroConfig = {
   requireCommandApproval: true,
   requireFileEditApproval: true,
   fullAccess: false,
+  changeSummariesEnabled: false,
   accountOidc: {
     issuerUrl: "local-device://gyro",
     clientId: "gyro-local-device",
@@ -1183,10 +1194,8 @@ export function App() {
     ];
   const currentChatProjectKey =
     chatGrid.activeProjectKey ??
-    normalizedChatProjectKey(activeSession?.workspacePath ?? workspacePath);
-  const activeChatLayout = currentChatProjectKey
-    ? chatGrid.layouts[currentChatProjectKey]
-    : undefined;
+    chatProjectKey(activeSession?.workspacePath ?? workspacePath);
+  const activeChatLayout = chatGrid.layouts[currentChatProjectKey];
   const displayedChatLayout =
     activeChatLayout ?? createChatProjectLayout(currentChatProjectKey);
   const activeChatPane = activeChatLayout?.slots.find(
@@ -1661,7 +1670,7 @@ export function App() {
     for (const layout of Object.values(chatGrid.layouts)) {
       if (
         removedProjectPaths.some(
-          (path) => normalizedChatProjectKey(path) === layout.projectKey,
+          (path) => chatProjectKey(path) === layout.projectKey,
         )
       ) {
         dispatchChatGrid({
@@ -1678,8 +1687,7 @@ export function App() {
         if (
           pane?.kind === "session" &&
           (!session ||
-            normalizedChatProjectKey(session.workspacePath) !==
-              layout.projectKey)
+            chatProjectKey(session.workspacePath) !== layout.projectKey)
         ) {
           dispatchChatGrid({
             type: "remove-session-pane",
@@ -1718,7 +1726,7 @@ export function App() {
       ) {
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: normalizedChatProjectKey(requestedSession.workspacePath),
+          projectKey: chatProjectKey(requestedSession.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(requestedSession),
         });
@@ -4353,6 +4361,87 @@ export function App() {
     [notify, workbench.preferences.workspaceTrust, workspaceActionRoot],
   );
 
+  const launchIdeDevTask = useCallback(
+    async (task: TaskDefinition, root: string) => {
+      const profile = getCommandProfile(commandProfiles, "shell");
+      const paneId = workspaceTaskTerminalPaneId(task.id);
+      const commandLine = terminalCommandLine(task);
+      const existingPane = workbench.terminalPanes.find(
+        (pane) => pane.id === paneId,
+      );
+      if (!existingPane) {
+        dispatchWorkbench({
+          type: "add-terminal-pane",
+          pane: createTerminalPane(paneId, profile, "running", {
+            ...workspaceRunMetadata("local", profile.displayName, root),
+            projectPath: root,
+            taskTitle: task.label,
+            workspaceTaskId: task.id,
+          }),
+        });
+      }
+      dispatchWorkbench({
+        type: "run-terminal-pane",
+        paneId,
+        profileId: profile.id,
+        command: commandLine,
+        output: `$ ${commandLine}\n`,
+      });
+      setTerminalOutput(`$ ${commandLine}\n`);
+
+      if (!isTauriRuntime()) {
+        return true;
+      }
+
+      try {
+        const snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: ["-lc", commandLine],
+              command: "zsh",
+              paneId,
+              profileId: profile.id,
+              title: task.label,
+              workspacePath: root,
+              workspaceMode: "local",
+              workingDirectory: "Workspace",
+            },
+          },
+        );
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId: snapshot.paneId,
+          command: snapshot.command,
+          projectPath: snapshot.workspacePath ?? root,
+          workingDirectory: snapshot.workingDirectory,
+          event:
+            snapshot.exitCode === null || snapshot.exitCode === undefined
+              ? snapshot.status
+              : `${snapshot.status} (${snapshot.exitCode})`,
+          output: snapshot.output ?? "",
+          status: terminalStatusFromSnapshot(snapshot.status),
+          hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+        });
+        terminalOutputRevisionRef.current[snapshot.paneId] =
+          snapshot.outputRevision;
+        setTerminalOutput(snapshot.output ?? "");
+        return true;
+      } catch (error) {
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId,
+          command: commandLine,
+          event: "process failed to start",
+          output: `Failed to start ${task.label}\n${String(error)}`,
+          status: "failed",
+        });
+        return false;
+      }
+    },
+    [commandProfiles, workbench.terminalPanes],
+  );
+
   const runIdeTask = useCallback(
     async (task: TaskDefinition) => {
       const root = workspaceActionRoot;
@@ -4406,6 +4495,15 @@ export function App() {
         }
       };
       setTaskStatus("running", task.group === "test" ? "running" : undefined);
+      // Dev servers and watchers run in a live PTY. They remain interactive,
+      // render ANSI output correctly, and are not cut short by task timeouts.
+      if (task.group === "dev") {
+        const started = await launchIdeDevTask(task, root);
+        if (!started) {
+          setTaskStatus("failed");
+        }
+        return;
+      }
       dispatchWorkbench({
         type: "ide-upsert-output-channel",
         channel: {
@@ -4471,6 +4569,7 @@ export function App() {
     },
     [
       notify,
+      launchIdeDevTask,
       workbench.ide.testTree,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
@@ -4491,6 +4590,37 @@ export function App() {
         });
         return;
       }
+      const terminalPane = workbench.terminalPanes.find(
+        (pane) => pane.workspaceTaskId === task.id,
+      );
+      if (terminalPane) {
+        try {
+          const snapshot = await invoke<TerminalPaneSnapshot>(
+            "stop_terminal_pane",
+            { paneId: terminalPane.id },
+          );
+          dispatchWorkbench({
+            type: "sync-terminal-pane-snapshot",
+            paneId: snapshot.paneId,
+            command: snapshot.command,
+            projectPath: snapshot.workspacePath,
+            workingDirectory: snapshot.workingDirectory,
+            event: "stopped",
+            output: snapshot.output ?? terminalPane.output,
+            status: terminalStatusFromSnapshot(snapshot.status),
+            hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+          });
+          dispatchWorkbench({
+            type: "ide-set-task-status",
+            taskId: task.id,
+            status: "cancelled",
+            lastRunAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          notify("command-failed", "Could not stop the command", String(error));
+        }
+        return;
+      }
       try {
         const stopped = await invoke<boolean>("task_cancel", {
           request: { workspacePath: root, taskId: task.id },
@@ -4506,7 +4636,7 @@ export function App() {
         notify("command-failed", "Could not stop the command", String(error));
       }
     },
-    [notify, workspaceActionRoot],
+    [notify, workbench.terminalPanes, workspaceActionRoot],
   );
 
   const createCustomIdeTask = useCallback(
@@ -5125,6 +5255,7 @@ export function App() {
    * a file records that it was read; it applies and reverts nothing.
    */
   const isFileReviewEnabled =
+    Boolean(config.changeSummariesEnabled) &&
     !config.fullAccess &&
     config.requireCommandApproval &&
     config.requireFileEditApproval;
@@ -5852,10 +5983,10 @@ export function App() {
     [notify, prepareWorkspace, refreshIdeServices],
   );
 
-  const openWorkspace = useCallback(async (): Promise<boolean> => {
+  const openWorkspace = useCallback(async (): Promise<string | undefined> => {
     if (!isTauriRuntime()) {
       await activateWorkspacePath(PREVIEW_WORKSPACE_PATH);
-      return true;
+      return PREVIEW_WORKSPACE_PATH;
     }
     try {
       const selected = await open({
@@ -5864,7 +5995,7 @@ export function App() {
         title: "Open workspace",
       });
       if (typeof selected !== "string") {
-        return false;
+        return undefined;
       }
       const trustPath = normalizedWorkspaceTrustPath(selected);
       if (!(trustPath in workbench.preferences.workspaceTrust)) {
@@ -5875,14 +6006,14 @@ export function App() {
         });
       }
       await activateWorkspacePath(selected);
-      return true;
+      return selected;
     } catch {
       notify(
         "command-failed",
         "Workspace open failed",
         "The current chat was left unchanged.",
       );
-      return false;
+      return undefined;
     }
   }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
 
@@ -6383,29 +6514,30 @@ export function App() {
   }, [createSession]);
 
   const startNewChat = useCallback(
-    (options: { keepLayout?: boolean } = {}) => {
+    (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
       suppressSessionAutoSelectRef.current = true;
-      const projectPath = activeSession?.workspacePath ?? workspacePath;
-      const projectKey = normalizedChatProjectKey(projectPath);
-      const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY;
+      const projectPath =
+        options.workspacePath === undefined
+          ? (activeSession?.workspacePath ?? workspacePath)
+          : options.workspacePath;
+      const projectKey = chatProjectKey(projectPath);
+      const draftKey = `new:${projectKey}`;
       const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
         layout.slots.some(
           (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
         ),
       );
-      if (projectKey && projectPath) {
-        dispatchChatGrid({
-          type: "select-pane",
-          projectKey,
-          mode: "replace",
-          pane: {
-            paneId: `draft:${projectKey}`,
-            kind: "draft",
-            draftKey,
-            workspacePath: projectPath,
-          },
-        });
-      }
+      dispatchChatGrid({
+        type: "select-pane",
+        projectKey,
+        mode: "replace",
+        pane: {
+          paneId: `draft:${projectKey}`,
+          kind: "draft",
+          draftKey,
+          workspacePath: projectPath ?? "",
+        },
+      });
       setIsStartingFirstTurn(false);
       activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
@@ -6439,6 +6571,28 @@ export function App() {
     ],
   );
 
+  /**
+   * A chat's folder is fixed at creation. Selecting a project from its
+   * context row therefore opens a fresh chat that is explicitly bound to the
+   * chosen folder, rather than only changing the surrounding Workspace view.
+   */
+  const selectChatWorkspace = useCallback(
+    async (savedPath?: string) => {
+      const selected = savedPath
+        ? savedPath
+        : await openWorkspace();
+      if (!selected) {
+        return false;
+      }
+      if (savedPath) {
+        await activateWorkspacePath(selected, "Project selected");
+      }
+      startNewChat({ workspacePath: selected });
+      return true;
+    },
+    [activateWorkspacePath, openWorkspace, startNewChat],
+  );
+
   const acknowledgeFinishedChat = useCallback((sessionId: string) => {
     setFinishedMenuBarOutcomes((current) =>
       current.filter(
@@ -6465,7 +6619,7 @@ export function App() {
       if (session) {
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: normalizedChatProjectKey(session.workspacePath),
+          projectKey: chatProjectKey(session.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(session),
         });
@@ -6667,7 +6821,7 @@ export function App() {
 
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
-      const projectKey = normalizedChatProjectKey(pane.workspacePath);
+      const projectKey = chatProjectKey(pane.workspacePath);
       const layout = chatGrid.layouts[projectKey];
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
@@ -6705,7 +6859,7 @@ export function App() {
     (sessionId: string) => {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) return;
-      const projectKey = normalizedChatProjectKey(session.workspacePath);
+      const projectKey = chatProjectKey(session.workspacePath);
       const layout = chatGrid.layouts[projectKey];
       const existingPane = layout?.slots.find(
         (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
@@ -6904,7 +7058,7 @@ export function App() {
     setRemovedProjectPaths(nextRemovedProjectPaths);
     dispatchChatGrid({
       type: "clear-project-layout",
-      projectKey: normalizedChatProjectKey(projectPath),
+      projectKey: chatProjectKey(projectPath),
     });
     setRecentProjectPaths((current) =>
       current.filter((path) => normalizeProjectPath(path) !== projectPath),
@@ -6966,6 +7120,7 @@ export function App() {
       missionSessionId,
       reveal = true,
       taskTitle,
+      workspaceTaskId,
     }: {
       commandOverride?: string;
       paneId?: string;
@@ -6977,6 +7132,7 @@ export function App() {
       /** Background tasks stay visible in the task rail until explicitly opened. */
       reveal?: boolean;
       taskTitle?: string;
+      workspaceTaskId?: string;
     }) => {
       const process = terminalProcessForProfile(profile, commandOverride);
       const existingPane = workbench.terminalPanes.find(
@@ -7016,6 +7172,7 @@ export function App() {
           projectPath: launchWorkspacePath,
           missionSessionId,
           taskTitle,
+          workspaceTaskId,
         });
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
@@ -8644,21 +8801,12 @@ export function App() {
       }
 
       if (action === "new-chat-select-workspace") {
-        void openWorkspace().then((selected) => {
-          if (selected) {
-            startNewChat();
-          }
-        });
+        void selectChatWorkspace();
         return;
       }
 
       if (action === "new-local-chat-select-workspace") {
-        void openWorkspace().then((selected) => {
-          if (selected) {
-            startNewChat();
-            dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
-          }
-        });
+        void selectChatWorkspace();
         return;
       }
 
@@ -8756,15 +8904,13 @@ export function App() {
         const encodedPath = action.replace("select-saved-project:", "");
         try {
           const selectedPath = decodeURIComponent(encodedPath);
-          void activateWorkspacePath(selectedPath, "Project selected").catch(
-            () => {
-              notify(
-                "command-failed",
-                "Project unavailable",
-                "The saved project folder could not be opened.",
-              );
-            },
-          );
+          void selectChatWorkspace(selectedPath).catch(() => {
+            notify(
+              "command-failed",
+              "Project unavailable",
+              "The saved project folder could not be opened.",
+            );
+          });
         } catch {
           notify(
             "command-failed",
@@ -8798,7 +8944,18 @@ export function App() {
         case "select-project":
         case "select-workspace":
         case "select-folder":
-          void openWorkspace();
+          void selectChatWorkspace();
+          break;
+        case "select-no-folder":
+          // A persisted chat keeps its original project for reproducibility.
+          // Selecting No folder therefore opens a fresh, detached draft rather
+          // than silently changing the context of an existing conversation.
+          setWorkspacePath(undefined);
+          setSelectedWorkspaceRoot(undefined);
+          setFiles([]);
+          setSelectedFile(undefined);
+          setBranchCatalog(undefined);
+          startNewChat({ workspacePath: "" });
           break;
         case "add-goal":
           dispatchWorkbench({ type: "set-chat-panel" });
@@ -8882,6 +9039,79 @@ export function App() {
         case "select-branch":
           void refreshWorkspaceBranches(currentWorkspacePath);
           break;
+        case "open-source-control":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          dispatchWorkbench({
+            type: "ide-select-view",
+            view: "source-control",
+          });
+          refreshSourceControl();
+          break;
+        case "run-workspace-test": {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          dispatchWorkbench({ type: "ide-select-view", view: "run-test" });
+          const testTask = workbench.ide.taskDefinitions.find(
+            (task) => task.group === "test",
+          );
+          if (!testTask) {
+            refreshIdeServices(currentWorkspacePath);
+            notify(
+              "command-failed",
+              "No test task detected",
+              "Open Run and Test to choose or add a workspace command.",
+            );
+            break;
+          }
+          void runIdeTask(testTask);
+          break;
+        }
+        case "open-diff":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          openToolPanel("diff");
+          break;
+        case "compact-context": {
+          if (!activeSessionId || activeSession?.providerId !== "openai") {
+            notify(
+              "command-failed",
+              "Context compaction unavailable",
+              "This command is available for resumable OpenAI chats.",
+            );
+            break;
+          }
+          if (sendingSessionIds.includes(activeSessionId)) {
+            notify(
+              "command-failed",
+              "Wait for the current response",
+              "Context can be compacted after the active turn finishes.",
+            );
+            break;
+          }
+          if (!isTauriRuntime()) {
+            break;
+          }
+          void invoke<ProviderContextCompactionResponse>(
+            "compact_provider_chat",
+            { sessionId: activeSessionId },
+          )
+            .then(() => refreshEvents(activeSessionId))
+            .catch((error) =>
+              notify(
+                "command-failed",
+                "Context compaction failed",
+                String(error),
+              ),
+            );
+          break;
+        }
         case "open-terminal-panel":
           openToolPanel("terminal");
           break;
@@ -8902,12 +9132,12 @@ export function App() {
       attachEditorSnapshot,
       activeChatMode,
       activeSession?.workspacePath,
-      activateWorkspacePath,
       checkProviderReadiness,
       changeChatMode,
       connectProvider,
       config,
       createWorkspaceBranch,
+      activeSessionId,
       isShellOptimizing,
       notify,
       openGlobalSearch,
@@ -8915,8 +9145,13 @@ export function App() {
       openToolPanel,
       openWorkspace,
       persistConfig,
+      refreshEvents,
+      refreshIdeServices,
+      refreshSourceControl,
       removeWorkspaceWorktree,
+      runIdeTask,
       savedProjects,
+      selectChatWorkspace,
       selectProvider,
       selectProviderModel,
       selectProviderReasoningEffort,
@@ -8924,7 +9159,9 @@ export function App() {
       refreshWorkspaceBranches,
       startNewChat,
       selectChatAttachment,
+      sendingSessionIds,
       sessions,
+      workbench.ide.taskDefinitions,
       workbench.workspaceMode,
       workspacePath,
     ],
@@ -9100,14 +9337,26 @@ export function App() {
       const requestedTurnGoal = overrideContext?.goal ?? activeSessionGoal;
       const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
+      const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const targetSession = targetSessionId
+        ? sessions.find((session) => session.id === targetSessionId)
+        : undefined;
+      const targetSessionHasTranscriptEvents = targetSessionId
+        ? (sessionEventsById[targetSessionId] ?? []).some(
+            (event) =>
+              event.kind === "user-message" ||
+              event.kind === "assistant-message",
+          )
+        : activeSessionHasTranscriptEvents;
+      const isBackgroundSend = Boolean(
+        targetSessionId && targetSessionId !== activeSessionId,
+      );
       const sessionModel = {
         ...selectedSessionModelFromConfig(config),
         // Prefer the model bound to this session or draft pane over the global
         // picker — required so split-screen chats keep independent models.
-        ...(activeSessionId
-          ? sessionModelSelectionFromSession(
-              sessions.find((session) => session.id === activeSessionId),
-            )
+        ...(targetSessionId
+          ? sessionModelSelectionFromSession(targetSession)
           : chatDraftModels[activeDraftKey]),
         ...overrideContext?.sessionModel,
       };
@@ -9124,7 +9373,7 @@ export function App() {
         overrideContext?.fullAccess ?? Boolean(config.fullAccess);
       const chatWorkspacePath =
         overrideContext?.workspacePath ??
-        activeSession?.workspacePath ??
+        targetSession?.workspacePath ??
         workspacePath;
       const turnWorkspaceContext =
         overrideContext?.workspaceContext ??
@@ -9153,15 +9402,15 @@ export function App() {
         );
         return false;
       }
-      if (!activeSessionId && isStartingFirstTurn) {
+      if (!targetSessionId && isStartingFirstTurn) {
         return false;
       }
       if (
-        activeSessionId &&
-        sendingSessionIdsRef.current.has(activeSessionId)
+        targetSessionId &&
+        sendingSessionIdsRef.current.has(targetSessionId)
       ) {
         if (
-          (chatMessageQueues[activeSessionId]?.length ?? 0) >=
+          (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
         ) {
           notify(
@@ -9202,13 +9451,14 @@ export function App() {
             requireCommandApproval,
             requireFileEditApproval,
             fullAccess,
+            sessionId: targetSessionId,
             turnId: createTurnId(),
             workspacePath: chatWorkspacePath,
             workspaceContext: turnWorkspaceContext,
           },
         };
         setChatMessageQueues((current) => {
-          const queued = current[activeSessionId] ?? [];
+          const queued = current[targetSessionId] ?? [];
           const totalQueued = Object.values(current).reduce(
             (total, messages) => total + messages.length,
             0,
@@ -9221,7 +9471,7 @@ export function App() {
           }
           return {
             ...current,
-            [activeSessionId]: [...queued, queuedMessage],
+            [targetSessionId]: [...queued, queuedMessage],
           };
         });
         if (!overrideContext?.preserveDraft) {
@@ -9230,20 +9480,20 @@ export function App() {
         notify(
           "terminal",
           "Message queued",
-          "It will send when this chat is active and its current response finishes.",
+          "It will send when this chat's current response finishes, even after you switch chats.",
         );
         return true;
       }
-      if (!isUserSelectedWorkspacePath(chatWorkspacePath)) {
+      const isCouncilTurn = turnMode === "council";
+      if (isCouncilTurn && !isUserSelectedWorkspacePath(chatWorkspacePath)) {
         notify(
           "command-failed",
           "Choose a project",
-          "Select the folder Gyro should use before starting this chat.",
+          "Council needs a folder before starting a chat.",
         );
         void openWorkspace();
         return false;
       }
-      const isCouncilTurn = turnMode === "council";
       if (
         !isCouncilTurn &&
         !checkProviderReadiness("chat", sessionModel.providerId)
@@ -9289,18 +9539,18 @@ export function App() {
           [turnId, sourceControlLineStats(workbench.ide.sourceControl)],
         ]);
       });
-      const isRetry = Boolean(activeSessionId && retryTurnId);
+      const isRetry = Boolean(targetSessionId && retryTurnId);
       const shouldSuggestTitle =
         !isRetry &&
         shouldSuggestSessionTitle(
-          activeSession,
-          activeSessionHasTranscriptEvents,
+          targetSession,
+          targetSessionHasTranscriptEvents,
         );
       const provisionalTitle = shouldSuggestTitle
         ? sessionTitleFromMessage(message)
         : undefined;
 
-      if (!activeSessionId) {
+      if (!targetSessionId) {
         setIsStartingFirstTurn(true);
         // A first message opens the thread layout so the new chat is visible —
         // except when it was sent from the AI view, where the chat is already
@@ -9332,7 +9582,11 @@ export function App() {
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         setWorkspacePath(session.workspacePath);
-        setFiles(workspaceFilesForRoot(session.workspacePath, previewFiles));
+        setFiles(
+          session.workspacePath
+            ? workspaceFilesForRoot(session.workspacePath, previewFiles)
+            : [],
+        );
         setSessions((current) => [session, ...current]);
         dispatchChatGrid({
           type: "migrate-draft-pane",
@@ -9638,46 +9892,48 @@ export function App() {
       const optimisticEvents = isRetry
         ? []
         : createOptimisticTurnEvents(
-            activeSessionId,
+            targetSessionId,
             message,
             turnId,
             selectedProvider,
             turnAttachments,
           );
       if (provisionalTitle) {
-        void updateSessionTitle(activeSessionId, provisionalTitle, {
+        void updateSessionTitle(targetSessionId, provisionalTitle, {
           notifyFailure: false,
         });
       }
-      void saveSessionModel(activeSessionId, sessionModel);
+      void saveSessionModel(targetSessionId, sessionModel);
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
         optimisticEventsRef.current.set(
-          activeSessionId,
-          resetEvents(optimisticEventsRef.current.get(activeSessionId) ?? []),
+          targetSessionId,
+          resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
         );
-        setEvents((current) => resetEvents(current));
+        setEventsForSession(targetSessionId, (current) => resetEvents(current));
         updateOptimisticProviderStatus(
           optimisticEventsRef,
-          setEvents,
-          activeSessionId,
+          (value) => setEventsForSession(targetSessionId, value),
+          targetSessionId,
           turnId,
           "running",
         );
       } else {
         optimisticEventsRef.current.set(
-          activeSessionId,
+          targetSessionId,
           mergePersistedAndOptimisticEvents(
-            optimisticEventsRef.current.get(activeSessionId) ?? [],
+            optimisticEventsRef.current.get(targetSessionId) ?? [],
             optimisticEvents,
           ),
         );
       }
-      setSessionSending(activeSessionId, true);
-      dispatchWorkbench({ type: "set-chat-panel" });
+      setSessionSending(targetSessionId, true);
+      if (!isBackgroundSend) {
+        dispatchWorkbench({ type: "set-chat-panel" });
+      }
       if (!isRetry) {
-        setEvents((current) =>
+        setEventsForSession(targetSessionId, (current) =>
           limitSessionEventsForUi(
             mergePersistedAndOptimisticEvents(current, optimisticEvents),
           ),
@@ -9689,12 +9945,12 @@ export function App() {
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
           optimisticEventsRef,
-          setEvents,
-          activeSessionId,
+          (value) => setEventsForSession(targetSessionId, value),
+          targetSessionId,
           turnId,
           "done",
         );
-        setSessionSending(activeSessionId, false);
+        setSessionSending(targetSessionId, false);
         notify("terminal", "Message added", "Local optimistic event");
         return true;
       }
@@ -9704,7 +9960,7 @@ export function App() {
         if (!isRetry) {
           await invoke<SessionEvent>("append_user_message", {
             attachments: turnAttachments,
-            sessionId: activeSessionId,
+            sessionId: targetSessionId,
             message,
             turnId,
           });
@@ -9724,7 +9980,7 @@ export function App() {
             "run_council_chat",
             {
               request: {
-                sessionId: activeSessionId,
+                sessionId: targetSessionId,
                 message,
                 turnId,
                 presetId: councilResolution.presetId,
@@ -9741,13 +9997,13 @@ export function App() {
               },
             },
           );
-          applyCouncilChatResponse(activeSessionId, councilResponse);
+          applyCouncilChatResponse(targetSessionId, councilResponse);
         } else {
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
             {
               request: {
-                sessionId: activeSessionId,
+                sessionId: targetSessionId,
                 message,
                 turnId,
                 providerId:
@@ -9771,11 +10027,11 @@ export function App() {
               },
             },
           );
-          applyProviderChatResponse(activeSessionId, providerResponse);
+          applyProviderChatResponse(targetSessionId, providerResponse);
         }
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
-        optimisticEventsRef.current.delete(activeSessionId);
+        optimisticEventsRef.current.delete(targetSessionId);
         const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
         if (usageProviderId && providerSupportsUsage(usageProviderId)) {
           void refreshProviderUsage(usageProviderId);
@@ -9795,20 +10051,20 @@ export function App() {
           });
         updateOptimisticProviderStatus(
           optimisticEventsRef,
-          setEvents,
-          activeSessionId,
+          (value) => setEventsForSession(targetSessionId, value),
+          targetSessionId,
           turnId,
           wasCancelled ? "cancelled" : "failed",
           errorMessage,
         );
-        await refreshEvents(activeSessionId);
+        await refreshEvents(targetSessionId);
         notify(
           wasCancelled ? "terminal" : "command-failed",
           wasCancelled ? "Turn stopped" : "Message fallback",
           wasCancelled ? providerStopDetail(errorMessage) : "Chat stayed local",
         );
       } finally {
-        setSessionSending(activeSessionId, false);
+        setSessionSending(targetSessionId, false);
       }
       return didDeliverProviderResponse;
     },
@@ -10033,52 +10289,47 @@ export function App() {
   );
 
   useEffect(() => {
-    if (
-      !activeSessionId ||
-      sendingSessionIdsRef.current.has(activeSessionId) ||
-      queuedChatDispatchesRef.current.has(activeSessionId)
-    ) {
-      return undefined;
-    }
-    const nextMessage = chatMessageQueues[activeSessionId]?.find(
-      (message) => message.status !== "failed",
-    );
-    if (!nextMessage) {
-      return undefined;
-    }
-    const retryDelay = (nextMessage.retryAt ?? 0) - Date.now();
-    if (retryDelay > 0) {
+    // A queue belongs to its session, not the currently visible pane. Scanning
+    // every session lets a completed background turn promote its own next
+    // message instead of waiting for the user to navigate back to that chat.
+    const now = Date.now();
+    const next = selectQueuedMessageDelivery(chatMessageQueues, {
+      dispatchingSessionIds: queuedChatDispatchesRef.current,
+      now,
+      sendingSessionIds: sendingSessionIdsRef.current,
+    });
+    if (!next) return undefined;
+    if (next.kind === "waiting") {
       const timer = window.setTimeout(
         () => setQueueRetryTick((current) => current + 1),
-        retryDelay,
+        Math.max(0, next.retryAt - now),
       );
       return () => window.clearTimeout(timer);
     }
-    queuedChatDispatchesRef.current.add(activeSessionId);
-    queuedChatDispatchMessageIdsRef.current.set(
-      activeSessionId,
-      nextMessage.id,
-    );
+    const { sessionId, message: nextMessage } = next;
+    queuedChatDispatchesRef.current.add(sessionId);
+    queuedChatDispatchMessageIdsRef.current.set(sessionId, nextMessage.id);
     setChatMessageQueues((current) => {
-      const remaining = (current[activeSessionId] ?? []).filter(
+      const remaining = (current[sessionId] ?? []).filter(
         (item) => item.id !== nextMessage.id,
       );
       if (remaining.length === 0) {
         const next = { ...current };
-        delete next[activeSessionId];
+        delete next[sessionId];
         return next;
       }
-      return { ...current, [activeSessionId]: remaining };
+      return { ...current, [sessionId]: remaining };
     });
     void sendDraft(nextMessage.message, {
       ...nextMessage.context,
       preserveDraft: true,
+      sessionId,
     })
       .then((accepted) => {
         if (!accepted) {
           const willRetry = (nextMessage.deliveryAttempts ?? 0) + 1 < 2;
           setChatMessageQueues((current) => {
-            const queued = current[activeSessionId] ?? [];
+            const queued = current[sessionId] ?? [];
             if (queued.some((item) => item.id === nextMessage.id)) {
               return current;
             }
@@ -10091,7 +10342,7 @@ export function App() {
             const shouldRetry = deliveryAttempts < 2;
             return {
               ...current,
-              [activeSessionId]: [
+              [sessionId]: [
                 {
                   ...nextMessage,
                   context: {
@@ -10117,18 +10368,11 @@ export function App() {
         }
       })
       .finally(() => {
-        queuedChatDispatchesRef.current.delete(activeSessionId);
-        queuedChatDispatchMessageIdsRef.current.delete(activeSessionId);
+        queuedChatDispatchesRef.current.delete(sessionId);
+        queuedChatDispatchMessageIdsRef.current.delete(sessionId);
       });
     return undefined;
-  }, [
-    activeSessionId,
-    chatMessageQueues,
-    notify,
-    queueRetryTick,
-    sendDraft,
-    sendingSessionIds,
-  ]);
+  }, [chatMessageQueues, notify, queueRetryTick, sendDraft, sendingSessionIds]);
 
   const removeQueuedChatMessage = useCallback(
     (messageId: string) => {
@@ -10618,38 +10862,11 @@ export function App() {
 
   const steerQueuedChatMessage = useCallback(
     (messageId: string) => {
-      if (!activeSessionId) {
-        return;
-      }
-      setChatMessageQueues((current) => {
-        const queued = current[activeSessionId] ?? [];
-        const selected = queued.find((item) => item.id === messageId);
-        if (!selected) {
-          return current;
-        }
-        return {
-          ...current,
-          [activeSessionId]: [
-            {
-              ...selected,
-              deliveryAttempts: 0,
-              retryAt: undefined,
-              status: "waiting",
-            },
-            ...queued.filter((item) => item.id !== messageId),
-          ],
-        };
-      });
-      if (sendingSessionIdsRef.current.has(activeSessionId)) {
-        stopActiveChat();
-      }
-      notify(
-        "terminal",
-        "Steering next",
-        "Stopping the current response, then sending this message.",
-      );
+      // Queued turns are context from an earlier moment. Dismissing one must
+      // not promote it into a fresh send (or leave a ghost row in the queue).
+      removeQueuedChatMessage(messageId);
     },
-    [activeSessionId, notify, stopActiveChat],
+    [removeQueuedChatMessage],
   );
 
   const appendPlanEvent = useCallback(
@@ -11648,7 +11865,7 @@ export function App() {
       sessionId?: string;
       workspacePath?: string;
     }) => {
-      const projectKey = normalizedChatProjectKey(candidate.workspacePath);
+      const projectKey = chatProjectKey(candidate.workspacePath);
       // Prefer the active project layout, then the candidate workspace, so a
       // slightly mismatched path still finds the sibling pane in a split.
       const paneLayout =
@@ -13887,6 +14104,31 @@ export function App() {
     };
   }, [isActiveSessionSending, refreshTerminalPane, terminalPanePollKey]);
 
+  // Live Run and Test commands complete through terminal snapshots instead of
+  // the bounded task RPC. Reflect that final state back in the command list.
+  useEffect(() => {
+    for (const pane of workbench.terminalPanes) {
+      if (
+        !pane.workspaceTaskId ||
+        (pane.status !== "done" && pane.status !== "failed")
+      ) {
+        continue;
+      }
+      const task = workbench.ide.taskDefinitions.find(
+        (item) => item.id === pane.workspaceTaskId,
+      );
+      if (task?.status !== "running") {
+        continue;
+      }
+      dispatchWorkbench({
+        type: "ide-set-task-status",
+        taskId: task.id,
+        status: pane.status === "done" ? "done" : "failed",
+        lastRunAt: new Date().toISOString(),
+      });
+    }
+  }, [workbench.ide.taskDefinitions, workbench.terminalPanes]);
+
   useEffect(() => {
     const pane = selectedTerminalPane;
     const cliIsVisible =
@@ -14936,8 +15178,7 @@ export function App() {
     chats: sessions
       .filter(
         (session) =>
-          normalizedChatProjectKey(session.workspacePath) ===
-          currentChatProjectKey,
+          chatProjectKey(session.workspacePath) === currentChatProjectKey,
       )
       .slice(0, 8)
       .map((session) => ({
@@ -15251,9 +15492,7 @@ export function App() {
                     (item) => item.id === sessionId,
                   );
                   if (!session) return;
-                  const projectKey = normalizedChatProjectKey(
-                    session.workspacePath,
-                  );
+                  const projectKey = chatProjectKey(session.workspacePath);
                   if (
                     sourceProjectKey &&
                     sourceProjectKey !== displayedChatLayout.projectKey
@@ -17339,6 +17578,17 @@ function terminalProcessForProfile(
       .filter(Boolean)
       .join(" "),
   };
+}
+
+/** Preserve discovered task arguments when a task is launched through zsh. */
+function terminalCommandLine(task: TaskDefinition) {
+  return [task.command, ...task.args]
+    .map((part) => `'${part.replace(/'/g, "'\\''")}'`)
+    .join(" ");
+}
+
+function workspaceTaskTerminalPaneId(taskId: string) {
+  return `workspace-task-${encodeURIComponent(taskId)}`;
 }
 
 function terminalStatusFromSnapshot(

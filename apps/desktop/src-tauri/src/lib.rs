@@ -108,8 +108,14 @@ const MAX_LSP_HEADER_BYTES: usize = 16 * 1024;
 const IDE_PROTOCOL_CHANNEL_CAPACITY: usize = 8;
 const MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE: usize = 32;
 const MAX_IDE_PROTOCOL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 1024 * 1024;
-const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 64;
+// Codex app-server can legitimately return a multi-megabyte JSONL frame (for
+// example, a completed item with rich tool output). Keep this aligned with the
+// desktop IPC frame limit: the aggregate protocol budget below still bounds a
+// noisy or malicious child process.
+const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+// Preserve the former 64 MiB maximum of queued protocol frames even though an
+// individual frame can now be four times larger.
+const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 16;
 const MAX_CODEX_APP_SERVER_ACTIVITIES: usize = 256;
 const MAX_CODEX_APP_SERVER_PATCHES: usize = 64;
 const MAX_CODEX_APP_SERVER_PATCH_BYTES: usize = 256 * 1024;
@@ -1486,6 +1492,15 @@ struct ProviderChatResponse {
     session_title: Option<String>,
     status_event: SessionEvent,
     resume_cursor: Option<ProviderResumeCursor>,
+}
+
+/// Manual context compaction is a provider operation, not a synthetic chat
+/// message. The response only returns the durable activity rows; the live
+/// status travels through the normal provider activity stream.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderContextCompactionResponse {
+    activity_events: Vec<SessionEvent>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3307,6 +3322,45 @@ async fn run_provider_chat(
     result?
 }
 
+/// Ask a resumable Codex thread to compact its existing context. This uses the
+/// app-server's dedicated request instead of sending `/compact` as a normal
+/// prompt, so providers without that capability never receive a faux command.
+#[tauri::command]
+async fn compact_provider_chat(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<ProviderContextCompactionResponse, String> {
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&session_id) {
+            return Err("a provider turn is already running for this session".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err(format!(
+                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+            ));
+        }
+        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
+    }
+    let worker_app = app.clone();
+    let worker_session_id = session_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        compact_provider_chat_blocking(worker_app, worker_session_id)
+    })
+    .await
+    .map_err(|error| format!("context compaction worker failed: {error}"));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&session_id));
+    result?
+}
+
 #[tauri::command]
 async fn stop_provider_chat(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
     stop_provider_run(&app, &session_id, ProviderStopReason::User)
@@ -5061,6 +5115,87 @@ fn run_provider_chat_blocking(
         status_event,
         resume_cursor: runner_output.resume_cursor,
     })
+}
+
+fn compact_provider_chat_blocking(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<ProviderContextCompactionResponse, String> {
+    let store = open_store()?;
+    let session_uuid = parse_uuid(&session_id)?;
+    let session = store
+        .get_session(session_uuid)
+        .map_err(to_string)?
+        .ok_or_else(|| "provider chat session no longer exists".to_string())?;
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    let config = GyroConfig::load(&paths).map_err(to_string)?;
+    let run_id = Uuid::new_v4();
+    let mut request = ProviderChatRequest {
+        session_id: session_id.clone(),
+        message: "/compact".into(),
+        turn_id: Some(run_id.to_string()),
+        provider_id: "openai".into(),
+        provider_label: None,
+        model_id: session.model_id.clone(),
+        model_label: session.model_label.clone(),
+        reasoning_effort: session.reasoning_effort.clone(),
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: None,
+        mode: ChatMode::Normal,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+    };
+    bind_provider_chat_request(&mut request, &session, &config)?;
+    if request.provider_id != "openai" {
+        return Err("manual context compaction is not supported by this provider".into());
+    }
+    let binding = store
+        .get_provider_session_binding(session_uuid, &request.provider_id)
+        .map_err(to_string)?
+        .and_then(|binding| compatible_provider_session_binding(binding, &request))
+        .ok_or_else(|| "this chat does not have a resumable Codex context yet".to_string())?;
+    let resume_cursor = provider_resume_cursor_from_binding(&binding)
+        .filter(|cursor| cursor.kind == "codex-session")
+        .ok_or_else(|| "this chat does not have a resumable Codex context yet".to_string())?;
+    let activity_params = serde_json::json!({ "turnId": run_id.to_string() });
+    let running = codex_context_compaction_activity(&activity_params, "running");
+    emit_provider_activity_event(&app, &request, &running, Some(0));
+
+    let completed = match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
+        Ok(()) => codex_context_compaction_activity(&activity_params, "done"),
+        Err(error) => {
+            let error = gyro_core::security::redact_secrets(&error.to_string());
+            let failed = ProviderActivity {
+                id: running.id,
+                kind: "context".into(),
+                label: "Context compaction failed".into(),
+                detail: Some(error.clone()),
+                note: None,
+                status: "failed".into(),
+            };
+            emit_provider_activity_event(&app, &request, &failed, Some(0));
+            let _ = store.append_system_events_with_turn_id(
+                session_uuid,
+                vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
+            );
+            return Err(error);
+        }
+    };
+    emit_provider_activity_event(&app, &request, &completed, Some(0));
+    let activity_events = store
+        .append_system_events_with_turn_id(
+            session_uuid,
+            vec![provider_activity_event_entry(
+                &request, run_id, 0, &completed,
+            )],
+        )
+        .map_err(to_string)?;
+    Ok(ProviderContextCompactionResponse { activity_events })
 }
 
 fn bind_provider_chat_request(
@@ -8554,7 +8689,7 @@ fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String
     configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
-        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+        run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     if output.status == "done" {
         output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
     }
@@ -8639,7 +8774,7 @@ fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String
     configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
-        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+        run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     output.stdout = format!("tests {:?}\n{}", vec![task.id], output.stdout);
     Ok(output)
 }
@@ -10573,10 +10708,39 @@ fn run_command_output_with_cancellation(
     command: Command,
     cancellation: CancellationToken,
 ) -> anyhow::Result<IdeCommandOutput> {
-    let output = run_bounded_command_with_cancellation(
-        &command,
+    run_command_output_with_limits(
+        command,
+        cancellation,
         Duration::from_secs(30 * 60),
         Some(Duration::from_secs(5 * 60)),
+    )
+}
+
+/// Build and test commands can be quiet while they compile or download. Keep
+/// them cancellable, but do not treat silence as a failure or stop them after
+/// the short task window used by incidental helper commands.
+fn run_workspace_task_output_with_cancellation(
+    command: Command,
+    cancellation: CancellationToken,
+) -> anyhow::Result<IdeCommandOutput> {
+    run_command_output_with_limits(
+        command,
+        cancellation,
+        Duration::from_secs(2 * 60 * 60),
+        None,
+    )
+}
+
+fn run_command_output_with_limits(
+    command: Command,
+    cancellation: CancellationToken,
+    timeout: Duration,
+    inactivity_timeout: Option<Duration>,
+) -> anyhow::Result<IdeCommandOutput> {
+    let output = run_bounded_command_with_cancellation(
+        &command,
+        timeout,
+        inactivity_timeout,
         2 * 1024 * 1024,
         1024 * 1024,
         cancellation,
@@ -12435,7 +12599,7 @@ fn spawn_codex_app_server_reader(
         loop {
             match read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES) {
                 Ok(None) => {
-                    let _ = sender.send(Err("Codex usage service closed unexpectedly".into()));
+                    let _ = sender.send(Err("Codex app server closed unexpectedly".into()));
                     break;
                 }
                 Ok(Some(line)) => match serde_json::from_slice(&line) {
@@ -12446,14 +12610,14 @@ fn spawn_codex_app_server_reader(
                     }
                     Err(error) => {
                         let _ = sender.send(Err(format!(
-                            "Codex usage service returned invalid JSON: {error}"
+                            "Codex app server returned invalid JSON: {error}"
                         )));
                         break;
                     }
                 },
                 Err(error) => {
                     let _ = sender.send(Err(format!(
-                        "could not read the Codex usage response: {error}"
+                        "could not read the Codex app-server response: {error}"
                     )));
                     break;
                 }
@@ -14600,6 +14764,188 @@ fn run_openai_codex_app_server_chat(
     })();
     heartbeat_stop.store(true, Ordering::Relaxed);
     let _ = heartbeat.join();
+    drop(child);
+    result
+}
+
+/// Execute Codex's explicit `thread/compact/start` request against a persisted
+/// thread. A new app-server process is intentional: normal chat turns use the
+/// same short-lived connection and resume the durable Codex thread each time.
+fn run_openai_codex_context_compaction(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: &ProviderResumeCursor,
+) -> anyhow::Result<()> {
+    let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let mut process = command_with_gui_path("codex");
+    process
+        .current_dir(&cwd)
+        .args(["app-server", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    configure_provider_process_group(&mut process);
+    let child = process
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    let mut child = ProviderProcessGuard::new(child);
+    let result = (|| -> anyhow::Result<()> {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Codex app server input is unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
+        let messages = spawn_codex_app_server_reader(stdout);
+        let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "gyro",
+                        "title": "Gyro",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "capabilities": { "experimentalApi": true },
+                },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let initialize = receive_codex_app_server_response(&messages, 1, deadline)
+            .map_err(anyhow::Error::msg)?;
+        codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
+        write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
+            .map_err(anyhow::Error::msg)?;
+
+        let model = codex_model_arg(request.model_id.as_deref());
+        let approval_instructions = provider_approval_instructions(request).join("\n");
+        let approval_instructions =
+            (!approval_instructions.is_empty()).then_some(approval_instructions);
+        let (approval_policy, sandbox_mode, _) = codex_app_server_policy(
+            &request.mode,
+            request.require_command_approval,
+            request.require_file_edit_approval,
+            request.full_access,
+            &cwd,
+        );
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 2,
+                "method": "thread/resume",
+                "params": {
+                    "threadId": resume_cursor.session_id,
+                    "cwd": cwd,
+                    "model": model,
+                    "approvalPolicy": approval_policy,
+                    "approvalsReviewer": "user",
+                    "sandbox": sandbox_mode,
+                    "developerInstructions": approval_instructions,
+                },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let thread_response = receive_codex_app_server_response(&messages, 2, deadline)
+            .map_err(anyhow::Error::msg)?;
+        let thread_result =
+            codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
+        let thread_id = thread_result
+            .pointer("/thread/id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?;
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 3,
+                "method": "thread/compact/start",
+                "params": { "threadId": thread_id },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let mut request_confirmed = false;
+        let mut compaction_completed = false;
+        let mut protocol_messages = 0usize;
+        let mut protocol_bytes = 0usize;
+        loop {
+            if provider_chat_cancelled(app, &request.session_id) {
+                anyhow::bail!("{}", provider_stop_message(app, &request.session_id));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                anyhow::bail!("Codex context compaction timed out");
+            }
+            let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
+                Ok(message) => message.map_err(anyhow::Error::msg)?,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("Codex app server disconnected")
+                }
+            };
+            protocol_messages = protocol_messages.saturating_add(1);
+            protocol_bytes = protocol_bytes.saturating_add(serde_json::to_vec(&message)?.len());
+            if protocol_messages > MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES
+                || protocol_bytes > MAX_CODEX_APP_SERVER_PROTOCOL_BYTES
+            {
+                anyhow::bail!("Codex app server exceeded its protocol activity budget");
+            }
+            if message.get("id").and_then(serde_json::Value::as_u64) == Some(3) {
+                codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
+                request_confirmed = true;
+                if compaction_completed {
+                    return Ok(());
+                }
+                continue;
+            }
+            let method = message.get("method").and_then(serde_json::Value::as_str);
+            let params = message.get("params").cloned().unwrap_or_default();
+            match method {
+                Some("thread/compacted") => {
+                    compaction_completed = true;
+                    if request_confirmed {
+                        return Ok(());
+                    }
+                }
+                Some("item/completed") => {
+                    if params
+                        .pointer("/item/type")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("contextCompaction")
+                    {
+                        compaction_completed = true;
+                        if request_confirmed {
+                            return Ok(());
+                        }
+                    }
+                }
+                // Older app-server versions complete the compact operation as
+                // a turn. The response confirms it is this request, so accept
+                // a successful terminal turn only after that acknowledgement.
+                Some("turn/completed") if request_confirmed => {
+                    let status = params
+                        .pointer("/turn/status")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("failed");
+                    if status == "completed" {
+                        return Ok(());
+                    }
+                    let detail = params
+                        .pointer("/turn/error/message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("Codex context compaction did not complete");
+                    anyhow::bail!("{detail}");
+                }
+                _ => {}
+            }
+        }
+    })();
     drop(child);
     result
 }
@@ -22165,6 +22511,7 @@ pub fn run() {
             retry_council_synthesis,
             run_council_chat,
             run_provider_chat,
+            compact_provider_chat,
             save_config,
             save_project_capability_policy,
             search_workspace,
@@ -27006,6 +27353,25 @@ while True:
         assert!(read_bounded_protocol_line(&mut unterminated, 32)
             .unwrap_err()
             .contains("newline terminator"));
+    }
+
+    #[test]
+    fn codex_protocol_reader_accepts_frames_larger_than_one_megabyte() {
+        // Codex 0.152 emits some valid app-server frames just above the former
+        // 1 MiB cap. Such a frame must reach the JSON decoder rather than
+        // turning a normal chat send into a generic retry failure.
+        let payload_len = 1024 * 1024 + 1;
+        let mut frame = vec![b'x'; payload_len];
+        frame.push(b'\n');
+        let mut reader = BufReader::new(std::io::Cursor::new(frame));
+
+        assert_eq!(
+            read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES)
+                .unwrap()
+                .unwrap()
+                .len(),
+            payload_len
+        );
     }
 
     #[cfg(unix)]

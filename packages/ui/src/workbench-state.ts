@@ -153,6 +153,15 @@ export function normalizedChatProjectKey(path?: string) {
   return path?.trim().replaceAll("\\", "/").replace(/\/+$/, "") ?? "";
 }
 
+/**
+ * Chat layouts need a durable key even when a conversation deliberately has
+ * no project. Keep that sentinel separate from a session's empty
+ * `workspacePath`, which means "no folder" to the provider.
+ */
+export function chatProjectKey(path?: string) {
+  return normalizedChatProjectKey(path) || "__gyro-no-folder__";
+}
+
 export function chatPaneIdentity(pane: ChatPaneRef) {
   return pane.kind === "session"
     ? `session:${pane.sessionId}`
@@ -180,9 +189,9 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
   const layouts: Record<string, ChatProjectLayout> = {};
   if (rawLayouts) {
     for (const [rawKey, rawLayout] of Object.entries(rawLayouts)) {
-      const projectKey = normalizedChatProjectKey(rawKey);
+      const projectKey = chatProjectKey(rawKey);
       const layout = storedRecord(rawLayout);
-      if (!projectKey || !layout || !Array.isArray(layout.slots)) continue;
+      if (!layout || !Array.isArray(layout.slots)) continue;
       const seen = new Set<string>();
       const seenPaneIds = new Set<string>();
       const slots = layout.slots.slice(0, CHAT_GRID_MAX_SLOTS).map((raw) => {
@@ -191,7 +200,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
         const workspacePath = normalizedChatProjectKey(
           storedChatGridText(pane?.workspacePath, 4096),
         );
-        if (!paneId || !workspacePath || seenPaneIds.has(paneId)) return null;
+        if (!paneId || seenPaneIds.has(paneId)) return null;
         let result: ChatPaneRef | null = null;
         if (pane?.kind === "session") {
           const sessionId = storedChatGridText(pane.sessionId, 160);
@@ -205,7 +214,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
           }
         }
         if (!result) return null;
-        if (normalizedChatProjectKey(result.workspacePath) !== projectKey) {
+        if (chatProjectKey(result.workspacePath) !== projectKey) {
           return null;
         }
         const identity = chatPaneIdentity(result);
@@ -229,7 +238,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
       };
     }
   }
-  const requestedProjectKey = normalizedChatProjectKey(
+  const requestedProjectKey = chatProjectKey(
     storedChatGridText(stored?.activeProjectKey, 4096),
   );
   return {
@@ -349,13 +358,14 @@ export function chatGridReducer(
     };
   }
   if (action.type === "clear-project-layout") {
+    const projectKey = chatProjectKey(action.projectKey);
     const layouts = { ...state.layouts };
-    const removed = layouts[action.projectKey];
-    delete layouts[action.projectKey];
+    const removed = layouts[projectKey];
+    delete layouts[projectKey];
     return {
       layouts,
       activeProjectKey:
-        state.activeProjectKey === action.projectKey
+        state.activeProjectKey === projectKey
           ? Object.keys(layouts)[0]
           : state.activeProjectKey,
       maximizedPaneId: removed?.slots.some(
@@ -366,8 +376,7 @@ export function chatGridReducer(
     };
   }
 
-  const projectKey = normalizedChatProjectKey(action.projectKey);
-  if (!projectKey) return state;
+  const projectKey = chatProjectKey(action.projectKey);
   if (action.type === "set-arrangement") {
     const layout = state.layouts[projectKey];
     if (!layout) return state;
@@ -3978,6 +3987,7 @@ export function createTerminalPane(
     workingDirectory?: string;
     missionSessionId?: string;
     taskTitle?: string;
+    workspaceTaskId?: string;
   } = {},
 ): TerminalPane {
   const workspaceMode = options.workspaceMode ?? "local";
@@ -4002,6 +4012,7 @@ export function createTerminalPane(
     workingDirectory: options.workingDirectory,
     missionSessionId: options.missionSessionId,
     taskTitle,
+    workspaceTaskId: options.workspaceTaskId,
     createdAt: new Date().toISOString(),
   };
 }
@@ -4026,6 +4037,10 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     taskTitle:
       typeof pane.taskTitle === "string" && pane.taskTitle.trim()
         ? pane.taskTitle.trim()
+        : undefined,
+    workspaceTaskId:
+      typeof pane.workspaceTaskId === "string" && pane.workspaceTaskId.trim()
+        ? pane.workspaceTaskId.trim()
         : undefined,
     hasForegroundJob:
       typeof pane.hasForegroundJob === "boolean"
@@ -4875,8 +4890,8 @@ export function isUserSelectedWorkspacePath(path?: string) {
   return !/^gyro-.+-\d{8,}$/i.test(name);
 }
 
-export function canSendChat(providerReady: boolean, workspacePath?: string) {
-  return providerReady && isUserSelectedWorkspacePath(workspacePath);
+export function canSendChat(providerReady: boolean, _workspacePath?: string) {
+  return providerReady;
 }
 
 function browserHistoryState(

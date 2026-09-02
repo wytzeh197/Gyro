@@ -120,8 +120,11 @@ export type WorkGroup = {
 };
 
 /** What the run view renders: narration and approvals keep their place; tool
- * noise becomes a compact, expandable phase. */
-export type RunDisplayStep = Exclude<RunStep, { kind: "work" }> | WorkGroup;
+ * noise becomes a compact, expandable phase. Context compaction is deliberately
+ * left as its own row: it changes the conversation the model can see, so hiding
+ * it inside an unrelated “Reviewing workspace” group makes an important state
+ * transition invisible. */
+export type RunDisplayStep = RunStep | WorkGroup;
 
 /**
  * Group consecutive work into the small number of phases a person can scan:
@@ -132,6 +135,12 @@ export function groupRunSteps(steps: RunStep[]): RunDisplayStep[] {
   const displayed: RunDisplayStep[] = [];
   for (const step of steps) {
     if (step.kind !== "work") {
+      displayed.push(step);
+      continue;
+    }
+    // A compaction is not ordinary inspection work. Keep its symbol and status
+    // in the visible timeline, including while it is in progress.
+    if (step.item.kind === "context") {
       displayed.push(step);
       continue;
     }
@@ -1149,6 +1158,10 @@ export function runRowText(step: RunStep): RunRowText {
           item.status === "running"
             ? "Compacting context"
             : "Compacted context",
+        description:
+          item.status === "running"
+            ? "Summarizing earlier conversation"
+            : "Earlier conversation summarized",
       };
     case "browser":
       return {

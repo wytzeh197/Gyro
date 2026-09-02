@@ -261,6 +261,7 @@ export {
   workbenchReducer,
   CLI_LAUNCH_PRESET_MAX_PANES,
   CHAT_GRID_MAX_SLOTS,
+  chatProjectKey,
   chatGridReducer,
   chatPaneIdentity,
   createChatProjectLayout,
@@ -358,6 +359,11 @@ export type {
   UsageSafetyNotice,
 } from "./usage-ledger";
 export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
+export { selectQueuedMessageDelivery } from "./chat-message-queue";
+export type {
+  QueuedDeliverySelection,
+  QueuedMessageDelivery,
+} from "./chat-message-queue";
 export {
   createGlobalSearchTarget,
   globalSearchMatch,

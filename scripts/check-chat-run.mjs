@@ -766,7 +766,25 @@ assert.deepEqual(rowText("memory", "Edited memory"), {
 });
 assert.deepEqual(rowText("context", "Compacted context"), {
   label: "Compacted context",
+  description: "Earlier conversation summarized",
 });
+
+const compactionVisible = buildRunModel([
+  activity("tool", "Read a.ts", {}, 0),
+  activity("context", "Compacting context", { status: "running" }, 1),
+  activity("tool", "Read b.ts", {}, 2),
+]);
+assert.deepEqual(
+  groupRunSteps(compactionVisible.steps).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind === "work"
+        ? step.item.kind
+        : step.kind,
+  ),
+  [["review", 1], "context", ["review", 1]],
+  "context compaction stays visible instead of being folded into a review group",
+);
 
 // An unknown kind stays a beat rather than vanishing.
 assert.deepEqual(rowText("something-new", "Rendered a diagram"), {
