@@ -261,6 +261,7 @@ export {
   workbenchReducer,
   CLI_LAUNCH_PRESET_MAX_PANES,
   CHAT_GRID_MAX_SLOTS,
+  chatProjectKey,
   chatGridReducer,
   chatPaneIdentity,
   createChatProjectLayout,

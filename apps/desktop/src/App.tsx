@@ -30,6 +30,7 @@ import {
   ToolsSurface,
   WorkspaceToolPanel,
   activeChatCompanionTab,
+  chatProjectKey,
   chatCompanionPane,
   chatCompanionReducer,
   chatGridReducer,
@@ -60,7 +61,6 @@ import {
   workspaceFilesForRoot,
   workspaceRootForPath,
   workspacePathExcluded,
-  normalizedChatProjectKey,
   normalizedConfig,
   COUNCIL_COMING_SOON,
   normalizedCouncilConfig,
@@ -308,6 +308,10 @@ type ProviderChatResponse = {
   statusEvent: SessionEvent;
 };
 
+type ProviderContextCompactionResponse = {
+  activityEvents?: SessionEvent[];
+};
+
 type CouncilChatInvokeResponse = {
   councilRun: CouncilRun;
   assistantEvent: SessionEvent;
@@ -432,6 +436,7 @@ const EMPTY_CONFIG: GyroConfig = {
   requireCommandApproval: true,
   requireFileEditApproval: true,
   fullAccess: false,
+  changeSummariesEnabled: false,
   accountOidc: {
     issuerUrl: "local-device://gyro",
     clientId: "gyro-local-device",
@@ -1183,10 +1188,8 @@ export function App() {
     ];
   const currentChatProjectKey =
     chatGrid.activeProjectKey ??
-    normalizedChatProjectKey(activeSession?.workspacePath ?? workspacePath);
-  const activeChatLayout = currentChatProjectKey
-    ? chatGrid.layouts[currentChatProjectKey]
-    : undefined;
+    chatProjectKey(activeSession?.workspacePath ?? workspacePath);
+  const activeChatLayout = chatGrid.layouts[currentChatProjectKey];
   const displayedChatLayout =
     activeChatLayout ?? createChatProjectLayout(currentChatProjectKey);
   const activeChatPane = activeChatLayout?.slots.find(
@@ -1661,7 +1664,7 @@ export function App() {
     for (const layout of Object.values(chatGrid.layouts)) {
       if (
         removedProjectPaths.some(
-          (path) => normalizedChatProjectKey(path) === layout.projectKey,
+          (path) => chatProjectKey(path) === layout.projectKey,
         )
       ) {
         dispatchChatGrid({
@@ -1678,8 +1681,7 @@ export function App() {
         if (
           pane?.kind === "session" &&
           (!session ||
-            normalizedChatProjectKey(session.workspacePath) !==
-              layout.projectKey)
+            chatProjectKey(session.workspacePath) !== layout.projectKey)
         ) {
           dispatchChatGrid({
             type: "remove-session-pane",
@@ -1718,7 +1720,7 @@ export function App() {
       ) {
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: normalizedChatProjectKey(requestedSession.workspacePath),
+          projectKey: chatProjectKey(requestedSession.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(requestedSession),
         });
@@ -5125,6 +5127,7 @@ export function App() {
    * a file records that it was read; it applies and reverts nothing.
    */
   const isFileReviewEnabled =
+    Boolean(config.changeSummariesEnabled) &&
     !config.fullAccess &&
     config.requireCommandApproval &&
     config.requireFileEditApproval;
@@ -5852,10 +5855,10 @@ export function App() {
     [notify, prepareWorkspace, refreshIdeServices],
   );
 
-  const openWorkspace = useCallback(async (): Promise<boolean> => {
+  const openWorkspace = useCallback(async (): Promise<string | undefined> => {
     if (!isTauriRuntime()) {
       await activateWorkspacePath(PREVIEW_WORKSPACE_PATH);
-      return true;
+      return PREVIEW_WORKSPACE_PATH;
     }
     try {
       const selected = await open({
@@ -5864,7 +5867,7 @@ export function App() {
         title: "Open workspace",
       });
       if (typeof selected !== "string") {
-        return false;
+        return undefined;
       }
       const trustPath = normalizedWorkspaceTrustPath(selected);
       if (!(trustPath in workbench.preferences.workspaceTrust)) {
@@ -5875,14 +5878,14 @@ export function App() {
         });
       }
       await activateWorkspacePath(selected);
-      return true;
+      return selected;
     } catch {
       notify(
         "command-failed",
         "Workspace open failed",
         "The current chat was left unchanged.",
       );
-      return false;
+      return undefined;
     }
   }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
 
@@ -6383,29 +6386,30 @@ export function App() {
   }, [createSession]);
 
   const startNewChat = useCallback(
-    (options: { keepLayout?: boolean } = {}) => {
+    (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
       suppressSessionAutoSelectRef.current = true;
-      const projectPath = activeSession?.workspacePath ?? workspacePath;
-      const projectKey = normalizedChatProjectKey(projectPath);
-      const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY;
+      const projectPath =
+        options.workspacePath === undefined
+          ? (activeSession?.workspacePath ?? workspacePath)
+          : options.workspacePath;
+      const projectKey = chatProjectKey(projectPath);
+      const draftKey = `new:${projectKey}`;
       const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
         layout.slots.some(
           (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
         ),
       );
-      if (projectKey && projectPath) {
-        dispatchChatGrid({
-          type: "select-pane",
-          projectKey,
-          mode: "replace",
-          pane: {
-            paneId: `draft:${projectKey}`,
-            kind: "draft",
-            draftKey,
-            workspacePath: projectPath,
-          },
-        });
-      }
+      dispatchChatGrid({
+        type: "select-pane",
+        projectKey,
+        mode: "replace",
+        pane: {
+          paneId: `draft:${projectKey}`,
+          kind: "draft",
+          draftKey,
+          workspacePath: projectPath ?? "",
+        },
+      });
       setIsStartingFirstTurn(false);
       activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
@@ -6439,6 +6443,28 @@ export function App() {
     ],
   );
 
+  /**
+   * A chat's folder is fixed at creation. Selecting a project from its
+   * context row therefore opens a fresh chat that is explicitly bound to the
+   * chosen folder, rather than only changing the surrounding Workspace view.
+   */
+  const selectChatWorkspace = useCallback(
+    async (savedPath?: string) => {
+      const selected = savedPath
+        ? savedPath
+        : await openWorkspace();
+      if (!selected) {
+        return false;
+      }
+      if (savedPath) {
+        await activateWorkspacePath(selected, "Project selected");
+      }
+      startNewChat({ workspacePath: selected });
+      return true;
+    },
+    [activateWorkspacePath, openWorkspace, startNewChat],
+  );
+
   const acknowledgeFinishedChat = useCallback((sessionId: string) => {
     setFinishedMenuBarOutcomes((current) =>
       current.filter(
@@ -6465,7 +6491,7 @@ export function App() {
       if (session) {
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: normalizedChatProjectKey(session.workspacePath),
+          projectKey: chatProjectKey(session.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(session),
         });
@@ -6667,7 +6693,7 @@ export function App() {
 
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
-      const projectKey = normalizedChatProjectKey(pane.workspacePath);
+      const projectKey = chatProjectKey(pane.workspacePath);
       const layout = chatGrid.layouts[projectKey];
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
@@ -6705,7 +6731,7 @@ export function App() {
     (sessionId: string) => {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) return;
-      const projectKey = normalizedChatProjectKey(session.workspacePath);
+      const projectKey = chatProjectKey(session.workspacePath);
       const layout = chatGrid.layouts[projectKey];
       const existingPane = layout?.slots.find(
         (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
@@ -6904,7 +6930,7 @@ export function App() {
     setRemovedProjectPaths(nextRemovedProjectPaths);
     dispatchChatGrid({
       type: "clear-project-layout",
-      projectKey: normalizedChatProjectKey(projectPath),
+      projectKey: chatProjectKey(projectPath),
     });
     setRecentProjectPaths((current) =>
       current.filter((path) => normalizeProjectPath(path) !== projectPath),
@@ -8644,21 +8670,12 @@ export function App() {
       }
 
       if (action === "new-chat-select-workspace") {
-        void openWorkspace().then((selected) => {
-          if (selected) {
-            startNewChat();
-          }
-        });
+        void selectChatWorkspace();
         return;
       }
 
       if (action === "new-local-chat-select-workspace") {
-        void openWorkspace().then((selected) => {
-          if (selected) {
-            startNewChat();
-            dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
-          }
-        });
+        void selectChatWorkspace();
         return;
       }
 
@@ -8756,15 +8773,13 @@ export function App() {
         const encodedPath = action.replace("select-saved-project:", "");
         try {
           const selectedPath = decodeURIComponent(encodedPath);
-          void activateWorkspacePath(selectedPath, "Project selected").catch(
-            () => {
-              notify(
-                "command-failed",
-                "Project unavailable",
-                "The saved project folder could not be opened.",
-              );
-            },
-          );
+          void selectChatWorkspace(selectedPath).catch(() => {
+            notify(
+              "command-failed",
+              "Project unavailable",
+              "The saved project folder could not be opened.",
+            );
+          });
         } catch {
           notify(
             "command-failed",
@@ -8798,7 +8813,18 @@ export function App() {
         case "select-project":
         case "select-workspace":
         case "select-folder":
-          void openWorkspace();
+          void selectChatWorkspace();
+          break;
+        case "select-no-folder":
+          // A persisted chat keeps its original project for reproducibility.
+          // Selecting No folder therefore opens a fresh, detached draft rather
+          // than silently changing the context of an existing conversation.
+          setWorkspacePath(undefined);
+          setSelectedWorkspaceRoot(undefined);
+          setFiles([]);
+          setSelectedFile(undefined);
+          setBranchCatalog(undefined);
+          startNewChat({ workspacePath: "" });
           break;
         case "add-goal":
           dispatchWorkbench({ type: "set-chat-panel" });
@@ -8882,6 +8908,79 @@ export function App() {
         case "select-branch":
           void refreshWorkspaceBranches(currentWorkspacePath);
           break;
+        case "open-source-control":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          dispatchWorkbench({
+            type: "ide-select-view",
+            view: "source-control",
+          });
+          refreshSourceControl();
+          break;
+        case "run-workspace-test": {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          dispatchWorkbench({ type: "ide-select-view", view: "run-test" });
+          const testTask = workbench.ide.taskDefinitions.find(
+            (task) => task.group === "test",
+          );
+          if (!testTask) {
+            refreshIdeServices(currentWorkspacePath);
+            notify(
+              "command-failed",
+              "No test task detected",
+              "Open Run and Test to choose or add a workspace command.",
+            );
+            break;
+          }
+          void runIdeTask(testTask);
+          break;
+        }
+        case "open-diff":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          openToolPanel("diff");
+          break;
+        case "compact-context": {
+          if (!activeSessionId || activeSession?.providerId !== "openai") {
+            notify(
+              "command-failed",
+              "Context compaction unavailable",
+              "This command is available for resumable OpenAI chats.",
+            );
+            break;
+          }
+          if (sendingSessionIds.includes(activeSessionId)) {
+            notify(
+              "command-failed",
+              "Wait for the current response",
+              "Context can be compacted after the active turn finishes.",
+            );
+            break;
+          }
+          if (!isTauriRuntime()) {
+            break;
+          }
+          void invoke<ProviderContextCompactionResponse>(
+            "compact_provider_chat",
+            { sessionId: activeSessionId },
+          )
+            .then(() => refreshEvents(activeSessionId))
+            .catch((error) =>
+              notify(
+                "command-failed",
+                "Context compaction failed",
+                String(error),
+              ),
+            );
+          break;
+        }
         case "open-terminal-panel":
           openToolPanel("terminal");
           break;
@@ -8902,12 +9001,12 @@ export function App() {
       attachEditorSnapshot,
       activeChatMode,
       activeSession?.workspacePath,
-      activateWorkspacePath,
       checkProviderReadiness,
       changeChatMode,
       connectProvider,
       config,
       createWorkspaceBranch,
+      activeSessionId,
       isShellOptimizing,
       notify,
       openGlobalSearch,
@@ -8915,8 +9014,13 @@ export function App() {
       openToolPanel,
       openWorkspace,
       persistConfig,
+      refreshEvents,
+      refreshIdeServices,
+      refreshSourceControl,
       removeWorkspaceWorktree,
+      runIdeTask,
       savedProjects,
+      selectChatWorkspace,
       selectProvider,
       selectProviderModel,
       selectProviderReasoningEffort,
@@ -8924,7 +9028,9 @@ export function App() {
       refreshWorkspaceBranches,
       startNewChat,
       selectChatAttachment,
+      sendingSessionIds,
       sessions,
+      workbench.ide.taskDefinitions,
       workbench.workspaceMode,
       workspacePath,
     ],
@@ -9234,16 +9340,16 @@ export function App() {
         );
         return true;
       }
-      if (!isUserSelectedWorkspacePath(chatWorkspacePath)) {
+      const isCouncilTurn = turnMode === "council";
+      if (isCouncilTurn && !isUserSelectedWorkspacePath(chatWorkspacePath)) {
         notify(
           "command-failed",
           "Choose a project",
-          "Select the folder Gyro should use before starting this chat.",
+          "Council needs a folder before starting a chat.",
         );
         void openWorkspace();
         return false;
       }
-      const isCouncilTurn = turnMode === "council";
       if (
         !isCouncilTurn &&
         !checkProviderReadiness("chat", sessionModel.providerId)
@@ -9332,7 +9438,11 @@ export function App() {
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         setWorkspacePath(session.workspacePath);
-        setFiles(workspaceFilesForRoot(session.workspacePath, previewFiles));
+        setFiles(
+          session.workspacePath
+            ? workspaceFilesForRoot(session.workspacePath, previewFiles)
+            : [],
+        );
         setSessions((current) => [session, ...current]);
         dispatchChatGrid({
           type: "migrate-draft-pane",
@@ -10618,38 +10728,11 @@ export function App() {
 
   const steerQueuedChatMessage = useCallback(
     (messageId: string) => {
-      if (!activeSessionId) {
-        return;
-      }
-      setChatMessageQueues((current) => {
-        const queued = current[activeSessionId] ?? [];
-        const selected = queued.find((item) => item.id === messageId);
-        if (!selected) {
-          return current;
-        }
-        return {
-          ...current,
-          [activeSessionId]: [
-            {
-              ...selected,
-              deliveryAttempts: 0,
-              retryAt: undefined,
-              status: "waiting",
-            },
-            ...queued.filter((item) => item.id !== messageId),
-          ],
-        };
-      });
-      if (sendingSessionIdsRef.current.has(activeSessionId)) {
-        stopActiveChat();
-      }
-      notify(
-        "terminal",
-        "Steering next",
-        "Stopping the current response, then sending this message.",
-      );
+      // Queued turns are context from an earlier moment. Dismissing one must
+      // not promote it into a fresh send (or leave a ghost row in the queue).
+      removeQueuedChatMessage(messageId);
     },
-    [activeSessionId, notify, stopActiveChat],
+    [removeQueuedChatMessage],
   );
 
   const appendPlanEvent = useCallback(
@@ -11648,7 +11731,7 @@ export function App() {
       sessionId?: string;
       workspacePath?: string;
     }) => {
-      const projectKey = normalizedChatProjectKey(candidate.workspacePath);
+      const projectKey = chatProjectKey(candidate.workspacePath);
       // Prefer the active project layout, then the candidate workspace, so a
       // slightly mismatched path still finds the sibling pane in a split.
       const paneLayout =
@@ -14936,8 +15019,7 @@ export function App() {
     chats: sessions
       .filter(
         (session) =>
-          normalizedChatProjectKey(session.workspacePath) ===
-          currentChatProjectKey,
+          chatProjectKey(session.workspacePath) === currentChatProjectKey,
       )
       .slice(0, 8)
       .map((session) => ({
@@ -15251,9 +15333,7 @@ export function App() {
                     (item) => item.id === sessionId,
                   );
                   if (!session) return;
-                  const projectKey = normalizedChatProjectKey(
-                    session.workspacePath,
-                  );
+                  const projectKey = chatProjectKey(session.workspacePath);
                   if (
                     sourceProjectKey &&
                     sourceProjectKey !== displayedChatLayout.projectKey
