@@ -20626,7 +20626,7 @@ function Composer({
   isCliUpdating?: boolean;
   /** Defaults to the hero layout: project, mode, and branch only at the start. */
   showContextRow?: boolean;
-  /** Split panes keep an identical empty composer baseline. */
+  /** Tiled panes keep an identical empty composer baseline. */
   stabilizeEmptyHeight?: boolean;
   variant?: "thread" | "hero";
 }) {

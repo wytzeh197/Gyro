@@ -3323,7 +3323,7 @@ expect(
     appSource.includes("setSessionSending") &&
     appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
     appSource.includes("[activeSessionId, events]") &&
-    /shouldSuggestSessionTitle\(\s*activeSession,\s*activeSessionHasTranscriptEvents/.test(
+    /shouldSuggestSessionTitle\(\s*targetSession,\s*targetSessionHasTranscriptEvents/.test(
       appSource,
     ) &&
     !appSource.includes(
@@ -3335,9 +3335,7 @@ expect(
     appSource.includes(
       "sessionModel,\n          chatWorkspacePath,\n          provisionalTitle",
     ) &&
-    appSource.includes(
-      "const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY",
-    ) &&
+    appSource.includes("const draftKey = `new:${projectKey}`") &&
     appSource.includes("resetChatDraft") &&
     !appSource.includes("const [draft, setDraft]") &&
     !appSource.includes("onDraftChange={setDraft}") &&
@@ -3353,12 +3351,12 @@ expect(
       "const bySession = new Map<string, ProviderStreamBatch[]>()",
     ) &&
     appSource.includes("(value) => setEventsForSession(sessionId, value)") &&
-    appSource.includes("applyProviderChatResponse(activeSessionId") &&
+    appSource.includes("applyProviderChatResponse(targetSessionId") &&
     appSource.includes("applyProviderChatResponse(persistedSession.id") &&
     !/applyProviderChatResponse\(persistedSession\.id,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
       appSource,
     ) &&
-    !/applyProviderChatResponse\(activeSessionId,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
+    !/applyProviderChatResponse\(targetSessionId,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
       appSource,
     ) &&
     appSource.includes("ProviderChatStreamEvent") &&
@@ -3630,7 +3628,9 @@ expect(
     surfaceSource.includes("const turnsById = new Map") &&
     surfaceSource.includes("isStreamingAssistantEvent") &&
     surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
-    surfaceSource.includes('{ kind: "ordered-list"; items: string[] }') &&
+    surfaceSource.includes(
+      '{ kind: "ordered-list"; items: string[]; start: number }',
+    ) &&
     runViewSource.includes("renderSay(step.text)") &&
     surfaceSource.includes("stripHiddenSessionTitleMarker") &&
     surfaceSource.includes("isHiddenSessionTitleActivity") &&
@@ -3852,7 +3852,7 @@ expect(
   appSource.includes('"New chat"') &&
     appSource.includes("normalizeSessionTitleInput") &&
     appSource.includes(
-      "updateSessionTitle(activeSessionId, provisionalTitle",
+      "updateSessionTitle(targetSessionId, provisionalTitle",
     ) &&
     styleSource.includes(".gyro-session-row.is-active .gyro-session-actions") &&
     styleSource.includes(
@@ -5865,7 +5865,7 @@ expect(
   surfaceSource.includes("function PlanDecisionCard") &&
     surfaceSource.includes("{isPlanReadyForDecision && sessionPlan ? (") &&
     surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes("<span>Implement this plan?</span>") &&
+    surfaceSource.includes("<strong>Ready to implement</strong>") &&
     surfaceSource.includes('onDecision("reject")') &&
     surfaceSource.includes('onDecision("approve")') &&
     surfaceSource.includes('className="gyro-plan-artifact-actions"') &&
@@ -5873,9 +5873,8 @@ expect(
     surfaceSource.includes("Yes, implement") &&
     surfaceSource.includes('onPlanDecision?.("approve")') &&
     surfaceSource.includes('activePanel === "plan" && sessionPlan?.content') &&
-    surfaceSource.includes(
-      "<PlanDocument content={sessionPlan.content} title={sessionPlan.title}",
-    ) &&
+    surfaceSource.includes("content={sessionPlan.content}") &&
+    surfaceSource.includes("title={sessionPlan.title}") &&
     surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
     surfaceSource.includes('chatMode === "plan"') &&
     surfaceSource.includes("planDecisionKey !== dismissedPlanDecisionKey") &&
