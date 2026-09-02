@@ -5768,7 +5768,7 @@ export function groupedRunTasks(
 function runTaskStatusCopy(task: TaskDefinition): string | undefined {
   switch (task.status) {
     case "running":
-      return "running";
+      return task.group === "dev" ? "live" : "running";
     case "done":
       return "passed";
     case "failed":
@@ -13586,7 +13586,9 @@ function WorkbenchPaneContent({
           <span>{activeChannel?.label ?? "Output"}</span>
         </header>
         <pre>
-          {(activeChannel?.lines ?? ["No output channel selected."]).join("\n")}
+          {formatOutputForDisplay(
+            (activeChannel?.lines ?? ["No output channel selected."]).join("\n"),
+          )}
         </pre>
       </section>
     );
@@ -13625,6 +13627,17 @@ function WorkbenchPaneContent({
       renderTerminalPaneBody={renderTerminalPaneBody}
     />
   );
+}
+
+/**
+ * Commands captured without a PTY can still emit ANSI control codes. The
+ * terminal renderer understands them; the plain Output pane must remove them
+ * rather than exposing escape bytes as visible garbage.
+ */
+export function formatOutputForDisplay(output: string) {
+  return output
+    .replace(/(?:\u001b|\u009b|\ufffd)\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, "")
+    .replace(/(?:\u001b|\u009b|\ufffd)\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 type WorkspaceToolPanelProps = {

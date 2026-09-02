@@ -3987,6 +3987,7 @@ export function createTerminalPane(
     workingDirectory?: string;
     missionSessionId?: string;
     taskTitle?: string;
+    workspaceTaskId?: string;
   } = {},
 ): TerminalPane {
   const workspaceMode = options.workspaceMode ?? "local";
@@ -4011,6 +4012,7 @@ export function createTerminalPane(
     workingDirectory: options.workingDirectory,
     missionSessionId: options.missionSessionId,
     taskTitle,
+    workspaceTaskId: options.workspaceTaskId,
     createdAt: new Date().toISOString(),
   };
 }
@@ -4035,6 +4037,10 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     taskTitle:
       typeof pane.taskTitle === "string" && pane.taskTitle.trim()
         ? pane.taskTitle.trim()
+        : undefined,
+    workspaceTaskId:
+      typeof pane.workspaceTaskId === "string" && pane.workspaceTaskId.trim()
+        ? pane.workspaceTaskId.trim()
         : undefined,
     hasForegroundJob:
       typeof pane.hasForegroundJob === "boolean"

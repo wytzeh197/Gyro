@@ -359,6 +359,11 @@ export type {
   UsageSafetyNotice,
 } from "./usage-ledger";
 export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
+export { selectQueuedMessageDelivery } from "./chat-message-queue";
+export type {
+  QueuedDeliverySelection,
+  QueuedMessageDelivery,
+} from "./chat-message-queue";
 export {
   createGlobalSearchTarget,
   globalSearchMatch,

@@ -8689,7 +8689,7 @@ fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String
     configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
-        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+        run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     if output.status == "done" {
         output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
     }
@@ -8774,7 +8774,7 @@ fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String
     configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
-        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+        run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     output.stdout = format!("tests {:?}\n{}", vec![task.id], output.stdout);
     Ok(output)
 }
@@ -10708,10 +10708,39 @@ fn run_command_output_with_cancellation(
     command: Command,
     cancellation: CancellationToken,
 ) -> anyhow::Result<IdeCommandOutput> {
-    let output = run_bounded_command_with_cancellation(
-        &command,
+    run_command_output_with_limits(
+        command,
+        cancellation,
         Duration::from_secs(30 * 60),
         Some(Duration::from_secs(5 * 60)),
+    )
+}
+
+/// Build and test commands can be quiet while they compile or download. Keep
+/// them cancellable, but do not treat silence as a failure or stop them after
+/// the short task window used by incidental helper commands.
+fn run_workspace_task_output_with_cancellation(
+    command: Command,
+    cancellation: CancellationToken,
+) -> anyhow::Result<IdeCommandOutput> {
+    run_command_output_with_limits(
+        command,
+        cancellation,
+        Duration::from_secs(2 * 60 * 60),
+        None,
+    )
+}
+
+fn run_command_output_with_limits(
+    command: Command,
+    cancellation: CancellationToken,
+    timeout: Duration,
+    inactivity_timeout: Option<Duration>,
+) -> anyhow::Result<IdeCommandOutput> {
+    let output = run_bounded_command_with_cancellation(
+        &command,
+        timeout,
+        inactivity_timeout,
         2 * 1024 * 1024,
         1024 * 1024,
         cancellation,

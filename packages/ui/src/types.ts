@@ -359,6 +359,8 @@ export type TerminalPane = {
   missionSessionId?: string;
   /** Short task label for the mission board (not the profile display name). */
   taskTitle?: string;
+  /** Run and Test task backed by this terminal, when the command stays live. */
+  workspaceTaskId?: string;
 };
 
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
