@@ -261,6 +261,24 @@ should foreclose it: keep the session store's identity and event model clean
 enough that a sync layer can be added above it without a schema break. That is
 the only accommodation v1.0 makes for it.
 
+**Post-v1.0 horizon — Gyro Remote.** Cross-device continuity should make Gyro
+the private command center for agent work happening on a user's Mac, not turn
+it into a generic multi-model ChatGPT client. A paired iPhone should let a
+developer stay in the loop while their Mac remains the execution host: inspect
+live run state, output, diffs, tests, and approval requests; send a follow-up
+or change direction; and explicitly approve, reject, or stop work. Files,
+provider credentials, terminals, project context, and the active approval
+policy stay on the Mac. The connection requires device pairing and a secure
+relay rather than an exposed inbound machine.
+
+The first mobile surface is deliberately a companion, not a remote IDE or
+shell. It earns its place by keeping long-running coding tasks moving away from
+the desk. A lightweight no-project chat using the user's existing configured
+provider profiles may follow if it strengthens that continuity, but it is not
+the product headline and must not require Gyro-hosted model routing or a new
+provider billing layer. Remote mutation always remains explicit approval; do
+not make mobile convenience a path around the local-first trust boundary.
+
 **Full IDE parity is out**, permanently at this scope. vision.md already says
 the integrated IDE surface is part of the agent workflow, not a replacement for
 a mature editor. Do not let M5's "every control is functional" audit turn into

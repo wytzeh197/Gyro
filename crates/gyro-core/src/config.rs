@@ -152,6 +152,10 @@ pub struct GyroConfig {
     pub require_file_edit_approval: bool,
     #[serde(default)]
     pub full_access: bool,
+    /// Whether to use an additional provider call to describe files changed in
+    /// a completed turn.
+    #[serde(default)]
+    pub change_summaries_enabled: bool,
     #[serde(default)]
     pub account_oidc: AccountOidcConfig,
     #[serde(default)]
@@ -178,6 +182,7 @@ impl Default for GyroConfig {
             require_command_approval: true,
             require_file_edit_approval: true,
             full_access: false,
+            change_summaries_enabled: false,
             account_oidc: AccountOidcConfig::default(),
             account_session: AccountSessionState::default(),
             selected_provider_id: None,
@@ -827,6 +832,8 @@ mod tests {
 
         let config = GyroConfig::load(&paths).unwrap();
 
+        assert!(!config.change_summaries_enabled);
+
         assert_eq!(
             config.command_profiles[0].provider_id.as_deref(),
             Some("openai")
@@ -862,6 +869,7 @@ mod tests {
         let config = GyroConfig {
             telemetry_enabled: true,
             selected_provider_id: Some("anthropic".into()),
+            change_summaries_enabled: true,
             ..GyroConfig::default()
         };
 

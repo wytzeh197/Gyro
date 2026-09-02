@@ -2001,6 +2001,7 @@ export type GyroConfig = {
   requireCommandApproval: boolean;
   requireFileEditApproval: boolean;
   fullAccess?: boolean;
+  changeSummariesEnabled?: boolean;
   accountOidc?: GyroAccountOidcConfig;
   accountSession?: GyroAccountSession;
   selectedProviderId?: ProviderId;

@@ -4,7 +4,8 @@ The clean-machine path is the shortest trusted loop on a Mac that has never
 run Gyro:
 
 1. Install and open Gyro.app (see [install-macos.md](install-macos.md)).
-2. **Open a project** — pick a local folder; send stays locked until this is set.
+2. **Optionally open a project** — pick a local folder when the chat should
+   work with files, diffs, and workspace tools.
 3. **Connect a provider** — Codex CLI or Claude Code via the provider's own
    login (no Gyro config file, no API key pasted into Gyro).
 4. **Send a first message** and complete one streamed response.
@@ -18,7 +19,7 @@ Signing and notarization remain a separate distribution gate.
 
 | Gate     | Behavior                                                                                                            |
 | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| Project  | `canSendChat` requires a user-selected workspace path. Auto session folders do not count.                           |
+| Project  | A chat can use **No folder**. File, diff, terminal, and workspace tools remain tied to a user-selected project.     |
 | Provider | Send requires a connected executable provider. Disconnected rows in the model picker start `connect-provider:{id}`. |
 | Honesty  | Blocked send disables the send control and states the next step in the composer placeholder.                        |
 | Mutation | Supported Codex/Claude text edits use the journaled propose/review/apply/reject/recover path in `gyro-core`.        |
@@ -34,7 +35,7 @@ node --experimental-strip-types scripts/check-clean-machine-path.mjs
 
 Also covered indirectly by:
 
-- `pnpm smoke:workbench` — project-required send rules
+- `pnpm smoke:workbench` — optional-project chat and workspace-tool rules
 - `cargo test -p gyro-core mutations` — mutation journal and recovery
 - `gyro doctor` / `gyro setup` — required vs optional checks with next actions
 
@@ -43,8 +44,10 @@ Also covered indirectly by:
 Use a macOS user that has never configured Gyro. Provider CLIs may be installed.
 
 1. Launch Gyro.app. Do not edit `~/Library/Application Support/Gyro/`.
-2. Empty Chat must explain that a project is required; **Open project** works.
-3. After opening a repo, send stays blocked until a provider is connected.
+2. Empty Chat must show **No folder** as the selected project context; **Open
+   project** remains available for file-aware work.
+3. Send stays blocked until a provider is connected, whether or not a project
+   is selected.
 4. Connect **OpenAI / Codex** from the readiness CTA or model picker → Connect.
 5. Finish the provider-owned login. Gyro should show the provider as ready
    without a config edit.

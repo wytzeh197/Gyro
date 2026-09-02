@@ -187,9 +187,9 @@ for (const [name, html] of Object.entries(pages)) {
 }
 
 containsAll(pages.home, "Homepage", [
-  "Stop switching tools. Say it once.",
+  "The open-source AI workspace.",
   "Public alpha",
-  "Chat, CLI, and review—one local workspace.",
+  "Think, build, and ship in one place.",
   "Open source · No account · No analytics",
   "Tool switches cost context.",
   "Terminal without the ask.",
@@ -278,7 +278,7 @@ check(
 
 containsAll(pages.install, "Install page", [
   "Download for macOS.",
-  "Choose your Mac.",
+  "Choose the right build for your Mac.",
   "Choose your Mac processor",
   "Apple Silicon",
   "M1–M4 and newer",

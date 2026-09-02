@@ -144,9 +144,17 @@ export function ChatRun({
     (step): step is WorkGroup =>
       step.kind === "work-group" && step.status === "running",
   );
-  const activeLabel = activeGroup
-    ? runWorkGroupText(activeGroup).label
-    : undefined;
+  const activeContextStep = displaySteps.findLast(
+    (step): step is Extract<RunStep, { kind: "work" }> =>
+      step.kind === "work" &&
+      step.item.kind === "context" &&
+      step.item.status === "running",
+  );
+  const activeLabel = activeContextStep
+    ? runRowText(activeContextStep).label
+    : activeGroup
+      ? runWorkGroupText(activeGroup).label
+      : undefined;
   // Keep a thinking beat while the model is quiet between tools, not only at
   // the empty start of a run — otherwise the rail freezes on the last Done row.
   const hasRunningWork = model.steps.some(

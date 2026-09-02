@@ -22326,10 +22326,8 @@ button.gyro-settings-row em::after {
 }
 
 /*
- * Start cards. Four openings on one row, sized by the widest label rather than
- * by content, so the row reads as a set. The card carries the composer's own
- * surface and hairline — the start screen is one material, not a card style
- * plus a composer style.
+ * Start actions. These are compact, icon-led launchers rather than a second
+ * layer of large cards, keeping the hero focused on the composer.
  */
 .gyro-chat-start-suggestions {
   display: grid;
@@ -22344,23 +22342,23 @@ button.gyro-settings-row em::after {
 }
 
 .gyro-chat-start-suggestion {
-  align-content: space-between;
+  align-items: center;
   background: var(--gyro-hero-composer);
   border: 1px solid var(--gyro-hero-border);
-  border-radius: var(--gyro-radius-composer);
+  border-radius: 12px;
   color: var(--gyro-hero-text);
-  display: grid;
-  font-size: 13px;
-  font-weight: 460;
-  gap: 22px;
-  justify-items: start;
-  line-height: 1.32;
-  min-height: 112px;
-  padding: 13px 13px 14px;
+  display: flex;
+  font-size: 12px;
+  font-weight: 510;
+  gap: 8px;
+  line-height: 1.2;
+  min-height: 44px;
+  padding: 8px 10px;
   text-align: left;
   transition:
     background var(--gyro-premium-motion) var(--gyro-premium-ease),
-    border-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+    border-color var(--gyro-premium-motion) var(--gyro-premium-ease),
+    transform var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 
 .gyro-chat-start-suggestion:hover {
@@ -22370,6 +22368,7 @@ button.gyro-settings-row em::after {
     var(--gyro-hero-text)
   );
   border-color: var(--gyro-hero-focus-border);
+  transform: translateY(-1px);
 }
 
 .gyro-chat-start-suggestion:focus-visible {
@@ -22381,6 +22380,18 @@ button.gyro-settings-row em::after {
 .gyro-chat-start-suggestion span {
   display: block;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-start-suggestion svg {
+  background: color-mix(in srgb, currentColor 13%, transparent);
+  border-radius: 8px;
+  flex: 0 0 auto;
+  padding: 5px;
+  width: 27px;
+  height: 27px;
 }
 
 .gyro-chat-start-suggestion.is-explore svg {
@@ -22409,12 +22420,10 @@ button.gyro-settings-row em::after {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-/* Two across, the card is wide enough that the tall icon-to-label gap reads
-   as a hole rather than as breathing room. */
+/* Preserve a thumb-friendly target when the actions fold into two columns. */
 .gyro-chat-surface.has-environment .gyro-chat-start-suggestion,
 .gyro-chat-surface.is-tiled .gyro-chat-start-suggestion {
-  gap: 14px;
-  min-height: 88px;
+  min-height: 44px;
 }
 
 @media (max-width: 1100px) {
@@ -22423,8 +22432,7 @@ button.gyro-settings-row em::after {
   }
 
   .gyro-chat-start-suggestion {
-    gap: 14px;
-    min-height: 88px;
+    min-height: 44px;
   }
 }
 
@@ -24135,9 +24143,10 @@ button.gyro-response-changed-files:hover {
      rather than in each of the three fallback breakpoints. */
   --gyro-companion-shadow: 0 16px 44px rgb(0 0 0 / 44%);
   align-self: stretch;
-  background: var(--gyro-surface);
-  border: 1px solid var(--gyro-border);
-  border-radius: 16px;
+  background: var(--gyro-app);
+  border: 0;
+  border-left: 1px solid var(--gyro-border-soft);
+  border-radius: 0;
   box-sizing: border-box;
   color: var(--gyro-text);
   display: grid;
@@ -24187,15 +24196,23 @@ button.gyro-response-changed-files:hover {
   border-bottom: 1px solid var(--gyro-border-soft);
   display: flex;
   gap: 4px;
-  min-height: 42px;
-  padding: 5px 8px 5px 10px;
+  min-height: 44px;
+  padding: 6px 8px 6px 14px;
+}
+
+.gyro-chat-companion-context {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 540;
+  letter-spacing: 0.01em;
 }
 
 .gyro-chat-companion-tab-list {
   align-items: center;
   display: flex;
   flex: 1 1 auto;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -24213,7 +24230,7 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-muted);
   display: inline-flex;
   flex: 0 0 auto;
-  padding-right: 2px;
+  padding-right: 0;
 }
 
 .gyro-chat-companion-tab:hover {
@@ -24222,8 +24239,8 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-companion-tab.is-active {
-  background: var(--gyro-surface-raised);
-  box-shadow: inset 0 0 0 1px var(--gyro-border);
+  background: var(--gyro-control-bg);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-soft);
   color: var(--gyro-text);
 }
 
@@ -24235,9 +24252,22 @@ button.gyro-response-changed-files:hover {
   color: inherit;
   display: inline-flex;
   gap: 6px;
-  max-width: 148px;
+  max-width: 132px;
   min-height: 28px;
   padding: 0 6px 0 8px;
+}
+
+/* One active tool is named; the rest stay one-click away without turning the
+   environment header into a second browser tab bar. */
+.gyro-chat-companion-tab:not(.is-active) > button {
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.gyro-chat-companion-tab:not(.is-active) > button > span,
+.gyro-chat-companion-tab:not(.is-active) > .gyro-chat-companion-tab-close {
+  display: none;
 }
 
 .gyro-chat-companion-tab > button > span {
@@ -24258,7 +24288,7 @@ button.gyro-response-changed-files:hover {
   justify-content: center;
   opacity: 0;
   padding: 0;
-  width: 20px;
+  width: 18px;
 }
 
 .gyro-chat-companion-tab:hover > .gyro-chat-companion-tab-close,
@@ -25418,7 +25448,9 @@ button.gyro-account-menu-row:hover,
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar {
   background: var(--gyro-hero-composer);
-  border-radius: 0 0 16px 16px;
+  /* The context rail owns the lower outer corners. Rounding this overlapping
+     bar creates a visible white notch along the rail's top edge. */
+  border-radius: 0;
   position: relative;
   z-index: 2;
 }
@@ -25922,6 +25954,18 @@ button.gyro-account-menu-row:hover,
   z-index: 122;
 }
 
+/* Slash commands can open a picker without introducing a duplicate branch UI. */
+.gyro-composer-command-popover {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 122;
+}
+
+.gyro-composer-command-popover > .gyro-composer-popover {
+  z-index: 122;
+}
+
 /* Running cost for this chat, read from Gyro's usage ledger. */
 .gyro-composer-session-cost {
   align-items: center;
@@ -25969,7 +26013,7 @@ button.gyro-account-menu-row:hover,
   flex-direction: column;
   gap: 1px;
   left: 8px;
-  max-height: min(288px, calc(100vh - 40px));
+  max-height: min(390px, calc(100vh - 40px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 4px;
@@ -25977,6 +26021,21 @@ button.gyro-account-menu-row:hover,
   right: 8px;
   width: min(300px, calc(100% - 16px));
   z-index: 140;
+}
+
+.gyro-composer-slash-menu > header {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: 10px;
+  justify-content: space-between;
+  padding: 4px 6px 6px;
+}
+
+.gyro-composer-slash-menu > header strong {
+  color: var(--gyro-muted);
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .gyro-composer-slash-menu button {
@@ -26013,6 +26072,30 @@ button.gyro-account-menu-row:hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gyro-composer-slash-command-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-composer-slash-command-copy strong,
+.gyro-composer-slash-command-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-composer-slash-command-copy strong {
+  color: inherit;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.gyro-composer-slash-command-copy small {
+  color: var(--gyro-faint);
+  font-size: 9px;
 }
 
 .gyro-composer-slash-hint-mark {
@@ -29984,6 +30067,17 @@ button.gyro-account-menu-row:hover,
   padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
 }
 
+/* The browser-style title bar is taller than the compact controls it carries.
+   A small optical offset centers the title and actions within the full bar. */
+.gyro-chat-surface.is-thread:not(.is-tiled)
+  > .gyro-chat-thread-topbar
+  > .gyro-chat-thread-identity,
+.gyro-chat-surface.is-thread:not(.is-tiled)
+  > .gyro-chat-thread-topbar
+  > .gyro-thread-topbar-actions {
+  transform: translateY(4px);
+}
+
 /* -- Settings rows -------------------------------------------------------- */
 
 /* Values were left-aligned against the divider, which left up to 180px of dead
@@ -30055,9 +30149,10 @@ button.gyro-account-menu-row:hover,
 
 .gyro-sidebar-restore-button {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-surface) 88%, transparent);
-  border: 1px solid var(--gyro-border-soft, rgba(0, 0, 0, 0.08));
-  border-radius: 7px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   color: var(--gyro-text);
   display: inline-flex;
   height: 28px;
@@ -30071,8 +30166,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-restore-button:hover {
-  background: var(--gyro-surface);
-  border-color: var(--gyro-border);
+  background: transparent;
   color: var(--gyro-text);
 }
 
@@ -30092,15 +30186,46 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-sidebar-restore-button {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(0, 0, 0, 0.1);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   color: #1f2328;
 }
 
 :root[data-theme="light"] .gyro-sidebar-restore-button:hover {
-  background: #fff;
-  border-color: rgba(0, 0, 0, 0.16);
+  background: transparent;
+}
+
+/* Sidebar visibility controls stay icon-only in both shown and hidden states. */
+.gyro-sidebar-window-actions .gyro-sidebar-toggle-button {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--gyro-text);
+  height: 28px;
+  width: 28px;
+}
+
+.gyro-sidebar-window-actions .gyro-sidebar-toggle-button:hover {
+  background: transparent;
+  color: var(--gyro-text);
+  transform: none;
+}
+
+:root[data-theme="light"]
+  .gyro-sidebar-window-actions
+  .gyro-sidebar-toggle-button {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #1f2328;
+}
+
+:root[data-theme="light"]
+  .gyro-sidebar-window-actions
+  .gyro-sidebar-toggle-button:hover {
+  background: transparent;
 }
 
 /* Workspace code: show-sidebar lives in the main column (after the activity rail). */
@@ -31772,6 +31897,23 @@ button.gyro-account-menu-row:hover,
   animation: gyro-run-breathe 1.6s ease-in-out infinite;
 }
 
+/* Context compaction changes what the model carries forward. It therefore
+   remains a first-class status row instead of blending into generic review
+   work: the compression mark and direct copy make the transition legible at a
+   glance. */
+.gyro-run-row.is-context .gyro-run-row-icon {
+  color: var(--gyro-accent);
+  opacity: 1;
+}
+
+.gyro-run-row.is-context.is-running .gyro-run-row-label {
+  color: var(--gyro-text);
+}
+
+.gyro-run-row.is-context.is-running .gyro-run-row-icon {
+  animation: gyro-context-compacting 1.4s ease-in-out infinite;
+}
+
 .gyro-run-row:hover .gyro-run-row-detail {
   color: var(--gyro-muted);
 }
@@ -31903,6 +32045,18 @@ button.gyro-account-menu-row:hover,
   }
 }
 
+@keyframes gyro-context-compacting {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(2px) scaleX(1);
+  }
+  50% {
+    opacity: 0.58;
+    transform: translateY(2px) scaleX(0.7);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gyro-run.is-live .gyro-run-header-toggle > span::before,
   .gyro-run.is-retrying .gyro-run-header-toggle > span::before {
@@ -31910,6 +32064,7 @@ button.gyro-account-menu-row:hover,
   }
 
   .gyro-run-row.is-running .gyro-run-row-icon,
+  .gyro-run-row.is-context.is-running .gyro-run-row-icon,
   .gyro-run-pulse,
   .gyro-run-retry .gyro-run-row-icon,
   .gyro-run-retry .gyro-run-row-detail {
@@ -33390,6 +33545,278 @@ button.gyro-account-menu-row:hover,
   min-width: 0;
 }
 
+/* -------------------------------------------------------------------------
+ * Plan approval, document rail, and image previews
+ * ---------------------------------------------------------------------- */
+
+/* A plan is supporting context. Keep the conversation as the dominant pane
+   instead of splitting the workspace almost in half. */
+.gyro-chat-surface.is-thread.has-plan {
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 520px);
+}
+
+@media (max-width: 1100px) {
+  .gyro-chat-surface.is-thread.has-plan {
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 34vw, 440px);
+  }
+}
+
+/* Approval is a compact decision, not a second copy of the full plan. */
+.gyro-plan-decision-card {
+  box-shadow: 0 14px 32px rgb(0 0 0 / 20%);
+  padding: 12px 14px 18px;
+}
+
+.gyro-plan-decision-card > header {
+  gap: 9px;
+}
+
+.gyro-plan-decision-card > header > .gyro-plan-decision-open {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--gyro-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 7px;
+}
+
+.gyro-plan-decision-card > header > .gyro-plan-decision-open:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-decision-card ol {
+  margin: 10px 0 8px;
+}
+
+.gyro-plan-decision-card li {
+  padding-block: 4px;
+}
+
+.gyro-plan-decision-card > footer {
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 10px;
+}
+
+.gyro-plan-decision-card > footer > button {
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  min-height: 31px;
+  padding: 0 11px;
+}
+
+.gyro-plan-decision-card > footer > button.is-secondary {
+  background: transparent;
+  color: var(--gyro-muted);
+}
+
+.gyro-plan-decision-card > footer > button.is-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-plan-decision-card > footer > button.is-primary {
+  background: var(--gyro-text);
+  border-color: var(--gyro-text);
+  color: var(--gyro-app);
+}
+
+.gyro-plan-decision-card > footer > button.is-primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+/* Sent screenshots are clearly interactive, then open above the whole app. */
+.gyro-transcript-image-preview {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: zoom-in;
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.gyro-transcript-image-preview:focus-visible {
+  box-shadow: 0 0 0 2px var(--gyro-accent);
+  outline: 0;
+}
+
+.gyro-transcript-image-preview > img {
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.gyro-transcript-image-preview:hover > img {
+  opacity: 0.86;
+  transform: scale(1.03);
+}
+
+.gyro-image-preview-overlay {
+  align-items: center;
+  background: rgb(8 11 16 / 76%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 32px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.gyro-image-preview-overlay > figure {
+  margin: 0;
+  max-height: 100%;
+  max-width: min(1120px, 100%);
+  position: relative;
+}
+
+.gyro-image-preview-overlay img {
+  border-radius: 10px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 48%);
+  display: block;
+  max-height: calc(100vh - 96px);
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.gyro-image-preview-overlay figcaption {
+  color: rgb(255 255 255 / 76%);
+  font-size: 12px;
+  margin-top: 9px;
+  overflow: hidden;
+  padding-right: 34px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-image-preview-overlay button {
+  align-items: center;
+  background: rgb(20 24 31 / 88%);
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 32px;
+}
+
+/* Workspace context is a compact menu, not a stack of nested composer cards.
+   Its rows deliberately use one quiet selection treatment and a tighter
+   vertical rhythm so the branch list stays readable without taking the screen. */
+.gyro-thread-context-control > .gyro-thread-workspace-menu {
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
+  border-radius: 12px;
+  box-shadow: 0 14px 32px rgb(28 39 52 / 14%);
+  gap: 2px;
+  max-height: min(520px, calc(100vh - 72px));
+  overflow-y: auto;
+  padding: 8px;
+  width: min(336px, calc(100vw - 24px));
+}
+
+.gyro-thread-workspace-menu .gyro-composer-popover-title {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 3px 4px 8px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-popover-section-title {
+  border-top-color: var(--gyro-border-soft);
+  color: var(--gyro-faint);
+  font-size: 10px;
+  letter-spacing: 0.075em;
+  margin-top: 5px;
+  padding: 10px 4px 4px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item,
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-model {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  gap: 9px;
+  grid-template-columns: 18px minmax(0, 1fr) 18px;
+  min-height: 44px;
+  padding: 7px 8px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item:hover:not(:disabled),
+.gyro-thread-workspace-menu .gyro-composer-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+  outline: none;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--gyro-accent);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active,
+.gyro-thread-workspace-menu .gyro-composer-menu-item.is-active:disabled {
+  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item > svg:first-child {
+  color: var(--gyro-faint);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item > svg:last-child {
+  color: var(--gyro-muted);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item span {
+  gap: 2px;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item strong {
+  color: var(--gyro-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item small {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+@media (max-width: 620px) {
+  .gyro-plan-decision-card > header {
+    align-items: flex-start;
+  }
+
+  .gyro-plan-decision-card > header > .gyro-plan-decision-open {
+    margin-top: -2px;
+  }
+
+  .gyro-plan-decision-card > footer {
+    flex-direction: row;
+  }
+
+  .gyro-image-preview-overlay {
+    padding: 16px;
+  }
+}
+
 /* A blocked composer needs an explanation and a way out, not only a disabled
    arrow and a placeholder that competes with the current model label. */
 .gyro-composer-blocker {
@@ -33509,4 +33936,269 @@ button.gyro-account-menu-row:hover,
   box-shadow:
     inset 0 1px 0 var(--gyro-premium-inset-highlight),
     0 1px 2px var(--gyro-sidebar-mode-active-shadow);
+}
+
+/* Folderless chats remain findable without being represented as a synthetic
+   project. Keep the section light so real project context stays primary. */
+.gyro-sidebar-recents {
+  margin-top: 18px;
+}
+
+.gyro-sidebar-recents-empty {
+  color: var(--gyro-premium-faint);
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.72;
+  padding: 4px 8px 8px 31px;
+}
+
+/* Queued turns share the composer's centerline but step in five percent on
+   either side, distinguishing them from the active writing surface. */
+.gyro-chat-message-queue-wrap {
+  align-self: stretch;
+  box-sizing: border-box;
+  margin-bottom: -12px;
+  margin-inline: auto;
+  max-width: min(100%, var(--gyro-composer-width));
+  min-width: 0;
+  width: min(100%, var(--gyro-composer-width));
+  z-index: 1;
+}
+
+.gyro-chat-message-queue-wrap > .gyro-chat-message-queue {
+  margin-bottom: 0;
+  margin-inline: auto;
+  max-width: none;
+  width: 90%;
+}
+
+/* Terminal surface refresh: the first-run state belongs to the workspace,
+   while live sessions keep their identity and health in the same compact bar. */
+.gyro-terminal-workspace {
+  background: var(--gyro-app);
+}
+
+.gyro-terminal-toolbar {
+  background: var(--gyro-app);
+  gap: 8px;
+  grid-template-columns:
+    minmax(116px, 168px) minmax(124px, auto) minmax(0, 1fr)
+    auto auto;
+  min-height: 48px;
+  padding: 8px 12px;
+}
+
+.gyro-terminal-session-summary {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.gyro-terminal-session-summary strong {
+  color: var(--gyro-premium-text);
+  font-size: 12px;
+  font-weight: 620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-terminal-session-summary small {
+  color: var(--gyro-premium-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-terminal-connection-notice {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-warn) 8%, var(--gyro-app));
+  border-bottom: 0.5px solid
+    color-mix(in srgb, var(--gyro-warn) 28%, var(--gyro-premium-hairline));
+  color: var(--gyro-warn);
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px 14px;
+}
+
+.gyro-terminal-connection-notice > div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.gyro-terminal-connection-notice strong {
+  color: var(--gyro-premium-text);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.gyro-terminal-connection-notice span {
+  color: var(--gyro-premium-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-terminal-connection-notice button {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-warn) 14%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--gyro-warn) 36%, transparent);
+  border-radius: var(--gyro-premium-radius-sm);
+  color: var(--gyro-premium-text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+}
+
+.gyro-terminal-connection-notice button:hover {
+  background: color-mix(in srgb, var(--gyro-warn) 22%, transparent);
+}
+
+.gyro-terminal-workspace.has-connection-issue {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.gyro-terminal-workspace.is-empty {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.gyro-terminal-workspace.is-empty > .gyro-terminal-toolbar,
+.gyro-terminal-workspace.is-empty > .gyro-terminal-grid {
+  grid-area: auto;
+}
+
+.gyro-terminal-toolbar.is-empty {
+  align-self: auto;
+  background: var(--gyro-app);
+  backdrop-filter: none;
+  border: 0;
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-soft);
+  border-radius: 0;
+  box-shadow: none;
+  justify-self: stretch;
+  padding: 8px 12px;
+  width: auto;
+}
+
+.gyro-terminal-toolbar.is-empty .gyro-terminal-agent-button,
+.gyro-terminal-toolbar.is-empty .gyro-terminal-preset-button {
+  min-height: 32px;
+}
+
+.gyro-terminal-workspace.is-empty .gyro-terminal-grid {
+  align-items: center;
+  background: var(--gyro-app);
+  display: grid;
+  padding: clamp(24px, 7vh, 76px) 20px;
+}
+
+.gyro-terminal-workspace.is-empty .gyro-terminal-empty {
+  align-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-premium-muted);
+  display: grid;
+  gap: 13px;
+  justify-items: center;
+  margin: 0;
+  max-width: 460px;
+  min-height: 0;
+  padding: 18px;
+  text-align: center;
+}
+
+.gyro-terminal-empty-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--gyro-accent) 28%, transparent);
+  border-radius: 10px;
+  color: var(--gyro-accent);
+  display: inline-flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.gyro-terminal-empty > div {
+  display: grid;
+  gap: 6px;
+}
+
+.gyro-terminal-empty-eyebrow {
+  color: var(--gyro-accent);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gyro-terminal-workspace.is-empty .gyro-terminal-empty strong {
+  color: var(--gyro-premium-text);
+  font-family: var(--gyro-font-display);
+  font-size: 20px;
+  font-weight: 560;
+}
+
+.gyro-terminal-empty p {
+  color: var(--gyro-premium-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 400px;
+}
+
+.gyro-terminal-empty-hint {
+  color: var(--gyro-premium-faint);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .gyro-terminal-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .gyro-terminal-session-summary {
+    display: none;
+  }
+
+  .gyro-terminal-toolbar-spacer {
+    display: none;
+  }
+
+  .gyro-terminal-awareness {
+    justify-content: flex-end;
+  }
+
+  .gyro-terminal-connection-notice {
+    align-items: flex-start;
+  }
+
+  .gyro-terminal-connection-notice span {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 520px) {
+  .gyro-terminal-toolbar,
+  .gyro-terminal-toolbar.is-empty {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    padding-inline: 8px;
+  }
+
+  .gyro-terminal-connection-notice button {
+    padding: 0 7px;
+  }
+
+  .gyro-terminal-connection-notice button svg {
+    display: none;
+  }
 }
