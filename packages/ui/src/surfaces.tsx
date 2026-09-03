@@ -116,7 +116,7 @@ import { createPortal } from "react-dom";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import { structuredCommentaryBlocks } from "./chat-commentary";
-import { buildRunModel, elapsedMsBetween } from "./chat-run";
+import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
 import {
   askAboutFilePrompt,
   changeSummaryLine,
@@ -270,6 +270,7 @@ import {
   defaultCliLaunchPreset,
   defaultCommandProfiles,
   defaultProviderStatuses,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   resolveChatGridDropSlot,
 } from "./workbench-state";
@@ -788,6 +789,12 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     label: "Theme",
     detail: "Switch between Light and Dark mode",
     keywords: "color appearance",
+  },
+  {
+    section: "appearance",
+    label: "Interface colors",
+    detail: "Customize Gyro's main and secondary accents",
+    keywords: "main secondary accent brand palette color",
   },
   {
     section: "appearance",
@@ -3035,11 +3042,14 @@ function WorkspaceSidebarContent({
   onRetryWorkspacePreparation?: () => void;
   workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
-  const pinnedSessions = sessions.filter((session) =>
+  const sidebarSessions = sessions.filter(
+    (session) => !isTransientWorkspacePath(session.workspacePath),
+  );
+  const pinnedSessions = sidebarSessions.filter((session) =>
     pinnedSessionIds.includes(session.id),
   );
   // Hide empty "New chat" / "New mission" shells until something real happens.
-  const recentSessions = sessions.filter((session) => {
+  const recentSessions = sidebarSessions.filter((session) => {
     if (pinnedSessionIds.includes(session.id)) {
       return false;
     }
@@ -3089,7 +3099,9 @@ function WorkspaceSidebarContent({
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>(
     loadCollapsedSidebarProjectIds,
   );
-  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
+  const [projectVisibleCounts, setProjectVisibleCounts] = useState<
+    Record<string, number>
+  >({});
   const discoveredSessionNavigation = useMemo(
     () =>
       sidebarProjectGroups(
@@ -3318,12 +3330,25 @@ function WorkspaceSidebarContent({
         : [...current, projectKey],
     );
   };
-  const toggleProjectMore = (projectKey: string) => {
-    setExpandedProjectIds((current) =>
-      current.includes(projectKey)
-        ? current.filter((id) => id !== projectKey)
-        : [...current, projectKey],
-    );
+  const showMoreProjectSessions = (projectKey: string, totalCount: number) => {
+    setProjectVisibleCounts((current) => {
+      const visibleCount =
+        current[projectKey] ?? SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
+      return {
+        ...current,
+        [projectKey]: Math.min(
+          totalCount,
+          visibleCount + SIDEBAR_PROJECT_SESSION_BATCH_SIZE,
+        ),
+      };
+    });
+  };
+  const showLessProjectSessions = (projectKey: string) => {
+    setProjectVisibleCounts((current) => {
+      const next = { ...current };
+      delete next[projectKey];
+      return next;
+    });
   };
   const moveProject = (
     sourceKey: string,
@@ -4075,7 +4100,7 @@ function WorkspaceSidebarContent({
           ) : null}
 
           {activeIdeView === "source-control" ? (
-            <SidebarSection grow title="Source Control">
+            <SidebarSection grow title="Source control">
               <div className="gyro-scm-panel">
                 <div className="gyro-sidebar-scm-group-label">
                   <span className="gyro-scm-label-text">Repository</span>
@@ -4255,45 +4280,51 @@ function WorkspaceSidebarContent({
                       >
                         <ListChecks size={11} />
                       </button>
-                      <button
-                        aria-label="Stage selected source control changes"
-                        disabled={selectedSourceControlPaths.size === 0}
-                        onClick={async () => {
-                          const selected = unstagedSourceControlFiles.filter(
-                            (file) => selectedSourceControlPaths.has(file.path),
-                          );
-                          for (const file of selected) {
-                            await onToggleSourceControlFile?.(file.path, false);
-                          }
-                          onRefreshSourceControl?.();
-                        }}
-                        title="Stage selected"
-                        type="button"
-                      >
-                        <Plus size={11} />
-                      </button>
-                      <button
-                        aria-label="Discard selected source control changes"
-                        disabled={selectedSourceControlPaths.size === 0}
-                        onClick={async () => {
-                          if (
-                            !window.confirm(
-                              `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
-                            )
-                          ) {
-                            return;
-                          }
-                          for (const path of selectedSourceControlPaths) {
-                            await onDiscardSourceControlFile?.(path);
-                          }
-                          setSelectedSourceControlPaths(new Set());
-                          onRefreshSourceControl?.();
-                        }}
-                        title="Discard selected"
-                        type="button"
-                      >
-                        <Trash2 size={11} />
-                      </button>
+                      {selectedSourceControlPaths.size > 0 ? (
+                        <>
+                          <button
+                            aria-label="Stage selected source control changes"
+                            onClick={async () => {
+                              const selected =
+                                unstagedSourceControlFiles.filter((file) =>
+                                  selectedSourceControlPaths.has(file.path),
+                                );
+                              for (const file of selected) {
+                                await onToggleSourceControlFile?.(
+                                  file.path,
+                                  false,
+                                );
+                              }
+                              onRefreshSourceControl?.();
+                            }}
+                            title="Stage selected"
+                            type="button"
+                          >
+                            <Plus size={11} />
+                          </button>
+                          <button
+                            aria-label="Discard selected source control changes"
+                            onClick={async () => {
+                              if (
+                                !window.confirm(
+                                  `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
+                                )
+                              ) {
+                                return;
+                              }
+                              for (const path of selectedSourceControlPaths) {
+                                await onDiscardSourceControlFile?.(path);
+                              }
+                              setSelectedSourceControlPaths(new Set());
+                              onRefreshSourceControl?.();
+                            }}
+                            title="Discard selected"
+                            type="button"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </>
+                      ) : null}
                     </>
                   }
                   className="is-changes"
@@ -4807,32 +4838,35 @@ function WorkspaceSidebarContent({
             <div className="gyro-sidebar-small-title">Projects</div>
             {projectGroups.map((project, projectIndex) => {
               const isCollapsed = collapsedProjectIds.includes(project.key);
-              const isExpanded = expandedProjectIds.includes(project.key);
-              const collapsedProjectSessions = project.items.slice(0, 3);
+              const projectVisibleCount =
+                projectVisibleCounts[project.key] ??
+                SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
+              const collapsedProjectSessions = project.items.slice(
+                0,
+                projectVisibleCount,
+              );
               const activeProjectSession = project.items.find((item) =>
                 item.kind === "chat"
                   ? item.session.id === activeSessionId
                   : item.pane.id === selectedTerminalPaneId,
               );
-              const visibleProjectSessions = isExpanded
-                ? project.items
-                : activeProjectSession &&
-                    !collapsedProjectSessions.includes(activeProjectSession)
+              const visibleProjectSessions =
+                activeProjectSession &&
+                !collapsedProjectSessions.includes(activeProjectSession)
                   ? [
-                      ...collapsedProjectSessions.slice(0, 2),
+                      ...collapsedProjectSessions.slice(
+                        0,
+                        Math.max(0, projectVisibleCount - 1),
+                      ),
                       activeProjectSession,
                     ]
                   : collapsedProjectSessions;
-              const hiddenCount =
-                project.items.length - visibleProjectSessions.length;
-              const timeGroupedSessions = isExpanded
-                ? groupSidebarItemsByRecency(visibleProjectSessions)
-                : [
-                    {
-                      label: null as string | null,
-                      items: visibleProjectSessions,
-                    },
-                  ];
+              const hiddenCount = Math.max(
+                0,
+                project.items.length - visibleProjectSessions.length,
+              );
+              const hasRevealedMore =
+                projectVisibleCount > SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
               return (
                 <div
                   className={[
@@ -4935,16 +4969,7 @@ function WorkspaceSidebarContent({
                   {!isCollapsed ? (
                     <>
                       {visibleProjectSessions.length > 0 ? (
-                        timeGroupedSessions.map((group) => (
-                          <div key={group.label ?? "recent"}>
-                            {group.label ? (
-                              <div className="gyro-sidebar-time-group">
-                                {group.label}
-                              </div>
-                            ) : null}
-                            {group.items.map(renderNavigationItem)}
-                          </div>
-                        ))
+                        visibleProjectSessions.map(renderNavigationItem)
                       ) : (
                         <button
                           className="gyro-sidebar-thread is-empty"
@@ -4954,18 +4979,37 @@ function WorkspaceSidebarContent({
                           <span>No recent sessions</span>
                         </button>
                       )}
-                      {hiddenCount > 0 || isExpanded ? (
-                        <button
-                          aria-expanded={isExpanded}
-                          className="gyro-sidebar-more-button"
-                          onClick={() => toggleProjectMore(project.key)}
-                          type="button"
-                        >
-                          <ChevronDown aria-hidden="true" size={12} />
-                          <span>
-                            {isExpanded ? "Show less" : `${hiddenCount} more`}
-                          </span>
-                        </button>
+                      {hiddenCount > 0 || hasRevealedMore ? (
+                        <div className="gyro-sidebar-more-actions">
+                          {hiddenCount > 0 ? (
+                            <button
+                              aria-expanded={hasRevealedMore}
+                              className="gyro-sidebar-more-button"
+                              onClick={() =>
+                                showMoreProjectSessions(
+                                  project.key,
+                                  project.items.length,
+                                )
+                              }
+                              type="button"
+                            >
+                              <ChevronDown aria-hidden="true" size={12} />
+                              <span>more</span>
+                            </button>
+                          ) : null}
+                          {hasRevealedMore ? (
+                            <button
+                              className="gyro-sidebar-more-button"
+                              onClick={() =>
+                                showLessProjectSessions(project.key)
+                              }
+                              type="button"
+                            >
+                              <ChevronUp aria-hidden="true" size={12} />
+                              <span>less</span>
+                            </button>
+                          ) : null}
+                        </div>
                       ) : null}
                     </>
                   ) : null}
@@ -5368,6 +5412,8 @@ type SidebarProjectGroupData = {
 
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
 const SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY = "gyro.sidebar-project-collapse-v1";
+const SIDEBAR_INITIAL_PROJECT_SESSION_COUNT = 3;
+const SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15;
 
 function sidebarProjectGroups(
   sessions: Session[],
@@ -6741,6 +6787,8 @@ type ChatSurfaceProps = {
   sessionPlan?: SessionPlan;
   sessionGoal?: SessionGoal;
   isGoalComposerActive?: boolean;
+  /** Starts a new goal-backed chat instead of only saving goal metadata. */
+  onStartGoalChat?: (goal: string) => void;
   /** When true, this chat is a mission control plane for CLI workers. */
   isMission?: boolean;
   missionWorkers?: TerminalPane[];
@@ -7096,6 +7144,7 @@ export function ChatSurface({
   onPlanAction,
   onPlanDecision,
   onGoalAction,
+  onStartGoalChat,
   onCancelGoalComposer,
   onToggleEnvironmentRail,
   onTogglePlanPanel,
@@ -7233,6 +7282,11 @@ export function ChatSurface({
     if (isGoalComposerActive) {
       const goal = goalDraft.trim();
       if (!goal) return;
+      if (onStartGoalChat) {
+        onStartGoalChat(goal);
+        cancelGoalComposer();
+        return;
+      }
       const result = await onGoalAction?.(
         sessionGoal?.text ? "edit" : "set",
         goal,
@@ -7248,6 +7302,7 @@ export function ChatSurface({
     isGoalComposerActive,
     localDraft,
     onGoalAction,
+    onStartGoalChat,
     onSend,
     sessionGoal?.text,
   ]);
@@ -7503,6 +7558,18 @@ export function ChatSurface({
   const transcriptContent = useMemo(
     () => (
       <>
+        {sessionGoal?.text ? (
+          <SessionGoalStatusRow
+            goal={sessionGoal}
+            onComplete={() =>
+              onGoalAction?.(
+                sessionGoal.status === "complete" ? "reopen" : "complete",
+              )
+            }
+            onEdit={() => onComposerAction?.("add-goal")}
+            onClear={() => onGoalAction?.("clear")}
+          />
+        ) : null}
         {looseEvents.map((event) => (
           <ChatEvent
             event={event}
@@ -7611,6 +7678,7 @@ export function ChatSurface({
       isFileReviewEnabled,
       onFileReviewAsk,
       onFileReviewKeep,
+      onGoalAction,
       onLoadChangeDiff,
       onOpenToolPanel,
       onSelectChatPanel,
@@ -7631,6 +7699,7 @@ export function ChatSurface({
       activeRailPanel,
       looseEvents,
       onTogglePlanPanel,
+      sessionGoal,
       sessionPlan,
       turns,
     ],
@@ -7812,6 +7881,18 @@ export function ChatSurface({
               <span>What should we work on?</span>
             )}
           </h1>
+          {sessionGoal?.text ? (
+            <SessionGoalStatusRow
+              goal={sessionGoal}
+              onComplete={() =>
+                onGoalAction?.(
+                  sessionGoal.status === "complete" ? "reopen" : "complete",
+                )
+              }
+              onEdit={() => onComposerAction?.("add-goal")}
+              onClear={() => onGoalAction?.("clear")}
+            />
+          ) : null}
           {isMission || localDraft.trim().length > 0 ? null : (
             <ChatStartSuggestions onPick={handleStartSuggestion} />
           )}
@@ -7856,6 +7937,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
+            startsGoalSession={Boolean(onStartGoalChat)}
             onCancelGoalComposer={cancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
@@ -8184,6 +8266,7 @@ export function ChatSurface({
             sessionModel={sessionModel}
             sessionGoal={sessionGoal}
             isGoalComposerActive={isGoalComposerActive}
+            startsGoalSession={Boolean(onStartGoalChat)}
             onCancelGoalComposer={cancelGoalComposer}
             promptHistory={turns.flatMap((turn) =>
               turn.user ? [turn.user.message] : [],
@@ -11002,7 +11085,7 @@ function WorkspaceSettingsEditor({
     >
       <header>
         <span className="gyro-workspace-settings-eyebrow">
-          <Settings size={13} /> Workspace configuration
+          <Settings size={13} /> Workspace
         </span>
         <h1 id="gyro-workspace-settings-title">
           {view === "editor" ? "Editor & Search" : "Tools & Contributions"}
@@ -11817,6 +11900,11 @@ export function IdeSurface({
                     fileContent?.path === groupPath ? fileContent : undefined
                   }
                   fileError={fileError}
+                  emptyPrompt={
+                    ide?.activeView === "source-control"
+                      ? "Select a changed file to review"
+                      : "Select a workspace file"
+                  }
                   fileLoadState={
                     groupBuffer
                       ? "ready"
@@ -12029,6 +12117,7 @@ type EditorGroupPaneProps = {
   revealTarget?: EditorRevealTarget;
   fileContent?: WorkspaceFileContent;
   fileError: string;
+  emptyPrompt: string;
   fileLoadState: "idle" | "loading" | "ready" | "error";
   filesAvailable: boolean;
   minimapEnabled: boolean;
@@ -12063,6 +12152,7 @@ function EditorGroupPane({
   revealTarget,
   fileContent,
   fileError,
+  emptyPrompt,
   fileLoadState,
   filesAvailable,
   minimapEnabled,
@@ -12264,7 +12354,7 @@ function EditorGroupPane({
             <strong className="gyro-editor-empty-hint">
               {browserFocusEmpty
                 ? "Previewing — open a file to edit alongside"
-                : "No workspace file loaded"}
+                : emptyPrompt}
             </strong>
           )}
         </div>
@@ -12348,7 +12438,7 @@ function EditorGroupPane({
         </div>
       </div>
       <div className="gyro-code-surface" role="img" aria-label="Code editor">
-        {renderEditor ? (
+        {renderEditor && activePath ? (
           renderEditor({
             buffer: activeBuffer,
             fileContent,
@@ -12375,9 +12465,9 @@ function EditorGroupPane({
           </pre>
         ) : (
           <div className="gyro-code-empty">
-            {filesAvailable
-              ? "Select a workspace file to preview it here."
-              : "Open a workspace file to preview it here."}
+            {filesAvailable || emptyPrompt === "Select a changed file to review"
+              ? `${emptyPrompt}.`
+              : "Open a workspace file to review it here."}
           </div>
         )}
       </div>
@@ -13587,7 +13677,9 @@ function WorkbenchPaneContent({
         </header>
         <pre>
           {formatOutputForDisplay(
-            (activeChannel?.lines ?? ["No output channel selected."]).join("\n"),
+            (activeChannel?.lines ?? ["No output channel selected."]).join(
+              "\n",
+            ),
           )}
         </pre>
       </section>
@@ -13636,7 +13728,10 @@ function WorkbenchPaneContent({
  */
 export function formatOutputForDisplay(output: string) {
   return output
-    .replace(/(?:\u001b|\u009b|\ufffd)\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, "")
+    .replace(
+      /(?:\u001b|\u009b|\ufffd)\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g,
+      "",
+    )
     .replace(/(?:\u001b|\u009b|\ufffd)\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
@@ -15390,9 +15485,21 @@ function GithubSidebarPanel({
   onSelectRun?: (runId: number) => void | Promise<void>;
   onViewLogs?: (runId: number) => void | Promise<void>;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const availability = github?.availability;
   const header = (
     <div className="gyro-sidebar-scm-group-label is-github">
+      <button
+        aria-expanded={expanded}
+        aria-label={
+          expanded ? "Collapse GitHub details" : "Expand GitHub details"
+        }
+        className="gyro-sidebar-scm-group-toggle"
+        onClick={() => setExpanded((current) => !current)}
+        type="button"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
       <span className="gyro-scm-label-text">GitHub</span>
       {github?.loading ? <small>…</small> : null}
       <button
@@ -15405,6 +15512,10 @@ function GithubSidebarPanel({
       </button>
     </div>
   );
+
+  if (!expanded) {
+    return header;
+  }
 
   if (!github || !availability?.available) {
     return (
@@ -17757,6 +17868,8 @@ type SettingsSurfaceProps = {
   config: GyroConfig;
   cliLaunchPreset?: CliLaunchPreset;
   themeMode: ThemeMode;
+  mainColor?: string;
+  secondaryColor?: string;
   density?: WorkbenchDensity;
   showMenuBarIcon?: boolean;
   modelFollow?: ModelFollowMode;
@@ -17765,6 +17878,10 @@ type SettingsSurfaceProps = {
   onDefaultWorkspaceModeChange?: (mode: WorkbenchMode) => void;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
+  onAppearanceColorsChange?: (
+    mainColor: string,
+    secondaryColor: string,
+  ) => void;
   onDensityChange?: (density: WorkbenchDensity) => void;
   onMenuBarVisibilityChange?: (visible: boolean) => void;
   onSectionChange?: (section: SettingsSectionId) => void;
@@ -17997,6 +18114,8 @@ export function SettingsSurface({
   config,
   cliLaunchPreset = defaultCliLaunchPreset(),
   themeMode,
+  mainColor = "#0874df",
+  secondaryColor = "#8b6fcb",
   density = "compact",
   showMenuBarIcon = true,
   modelFollow = "peek",
@@ -18005,6 +18124,7 @@ export function SettingsSurface({
   onDefaultWorkspaceModeChange,
   activeSection = "general",
   onThemeChange,
+  onAppearanceColorsChange,
   onDensityChange,
   onMenuBarVisibilityChange,
   onSectionChange,
@@ -18197,6 +18317,51 @@ export function SettingsSurface({
                   ]}
                   onChange={(value) => onDensityChange?.(value)}
                 />
+              </SettingsRow>
+            </SettingsGroup>
+            <SettingsGroup label="Colors">
+              <SettingsRow
+                label="Main color"
+                detail="Selection, focus, and primary action color."
+              >
+                <AppearanceColorControl
+                  color={mainColor}
+                  label="Main color"
+                  onChange={(color) =>
+                    onAppearanceColorsChange?.(color, secondaryColor)
+                  }
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Secondary color"
+                detail="Supporting icons, badges, and quiet highlights."
+              >
+                <AppearanceColorControl
+                  color={secondaryColor}
+                  label="Secondary color"
+                  onChange={(color) =>
+                    onAppearanceColorsChange?.(mainColor, color)
+                  }
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Default palette"
+                detail="Restore Gyro blue and violet."
+              >
+                <button
+                  className="gyro-color-reset"
+                  disabled={
+                    mainColor.toLowerCase() === "#0874df" &&
+                    secondaryColor.toLowerCase() === "#8b6fcb"
+                  }
+                  onClick={() =>
+                    onAppearanceColorsChange?.("#0874df", "#8b6fcb")
+                  }
+                  type="button"
+                >
+                  <RotateCcw aria-hidden="true" size={13} />
+                  Reset colors
+                </button>
               </SettingsRow>
             </SettingsGroup>
             <SettingsGroup label="System">
@@ -19358,6 +19523,32 @@ function SettingsRow({
     >
       {content}
     </div>
+  );
+}
+
+function AppearanceColorControl({
+  color,
+  label,
+  onChange,
+}: {
+  color: string;
+  label: string;
+  onChange: (color: string) => void;
+}) {
+  return (
+    <label
+      className="gyro-color-control"
+      style={{ "--gyro-color-preview": color } as CSSProperties}
+    >
+      <input
+        aria-label={label}
+        onChange={(event) => onChange(event.target.value)}
+        type="color"
+        value={color}
+      />
+      <span aria-hidden="true" className="gyro-color-swatch" />
+      <code>{color.toUpperCase()}</code>
+    </label>
   );
 }
 
@@ -20559,6 +20750,7 @@ function Composer({
   usageSafety,
   onResumeUsage,
   isGoalComposerActive = false,
+  startsGoalSession = false,
   savedProjects = [],
   surfaceControls,
   isSending = false,
@@ -20610,6 +20802,8 @@ function Composer({
   usageSafety?: UsageSafetySnapshot;
   onResumeUsage?: () => void;
   isGoalComposerActive?: boolean;
+  /** The Goal chip will create a new chat and send the same text. */
+  startsGoalSession?: boolean;
   savedProjects?: Array<{
     path: string;
     label: string;
@@ -21833,7 +22027,13 @@ function Composer({
         : null}
       <textarea
         ref={composerTextareaRef}
-        aria-label={isGoalComposerActive ? "Set session goal" : "Message Gyro"}
+        aria-label={
+          isGoalComposerActive
+            ? startsGoalSession
+              ? "Start goal session"
+              : "Set session goal"
+            : "Message Gyro"
+        }
         aria-controls={
           isSlashMenuOpen ? `${popoverBaseId}-slash-menu` : undefined
         }
@@ -21945,7 +22145,9 @@ function Composer({
           !shellReady
             ? "Draft freely — send unlocks when Gyro finishes optimizing"
             : isGoalComposerActive
-              ? "Define the outcome for this chat"
+              ? startsGoalSession
+                ? "Describe the outcome and press Send to start"
+                : "Define the outcome for this chat"
               : chatMode === "council"
                 ? "Ask for architecture, review, or alternatives — models answer in parallel"
                 : !canSubmitChat
@@ -22314,7 +22516,9 @@ function Composer({
             isStopAction
               ? "Stop response"
               : isGoalComposerActive
-                ? "Set goal"
+                ? startsGoalSession
+                  ? "Start goal session"
+                  : "Set goal"
                 : isSending
                   ? "Queue message"
                   : "Send message"
@@ -22385,7 +22589,9 @@ function Composer({
             isStopAction
               ? "Stop response"
               : isGoalComposerActive
-                ? "Set goal"
+                ? startsGoalSession
+                  ? "Start goal session"
+                  : "Set goal"
                 : isCliUpdating
                   ? "Wait for the CLI update to finish"
                   : !hasReadyProvider
@@ -23740,14 +23946,23 @@ function ChatRunChangeSummary({
   );
   const fileLabel = files.length === 1 ? "file" : "files";
   const canExpandDiff = isReviewable && Boolean(onLoadChangeDiff);
+  // Regular chats have a dedicated Changes panel, so the small result pill
+  // goes straight there. Ask-first keeps its per-file explanation and Keep
+  // controls inline; a transcript without a review panel still has a readable
+  // fallback instead of a dead summary.
+  const showsInlineDetails = isReviewable || !onReview;
   const reviewFiles = () => {
     // Ask-first changes have a turn-scoped diff ready in this card. Opening the
     // generic workbench diff instead can land on an unrelated empty proposal
     // list (or, in the compact thread layout, a terminal), so begin with the
     // first actual change the user asked to review.
-    if (canExpandDiff) {
-      setIsExpanded(true);
-      setOpenPath(files[0]?.path);
+    if (showsInlineDetails) {
+      setIsExpanded((current) => !current);
+      if (!isExpanded && canExpandDiff) {
+        setOpenPath(files[0]?.path);
+      } else if (isExpanded) {
+        setOpenPath(undefined);
+      }
       return;
     }
     onReview?.();
@@ -23762,169 +23977,271 @@ function ChatRunChangeSummary({
     : 0;
 
   return (
-    <section className="gyro-chat-run-change-summary" aria-label="Edited files">
-      <header>
-        <span className="gyro-chat-run-change-icon">
-          <FileCode2 aria-hidden="true" size={17} />
-        </span>
-        <div>
-          <strong>
-            Edited {files.length} {fileLabel}
-          </strong>
-          <small className="gyro-change-totals">
-            <em className="is-added">+{totals.additions}</em>
-            <em className="is-removed">-{totals.deletions}</em>
-            {keptCount > 0 ? (
-              <em className="is-kept">
-                {keptCount} of {files.length} kept
-              </em>
-            ) : null}
-          </small>
-        </div>
-        <span className="gyro-change-summary-actions">
-          {onUndo ? (
-            <button onClick={onUndo} type="button">
-              Undo <RotateCcw aria-hidden="true" size={13} />
-            </button>
-          ) : null}
-          {onReview ? (
-            <button onClick={reviewFiles} type="button">
-              Review
-            </button>
-          ) : null}
-        </span>
-      </header>
-      <div className="gyro-change-summary-files">
-        {visibleFiles.map((file) => {
-          const summary = summaries?.get(file.path);
-          const line = changeSummaryLine(file, summary);
-          const isOpen = openPath === file.path;
-          const kept = isKeptCurrent(
-            decisions?.get(file.path),
-            summary?.contentHash,
-          );
-          const stats = (
-            <small>
-              <em className="is-added">+{file.additions}</em>
-              <em className="is-removed">-{file.deletions}</em>
-            </small>
-          );
+    <section
+      aria-label={`${files.length} ${fileLabel} changed`}
+      className={`gyro-chat-run-change-summary${isExpanded ? " is-expanded" : ""}`}
+    >
+      <button
+        aria-expanded={showsInlineDetails ? isExpanded : undefined}
+        className="gyro-chat-run-change-summary-trigger"
+        onClick={reviewFiles}
+        title={
+          showsInlineDetails
+            ? isExpanded
+              ? "Collapse file details"
+              : "Review changed files"
+            : "Review changed files"
+        }
+        type="button"
+      >
+        <strong>
+          {files.length} {fileLabel} changed
+        </strong>
+        {totals.additions > 0 ? (
+          <em className="is-added">+{totals.additions}</em>
+        ) : null}
+        {totals.deletions > 0 ? (
+          <em className="is-removed">-{totals.deletions}</em>
+        ) : null}
+        {keptCount > 0 ? (
+          <em className="is-kept">
+            {keptCount} of {files.length} kept
+          </em>
+        ) : null}
+      </button>
+      {isExpanded ? (
+        <div className="gyro-change-summary-details">
+          <div className="gyro-change-summary-files">
+            {visibleFiles.map((file) => {
+              const summary = summaries?.get(file.path);
+              const line = changeSummaryLine(file, summary);
+              const isOpen = openPath === file.path;
+              const kept = isKeptCurrent(
+                decisions?.get(file.path),
+                summary?.contentHash,
+              );
+              const stats = (
+                <small>
+                  <em className="is-added">+{file.additions}</em>
+                  <em className="is-removed">-{file.deletions}</em>
+                </small>
+              );
 
-          if (!isReviewable) {
-            const contents = (
-              <>
-                <span title={file.path}>{file.path}</span>
-                {stats}
-              </>
-            );
-            return (
-              <div className="gyro-change-summary-file" key={file.path}>
-                {onReview ? (
+              if (!isReviewable) {
+                const contents = (
+                  <>
+                    <span title={file.path}>{file.path}</span>
+                    {stats}
+                  </>
+                );
+                return (
+                  <div className="gyro-change-summary-file" key={file.path}>
+                    {onReview ? (
+                      <button
+                        onClick={() => onReview(file.path)}
+                        title={`Review ${file.path}`}
+                        type="button"
+                      >
+                        {contents}
+                      </button>
+                    ) : (
+                      <div className="gyro-change-summary-file-static">
+                        {contents}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  className="gyro-change-summary-file is-reviewable"
+                  key={file.path}
+                >
                   <button
-                    onClick={() => onReview(file.path)}
-                    title={`Review ${file.path}`}
+                    aria-expanded={canExpandDiff ? isOpen : undefined}
+                    onClick={() => {
+                      if (canExpandDiff) {
+                        setOpenPath(isOpen ? undefined : file.path);
+                        return;
+                      }
+                      onReview?.(file.path);
+                    }}
+                    title={
+                      canExpandDiff
+                        ? isOpen
+                          ? `Hide the change to ${file.path}`
+                          : `Show the change to ${file.path}`
+                        : `Review ${file.path}`
+                    }
                     type="button"
                   >
-                    {contents}
+                    <span className="gyro-change-summary-file-text">
+                      <span
+                        className="gyro-change-summary-file-path"
+                        title={file.path}
+                      >
+                        {file.path}
+                      </span>
+                      {line ? (
+                        <span
+                          className={`gyro-change-summary-file-line${
+                            line.source === "fallback" ? " is-measured" : ""
+                          }`}
+                        >
+                          {line.text}
+                        </span>
+                      ) : isSummarizing ? (
+                        // Said only while a summary call is genuinely in flight.
+                        <span className="gyro-change-summary-file-line is-pending">
+                          Working out what changed…
+                        </span>
+                      ) : null}
+                    </span>
+                    {stats}
                   </button>
-                ) : (
-                  <div className="gyro-change-summary-file-static">
-                    {contents}
-                  </div>
-                )}
-              </div>
-            );
-          }
-
-          return (
-            <div
-              className="gyro-change-summary-file is-reviewable"
-              key={file.path}
-            >
-              <button
-                aria-expanded={canExpandDiff ? isOpen : undefined}
-                onClick={() => {
-                  if (canExpandDiff) {
-                    setOpenPath(isOpen ? undefined : file.path);
-                    return;
-                  }
-                  onReview?.(file.path);
-                }}
-                title={
-                  canExpandDiff
-                    ? isOpen
-                      ? `Hide the change to ${file.path}`
-                      : `Show the change to ${file.path}`
-                    : `Review ${file.path}`
-                }
-                type="button"
-              >
-                <span className="gyro-change-summary-file-text">
-                  <span
-                    className="gyro-change-summary-file-path"
-                    title={file.path}
-                  >
-                    {file.path}
+                  <span className="gyro-change-summary-file-actions">
+                    {onAsk ? (
+                      <button onClick={() => onAsk(file.path)} type="button">
+                        <MessageSquare aria-hidden="true" size={13} /> Ask AI
+                      </button>
+                    ) : null}
+                    {onKeep ? (
+                      kept ? (
+                        <span className="gyro-change-summary-kept">
+                          <Check aria-hidden="true" size={13} /> Kept
+                        </span>
+                      ) : (
+                        <button
+                          className="is-keep"
+                          onClick={() =>
+                            onKeep(file.path, summary?.contentHash)
+                          }
+                          type="button"
+                        >
+                          Keep
+                        </button>
+                      )
+                    ) : null}
                   </span>
-                  {line ? (
-                    <span
-                      className={`gyro-change-summary-file-line${
-                        line.source === "fallback" ? " is-measured" : ""
-                      }`}
-                    >
-                      {line.text}
-                    </span>
-                  ) : isSummarizing ? (
-                    // Said only while a summary call is genuinely in flight.
-                    <span className="gyro-change-summary-file-line is-pending">
-                      Working out what changed…
-                    </span>
+                  {isOpen && onLoadChangeDiff ? (
+                    <ChangeSummaryDiff
+                      onLoad={onLoadChangeDiff}
+                      path={file.path}
+                    />
                   ) : null}
-                </span>
-                {stats}
-              </button>
-              <span className="gyro-change-summary-file-actions">
-                {onAsk ? (
-                  <button onClick={() => onAsk(file.path)} type="button">
-                    <MessageSquare aria-hidden="true" size={13} /> Ask AI
-                  </button>
-                ) : null}
-                {onKeep ? (
-                  kept ? (
-                    <span className="gyro-change-summary-kept">
-                      <Check aria-hidden="true" size={13} /> Kept
-                    </span>
-                  ) : (
-                    <button
-                      className="is-keep"
-                      onClick={() => onKeep(file.path, summary?.contentHash)}
-                      type="button"
-                    >
-                      Keep
-                    </button>
-                  )
-                ) : null}
-              </span>
-              {isOpen && onLoadChangeDiff ? (
-                <ChangeSummaryDiff onLoad={onLoadChangeDiff} path={file.path} />
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {hiddenCount > 0 ? (
-        <button
-          aria-expanded={isExpanded}
-          className="gyro-change-summary-more"
-          onClick={() => setIsExpanded((current) => !current)}
-          type="button"
-        >
-          {isExpanded
-            ? "Show fewer files"
-            : `Show ${hiddenCount} more ${hiddenCount === 1 ? "file" : "files"}`}
-          <ChevronDown aria-hidden="true" size={15} />
-        </button>
+                </div>
+              );
+            })}
+          </div>
+          {hiddenCount > 0 ? (
+            <button
+              className="gyro-change-summary-more"
+              onClick={() => setIsExpanded(false)}
+              type="button"
+            >
+              Show fewer files
+              <ChevronDown aria-hidden="true" size={15} />
+            </button>
+          ) : null}
+          {onUndo ? (
+            <button
+              className="gyro-change-summary-undo"
+              onClick={onUndo}
+              type="button"
+            >
+              Undo changes <RotateCcw aria-hidden="true" size={13} />
+            </button>
+          ) : null}
+        </div>
       ) : null}
+    </section>
+  );
+}
+
+/**
+ * One quiet, persistent statement of the outcome for this chat. Goals used to
+ * be visible only in the composer or the optional environment rail, so the
+ * work timeline could read as an unconnected list of tool calls. This row
+ * keeps the outcome and its controls in the same visual language as a turn.
+ */
+function SessionGoalStatusRow({
+  goal,
+  onClear,
+  onComplete,
+  onEdit,
+}: {
+  goal: SessionGoal;
+  onClear?: () => void;
+  onComplete?: () => void;
+  onEdit?: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const isActive = goal.status === "active";
+  useEffect(() => {
+    if (!isActive) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [isActive]);
+
+  const startedAt = Date.parse(goal.createdAt ?? goal.updatedAt ?? "");
+  const finishedAt = Date.parse(goal.updatedAt ?? "");
+  const durationEnd =
+    isActive || !Number.isFinite(finishedAt) ? now : finishedAt;
+  const duration = Number.isFinite(startedAt)
+    ? formatRunDuration(
+        Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
+      )
+    : undefined;
+  const label = isActive ? "Pursuing goal" : "Goal completed";
+
+  return (
+    <section
+      aria-label={`${label}: ${goal.text}`}
+      className={`gyro-session-goal-status is-${goal.status}`}
+    >
+      <span aria-hidden="true" className="gyro-session-goal-status-mark">
+        {isActive ? <CircleDashed size={14} /> : <Check size={14} />}
+      </span>
+      <strong>{label}</strong>
+      <span className="gyro-session-goal-status-text">{goal.text}</span>
+      {duration ? <time>{duration}</time> : null}
+      <span className="gyro-session-goal-status-actions">
+        {onEdit ? (
+          <button
+            aria-label="Edit goal"
+            onClick={onEdit}
+            title="Edit goal"
+            type="button"
+          >
+            <Edit3 aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+        {onComplete ? (
+          <button
+            aria-label={isActive ? "Complete goal" : "Reopen goal"}
+            onClick={onComplete}
+            title={isActive ? "Complete goal" : "Reopen goal"}
+            type="button"
+          >
+            {isActive ? (
+              <Check aria-hidden="true" size={13} />
+            ) : (
+              <RefreshCw aria-hidden="true" size={13} />
+            )}
+          </button>
+        ) : null}
+        {onClear ? (
+          <button
+            aria-label="Clear goal"
+            onClick={onClear}
+            title="Clear goal"
+            type="button"
+          >
+            <Trash2 aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+      </span>
     </section>
   );
 }
@@ -25662,48 +25979,6 @@ function relativeSessionTime(value: string) {
     return `${hours}h`;
   }
   return `${Math.round(hours / 24)}d`;
-}
-
-function sidebarRecencyLabel(updatedAt: number, now: number): string {
-  if (Number.isNaN(updatedAt) || updatedAt <= 0) {
-    return "Older";
-  }
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-  const startOfWeek = new Date(startOfToday);
-  startOfWeek.setDate(startOfWeek.getDate() - 6);
-  const startOfMonth = new Date(startOfToday);
-  startOfMonth.setDate(startOfMonth.getDate() - 29);
-  if (updatedAt >= startOfToday.getTime()) {
-    return "Today";
-  }
-  if (updatedAt >= startOfWeek.getTime()) {
-    return "This week";
-  }
-  if (updatedAt >= startOfMonth.getTime()) {
-    return "Earlier this month";
-  }
-  return "Older";
-}
-
-/**
- * Group expanded project chats by recency so a month-old thread is not lost
- * in a flat list sorted only by updated_at.
- */
-function groupSidebarItemsByRecency(items: SidebarSessionItem[]) {
-  const now = Date.now();
-  const order = ["Today", "This week", "Earlier this month", "Older"] as const;
-  const buckets = new Map<string, SidebarSessionItem[]>();
-  for (const label of order) {
-    buckets.set(label, []);
-  }
-  for (const item of items) {
-    const label = sidebarRecencyLabel(sidebarSessionTimestamp(item), now);
-    buckets.get(label)?.push(item);
-  }
-  return order
-    .map((label) => ({ label, items: buckets.get(label) ?? [] }))
-    .filter((group) => group.items.length > 0);
 }
 
 function formatBytes(value: number) {

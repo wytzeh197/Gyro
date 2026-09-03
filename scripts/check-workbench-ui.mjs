@@ -14,6 +14,7 @@ import {
   createTerminalPane,
   defaultCliLaunchPreset,
   defaultCommandProfiles,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   normalizeCliLaunchPreset,
   parseProviderHealthOutput,
@@ -83,6 +84,7 @@ import {
   updateProgressPercent,
   updateSidebarLabel,
 } from "../packages/ui/src/update-state.ts";
+import { isUpdateVersionNewer } from "../apps/desktop/src/update-version.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -292,7 +294,12 @@ expect(
     canSendChat(true, "/tmp/gyro-session-1783969000000") &&
     !canSendChat(false, "/Users/example/Project") &&
     canSendChat(true, "/Users/example/Project") &&
-    isUserSelectedWorkspacePath("/Users/example/Project"),
+    isUserSelectedWorkspacePath("/Users/example/Project") &&
+    isTransientWorkspacePath("/private/tmp/gyro-live-provider-20260713") &&
+    isTransientWorkspacePath(
+      "/var/folders/20/example/T/TemporaryItems/gyro-smoke",
+    ) &&
+    !isTransientWorkspacePath("/Users/example/Project"),
   "Chat send requires a connected provider; a project is optional.",
 );
 
@@ -616,6 +623,22 @@ expect(
     ) &&
     styleSource.includes("object-fit: contain"),
   "Linked screenshots should use a contained preview tray inside the composer.",
+);
+expect(
+  surfaceSource.includes('className="gyro-transcript-image-preview"') &&
+    cssRules(styleSource, ".gyro-transcript-image-preview").some(
+      (rule) =>
+        rule.includes("height: 32px") &&
+        rule.includes("overflow: hidden") &&
+        rule.includes("width: 32px"),
+    ) &&
+    cssRules(styleSource, ".gyro-transcript-image-preview > img").some(
+      (rule) =>
+        rule.includes("height: 100%") &&
+        rule.includes("object-fit: cover") &&
+        rule.includes("width: 100%"),
+    ),
+  "Linked screenshots in restored transcripts should stay inside their thumbnail boundary.",
 );
 expect(
   surfaceSource.includes("buildRunModel(turn.timelineEvents, {") &&
@@ -978,6 +1001,14 @@ expect(
     updateProgressPercent(64, 100) === 64 &&
     updateProgressPercent(10, undefined) === undefined,
   "Update state should drive sidebar visibility, labels, and bounded progress.",
+);
+expect(
+  !isUpdateVersionNewer("0.1.0-alpha.44", "0.1.0-alpha.45") &&
+    !isUpdateVersionNewer("0.1.0-alpha.45", "0.1.0-alpha.45") &&
+    isUpdateVersionNewer("0.1.0-alpha.46", "0.1.0-alpha.45") &&
+    isUpdateVersionNewer("0.1.0", "0.1.0-alpha.45") &&
+    !isUpdateVersionNewer("0.1.0-alpha.45", "0.1.0"),
+  "Updater should never offer an equal or older SemVer release, including Alpha downgrades.",
 );
 const openAiCatalog = providerCatalog.find(
   (provider) => provider.id === "openai",
@@ -1420,6 +1451,11 @@ expect(
   "Chat environment rail should start closed for standard chat layout.",
 );
 expect(
+  initialState.preferences.mainColor === "#0874df" &&
+    initialState.preferences.secondaryColor === "#8b6fcb",
+  "Appearance colors should start with Gyro's blue and violet palette.",
+);
+expect(
   initialState.preferences.activeChatPanel === undefined,
   "Chat side panel should not default to the environment rail.",
 );
@@ -1455,6 +1491,11 @@ state = workbenchReducer(state, {
   density: "comfortable",
 });
 state = workbenchReducer(state, {
+  type: "set-appearance-colors",
+  mainColor: "#1570ef",
+  secondaryColor: "#7f56d9",
+});
+state = workbenchReducer(state, {
   type: "record-command",
   commandId: "new-terminal",
 });
@@ -1462,6 +1503,11 @@ expect(state.preferences.theme === "light", "Theme reducer did not update.");
 expect(
   state.preferences.density === "comfortable",
   "Density reducer did not update.",
+);
+expect(
+  state.preferences.mainColor === "#1570ef" &&
+    state.preferences.secondaryColor === "#7f56d9",
+  "Appearance color reducer did not persist a valid custom palette.",
 );
 expect(
   state.preferences.commandPaletteRecents[0] === "new-terminal",
@@ -4186,6 +4232,10 @@ expect(
 expect(
   surfaceSource.includes("gyro-sidebar-windowbar") &&
     surfaceSource.includes("gyro-sidebar-persistent-header") &&
+    styleSource.includes(
+      ".gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings)",
+    ) &&
+    styleSource.includes("margin-bottom: 4px") &&
     styleSource.includes(".gyro-sidebar-persistent-header") &&
     surfaceSource.includes('aria-label="Window navigation"') &&
     surfaceSource.includes('aria-label="Hide sidebar"') &&
@@ -4238,10 +4288,10 @@ expect(
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
     surfaceSource.includes("collapsedProjectIds") &&
-    surfaceSource.includes("expandedProjectIds") &&
+    surfaceSource.includes("projectVisibleCounts") &&
     surfaceSource.includes("sidebarProjectGroups") &&
     !surfaceSource.includes("if (groups.size === 0)") &&
-    surfaceSource.includes("toggleProjectMore") &&
+    surfaceSource.includes("showMoreProjectSessions") &&
     surfaceSource.includes("aria-expanded={isCollapsed") &&
     styleSource.includes(".gyro-sidebar-collapse-icon") &&
     styleSource.includes(".gyro-sidebar-more-button") &&
@@ -4426,7 +4476,7 @@ expect(
       "pinnedSessions.map((session) => renderSessionRow(session))",
     ) &&
     chatSidebarSource.includes("projectGroups.map") &&
-    chatSidebarSource.includes("project.items.slice(0, 3)") &&
+    chatSidebarSource.includes("SIDEBAR_INITIAL_PROJECT_SESSION_COUNT") &&
     surfaceSource.includes("const primaryGyroProjectPath = [") &&
     surfaceSource.includes("projectGroupKey(path, primaryGyroProjectPath)") &&
     surfaceSource.includes('projectSidebarName(normalizedPath) === "Gyro"') &&
@@ -4436,15 +4486,25 @@ expect(
     chatSidebarSource.includes(
       "!collapsedProjectSessions.includes(activeProjectSession)",
     ) &&
-    chatSidebarSource.includes("...collapsedProjectSessions.slice(0, 2)") &&
+    chatSidebarSource.includes("Math.max(0, projectVisibleCount - 1)") &&
     chatSidebarSource.includes("toggleProject(project.key)") &&
-    chatSidebarSource.includes("toggleProjectMore(project.key)") &&
+    chatSidebarSource.includes("showMoreProjectSessions(") &&
+    chatSidebarSource.includes("showLessProjectSessions(project.key)") &&
+    surfaceSource.includes("SIDEBAR_PROJECT_SESSION_BATCH_SIZE") &&
+    !chatSidebarSource.includes("timeGroupedSessions") &&
+    !chatSidebarSource.includes("gyro-sidebar-time-group") &&
+    chatSidebarSource.includes("gyro-sidebar-more-actions") &&
+    chatSidebarSource.includes("<span>more</span>") &&
+    chatSidebarSource.includes("<span>less</span>") &&
     chatSidebarSource.includes("gyro-sidebar-more-button") &&
     chatSidebarSource.includes("No recent sessions") &&
     !chatSidebarSource.includes("Local CLI") &&
     !chatSidebarSource.includes("<small>Start one</small>") &&
     chatSidebarSource.includes("onOpenWorkspace();") &&
     surfaceSource.includes("const unprojectedRecentSessions") &&
+    surfaceSource.includes(
+      "!isTransientWorkspacePath(session.workspacePath)",
+    ) &&
     surfaceSource.includes(
       "!isUserSelectedWorkspacePath(session.workspacePath)",
     ) &&
@@ -4677,6 +4737,10 @@ expect(
     ) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
+    chatSurfaceSource.includes("onStartGoalChat(goal)") &&
+    chatSurfaceSource.includes(
+      "startsGoalSession={Boolean(onStartGoalChat)}",
+    ) &&
     chatSurfaceSource.includes("const result = await onGoalAction?.(") &&
     chatSurfaceSource.includes("if (result === false) return") &&
     !chatSurfaceSource.includes('onDraftChange?.("");') &&
@@ -5047,6 +5111,7 @@ expect(
     !styleSource.includes(".gyro-update-popover") &&
     updateControllerSource.includes("import.meta.env.DEV") &&
     updateControllerSource.includes("allowDowngrades: false") &&
+    updateControllerSource.includes("isUpdateVersionNewer") &&
     updateControllerSource.includes(
       "localStorage.setItem(LAST_UPDATE_CHECK_STORAGE_KEY, checkedAt)",
     ) &&
@@ -5347,9 +5412,8 @@ expect(
     coreSessionsSource.includes("summary_updated_at") &&
     tauriSource.includes("derive_session_summary") &&
     typeSource.includes("summaryUpdatedAt?: string") &&
-    surfaceSource.includes(
-      'aria-label={isGoalComposerActive ? "Set session goal" : "Message Gyro"}',
-    ) &&
+    surfaceSource.includes('"Set session goal"') &&
+    surfaceSource.includes('"Start goal session"') &&
     surfaceSource.includes('role="log"') &&
     surfaceSource.includes('aria-live="polite"') &&
     surfaceSource.includes("session.summary") &&
@@ -6340,19 +6404,30 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 8px") &&
+    styleSource.includes("--gyro-premium-radius-md: 10px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
-    styleSource.includes("--gyro-app: #0e0e0e") &&
-    styleSource.includes("--gyro-pane: #121212") &&
-    styleSource.includes("--gyro-hero-composer: #1a1a1a") &&
-    styleSource.includes("--gyro-accent: #7aa7ff") &&
+    styleSource.includes("--gyro-app: #15171a") &&
+    styleSource.includes("--gyro-pane: #1c1f23") &&
+    styleSource.includes("--gyro-hero-composer: #1c1f23") &&
+    styleSource.includes("--gyro-user-main: #0874df") &&
+    styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
+    styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-premium-hairline: rgba(23, 27, 34, 0.13)") &&
-    styleSource.includes("--gyro-accent: #356fd6") &&
-    styleSource.includes(
-      "Balanced light and dark theme contrast for primary interactive surfaces.",
+    styleSource.includes("--gyro-app: #f8f9f9") &&
+    styleSource.includes("--gyro-sidebar: #f1f2f3") &&
+    styleSource.includes("--gyro-premium-hairline: rgba(32, 36, 42, 0.11)") &&
+    styleSource.includes("var(--gyro-user-main) 82%") &&
+    styleSource.includes("--gyro-secondary-accent") &&
+    surfaceSource.includes('label="Main color"') &&
+    surfaceSource.includes('label="Secondary color"') &&
+    surfaceSource.includes(
+      'detail="Supporting icons, badges, and quiet highlights."',
     ) &&
-    styleSource.includes("var(--gyro-hero-shadow), var(--gyro-hero-highlight)"),
+    appSource.includes('"--gyro-user-main"') &&
+    appSource.includes('"--gyro-user-secondary"') &&
+    styleSource.includes("Large surfaces stay neutral") &&
+    !styleSource.includes("var(--gyro-secondary-accent) 1.5%") &&
+    styleSource.includes("0 0 0 2px var(--gyro-focus-ring)"),
   "The premium graphite system should keep one token authority with thin hairlines, fast motion, and dark/light accent parity.",
 );
 
@@ -6938,9 +7013,9 @@ expect(
     ) &&
     styleSource.includes("overscroll-behavior: contain") &&
     surfaceSource.includes('className="gyro-sidebar-more-button"') &&
-    surfaceSource.includes(
-      '{isExpanded ? "Show less" : `${hiddenCount} more`}',
-    ),
+    surfaceSource.includes("SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15") &&
+    styleSource.includes(".gyro-sidebar-more-actions") &&
+    surfaceSource.includes("showLessProjectSessions(project.key)"),
   "The sidebar project list should scroll under a fixed project title and keep the collapse button reachable.",
 );
 
@@ -6998,6 +7073,27 @@ expect(
     styleSource.includes(".gyro-run-row-icon") &&
     styleSource.includes(".gyro-run-row-detail"),
   "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
+);
+
+expect(
+  surfaceSource.includes("function SessionGoalStatusRow") &&
+    surfaceSource.includes(
+      'const label = isActive ? "Pursuing goal" : "Goal completed"',
+    ) &&
+    surfaceSource.includes(
+      "className={`gyro-session-goal-status is-${goal.status}`}",
+    ) &&
+    surfaceSource.includes(
+      'className="gyro-chat-run-change-summary-trigger"',
+    ) &&
+    surfaceSource.includes(
+      "const showsInlineDetails = isReviewable || !onReview",
+    ) &&
+    surfaceSource.includes('onEdit={() => onComposerAction?.("add-goal")}') &&
+    styleSource.includes(".gyro-session-goal-status") &&
+    styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
+    styleSource.includes(".gyro-change-summary-details"),
+  "Goal progress and changed-file results should stay compact, actionable transcript treatments.",
 );
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

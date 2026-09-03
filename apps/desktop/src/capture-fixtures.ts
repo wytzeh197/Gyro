@@ -18,6 +18,21 @@ type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
+const supportedScenes = new Set([
+  "chat",
+  "welcome",
+  "active-chat",
+  "workspace-source-control",
+  "workspace-diff",
+  "selected-diff",
+  "appearance",
+  "cli",
+  "ollama",
+  "ollama-empty",
+]);
+if (!supportedScenes.has(scene)) {
+  console.warn(`[capture] unknown scene: ${scene}`);
+}
 const isOllamaScene = scene === "ollama" || scene === "ollama-empty";
 const isOllamaEmptyScene = scene === "ollama-empty";
 const WORKSPACE = "/Users/dev/Projects/aurora";

@@ -1292,6 +1292,11 @@ export type WorkbenchAction =
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
   | { type: "set-default-workspace-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
+  | {
+      type: "set-appearance-colors";
+      mainColor: string;
+      secondaryColor: string;
+    }
   | { type: "set-density"; density: WorkbenchDensity }
   | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
@@ -1760,6 +1765,18 @@ export function workbenchReducer(
       return {
         ...state,
         preferences: { ...state.preferences, theme: action.theme },
+      };
+    case "set-appearance-colors":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          mainColor: normalizeAppearanceColor(action.mainColor, "#0874df"),
+          secondaryColor: normalizeAppearanceColor(
+            action.secondaryColor,
+            "#8b6fcb",
+          ),
+        },
       };
     case "set-density":
       return {
@@ -4134,6 +4151,12 @@ function normalizedModelFollowMode(value: unknown): ModelFollowMode {
   return value === "off" || value === "follow" ? value : "peek";
 }
 
+function normalizeAppearanceColor(value: unknown, fallback: string) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLowerCase()
+    : fallback;
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -4188,6 +4211,11 @@ function normalizeWorkbenchPreferences(
       preferences?.theme === "system"
         ? preferences.theme
         : "system",
+    mainColor: normalizeAppearanceColor(preferences?.mainColor, "#0874df"),
+    secondaryColor: normalizeAppearanceColor(
+      preferences?.secondaryColor,
+      "#8b6fcb",
+    ),
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
@@ -4888,6 +4916,26 @@ export function isUserSelectedWorkspacePath(path?: string) {
   }
   const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   return !/^gyro-.+-\d{8,}$/i.test(name);
+}
+
+/**
+ * System temporary workspaces are useful for smoke tests and short-lived CLI
+ * runs, but they are not durable projects. Keep their persisted sessions out
+ * of the normal sidebar so an old validation run cannot leak into Recents.
+ */
+export function isTransientWorkspacePath(path?: string) {
+  const normalized = path?.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === "/tmp" ||
+    normalized.startsWith("/tmp/") ||
+    normalized === "/private/tmp" ||
+    normalized.startsWith("/private/tmp/") ||
+    /^\/(?:private\/)?var\/folders\/[^/]+\/[^/]+\/t(?:\/|$)/i.test(normalized)
+  );
 }
 
 export function canSendChat(providerReady: boolean, _workspacePath?: string) {

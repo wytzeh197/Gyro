@@ -395,7 +395,7 @@ impl PauseState {
     /// An expired auto-resume is not a pause: the window it was waiting on has
     /// rolled, so work continues without the user having to clear anything.
     pub fn is_active_at(&self, now: DateTime<Utc>) -> bool {
-        self.active && self.auto_resume_at.is_none_or(|resume| now < resume)
+        self.active && self.auto_resume_at.map_or(true, |resume| now < resume)
     }
 
     pub fn covers(&self, origin: UsageOrigin) -> bool {

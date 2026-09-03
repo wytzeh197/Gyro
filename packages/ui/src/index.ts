@@ -255,6 +255,7 @@ export {
   missionDefaultProfile,
   missionWorkerPanes,
   normalizeCliLaunchPreset,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   parseProviderHealthOutput,
   sanitizeStoredIdeState,

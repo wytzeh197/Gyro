@@ -1016,6 +1016,9 @@ export type OnboardingState = {
 
 export type WorkbenchPreferences = {
   theme: ThemeMode;
+  /** User-selected brand accents applied across every local Gyro surface. */
+  mainColor: string;
+  secondaryColor: string;
   density: WorkbenchDensity;
   lastSettingsSection: SettingsSectionId;
   commandPaletteRecents: string[];

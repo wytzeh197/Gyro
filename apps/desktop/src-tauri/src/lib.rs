@@ -15056,7 +15056,7 @@ impl CodexAppServerCommentaryStream {
         item_id: Option<&str>,
         text: Option<&str>,
     ) {
-        if self.active.is_none() && text.is_none_or(str::is_empty) {
+        if self.active.is_none() && text.map_or(true, str::is_empty) {
             return;
         }
         let Some(active) = self.ensure_active(activities, item_id) else {
@@ -20297,7 +20297,7 @@ fn wait_for_capability_approval(
             .and_then(|flags| flags.get(&bound.session_id).cloned());
         if active
             .as_ref()
-            .is_none_or(|control| control.cancellation.is_cancelled())
+            .map_or(true, |control| control.cancellation.is_cancelled())
         {
             break Err("capability approval was cancelled".to_string());
         }
@@ -28190,6 +28190,37 @@ while True:
         })
         .unwrap_err();
         assert!(error.to_string().contains("commit or stash"));
+    }
+
+    #[test]
+    fn git_branch_catalog_creates_a_session_branch_from_the_selected_base() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let tracked = repo.path().join("tracked.txt");
+        fs::write(&tracked, "release base\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "release base"]);
+        run_git(repo.path(), &["branch", "release/base"]);
+        fs::write(&tracked, "main head\n").unwrap();
+        run_git(repo.path(), &["commit", "-am", "main head"]);
+        fs::write(repo.path().join("scratch.txt"), "keep me\n").unwrap();
+
+        let catalog = git_create_branch_impl(&GitCreateBranchRequest {
+            workspace_path: repo.path().to_string_lossy().into_owned(),
+            branch: "feature/session-goal".into(),
+            start_point: Some("release/base".into()),
+        })
+        .unwrap();
+
+        assert_eq!(catalog.current.as_deref(), Some("feature/session-goal"));
+        assert!(catalog
+            .branches
+            .contains(&"feature/session-goal".to_string()));
+        assert_eq!(fs::read_to_string(tracked).unwrap(), "release base\n");
+        assert_eq!(
+            fs::read_to_string(repo.path().join("scratch.txt")).unwrap(),
+            "keep me\n"
+        );
     }
 
     #[test]

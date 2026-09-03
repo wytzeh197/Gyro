@@ -950,6 +950,7 @@ export function App() {
   const pendingPaneSendRef = useRef<{
     paneId: string;
     message: string;
+    context?: ChatTurnContextSnapshot;
   }>();
   // The companion dock: one strip of tool tabs per chat pane, following
   // whichever pane has focus. The solo chat surfaces (workspace AI view, empty
@@ -6578,9 +6579,7 @@ export function App() {
    */
   const selectChatWorkspace = useCallback(
     async (savedPath?: string) => {
-      const selected = savedPath
-        ? savedPath
-        : await openWorkspace();
+      const selected = savedPath ? savedPath : await openWorkspace();
       if (!selected) {
         return false;
       }
@@ -9713,18 +9712,37 @@ export function App() {
 
           const contextEvents: SessionEvent[] = [];
           if (turnGoal?.text) {
-            contextEvents.push(
-              await invoke<SessionEvent>("append_chat_context_event", {
-                sessionId: persistedSession.id,
-                eventKind: "goal-updated",
-                message: `Goal set: ${turnGoal.text}`,
-                payload: {
-                  action: "set",
-                  text: turnGoal.text,
-                  status: turnGoal.status,
-                },
-              }),
-            );
+            const goalPayload = {
+              action: "set",
+              text: turnGoal.text,
+              status: turnGoal.status,
+            };
+            try {
+              contextEvents.push(
+                await invoke<SessionEvent>("append_chat_context_event", {
+                  sessionId: persistedSession.id,
+                  eventKind: "goal-updated",
+                  message: `Goal set: ${turnGoal.text}`,
+                  payload: goalPayload,
+                }),
+              );
+            } catch {
+              // Goal metadata must never prevent the first message from
+              // starting. The provider still receives the goal below, and a
+              // local event keeps the outcome visible for this chat.
+              contextEvents.push(
+                createGoalSessionEvent(
+                  persistedSession.id,
+                  `Goal set: ${turnGoal.text}`,
+                  goalPayload,
+                ),
+              );
+              notify(
+                "command-failed",
+                "Goal save failed",
+                "Your message is still sending. Set the goal again after the response.",
+              );
+            }
           }
           if (turnMode === "plan" || turnMode === "council") {
             contextEvents.push(
@@ -10252,11 +10270,20 @@ export function App() {
     ],
   );
 
+  const startNewGoalChat = useCallback(
+    (goal: string) => {
+      void sendDraft(goal, {
+        goal: { text: goal, status: "active" },
+      });
+    },
+    [sendDraft],
+  );
+
   useEffect(() => {
     const pending = pendingPaneSendRef.current;
     if (!pending || activeChatPane?.paneId !== pending.paneId) return;
     pendingPaneSendRef.current = undefined;
-    void sendDraft(pending.message);
+    void sendDraft(pending.message, pending.context);
   }, [activeChatPane?.paneId, sendDraft]);
 
   const handlePlanDecision = useCallback(
@@ -13298,14 +13325,28 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.density = workbench.preferences.density;
+    document.documentElement.style.setProperty(
+      "--gyro-user-main",
+      workbench.preferences.mainColor,
+    );
+    document.documentElement.style.setProperty(
+      "--gyro-user-secondary",
+      workbench.preferences.secondaryColor,
+    );
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        resolvedTheme === "light" ? "#f2f4f7" : "#0e0e0e",
+        resolvedTheme === "light" ? "#f8f9f9" : "#15171a",
       );
     safeSetLocalStorage(THEME_STORAGE_KEY, themePreference);
-  }, [resolvedTheme, themePreference, workbench.preferences.density]);
+  }, [
+    resolvedTheme,
+    themePreference,
+    workbench.preferences.density,
+    workbench.preferences.mainColor,
+    workbench.preferences.secondaryColor,
+  ]);
 
   useEffect(() => {
     const syncWindowFocus = () => {
@@ -14845,12 +14886,15 @@ export function App() {
     const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
     const queue =
       pane.kind === "session" ? (chatMessageQueues[pane.sessionId] ?? []) : [];
-    const requestSend = (message: string) => {
+    const requestSend = (
+      message: string,
+      context?: ChatTurnContextSnapshot,
+    ) => {
       if (isFocused) {
-        void sendDraft(message);
+        void sendDraft(message, context);
         return;
       }
-      pendingPaneSendRef.current = { paneId: pane.paneId, message };
+      pendingPaneSendRef.current = { paneId: pane.paneId, message, context };
       focusChatPane(pane);
     };
     const togglePanePanel = (panel: ChatSidePanelId) => {
@@ -15060,6 +15104,14 @@ export function App() {
           focusChatPane(pane);
           return changeGoal(action, value);
         }}
+        onStartGoalChat={
+          pane.kind === "draft"
+            ? (goal) =>
+                requestSend(goal, {
+                  goal: { text: goal, status: "active" },
+                })
+            : undefined
+        }
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
         fileReview={
           // The summaries and the Keep both belong to the focused session, so a
@@ -15274,6 +15326,7 @@ export function App() {
       planEditorRequest={planEditorRequest}
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
+      onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
       fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
@@ -15613,6 +15666,9 @@ export function App() {
                       setPlanEditorRequest(undefined)
                     }
                     onGoalAction={changeGoal}
+                    onStartGoalChat={
+                      activeSessionId ? undefined : startNewGoalChat
+                    }
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
                     fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
@@ -15912,6 +15968,8 @@ export function App() {
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
+          mainColor={workbench.preferences.mainColor}
+          secondaryColor={workbench.preferences.secondaryColor}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
@@ -15958,6 +16016,13 @@ export function App() {
           }
           onThemeChange={(theme) =>
             dispatchWorkbench({ type: "set-theme", theme })
+          }
+          onAppearanceColorsChange={(mainColor, secondaryColor) =>
+            dispatchWorkbench({
+              type: "set-appearance-colors",
+              mainColor,
+              secondaryColor,
+            })
           }
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
@@ -16171,6 +16236,7 @@ export function App() {
           planEditorRequest={planEditorRequest}
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
+          onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
           onCancelGoalComposer={() => setIsGoalComposerActive(false)}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
