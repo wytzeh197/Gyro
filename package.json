@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/workspace",
-  "version": "0.1.0-alpha.44",
+  "version": "0.1.0-alpha.45",
   "private": true,
   "description": "Open-source local-first coding agent workspace.",
   "license": "Apache-2.0",
@@ -30,7 +30,7 @@
     "site:deploy": "node scripts/build-download-site.mjs && npx --yes wrangler@4 deploy --config site/wrangler.toml",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs",
     "test": "pnpm test:reliability && pnpm -r test",
-    "test:reliability": "node --experimental-strip-types scripts/check-provider-stream-ordering.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs && node --experimental-strip-types scripts/check-menu-bar-state.mjs && node --experimental-strip-types scripts/check-global-search.mjs && node --experimental-strip-types scripts/check-chat-timeline.mjs && node --experimental-strip-types scripts/check-chat-run.mjs && node --experimental-strip-types scripts/check-chat-message-queue.mjs && node --experimental-strip-types scripts/check-file-review.mjs && node --experimental-strip-types scripts/check-chat-companion.mjs && node --experimental-strip-types scripts/check-chat-pane-close.mjs && node --experimental-strip-types scripts/check-usage-ledger.mjs && node --experimental-strip-types scripts/check-provider-identity.mjs && node --experimental-strip-types scripts/check-council-freeze.mjs && node --experimental-strip-types scripts/check-clean-machine-path.mjs && node scripts/check-browser-capability.mjs && node scripts/check-chat-side-panel.mjs",
+    "test:reliability": "node scripts/check-startup-performance.mjs && node scripts/check-syntax-highlighting.mjs && node --experimental-strip-types scripts/check-source-control-review.mjs && node --experimental-strip-types scripts/check-provider-stream-ordering.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs && node --experimental-strip-types scripts/check-menu-bar-state.mjs && node --experimental-strip-types scripts/check-global-search.mjs && node --experimental-strip-types scripts/check-chat-timeline.mjs && node --experimental-strip-types scripts/check-chat-run.mjs && node --experimental-strip-types scripts/check-chat-message-queue.mjs && node --experimental-strip-types scripts/check-file-review.mjs && node --experimental-strip-types scripts/check-chat-companion.mjs && node --experimental-strip-types scripts/check-chat-pane-close.mjs && node --experimental-strip-types scripts/check-usage-ledger.mjs && node --experimental-strip-types scripts/check-provider-identity.mjs && node --experimental-strip-types scripts/check-council-freeze.mjs && node --experimental-strip-types scripts/check-clean-machine-path.mjs && node scripts/check-browser-capability.mjs && node scripts/check-chat-side-panel.mjs",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

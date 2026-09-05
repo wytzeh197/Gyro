@@ -79,7 +79,11 @@ import {
   defaultProviderStatuses as catalogDefaultProviderStatuses,
   providerHealthAfterSignInRejection,
 } from "./provider-catalog.ts";
-import { clampChatCompanionWidth } from "./chat-companion.ts";
+import {
+  clampBrowserCompanionWidth,
+  clampChatCompanionWidth,
+  clampChatPanelWidth,
+} from "./chat-companion.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
   MAX_WORKSPACE_FOLDERS,
@@ -87,6 +91,7 @@ import {
 } from "./workspace-project.ts";
 import {
   defaultWorkspaceUserSettings,
+  normalizedWorkspaceUserSettings,
   normalizedWorkspaceScopedSettings,
 } from "./workspace-settings.ts";
 
@@ -882,6 +887,7 @@ function storedRelativeEditorPath(value: unknown) {
   const path = value.trim().replaceAll("\\", "/");
   if (
     !path ||
+    path.startsWith("gyro-diff:") ||
     path.length > 4_096 ||
     path.includes("\0") ||
     path.split("/").some((segment) => segment === "..")
@@ -1292,7 +1298,13 @@ export type WorkbenchAction =
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
   | { type: "set-default-workspace-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
+  | {
+      type: "set-appearance-colors";
+      mainColor: string;
+      secondaryColor: string;
+    }
   | { type: "set-density"; density: WorkbenchDensity }
+  | { type: "set-quick-actions-visible"; visible: boolean }
   | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
@@ -1401,6 +1413,8 @@ export type WorkbenchAction =
   | { type: "register-side-chat-session"; sessionId: string }
   | { type: "forget-side-chat-sessions"; sessionIds: string[] }
   | { type: "set-chat-companion-width"; width: number }
+  | { type: "set-chat-panel-width"; width: number }
+  | { type: "set-browser-companion-width"; width: number }
   | { type: "set-model-focus"; focus: ModelFocus }
   | { type: "clear-model-focus" }
   | { type: "set-model-follow"; mode: ModelFollowMode }
@@ -1522,6 +1536,7 @@ export type WorkbenchAction =
       capture: NonNullable<BrowserPreview["latestCapture"]>;
     }
   | { type: "browser-capture-failure"; error: string }
+  | { type: "browser-title"; title?: string }
   | {
       type: "browser-status";
       status: BrowserPreviewStatus;
@@ -1761,10 +1776,30 @@ export function workbenchReducer(
         ...state,
         preferences: { ...state.preferences, theme: action.theme },
       };
+    case "set-appearance-colors":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          mainColor: normalizeAppearanceColor(action.mainColor, "#0874df"),
+          secondaryColor: normalizeAppearanceColor(
+            action.secondaryColor,
+            "#8b6fcb",
+          ),
+        },
+      };
     case "set-density":
       return {
         ...state,
         preferences: { ...state.preferences, density: action.density },
+      };
+    case "set-quick-actions-visible":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          showQuickActions: action.visible,
+        },
       };
     case "set-menu-bar-visible":
       return {
@@ -1993,6 +2028,24 @@ export function workbenchReducer(
       return {
         ...state,
         preferences: { ...state.preferences, chatCompanionWidth: width },
+      };
+    }
+    case "set-chat-panel-width":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          chatPanelWidth: clampChatPanelWidth(action.width),
+        },
+      };
+    case "set-browser-companion-width": {
+      const width = clampBrowserCompanionWidth(action.width);
+      if (state.preferences.browserCompanionWidth === width) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, browserCompanionWidth: width },
       };
     }
     case "set-mission-default-profile":
@@ -3645,6 +3698,7 @@ export function workbenchReducer(
           historyIndex: nextHistory.length - 1,
           status: action.status ?? "loading",
           url: action.url,
+          title: undefined,
           consoleErrors: 0,
           diagnostics: [],
           diagnosticsSupported: false,
@@ -3657,10 +3711,16 @@ export function workbenchReducer(
       };
     }
     case "browser-back": {
+      if (state.browserPreview.historyIndex <= 0) return state;
       const historyIndex = Math.max(0, state.browserPreview.historyIndex - 1);
       return browserHistoryState(state, historyIndex);
     }
     case "browser-forward": {
+      if (
+        state.browserPreview.historyIndex >=
+        state.browserPreview.history.length - 1
+      )
+        return state;
       const historyIndex = Math.min(
         state.browserPreview.history.length - 1,
         state.browserPreview.historyIndex + 1,
@@ -3668,6 +3728,7 @@ export function workbenchReducer(
       return browserHistoryState(state, historyIndex);
     }
     case "browser-reload":
+      if (!state.browserPreview.url.trim()) return state;
       return {
         ...state,
         browserPreview: {
@@ -3719,6 +3780,14 @@ export function workbenchReducer(
           ...state.browserPreview,
           captureStatus: "failed",
           captureError: action.error,
+        },
+      };
+    case "browser-title":
+      return {
+        ...state,
+        browserPreview: {
+          ...state.browserPreview,
+          title: action.title?.trim() || undefined,
         },
       };
     case "browser-status":
@@ -4134,6 +4203,12 @@ function normalizedModelFollowMode(value: unknown): ModelFollowMode {
   return value === "off" || value === "follow" ? value : "peek";
 }
 
+function normalizeAppearanceColor(value: unknown, fallback: string) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLowerCase()
+    : fallback;
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -4146,7 +4221,7 @@ function normalizeWorkbenchPreferences(
           (commandId): commandId is string => typeof commandId === "string",
         )
       : [],
-    density: preferences?.density === "comfortable" ? "comfortable" : "compact",
+    density: preferences?.density === "compact" ? "compact" : "comfortable",
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),
@@ -4180,6 +4255,16 @@ function normalizeWorkbenchPreferences(
       Number.isFinite(preferences.chatCompanionWidth)
         ? clampChatCompanionWidth(preferences.chatCompanionWidth)
         : undefined,
+    chatPanelWidth:
+      typeof preferences?.chatPanelWidth === "number" &&
+      Number.isFinite(preferences.chatPanelWidth)
+        ? clampChatPanelWidth(preferences.chatPanelWidth)
+        : undefined,
+    browserCompanionWidth:
+      typeof preferences?.browserCompanionWidth === "number" &&
+      Number.isFinite(preferences.browserCompanionWidth)
+        ? clampBrowserCompanionWidth(preferences.browserCompanionWidth)
+        : undefined,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
     theme:
@@ -4188,11 +4273,17 @@ function normalizeWorkbenchPreferences(
       preferences?.theme === "system"
         ? preferences.theme
         : "system",
+    mainColor: normalizeAppearanceColor(preferences?.mainColor, "#0874df"),
+    secondaryColor: normalizeAppearanceColor(
+      preferences?.secondaryColor,
+      "#8b6fcb",
+    ),
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
+    showQuickActions: preferences?.showQuickActions !== false,
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:
@@ -4266,7 +4357,7 @@ function normalizeWorkbenchPreferences(
         : {},
     workspaceUserSettings: {
       ...defaultWorkspaceUserSettings,
-      ...normalizedWorkspaceScopedSettings(preferences?.workspaceUserSettings),
+      ...normalizedWorkspaceUserSettings(preferences?.workspaceUserSettings),
     },
     workspaceSettingsByWorkspace: normalizedWorkspaceSettingsMap(
       preferences?.workspaceSettingsByWorkspace,
@@ -4786,9 +4877,9 @@ function parentDirectoriesForPath(filePath: string) {
 
 function defaultBrowserPreview() {
   return {
-    url: "http://localhost:3000",
-    history: ["http://localhost:3000"],
-    historyIndex: 0,
+    url: "",
+    history: [] as string[],
+    historyIndex: -1,
     device: "desktop" as const,
     consoleErrors: 0,
     diagnostics: [],
@@ -4888,6 +4979,26 @@ export function isUserSelectedWorkspacePath(path?: string) {
   }
   const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   return !/^gyro-.+-\d{8,}$/i.test(name);
+}
+
+/**
+ * System temporary workspaces are useful for smoke tests and short-lived CLI
+ * runs, but they are not durable projects. Keep their persisted sessions out
+ * of the normal sidebar so an old validation run cannot leak into Recents.
+ */
+export function isTransientWorkspacePath(path?: string) {
+  const normalized = path?.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === "/tmp" ||
+    normalized.startsWith("/tmp/") ||
+    normalized === "/private/tmp" ||
+    normalized.startsWith("/private/tmp/") ||
+    /^\/(?:private\/)?var\/folders\/[^/]+\/[^/]+\/t(?:\/|$)/i.test(normalized)
+  );
 }
 
 export function canSendChat(providerReady: boolean, _workspacePath?: string) {

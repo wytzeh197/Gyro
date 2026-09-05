@@ -1,3 +1,4 @@
+import { createMonacoTheme } from "./editor/monaco-theme";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
@@ -106,92 +107,11 @@ export function remeasureMonacoFonts() {
   void document.fonts?.ready.then(() => monaco.editor.remeasureFonts());
 }
 
-monaco.editor.defineTheme("gyro-dark", {
-  base: "vs-dark",
-  inherit: true,
-  rules: [
-    { token: "comment", foreground: "6A737D", fontStyle: "italic" },
-    { token: "string", foreground: "A5D6FF" },
-    { token: "string.escape", foreground: "79C0FF" },
-    { token: "number", foreground: "9ECE6A" },
-    { token: "keyword", foreground: "FF7B72" },
-    { token: "keyword.type", foreground: "2DD4BF" },
-    { token: "type.identifier", foreground: "2DD4BF" },
-    { token: "type.lifetime", foreground: "FF9E64" },
-    { token: "namespace", foreground: "2DD4BF" },
-    { token: "function", foreground: "C7A0FF" },
-    { token: "function.macro", foreground: "C7A0FF" },
-    { token: "constant", foreground: "79C0FF" },
-    { token: "operator", foreground: "E6EDF3" },
-  ],
-  colors: {
-    "editor.background": "#0C0C0C",
-    "editor.foreground": "#D7D9DE",
-    "editorGutter.background": "#0C0C0C",
-    "editor.lineHighlightBackground": "#161616",
-    "editorLineNumber.foreground": "#626872",
-    "editorLineNumber.activeForeground": "#C2C5CB",
-    "editorCursor.foreground": "#E9EDF2",
-    "editor.selectionBackground": "#294A73",
-    "editor.inactiveSelectionBackground": "#26394F",
-    "editorIndentGuide.background1": "#262626",
-    "editorIndentGuide.activeBackground1": "#444444",
-    "editorWidget.background": "#1B1B1B",
-    "editorWidget.border": "#303030",
-    "editorSuggestWidget.background": "#1B1B1B",
-    "editorSuggestWidget.border": "#303030",
-    "editorSuggestWidget.selectedBackground": "#2A2A2A",
-    "editorHoverWidget.background": "#1B1B1B",
-    "editorHoverWidget.border": "#303030",
-    "minimap.background": "#0C0C0C",
-    "scrollbarSlider.background": "#5A5F694D",
-    "scrollbarSlider.hoverBackground": "#70768066",
-    "scrollbarSlider.activeBackground": "#878D9980",
-  },
-});
-
-monaco.editor.defineTheme("gyro-light", {
-  base: "vs",
-  inherit: true,
-  rules: [
-    { token: "comment", foreground: "6B7380", fontStyle: "italic" },
-    { token: "string", foreground: "0B6E99" },
-    { token: "string.escape", foreground: "1F66D1" },
-    { token: "number", foreground: "2B7A4B" },
-    { token: "keyword", foreground: "B42318" },
-    { token: "keyword.type", foreground: "0F766E" },
-    { token: "type.identifier", foreground: "0F766E" },
-    { token: "type.lifetime", foreground: "C2410C" },
-    { token: "namespace", foreground: "0F766E" },
-    { token: "function", foreground: "6D28D9" },
-    { token: "function.macro", foreground: "6D28D9" },
-    { token: "constant", foreground: "1F66D1" },
-    { token: "operator", foreground: "24272D" },
-  ],
-  colors: {
-    "editor.background": "#F6F8FA",
-    "editor.foreground": "#24272D",
-    "editorGutter.background": "#F6F8FA",
-    "editor.lineHighlightBackground": "#EEF1F5",
-    "editorLineNumber.foreground": "#7A8490",
-    "editorLineNumber.activeForeground": "#3F4650",
-    "editorCursor.foreground": "#161B23",
-    "editor.selectionBackground": "#C9DBF7",
-    "editor.inactiveSelectionBackground": "#DCE6F2",
-    "editorIndentGuide.background1": "#DBE1E8",
-    "editorIndentGuide.activeBackground1": "#9EABB9",
-    "editorWidget.background": "#FFFFFF",
-    "editorWidget.border": "#C7D0DA",
-    "editorSuggestWidget.background": "#FFFFFF",
-    "editorSuggestWidget.border": "#C7D0DA",
-    "editorSuggestWidget.selectedBackground": "#E8EDF3",
-    "editorHoverWidget.background": "#FFFFFF",
-    "editorHoverWidget.border": "#C7D0DA",
-    "minimap.background": "#F6F8FA",
-    "scrollbarSlider.background": "#9EABB94D",
-    "scrollbarSlider.hoverBackground": "#7A849066",
-    "scrollbarSlider.activeBackground": "#4E5A6880",
-  },
-});
+for (const mode of ["dark", "light"] as const)
+  monaco.editor.defineTheme(`gyro-${mode}`, createMonacoTheme(mode));
 
 export default Editor;
+
+export { DiffEditor } from "@monaco-editor/react";
+
+export { loadSyntax } from "./editor/monaco-syntax";

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Captures the marketing screenshots under `site/assets/screenshots/` from the
- * real Gyro UI.
+ * Captures marketing and README screenshots from the real Gyro UI.
  *
  * The desktop UI is rendered in headless Chrome against `capture.html`, which
  * installs a fake Tauri IPC layer (see `apps/desktop/src/capture-fixtures.ts`)
@@ -16,6 +15,7 @@
  *
  * Options:
  *   --scene <name>   capture a single scene
+ *   --readme         capture the three README product-tour scenes
  *   --keep-png       also write the intermediate PNGs next to the WebP output
  */
 
@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = resolve(repoRoot, "site/assets/screenshots");
+const readmeOutputRoot = resolve(repoRoot, "docs/screenshots/readme");
 const stagingRoot = resolve(repoRoot, "docs/screenshots/site-v4");
 const appOrigin = "http://127.0.0.1:1420";
 const debugPort = 9333;
@@ -87,15 +88,13 @@ const keepPng = process.argv.includes("--keep-png");
  * the desktop stage picks from.
  *
  * `steps` matter as much as the size. A freshly opened session shows a
- * collapsed run and no side panel, which photographs as an app that has not
- * done anything — the exact impression the hero should not leave. Expanding the
- * run puts the search, the command, and the three edited files on screen, and
- * opening the environment panel fills the right edge with the state Gyro keeps
- * beside the conversation.
+ * collapsed run, which photographs as an app that has not done anything — the
+ * exact impression the hero should not leave. Expanding the run puts the
+ * workspace review, commands, and edited files on screen beside the result.
  */
-const heroSteps = ["selectSession", "expandRun", "openEnvironment"];
+const heroSteps = ["selectSession", "expandRun"];
 
-const scenes = [
+const marketingScenes = [
   {
     name: "hero",
     urlScene: "chat",
@@ -121,6 +120,63 @@ const scenes = [
       { file: "hero-light-2400.webp", width: 2400, height: 1500 },
       { file: "hero-light-1200.webp", width: 1200, height: 750 },
       { file: "hero-light-600.webp", width: 600, height: 375 },
+    ],
+  },
+];
+
+const readmeScenes = [
+  {
+    name: "readme-chat",
+    urlScene: "chat",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: heroSteps,
+    outputs: [
+      {
+        directory: "readme",
+        file: "chat-workflow.webp",
+        width: 2400,
+        height: 1500,
+      },
+    ],
+  },
+  {
+    name: "readme-workspace",
+    urlScene: "workspace-source-control",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: [
+      "selectSession",
+      "openWorkspace",
+      "openSourceControl",
+      "openChangedFile",
+      "maximizeToolPanel",
+    ],
+    outputs: [
+      {
+        directory: "readme",
+        file: "workspace-review.webp",
+        width: 2400,
+        height: 1500,
+      },
+    ],
+  },
+  {
+    name: "readme-cli",
+    urlScene: "cli",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: ["openWorkspace", "openTerminal", "maximizeToolPanel"],
+    outputs: [
+      {
+        directory: "readme",
+        file: "cli-workbench.webp",
+        width: 2400,
+        height: 1500,
+      },
     ],
   },
 ];
@@ -199,17 +255,37 @@ const steps = {
   `,
   openPane: clickByText("Claude Code"),
   openWorkspace: clickByText("Workspace"),
-  openSourceControl: clickByText("Source Control"),
+  openSourceControl: `
+    (() => {
+      const view = document.querySelector(
+        '.gyro-workspace-activity-rail button[aria-label^="Source Control"]',
+      );
+      if (!view) return 'missing:source-control';
+      view.click();
+      return 'clicked:source-control';
+    })()
+  `,
+  openTerminal: clickByText("Terminal"),
   closeCompanion: clickByText("Close AI companion"),
   openDiffTab: clickByText("Diff"),
   openChangedFile: `
     (() => {
-      const nodes = [...document.querySelectorAll('button, [role="button"], li')];
-      const match = nodes.find((node) =>
-        (node.textContent || '').includes('sync.js'));
+      const match = document.querySelector(
+        'button[aria-label="Open diff for src/sync.js"]',
+      );
       if (!match) return 'missing:changed-file';
       match.click();
       return 'clicked:changed-file';
+    })()
+  `,
+  maximizeToolPanel: `
+    (() => {
+      const button = document.querySelector(
+        'button[aria-label^="Maximize tool panel"]',
+      );
+      if (!button) return 'missing:maximize-tool-panel';
+      button.click();
+      return 'clicked:maximize-tool-panel';
     })()
   `,
 };
@@ -306,9 +382,14 @@ function encodeWebp(sourcePng, target, width, height) {
 
 async function main() {
   const only = argument("--scene");
+  const readmeOnly = process.argv.includes("--readme");
   const selected = only
-    ? [...scenes, ...testScenes].filter((scene) => scene.name === only)
-    : scenes;
+    ? [...marketingScenes, ...readmeScenes, ...testScenes].filter(
+        (scene) => scene.name === only,
+      )
+    : readmeOnly
+      ? readmeScenes
+      : marketingScenes;
   if (!selected.length) fail(`unknown scene ${only}`);
 
   try {
@@ -323,6 +404,7 @@ async function main() {
   }
 
   mkdirSync(outputRoot, { recursive: true });
+  mkdirSync(readmeOutputRoot, { recursive: true });
   mkdirSync(stagingRoot, { recursive: true });
 
   // A fresh profile per run keeps localStorage clean and avoids colliding with
@@ -409,7 +491,12 @@ async function main() {
           returnByValue: true,
         });
         console.log(`  ${scene.name}: ${step} -> ${result.value}`);
-        await new Promise((done) => setTimeout(done, 900));
+        // Workspace preparation starts only after a session has been selected.
+        // Give the activity rail time to mount before a following step selects
+        // one of its icon-only views.
+        await new Promise((done) =>
+          setTimeout(done, step === "openWorkspace" ? 2_000 : 900),
+        );
       }
 
       await new Promise((done) => setTimeout(done, 1200));
@@ -443,7 +530,10 @@ async function main() {
       writeFileSync(png, Buffer.from(shot.data, "base64"));
 
       for (const output of scene.outputs) {
-        const target = resolve(outputRoot, output.file);
+        const target = resolve(
+          output.directory === "readme" ? readmeOutputRoot : outputRoot,
+          output.file,
+        );
         encodeWebp(png, target, output.width, output.height);
         console.log(
           `  wrote ${output.file} (${output.width}x${output.height})`,

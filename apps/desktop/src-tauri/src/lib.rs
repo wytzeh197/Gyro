@@ -16,13 +16,13 @@ use gyro_core::{
     },
     logout_account as account_logout, mutation_approval_payload, ollama_chat, ollama_tool_chat,
     parse_council_synthesis, parse_summary_response, prepare_claude_provider_mutation_transaction,
-    prepare_provider_mutation_transaction, prepare_provider_text_replacement_transaction,
-    provider_descriptor, recover_provider_mutation_transactions,
-    refresh_account_session as account_refresh_session, run_kimi_acp, seat_label_map,
-    start_account_login as account_start_login, stored_account_session as account_stored_session,
-    successful_seat_answers, write_council_run_manifest, write_council_snapshot,
-    write_seat_artifact, write_synthesis_artifact, AccountSessionState, AppNotificationKind,
-    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
+    prepare_provider_mutation_transaction, provider_descriptor,
+    recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
+    run_kimi_acp, seat_label_map, start_account_login as account_start_login,
+    stored_account_session as account_stored_session, successful_seat_answers,
+    write_council_run_manifest, write_council_snapshot, write_seat_artifact,
+    write_synthesis_artifact, AccountSessionState, AppNotificationKind, Automation,
+    AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
     CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
     CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
     CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
@@ -66,6 +66,7 @@ use walkdir::WalkDir;
 
 mod menu_bar;
 mod session_browser;
+mod source_control_review;
 mod system_access;
 
 #[cfg(test)]
@@ -892,6 +893,8 @@ struct SourceControlStatus {
     deletions: usize,
     stats_partial: bool,
     files: Vec<SourceControlFile>,
+    history: Vec<source_control_review::HistoryEntry>,
+    history_error: Option<String>,
     last_checked_at: Option<String>,
     error: Option<String>,
 }
@@ -1234,6 +1237,7 @@ struct LanguageServerProcess {
     stdin: ChildStdin,
     messages: mpsc::Receiver<Result<serde_json::Value, String>>,
     next_request_id: u64,
+    semantic_tokens: serde_json::Value,
     language_id: String,
     command: String,
 }
@@ -6685,12 +6689,13 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
         .into_iter()
         .filter_entry(|entry| {
             let name = entry.file_name().to_string_lossy();
-            !matches!(
-                name.as_ref(),
-                ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
-            )
+            name != ".git"
+                && (max_depth == 1
+                    || !matches!(
+                        name.as_ref(),
+                        ".next" | "node_modules" | "target" | "dist" | "build"
+                    ))
         })
-        .take(1200)
     {
         let entry = entry.map_err(to_string)?;
         let path = entry.path().strip_prefix(root).map_err(to_string)?;
@@ -6794,7 +6799,7 @@ impl WorkspaceWatchManager {
         let root = PathBuf::from(workspace_path)
             .canonicalize()
             .map_err(to_string)?;
-        let snapshot = scan_workspace_tree(&root, 5)?;
+        let snapshot = scan_workspace_tree(&root, 1)?;
         self.cache_snapshot(root, snapshot)
     }
 
@@ -6825,7 +6830,7 @@ impl WorkspaceWatchManager {
             }
         }
 
-        let snapshot = scan_workspace_tree(&root, 5)?;
+        let snapshot = scan_workspace_tree(&root, 1)?;
         self.cache_snapshot(root, snapshot)
             .map(|snapshot| snapshot.files)
     }
@@ -6886,7 +6891,7 @@ impl WorkspaceWatchManager {
                 return;
             };
 
-            let scanned = scan_workspace_tree(&root, 5);
+            let scanned = scan_workspace_tree(&root, 1);
             let superseded = manager
                 .rescan_state
                 .lock()
@@ -6926,12 +6931,9 @@ fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
             let Ok(relative) = path.strip_prefix(root) else {
                 return false;
             };
-            !relative.components().any(|component| {
-                matches!(
-                    component.as_os_str().to_string_lossy().as_ref(),
-                    ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
-                )
-            })
+            !relative
+                .components()
+                .any(|component| matches!(component.as_os_str().to_string_lossy().as_ref(), ".git"))
         })
 }
 
@@ -8261,6 +8263,7 @@ impl LanguageServerManager {
             stdin,
             messages: spawn_lsp_message_reader(stdout),
             next_request_id: 2,
+            semantic_tokens: serde_json::Value::Null,
             language_id: request.language_id.clone(),
             command: command_text.clone(),
         };
@@ -8282,7 +8285,13 @@ impl LanguageServerManager {
                             "publishDiagnostics": { "relatedInformation": true },
                             "completion": { "completionItem": { "snippetSupport": true } },
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
-                            "definition": { "linkSupport": true }
+                            "definition": { "linkSupport": true },
+                            "semanticTokens": {
+                                "requests": { "full": true },
+                                "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
+                                "tokenModifiers": ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"],
+                                "formats": ["relative"], "overlappingTokenSupport": false, "multilineTokenSupport": false
+                            }
                         }
                     }
                 }
@@ -8301,6 +8310,10 @@ impl LanguageServerManager {
                 "params": {}
             }),
         )?;
+        process.semantic_tokens = initialize_response
+            .pointer("/result/capabilities/semanticTokensProvider")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let capability_count = initialize_response
             .pointer("/result/capabilities")
             .and_then(|value| value.as_object())
@@ -8344,6 +8357,14 @@ impl LanguageServerManager {
             anyhow::bail!("language server exited with {status}");
         }
 
+        if request.method == "$/gyro/semanticTokensLegend" {
+            let full = process.semantic_tokens.get("full");
+            let supported = full
+                .is_some_and(|value| value == &serde_json::Value::Bool(true) || value.is_object());
+            return Ok(
+                serde_json::json!({ "serverId": request.server_id, "status": "ok", "result": if supported { process.semantic_tokens.get("legend").cloned().unwrap_or(serde_json::Value::Null) } else { serde_json::Value::Null } }),
+            );
+        }
         if request.method == "$/gyro/poll" {
             let messages = drain_lsp_messages(&mut process)?;
             return Ok(serde_json::json!({
@@ -9202,7 +9223,7 @@ fn read_workspace_file_with_limit(
         anyhow::bail!("binary workspace files cannot be previewed");
     }
     let content_hash = content_hash(&bytes);
-    let content = String::from_utf8_lossy(&bytes).to_string();
+    let content = decode_workspace_utf8(&bytes, truncated)?;
 
     Ok(WorkspaceFileContent {
         path: path.to_string(),
@@ -9211,6 +9232,37 @@ fn read_workspace_file_with_limit(
         size_bytes,
         content_hash,
     })
+}
+
+// A preview may end in the middle of one codepoint; malformed input anywhere
+// else must never be silently replaced and subsequently saved over the file.
+fn decode_workspace_utf8(bytes: &[u8], truncated: bool) -> anyhow::Result<String> {
+    match std::str::from_utf8(bytes) {
+        Ok(content) => Ok(content.to_owned()),
+        Err(error) if truncated && error.error_len().is_none() => {
+            Ok(std::str::from_utf8(&bytes[..error.valid_up_to()])?.to_owned())
+        }
+        Err(_) => anyhow::bail!("This file is not valid UTF-8 and cannot be edited as text."),
+    }
+}
+
+#[cfg(test)]
+mod workspace_utf8_tests {
+    use super::decode_workspace_utf8;
+    #[test]
+    fn rejects_invalid_utf8_even_in_previews() {
+        assert!(decode_workspace_utf8(&[0xff, 0x61], false).is_err());
+        assert!(decode_workspace_utf8(&[0xff, 0x61], true).is_err());
+        assert!(decode_workspace_utf8(&[0x61, 0xe2], false).is_err());
+    }
+    #[test]
+    fn trims_only_a_truncated_codepoint() {
+        assert_eq!(
+            decode_workspace_utf8(&[0x61, 0xe2, 0x82], true).unwrap(),
+            "a"
+        );
+        assert_eq!(decode_workspace_utf8("a€".as_bytes(), false).unwrap(), "a€");
+    }
 }
 
 fn read_bounded_regular_file(
@@ -9770,6 +9822,8 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
                 deletions: 0,
                 stats_partial: false,
                 files: Vec::new(),
+                history: Vec::new(),
+                history_error: None,
                 last_checked_at: None,
                 error: Some(error.to_string()),
             });
@@ -9788,6 +9842,8 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             deletions: 0,
             stats_partial: false,
             files: Vec::new(),
+            history: Vec::new(),
+            history_error: None,
             last_checked_at: None,
             error: Some(bounded_command_error("could not inspect Git status", &output).to_string()),
         });
@@ -9795,6 +9851,13 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
     let mut status = parse_git_status_v2(&output.stdout);
     let repo_root = git_repo_root(&root).unwrap_or(root);
     apply_git_diff_stats(&repo_root, &mut status);
+    match source_control_review::history(&repo_root) {
+        Ok(history) => status.history = history,
+        Err(error) if !output.stdout.contains("# branch.oid (initial)") => {
+            status.history_error = Some(error.to_string());
+        }
+        Err(_) => {}
+    }
     status.repo_root = Some(repo_root.display().to_string());
     status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
     Ok(status)
@@ -9813,6 +9876,8 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         deletions: 0,
         stats_partial: false,
         files: Vec::new(),
+        history: Vec::new(),
+        history_error: None,
         last_checked_at: None,
         error: None,
     };
@@ -13812,6 +13877,37 @@ fn acp_auth_methods(runtime: AcpProviderRuntime) -> Vec<String> {
     methods
 }
 
+fn apply_acp_workspace_write(
+    workspace: &Path,
+    target: &Path,
+    content: &str,
+    plan_mode: bool,
+    require_approval: bool,
+    cancellation: &gyro_core::CancellationToken,
+    approve: impl FnOnce(
+        PreparedProviderMutationTransaction,
+        serde_json::Value,
+    ) -> anyhow::Result<ProviderApprovalDecision>,
+) -> anyhow::Result<()> {
+    if plan_mode {
+        anyhow::bail!("ACP file writes are disabled in plan mode");
+    }
+    let (transaction, details) =
+        gyro_core::mutations::prepare_provider_text_replacement_review(workspace, target, content)?;
+    if require_approval {
+        // The resolver applies the exact reviewed transaction. Never reuse a
+        // previous ACP permission grant or apply a committed transaction twice.
+        if approve(transaction, details)? != ProviderApprovalDecision::AppliedByGyro {
+            anyhow::bail!("ACP workspace write was not approved and applied");
+        }
+    } else {
+        apply_provider_mutation_transaction_with_cancellation(&transaction, || {
+            cancellation.is_cancelled()
+        })?;
+    }
+    Ok(())
+}
+
 fn run_kimi_acp_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -13892,9 +13988,6 @@ fn run_kimi_acp_chat(
 
     let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
     let activity_sink = activities.clone();
-    let approved_file_writes = Arc::new(AtomicUsize::new(0));
-    let approval_write_tokens = approved_file_writes.clone();
-    let write_tokens = approved_file_writes.clone();
     let approval_context = ProviderApprovalContext::from(request);
     let plan_mode = request.mode == ChatMode::Plan;
     let require_command_approval = request.require_command_approval;
@@ -14013,9 +14106,6 @@ fn run_kimi_acp_chat(
                     None,
                 )? != ProviderApprovalDecision::Reject
             };
-            if allowed && approval.kind == KimiAcpApprovalKind::FileChange {
-                approval_write_tokens.fetch_add(1, Ordering::SeqCst);
-            }
             Ok(if allowed {
                 KimiAcpApprovalDecision::AllowOnce
             } else {
@@ -14023,23 +14113,23 @@ fn run_kimi_acp_chat(
             })
         },
         |target, content| {
-            if plan_mode {
-                anyhow::bail!("{provider_label} file writes are disabled in plan mode");
-            }
-            if write_tokens
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |tokens| {
-                    tokens.checked_sub(1)
-                })
-                .is_err()
-            {
-                anyhow::bail!("{provider_label} requested an unapproved workspace write");
-            }
-            let transaction =
-                prepare_provider_text_replacement_transaction(&workspace, target, content)?;
-            apply_provider_mutation_transaction_with_cancellation(&transaction, || {
-                cancellation.is_cancelled()
-            })?;
-            Ok(())
+            apply_acp_workspace_write(
+                &workspace,
+                target,
+                content,
+                plan_mode,
+                require_file_approval,
+                &cancellation,
+                |transaction, details| {
+                    wait_for_provider_approval_with_transaction(
+                        app,
+                        &approval_context,
+                        "file-change",
+                        sanitize_provider_approval_details(details),
+                        Some(transaction),
+                    )
+                },
+            )
         },
     );
     // Stop heartbeats on every exit path so a finished ACP turn never keeps
@@ -15056,7 +15146,7 @@ impl CodexAppServerCommentaryStream {
         item_id: Option<&str>,
         text: Option<&str>,
     ) {
-        if self.active.is_none() && text.is_none_or(str::is_empty) {
+        if self.active.is_none() && text.map_or(true, str::is_empty) {
             return;
         }
         let Some(active) = self.ensure_active(activities, item_id) else {
@@ -20297,7 +20387,7 @@ fn wait_for_capability_approval(
             .and_then(|flags| flags.get(&bound.session_id).cloned());
         if active
             .as_ref()
-            .is_none_or(|control| control.cancellation.is_cancelled())
+            .map_or(true, |control| control.cancellation.is_cancelled())
         {
             break Err("capability approval was cancelled".to_string());
         }
@@ -22460,6 +22550,7 @@ pub fn run() {
             git_create_branch,
             git_remove_worktree,
             git_diff,
+            source_control_review::git_review_content,
             git_discard,
             git_fetch,
             git_pull,
@@ -22950,6 +23041,112 @@ fn write_bounded_json_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        let a = workspace.join("approved-earlier.txt");
+        let b = workspace.join("actual.txt");
+        fs::write(&a, "safe").unwrap();
+        fs::write(&b, "before\n").unwrap();
+        let cancellation = gyro_core::CancellationToken::default();
+        let denied = apply_acp_workspace_write(
+            &workspace,
+            &b,
+            "different\n",
+            false,
+            true,
+            &cancellation,
+            |_, details| {
+                assert_eq!(details["patch"]["changes"][0]["path"], "actual.txt");
+                assert!(details["patch"]["changes"][0]["diff"]
+                    .as_str()
+                    .unwrap()
+                    .contains("+different"));
+                Ok(ProviderApprovalDecision::Reject)
+            },
+        );
+        assert!(denied.is_err());
+        assert_eq!(fs::read_to_string(&b).unwrap(), "before\n");
+        apply_acp_workspace_write(
+            &workspace,
+            &b,
+            "reviewed\n",
+            false,
+            true,
+            &cancellation,
+            |transaction, _| {
+                gyro_core::apply_provider_mutation_transaction(&transaction)?;
+                Ok(ProviderApprovalDecision::AppliedByGyro)
+            },
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&b).unwrap(), "reviewed\n");
+        assert_eq!(fs::read_to_string(&a).unwrap(), "safe");
+        assert!(apply_acp_workspace_write(
+            &workspace,
+            &b,
+            "plan write",
+            true,
+            false,
+            &cancellation,
+            |_, _| panic!("plan must not ask to write")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn workspace_tree_lists_every_direct_child_without_truncation() {
+        let workspace = tempfile::tempdir().unwrap();
+        for index in 0..1250 {
+            fs::write(workspace.path().join(format!("file-{index}.txt")), "").unwrap();
+        }
+        for folder in [
+            "apps",
+            "packages",
+            "scripts",
+            "node_modules",
+            "target",
+            ".github",
+        ] {
+            fs::create_dir(workspace.path().join(folder)).unwrap();
+            fs::write(workspace.path().join(folder).join("child.txt"), "").unwrap();
+        }
+        let listing =
+            list_workspace_tree_blocking(workspace.path().display().to_string(), Some(1)).unwrap();
+        assert_eq!(listing.len(), 1256);
+        assert!(listing.iter().all(|entry| entry.depth == 1));
+        for folder in [
+            "apps",
+            "packages",
+            "scripts",
+            "node_modules",
+            "target",
+            ".github",
+        ] {
+            assert!(listing
+                .iter()
+                .any(|entry| entry.path == folder && entry.kind == "directory"));
+            let children = list_workspace_tree_blocking(
+                workspace.path().join(folder).display().to_string(),
+                Some(1),
+            )
+            .unwrap();
+            assert_eq!(children.len(), 1);
+            assert_eq!(children[0].path, "child.txt");
+        }
+    }
+
+    #[test]
+    fn workspace_tree_can_expand_beyond_the_old_depth_limit() {
+        let workspace = tempfile::tempdir().unwrap();
+        let nested = workspace.path().join("a/b/c/d/e/f/g/h/i/j");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("deep.txt"), "deep").unwrap();
+        let listing = list_workspace_tree_blocking(nested.display().to_string(), Some(1)).unwrap();
+        assert_eq!(listing[0].path, "deep.txt");
+    }
 
     #[test]
     fn workspace_tree_entries_are_sorted_depth_first() {
@@ -24332,14 +24529,17 @@ while True:
     }
 
     #[test]
-    fn workspace_watcher_ignores_generated_and_git_paths() {
+    fn workspace_watcher_includes_dependency_changes_but_ignores_git_internals() {
         let root = PathBuf::from("/tmp/gyro-workspace");
-        let ignored = NotifyEvent::new(notify::EventKind::Any)
+        let ignored =
+            NotifyEvent::new(notify::EventKind::Any).add_path(root.join(".git/objects/object"));
+        let dependency = NotifyEvent::new(notify::EventKind::Any)
             .add_path(root.join("node_modules/package/index.js"));
         let source = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("src/app.ts"));
 
         assert!(!workspace_watch_event_is_relevant(&root, &ignored));
         assert!(workspace_watch_event_is_relevant(&root, &source));
+        assert!(workspace_watch_event_is_relevant(&root, &dependency));
     }
 
     #[test]
@@ -28190,6 +28390,37 @@ while True:
         })
         .unwrap_err();
         assert!(error.to_string().contains("commit or stash"));
+    }
+
+    #[test]
+    fn git_branch_catalog_creates_a_session_branch_from_the_selected_base() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let tracked = repo.path().join("tracked.txt");
+        fs::write(&tracked, "release base\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "release base"]);
+        run_git(repo.path(), &["branch", "release/base"]);
+        fs::write(&tracked, "main head\n").unwrap();
+        run_git(repo.path(), &["commit", "-am", "main head"]);
+        fs::write(repo.path().join("scratch.txt"), "keep me\n").unwrap();
+
+        let catalog = git_create_branch_impl(&GitCreateBranchRequest {
+            workspace_path: repo.path().to_string_lossy().into_owned(),
+            branch: "feature/session-goal".into(),
+            start_point: Some("release/base".into()),
+        })
+        .unwrap();
+
+        assert_eq!(catalog.current.as_deref(), Some("feature/session-goal"));
+        assert!(catalog
+            .branches
+            .contains(&"feature/session-goal".to_string()));
+        assert_eq!(fs::read_to_string(tracked).unwrap(), "release base\n");
+        assert_eq!(
+            fs::read_to_string(repo.path().join("scratch.txt")).unwrap(),
+            "keep me\n"
+        );
     }
 
     #[test]

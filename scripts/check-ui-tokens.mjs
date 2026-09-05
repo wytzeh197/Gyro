@@ -20,35 +20,26 @@ const monaco = read("apps/desktop/src/monaco-editor.ts");
 const earlyShell = read("apps/desktop/src/early-shell.css");
 
 expect(
-  existsSync(
-    resolve(repoRoot, "packages/ui/src/assets/fonts/inter-latin.woff2"),
+  /\.gyro-chat-start:not\(\.is-mission\)\s*\{[^}]*justify-content:\s*center;/.test(
+    styles,
   ) &&
-    existsSync(
-      resolve(repoRoot, "packages/ui/src/assets/fonts/inter-tight-latin.woff2"),
-    ) &&
-    existsSync(
-      resolve(repoRoot, "apps/desktop/public/fonts/inter-latin.woff2"),
-    ) &&
-    existsSync(
-      resolve(repoRoot, "apps/desktop/public/fonts/inter-tight-latin.woff2"),
+    /\.gyro-chat-start:not\(\.is-mission\)\s*>\s*\.gyro-composer-shell\s*\{[^}]*margin-top:\s*24px;/.test(
+      styles,
     ),
-  "Inter and Inter Tight must be vendored for the desktop app and the UI package.",
+  "Before the first message, the composer must stay with the centered quick actions, not bottom-dock.",
 );
 
 expect(
-  styles.includes('font-family: "Inter"') &&
-    styles.includes('font-family: "Inter Tight"') &&
-    styles.includes("--gyro-font-display") &&
-    styles.includes("--gyro-font-sans") &&
-    styles.includes('"cv05" 1') &&
-    styles.includes('"cv11" 1'),
-  "The app type ladder must load Inter / Inter Tight and enable Inter features.",
+  styles.includes("--gyro-font-sans: -apple-system") &&
+    /--gyro-font-display:\s*-apple-system/.test(styles) &&
+    !styles.includes('font-family: "Inter"') &&
+    !styles.includes('font-family: "Inter Tight"'),
+  "App typography must use the macOS system stack, including companion layouts.",
 );
-
 expect(
-  earlyShell.includes('font-family: "Inter Tight"') &&
-    earlyShell.includes("/fonts/inter-latin.woff2"),
-  "First paint must load the same typefaces as the running app.",
+  earlyShell.includes("font-family: -apple-system, BlinkMacSystemFont") &&
+    !earlyShell.includes("@font-face"),
+  "First paint must use the same system typeface as the running app.",
 );
 
 expect(
@@ -59,8 +50,8 @@ expect(
 );
 
 expect(
-  monaco.includes('defineTheme("gyro-dark"') &&
-    monaco.includes('defineTheme("gyro-light"'),
+  monaco.includes('["dark", "light"] as const') &&
+    monaco.includes("createMonacoTheme(mode)"),
   "Monaco must ship matching dark and light Gyro themes.",
 );
 

@@ -1,0 +1,63 @@
+.gyro-branch-name-dialog {
+  background: var(--gyro-topbar, #202124);
+  color: var(--gyro-text, #eee);
+  border: 1px solid var(--gyro-topbar-border, #454545);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px #0006;
+  padding: 24px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.gyro-branch-name-dialog::backdrop {
+  background: #0007;
+}
+.gyro-branch-name-dialog form {
+  display: grid;
+  gap: 14px;
+}
+.gyro-branch-name-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.gyro-branch-name-dialog p {
+  margin: 0;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+.gyro-branch-name-dialog label {
+  font-weight: 600;
+}
+.gyro-branch-name-dialog input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--gyro-topbar-border, #454545);
+  border-radius: 6px;
+  padding: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.gyro-branch-name-dialog input:focus-visible {
+  outline: 2px solid var(--gyro-accent, #e84a8a);
+  outline-offset: 2px;
+}
+.gyro-branch-name-dialog footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.gyro-branch-name-dialog button {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gyro-branch-name-dialog button[type="submit"] {
+  background: var(--gyro-accent, #e84a8a);
+  color: #fff;
+  border: 1px solid transparent;
+}
+.gyro-branch-name-dialog button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

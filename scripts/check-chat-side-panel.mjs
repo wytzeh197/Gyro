@@ -76,6 +76,14 @@ expect(
 // --- Browser card -----------------------------------------------------------
 
 expect(
+  styles.includes(".gyro-chat-companion.is-browser-focus {") &&
+    styles.includes("grid-template-columns: minmax(360px, 1fr) auto") &&
+    surfaces.includes("browserCompanionWidth") &&
+    surfaces.includes("browserTabLabel"),
+  "A selected Browser tab must become the broad in-app page canvas, retain a readable chat column, and identify the page in its tab.",
+);
+
+expect(
   cssRules(styles, ".gyro-browser-preview").some(
     (rule) =>
       rule.includes("container-name: gyro-browser") &&

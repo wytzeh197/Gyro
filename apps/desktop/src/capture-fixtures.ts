@@ -18,6 +18,22 @@ type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
+const supportedScenes = new Set([
+  "chat",
+  "welcome",
+  "active-chat",
+  "companion-layout",
+  "workspace-source-control",
+  "workspace-diff",
+  "selected-diff",
+  "appearance",
+  "cli",
+  "ollama",
+  "ollama-empty",
+]);
+if (!supportedScenes.has(scene)) {
+  console.warn(`[capture] unknown scene: ${scene}`);
+}
 const isOllamaScene = scene === "ollama" || scene === "ollama-empty";
 const isOllamaEmptyScene = scene === "ollama-empty";
 const WORKSPACE = "/Users/dev/Projects/aurora";
@@ -472,6 +488,55 @@ const workspaceTree = [
   file("README.md", "file", 1),
 ];
 
+if (parameters.get("edge") === "lazy-explorer") {
+  workspaceTree.push(
+    file("node_modules", "directory", 1),
+    file("node_modules/example", "directory", 2),
+    file("node_modules/example/index.js", "file", 3),
+    file("target", "directory", 1),
+    file("target/build.log", "file", 2),
+  );
+  const controls = document.createElement("nav");
+  controls.setAttribute("aria-label", "Explorer capture controls");
+  controls.style.cssText =
+    "position:fixed;right:16px;bottom:36px;z-index:99999";
+  const toggle = document.createElement("button");
+  toggle.textContent = "Add fixture file";
+  toggle.onclick = () => {
+    const path = `${WORKSPACE}/src/fixture-refresh.txt`;
+    const index = workspaceTree.findIndex((entry) => entry.path === path);
+    if (index < 0)
+      workspaceTree.push(file("src/fixture-refresh.txt", "file", 2));
+    else workspaceTree.splice(index, 1);
+    toggle.textContent = index < 0 ? "Delete fixture file" : "Add fixture file";
+  };
+  controls.append(toggle);
+  document.body.append(controls);
+}
+
+// Design QA cases remain isolated to the development capture entry point.
+if (parameters.get("edge") === "multiple-roots") {
+  const otherRoot = "/Users/dev/Clients/aurora";
+  workspaceTree.push(
+    {
+      ...file("", "directory", 0),
+      path: otherRoot,
+      workspacePath: otherRoot,
+      isWorkspaceRoot: true,
+    },
+    {
+      ...file("README.md", "file", 1),
+      path: `${otherRoot}/README.md`,
+      workspacePath: otherRoot,
+    },
+    file(
+      "a-very-long-workspace-file-name-with-important-details.ts",
+      "file",
+      1,
+    ),
+  );
+}
+
 const terminalOutput = [
   "$ gyro doctor",
   "workspace store ready",
@@ -674,6 +739,46 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  if (parameters.get("edge") === "lazy-explorer") {
+    const rootFiles = workspaceTree.filter(
+      (entry) => entry.isWorkspaceRoot || entry.depth === 1,
+    );
+    if (command === "prepare_workspace")
+      return { ...preparation, files: rootFiles };
+    if (command === "watch_workspace") return rootFiles;
+  }
+  if (command === "list_workspace_tree" && args?.depth === 1) {
+    const directory = String(args.workspacePath);
+    return workspaceTree
+      .filter(
+        (entry) =>
+          !entry.isWorkspaceRoot &&
+          entry.path.slice(0, entry.path.lastIndexOf("/")) === directory,
+      )
+      .map((entry) => ({
+        path: entry.path.slice(directory.length + 1),
+        kind: entry.kind,
+        depth: 1,
+      }));
+  }
+  if (
+    parameters.get("edge") === "multiple-roots" &&
+    ["watch_workspace", "list_workspace_tree"].includes(command)
+  ) {
+    return workspaceTree.filter(
+      (entry) =>
+        entry.workspacePath === String(args?.workspacePath ?? WORKSPACE),
+    );
+  }
+  if (command === "plugin:event|listen") {
+    const id = Number(args?.handler);
+    captureListeners.set(id, String(args?.event));
+    return id;
+  }
+  if (command === "plugin:event|unlisten") {
+    captureListeners.delete(Number(args?.eventId));
+    return null;
+  }
   if (command.startsWith("plugin:event|")) return 0;
   if (command === "warm_desktop_shell") {
     return {
@@ -782,6 +887,92 @@ const invoke: Invoke = (command, args) => {
     const providerLabel = String(request.providerLabel ?? "Claude Code");
     const modelLabel = String(request.modelLabel ?? "Claude Opus 5");
     const responseSession = sessions.find((item) => item.id === sessionId);
+    // Manual steps make streaming placement and the completed review card
+    // reproducible without a provider, a real edit, or timing-dependent waits.
+    if (parameters.get("edge") === "live-file-changes") {
+      return new Promise((resolve) => {
+        const activityEvents: ReturnType<typeof captureSessionEvent>[] = [];
+        const changes = [
+          { path: "src/sync.js", additions: 24, deletions: 6 },
+          { path: "src/sync.test.js", additions: 31, deletions: 0 },
+          { path: "src/queue/backoff.js", additions: 18, deletions: 0 },
+          { path: "src/sync.js", additions: 30, deletions: 7 },
+        ];
+        let step = 0;
+        const controls = document.createElement("nav");
+        controls.setAttribute("aria-label", "File change capture controls");
+        controls.style.cssText =
+          "position:fixed;top:8px;right:8px;z-index:99999;display:flex;gap:8px;background:#fff;padding:8px;border:1px solid #ddd;border-radius:8px";
+        const next = document.createElement("button");
+        next.textContent = "Report next file change";
+        next.onclick = () => {
+          const file = changes[step++];
+          if (!file) return;
+          const event = captureSessionEvent(
+            sessionId,
+            turnId,
+            "system-event",
+            `Edited ${file.path}`,
+            {
+              kind: "provider-activity",
+              activityKind: "file",
+              activityId: `edit-${step}`,
+              status: "done",
+              label: `Edited ${file.path}`,
+              detail: file.path,
+              ...file,
+            },
+          );
+          activityEvents.push(event);
+          captureEventsBySessionId.set(sessionId, [
+            ...(captureEventsBySessionId.get(sessionId) ?? []),
+            event,
+          ]);
+          for (const [id, name] of captureListeners) {
+            if (name === "gyro://provider-capability-event")
+              callbacks.get(id)?.({ event: name, id, payload: event });
+          }
+          next.disabled = step === changes.length;
+        };
+        const finish = document.createElement("button");
+        finish.textContent = "Finish capture run";
+        finish.onclick = () => {
+          const statusEvent = captureSessionEvent(
+            sessionId,
+            turnId,
+            "system-event",
+            `${providerLabel} finished`,
+            {
+              kind: "provider-status",
+              status: "completed",
+              providerId: request.providerId ?? "anthropic",
+              providerLabel,
+              modelLabel,
+            },
+          );
+          const assistantEvent = captureSessionEvent(
+            sessionId,
+            turnId,
+            "assistant-message",
+            "Updated the retry logic and its tests. This was a local capture fixture; no files were changed.",
+          );
+          captureEventsBySessionId.set(sessionId, [
+            ...(captureEventsBySessionId.get(sessionId) ?? []),
+            statusEvent,
+            assistantEvent,
+          ]);
+          controls.remove();
+          resolve({
+            activityEvents,
+            statusEvent,
+            assistantEvent,
+            session: responseSession ?? null,
+          });
+        };
+        controls.append(next, finish);
+        document.body.append(controls);
+      });
+    }
     const activityEvent = captureSessionEvent(
       sessionId,
       turnId,
@@ -935,6 +1126,7 @@ const missing = new Set<string>();
   () => [...missing];
 
 const callbacks = new Map<number, (payload: unknown) => void>();
+const captureListeners = new Map<number, string>();
 let callbackId = 0;
 
 Object.defineProperty(window, "__TAURI_INTERNALS__", {
@@ -961,6 +1153,7 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
 Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
   value: {
     unregisterListener(_event: string, id: number) {
+      captureListeners.delete(id);
       callbacks.delete(id);
     },
   },
@@ -974,3 +1167,54 @@ document.documentElement.dataset.captureScene = scene;
  * light hero passes ?theme=light.
  */
 localStorage.setItem("gyro.theme", theme);
+// A repeatable starting point for the chat/panel layout comparison. This entry
+// point is development-only and its browser profile contains fixture data.
+if (scene === "companion-layout") {
+  localStorage.setItem(
+    "gyro.workbench-state",
+    JSON.stringify({
+      preferences: {
+        theme,
+        density: parameters.get("density") ?? "compact",
+        ...(parameters.get("edge") === "multiple-roots"
+          ? { workspaceFolders: { [WORKSPACE]: ["/Users/dev/Clients/aurora"] } }
+          : {}),
+      },
+      ...(parameters.get("edge") === "pending-review"
+        ? {
+            diffReview: {
+              files: [
+                {
+                  path: "src/sync.js",
+                  additions: 1,
+                  deletions: 1,
+                  source: "agent-generated",
+                  state: "pending",
+                  comments: 0,
+                  lines: [
+                    {
+                      kind: "removed",
+                      content: "const MAX_ATTEMPTS = Infinity;",
+                      number: 3,
+                    },
+                    {
+                      kind: "added",
+                      content: "const MAX_ATTEMPTS = 5;",
+                      number: 3,
+                    },
+                  ],
+                },
+              ],
+              selectedPath: "src/sync.js",
+              approvalState: "pending",
+              commitMessage: "",
+              collapsedDirectories: [],
+              lastAction: "Fixture edit awaiting approval",
+            },
+          }
+        : {}),
+      lastSessionsLayout: "thread",
+      isToolPanelOpen: false,
+    }),
+  );
+}

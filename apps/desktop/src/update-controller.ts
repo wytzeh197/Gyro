@@ -4,6 +4,8 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { updateProgressPercent, type UpdateState } from "@gyro-dev/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isUpdateVersionNewer } from "./update-version";
+
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1_000;
 const UPDATE_CHECK_POLL_INTERVAL_MS = 60 * 1_000;
 const UPDATE_RETRY_DELAYS_MS = [
@@ -101,7 +103,8 @@ export function useGyroUpdater({
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = undefined;
         retryCountRef.current = 0;
-        if (!update) {
+        if (!update || !isUpdateVersionNewer(update.version, currentVersion)) {
+          await update?.close().catch(() => undefined);
           await updateRef.current?.close().catch(() => undefined);
           updateRef.current = null;
           setState({

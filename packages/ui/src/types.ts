@@ -37,6 +37,7 @@ export type WorkbenchMode = "local" | "worktree";
  * picking one never closes the pane.
  */
 export type ChatSidePanelId =
+  | "tools"
   | "environment"
   | "plan"
   | "review"
@@ -1016,7 +1017,12 @@ export type OnboardingState = {
 
 export type WorkbenchPreferences = {
   theme: ThemeMode;
+  /** User-selected brand accents applied across every local Gyro surface. */
+  mainColor: string;
+  secondaryColor: string;
   density: WorkbenchDensity;
+  /** Whether new chats show the four starter prompt shortcuts. */
+  showQuickActions: boolean;
   lastSettingsSection: SettingsSectionId;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;
@@ -1037,8 +1043,12 @@ export type WorkbenchPreferences = {
    * is recorded so an unclean exit can be swept on the next launch.
    */
   sideChatSessionIds: string[];
-  /** Width of the chat companion dock, shared by every chat pane. */
+  /** Width of compact chat companion tools, shared by every chat pane. */
   chatCompanionWidth?: number;
+  /** Width of the primary in-chat Browser canvas, shared by every chat pane. */
+  browserCompanionWidth?: number;
+  /** Shared full-height panel width. Omitted uses the window's available space. */
+  chatPanelWidth?: number;
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
   showMenuBarIcon: boolean;
@@ -1166,7 +1176,15 @@ export type WorkbenchTurn = {
   reconciledAt?: string;
 };
 
+export type SourceControlDiff = {
+  workspacePath: string;
+  path: string;
+  originalPath?: string;
+  staged: boolean;
+};
+
 export type EditorTab = {
+  sourceControlDiff?: SourceControlDiff;
   path: string;
   title: string;
   dirty: boolean;
@@ -1320,6 +1338,15 @@ export type SourceControlFile = {
 };
 
 export type SourceControlState = {
+  history?: Array<{
+    hash: string;
+    shortHash: string;
+    subject: string;
+    author: string;
+    relativeDate: string;
+    refs: string;
+  }>;
+  historyError?: string;
   provider: "git";
   available: boolean;
   branch?: string;

@@ -175,7 +175,10 @@ impl KimiAcpConnection {
             let mut reader = BufReader::new(stdout);
             loop {
                 let mut bytes = Vec::new();
-                match reader.read_until(b'\n', &mut bytes) {
+                match (&mut reader)
+                    .take((ACP_MAX_FRAME_BYTES + 1) as u64)
+                    .read_until(b'\n', &mut bytes)
+                {
                     Ok(0) => break,
                     Ok(_) if bytes.len() > ACP_MAX_FRAME_BYTES => {
                         let _ = incoming_sender.send(Err(format!(
@@ -322,13 +325,11 @@ impl KimiAcpConnection {
                     if let Ok(stderr) = self.stderr.try_recv() {
                         self.stderr_text = stderr;
                     }
-                    if let Some(status) = self.child.try_wait()? {
-                        anyhow::bail!(
-                            "{} ACP exited with {status}: {}",
-                            self.provider_label,
-                            redact_secrets(self.stderr_text.trim())
-                        );
-                    }
+                    // The reader may still be delivering the child's final
+                    // frame after process exit. Let channel EOF establish that
+                    // stdout is drained; inspecting try_wait here can discard
+                    // a response (or its parse error) under scheduling load.
+                    // Cancellation and the run deadline still bound this wait.
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     let stderr = self
@@ -1171,6 +1172,11 @@ fn read_workspace_text_file(workspace: &Path, params: &Value) -> Result<String> 
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("ACP file read did not include a path"))?;
     let path = resolve_existing_workspace_path(workspace, requested)?;
+    let canonical_workspace = workspace.canonicalize()?;
+    let relative = path.strip_prefix(&canonical_workspace)?;
+    if crate::capabilities::capability_path_is_sensitive(&relative.to_string_lossy()) {
+        anyhow::bail!("Sensitive files require the governed Gyro workspace-read tool and its access policy; direct ACP reads are disabled for this path");
+    }
     let metadata = std::fs::symlink_metadata(&path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         anyhow::bail!("ACP reads require a regular non-symlink file");
@@ -1404,6 +1410,61 @@ mod tests {
         resolve_workspace_write_path, run_kimi_acp, CredentialPolicy, KimiAcpApprovalDecision,
         KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest,
     };
+
+    #[test]
+    fn direct_acp_reads_refuse_sensitive_files_and_aliases() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join(".env"), "PRIVATE_VALUE=fixture").unwrap();
+        std::fs::write(temp.path().join("source.rs"), "first\nsecond\n").unwrap();
+        assert!(
+            super::read_workspace_text_file(temp.path(), &json!({"path": ".env"}))
+                .unwrap_err()
+                .to_string()
+                .contains("governed")
+        );
+        assert_eq!(
+            super::read_workspace_text_file(
+                temp.path(),
+                &json!({"path": "source.rs", "line": 2, "limit": 1})
+            )
+            .unwrap(),
+            "second"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(temp.path().join(".env"), temp.path().join("innocent.txt"))
+                .unwrap();
+            assert!(
+                super::read_workspace_text_file(temp.path(), &json!({"path": "innocent.txt"}))
+                    .is_err()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_frame_without_newline_fails_before_the_peer_closes() {
+        let (temp, program) = acp_fixture(
+            "read line\ndd if=/dev/zero bs=1048577 count=1 2>/dev/null | tr '\\000' x\nsleep 10",
+        );
+        let started = std::time::Instant::now();
+        let error = run_kimi_acp(
+            fixture_request(
+                program,
+                temp.path().to_path_buf(),
+                CancellationToken::default(),
+                None,
+            ),
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("size limit"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 
     #[test]
     fn a_selected_model_is_renamed_to_the_id_the_agent_advertises() {
@@ -1867,7 +1928,7 @@ done
         )
         .unwrap_err()
         .to_string();
-        assert!(error.contains("invalid Kimi ACP JSON"));
+        assert!(error.contains("invalid Kimi ACP JSON"), "{error}");
 
         let (temp, program) = acp_fixture(
             "read line\nprintf '{\\\"payload\\\":\\\"'\ndd if=/dev/zero bs=1048577 count=1 2>/dev/null | tr '\\000' x\nprintf '\\\"}\\n'",
