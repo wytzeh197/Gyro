@@ -1482,6 +1482,20 @@ expect(
   "Sessions routing should persist and safely hydrate the last Chat or CLI layout.",
 );
 
+// Restored preference values must not silently become Compact after the redesign.
+for (const [density, expected] of [
+  [undefined, "comfortable"],
+  ["invalid", "comfortable"],
+  ["compact", "compact"],
+  ["comfortable", "comfortable"],
+]) {
+  expect(
+    createInitialWorkbenchState({ preferences: { density } }).preferences
+      .density === expected,
+    `Restored density ${String(density)} should resolve to ${expected}.`,
+  );
+}
+
 let state = workbenchReducer(initialState, {
   type: "set-theme",
   theme: "light",
@@ -1489,6 +1503,10 @@ let state = workbenchReducer(initialState, {
 state = workbenchReducer(state, {
   type: "set-density",
   density: "comfortable",
+});
+state = workbenchReducer(state, {
+  type: "set-quick-actions-visible",
+  visible: false,
 });
 state = workbenchReducer(state, {
   type: "set-appearance-colors",
@@ -1503,6 +1521,10 @@ expect(state.preferences.theme === "light", "Theme reducer did not update.");
 expect(
   state.preferences.density === "comfortable",
   "Density reducer did not update.",
+);
+expect(
+  state.preferences.showQuickActions === false,
+  "Quick actions visibility reducer did not update.",
 );
 expect(
   state.preferences.mainColor === "#1570ef" &&
@@ -3468,7 +3490,7 @@ expect(
     appSource.includes("isStreamingAssistantSessionEvent") &&
     !appSource.includes("[...events]\n    .reverse()") &&
     appSource.includes(
-      "}, [resolvedTheme, themePreference, workbench.preferences.density]);",
+      "document.documentElement.dataset.density = workbench.preferences.density",
     ) &&
     appSource.includes(
       "safeSetLocalStorage(THEME_STORAGE_KEY, themePreference)",
@@ -3647,7 +3669,7 @@ expect(
     runViewSource.includes("WORK_ICON[item.kind]") &&
     !surfaceSource.includes("Hide changed files") &&
     !surfaceSource.includes("Show changed files") &&
-    !surfaceSource.includes("showAllFiles") &&
+    surfaceSource.includes("files.slice(0, 6)") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
     appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
@@ -3971,13 +3993,13 @@ expect(
     surfaceSource.includes(
       'hasPanes ? (\n          <div className="gyro-terminal-tools">',
     ) &&
-    surfaceSource.includes("gyro-terminal-empty-icon") &&
-    surfaceSource.includes("Terminal workspace") &&
-    surfaceSource.includes("Start where the work is") &&
+    surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
+    surfaceSource.includes('aria-label="Start a terminal"') &&
+    surfaceSource.includes("<span>New terminal</span>") &&
     styleSource.includes(
       ".gyro-terminal-workspace.is-empty .gyro-terminal-empty",
     ) &&
-    styleSource.includes(".gyro-terminal-empty-icon") &&
+    styleSource.includes(".gyro-terminal-launcher") &&
     surfaceSource.includes("<Plus size={14} />"),
   "CLI empty state should orient users and keep launch controls available.",
 );
@@ -4302,8 +4324,8 @@ expect(
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
     surfaceSource.includes('title="Explorer"') &&
-    surfaceSource.includes('aria-label="Code tools"') &&
-    surfaceSource.includes('className="gyro-ide-panel-shortcuts"') &&
+    appSource.includes('aria-label="Workspace tools"') &&
+    !surfaceSource.includes('className="gyro-ide-panel-shortcuts"') &&
     surfaceSource.includes("headerActions={") &&
     styleSource.includes(".gyro-sidebar-section-heading") &&
     styleSource.includes(".gyro-ide-panel-shortcuts") &&
@@ -4381,7 +4403,7 @@ expect(
     !tauriSource.includes("dangerousRemoteDomainIpcAccess") &&
     surfaceSource.includes("gyro-browser-skeleton") &&
     !reducerSource.includes("screenshotCount") &&
-    reducerSource.includes('url: "http://localhost:3000"') &&
+    createInitialWorkbenchState().browserPreview.history.length === 0 &&
     tauriConfigSource.includes("frame-src http://localhost:*") &&
     tauriConfigSource.includes("http://127.0.0.1:*") &&
     styleSource.includes(".gyro-browser-page iframe"),
@@ -4414,8 +4436,10 @@ if (readinessAuditSource !== undefined) {
 expect(
   surfaceSource.includes('className="gyro-ide-project-empty"') &&
     surfaceSource.includes("Open a project to start coding") &&
-    surfaceSource.includes(
-      "Local workspace · guarded edits · reviewable changes",
+    !surfaceSource.includes('className="gyro-ide-project-empty-eyebrow"') &&
+    !surfaceSource.includes('className="gyro-ide-project-empty-features"') &&
+    /className="gyro-primary-button"\s+onClick=\{onOpenWorkspace\}/.test(
+      surfaceSource,
     ) &&
     surfaceSource.includes("if (!workspacePath)") &&
     appSource.includes(
@@ -4430,9 +4454,7 @@ expect(
       "isDisabled = view.requiresWorkspace && !hasWorkspace",
     ) &&
     surfaceSource.includes("<WorkspaceActivityRail") &&
-    surfaceSource.includes(
-      'workspacePath ? (\n            <nav className="gyro-ide-panel-shortcuts"',
-    ) &&
+    appSource.includes('activeWorkspaceLayout === "code" ? (') &&
     styleSource.includes(".gyro-ide-surface.is-project-empty") &&
     styleSource.includes(".gyro-workspace-activity-rail button:disabled") &&
     styleSource.includes(".gyro-ide-project-empty > button:focus-visible"),
@@ -4780,7 +4802,7 @@ const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
 expect(
   surfaceSource.includes('aria-label="Chat companion"') &&
     surfaceSource.includes(
-      "const isCompanionPanel = isChatCompanionTab(railPanel)",
+      'const isCompanionPanel = Boolean(activeCompanionTab) || railPanel === "tools"',
     ) &&
     surfaceSource.includes(
       'activePanel={railPanel === "review" ? "changes" : railPanel}',
@@ -4981,10 +5003,10 @@ expect(
     ) &&
     surfaceSource.includes("!event.shiftKey") &&
     surfaceSource.includes("event.preventDefault()") &&
-    styleSource.includes("--gyro-chat-content-width: 772px") &&
+    styleSource.includes("--gyro-chat-content-width: 760px") &&
     styleSource.includes("max-width: var(--gyro-chat-content-width)") &&
     styleSource.includes("border-radius: 20px") &&
-    styleSource.includes("color: #ff8a3d") &&
+    styleSource.includes("color: var(--gyro-warn)") &&
     styleSource.includes(
       ".gyro-chat-start .gyro-composer-shell:focus-within .gyro-composer-bar",
     ) &&
@@ -5076,16 +5098,17 @@ const updateControlSource = surfaceSource.slice(
   surfaceSource.indexOf("function SettingsSidebarContent", updateControlStart),
 );
 expect(
-  surfaceSource.includes('className="gyro-sidebar-update is-windowbar"') &&
+  surfaceSource.includes('className="gyro-sidebar-update"') &&
+    !surfaceSource.includes("gyro-sidebar-update is-windowbar") &&
     surfaceSource.indexOf("<SidebarUpdateControl") >
-      surfaceSource.indexOf('aria-label="Forward"') &&
+      surfaceSource.indexOf('className="gyro-sidebar-footer-row"') &&
     updateControlSource.includes("onClick={() => onAction?.(state)}") &&
-    updateControlSource.includes('className="gyro-sidebar-update-percent"') &&
-    updateControlSource.includes("state.progressPercent ?? 0") &&
+    updateControlSource.includes("const actionText") &&
+    updateControlSource.includes('className="gyro-sidebar-update-label"') &&
+    updateControlSource.includes('data-tip-placement="above"') &&
     updateControlSource.includes('state.status === "ready"') &&
     updateControlSource.includes("<RefreshCw") &&
     updateControlSource.includes('role="tooltip"') &&
-    updateControlSource.includes("data-tip-placement={placement}") &&
     updateControlSource.includes("updateVersionTag(state)") &&
     updateControlSource.includes("updateSizeLabel(state)") &&
     styleSource.includes(".gyro-sidebar-update-tip") &&
@@ -5095,17 +5118,15 @@ expect(
     !updateControlSource.includes('aria-haspopup="dialog"') &&
     !surfaceSource.includes("function UpdatePopover") &&
     styleSource.includes(".gyro-sidebar-update-button") &&
-    styleSource.includes(".gyro-sidebar-update.is-windowbar") &&
+    styleSource.includes(".gyro-sidebar-footer-row > .gyro-sidebar-update") &&
     styleSource.includes("--gyro-update-blue: #356fd6") &&
     styleSource.includes("background: var(--gyro-update-blue)") &&
     styleSource.includes("display: inline-flex") &&
     styleSource.includes("justify-content: center") &&
     styleSource.includes("grid-template-columns: none") &&
-    styleSource.includes("height: 24px") &&
-    styleSource.includes("width: 24px") &&
-    styleSource.includes("height: 11px") &&
-    styleSource.includes("width: 11px") &&
-    styleSource.includes(".gyro-sidebar-update-percent") &&
+    styleSource.includes("border-radius: 999px") &&
+    styleSource.includes("min-height: 30px") &&
+    styleSource.includes(".gyro-sidebar-update-label") &&
     !styleSource.includes(".gyro-sidebar-update-indicator") &&
     !surfaceSource.includes("gyro-sidebar-update-indicator") &&
     !styleSource.includes(".gyro-update-popover") &&
@@ -5225,7 +5246,7 @@ expect(
     surfaceSource.includes("Change folder") &&
     // Workspace-mode picker: card rows with full copy, badge (not trailing
     // "Recommended" that collides with truncated labels in a narrow menu).
-    surfaceSource.includes('className="gyro-workspace-mode-picker"') &&
+    surfaceSource.includes('action: "context:workspace-mode"') &&
     surfaceSource.includes('kind: "workspace-mode"') &&
     // Labels + optional Recommended only — no redundant title or detail rows.
     !surfaceSource.includes('title="Where the agent works"') &&
@@ -5483,7 +5504,8 @@ expect(
     surfaceSource.includes("providerAuthSummary(provider.id)") &&
     !surfaceSource.includes('label="Selected model"') &&
     !surfaceSource.includes('className="gyro-provider-model-picker"') &&
-    !surfaceSource.includes("Refresh models") &&
+    surfaceSource.includes("Refresh models") &&
+    appSource.includes('await connectProvider("ollama")') &&
     appSource.includes("onTestProvider={testProvider}") &&
     styleSource.includes(".gyro-settings-provider-actions") &&
     styleSource.includes("/* Minimal provider settings */") &&
@@ -5514,12 +5536,14 @@ expect(
 expect(
   surfaceSource.includes("const dismissActiveComposerPopover = useCallback") &&
     surfaceSource.includes(
-      'document.addEventListener("keydown", handleComposerPopoverKeyDown)',
+      'document.addEventListener("keydown", handleKeyDown)',
     ) &&
     surfaceSource.includes(
-      'document.removeEventListener("keydown", handleComposerPopoverKeyDown)',
+      'document.removeEventListener("keydown", handleKeyDown)',
     ) &&
-    surfaceSource.includes('if (event.key !== "Escape") return;'),
+    surfaceSource.includes('if (event.key === "Escape")') &&
+    surfaceSource.includes("openMenus.at(-1) !== menu") &&
+    surfaceSource.includes("returnFocus.focus()"),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
 expect(
@@ -5766,7 +5790,7 @@ expect(
   surfaceSource.includes("function useOutsidePointerDismiss") &&
     surfaceSource.includes('document.addEventListener("pointerdown"') &&
     surfaceSource.includes("const path = event.composedPath()") &&
-    surfaceSource.includes("path.includes(current)") &&
+    surfaceSource.includes("path.includes(element)") &&
     surfaceSource.includes("const menuRef = useOutsidePointerDismiss") &&
     surfaceSource.includes("event.target === event.currentTarget") &&
     surfaceSource.includes("ref={detailRef}"),
@@ -5774,17 +5798,10 @@ expect(
 );
 expect(
   surfaceSource.includes("triggerRef?: RefObject<HTMLElement | null>") &&
-    surfaceSource.includes("path.includes(trigger)") &&
+    surfaceSource.includes("path.includes(triggerRef.current)") &&
     // The dismiss scope is the open control itself, not a whole composer, row,
     // or message, so a press on any neighbouring control still closes it.
-    [
-      "context",
-      "approval",
-      "provider",
-      "project",
-      "workspace-mode",
-      "branch",
-    ].every((popover) =>
+    ["context", "approval", "provider"].every((popover) =>
       surfaceSource.includes(
         `activePopover === "${popover}" ? popoverScopeRef : undefined`,
       ),
@@ -5797,7 +5814,7 @@ expect(
       '<div className="gyro-session-menu" ref={menuRef}',
     ) &&
     surfaceSource.includes("menuMessageId === message.id ? menuTriggerRef") &&
-    !surfaceSource.includes("ref={popoverScopeRef}"),
+    surfaceSource.includes("ref={popoverScopeRef}"),
   "Dropdown dismissal should be scoped to the open control and its trigger, not the surrounding row.",
 );
 expect(
@@ -6404,7 +6421,7 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 10px") &&
+    styleSource.includes("--gyro-premium-radius-md: 6px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
     styleSource.includes("--gyro-app: #15171a") &&
     styleSource.includes("--gyro-pane: #1c1f23") &&
@@ -6427,7 +6444,7 @@ expect(
     appSource.includes('"--gyro-user-secondary"') &&
     styleSource.includes("Large surfaces stay neutral") &&
     !styleSource.includes("var(--gyro-secondary-accent) 1.5%") &&
-    styleSource.includes("0 0 0 2px var(--gyro-focus-ring)"),
+    styleSource.includes("outline: 2px solid var(--gyro-accent)"),
   "The premium graphite system should keep one token authority with thin hairlines, fast motion, and dark/light accent parity.",
 );
 
@@ -6685,13 +6702,10 @@ expect(
 );
 
 expect(
-  monacoEditorSource.includes('monaco.editor.defineTheme("gyro-dark"') &&
-    monacoEditorSource.includes('monaco.editor.defineTheme("gyro-light"') &&
-    monacoEditorSource.includes('"editor.background": "#0C0C0C"') &&
-    monacoEditorSource.includes(
-      '"editor.lineHighlightBackground": "#161616"',
-    ) &&
-    appSource.includes("stickyScroll: { enabled: true, maxLineCount: 3 }") &&
+  monacoEditorSource.includes("createMonacoTheme(mode)") &&
+    readRepoFile("packages/ui/src/editor/themes/workspace-colors.ts").includes('"editor.background": "#0C0C0C"') &&
+    readRepoFile("packages/ui/src/editor/themes/workspace-colors.ts").includes('"editor.lineHighlightBackground": "#161616"') &&
+    appSource.includes("stickyScroll: { enabled: !syntax.policy.limited, maxLineCount: 3 }") &&
     appSource.includes(
       'theme={theme === "light" ? "gyro-light" : "gyro-dark"}',
     ),
@@ -6785,8 +6799,8 @@ expect(
     styleSource.includes("color: var(--gyro-warn)") &&
     styleSource.includes("background: transparent") &&
     styleSource.includes("border-color: transparent") &&
-    styleSource.includes("color: #ff8a3d"),
-  "Full Access should keep orange text and icons on a transparent menu and composer control.",
+    styleSource.includes("color: var(--gyro-warn)"),
+  "Full Access should use the theme-aware warning color on a transparent menu and composer control.",
 );
 
 const requiredViewports = [
@@ -6864,6 +6878,27 @@ expect(
     surfaceSource.includes("Automatic update checks") &&
     surfaceSource.includes("gyro-settings-confirm-overlay"),
   "Settings should use semantic switches for persisted booleans and confirm destructive resets.",
+);
+
+expect(
+  surfaceSource.includes(
+    "Compact fits more sessions, tools, and editor chrome; Comfortable gives rows and controls more breathing room.",
+  ) &&
+    styleSource.includes("Product-wide density contract") &&
+    styleSource.includes(
+      ':root[data-density="compact"] .gyro-sidebar-action',
+    ) &&
+    styleSource.includes(
+      ':root[data-density="comfortable"] .gyro-sidebar-action',
+    ) &&
+    styleSource.includes(".gyro-chat-start-suggestion") &&
+    styleSource.includes(".gyro-composer-context-row") &&
+    styleSource.includes("--gyro-ide-tab-height: 30px") &&
+    styleSource.includes("--gyro-ide-tab-height: 38px") &&
+    styleSource.includes(
+      ':root[data-density="comfortable"] .gyro-workspace-route.is-code',
+    ),
+  "Density should apply across navigation, chats, Settings, and editor chrome instead of only enlarging Settings rows.",
 );
 
 for (const settingsSelector of [
@@ -7060,8 +7095,10 @@ expect(
 );
 
 expect(
-  styleSource.includes("Codex-matched chat typography") &&
-    styleSource.includes("font-size: 14px;\n  line-height: 1.5;") &&
+  styleSource.includes(
+    "Conversation text shares the 16px system-font measure",
+  ) &&
+    styleSource.includes("font-size: 16px;\n  line-height: 1.6;") &&
     styleSource.includes(".gyro-user-message-bubble p") &&
     styleSource.includes(".gyro-run-row-detail") &&
     styleSource.includes(".gyro-run-row-stat") &&
@@ -7072,7 +7109,7 @@ expect(
     !styleSource.includes(".gyro-run-step-time") &&
     styleSource.includes(".gyro-run-row-icon") &&
     styleSource.includes(".gyro-run-row-detail"),
-  "Chat typography should use the Codex 14px body, 13px supporting, and 12px metadata scale.",
+  "Chat typography should use 16px conversation text, 13px controls, and 12px metadata.",
 );
 
 expect(
@@ -7086,14 +7123,16 @@ expect(
     surfaceSource.includes(
       'className="gyro-chat-run-change-summary-trigger"',
     ) &&
+    surfaceSource.includes("function LiveFileChanges") &&
+    surfaceSource.includes("gyro-composer-live-changes") &&
     surfaceSource.includes(
-      "const showsInlineDetails = isReviewable || !onReview",
+      'className="gyro-chat-run-change-summary is-complete"',
     ) &&
     surfaceSource.includes('onEdit={() => onComposerAction?.("add-goal")}') &&
     styleSource.includes(".gyro-session-goal-status") &&
     styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
     styleSource.includes(".gyro-change-summary-details"),
-  "Goal progress and changed-file results should stay compact, actionable transcript treatments.",
+  "Live file changes should sit by the composer and completed edits should retain their file review card.",
 );
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

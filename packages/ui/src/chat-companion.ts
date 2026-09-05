@@ -39,9 +39,11 @@ export function isChatCompanionTabId(
 }
 
 export type ChatCompanionPaneState = {
+  /** An open panel can show the tool picker without an active tab. */
+  isOpen?: boolean;
   /** Tabs in strip order; the first opened sits leftmost. */
   openTabs: ChatCompanionTabId[];
-  /** Undefined means the dock is closed for this pane. */
+  /** Undefined shows the picker when isOpen, or hides the panel otherwise. */
   activeTab?: ChatCompanionTabId;
   /**
    * Transient session backing the Side chat tab, when one is live. It is
@@ -53,18 +55,47 @@ export type ChatCompanionPaneState = {
 
 export type ChatCompanionState = {
   focusedPaneId?: string;
-  /** Shared across panes: the dock keeps one width as focus moves. */
+  /** Undefined follows the window, leaving a 424px conversation column. */
+  panelWidth?: number;
+  /** Shared across panes: non-browser tools keep one width as focus moves. */
   dockWidth: number;
+  /**
+   * The Browser is a working surface rather than a compact utility panel. It
+   * gets its own persisted width so a wide page never changes the size of
+   * Review, Terminal, Files, or Side chat.
+   */
+  browserDockWidth: number;
   panes: Record<string, ChatCompanionPaneState>;
 };
 
-/** The transcript remains the primary work surface, even with a wide tool open. */
+export type ChatCompanionWidthMode = "tool" | "browser" | "panel";
+
+export const CHAT_PANEL_MIN_WIDTH = 360;
+export const CHAT_PANEL_MAX_WIDTH = 1920;
+export const CHAT_PANEL_TRANSCRIPT_WIDTH = 424;
+
+export function clampChatPanelWidth(width: number, available?: number) {
+  return clampCompanionWidth(width, available, {
+    defaultWidth:
+      available === undefined ? 880 : available - CHAT_PANEL_TRANSCRIPT_WIDTH,
+    maximum: CHAT_PANEL_MAX_WIDTH,
+    minimum: CHAT_PANEL_MIN_WIDTH,
+    transcriptMinimum: 320,
+  });
+}
+
+/** The transcript remains the primary work surface for compact tools. */
 export const CHAT_COMPANION_MIN_WIDTH = 320;
 export const CHAT_COMPANION_MAX_WIDTH = 720;
 export const CHAT_COMPANION_DEFAULT_WIDTH = 420;
+/** Browser focus follows Codex's split: a readable conversation beside a broad page. */
+export const BROWSER_COMPANION_MIN_WIDTH = 440;
+export const BROWSER_COMPANION_MAX_WIDTH = 1_040;
+export const BROWSER_COMPANION_DEFAULT_WIDTH = 860;
 /** One deliberate keyboard nudge, large enough to be useful without jumping. */
 export const CHAT_COMPANION_KEYBOARD_STEP = 24;
 const CHAT_TRANSCRIPT_MIN_WIDTH = 480;
+const BROWSER_TRANSCRIPT_MIN_WIDTH = 360;
 
 /**
  * Below this the dock would leave the transcript unreadable, so a pane narrower
@@ -82,7 +113,9 @@ export type ChatCompanionAction =
   /** Hides the dock without discarding the strip, so reopening restores it. */
   | { type: "close-dock"; paneId?: string }
   | { type: "reopen-dock"; paneId?: string }
-  | { type: "resize-dock"; width: number }
+  | { type: "show-launcher"; paneId?: string }
+  | { type: "resize-panel"; width: number }
+  | { type: "resize-dock"; width: number; mode?: ChatCompanionWidthMode }
   | { type: "bind-side-chat"; sessionId: string; paneId?: string }
   /** Drops a pane's strip outright — used when its chat pane closes. */
   | { type: "forget-pane"; paneId: string };
@@ -91,28 +124,59 @@ export const emptyChatCompanionPane: ChatCompanionPaneState = { openTabs: [] };
 
 export function createInitialChatCompanionState(
   dockWidth = CHAT_COMPANION_DEFAULT_WIDTH,
+  browserDockWidth = BROWSER_COMPANION_DEFAULT_WIDTH,
+  panelWidth?: number,
 ): ChatCompanionState {
-  return { dockWidth: clampChatCompanionWidth(dockWidth), panes: {} };
+  return {
+    dockWidth: clampChatCompanionWidth(dockWidth),
+    browserDockWidth: clampBrowserCompanionWidth(browserDockWidth),
+    panelWidth:
+      panelWidth === undefined ? undefined : clampChatPanelWidth(panelWidth),
+    panes: {},
+  };
 }
 
 export function clampChatCompanionWidth(width: number, available?: number) {
-  // A tool must never squeeze an active conversation into a narrow vertical
-  // strip. The dock is secondary, so give the transcript a readable floor
-  // before applying the dock's own bounds.
+  return clampCompanionWidth(width, available, {
+    defaultWidth: CHAT_COMPANION_DEFAULT_WIDTH,
+    maximum: CHAT_COMPANION_MAX_WIDTH,
+    minimum: CHAT_COMPANION_MIN_WIDTH,
+    transcriptMinimum: CHAT_TRANSCRIPT_MIN_WIDTH,
+  });
+}
+
+export function clampBrowserCompanionWidth(width: number, available?: number) {
+  return clampCompanionWidth(width, available, {
+    defaultWidth: BROWSER_COMPANION_DEFAULT_WIDTH,
+    maximum: BROWSER_COMPANION_MAX_WIDTH,
+    minimum: BROWSER_COMPANION_MIN_WIDTH,
+    transcriptMinimum: BROWSER_TRANSCRIPT_MIN_WIDTH,
+  });
+}
+
+function clampCompanionWidth(
+  width: number,
+  available: number | undefined,
+  {
+    defaultWidth,
+    maximum,
+    minimum,
+    transcriptMinimum,
+  }: {
+    defaultWidth: number;
+    maximum: number;
+    minimum: number;
+    transcriptMinimum: number;
+  },
+) {
   const cap =
     available === undefined
-      ? CHAT_COMPANION_MAX_WIDTH
-      : Math.max(
-          CHAT_COMPANION_MIN_WIDTH,
-          Math.min(
-            CHAT_COMPANION_MAX_WIDTH,
-            available - CHAT_TRANSCRIPT_MIN_WIDTH,
-          ),
-        );
+      ? maximum
+      : Math.max(minimum, Math.min(maximum, available - transcriptMinimum));
   if (!Number.isFinite(width)) {
-    return Math.min(cap, CHAT_COMPANION_DEFAULT_WIDTH);
+    return Math.min(cap, Math.max(minimum, defaultWidth));
   }
-  return Math.min(cap, Math.max(CHAT_COMPANION_MIN_WIDTH, Math.round(width)));
+  return Math.min(cap, Math.max(minimum, Math.round(width)));
 }
 
 /**
@@ -123,20 +187,37 @@ export function keyboardChatCompanionWidth(
   width: number,
   key: string,
   available?: number,
+  mode: ChatCompanionWidthMode = "tool",
 ): number | undefined {
+  const minimum =
+    mode === "panel"
+      ? CHAT_PANEL_MIN_WIDTH
+      : mode === "browser"
+        ? BROWSER_COMPANION_MIN_WIDTH
+        : CHAT_COMPANION_MIN_WIDTH;
+  const maximum =
+    mode === "panel"
+      ? CHAT_PANEL_MAX_WIDTH
+      : mode === "browser"
+        ? BROWSER_COMPANION_MAX_WIDTH
+        : CHAT_COMPANION_MAX_WIDTH;
   let requested: number | undefined;
   if (key === "ArrowLeft") {
     requested = width + CHAT_COMPANION_KEYBOARD_STEP;
   } else if (key === "ArrowRight") {
     requested = width - CHAT_COMPANION_KEYBOARD_STEP;
   } else if (key === "Home") {
-    requested = CHAT_COMPANION_MIN_WIDTH;
+    requested = minimum;
   } else if (key === "End") {
-    requested = CHAT_COMPANION_MAX_WIDTH;
+    requested = maximum;
   }
   return requested === undefined
     ? undefined
-    : clampChatCompanionWidth(requested, available);
+    : mode === "panel"
+      ? clampChatPanelWidth(requested, available)
+      : mode === "browser"
+        ? clampBrowserCompanionWidth(requested, available)
+        : clampChatCompanionWidth(requested, available);
 }
 
 export function chatCompanionPane(
@@ -154,6 +235,14 @@ export function activeChatCompanionTab(
   paneId?: string,
 ): ChatCompanionTabId | undefined {
   return chatCompanionPane(state, paneId).activeTab;
+}
+
+export function activeChatCompanionPanel(
+  state: ChatCompanionState,
+  paneId?: string,
+): ChatSidePanelId | undefined {
+  const pane = chatCompanionPane(state, paneId);
+  return pane.activeTab ?? (pane.isOpen ? "tools" : undefined);
 }
 
 /**
@@ -179,7 +268,15 @@ export function chatCompanionReducer(
     if (state.focusedPaneId === action.paneId) return state;
     return { ...state, focusedPaneId: action.paneId };
   }
+  if (action.type === "resize-panel") {
+    return { ...state, panelWidth: clampChatPanelWidth(action.width) };
+  }
   if (action.type === "resize-dock") {
+    if (action.mode === "browser") {
+      const browserDockWidth = clampBrowserCompanionWidth(action.width);
+      if (browserDockWidth === state.browserDockWidth) return state;
+      return { ...state, browserDockWidth };
+    }
     const dockWidth = clampChatCompanionWidth(action.width);
     if (dockWidth === state.dockWidth) return state;
     return { ...state, dockWidth };
@@ -212,6 +309,7 @@ export function chatCompanionReducer(
       if (isOpen && pane.activeTab === action.tab) return state;
       return withPane({
         ...pane,
+        isOpen: true,
         openTabs: isOpen ? pane.openTabs : [...pane.openTabs, action.tab],
         activeTab: action.tab,
       });
@@ -236,15 +334,16 @@ export function chatCompanionReducer(
       });
     }
     case "close-dock": {
-      if (pane.activeTab === undefined) return state;
-      return withPane({ ...pane, activeTab: undefined });
+      if (!pane.isOpen && pane.activeTab === undefined) return state;
+      return withPane({ ...pane, isOpen: false, activeTab: undefined });
     }
     case "reopen-dock": {
-      if (pane.activeTab !== undefined) return state;
+      if (pane.isOpen || pane.activeTab !== undefined) return state;
       const activeTab = pane.openTabs.at(-1);
-      if (!activeTab) return state;
-      return withPane({ ...pane, activeTab });
+      return withPane({ ...pane, isOpen: true, activeTab });
     }
+    case "show-launcher":
+      return withPane({ ...pane, isOpen: true, activeTab: undefined });
     case "bind-side-chat":
       if (pane.sideChatSessionId === action.sessionId) return state;
       return withPane({ ...pane, sideChatSessionId: action.sessionId });

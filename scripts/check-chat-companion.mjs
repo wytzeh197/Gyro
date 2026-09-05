@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 
 import {
+  BROWSER_COMPANION_DEFAULT_WIDTH,
+  BROWSER_COMPANION_MAX_WIDTH,
+  BROWSER_COMPANION_MIN_WIDTH,
   CHAT_COMPANION_DEFAULT_WIDTH,
   CHAT_COMPANION_KEYBOARD_STEP,
   CHAT_COMPANION_MAX_WIDTH,
   CHAT_COMPANION_MIN_WIDTH,
   activeChatCompanionTab,
+  activeChatCompanionPanel,
+  clampChatPanelWidth,
   chatCompanionPane,
   chatCompanionReducer,
+  clampBrowserCompanionWidth,
   clampChatCompanionWidth,
   createInitialChatCompanionState,
   discardedSideChatSessionIds,
@@ -109,7 +115,7 @@ const focused = (paneId = PANE_A) =>
 }
 
 {
-  // The last close shuts the dock.
+  // Closing the last tab returns to the picker without collapsing the split.
   const state = reduce(
     focused(),
     { type: "open-tab", tab: "review" },
@@ -117,6 +123,7 @@ const focused = (paneId = PANE_A) =>
   );
   assert.deepEqual(chatCompanionPane(state).openTabs, []);
   assert.equal(activeChatCompanionTab(state), undefined);
+  assert.equal(activeChatCompanionPanel(state), "tools");
 }
 
 {
@@ -134,10 +141,35 @@ const focused = (paneId = PANE_A) =>
 }
 
 {
-  // Reopening an empty dock has nothing to show and must stay closed rather
-  // than render a tab strip with no tabs in it.
+  // The panel button works before a tool has ever been opened.
   const state = chatCompanionReducer(focused(), { type: "reopen-dock" });
   assert.equal(activeChatCompanionTab(state), undefined);
+  assert.equal(activeChatCompanionPanel(state), "tools");
+  assert.equal(
+    activeChatCompanionPanel(
+      chatCompanionReducer(state, { type: "close-dock" }),
+    ),
+    undefined,
+  );
+}
+
+{
+  const state = reduce(
+    focused(),
+    { type: "open-tab", tab: "browser" },
+    { type: "show-launcher" },
+  );
+  assert.equal(activeChatCompanionPanel(state), "tools");
+  assert.deepEqual(chatCompanionPane(state).openTabs, ["browser"]);
+  assert.equal(
+    activeChatCompanionPanel(
+      chatCompanionReducer(state, { type: "select-tab", tab: "browser" }),
+    ),
+    "browser",
+  );
+  assert.equal(clampChatPanelWidth(Number.NaN, 1304), 880);
+  assert.equal(clampChatPanelWidth(Number.NaN, 360), 360);
+  assert.equal(clampChatPanelWidth(1400, 1000), 680);
 }
 
 // --- Following the focused pane --------------------------------------------
@@ -220,6 +252,26 @@ const focused = (paneId = PANE_A) =>
   );
 }
 
+{
+  const initial = createInitialChatCompanionState();
+  const resized = chatCompanionReducer(initial, {
+    type: "resize-dock",
+    mode: "browser",
+    width: 920,
+  });
+  assert.equal(
+    initial.browserDockWidth,
+    BROWSER_COMPANION_DEFAULT_WIDTH,
+    "the Browser starts as a wide page canvas",
+  );
+  assert.equal(resized.browserDockWidth, 920);
+  assert.equal(
+    resized.dockWidth,
+    initial.dockWidth,
+    "resizing Browser must not change compact companion tools",
+  );
+}
+
 assert.equal(
   clampChatCompanionWidth(10),
   CHAT_COMPANION_MIN_WIDTH,
@@ -227,6 +279,17 @@ assert.equal(
 );
 assert.equal(clampChatCompanionWidth(10_000), CHAT_COMPANION_MAX_WIDTH);
 assert.equal(clampChatCompanionWidth(Number.NaN), CHAT_COMPANION_DEFAULT_WIDTH);
+assert.equal(
+  clampBrowserCompanionWidth(10),
+  BROWSER_COMPANION_MIN_WIDTH,
+  "the Browser still has a safe page-width floor",
+);
+assert.equal(clampBrowserCompanionWidth(10_000), BROWSER_COMPANION_MAX_WIDTH);
+assert.equal(
+  clampBrowserCompanionWidth(10_000, 900),
+  540,
+  "a wide Browser keeps 360px for the nearby conversation",
+);
 assert.equal(
   clampChatCompanionWidth(800, 900),
   420,

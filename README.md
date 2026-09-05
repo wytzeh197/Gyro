@@ -50,12 +50,11 @@ policy are what make it safe to trust one place with the work.
 ## Product Tour
 
 <p align="center">
-  <img src="docs/screenshots/chat-thread.png" alt="Gyro agent chat and run activity" width="49%">
-  <img src="docs/screenshots/ide.png" alt="Gyro Workspace" width="49%">
+  <img src="docs/screenshots/readme/chat-workflow.webp" alt="An active Gyro agent session showing the task, reviewed workspace actions, commands, edited files, and final result" width="100%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/cli-workbench.png" alt="Gyro CLI workbench" width="49%">
-  <img src="docs/screenshots/diff-review.png" alt="Gyro diff review" width="49%">
+  <img src="docs/screenshots/readme/workspace-review.webp" alt="Gyro Workspace with source control, staged and unstaged changes, and a full diff review" width="49%">
+  <img src="docs/screenshots/readme/cli-workbench.webp" alt="Gyro Workspace with the local CLI terminal, test output, approval state, and shared sessions" width="49%">
 </p>
 
 ## What Works Today

@@ -273,6 +273,9 @@ export {
 } from "./workbench-state";
 export {
   activeChatCompanionTab,
+  BROWSER_COMPANION_DEFAULT_WIDTH,
+  BROWSER_COMPANION_MAX_WIDTH,
+  BROWSER_COMPANION_MIN_WIDTH,
   CHAT_COMPANION_DEFAULT_WIDTH,
   CHAT_COMPANION_MAX_WIDTH,
   CHAT_COMPANION_MIN_WIDTH,
@@ -281,7 +284,10 @@ export {
   chatCompanionReducer,
   chatCompanionTabIds,
   chatCompanionTabLabels,
+  clampBrowserCompanionWidth,
   clampChatCompanionWidth,
+  clampChatPanelWidth,
+  activeChatCompanionPanel,
   createInitialChatCompanionState,
   discardedSideChatSessionIds,
   isChatCompanionTabId,
@@ -293,6 +299,7 @@ export type {
   ChatCompanionPaneState,
   ChatCompanionState,
   ChatCompanionTabId,
+  ChatCompanionWidthMode,
 } from "./chat-companion";
 export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
@@ -475,3 +482,11 @@ export type {
   SideChatMessage,
   SideChatState,
 } from "./surfaces";
+
+export { ScmReviewToolbar } from "./source-control-review";
+
+export { languages, getLanguage, resolveLanguage, searchLanguages, editorFilePolicy } from "./editor/languages/registry";
+export type { LanguageDefinition, LanguageInput, SyntaxSource } from "./editor/languages/types";
+export { createSyntaxTheme, tokenRoles, tokenRoleAliases, normalizeTokenRole } from "./editor/themes/syntax-theme";
+export { workspaceEditorColors } from "./editor/themes/workspace-colors";
+export type { TokenRole, GyroSyntaxTheme } from "./editor/themes/syntax-theme";

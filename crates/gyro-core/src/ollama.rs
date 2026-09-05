@@ -11,6 +11,9 @@ use url::{Host, Url};
 
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/api";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+// Loading a local model and generating a complete, non-streamed answer can
+// take considerably longer than a readiness probe, especially on CPU hosts.
+const CHAT_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_DISCOVERED_MODELS: usize = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -162,7 +165,7 @@ pub fn ollama_tool_chat(request: OllamaToolChatRequest<'_>) -> Result<OllamaChat
     }
     let endpoint = ollama_endpoint(request.base_url)?;
     let url = endpoint.join("chat")?;
-    let response = agent()
+    let response = chat_agent()
         .post(url.as_str())
         .send_json(ureq::json!({
             "model": model,
@@ -199,10 +202,19 @@ pub fn ollama_tool_chat(request: OllamaToolChatRequest<'_>) -> Result<OllamaChat
 }
 
 fn agent() -> ureq::Agent {
+    agent_with_read_timeout(REQUEST_TIMEOUT)
+}
+
+fn chat_agent() -> ureq::Agent {
+    agent_with_read_timeout(CHAT_TIMEOUT)
+}
+
+fn agent_with_read_timeout(read_timeout: Duration) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(REQUEST_TIMEOUT)
-        .timeout_read(REQUEST_TIMEOUT)
+        .timeout_read(read_timeout)
         .timeout_write(REQUEST_TIMEOUT)
+        .timeout(read_timeout)
         .redirects(0)
         .build()
 }
@@ -364,6 +376,47 @@ mod tests {
             model_context_window(&serde_json::json!({ "llama.context_length": 131072 })),
             Some(131072)
         );
+    }
+
+    #[test]
+    fn chat_allows_model_loading_longer_than_a_health_probe() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            assert!(request_line.starts_with("POST /api/chat "));
+            let mut content_length = 0;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" || header.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        content_length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0; content_length];
+            reader.read_exact(&mut body).unwrap();
+            drop(reader);
+            std::thread::sleep(REQUEST_TIMEOUT + Duration::from_millis(250));
+            let body = r#"{"message":{"content":"Local model ready"}}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let response = ollama_chat(OllamaChatRequest {
+            base_url: Some(&format!("http://{address}/api")),
+            model: "test-local-model",
+            system: "Be concise",
+            user: "Hello",
+        })
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(response.content, "Local model ready");
     }
 
     #[test]

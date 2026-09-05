@@ -1,3 +1,7 @@
+import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
+import { BranchNameDialog } from "./branch-name-dialog";
+import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
+import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -29,7 +33,7 @@ import {
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
-  activeChatCompanionTab,
+  activeChatCompanionPanel,
   chatProjectKey,
   chatCompanionPane,
   chatCompanionReducer,
@@ -217,6 +221,7 @@ import {
   type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
+import { useWorkspaceExplorerFiles } from "./workspace-explorer";
 import { useGyroUpdater } from "./update-controller";
 import {
   deriveLatestMenuBarOutcome,
@@ -224,6 +229,9 @@ import {
 } from "./menu-bar-state";
 
 const MonacoEditor = lazy(() => import("./monaco-editor"));
+const SourceControlDiffEditor = lazy(
+  () => import("./source-control-diff-editor"),
+);
 
 type AppNotification = {
   kind: "open-session" | "attach-session";
@@ -833,6 +841,12 @@ export function App() {
   const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const [languageOverrides, setLanguageOverrides] = useState<
+    Record<string, string>
+  >({});
+  const [detectedDiffLanguages, setDetectedDiffLanguages] = useState<
+    Record<string, string>
+  >({});
   const [selectedWorkspaceRoot, setSelectedWorkspaceRoot] = useState<string>();
   const [workspaceConfigurationFile, setWorkspaceConfigurationFile] =
     useState<string>();
@@ -919,6 +933,8 @@ export function App() {
   const terminalSourceControlRequestRef = useRef<Record<string, number>>({});
   const branchCatalogRequestRef = useRef(0);
   const ideSourceControlRequestRef = useRef(0);
+  const ideSourceControlInFlightRef = useRef(new Set<string>());
+  const ideSourceControlQueuedRef = useRef(new Set<string>());
   const ideServicesRequestRef = useRef(0);
   const workspaceSearchRequestRef = useRef(0);
   const workspaceTreeRequestRef = useRef(0);
@@ -963,9 +979,17 @@ export function App() {
   >({});
   const [companion, dispatchCompanion] = useReducer(
     chatCompanionReducer,
-    workbench.preferences.chatCompanionWidth,
-    (width) => ({
-      ...createInitialChatCompanionState(width),
+    {
+      browserWidth: workbench.preferences.browserCompanionWidth,
+      toolWidth: workbench.preferences.chatCompanionWidth,
+      panelWidth: workbench.preferences.chatPanelWidth,
+    },
+    (widths) => ({
+      ...createInitialChatCompanionState(
+        widths.toolWidth,
+        widths.browserWidth,
+        widths.panelWidth,
+      ),
       focusedPaneId: SOLO_CHAT_PANE_ID,
     }),
   );
@@ -1113,7 +1137,7 @@ export function App() {
         ? "environment"
         : undefined;
   const activeChatPanel: ChatSidePanelId | undefined =
-    legacyRailPanel ?? activeChatCompanionTab(companion, SOLO_CHAT_PANE_ID);
+    legacyRailPanel ?? activeChatCompanionPanel(companion, SOLO_CHAT_PANE_ID);
   const commandProfiles =
     config.commandProfiles.length > 0
       ? config.commandProfiles
@@ -1165,30 +1189,6 @@ export function App() {
       workbench.preferences.workspaceUserSettings,
     ],
   );
-  const visibleWorkspaceFiles = useMemo(
-    () =>
-      files.filter((file) => {
-        if (file.isWorkspaceRoot || !file.workspacePath) return true;
-        const settings = resolvedWorkspaceSettings(
-          workbench.preferences.workspaceUserSettings,
-          workbench.preferences.workspaceSettingsByWorkspace,
-          workbench.preferences.workspaceSettingsByFolder,
-          activeWorkspaceRoot,
-          file.workspacePath,
-        );
-        return !workspacePathExcluded(
-          file.relativePath ?? relativeFilePath(file.path, file.workspacePath),
-          settings.filesExclude,
-        );
-      }),
-    [
-      activeWorkspaceRoot,
-      files,
-      workbench.preferences.workspaceSettingsByFolder,
-      workbench.preferences.workspaceSettingsByWorkspace,
-      workbench.preferences.workspaceUserSettings,
-    ],
-  );
   const activeCapabilityPolicy =
     capabilityPoliciesByProject[
       normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
@@ -1222,8 +1222,8 @@ export function App() {
     dispatchWorkbench({ type: "set-chat-panel" });
   }, []);
   const setCompanionWidth = useCallback((width: number) => {
-    dispatchCompanion({ type: "resize-dock", width });
-    dispatchWorkbench({ type: "set-chat-companion-width", width });
+    dispatchCompanion({ type: "resize-panel", width });
+    dispatchWorkbench({ type: "set-chat-panel-width", width });
   }, []);
   // --- Transient side chats -------------------------------------------------
   // The Side chat tab runs against a session of its own so the model answers
@@ -1470,9 +1470,11 @@ export function App() {
     dispatchWorkbench({ type: "set-chat-panel", panel });
   }, []);
   const companionSurfaceProps = (paneId: string) => ({
+    showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
-    companionWidth: companion.dockWidth,
+    companionWidth: companion.panelWidth,
+    browserCompanionWidth: companion.browserDockWidth,
     onCompanionWidthChange: setCompanionWidth,
     onOpenCompanionTab: (tab: ChatCompanionTabId) => {
       closeLegacyRail();
@@ -1487,6 +1489,10 @@ export function App() {
     onReopenCompanionDock: () => {
       closeLegacyRail();
       dispatchCompanion({ type: "reopen-dock", paneId });
+    },
+    onShowCompanionLauncher: () => {
+      closeLegacyRail();
+      dispatchCompanion({ type: "show-launcher", paneId });
     },
   });
   const sidebarActiveSessionId =
@@ -1810,6 +1816,73 @@ export function App() {
       });
     },
     [],
+  );
+
+  const loadExplorerDirectory = useCallback(
+    async (path: string) => {
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return [];
+      const children = await invoke<WorkspaceFile[]>("list_workspace_tree", {
+        workspacePath: path,
+        depth: 1,
+      });
+      const relativeParent = path === root ? "" : relativeFilePath(path, root);
+      return workspaceFilesForRoot(
+        root,
+        children.map((file) => {
+          const relativePath = relativeParent
+            ? `${relativeParent}/${file.path}`
+            : file.path;
+          return {
+            ...file,
+            path: relativePath,
+            relativePath,
+            depth: relativePath.split("/").length,
+          };
+        }),
+      ).filter((file) => !file.isWorkspaceRoot);
+    },
+    [workspaceRoots],
+  );
+  const reportExplorerError = useCallback(
+    (path: string, error: unknown) => {
+      notify(
+        "command-failed",
+        `Could not read ${workspaceName(path)}`,
+        String(error),
+      );
+    },
+    [notify],
+  );
+  const { explorerFiles, onExpandedDirectoriesChange } =
+    useWorkspaceExplorerFiles(
+      files,
+      isTauriRuntime() ? loadExplorerDirectory : undefined,
+      reportExplorerError,
+    );
+  const visibleWorkspaceFiles = useMemo(
+    () =>
+      explorerFiles.filter((file) => {
+        if (file.isWorkspaceRoot || !file.workspacePath) return true;
+        const settings = resolvedWorkspaceSettings(
+          workbench.preferences.workspaceUserSettings,
+          workbench.preferences.workspaceSettingsByWorkspace,
+          workbench.preferences.workspaceSettingsByFolder,
+          activeWorkspaceRoot,
+          file.workspacePath,
+        );
+        return !workspacePathExcluded(
+          file.relativePath ?? relativeFilePath(file.path, file.workspacePath),
+          settings.filesExclude,
+        );
+      }),
+    [
+      activeWorkspaceRoot,
+      explorerFiles,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+    ],
   );
 
   const refreshProviderLedger = useCallback(async (providerId: ProviderId) => {
@@ -3296,28 +3369,30 @@ export function App() {
     }
     try {
       const nextConfig = await invoke<GyroConfig>("load_config");
-      let resolvedConfig = withCouncilConfig(nextConfig);
+      const resolvedConfig = withCouncilConfig(nextConfig);
+      setConfig(resolvedConfig);
+      setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
       const ollama = providersForConfig(resolvedConfig).find(
         (provider) => provider.id === "ollama",
       );
       if (ollama) {
-        const discovery = await invoke<OllamaDiscovery>(
-          "discover_ollama_models_command",
-          { baseUrl: ollama.baseUrl },
-        ).catch(() => undefined);
-        if (discovery) {
-          const models = discovery.models.map((model) => ({
-            id: model.id,
-            displayName: model.displayName,
-            description: model.description,
-            contextWindowTokens: model.contextWindowTokens,
-            supportsTools: model.supportsTools,
-          }));
-          resolvedConfig = {
-            ...resolvedConfig,
-            modelProviders: providersForConfig(resolvedConfig).map(
-              (provider) =>
-                provider.id === "ollama"
+        // Runtime discovery is optional startup work. A stopped or slow local
+        // service must not hold the whole workspace on its loading screen.
+        void invoke<OllamaDiscovery>("discover_ollama_models_command", {
+          baseUrl: ollama.baseUrl,
+        })
+          .then((discovery) => {
+            const models = discovery.models.map((model) => ({
+              id: model.id,
+              displayName: model.displayName,
+              description: model.description,
+              contextWindowTokens: model.contextWindowTokens,
+              supportsTools: model.supportsTools,
+            }));
+            setConfig((current) => ({
+              ...current,
+              modelProviders: providersForConfig(current).map((provider) =>
+                provider.id === "ollama" && provider.baseUrl === ollama.baseUrl
                   ? {
                       ...provider,
                       baseUrl: discovery.baseUrl,
@@ -3338,12 +3413,11 @@ export function App() {
                           : models[0]?.id,
                     }
                   : provider,
-            ),
-          };
-        }
+              ),
+            }));
+          })
+          .catch(() => undefined);
       }
-      setConfig(resolvedConfig);
-      setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
     } catch {
       setConfig(withCouncilConfig(EMPTY_CONFIG));
       setActiveProfileId("shell");
@@ -3419,7 +3493,11 @@ export function App() {
     [isShellOptimizing, notify],
   );
 
-  const refreshIdeSourceControl = useCallback((root?: string) => {
+  const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+    if (root && ideSourceControlInFlightRef.current.has(root)) {
+      ideSourceControlQueuedRef.current.add(root);
+      return;
+    }
     const requestId = ideSourceControlRequestRef.current + 1;
     ideSourceControlRequestRef.current = requestId;
     if (!root) {
@@ -3443,6 +3521,7 @@ export function App() {
       return;
     }
 
+    ideSourceControlInFlightRef.current.add(root);
     void invoke<SourceControlState>("git_status", { workspacePath: root })
       .then((sourceControl) => {
         if (ideSourceControlRequestRef.current !== requestId) {
@@ -3471,6 +3550,17 @@ export function App() {
             error: String(error),
           },
         });
+      })
+      .finally(() => {
+        ideSourceControlInFlightRef.current.delete(root);
+        // Collapse refresh bursts into one follow-up. Mutations during a read
+        // still get fresh status without spawning overlapping Git processes.
+        if (
+          ideSourceControlQueuedRef.current.delete(root) &&
+          ideSourceControlRequestRef.current === requestId
+        ) {
+          refresh(root);
+        }
       });
   }, []);
 
@@ -3588,6 +3678,23 @@ export function App() {
     ],
   );
 
+  const [branchNameRequest, setBranchNameRequest] = useState<{
+    startPoint?: string;
+    initialValue: string;
+    resolve: (name: string | undefined) => void;
+  }>();
+  const requestBranchName = useCallback(
+    (startPoint?: string, initialValue = "") =>
+      new Promise<string | undefined>((resolve) => {
+        setBranchNameRequest({ startPoint, initialValue, resolve });
+      }),
+    [],
+  );
+  const finishBranchNameRequest = (name?: string) => {
+    branchNameRequest?.resolve(name);
+    setBranchNameRequest(undefined);
+  };
+
   const createWorkspaceBranch = useCallback(
     async (startPoint?: string) => {
       const root = activeSession?.workspacePath ?? workspacePath;
@@ -3619,14 +3726,7 @@ export function App() {
         );
         return;
       }
-      const branch = window
-        .prompt(
-          startPoint
-            ? `New branch name (from ${startPoint})`
-            : "New branch name",
-          "",
-        )
-        ?.trim();
+      const branch = await requestBranchName(startPoint);
       if (!branch) {
         return;
       }
@@ -3663,6 +3763,7 @@ export function App() {
       activeSessionId,
       isStartingFirstTurn,
       notify,
+      requestBranchName,
       refreshIdeSourceControl,
       refreshSessions,
       refreshWorkspaceBranches,
@@ -5141,51 +5242,29 @@ export function App() {
 
   const openSourceControlDiffForRoot = useCallback(
     async (root: string, path: string, staged: boolean) => {
-      const channelId = `git-diff:${path}`;
+      const file = workbench.ide.sourceControl.files.find(
+        (file) => file.path === path && file.staged === staged,
+      );
+      const reviewPath = `gyro-diff:${encodeURIComponent(root)}:${staged ? "index" : "worktree"}:${encodeURIComponent(path)}`;
       dispatchWorkbench({
-        type: "ide-upsert-output-channel",
-        channel: {
-          id: channelId,
-          label: `Diff: ${workspaceName(path)}`,
-          kind: "system",
-          lines: ["Loading Git diff..."],
-          updatedAt: new Date().toISOString(),
+        type: "ide-open-tab",
+        tab: {
+          path: reviewPath,
+          title: `${workspaceName(path)} (${staged ? "Index" : "Working Tree"})`,
+          dirty: false,
+          preview: true,
+          sourceControlDiff: {
+            workspacePath: root,
+            path,
+            originalPath: file?.originalPath,
+            staged,
+          },
         },
       });
-      dispatchWorkbench({ type: "ide-select-output-channel", channelId });
-      dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
-      if (!isTauriRuntime()) {
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: channelId,
-            label: `Diff: ${workspaceName(path)}`,
-            kind: "system",
-            lines: [`Preview diff for ${path}`],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-        return;
-      }
-      try {
-        const output = await invoke<IdeCommandOutput>("git_diff", {
-          request: { workspacePath: root, path, staged },
-        });
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: channelId,
-            label: `Diff: ${workspaceName(path)}`,
-            kind: "system",
-            lines: [output.stdout || output.stderr || "No diff output."],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-      } catch (error) {
-        notify("command-failed", "Git diff failed", String(error));
-      }
+      setSelectedFile(reviewPath);
+      dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [notify],
+    [workbench.ide.sourceControl.files],
   );
 
   const openSourceControlDiff = useCallback(
@@ -5860,8 +5939,8 @@ export function App() {
       try {
         switch (actionId) {
           case "create-branch": {
-            const name = window.prompt(
-              "New branch name",
+            const name = await requestBranchName(
+              undefined,
               suggestedBranchName(workbench.diffReview.commitMessage),
             );
             if (!name?.trim()) {
@@ -5937,6 +6016,7 @@ export function App() {
       notify,
       refreshGithub,
       refreshIdeServices,
+      requestBranchName,
       workbench.diffReview.commitMessage,
       workbench.ide.sourceControl,
       workbench.preferences.workspaceTrust,
@@ -6072,7 +6152,7 @@ export function App() {
     } else {
       try {
         const rootFiles = await invoke<WorkspaceFile[]>("list_workspace_tree", {
-          depth: 5,
+          depth: 1,
           workspacePath: selected,
         });
         setFiles((current) =>
@@ -6353,7 +6433,7 @@ export function App() {
       });
 
       invoke<WorkspaceFile[]>("list_workspace_tree", {
-        depth: 5,
+        depth: 1,
         workspacePath: workspace,
       })
         .then((workspaceFiles) => {
@@ -8744,7 +8824,8 @@ export function App() {
       }
 
       if (action.startsWith("select-provider-model:")) {
-        const [, providerId, modelId] = action.split(":");
+        const [, providerId, ...modelParts] = action.split(":");
+        const modelId = modelParts.join(":");
         if (isProviderId(providerId) && modelId) {
           selectProviderModel(providerId, modelId);
         }
@@ -10985,6 +11066,15 @@ export function App() {
 
   const openEditorFile = useCallback(
     (path: string) => {
+      const reviewTab = workbench.ide.tabs.find(
+        (tab) => tab.path === path && tab.sourceControlDiff,
+      );
+      if (reviewTab) {
+        setSelectedFile(path);
+        dispatchWorkbench({ type: "ide-open-tab", tab: reviewTab });
+        dispatchWorkbench({ type: "close-tool-panel" });
+        return;
+      }
       const entry = files.find((file) => file.path === path);
       if (entry?.kind === "directory") {
         return;
@@ -11003,7 +11093,7 @@ export function App() {
         path,
       });
     },
-    [appendEditorEvent, files],
+    [appendEditorEvent, files, workbench.ide.tabs],
   );
 
   const openEditorLocation = useCallback(
@@ -11127,6 +11217,14 @@ export function App() {
       const root = workspaceRootForPath(workspaceRoots, path);
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
+        return;
+      }
+      if (buffer.truncated) {
+        notify(
+          "command-failed",
+          "Save blocked",
+          "This is a truncated preview. The complete file must be loaded before saving.",
+        );
         return;
       }
       if (!isTauriRuntime()) {
@@ -12162,7 +12260,9 @@ export function App() {
     activeSession?.workspacePath ?? activeWorkspaceRoot ?? workspacePath ?? "";
   const browserNativeHost = isTauriRuntime();
   const browserOverlayOccluded =
-    isCommandPaletteOpen || Boolean(modelStandardPrompt);
+    isCommandPaletteOpen ||
+    Boolean(modelStandardPrompt) ||
+    Boolean(branchNameRequest);
 
   const ensureSessionBrowser = useCallback(
     async (
@@ -12239,11 +12339,15 @@ export function App() {
 
   const handleBrowserNavigate = useCallback(
     (url: string) => {
-      const next = normalizedPreviewUrl(url);
-      dispatchWorkbench({ type: "browser-navigate", url: next });
-      void ensureSessionBrowser(next);
+      try {
+        const next = normalizedPreviewUrl(url);
+        dispatchWorkbench({ type: "browser-navigate", url: next });
+        void ensureSessionBrowser(next);
+      } catch (error) {
+        notify("command-failed", "Browser address is not valid", String(error));
+      }
     },
-    [ensureSessionBrowser],
+    [ensureSessionBrowser, notify],
   );
 
   const handleBrowserBack = useCallback(() => {
@@ -12313,6 +12417,38 @@ export function App() {
       void unlisten.then((dispose) => dispose?.());
     };
   }, [activeSessionId]);
+
+  // The native child webview reports its document title asynchronously. Keep
+  // that small piece of browser state in the React shell so its selected tab
+  // identifies the actual page, just like an in-app browser should.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: Promise<(() => void) | undefined> =
+      Promise.resolve(undefined);
+    try {
+      unlisten = listen<{
+        kind?: string;
+        sessionId: string;
+        title?: string;
+      }>("session-browser-event", (event) => {
+        if (
+          event.payload.sessionId !== sessionBrowserKey ||
+          event.payload.kind !== "title"
+        ) {
+          return;
+        }
+        dispatchWorkbench({
+          type: "browser-title",
+          title: event.payload.title,
+        });
+      });
+    } catch {
+      unlisten = Promise.resolve(undefined);
+    }
+    return () => {
+      void unlisten.then((dispose) => dispose?.());
+    };
+  }, [sessionBrowserKey]);
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
@@ -12910,6 +13046,12 @@ export function App() {
 
   const testProvider = useCallback(
     async (providerId: string) => {
+      if (providerId === "ollama") {
+        // The readiness probe alone does not update the model picker. Reuse
+        // connection discovery so newly pulled models are immediately usable.
+        await connectProvider("ollama");
+        return;
+      }
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
       );
@@ -12967,7 +13109,7 @@ export function App() {
         result.healthSummary ?? providerId,
       );
     },
-    [config, notify, recordProviderHealthOutput],
+    [config, connectProvider, notify, recordProviderHealthOutput],
   );
 
   const queueProviderHandoff = useCallback(
@@ -13395,7 +13537,10 @@ export function App() {
   const requestLanguageFeature = useCallback(
     async (path: string, method: string, params: Record<string, unknown>) => {
       const root = workspaceRootForPath(workspaceRoots, path);
-      const descriptor = languageServerDescriptorForPath(path);
+      const descriptor = languageServerDescriptorForPath(
+        path,
+        languageOverrides[path],
+      );
       if (!root || !descriptor || !isTauriRuntime()) {
         return undefined;
       }
@@ -13410,7 +13555,10 @@ export function App() {
           method,
           params: {
             ...params,
-            textDocument: { uri: workspaceFileUri(root, path) },
+            textDocument: {
+              ...(isRecord(params.textDocument) ? params.textDocument : {}),
+              uri: workspaceFileUri(root, path),
+            },
           },
         },
       });
@@ -13423,7 +13571,7 @@ export function App() {
       }
       return response.result;
     },
-    [workspaceRoots],
+    [workspaceRoots, languageOverrides],
   );
 
   useEffect(() => {
@@ -13630,7 +13778,7 @@ export function App() {
   }, [activeSession, prepareWorkspace, refreshIdeServices]);
 
   useEffect(() => {
-    if (!selectedFile) {
+    if (!selectedFile || selectedFile.startsWith("gyro-diff:")) {
       setSelectedFileContent(undefined);
       setSelectedFileError("");
       setSelectedFileLoadState("idle");
@@ -13739,6 +13887,7 @@ export function App() {
       .map((tab) => tab.path)
       .filter(
         (path) =>
+          !path.startsWith("gyro-diff:") &&
           !workspaceRootForPath(workspaceRoots, path) &&
           !/^(?:[a-z]:)?[/\\]/i.test(path),
       );
@@ -13894,8 +14043,21 @@ export function App() {
   useEffect(() => {
     const root = activeSession?.workspacePath ?? workspacePath;
     const descriptor = selectedFile
-      ? languageServerDescriptorForPath(selectedFile)
+      ? languageServerDescriptorForPath(
+          selectedFile,
+          languageOverrides[selectedFile],
+        )
       : undefined;
+    const fileBuffer = selectedFile
+      ? workbench.ide.buffers[selectedFile]
+      : undefined;
+    const filePolicy = editorFilePolicy(
+      selectedFile ?? "",
+      fileBuffer?.content ?? selectedFileContent?.content ?? "",
+      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
+      fileBuffer?.truncated ?? selectedFileContent?.truncated,
+    );
+    if (filePolicy.limited || filePolicy.binary) return;
     if (
       !root ||
       !selectedFile ||
@@ -14022,6 +14184,7 @@ export function App() {
       cancelled = true;
     };
   }, [
+    languageOverrides,
     selectedFile,
     selectedFileContent?.contentHash,
     workbench.preferences.workspaceTrust,
@@ -14031,11 +14194,24 @@ export function App() {
   useEffect(() => {
     const root = workspaceRootForPath(workspaceRoots, selectedFile);
     const descriptor = selectedFile
-      ? languageServerDescriptorForPath(selectedFile)
+      ? languageServerDescriptorForPath(
+          selectedFile,
+          languageOverrides[selectedFile],
+        )
       : undefined;
     const content = selectedFile
       ? workbench.ide.buffers[selectedFile]?.content
       : undefined;
+    const fileBuffer = selectedFile
+      ? workbench.ide.buffers[selectedFile]
+      : undefined;
+    const filePolicy = editorFilePolicy(
+      selectedFile ?? "",
+      fileBuffer?.content ?? selectedFileContent?.content ?? "",
+      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
+      fileBuffer?.truncated ?? selectedFileContent?.truncated,
+    );
+    if (filePolicy.limited || filePolicy.binary) return;
     if (
       !root ||
       !selectedFile ||
@@ -14091,6 +14267,7 @@ export function App() {
     }, 450);
     return () => window.clearTimeout(timer);
   }, [
+    languageOverrides,
     selectedFile,
     selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
     workspaceRoots,
@@ -14827,7 +15004,7 @@ export function App() {
       notify(
         "terminal",
         `Gyro ${result.nextVersion} is available`,
-        "Use the update control in the titlebar to download it",
+        "Use the update button at the bottom of the sidebar to download it",
       );
     } else if (result.status === "failed") {
       notify("command-failed", "Update check failed", result.error);
@@ -14877,12 +15054,11 @@ export function App() {
       pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
-    const paneCompanion = chatCompanionPane(companion, pane.paneId);
     // Plan and Environment still take the rail on their own; the dock's tab
     // shows through whenever neither is open.
     const paneLegacyPanel = paneLegacyPanelByPaneId[pane.paneId];
     const panePanel: ChatSidePanelId | undefined =
-      paneLegacyPanel ?? paneCompanion.activeTab;
+      paneLegacyPanel ?? activeChatCompanionPanel(companion, pane.paneId);
     const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
     const queue =
       pane.kind === "session" ? (chatMessageQueues[pane.sessionId] ?? []) : [];
@@ -14940,6 +15116,14 @@ export function App() {
           [pane.paneId]: undefined,
         }));
         dispatchCompanion({ type: "reopen-dock", paneId: pane.paneId });
+      },
+      onShowCompanionLauncher: () => {
+        focusChatPane(pane);
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({ type: "show-launcher", paneId: pane.paneId });
       },
     };
     return (
@@ -15230,8 +15414,10 @@ export function App() {
     chats: sessions
       .filter(
         (session) =>
-          chatProjectKey(session.workspacePath) === currentChatProjectKey,
+          chatProjectKey(session.workspacePath) ===
+          chatProjectKey(activeSession?.workspacePath ?? workspacePath),
       )
+      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
       .slice(0, 8)
       .map((session) => ({
         id: session.id,
@@ -15438,6 +15624,7 @@ export function App() {
         const root = activeSession?.workspacePath ?? workspacePath;
         if (root) void prepareWorkspace(root);
       }}
+      onExpandedWorkspaceDirectoriesChange={onExpandedDirectoriesChange}
       onOpenWorkspaceFile={openEditorLocation}
       onPinEditorTab={pinEditorTab}
       onRefreshWorkspace={refreshWorkspaceTree}
@@ -15921,27 +16108,134 @@ export function App() {
                 terminalOutput={terminalOutput}
                 terminalPanes={workbench.terminalPanes}
                 terminalTemplate={workbench.terminalTemplate}
-                renderEditor={(props) => (
-                  <MonacoEditorPane
-                    {...props}
-                    onLspRequest={requestLanguageFeature}
-                    theme={resolvedTheme}
-                  />
-                )}
+                renderEditor={(props) => {
+                  const review = workbench.ide.tabs.find(
+                    (tab) => tab.path === props.path,
+                  )?.sourceControlDiff;
+                  return review ? (
+                    <Suspense
+                      fallback={
+                        <div className="gyro-code-empty">
+                          Loading diff editor...
+                        </div>
+                      }
+                    >
+                      <SourceControlDiffEditor
+                        key={props.path}
+                        review={review}
+                        onDetectedLanguage={(id) => {
+                          const key = props.path;
+                          if (key)
+                            setDetectedDiffLanguages((previous) =>
+                              previous[key] === id
+                                ? previous
+                                : { ...previous, [key]: id },
+                            );
+                        }}
+                        refreshKey={workbench.ide.sourceControl.lastCheckedAt}
+                        languageOverride={
+                          languageOverrides[
+                            absoluteWorkspaceFilePath(
+                              review.workspacePath,
+                              review.path,
+                            )
+                          ]
+                        }
+                        theme={resolvedTheme}
+                        onOpenFile={() =>
+                          openEditorFile(
+                            absoluteWorkspaceFilePath(
+                              review.workspacePath,
+                              review.path,
+                            ),
+                          )
+                        }
+                      />
+                    </Suspense>
+                  ) : (
+                    <MonacoEditorPane
+                      {...props}
+                      languageOverride={
+                        props.path ? languageOverrides[props.path] : undefined
+                      }
+                      fileError={selectedFileError}
+                      semanticReady={
+                        workbench.ide.languageServers?.find(
+                          (server) =>
+                            server.activePath === props.path &&
+                            server.status === "ready",
+                        )?.serverId
+                      }
+                      onLspRequest={requestLanguageFeature}
+                      theme={resolvedTheme}
+                    />
+                  );
+                }}
               />
             </section>
           ) : null}
 
           {activeWorkspaceLayout !== "terminal-grid" &&
           (activeWorkspaceLayout !== "code" ||
-            Boolean(activeSession?.workspacePath ?? workspacePath))
-            ? workbench.isToolPanelOpen
-              ? renderWorkspaceToolPanel(false)
-              : null
-            : null}
+            Boolean(activeSession?.workspacePath ?? workspacePath)) ? (
+            workbench.isToolPanelOpen ? (
+              renderWorkspaceToolPanel(false)
+            ) : activeWorkspaceLayout === "code" ? (
+              <nav
+                className="gyro-workspace-tool-launcher"
+                aria-label="Workspace tools"
+              >
+                {(
+                  [
+                    ["diff", "Diff"],
+                    ["terminal", "Terminal"],
+                    ["browser", "Browser"],
+                    ["problems", "Problems"],
+                    ["test-results", "Test Results"],
+                    ["output", "Output"],
+                  ] as const
+                ).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => openToolPanel(tab)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            ) : null
+          ) : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             <IdeStatusBar
+              detectedLanguage={
+                selectedFile ? detectedDiffLanguages[selectedFile] : undefined
+              }
+              languageOverride={(() => {
+                const review = workbench.ide.tabs.find(
+                  (tab) => tab.path === selectedFile,
+                )?.sourceControlDiff;
+                const path = review
+                  ? absoluteWorkspaceFilePath(review.workspacePath, review.path)
+                  : selectedFile;
+                return path ? languageOverrides[path] : undefined;
+              })()}
+              onLanguageChange={(id) => {
+                const review = workbench.ide.tabs.find(
+                  (tab) => tab.path === selectedFile,
+                )?.sourceControlDiff;
+                const path = review
+                  ? absoluteWorkspaceFilePath(review.workspacePath, review.path)
+                  : selectedFile;
+                if (path)
+                  setLanguageOverrides((previous) => {
+                    const next = { ...previous };
+                    if (id) next[path] = id;
+                    else delete next[path];
+                    return next;
+                  });
+              }}
               activeBuffer={activeEditorBuffer}
               branchCatalog={branchCatalog}
               editorSelection={workbench.ide.selection}
@@ -15970,6 +16264,7 @@ export function App() {
           density={workbench.preferences.density}
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
+          showQuickActions={workbench.preferences.showQuickActions}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
@@ -15978,6 +16273,9 @@ export function App() {
           }
           onDensityChange={(density) =>
             dispatchWorkbench({ type: "set-density", density })
+          }
+          onQuickActionsVisibilityChange={(visible) =>
+            dispatchWorkbench({ type: "set-quick-actions-visible", visible })
           }
           onMenuBarVisibilityChange={(visible) =>
             dispatchWorkbench({ type: "set-menu-bar-visible", visible })
@@ -16281,6 +16579,13 @@ export function App() {
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
+        />
+      ) : null}
+      {branchNameRequest ? (
+        <BranchNameDialog
+          startPoint={branchNameRequest.startPoint}
+          initialValue={branchNameRequest.initialValue}
+          onFinish={finishBranchNameRequest}
         />
       ) : null}
       {modelStandardPrompt ? (
@@ -17426,9 +17731,17 @@ function chatMessagePreview(value: string) {
 
 function normalizedPreviewUrl(value: string) {
   const trimmed = value.trim();
-  const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed)
+  if (!trimmed) throw new Error("Enter a URL or search term");
+  const isHostWithPort = /^[^/\s:]+:\d+(?:[/?#]|$)/.test(trimmed);
+  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(trimmed) && !isHostWithPort;
+  const isAddress =
+    isHostWithPort ||
+    /^(?:localhost|\[[\da-f:]+\]|[^\s/]+\.[^\s/]+)(?:[/?#]|$)/i.test(trimmed);
+  const candidate = hasScheme
     ? trimmed
-    : `http://${trimmed}`;
+    : isAddress
+      ? `http://${trimmed}`
+      : `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
   const url = new URL(candidate);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Preview URLs must use http or https");
@@ -17464,52 +17777,15 @@ function browserUnreachableMessage(detail: string) {
   return `Unreachable · ${trimmed}`;
 }
 
-function languageServerDescriptorForPath(path: string) {
-  const extension = path.split(".").pop()?.toLowerCase();
-  switch (extension) {
-    case "ts":
-    case "tsx":
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs":
-      return {
-        languageId:
-          extension === "tsx"
-            ? "typescriptreact"
-            : extension === "jsx"
-              ? "javascriptreact"
-              : extension?.startsWith("j") ||
-                  extension === "mjs" ||
-                  extension === "cjs"
-                ? "javascript"
-                : "typescript",
-        command: "typescript-language-server --stdio",
-      };
-    case "rs":
-      return { languageId: "rust", command: "rust-analyzer" };
-    case "json":
-    case "jsonc":
-      return {
-        languageId: "json",
-        command: "vscode-json-language-server --stdio",
-      };
-    case "css":
-    case "scss":
-    case "less":
-      return {
-        languageId: extension,
-        command: "vscode-css-language-server --stdio",
-      };
-    case "html":
-    case "htm":
-      return {
-        languageId: "html",
-        command: "vscode-html-language-server --stdio",
-      };
-    default:
-      return undefined;
-  }
+function languageServerDescriptorForPath(path: string, override?: string) {
+  if (path.startsWith("gyro-diff:")) return undefined;
+  const language = resolveLanguage({ path, override });
+  return language.lsp
+    ? {
+        languageId: language.lsp.languageId ?? language.id,
+        command: language.lsp.command,
+      }
+    : undefined;
 }
 
 function workspaceFileUri(workspacePath: string, relativePath: string) {
@@ -18707,7 +18983,13 @@ function MonacoEditorPane({
   path,
   revealTarget,
   theme,
+  languageOverride,
+  semanticReady,
+  fileError,
 }: {
+  languageOverride?: string;
+  semanticReady?: string;
+  fileError?: string;
   buffer?: EditorBuffer;
   fileContent?: WorkspaceFileContent;
   loadState: "idle" | "loading" | "ready" | "error";
@@ -18723,9 +19005,17 @@ function MonacoEditorPane({
   revealTarget?: EditorRevealTarget;
   theme: ResolvedTheme;
 }) {
+  const syntax = useSyntax(
+    path ?? "",
+    buffer?.content ?? fileContent?.content ?? "",
+    languageOverride,
+    buffer?.sizeBytes ?? fileContent?.sizeBytes,
+    buffer?.truncated ?? fileContent?.truncated,
+  );
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
   const hasMountedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
   const revealEditorTarget = useCallback(
     (editor: Parameters<OnMount>[0]) => {
       if (!revealTarget || revealTarget.path !== path) {
@@ -18762,14 +19052,23 @@ function MonacoEditorPane({
   const editorOptions = useMemo(
     () => ({
       automaticLayout: true,
-      bracketPairColorization: { enabled: true },
+      bracketPairColorization: { enabled: !syntax.policy.limited },
+      readOnly: syntax.policy.readOnly,
+      "semanticHighlighting.enabled": !syntax.policy.limited,
+      maxTokenizationLineLength: 20000,
       fontFamily:
         "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
       fontLigatures: false,
       fontSize: 13.5,
-      guides: { bracketPairs: true, indentation: true },
+      guides: {
+        bracketPairs: !syntax.policy.limited,
+        indentation: !syntax.policy.limited,
+      },
       lineHeight: 21,
-      minimap: { enabled: minimapEnabled, scale: 0.75 },
+      minimap: {
+        enabled: minimapEnabled && !syntax.policy.limited,
+        scale: 0.75,
+      },
       overviewRulerBorder: false,
       padding: { top: 8, bottom: 12 },
       renderWhitespace: "selection" as const,
@@ -18779,205 +19078,297 @@ function MonacoEditorPane({
       },
       scrollBeyondLastLine: false,
       smoothScrolling: true,
-      stickyScroll: { enabled: true, maxLineCount: 3 },
+      stickyScroll: { enabled: !syntax.policy.limited, maxLineCount: 3 },
       tabSize: 2,
       wordWrap: "off" as const,
     }),
-    [minimapEnabled],
+    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly],
   );
+
+  useEffect(() => {
+    if (!mounted) return;
+    let disposed = false;
+    void import("monaco-editor").then((monaco) => {
+      if (disposed) return;
+      languageRegistrationsRef.current.forEach((registration) =>
+        registration.dispose(),
+      );
+      languageRegistrationsRef.current = [];
+      if (
+        path &&
+        onLspRequest &&
+        !syntax.policy.limited &&
+        syntax.language !== "plaintext"
+      ) {
+        const language = syntax.language;
+        const completionRegistration =
+          monaco.languages.registerCompletionItemProvider(language, {
+            triggerCharacters: [".", '"', "'", "/", "<", ":"],
+            provideCompletionItems: async (model, position, context) => {
+              if (model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return { suggestions: [] };
+              try {
+                const result = await onLspRequest(
+                  path,
+                  "textDocument/completion",
+                  {
+                    position: {
+                      line: position.lineNumber - 1,
+                      character: position.column - 1,
+                    },
+                    context: {
+                      triggerKind: context.triggerKind,
+                      triggerCharacter: context.triggerCharacter,
+                    },
+                  },
+                );
+                const resultRecord = isRecord(result) ? result : undefined;
+                const items = Array.isArray(result)
+                  ? result
+                  : Array.isArray(resultRecord?.items)
+                    ? resultRecord.items
+                    : [];
+                const word = model.getWordUntilPosition(position);
+                const fallbackRange = new monaco.Range(
+                  position.lineNumber,
+                  word.startColumn,
+                  position.lineNumber,
+                  word.endColumn,
+                );
+                return {
+                  suggestions: items.flatMap((value) => {
+                    if (!isRecord(value)) {
+                      return [];
+                    }
+                    const label = completionLabel(value.label);
+                    if (!label) {
+                      return [];
+                    }
+                    const textEdit = isRecord(value.textEdit)
+                      ? value.textEdit
+                      : undefined;
+                    const rangeValue = textEdit?.range ?? value.range;
+                    const range =
+                      monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
+                    const insertText =
+                      typeof textEdit?.newText === "string"
+                        ? textEdit.newText
+                        : typeof value.insertText === "string"
+                          ? value.insertText
+                          : label;
+                    return [
+                      {
+                        label,
+                        detail:
+                          typeof value.detail === "string"
+                            ? value.detail
+                            : undefined,
+                        documentation: completionDocumentation(
+                          value.documentation,
+                        ),
+                        insertText,
+                        kind: monacoCompletionKind(monaco, value.kind),
+                        range,
+                      },
+                    ];
+                  }),
+                };
+              } catch {
+                return { suggestions: [] };
+              }
+            },
+          });
+        const hoverRegistration = monaco.languages.registerHoverProvider(
+          language,
+          {
+            provideHover: async (_model, position) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(path, "textDocument/hover", {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                });
+                if (!isRecord(result)) {
+                  return null;
+                }
+                const markdown = lspMarkdown(result.contents);
+                if (!markdown) {
+                  return null;
+                }
+                return {
+                  contents: [{ value: markdown }],
+                  range: monacoRangeFromLsp(monaco, result.range),
+                };
+              } catch {
+                return null;
+              }
+            },
+          },
+        );
+        const definitionRegistration =
+          monaco.languages.registerDefinitionProvider(language, {
+            provideDefinition: async (_model, position) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(
+                  path,
+                  "textDocument/definition",
+                  {
+                    position: {
+                      line: position.lineNumber - 1,
+                      character: position.column - 1,
+                    },
+                  },
+                );
+                return monacoLocationsFromLsp(monaco, result);
+              } catch {
+                return [];
+              }
+            },
+          });
+        const referencesRegistration =
+          monaco.languages.registerReferenceProvider(language, {
+            provideReferences: async (_model, position) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(
+                  path,
+                  "textDocument/references",
+                  {
+                    position: {
+                      line: position.lineNumber - 1,
+                      character: position.column - 1,
+                    },
+                    context: { includeDeclaration: true },
+                  },
+                );
+                return monacoLocationsFromLsp(monaco, result);
+              } catch {
+                return [];
+              }
+            },
+          });
+        const renameRegistration = monaco.languages.registerRenameProvider(
+          language,
+          {
+            provideRenameEdits: async (_model, position, newName) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(path, "textDocument/rename", {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                  newName,
+                });
+                return monacoWorkspaceEditFromLsp(monaco, result);
+              } catch (error) {
+                return {
+                  edits: [],
+                  rejectReason: String(error),
+                };
+              }
+            },
+          },
+        );
+        const semanticRegistration =
+          monaco.languages.registerDocumentSemanticTokensProvider(language, {
+            getLegend: () => semanticLegend,
+            provideDocumentSemanticTokens: async (model, _previous, token) => {
+              if (
+                !semanticReady ||
+                model.uri.toString() !== monaco.Uri.parse(path).toString() ||
+                token.isCancellationRequested
+              )
+                return null;
+              const version = model.getVersionId();
+              try {
+                const legend = await onLspRequest(
+                  path,
+                  "$/gyro/semanticTokensLegend",
+                  {},
+                );
+                if (
+                  !legend ||
+                  token.isCancellationRequested ||
+                  model.isDisposed() ||
+                  model.getVersionId() !== version
+                )
+                  return null;
+                await onLspRequest(path, "textDocument/didChange", {
+                  textDocument: { version: Date.now() },
+                  contentChanges: [{ text: model.getValue() }],
+                });
+                if (
+                  token.isCancellationRequested ||
+                  model.isDisposed() ||
+                  model.getVersionId() !== version
+                )
+                  return null;
+                const response = await onLspRequest(
+                  path,
+                  "textDocument/semanticTokens/full",
+                  {},
+                );
+                if (
+                  token.isCancellationRequested ||
+                  model.isDisposed() ||
+                  model.getVersionId() !== version
+                )
+                  return null;
+                const data = decodeSemanticTokens(
+                  response,
+                  legend,
+                  model.getLinesContent().map((line) => line.length),
+                );
+                return data ? { data } : null;
+              } catch {
+                return null;
+              }
+            },
+            releaseDocumentSemanticTokens: () => {},
+          });
+        languageRegistrationsRef.current = [
+          semanticRegistration,
+          completionRegistration,
+          hoverRegistration,
+          definitionRegistration,
+          referencesRegistration,
+          renameRegistration,
+        ];
+      }
+    });
+    return () => {
+      disposed = true;
+      languageRegistrationsRef.current.forEach((item) => item.dispose());
+      languageRegistrationsRef.current = [];
+    };
+  }, [
+    mounted,
+    path,
+    syntax.language,
+    syntax.policy.limited,
+    onLspRequest,
+    semanticReady,
+  ]);
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     hasMountedRef.current = true;
+    setMounted(true);
     void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
       remeasureMonacoFonts(),
     );
     revealEditorTarget(editor);
-    languageRegistrationsRef.current.forEach((registration) =>
-      registration.dispose(),
-    );
-    languageRegistrationsRef.current = [];
-    if (path && onLspRequest) {
-      const language = languageForPath(path);
-      const completionRegistration =
-        monaco.languages.registerCompletionItemProvider(language, {
-          triggerCharacters: [".", '"', "'", "/", "<", ":"],
-          provideCompletionItems: async (model, position, context) => {
-            try {
-              const result = await onLspRequest(
-                path,
-                "textDocument/completion",
-                {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  context: {
-                    triggerKind: context.triggerKind,
-                    triggerCharacter: context.triggerCharacter,
-                  },
-                },
-              );
-              const resultRecord = isRecord(result) ? result : undefined;
-              const items = Array.isArray(result)
-                ? result
-                : Array.isArray(resultRecord?.items)
-                  ? resultRecord.items
-                  : [];
-              const word = model.getWordUntilPosition(position);
-              const fallbackRange = new monaco.Range(
-                position.lineNumber,
-                word.startColumn,
-                position.lineNumber,
-                word.endColumn,
-              );
-              return {
-                suggestions: items.flatMap((value) => {
-                  if (!isRecord(value)) {
-                    return [];
-                  }
-                  const label = completionLabel(value.label);
-                  if (!label) {
-                    return [];
-                  }
-                  const textEdit = isRecord(value.textEdit)
-                    ? value.textEdit
-                    : undefined;
-                  const rangeValue = textEdit?.range ?? value.range;
-                  const range =
-                    monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
-                  const insertText =
-                    typeof textEdit?.newText === "string"
-                      ? textEdit.newText
-                      : typeof value.insertText === "string"
-                        ? value.insertText
-                        : label;
-                  return [
-                    {
-                      label,
-                      detail:
-                        typeof value.detail === "string"
-                          ? value.detail
-                          : undefined,
-                      documentation: completionDocumentation(
-                        value.documentation,
-                      ),
-                      insertText,
-                      kind: monacoCompletionKind(monaco, value.kind),
-                      range,
-                    },
-                  ];
-                }),
-              };
-            } catch {
-              return { suggestions: [] };
-            }
-          },
-        });
-      const hoverRegistration = monaco.languages.registerHoverProvider(
-        language,
-        {
-          provideHover: async (_model, position) => {
-            try {
-              const result = await onLspRequest(path, "textDocument/hover", {
-                position: {
-                  line: position.lineNumber - 1,
-                  character: position.column - 1,
-                },
-              });
-              if (!isRecord(result)) {
-                return null;
-              }
-              const markdown = lspMarkdown(result.contents);
-              if (!markdown) {
-                return null;
-              }
-              return {
-                contents: [{ value: markdown }],
-                range: monacoRangeFromLsp(monaco, result.range),
-              };
-            } catch {
-              return null;
-            }
-          },
-        },
-      );
-      const definitionRegistration =
-        monaco.languages.registerDefinitionProvider(language, {
-          provideDefinition: async (_model, position) => {
-            try {
-              const result = await onLspRequest(
-                path,
-                "textDocument/definition",
-                {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                },
-              );
-              return monacoLocationsFromLsp(monaco, result);
-            } catch {
-              return [];
-            }
-          },
-        });
-      const referencesRegistration = monaco.languages.registerReferenceProvider(
-        language,
-        {
-          provideReferences: async (_model, position) => {
-            try {
-              const result = await onLspRequest(
-                path,
-                "textDocument/references",
-                {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  context: { includeDeclaration: true },
-                },
-              );
-              return monacoLocationsFromLsp(monaco, result);
-            } catch {
-              return [];
-            }
-          },
-        },
-      );
-      const renameRegistration = monaco.languages.registerRenameProvider(
-        language,
-        {
-          provideRenameEdits: async (_model, position, newName) => {
-            try {
-              const result = await onLspRequest(path, "textDocument/rename", {
-                position: {
-                  line: position.lineNumber - 1,
-                  character: position.column - 1,
-                },
-                newName,
-              });
-              return monacoWorkspaceEditFromLsp(monaco, result);
-            } catch (error) {
-              return {
-                edits: [],
-                rejectReason: String(error),
-              };
-            }
-          },
-        },
-      );
-      languageRegistrationsRef.current = [
-        completionRegistration,
-        hoverRegistration,
-        definitionRegistration,
-        referencesRegistration,
-        renameRegistration,
-      ];
-    }
     editor.onDidChangeCursorSelection((event) => {
       const model = editor.getModel();
-      if (!model || !path) {
+      if (!model) {
         onSelectionChange(undefined);
         return;
       }
@@ -18987,7 +19378,7 @@ function MonacoEditorPane({
         return;
       }
       onSelectionChange({
-        path,
+        path: model.uri.path,
         startLineNumber: event.selection.startLineNumber,
         startColumn: event.selection.startColumn,
         endLineNumber: event.selection.endLineNumber,
@@ -19007,90 +19398,36 @@ function MonacoEditorPane({
     return <div className="gyro-code-empty">Loading file preview...</div>;
   }
 
+  if (syntax.policy.binary || loadState === "error")
+    return (
+      <div className="gyro-code-empty" role="status">
+        {syntax.policy.reason ?? fileError ?? "This file cannot be displayed."}
+      </div>
+    );
   return (
-    <Suspense
-      fallback={<div className="gyro-code-empty">Loading editor...</div>}
-    >
-      <MonacoEditor
-        height="100%"
-        keepCurrentModel
-        language={languageForPath(path)}
-        onChange={(value) => onChange(value ?? "")}
-        onMount={handleMount}
-        options={editorOptions}
-        path={path}
-        theme={theme === "light" ? "gyro-light" : "gyro-dark"}
-        value={buffer?.content ?? fileContent?.content ?? ""}
-      />
-    </Suspense>
+    <div className="gyro-syntax-editor">
+      {syntax.notice && (
+        <div className="gyro-syntax-notice" role="status">
+          {syntax.notice}
+        </div>
+      )}
+      <Suspense
+        fallback={<div className="gyro-code-empty">Loading editor...</div>}
+      >
+        <MonacoEditor
+          height="100%"
+          keepCurrentModel
+          language={syntax.language}
+          onChange={(value) => onChange(value ?? "")}
+          onMount={handleMount}
+          options={editorOptions}
+          path={path}
+          theme={theme === "light" ? "gyro-light" : "gyro-dark"}
+          value={buffer?.content ?? fileContent?.content ?? ""}
+        />
+      </Suspense>
+    </div>
   );
-}
-
-function languageForPath(path: string) {
-  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
-  if (name === "dockerfile" || name.startsWith("dockerfile.")) {
-    return "dockerfile";
-  }
-  if (name === "makefile" || name === "cargo.lock") {
-    return "plaintext";
-  }
-  const extension = name.includes(".") ? name.split(".").at(-1) : undefined;
-  switch (extension) {
-    case "css":
-      return "css";
-    case "scss":
-      return "scss";
-    case "less":
-      return "less";
-    case "html":
-    case "htm":
-      return "html";
-    case "json":
-    case "jsonc":
-      return "json";
-    case "md":
-    case "mdx":
-      return "markdown";
-    case "rs":
-      return "gyro-rust";
-    case "ts":
-    case "tsx":
-    case "mts":
-    case "cts":
-      return "typescript";
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs":
-      return "javascript";
-    case "yml":
-    case "yaml":
-      return "yaml";
-    case "toml":
-      return "ini";
-    case "ini":
-    case "cfg":
-    case "conf":
-      return "ini";
-    case "sh":
-    case "bash":
-    case "zsh":
-      return "shell";
-    case "py":
-      return "python";
-    case "go":
-      return "go";
-    case "sql":
-      return "sql";
-    case "xml":
-    case "svg":
-      return "xml";
-    case "graphql":
-    case "gql":
-      return "graphql";
-    default:
-      return "plaintext";
-  }
 }
 
 function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {

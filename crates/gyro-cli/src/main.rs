@@ -15,24 +15,24 @@ use gyro_core::{
     doctor::run_doctor,
     ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
     keychain, ollama_chat, prepare_claude_provider_mutation_transaction,
-    prepare_provider_mutation_transaction, prepare_provider_text_replacement_transaction,
-    provider_descriptor, recover_provider_mutation_transactions, run_kimi_acp,
-    slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
-    CancellationToken, CreateSessionContext, CredentialPolicy, DoctorStatus, ExecutionRequest,
-    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
-    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpMode,
-    KimiAcpRequest, MutationDecision, MutationProposal, MutationProposalOperation,
-    MutationProposalStatus, OllamaChatRequest, PendingProviderMutationCommit, ProviderFileChange,
-    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
-    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode, TerminalRequestPayload,
+    prepare_provider_mutation_transaction, provider_descriptor,
+    recover_provider_mutation_transactions, run_kimi_acp, slugify_worktree_name, AppNotification,
+    AppNotificationKind, ApprovalRequestPayload, CancellationToken, CreateSessionContext,
+    CredentialPolicy, DoctorStatus, ExecutionRequest, ExecutionStream, ExecutionTermination,
+    GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind,
+    KimiAcpApprovalRequest, KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal,
+    MutationProposalOperation, MutationProposalStatus, OllamaChatRequest,
+    PendingProviderMutationCommit, ProviderFileChange, ProviderHealthRequest,
+    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload, ProviderTextChunk,
+    Session, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
+    TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::error::Error as StdError;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -1455,6 +1455,38 @@ fn select_execution_profile<'a>(
         ));
     }
     Ok(profile)
+}
+
+fn profile_setup_check(profile: &CommandProfile) -> SetupCheckOutput {
+    if profile_is_http_provider(profile) {
+        return SetupCheckOutput {
+            id: format!("profile:{}", profile.id),
+            label: format!("Local model profile: {}", profile.display_name),
+            status: CliStatus::Ready,
+            message: "Built-in local HTTP adapter; Ollama service and models are checked by provider health.".into(),
+            next: None,
+        };
+    }
+    let command_path = command_in_path(&profile.command);
+    SetupCheckOutput {
+        id: format!("profile:{}", profile.id),
+        label: format!("CLI profile: {}", profile.display_name),
+        status: if command_path.is_some() {
+            CliStatus::Ready
+        } else {
+            CliStatus::Blocked
+        },
+        message: command_path
+            .as_ref()
+            .map(|path| format!("{} found at {}", profile.command, path.display()))
+            .unwrap_or_else(|| format!("{} was not found on PATH", profile.command)),
+        next: command_path.is_none().then(|| {
+            format!(
+                "install `{}` or update the `{}` profile command",
+                profile.command, profile.id,
+            )
+        }),
+    }
 }
 
 fn profile_is_http_provider(profile: &CommandProfile) -> bool {
@@ -2921,6 +2953,16 @@ fn print_codex_approval_prompt(kind: CodexApprovalKind, details: &serde_json::Va
             for path in approval_file_paths(details).into_iter().take(6) {
                 eprintln!("  file:    {path}");
             }
+            if let Some(changes) = details
+                .pointer("/patch/changes")
+                .and_then(serde_json::Value::as_array)
+            {
+                for change in changes {
+                    if let Some(diff) = change.get("diff").and_then(serde_json::Value::as_str) {
+                        eprintln!("{diff}");
+                    }
+                }
+            }
         }
         CodexApprovalKind::Permissions => {}
     }
@@ -3114,9 +3156,6 @@ fn execute_kimi_acp_provider(
     })?;
     let provider_label = runtime.label;
     let plan_mode = mode == "plan";
-    let write_approvals = Arc::new(Mutex::new(Vec::<Uuid>::new()));
-    let approval_tokens = write_approvals.clone();
-    let write_tokens = write_approvals.clone();
     let mut program_args = profile
         .args
         .iter()
@@ -3182,7 +3221,7 @@ fn execute_kimi_acp_provider(
             );
         },
         |approval| {
-            let (decision, approval_id) = decide_kimi_provider_approval(
+            let (decision, _) = decide_kimi_provider_approval(
                 store,
                 session,
                 profile,
@@ -3194,12 +3233,6 @@ fn execute_kimi_acp_provider(
                 &cancellation,
                 approval,
             )?;
-            if let Some(approval_id) = approval_id {
-                approval_tokens
-                    .lock()
-                    .map_err(|_| anyhow!("{provider_label} approval state is unavailable"))?
-                    .push(approval_id);
-            }
             Ok(decision)
         },
         |target, content| {
@@ -3208,18 +3241,31 @@ fn execute_kimi_acp_provider(
                     "{provider_label} file writes are disabled in plan mode"
                 ));
             }
-            let approval_id = write_tokens
-                .lock()
-                .map_err(|_| anyhow!("{provider_label} approval state is unavailable"))?
-                .pop()
-                .ok_or_else(|| {
-                    anyhow!("{provider_label} requested an unapproved workspace write")
-                })?;
-            let transaction = prepare_provider_text_replacement_transaction(
-                &session.workspace_path,
-                target,
-                content,
+            let (transaction, details) =
+                gyro_core::mutations::prepare_provider_text_replacement_review(
+                    &session.workspace_path,
+                    target,
+                    content,
+                )?;
+            let (decision, approval_id) = decide_kimi_provider_approval(
+                store,
+                session,
+                profile,
+                turn_id,
+                config,
+                approved,
+                json,
+                plan_mode,
+                &cancellation,
+                &KimiAcpApprovalRequest {
+                    kind: KimiAcpApprovalKind::FileChange,
+                    tool_call: details,
+                },
             )?;
+            if decision != KimiAcpApprovalDecision::AllowOnce {
+                anyhow::bail!("{provider_label} workspace write was not approved");
+            }
+            let approval_id = approval_id.ok_or_else(|| anyhow!("missing write approval"))?;
             let pending = begin_provider_mutation_transaction_with_cancellation(
                 &transaction,
                 mutation_journal_dir,
@@ -4715,27 +4761,7 @@ fn setup_command(args: SetupArgs) -> Result<()> {
     });
 
     for profile in &config.command_profiles {
-        let command_path = command_in_path(&profile.command);
-        checks.push(SetupCheckOutput {
-            id: format!("profile:{}", profile.id),
-            label: format!("CLI profile: {}", profile.display_name),
-            status: if command_path.is_some() {
-                CliStatus::Ready
-            } else {
-                CliStatus::Blocked
-            },
-            message: command_path
-                .map(|path| format!("{} found at {}", profile.command, path.display()))
-                .unwrap_or_else(|| format!("{} was not found on PATH", profile.command)),
-            next: if command_in_path(&profile.command).is_some() {
-                None
-            } else {
-                Some(format!(
-                    "install `{}` or update the `{}` profile command",
-                    profile.command, profile.id
-                ))
-            },
-        });
+        checks.push(profile_setup_check(profile));
     }
 
     for agent in ["codex", "claude"] {
@@ -5480,6 +5506,94 @@ fn summarize_title(task: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_http_setup_does_not_require_a_fake_executable() {
+        let config = GyroConfig::default();
+        let profile = config
+            .command_profiles
+            .iter()
+            .find(|p| p.id == "ollama")
+            .unwrap();
+        let check = profile_setup_check(profile);
+        assert!(matches!(check.status, CliStatus::Ready));
+        assert!(check.message.contains("Built-in local HTTP"));
+        assert!(check.next.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acp_actual_write_records_a_separate_exact_approval() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("acp-fixture.sh");
+        std::fs::write(&script, r#"
+while IFS= read -r line; do
+ case "$line" in
+ *'"method":"initialize"'*) printf '%s\n' '{"id":1,"result":{}}';;
+ *'"method":"authenticate"'*) printf '%s\n' '{"id":2,"result":{}}';;
+ *'"method":"session/new"'*) printf '%s\n' '{"id":3,"result":{"sessionId":"fixture"}}';;
+ *'"method":"session/set_model"'*) printf '%s\n' '{"id":4,"result":{}}';;
+ *'"method":"session/set_config_option"'*) printf '%s\n' '{"id":5,"result":{}}';;
+ *'"method":"session/prompt"'*) printf '%s\n' '{"id":99,"method":"session/request_permission","params":{"toolCall":{"kind":"edit","path":"harmless.txt"},"options":[{"kind":"allow_once","optionId":"yes"},{"kind":"reject_once","optionId":"no"}]}}';;
+ *'"id":99'*) printf '%s\n' '{"id":100,"method":"fs/write_text_file","params":{"path":"actual.txt","content":"exact reviewed body"}}';;
+ *'"id":100'*) printf '%s\n' '{"id":6,"result":{"stopReason":"end_turn"}}';;
+ esac
+done
+"#).unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let journal = paths.mutation_journals_dir.clone();
+        let store = SessionStore::open(paths).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Cli, "ACP approval")
+            .unwrap();
+        let profile = CommandProfile {
+            id: "kimi-code".into(),
+            display_name: "Kimi".into(),
+            command: "/bin/sh".into(),
+            args: vec![script.to_string_lossy().into_owned()],
+            working_directory: None,
+            provider_id: Some("kimi".into()),
+            default_model: Some("k3".into()),
+            readiness: gyro_core::CommandProfileReadiness::Ready,
+        };
+        execute_kimi_acp_provider(
+            &store,
+            &journal,
+            &session,
+            &profile,
+            Some("k3".into()),
+            "write",
+            "act",
+            &GyroConfig::default(),
+            true,
+            true,
+            5,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            None,
+            CancellationToken::default(),
+        )
+        .unwrap();
+        let events = store.read_events(session.id).unwrap();
+        let reviews: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == SessionEventKind::ApprovalRequested)
+            .collect();
+        assert_eq!(reviews.len(), 2);
+        assert_eq!(
+            reviews[1].payload["details"]["patch"]["changes"][0]["path"],
+            "actual.txt"
+        );
+        assert_eq!(
+            reviews[1].payload["details"]["patch"]["changes"][0]["diff"],
+            "exact reviewed body"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("actual.txt")).unwrap(),
+            "exact reviewed body"
+        );
+        assert!(!temp.path().join("harmless.txt").exists());
+    }
 
     #[test]
     fn legacy_update_channel_command_accepts_only_stable() {
