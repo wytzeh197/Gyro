@@ -5,10 +5,12 @@ import "./branch-name-dialog.css";
 export function BranchNameDialog({
   startPoint,
   initialValue,
+  mode = "create",
   onFinish,
 }: {
   startPoint?: string;
   initialValue: string;
+  mode?: "create" | "rename";
   onFinish: (name?: string) => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -45,11 +47,15 @@ export function BranchNameDialog({
           if (name.trim()) onFinish(name.trim());
         }}
       >
-        <h2 id="gyro-branch-name-title">New branch</h2>
+        <h2 id="gyro-branch-name-title">
+          {mode === "rename" ? "Rename current branch" : "New branch"}
+        </h2>
         <p id="gyro-branch-name-description">
-          {startPoint
-            ? `Create and switch to a branch from ${startPoint}.`
-            : "Create and switch to a branch from the current commit."}
+          {mode === "rename"
+            ? "Rename the branch checked out in this workspace."
+            : startPoint
+              ? `Create and switch to a branch from ${startPoint}.`
+              : "Create and switch to a branch from the current commit."}
         </p>
         <label htmlFor="gyro-branch-name">Branch name</label>
         <input
@@ -67,7 +73,7 @@ export function BranchNameDialog({
             Cancel
           </button>
           <button type="submit" disabled={!name.trim()}>
-            Create branch
+            {mode === "rename" ? "Rename branch" : "Create branch"}
           </button>
         </footer>
       </form>
