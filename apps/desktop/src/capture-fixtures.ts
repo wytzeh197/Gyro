@@ -197,6 +197,60 @@ const chatEvents = [
   activity("file", "Edited src/queue/backoff.js", "src/queue/backoff.js", -12),
 ];
 
+// Development-only approval preview; no command is executed by these controls.
+if (parameters.get("edge") === "inline-approval") {
+  const fileChange = parameters.get("approval") === "file";
+  chatEvents.splice(
+    0,
+    chatEvents.length,
+    sessionEvent(
+      "user-message",
+      "Fix the spacing in the settings panel and run the checks.",
+      {},
+      -2,
+    ),
+    sessionEvent(
+      "assistant-message",
+      fileChange
+        ? "I’ve prepared the spacing changes for your review."
+        : "I’ve adjusted the spacing. I’d like to run the UI checks before wrapping up.",
+      {},
+      -1,
+    ),
+    sessionEvent(
+      "approval-requested",
+      "Approval required",
+      {
+        kind: "provider-tool-approval",
+        approvalId: "capture-inline-approval",
+        approvalType: fileChange ? "file-change" : "command",
+        providerLabel: "Claude Code",
+        status: "pending",
+        ...(fileChange
+          ? {
+              reason: "This updates the settings panel spacing.",
+              details: {
+                patch: {
+                  changes: [
+                    {
+                      path: "src/settings.css",
+                      diff: "-  gap: 8px;\n+  gap: 12px;",
+                    },
+                  ],
+                },
+              },
+            }
+          : {
+              command: "pnpm --filter @gyro-dev/ui test",
+              reason: "This runs the test script for the UI package.",
+            }),
+        cwd: WORKSPACE,
+      },
+      0,
+    ),
+  );
+}
+
 // The capture behaves like a small in-memory desktop store. A first message
 // causes the UI to refresh that session's transcript while the response is
 // arriving; returning an empty array there would erase the optimistic turn
@@ -810,6 +864,26 @@ const invoke: Invoke = (command, args) => {
   if (command === "check_cli_updates_command") {
     return { offers: [] };
   }
+  if (
+    command === "resolve_provider_approval" &&
+    parameters.get("edge") === "inline-approval"
+  ) {
+    const request = args?.request as { approvalId: string; decision: string };
+    const event = sessionEvent("system-event", "Approval resolved", {
+      kind: "provider-tool-approval",
+      approvalId: request.approvalId,
+      status: request.decision === "reject" ? "rejected" : "approved",
+    });
+    captureEventsBySessionId.set(SESSION_ID, [
+      ...(captureEventsBySessionId.get(SESSION_ID) ?? []),
+      event,
+    ]);
+    for (const [id, name] of captureListeners) {
+      if (name === "gyro://provider-capability-event")
+        callbacks.get(id)?.({ event: name, id, payload: event });
+    }
+    return event;
+  }
   if (command === "read_session_events") {
     const sessionId = String(args?.sessionId ?? SESSION_ID);
     return {
@@ -1215,6 +1289,34 @@ if (scene === "companion-layout") {
         : {}),
       lastSessionsLayout: "thread",
       isToolPanelOpen: false,
+    }),
+  );
+}
+
+// Start the approval preview on its seeded conversation instead of a saved draft.
+if (parameters.get("edge") === "inline-approval") {
+  const paneId = `session:${SESSION_ID}`;
+  localStorage.setItem(
+    "gyro.chat-grid-layouts-v1",
+    JSON.stringify({
+      activeProjectKey: WORKSPACE,
+      layouts: {
+        [WORKSPACE]: {
+          projectKey: WORKSPACE,
+          focusedPaneId: paneId,
+          slots: [
+            {
+              paneId,
+              kind: "session",
+              sessionId: SESSION_ID,
+              workspacePath: WORKSPACE,
+            },
+            null,
+            null,
+            null,
+          ],
+        },
+      },
     }),
   );
 }

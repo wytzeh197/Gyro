@@ -1,3 +1,6 @@
+import { SettingsHelp } from "./settings-help";
+import { InlineApprovalCard } from "./inline-approval-card";
+import { ComposerEffortSelector } from "./composer-effort-selector";
 import { resolveLanguage } from "./editor/languages/registry";
 import { LanguagePicker } from "./editor/languages/language-picker";
 import {
@@ -1059,7 +1062,9 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "about",
     label: "Help",
-    detail: "Version, license, release notes, and security resources",
+    detail: "Getting started, permissions, usage, troubleshooting, and support",
+    keywords:
+      "ask first allow in project full access approvals privacy commands setup diagnostics",
   },
   {
     section: "about",
@@ -19582,54 +19587,12 @@ export function SettingsSurface({
           <SettingsSection
             icon={HelpCircle}
             title="Help"
-            description="Version, license, release notes, and security policy."
+            description="Get started, understand permissions, and find answers when you need them."
           >
-            <div className="gyro-about-summary">
-              <div>
-                <strong>Gyro</strong>
-                <span>Open-source, local-first coding agent workspace.</span>
-              </div>
-              <code>
-                {updateState?.currentVersion ?? "Version unavailable"}
-              </code>
-            </div>
-            <SettingsGroup label="About">
-              <SettingsRow
-                label="Version and build"
-                value={updateState?.currentVersion ?? "Unknown"}
-                detail="Include this value when requesting support."
-              />
-              <SettingsRow
-                label="License"
-                value="Apache-2.0"
-                detail="Open-source licensing and governance live in the repository."
-              />
-            </SettingsGroup>
-            <SettingsGroup label="Resources">
-              <div className="gyro-resource-links">
-                <a
-                  href="https://github.com/wytzeh197/Gyro"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Repository <ArrowRight size={14} />
-                </a>
-                <a
-                  href="https://github.com/wytzeh197/Gyro/releases"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Release notes <ArrowRight size={14} />
-                </a>
-                <a
-                  href="https://github.com/wytzeh197/Gyro/blob/main/SECURITY.md"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Security policy <ArrowRight size={14} />
-                </a>
-              </div>
-            </SettingsGroup>
+            <SettingsHelp
+              version={updateState?.currentVersion}
+              onSectionChange={onSectionChange}
+            />
           </SettingsSection>
         ) : null}
       </section>
@@ -20394,7 +20357,8 @@ type ComposerPopoverItem = {
    * rather than doing anything, so they carry a destination instead of an
    * action string the composer would have to pretend to handle.
    */
-  menuPane?: "root" | "model" | "effort" | "provider";
+  menuPane?:
+    "root" | "model" | "effort" | "provider" | "provider-model" | "settings";
   sectionLabel?: string;
   providerId?: ProviderId;
   active?: boolean;
@@ -21186,8 +21150,9 @@ function providerApprovalCopy(
         title: providerTitle,
         gatedLabel: "Ask first",
         gatedDetail: "Claude asks before tools and edits",
-        autoLabel: "Allow in project",
-        autoDetail: "Claude can work without prompts inside its boundary",
+        autoLabel: "Auto Approve",
+        autoDetail:
+          "Runs commands and edits without asking. Separate Gyro tool permissions can still require approval.",
         directLabel: "Full access",
         directDetail: "Claude can use Git, network, and user tools directly",
         commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
@@ -21199,8 +21164,11 @@ function providerApprovalCopy(
         title: providerTitle,
         gatedLabel: "Ask first",
         gatedDetail: `${agentName} asks before commands and file edits`,
-        autoLabel: "Allow in project",
-        autoDetail: `${agentName} works without prompts inside its provider boundary`,
+        autoLabel: "Auto Approve",
+        autoDetail:
+          providerId === "openai"
+            ? "Runs commands and edits in the project without asking. Can still ask for network access, writes outside the project, or restricted tools."
+            : "Runs commands and edits without asking. Separate provider or Gyro tool permissions can still require approval.",
         directLabel: "Full access",
         directDetail: `${agentName} can use Git, network, and user tools directly`,
         commandValue: config.requireCommandApproval ? "Ask" : "Allow",
@@ -21342,29 +21310,11 @@ function Composer({
   const [modelPickerProviderId, setModelPickerProviderId] = useState<
     ProviderId | undefined
   >(undefined);
-  /**
-   * One chip now owns model and effort together, so the panel it opens is a
-   * small settings menu that drills down rather than a flat list: Model and
-   * Effort name their current value on the root, and each row swaps the panel
-   * for its own choices. Switching provider is the rarer move, so it folds
-   * away under Advanced instead of leading.
-   */
+  // Effort is the primary view; model lists and provider settings drill down.
   const [modelMenuPane, setModelMenuPane] = useState<
-    "root" | "model" | "effort" | "provider"
+    "root" | "model" | "effort" | "provider" | "provider-model" | "settings"
   >("root");
   const [isModelMenuAdvancedOpen, setIsModelMenuAdvancedOpen] = useState(false);
-  const [modelFlyoutVertical, setModelFlyoutVertical] = useState<"down" | "up">(
-    "down",
-  );
-  // Pixels to shift the whole picker left so models stay on-screen (right of
-  // providers) without clipping the viewport edge.
-  const [modelFlyoutShiftX, setModelFlyoutShiftX] = useState(0);
-  // Where the models open relative to the provider list. The Workspace AI
-  // sidebar is narrower than the two lists side by side, so the flyout flips
-  // to the left, and stacks above the list when neither side fits.
-  const [modelFlyoutSide, setModelFlyoutSide] = useState<
-    "right" | "left" | "stacked"
-  >("right");
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
@@ -21378,60 +21328,10 @@ function Composer({
     left: number;
   }>();
   const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const providerPickerRef = useRef<HTMLDivElement | null>(null);
-  // Sticky model-flyout hover: brief crossings of other rows must not yank the
-  // models panel closed before the pointer reaches it.
-  const modelPickerProviderIdRef = useRef<ProviderId | undefined>(undefined);
-  const modelFlyoutPreviewTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-  const clearModelFlyoutPreviewTimer = useCallback(() => {
-    if (modelFlyoutPreviewTimerRef.current != null) {
-      clearTimeout(modelFlyoutPreviewTimerRef.current);
-      modelFlyoutPreviewTimerRef.current = null;
-    }
-  }, []);
-  const setModelPickerProviderIdSticky = useCallback(
-    (providerId: ProviderId | undefined) => {
-      clearModelFlyoutPreviewTimer();
-      modelPickerProviderIdRef.current = providerId;
-      setModelPickerProviderId(providerId);
-    },
-    [clearModelFlyoutPreviewTimer],
-  );
-  const previewConnectedProviderModels = useCallback(
-    (providerId: ProviderId) => {
-      if (modelPickerProviderIdRef.current === providerId) {
-        clearModelFlyoutPreviewTimer();
-        return;
-      }
-      // First open is immediate; switches wait so a diagonal path to the
-      // models list is not hijacked by a 1ms graze of a neighbour row.
-      const delayMs = modelPickerProviderIdRef.current ? 160 : 0;
-      clearModelFlyoutPreviewTimer();
-      if (delayMs === 0) {
-        modelPickerProviderIdRef.current = providerId;
-        setModelPickerProviderId(providerId);
-        return;
-      }
-      modelFlyoutPreviewTimerRef.current = setTimeout(() => {
-        modelPickerProviderIdRef.current = providerId;
-        setModelPickerProviderId(providerId);
-        modelFlyoutPreviewTimerRef.current = null;
-      }, delayMs);
-    },
-    [clearModelFlyoutPreviewTimer],
-  );
-  useEffect(
-    () => () => {
-      clearModelFlyoutPreviewTimer();
-    },
-    [clearModelFlyoutPreviewTimer],
-  );
   const dismissActiveComposerPopover = useCallback(() => {
     setActivePopover(null);
-    setModelPickerProviderIdSticky(undefined);
-  }, [setModelPickerProviderIdSticky]);
+    setModelPickerProviderId(undefined);
+  }, [setModelPickerProviderId]);
   // Scoped to the open control (its trigger plus panel) rather than the whole
   // composer, so pressing the textarea or any other chip closes the dropdown.
   const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
@@ -21441,10 +21341,12 @@ function Composer({
     () => {
       if (activePopover !== "provider" || modelMenuPane === "root")
         return false;
-      setModelMenuPane("root");
+      setModelMenuPane(
+        modelMenuPane === "provider-model" ? "provider" : "root",
+      );
       requestAnimationFrame(() =>
         popoverScopeRef.current
-          ?.querySelector<HTMLElement>('[role="menuitem"]')
+          ?.querySelector<HTMLElement>('[role="menuitem"], input[type="range"]')
           ?.focus(),
       );
       return true;
@@ -21559,7 +21461,9 @@ function Composer({
   const approvalChipClassName =
     approvalMode === "direct"
       ? "gyro-composer-chip is-warning"
-      : "gyro-composer-chip";
+      : approvalMode === "auto"
+        ? "gyro-composer-chip is-auto-approve"
+        : "gyro-composer-chip";
   const isStopAction = Boolean(
     !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
   );
@@ -21712,9 +21616,7 @@ function Composer({
         label: reasoningEffortLabel(effort),
       }))
     : [];
-  // Models for the provider already in use. The provider list keeps its own
-  // hover flyout for cross-provider browsing; this is the one-click path to a
-  // sibling model of the model already selected.
+  // Direct access to models for the provider already in use.
   const currentModelItems: ComposerPopoverItem[] = displayProvider
     ? displayProvider.models.map((model) => ({
         action: `select-provider-model:${displayProvider.id}:${model.id}`,
@@ -22070,7 +21972,7 @@ function Composer({
     setActivePopover((current) => (current === popover ? null : popover));
   };
   const toggleProviderPopover = () => {
-    setModelPickerProviderIdSticky(undefined);
+    setModelPickerProviderId(undefined);
     setModelMenuPane("root");
     setIsModelMenuAdvancedOpen(false);
     togglePopover("provider");
@@ -22084,7 +21986,7 @@ function Composer({
     }
     if (item?.menuPane) {
       if (item.menuPane === "root") {
-        setModelPickerProviderIdSticky(undefined);
+        setModelPickerProviderId(undefined);
       }
       setModelMenuPane(item.menuPane);
       return;
@@ -22093,14 +21995,14 @@ function Composer({
   };
   const runPopoverAction = (action?: string, item?: ComposerPopoverItem) => {
     if (item?.providerId) {
-      // Clicks pin the flyout immediately (no hover grace). Only connected
-      // providers have a model list; Connect rows keep the menu open but do
-      // not clear an already-open neighbour flyout.
+      // Browse models in-place; commit the provider only with a model choice.
       const provider = providerConfigs.find(
         (entry) => entry.id === item.providerId,
       );
       if (provider?.authStatus === "connected") {
-        setModelPickerProviderIdSticky(item.providerId);
+        setModelPickerProviderId(item.providerId);
+        setModelMenuPane("provider-model");
+        return;
       }
       setActivePopover("provider");
       if (action) {
@@ -22110,7 +22012,7 @@ function Composer({
     }
 
     setActivePopover(null);
-    setModelPickerProviderIdSticky(undefined);
+    setModelPickerProviderId(undefined);
     if (action) {
       onComposerAction?.(action);
     }
@@ -22146,7 +22048,7 @@ function Composer({
     }
     setIsSlashHelpOpen(false);
     if (command.popover) {
-      setModelPickerProviderIdSticky(undefined);
+      setModelPickerProviderId(undefined);
       setActivePopover(command.popover);
       composerTextareaRef.current?.focus();
       return;
@@ -22163,12 +22065,9 @@ function Composer({
     "aria-haspopup": "menu" as const,
   });
   const preferredProviderPlacement =
-    popoverPlacement ?? (isHero ? "down" : "up");
-  // The hero composer sits mid-canvas, so its menu opens downward — but on a
-  // short window, or once Advanced unfolds another row, that runs the panel off
-  // the bottom edge. Measure the panel that is actually up and put it on the
-  // side that has the room, falling back to the preferred side when neither
-  // does. Docked composers keep opening upward for the same reason.
+    popoverPlacement ?? (hasEffortChoice ? "up" : isHero ? "down" : "up");
+  // Prefer the space above the effort chip. Measure the current panel so
+  // taller model lists can flip to the side with room in a short window.
   const [providerPopoverPlacement, setProviderPopoverPlacement] = useState<
     "up" | "down"
   >(preferredProviderPlacement);
@@ -22186,9 +22085,22 @@ function Composer({
     }
     const anchor = scope.getBoundingClientRect();
     const bounds = clippingBounds(panel);
-    const height = panel.offsetHeight;
     const gap = 6;
     const edgePad = 12;
+    panel.style.maxHeight = "";
+    // Keep the model list anchored to the same bottom edge as the slider.
+    // Long lists scroll into the available space instead of jumping below it.
+    const roomAbove = anchor.top - bounds.top - gap - edgePad;
+    if (
+      modelMenuPane === "model" &&
+      preferredProviderPlacement === "up" &&
+      roomAbove >= 96
+    ) {
+      panel.style.maxHeight = `${roomAbove}px`;
+      setProviderPopoverPlacement("up");
+      return;
+    }
+    const height = panel.offsetHeight;
     const fitsBelow = anchor.bottom + gap + height <= bounds.bottom - edgePad;
     const fitsAbove = anchor.top - gap - height >= bounds.top + edgePad;
     setProviderPopoverPlacement(
@@ -22207,74 +22119,6 @@ function Composer({
     preferredProviderPlacement,
     popoverScopeRef,
   ]);
-
-  // Models open to the right of the provider list. If that would clip, nudge
-  // the whole picker left just enough to fit, and flip the flyout to the left
-  // of the list when even that is not enough. Flip up only when the panel
-  // would run off the bottom.
-  useEffect(() => {
-    if (!modelPickerProvider || !providerPickerRef.current) {
-      setModelFlyoutVertical("down");
-      setModelFlyoutShiftX(0);
-      setModelFlyoutSide("right");
-      return;
-    }
-    const picker = providerPickerRef.current;
-    const control =
-      picker.offsetParent instanceof HTMLElement
-        ? picker.offsetParent
-        : picker.parentElement;
-    const flyout = picker.querySelector<HTMLElement>(
-      ".gyro-provider-model-flyout",
-    );
-    const modelFlyoutWidth =
-      flyout?.offsetWidth ?? Math.min(176, window.innerWidth * 0.42);
-    const modelFlyoutHeight = flyout?.scrollHeight ?? 420;
-    const edgePad = 8;
-    const gap = 2;
-    // The composer is not always the window's full width. In the Workspace AI
-    // sidebar it sits inside a panel that clips its overflow, so the viewport
-    // is the wrong bound — measuring against it let the flyout render past the
-    // sidebar and get cut in half by the editor next to it.
-    const bounds = clippingBounds(picker);
-    let side: "right" | "left" | "stacked" = "right";
-
-    if (control) {
-      // data-align="end" with right:0 pins the picker to the control's right.
-      // Measure from that natural position so shift is stable across renders.
-      const controlRect = control.getBoundingClientRect();
-      const unshiftedRight = controlRect.right;
-      const unshiftedFlyoutRight = unshiftedRight + gap + modelFlyoutWidth;
-      const overflowRight = unshiftedFlyoutRight - (bounds.right - edgePad);
-      const unshiftedLeft = unshiftedRight - picker.offsetWidth;
-      const maxShift = Math.max(0, unshiftedLeft - (bounds.left + edgePad));
-      const shift =
-        overflowRight > 0 ? Math.min(Math.ceil(overflowRight), maxShift) : 0;
-      setModelFlyoutShiftX(shift);
-      // Shifting only helps while the picker still has room to travel. Once it
-      // is against the left edge and models would still overhang, open them on
-      // the other side of the list instead of letting them clip.
-      const fitsRight = overflowRight - shift <= 0;
-      const fitsLeft =
-        unshiftedLeft - shift - gap - modelFlyoutWidth >= bounds.left + edgePad;
-      // The Workspace AI sidebar is narrower than list plus flyout together,
-      // so neither side can hold them. Stack the models over the list there
-      // rather than docking a panel that has nowhere to go.
-      side = fitsRight ? "right" : fitsLeft ? "left" : "stacked";
-      setModelFlyoutSide(side);
-    }
-
-    const rect = picker.getBoundingClientRect();
-    // Docked beside the list the flyout shares its top edge, so it runs out of
-    // room below that. Stacked it starts past the list instead, and only the
-    // room left over decides which way it goes.
-    const flyoutTop = side === "stacked" ? rect.bottom + gap : rect.top;
-    const fitsBelow = flyoutTop + modelFlyoutHeight <= bounds.bottom - 16;
-    const fitsAbove =
-      (side === "stacked" ? rect.top - gap : rect.bottom) - modelFlyoutHeight >=
-      bounds.top + 16;
-    setModelFlyoutVertical(!fitsBelow && fitsAbove ? "up" : "down");
-  }, [modelPickerProvider]);
 
   useEffect(() => {
     setActiveSlashCommandIndex(0);
@@ -22912,6 +22756,9 @@ function Composer({
             onClick={toggleProviderPopover}
             type="button"
             {...menuProps("provider")}
+            aria-haspopup={
+              hasEffortChoice && modelMenuPane === "root" ? "dialog" : "menu"
+            }
           >
             {displayProvider ? (
               <ProviderLogo providerId={displayProvider.id} />
@@ -22927,64 +22774,52 @@ function Composer({
             <ChevronDown size={13} />
           </button>
           {activePopover === "provider" && modelMenuPane === "provider" ? (
-            <div
-              className={[
-                "gyro-provider-picker",
-                modelPickerProvider ? "has-flyout" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              data-align="end"
-              data-flyout-side={modelFlyoutSide}
-              data-flyout-vertical={modelFlyoutVertical}
-              data-placement={providerPopoverPlacement}
+            <ComposerPopover
+              align="end"
+              className="gyro-model-menu gyro-provider-picker-menu"
               id={`${popoverBaseId}-provider`}
-              onPointerEnter={clearModelFlyoutPreviewTimer}
-              ref={providerPickerRef}
-              style={
-                modelFlyoutShiftX > 0 ? { right: modelFlyoutShiftX } : undefined
+              items={[modelMenuBackItem("Provider"), ...providerItems]}
+              onAction={runModelMenuAction}
+              placement={providerPopoverPlacement}
+            />
+          ) : activePopover === "provider" &&
+            modelMenuPane === "root" &&
+            hasEffortChoice ? (
+            <ComposerEffortSelector
+              key={`${effectiveProviderId}:${effectiveModelId}`}
+              id={`${popoverBaseId}-provider`}
+              modelLabel={modelChipLabel}
+              labels={effortItems.map((item) => item.label)}
+              selectedIndex={Math.max(
+                0,
+                effortItems.findIndex((item) => item.active),
+              )}
+              defaultIndex={Math.max(
+                0,
+                (effortSourceModel?.supportedReasoningEfforts ?? []).indexOf(
+                  effortSourceModel?.defaultReasoningEffort ?? "medium",
+                ),
+              )}
+              placement={providerPopoverPlacement}
+              onSelect={(index) => {
+                const action = effortItems[index]?.action;
+                if (action) onComposerAction?.(action);
+              }}
+              onModels={() =>
+                setModelMenuPane(
+                  currentModelItems.length ? "model" : "provider",
+                )
               }
-            >
-              <ComposerPopover
-                className="gyro-provider-picker-menu"
-                id={`${popoverBaseId}-provider-menu`}
-                items={[modelMenuBackItem("Provider"), ...providerItems]}
-                onAction={runModelMenuAction}
-                onItemPreview={(item) => {
-                  // Disconnected rows still carry providerId (brand logos) but
-                  // must not collapse the models panel while the pointer
-                  // crosses them on the way to a model.
-                  if (!item.providerId || item.disabled) {
-                    return;
-                  }
-                  const provider = providerConfigs.find(
-                    (entry) => entry.id === item.providerId,
-                  );
-                  if (provider?.authStatus === "connected") {
-                    previewConnectedProviderModels(item.providerId);
-                  }
-                }}
-                placement={providerPopoverPlacement}
-              />
-              {modelPickerProvider ? (
-                <ComposerPopover
-                  className="gyro-provider-model-flyout"
-                  id={`${popoverBaseId}-provider-models`}
-                  items={providerModelItems}
-                  onAction={runPopoverAction}
-                  onItemPreview={() => {
-                    // Pointer is over models — cancel any pending provider switch.
-                    clearModelFlyoutPreviewTimer();
-                  }}
-                  placement={providerPopoverPlacement}
-                />
-              ) : null}
-            </div>
+              onSettings={() => {
+                setIsModelMenuAdvancedOpen(true);
+                setModelMenuPane("settings");
+              }}
+            />
           ) : activePopover === "provider" ? (
             <ComposerPopover
               align="end"
               className={
-                modelMenuPane === "model"
+                modelMenuPane === "model" || modelMenuPane === "provider-model"
                   ? "gyro-model-menu gyro-model-list"
                   : modelMenuPane === "effort"
                     ? "gyro-model-menu gyro-effort-picker"
@@ -22993,10 +22828,36 @@ function Composer({
               id={`${popoverBaseId}-provider`}
               items={
                 modelMenuPane === "model"
-                  ? [modelMenuBackItem("Model"), ...currentModelItems]
-                  : modelMenuPane === "effort"
-                    ? [modelMenuBackItem("Effort"), ...effortItems]
-                    : modelMenuItems
+                  ? [
+                      modelMenuBackItem("Select model"),
+                      {
+                        hideIcon: true,
+                        icon: Sparkles,
+                        kind: "setting" as const,
+                        label: "Change provider",
+                        menuPane: "provider" as const,
+                        trailingLabel: displayProvider?.displayName ?? "Choose",
+                      },
+                      ...currentModelItems,
+                    ]
+                  : modelMenuPane === "provider-model"
+                    ? [
+                        {
+                          ...modelMenuBackItem(
+                            modelPickerProvider?.displayName ?? "Models",
+                          ),
+                          menuPane: "provider" as const,
+                        },
+                        ...providerModelItems,
+                      ]
+                    : modelMenuPane === "effort"
+                      ? [modelMenuBackItem("Effort"), ...effortItems]
+                      : modelMenuPane === "settings"
+                        ? [
+                            modelMenuBackItem("Model settings"),
+                            ...modelMenuItems,
+                          ]
+                        : modelMenuItems
               }
               onAction={runModelMenuAction}
               placement={providerPopoverPlacement}
@@ -23438,55 +23299,29 @@ function MutationApprovalCard({
   approval: MutationApproval;
   onAction?: (proposalId: string, decision: "approve" | "reject") => void;
 }) {
-  const isPending = approval.status === "pending";
-  const statusLabel =
-    approval.status === "applied"
-      ? "Applied"
-      : approval.status === "rejected"
-        ? "Rejected"
-        : approval.status === "failed"
-          ? approval.error?.includes("expired")
-            ? "Expired"
-            : "Needs review"
-          : "Approval required";
   return (
-    <article
-      aria-label={`File ${approval.operation} approval for ${approval.path}`}
-      className={`gyro-mutation-approval is-${approval.status}`}
-    >
-      <div className="gyro-mutation-approval-heading">
-        <span>
-          <ShieldCheck size={15} />
-        </span>
-        <div>
-          <strong>
-            {approval.operation === "create" ? "Create file" : "Update file"}
-          </strong>
-          <code>{approval.path}</code>
-        </div>
-        <small>{statusLabel}</small>
-      </div>
-      <div className="gyro-mutation-approval-facts">
-        <span>
-          <small>Effect</small>
-          {approval.effect}
-        </span>
-        <span>
-          <small>Scope</small>
-          {approval.scope === "workspace-file"
-            ? "Selected project only"
-            : approval.scope}
-        </span>
-      </div>
-      {approval.error ? (
-        <p className="gyro-mutation-approval-error">{approval.error}</p>
-      ) : (
-        <p className="gyro-mutation-approval-risk">{approval.risk}</p>
-      )}
-      {isPending ? (
-        <div className="gyro-mutation-approval-actions">
+    <InlineApprovalCard
+      title={
+        approval.operation === "create"
+          ? "Create this file?"
+          : "Update this file?"
+      }
+      icon={<FileCode2 size={18} />}
+      description={[approval.effect, approval.risk]
+        .filter((value, index, all) => value && all.indexOf(value) === index)
+        .join(" ")}
+      files={[{ path: approval.path }]}
+      scope={
+        approval.scope === "workspace-file"
+          ? "Selected project only"
+          : approval.scope
+      }
+      error={approval.error}
+      status={approval.status}
+      actions={
+        <>
           <button
-            className="is-secondary"
+            disabled={!onAction}
             onClick={() => onAction?.(approval.proposalId, "reject")}
             type="button"
           >
@@ -23494,14 +23329,15 @@ function MutationApprovalCard({
           </button>
           <button
             className="is-primary"
+            disabled={!onAction}
             onClick={() => onAction?.(approval.proposalId, "approve")}
             type="button"
           >
             Approve change
           </button>
-        </div>
-      ) : null}
-    </article>
+        </>
+      }
+    />
   );
 }
 
@@ -23515,105 +23351,66 @@ function ProviderToolApprovalCard({
     decision: "approve" | "reject" | "allow-project",
   ) => void;
 }) {
-  const isPending = approval.status === "pending";
   const title =
     approval.approvalType === "command"
-      ? "Run command"
+      ? "Run this command?"
       : approval.approvalType === "file-change"
-        ? "Apply file changes"
+        ? "Apply these file changes?"
         : approval.approvalType === "capability"
-          ? `Allow ${approval.capabilityId?.replaceAll("-", " ") ?? "model capability"}`
-          : "Expand permissions";
-  const statusLabel =
-    approval.status === "applied"
-      ? "Applied"
-      : approval.status === "approved"
-        ? "Approved"
-        : approval.status === "rejected"
-          ? "Rejected"
-          : approval.status === "cancelled"
-            ? "Cancelled"
-            : approval.status === "failed"
-              ? "Unavailable"
-              : "Approval required";
+          ? `Allow ${approval.capabilityId?.replaceAll("-", " ") ?? "this capability"}?`
+          : "Allow expanded permissions?";
+  const icon =
+    approval.approvalType === "command" ? (
+      <Terminal size={18} />
+    ) : approval.approvalType === "file-change" ? (
+      <FileCode2 size={18} />
+    ) : (
+      <ShieldCheck size={18} />
+    );
   return (
-    <article
-      aria-label={`${title} approval`}
-      className={`gyro-provider-tool-approval is-${approval.status}`}
-    >
-      <div className="gyro-provider-tool-approval-heading">
-        <span>
-          {approval.approvalType === "command" ? (
-            <Terminal size={15} />
-          ) : approval.approvalType === "file-change" ? (
-            <FileCode2 size={15} />
-          ) : approval.approvalType === "capability" ? (
-            <Sparkles size={15} />
-          ) : (
-            <ShieldCheck size={15} />
-          )}
-        </span>
-        <div>
-          <strong>{title}</strong>
-          <small>{approval.providerLabel}</small>
-        </div>
-        <small>{statusLabel}</small>
-      </div>
-      {approval.command ? (
-        <code className="gyro-provider-tool-approval-command">
-          {approval.command}
-        </code>
-      ) : null}
-      {approval.changes.length ? (
-        <div className="gyro-provider-tool-approval-files">
-          {approval.changes.slice(0, 4).map((change) => (
-            <span key={change.path}>
-              <FileText size={13} />
-              {change.path}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <p>{approval.error ?? approval.reason ?? approval.risk}</p>
-      {approval.scope ? <small>Scope: {approval.scope}</small> : null}
-      {approval.cwd ? <small>In {approval.cwd}</small> : null}
-      {isPending ? (
-        <div className="gyro-provider-tool-approval-actions">
+    <InlineApprovalCard
+      title={title}
+      icon={icon}
+      description={approval.reason ?? approval.risk}
+      command={approval.command}
+      files={approval.changes}
+      cwd={approval.cwd}
+      scope={approval.scope}
+      error={approval.error}
+      status={approval.status}
+      actions={
+        <>
           <button
-            className="is-secondary"
+            disabled={!onAction}
             onClick={() => onAction?.(approval.approvalId, "reject")}
             type="button"
           >
             Reject
           </button>
           {approval.approvalType === "capability" ? (
-            <>
-              <button
-                onClick={() => onAction?.(approval.approvalId, "allow-project")}
-                type="button"
-              >
-                Allow for project
-              </button>
-              <button
-                className="is-primary"
-                onClick={() => onAction?.(approval.approvalId, "approve")}
-                type="button"
-              >
-                Allow once
-              </button>
-            </>
-          ) : (
             <button
-              className="is-primary"
-              onClick={() => onAction?.(approval.approvalId, "approve")}
+              disabled={!onAction}
+              onClick={() => onAction?.(approval.approvalId, "allow-project")}
               type="button"
             >
-              {approval.approvalType === "command" ? "Run command" : "Approve"}
+              Allow for project
             </button>
-          )}
-        </div>
-      ) : null}
-    </article>
+          ) : null}
+          <button
+            className="is-primary"
+            disabled={!onAction}
+            onClick={() => onAction?.(approval.approvalId, "approve")}
+            type="button"
+          >
+            {approval.approvalType === "command"
+              ? "Run command"
+              : approval.approvalType === "capability"
+                ? "Allow once"
+                : "Approve"}
+          </button>
+        </>
+      }
+    />
   );
 }
 

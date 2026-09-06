@@ -322,6 +322,9 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const inlineApprovalSource = readRepoFile(
+  "packages/ui/src/inline-approval-card.tsx",
+);
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
@@ -5552,9 +5555,6 @@ expect(
 );
 expect(
   surfaceSource.includes("gyro-provider-picker") &&
-    surfaceSource.includes("gyro-provider-model-flyout") &&
-    surfaceSource.includes('modelPickerProvider ? "has-flyout" : ""') &&
-    surfaceSource.includes("onItemPreview") &&
     surfaceSource.includes("const providerModelItems: ComposerPopoverItem[]") &&
     !surfaceSource.includes('sectionLabel: index === 0 ? "Effort"') &&
     !surfaceSource.includes('sectionLabel: index === 0 ? "Model"') &&
@@ -5593,13 +5593,11 @@ expect(
     surfaceSource.includes("disconnected: !isConnected") &&
     styleSource.includes(".is-provider.is-disconnected") &&
     styleSource.includes("opacity: 0.58") &&
-    // Sticky model flyout: only connected hover opens/switches the models
-    // panel (with a settle delay), so a 1ms graze of Connect rows cannot
-    // collapse models before the pointer arrives.
-    surfaceSource.includes("previewConnectedProviderModels") &&
+    // Provider clicks replace the menu; hover never opens a second panel.
+    surfaceSource.includes('setModelMenuPane("provider-model")') &&
+    !surfaceSource.includes("previewConnectedProviderModels") &&
+    !surfaceSource.includes('className="gyro-provider-model-flyout"') &&
     surfaceSource.includes('authStatus === "connected"') &&
-    surfaceSource.includes("clearModelFlyoutPreviewTimer") &&
-    surfaceSource.includes("modelFlyoutPreviewTimerRef") &&
     surfaceSource.includes("modelPickerProvider.id === effectiveProviderId") &&
     appSource.includes("selectProvider(providerId);") &&
     appSource.includes("{ notifySuccess: false }") &&
@@ -5614,14 +5612,8 @@ expect(
     styleSource.includes(".gyro-composer-menu-item.is-effort") &&
     styleSource.includes(".gyro-composer-menu-item.has-no-icon") &&
     surfaceSource.includes("getBoundingClientRect") &&
-    surfaceSource.includes("?.scrollHeight ?? 420") &&
-    surfaceSource.includes("data-flyout-side={modelFlyoutSide}") &&
-    surfaceSource.includes("modelFlyoutShiftX") &&
-    surfaceSource.includes("overflowRight") &&
-    surfaceSource.includes("modelFlyoutHeight") &&
-    surfaceSource.includes("data-flyout-vertical={modelFlyoutVertical}") &&
     !surfaceSource.includes('title="Model & effort"'),
-  "Provider picker should keep a sticky model flyout while selecting models.",
+  "Provider clicks should open models in the same menu and retain provider connection actions.",
 );
 
 // Split-screen chats each bind their own model. Changing the picker in a new
@@ -5694,20 +5686,12 @@ expect(
   "Anthropic plan usage and the update tip should read live account windows and archive size.",
 );
 
-// The composer is not always full-window width. In the Workspace AI sidebar
-// the picker sits in an overflow-clipped panel narrower than the provider list
-// and model flyout side by side, so the flyout must measure against that panel
-// and fall back to stacking rather than rendering past the panel edge.
+// Provider drill-down shares the same bounded popover as the model list.
 expect(
-  surfaceSource.includes("function clippingBounds") &&
-    surfaceSource.includes("clippingBounds(picker)") &&
-    !surfaceSource.includes("(window.innerWidth - edgePad)") &&
-    surfaceSource.includes(
-      'fitsRight ? "right" : fitsLeft ? "left" : "stacked"',
-    ) &&
-    styleSource.includes('[data-flyout-side="left"]') &&
-    styleSource.includes('[data-flyout-side="stacked"]'),
-  "The model flyout should stay inside the panel that clips it, flipping left or stacking when it cannot dock right.",
+  surfaceSource.includes('modelMenuPane === "provider-model"') &&
+    surfaceSource.includes('menuPane: "provider" as const') &&
+    !surfaceSource.includes("modelFlyoutShiftX"),
+  "Provider models should replace the popup with a path back to providers.",
 );
 // One chip carries model and effort together, still under the provider's own
 // brand mark. It opens a drill-down menu that names each setting's current
@@ -6031,7 +6015,7 @@ expect(
   surfaceSource.includes("OpenAI permissions") &&
     surfaceSource.includes("Anthropic permissions") &&
     surfaceSource.includes('gatedLabel: "Ask first"') &&
-    surfaceSource.includes('autoLabel: "Allow in project"') &&
+    surfaceSource.includes('autoLabel: "Auto Approve"') &&
     surfaceSource.includes('directLabel: "Full access"') &&
     !surfaceSource.includes('action: "toggle-access"') &&
     !surfaceSource.includes("Codex settings") &&
@@ -6427,9 +6411,9 @@ expect(
     ) &&
     styleSource.includes("--gyro-premium-radius-md: 6px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
-    styleSource.includes("--gyro-app: #15171a") &&
-    styleSource.includes("--gyro-pane: #1c1f23") &&
-    styleSource.includes("--gyro-hero-composer: #1c1f23") &&
+    styleSource.includes("--gyro-app: #181818") &&
+    styleSource.includes("--gyro-pane: #212121") &&
+    styleSource.includes("--gyro-hero-composer: #292929") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
@@ -6968,14 +6952,14 @@ expect(
     ) &&
     surfaceSource.includes("providerApprovalDecisions") &&
     surfaceSource.includes('status === "applied"') &&
-    surfaceSource.includes(
-      "approval.error ?? approval.reason ?? approval.risk",
-    ) &&
-    styleSource.includes(".gyro-provider-tool-approval") &&
-    styleSource.includes(".gyro-provider-tool-approval.is-applied") &&
-    styleSource.includes(
-      ".gyro-provider-tool-approval-actions button:focus-visible",
-    ),
+    surfaceSource.includes("description={approval.reason ?? approval.risk}") &&
+    surfaceSource.includes("error={approval.error}") &&
+    inlineApprovalSource.includes("aria-labelledby={titleId}") &&
+    inlineApprovalSource.includes('role="status"') &&
+    inlineApprovalSource.includes('role="alert"') &&
+    styleSource.includes(".gyro-inline-approval") &&
+    styleSource.includes(".gyro-inline-approval.is-applied") &&
+    styleSource.includes(".gyro-inline-approval-actions button:focus-visible"),
   "Provider command, file, and permission requests should render as reconciled accessible transcript cards.",
 );
 

@@ -218,7 +218,14 @@ export function ChatRun({
                   );
                 }
                 return (
-                  <li className="gyro-run-row-item" key={step.id}>
+                  <li
+                    className={
+                      step.kind === "ask" && renderAsk
+                        ? "gyro-run-row-item gyro-run-approval-item"
+                        : "gyro-run-row-item"
+                    }
+                    key={step.id}
+                  >
                     {step.kind === "ask" && renderAsk ? (
                       renderAsk(step.event)
                     ) : (

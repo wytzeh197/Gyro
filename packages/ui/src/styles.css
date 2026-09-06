@@ -21,19 +21,19 @@
   color-scheme: dark;
   --gyro-user-main: #0874df;
   --gyro-user-secondary: #8b6fcb;
-  --gyro-app: #15171a;
-  --gyro-sidebar: #111316;
-  --gyro-sidebar-soft: #1a1d21;
-  --gyro-pane: #1c1f23;
-  --gyro-surface: #1c1f23;
-  --gyro-surface-raised: #23272c;
-  --gyro-surface-soft: #282d33;
-  --gyro-border: #30343a;
-  --gyro-border-soft: #272b30;
-  --gyro-border-strong: #777d87;
-  --gyro-text: #f2f4f6;
-  --gyro-muted: #b2b7c0;
-  --gyro-faint: #b2b7c0;
+  --gyro-app: #181818;
+  --gyro-sidebar: #252525;
+  --gyro-sidebar-soft: #2d2d2d;
+  --gyro-pane: #212121;
+  --gyro-surface: #262626;
+  --gyro-surface-raised: #2c2c2c;
+  --gyro-surface-soft: #323232;
+  --gyro-border: #363636;
+  --gyro-border-soft: #2d2d2d;
+  --gyro-border-strong: #686868;
+  --gyro-text: #ededed;
+  --gyro-muted: #b5b5b5;
+  --gyro-faint: #999999;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -57,8 +57,8 @@
   --gyro-success: #70d39f;
   --gyro-sidebar-text: #d9d9d9;
   --gyro-hover-text: #fafafa;
-  --gyro-topbar: rgba(28, 31, 35, 0.97);
-  --gyro-topbar-border: #30343a;
+  --gyro-topbar: #181818;
+  --gyro-topbar-border: #2d2d2d;
   --gyro-brand-text: #111210;
   --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 56%, white 44%);
   --gyro-primary-text: #101724;
@@ -67,23 +67,23 @@
     var(--gyro-user-main) 40%,
     white 60%
   );
-  --gyro-user-bubble: #202124;
-  --gyro-user-bubble-text: #f1f3f5;
+  --gyro-user-bubble: #303030;
+  --gyro-user-bubble-text: #ededed;
   --gyro-code-bg: #0c0c0c;
   --gyro-code-text: #e6e6e6;
-  --gyro-segment-bg: #15171a;
-  --gyro-segment-active: #2a2e34;
+  --gyro-segment-bg: #202020;
+  --gyro-segment-active: #383838;
   --gyro-segment-active-text: #f3f3f3;
   /* The System preference thumbnail must show both palettes at once. */
   --gyro-theme-preview-dark-canvas: #30302d;
   --gyro-theme-preview-dark-content: #5c5c58;
   --gyro-theme-preview-light-canvas: #f8f9fb;
   --gyro-theme-preview-light-content: #e9eef5;
-  --gyro-sidebar-mode-track: #181817;
-  --gyro-sidebar-mode-track-border: rgba(255, 255, 255, 0.11);
-  --gyro-sidebar-mode-active: #292927;
-  --gyro-sidebar-mode-active-border: rgba(255, 255, 255, 0.15);
-  --gyro-sidebar-mode-active-shadow: rgba(0, 0, 0, 0.28);
+  --gyro-sidebar-mode-track: #202020;
+  --gyro-sidebar-mode-track-border: rgba(255, 255, 255, 0.04);
+  --gyro-sidebar-mode-active: #383838;
+  --gyro-sidebar-mode-active-border: rgba(255, 255, 255, 0.04);
+  --gyro-sidebar-mode-active-shadow: rgba(0, 0, 0, 0.12);
   --gyro-shadow: rgba(0, 0, 0, 0.34);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
   --gyro-focus-ring: var(--gyro-text);
@@ -97,22 +97,22 @@
   --gyro-danger-soft: rgba(255, 105, 97, 0.13);
   --gyro-blue: #7aa7ff;
   --gyro-blue-soft: rgba(122, 167, 255, 0.12);
-  --gyro-canvas-subtle: #15171a;
-  --gyro-window: #1c1f23;
+  --gyro-canvas-subtle: #181818;
+  --gyro-window: #181818;
   --gyro-workbench-line: rgba(255, 255, 255, 0.07);
-  --gyro-control-bg: #23272c;
-  --gyro-control-hover: #2b3036;
+  --gyro-control-bg: #2c2c2c;
+  --gyro-control-hover: #383838;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
   --gyro-premium-panel-strong: var(--gyro-surface-raised);
   --gyro-premium-control: var(--gyro-surface-soft);
-  --gyro-premium-control-hover: #30353b;
+  --gyro-premium-control-hover: #383838;
   --gyro-premium-line: var(--gyro-border);
   --gyro-premium-line-soft: var(--gyro-border-soft);
   --gyro-premium-text: var(--gyro-text);
-  --gyro-premium-muted: #b2b7c0;
-  --gyro-premium-faint: #b2b7c0;
+  --gyro-premium-muted: var(--gyro-muted);
+  --gyro-premium-faint: var(--gyro-faint);
   --gyro-premium-accent: var(--gyro-accent);
   --gyro-premium-shadow: rgba(0, 0, 0, 0.44);
   --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.24);
@@ -170,30 +170,30 @@
   --gyro-provider-gemini: #8bb8ff;
   --gyro-provider-cursor: #f2efe9;
   --gyro-provider-opencode: #f2efe9;
-  --gyro-hero-heading: #f4f4f1;
+  --gyro-hero-heading: #ededed;
   --gyro-hero-brand: #a0a0a0;
-  --gyro-hero-composer: #1a1a1a;
-  --gyro-hero-context: #151515;
-  --gyro-hero-border: rgba(255, 255, 255, 0.14);
-  --gyro-hero-text: #f0f1f2;
-  --gyro-hero-muted: #b0b0b0;
-  --gyro-hero-placeholder: #929292;
+  --gyro-hero-composer: #292929;
+  --gyro-hero-context: #292929;
+  --gyro-hero-border: #353535;
+  --gyro-hero-text: #ededed;
+  --gyro-hero-muted: #b5b5b5;
+  --gyro-hero-placeholder: #999999;
   --gyro-hero-hover: rgba(255, 255, 255, 0.065);
-  --gyro-hero-hover-text: #e5e7eb;
-  --gyro-hero-send: #8d9098;
-  --gyro-hero-send-hover: #a4a7af;
-  --gyro-hero-send-text: #101114;
+  --gyro-hero-hover-text: #ededed;
+  --gyro-hero-send: #ededed;
+  --gyro-hero-send-hover: #ffffff;
+  --gyro-hero-send-text: #181818;
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.26);
-  --gyro-hero-shadow: 0 20px 48px rgba(0, 0, 0, 0.38);
-  --gyro-hero-shadow-focus: 0 22px 52px rgba(0, 0, 0, 0.42);
-  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --gyro-hero-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+  --gyro-hero-shadow-focus: 0 2px 8px rgba(0, 0, 0, 0.14);
+  --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.015);
   /* Start-card icon hues. One per opening, so the four cards read as four
      kinds of work at a glance rather than four identical rectangles. */
   --gyro-start-icon-explore: #7aa7ff;
   --gyro-start-icon-build: var(--gyro-secondary-accent);
   --gyro-start-icon-review: #70d39f;
   --gyro-start-icon-fix: #e8b45f;
-  --gyro-page-header-bg: var(--gyro-surface-raised);
+  --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
   --gyro-page-card: var(--gyro-surface);
   --gyro-page-card-hover: var(--gyro-surface-raised);
@@ -32000,6 +32000,16 @@ button.gyro-account-menu-row:hover,
   width: 1px;
 }
 
+/* Approval cards occupy the full row, including the icon column. Break the
+   timeline here instead of drawing its connector over the decision surface. */
+.gyro-run-row-item.gyro-run-approval-item::after {
+  content: none;
+}
+
+.gyro-run-approval-item {
+  min-width: 0;
+}
+
 .gyro-run-row {
   align-items: baseline;
   background: none;
@@ -32706,23 +32716,22 @@ button.gyro-account-menu-row:hover,
   }
 }
 
-/* Dark mode follows the same quiet, high-contrast system: a near-black canvas,
-   a graphite sidebar, and just enough warm lift to make the shell feel like a
-   deliberate desktop surface instead of a flat void. */
+/* Neutral charcoal keeps the canvas quiet. The lighter navigation and raised
+   controls establish hierarchy without tinted surfaces or heavy outlines. */
 :root[data-theme="dark"] {
-  --gyro-app: #15171a;
-  --gyro-sidebar: #111316;
-  --gyro-sidebar-soft: #1a1d21;
-  --gyro-pane: #1c1f23;
-  --gyro-surface: #1c1f23;
-  --gyro-surface-raised: #23272c;
-  --gyro-surface-soft: #282d33;
-  --gyro-border: #30343a;
-  --gyro-border-soft: #272b30;
-  --gyro-border-strong: #777d87;
-  --gyro-text: #f2f4f6;
-  --gyro-muted: #b2b7c0;
-  --gyro-faint: #b2b7c0;
+  --gyro-app: #181818;
+  --gyro-sidebar: #252525;
+  --gyro-sidebar-soft: #2d2d2d;
+  --gyro-pane: #212121;
+  --gyro-surface: #262626;
+  --gyro-surface-raised: #2c2c2c;
+  --gyro-surface-soft: #323232;
+  --gyro-border: #363636;
+  --gyro-border-soft: #2d2d2d;
+  --gyro-border-strong: #686868;
+  --gyro-text: #ededed;
+  --gyro-muted: #b5b5b5;
+  --gyro-faint: #999999;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -32735,12 +32744,12 @@ button.gyro-account-menu-row:hover,
     var(--gyro-user-main) 40%,
     white 60%
   );
-  --gyro-page-canvas: #15171a;
-  --gyro-page-header-bg: #1c1f23;
-  --gyro-control-bg: #23272c;
-  --gyro-control-hover: #2b3036;
-  --gyro-topbar: rgba(28, 31, 35, 0.94);
-  --gyro-topbar-border: #30343a;
+  --gyro-page-canvas: var(--gyro-app);
+  --gyro-page-header-bg: var(--gyro-surface);
+  --gyro-control-bg: #2c2c2c;
+  --gyro-control-hover: #383838;
+  --gyro-topbar: #181818;
+  --gyro-topbar-border: #2d2d2d;
   --gyro-premium-shadow: rgba(0, 0, 0, 0.42);
   --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.24);
   --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.34);
@@ -32748,12 +32757,12 @@ button.gyro-account-menu-row:hover,
   --gyro-premium-hairline-soft: rgba(255, 255, 255, 0.055);
   --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.14);
   --gyro-premium-focus: color-mix(in srgb, var(--gyro-accent) 38%, transparent);
-  --gyro-hero-heading: #f2f4f6;
-  --gyro-hero-composer: #1c1f23;
-  --gyro-hero-context: #282d33;
-  --gyro-hero-border: #30343a;
-  --gyro-hero-shadow: 0 20px 48px rgba(0, 0, 0, 0.32);
-  --gyro-hero-shadow-focus: 0 22px 52px rgba(0, 0, 0, 0.4);
+  --gyro-hero-heading: #ededed;
+  --gyro-hero-composer: #292929;
+  --gyro-hero-context: #292929;
+  --gyro-hero-border: #353535;
+  --gyro-hero-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+  --gyro-hero-shadow-focus: 0 2px 8px rgba(0, 0, 0, 0.14);
 }
 
 :root[data-theme="dark"] .gyro-app-shell,
@@ -32778,12 +32787,12 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="dark"] .gyro-sidebar-thread.is-active,
 :root[data-theme="dark"] .gyro-sidebar-action:hover,
 :root[data-theme="dark"] .gyro-account-button:hover {
-  background: #292927;
+  background: var(--gyro-control-hover);
 }
 
 :root[data-theme="dark"] .gyro-chat-start h1,
 :root[data-theme="dark"] .gyro-chat-thread-topbar strong {
-  color: #f4f3f0;
+  color: var(--gyro-text);
   letter-spacing: -0.035em;
 }
 
@@ -32794,27 +32803,25 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-start
   .gyro-composer-shell.is-provider-collapsed,
 :root[data-theme="dark"] .gyro-chat-composer-dock .gyro-composer-shell {
-  background: #181817;
-  border-color: #30302d;
+  background: var(--gyro-hero-composer);
+  border-color: var(--gyro-hero-border);
   box-shadow:
-    0 16px 38px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    var(--gyro-hero-shadow), var(--gyro-hero-highlight);
 }
 
 :root[data-theme="dark"] .gyro-chat-start .gyro-composer-shell:focus-within,
 :root[data-theme="dark"]
   .gyro-chat-composer-dock
   .gyro-composer-shell:focus-within {
-  border-color: #30302d;
+  border-color: var(--gyro-hero-border);
   box-shadow:
-    0 16px 38px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    var(--gyro-hero-shadow), var(--gyro-hero-highlight);
 }
 
 :root[data-theme="dark"] .gyro-chat-start .gyro-composer-context-row,
 :root[data-theme="dark"] .gyro-chat-composer-dock .gyro-composer-context-row {
-  background: #141413;
-  border-color: #252523;
+  background: var(--gyro-hero-context);
+  border-color: var(--gyro-border);
 }
 
 :root[data-theme="dark"] .gyro-overlay,
@@ -32822,8 +32829,8 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="dark"] .gyro-composer-popover,
 :root[data-theme="dark"] .gyro-scm-branch-menu,
 :root[data-theme="dark"] .gyro-chat-switcher-menu {
-  background: rgba(29, 29, 27, 0.98);
-  border-color: #363633;
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-border);
   box-shadow:
     0 18px 44px rgba(0, 0, 0, 0.48),
     inset 0 1px 0 rgba(255, 255, 255, 0.035);
@@ -32831,7 +32838,7 @@ button.gyro-account-menu-row:hover,
 
 :root[data-theme="dark"] .gyro-scm-branch-item:hover,
 :root[data-theme="dark"] .gyro-scm-branch-item.is-current {
-  background: #292927;
+  background: var(--gyro-control-hover);
 }
 
 /* The bottom row deliberately owns update status: Settings remains anchored on
@@ -36360,12 +36367,12 @@ textarea:focus-visible,
 :root[data-theme="dark"]
   .gyro-chat-surface.is-empty
   > .gyro-chat-start:not(.is-mission) {
-  --gyro-welcome-composer-surface: #252628;
-  --gyro-welcome-composer-outline: #424448;
-  --gyro-welcome-composer-divider: #37383b;
-  --gyro-welcome-composer-muted: #b3b5b9;
-  --gyro-welcome-composer-hover: #303134;
-  --gyro-welcome-composer-shadow: rgb(0 0 0 / 18%);
+  --gyro-welcome-composer-surface: var(--gyro-hero-composer);
+  --gyro-welcome-composer-outline: var(--gyro-hero-border);
+  --gyro-welcome-composer-divider: var(--gyro-border);
+  --gyro-welcome-composer-muted: var(--gyro-muted);
+  --gyro-welcome-composer-hover: var(--gyro-control-hover);
+  --gyro-welcome-composer-shadow: rgb(0 0 0 / 8%);
 }
 
 .gyro-chat-surface.is-empty
@@ -36852,4 +36859,590 @@ textarea:focus-visible,
   .gyro-sidebar-row.gyro-sidebar-explorer-row[data-file-tone]
   > .gyro-explorer-file-icon {
   color: var(--gyro-file-tone, var(--gyro-file-default));
+}
+
+.gyro-composer-control-model {
+  --gyro-model-popover-width: min(290.7px, calc(100vw - 24px));
+}
+
+/* Codex-style effort control: the whole track is a pill, with native range
+   keyboard/pointer behavior. Insets align the stops with the thumb's travel. */
+:root .gyro-composer-popover.gyro-effort-slider-popover {
+  display: block;
+  background: var(--gyro-surface);
+  width: var(--gyro-model-popover-width);
+  min-width: 0;
+  max-width: none;
+  padding: 13.3px;
+  border-radius: 19px;
+  overflow: visible;
+}
+.gyro-effort-slider-header {
+  display: grid;
+  grid-template-columns: 22.8px minmax(0, 1fr) 22.8px;
+  align-items: start;
+  gap: 5.7px;
+  margin-bottom: 15.2px;
+}
+.gyro-effort-slider-header button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.gyro-effort-slider-header .gyro-effort-icon-button {
+  display: grid;
+  place-items: center;
+  width: 22.8px;
+  height: 22.8px;
+  color: var(--gyro-muted);
+  border-radius: 5.7px;
+}
+.gyro-effort-slider-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.9px;
+  min-width: 0;
+}
+.gyro-effort-slider-header .gyro-effort-value-button {
+  display: flex;
+  align-items: center;
+  gap: 2.85px;
+  color: #3982fa;
+  font-size: 15.2px;
+  font-weight: 500;
+  line-height: 20.9px;
+  border-radius: 3.8px;
+}
+.gyro-effort-value-button svg {
+  color: var(--gyro-muted);
+}
+.gyro-effort-slider-header .gyro-effort-model-button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.3px;
+  line-height: 19px;
+  color: var(--gyro-muted);
+  border-radius: 3.8px;
+}
+.gyro-effort-slider-header button:hover {
+  color: var(--gyro-text);
+}
+.gyro-effort-slider-header button:focus-visible {
+  outline: 1.9px solid #3982fa;
+  outline-offset: 2.85px;
+}
+.gyro-effort-slider {
+  position: relative;
+  height: 31.35px;
+  --effort-thumb-size: 31.35px;
+}
+.gyro-effort-slider-track {
+  position: absolute;
+  inset: 1.9px 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gyro-text) 12%, var(--gyro-surface));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  overflow: hidden;
+}
+.gyro-effort-slider-fill {
+  height: 100%;
+  width: calc(
+    var(--effort-thumb-size) / 2 + (100% - var(--effort-thumb-size)) *
+      var(--effort-progress)
+  );
+  background: #3982fa;
+}
+.gyro-effort-slider-stops {
+  position: absolute;
+  inset: 0 calc(var(--effort-thumb-size) / 2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.gyro-effort-slider-stops span {
+  width: 4.75px;
+  height: 4.75px;
+  margin: 0 -2.375px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gyro-text) 28%, transparent);
+}
+.gyro-effort-slider-stops .is-filled {
+  background: #8fbbff;
+}
+.gyro-effort-slider input {
+  position: absolute;
+  inset: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 31.35px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 999px;
+  touch-action: none;
+}
+.gyro-effort-slider input::-webkit-slider-runnable-track {
+  height: 31.35px;
+  background: transparent;
+}
+.gyro-effort-slider input::-moz-range-track {
+  height: 31.35px;
+  background: transparent;
+}
+.gyro-effort-slider input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 31.35px;
+  height: 31.35px;
+  border: 1px solid #e3e4e6;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2.85px rgb(0 0 0 / 12%);
+}
+.gyro-effort-slider input::-moz-range-thumb {
+  width: 29.45px;
+  height: 29.45px;
+  border: 1px solid #e3e4e6;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2.85px rgb(0 0 0 / 12%);
+}
+.gyro-effort-slider input:focus-visible {
+  outline: 1.9px solid #3982fa;
+  outline-offset: 3.8px;
+}
+.gyro-effort-slider input:disabled {
+  cursor: default;
+}
+
+.gyro-effort-icon-button svg {
+  width: 16.15px;
+  height: 16.15px;
+}
+.gyro-effort-value-button svg {
+  width: 15.2px;
+  height: 15.2px;
+}
+
+/* The model list grows out of the effort panel without changing its width. */
+:root .gyro-composer-control-model > .gyro-model-menu.gyro-model-list {
+  width: var(--gyro-model-popover-width);
+  min-width: 0;
+  max-width: none;
+  border-radius: 19px;
+  grid-auto-rows: max-content;
+  align-content: start;
+  overflow-y: auto;
+}
+
+/* Inline permission questions: attached to the action in chat, not the composer. */
+.gyro-inline-approval {
+  width: 100%;
+  max-width: 620px;
+  min-width: 0;
+  margin: 12px 0;
+  overflow: hidden;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 12px;
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+}
+.gyro-inline-approval-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+.gyro-inline-approval-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.gyro-inline-approval-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 8px;
+  color: var(--gyro-muted);
+}
+.gyro-inline-approval-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.gyro-inline-approval-heading p {
+  margin: 3px 0 0;
+  color: var(--gyro-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.gyro-inline-approval-command,
+.gyro-inline-approval-files pre {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-surface));
+  color: var(--gyro-text);
+  font:
+    12px/1.6 "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+.gyro-inline-approval-command code {
+  font: inherit;
+}
+.gyro-inline-approval-context,
+.gyro-inline-approval-files > div > span {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.gyro-inline-approval-context svg,
+.gyro-inline-approval-files svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.gyro-inline-approval-context code {
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.gyro-inline-approval-files {
+  display: grid;
+  gap: 10px;
+}
+.gyro-inline-approval-files code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.gyro-inline-approval-files summary {
+  cursor: pointer;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.gyro-inline-approval-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid var(--gyro-premium-hairline-soft);
+  padding: 14px 18px;
+}
+.gyro-inline-approval-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--gyro-muted);
+}
+.gyro-inline-approval-status svg {
+  flex: 0 0 auto;
+}
+.gyro-inline-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+.gyro-inline-approval-actions button {
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 7px;
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  min-height: 32px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.gyro-inline-approval-actions .is-primary {
+  background: var(--gyro-text);
+  color: var(--gyro-surface);
+  border-color: var(--gyro-text);
+}
+.gyro-inline-approval-actions button:hover {
+  filter: brightness(0.94);
+}
+.gyro-inline-approval-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.gyro-inline-approval-actions button:focus-visible,
+.gyro-inline-approval summary:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 3px;
+}
+.gyro-inline-approval.is-approved .gyro-inline-approval-status svg,
+.gyro-inline-approval.is-applied .gyro-inline-approval-status svg {
+  color: var(--gyro-success);
+}
+.gyro-inline-approval-error {
+  margin: 0;
+  color: var(--gyro-danger);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Explain remaining approval prompts where the automatic mode is chosen. */
+.gyro-composer-popover.gyro-approval-picker {
+  width: min(340px, calc(100vw - 24px));
+  max-width: min(340px, calc(100vw - 24px));
+}
+.gyro-approval-picker .gyro-composer-menu-item small {
+  white-space: normal;
+  line-height: 1.45;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Help keeps answers compact until someone needs the detail. */
+.gyro-help {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.gyro-help-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 9px;
+  padding: 0 12px;
+  color: var(--gyro-muted);
+}
+.gyro-help-search:focus-within {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+.gyro-help-search input {
+  min-width: 0;
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 13px;
+}
+.gyro-help-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.gyro-help button {
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-help-search button {
+  display: flex;
+  padding: 4px;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+}
+.gyro-help-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.gyro-help-shortcuts button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: 8px;
+  background: transparent;
+  padding: 12px;
+  color: var(--gyro-text);
+  font-size: 12px;
+  text-align: left;
+}
+.gyro-help-topics {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.gyro-help-topics button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--gyro-muted);
+  background: transparent;
+  font-size: 12px;
+}
+.gyro-help-topics button[aria-pressed="true"] {
+  color: var(--gyro-text);
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border-color: var(--gyro-premium-hairline-strong);
+}
+.gyro-help-count {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: 11px;
+}
+.gyro-help-answers {
+  display: grid;
+  gap: 24px;
+}
+.gyro-help h2 {
+  margin: 0 0 10px;
+  color: var(--gyro-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.gyro-help-topic details {
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+}
+.gyro-help-topic summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 2px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--gyro-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.gyro-help-topic summary::-webkit-details-marker {
+  display: none;
+}
+.gyro-help-topic summary svg {
+  flex-shrink: 0;
+  color: var(--gyro-muted);
+}
+.gyro-help-topic details[open] summary svg {
+  transform: rotate(180deg);
+}
+.gyro-help-answer {
+  padding: 0 24px 16px 2px;
+}
+.gyro-help-answer p,
+.gyro-help-empty p {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: 13px;
+  line-height: 1.7;
+  max-width: 68ch;
+}
+.gyro-help-answer button,
+.gyro-help-empty button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-text);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.gyro-help-empty {
+  padding: 24px 0;
+}
+.gyro-help-empty strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--gyro-text);
+  font-size: 14px;
+}
+.gyro-help-resources {
+  border-top: 1px solid var(--gyro-premium-hairline-strong);
+  padding-top: 20px;
+}
+.gyro-help-resources > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+.gyro-help a {
+  color: var(--gyro-muted);
+  text-decoration: none;
+  font-size: 12px;
+}
+.gyro-help-resources a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.gyro-help a:hover {
+  color: var(--gyro-text);
+  text-decoration: underline;
+}
+.gyro-help-shortcuts button:hover,
+.gyro-help-topics button:hover,
+.gyro-help-topic summary:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+.gyro-help button:focus-visible,
+.gyro-help summary:focus-visible,
+.gyro-help a:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.gyro-help-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--gyro-premium-hairline-soft);
+  padding-top: 16px;
+  color: var(--gyro-muted);
+  font-size: 11px;
+}
+.gyro-help-footer > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 640px) {
+  .gyro-help-shortcuts {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A restrained blue accent identifies automatic approvals at a glance. */
+.gyro-composer-chip.is-auto-approve {
+  --gyro-auto-approve-color: #1674cf;
+}
+:root[data-theme="dark"] .gyro-composer-chip.is-auto-approve {
+  --gyro-auto-approve-color: #66afff;
+}
+.gyro-composer-chip.is-auto-approve > svg:first-child,
+.gyro-composer-chip.is-auto-approve > .gyro-composer-label {
+  color: var(--gyro-auto-approve-color);
 }
