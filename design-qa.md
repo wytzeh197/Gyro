@@ -1,3 +1,73 @@
+# Inline approval cards — 2026-09-06
+
+final result: blocked
+
+## Implementation
+
+Option 1 is implemented in `packages/ui/src/inline-approval-card.tsx` and wired into both existing transcript approval renderers. The composer is unchanged by this approval-card work. Command, file-change, permission, and capability cards retain their existing decision callbacks and policy scope. File diffs can be expanded before approving. Pending, approved, applied, rejected, cancelled, failed, and expired presentations use explicit status text.
+
+## Source and evidence
+
+- Selected visual: `docs/design/inline-approval/approved-reference.png` (first displayed approval option).
+- Real-app development fixture: `/capture.html?scene=chat&theme=light&edge=inline-approval`; add `&approval=file` for file changes. Its resolver is in-memory and never executes a command.
+- Browser: Codex in-app browser. Page and accessibility reads succeeded, but mouse dispatch, keyboard dispatch, and subsequent reload attempts repeatedly timed out. Fresh tabs did not restore input. Chrome fallback was unavailable.
+- The browser remained on the welcome composer; no rendered approval-card screenshot or valid visual comparison was obtained. Visual QA and interactive acceptance are therefore blocked, not passed.
+
+## Checks
+
+- Desktop TypeScript check and Vite production build passed. Vite reports the existing bundle-size advisory.
+- Workbench/token smoke checks and diff whitespace checks passed. The existing approval smoke assertion was updated to inspect the extracted shared card, including accessible labels, status, errors, and keyboard focus styles.
+- Source review confirms that each decision still receives its original approval/proposal ID, commands offer approve/reject only, and project-wide grants remain limited to capability requests.
+- No broad approval policy changes, permission grants, live commands, or composer changes were introduced.
+
+## Remaining verification
+
+Inspect command and file cards against the approved reference in light/dark and narrow chat panes; verify approve/reject resolution, file-diff disclosure, and existing backend failure behavior. Typography, spacing, colors, icons, and dynamic content still need rendered comparison. Do not treat earlier reports below as approval of this new card design.
+
+---
+
+# Gyro effort selector — 2026-09-06
+
+final result: passed
+
+Implemented in the existing composer, using the approved pill-slider mockup.
+
+## Visual evidence
+
+- Source visual truth: `docs/design/effort-selector/approved-reference.png` (1568 × 1003).
+- Light implementation: `docs/design/effort-selector/implementation-light.png` (842 × 759).
+- Dark implementation: `docs/design/effort-selector/implementation-dark.png` (842 × 759).
+- Compact implementation: `docs/design/effort-selector/implementation-compact.png` (600 × 480).
+- Focused comparison: `docs/design/effort-selector/comparison.png`, approved source left, implementation right.
+- Viewport: 842 × 759 CSS pixels, reported devicePixelRatio 2. Browser export is normalized to 842 × 759 pixels. Compact viewport is 600 × 480 CSS pixels; temporary viewport override was reset.
+- Compared state: effort popover open, GPT-6 Astra, Medium selected. Cropped source and implementation panels normalized to 612 pixels wide for comparison. Full application captures were also inspected for placement, composer integration, and clipping.
+
+## Findings and comparison history
+
+- Initial check: the remaining slider track was nearly white because its surface token was undefined. Corrected it to the existing `--gyro-surface` token.
+- Initial check: translucent popover allowed nearby text to show through. Applied an opaque theme surface with sufficient specificity.
+- Final check: no actionable P0/P1/P2 findings. The 306 × 123 CSS-pixel popover has a 276 × 29 pill track and a 33-pixel white native thumb. It opens above the composer when space permits and preserves the existing placement fallback.
+- Typography: existing Gyro font, 16px effort heading and 14px secondary model label preserve hierarchy. Text truncates for long model names.
+- Spacing/layout: centered two-line heading, corner icons, wide rounded track, and compact pill trigger match the selected structure. P3: the implemented popover is slightly taller relative to its width than the generated reference, retaining readable Gyro font sizes.
+- Colors: blue selected effort and fill, neutral remaining track, opaque light/dark surfaces, and white thumb verified.
+- Assets: existing provider logos and Lucide navigation/reset/lightning icons; no raster UI approximation.
+- Content: current model and supported effort levels come from the existing provider catalog. Astra has six supported stops in the app, rather than the five illustrative stops in the mockup. No models or capabilities were invented to match reference text.
+
+## Interaction and technical verification
+
+- Dragged Astra from Medium to Ultra; selected effort updated in composer while the popover stayed open.
+- Keyboard End selected Max for Claude; reset restored its High default. Astra reset restored Medium.
+- Opened model list, switched provider and model, and verified the new model/default effort.
+- Verified provider settings remain reachable through the lightning button.
+- Verified Escape returns from model list to slider, then dismisses and restores trigger focus.
+- Verified outside-click dismissal and reopening, and the existing fallback menu for a model without effort choices.
+- Inspected light, dark, and compact layouts; no clipped slider or control overlap.
+- Browser console: no errors reported during verification.
+- Desktop TypeScript check, Vite production build, workbench/token smoke checks, Prettier, and diff whitespace checks passed. Vite retains its bundle-size advisory.
+- Validation uses the real React app with the repository's in-memory capture harness; no live provider request was sent. Native macOS app packaging/installation was not performed.
+
+---
+
 # Gyro design quality upgrade — current review
 
 **Date:** 2026-09-05

@@ -2552,8 +2552,17 @@ fn automation_notification_content(
     }
 }
 
-fn should_show_automation_notification(window_visible: bool, window_focused: bool) -> bool {
+fn should_show_background_notification(window_visible: bool, window_focused: bool) -> bool {
     !window_visible || !window_focused
+}
+
+fn app_is_in_background(app: &tauri::AppHandle) -> bool {
+    app.webview_windows().values().all(|window| {
+        should_show_background_notification(
+            window.is_visible().unwrap_or(false),
+            window.is_focused().unwrap_or(false),
+        )
+    })
 }
 
 fn notification_permission_allows_delivery(permission: PermissionState) -> bool {
@@ -2582,6 +2591,9 @@ fn notify_provider_approval_question(
     approval_id: Uuid,
     approval_type: &str,
 ) {
+    if !app_is_in_background(app) {
+        return;
+    }
     let Ok(permission) = app.notification().permission_state() else {
         return;
     };
@@ -2673,16 +2685,7 @@ fn notify_automation_outcome(app: &tauri::AppHandle, automation: &Automation) {
     let Some((title, body)) = automation_notification_content(automation) else {
         return;
     };
-    let (window_visible, window_focused) = app
-        .get_webview_window("main")
-        .map(|window| {
-            (
-                window.is_visible().unwrap_or(false),
-                window.is_focused().unwrap_or(false),
-            )
-        })
-        .unwrap_or((false, false));
-    if !should_show_automation_notification(window_visible, window_focused) {
+    if !app_is_in_background(app) {
         return;
     }
     let Ok(permission) = app.notification().permission_state() else {
@@ -7448,6 +7451,39 @@ async fn git_checkout_branch(
 }
 
 #[tauri::command]
+async fn git_rename_branch(request: GitCheckoutBranchRequest) -> Result<GitBranchCatalog, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_rename_branch_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("git branch rename worker failed: {error}"))?
+}
+
+fn git_rename_branch_impl(request: &GitCheckoutBranchRequest) -> anyhow::Result<GitBranchCatalog> {
+    gyro_core::validate_branch_name(&request.branch)?;
+    let root = workspace_root(&request.workspace_path)?;
+    let repo_root = git_repo_root(&root)
+        .ok_or_else(|| anyhow::anyhow!("the selected folder is not a Git repository"))?;
+    let mut command = git_command();
+    command
+        .arg("-C")
+        .arg(&repo_root)
+        .args(["branch", "-m", "--"])
+        .arg(&request.branch);
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(10),
+        None,
+        64 * 1024,
+        64 * 1024,
+    )?;
+    if !output.succeeded() {
+        return Err(bounded_command_error("could not rename branch", &output));
+    }
+    git_branch_catalog_impl(&request.workspace_path)
+}
+
+#[tauri::command]
 async fn git_remove_worktree(
     request: GitRemoveWorktreeRequest,
 ) -> Result<GitBranchCatalog, String> {
@@ -7638,28 +7674,8 @@ fn git_checkout_branch_impl(
     if catalog.current.as_deref() == Some(request.branch.as_str()) {
         return Ok(catalog);
     }
-    let mut status_command = git_command();
-    status_command
-        .arg("-C")
-        .arg(&repo_root)
-        .args(["status", "--porcelain"]);
-    let status = run_bounded_command(
-        &status_command,
-        Duration::from_secs(10),
-        None,
-        2 * 1024 * 1024,
-        64 * 1024,
-    )?;
-    if !status.succeeded() {
-        return Err(anyhow::anyhow!(
-            "could not inspect the workspace before switching branches"
-        ));
-    }
-    if !status.stdout.is_empty() || status.stdout_truncated {
-        return Err(anyhow::anyhow!(
-            "commit or stash workspace changes before switching branches"
-        ));
-    }
+    // Git refuses switches that would overwrite local changes, while retaining
+    // unrelated edits and untracked files without forcing or stashing them.
     let mut switch_command = git_command();
     switch_command
         .arg("-C")
@@ -17212,7 +17228,7 @@ fn codex_reasoning_effort_arg(
     let effort = reasoning_effort?.trim().to_ascii_lowercase();
     let model = model_id?.trim().to_ascii_lowercase();
     let supported = match model.as_str() {
-        "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
+        "gpt-6-astra" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
             matches!(
                 effort.as_str(),
                 "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
@@ -18826,6 +18842,7 @@ fn provider_model_context_window(provider_id: &str, model_id: Option<&str>) -> O
     let model_id = model_id.map(str::trim).unwrap_or_default();
     let window = match provider_id {
         "openai" => match model_id {
+            "gpt-6-astra" => 272_000,
             "gpt-5.4-mini" => 400_000,
             _ => 1_050_000,
         },
@@ -22547,6 +22564,7 @@ pub fn run() {
             git_commit,
             git_branches,
             git_checkout_branch,
+            git_rename_branch,
             git_create_branch,
             git_remove_worktree,
             git_diff,
@@ -24931,6 +24949,32 @@ while True:
         assert_eq!(codex_model_arg(Some("gpt-5.5")), None);
         assert_eq!(codex_model_arg(Some(" gpt-5.4-mini ")), None);
         assert_eq!(codex_model_arg(Some("o4-mini")), Some("o4-mini".into()));
+    }
+
+    #[test]
+    fn astra_model_and_effort_are_forwarded_to_codex() {
+        assert_eq!(
+            codex_model_arg(Some("gpt-6-astra")),
+            Some("gpt-6-astra".into())
+        );
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert_eq!(
+                codex_reasoning_effort_arg(Some("gpt-6-astra"), Some(effort)),
+                Some(effort.into())
+            );
+        }
+        assert_eq!(
+            codex_reasoning_effort_arg(Some("gpt-6-astra"), Some("invalid")),
+            None
+        );
+        assert_eq!(
+            provider_model_context_window("openai", Some("gpt-6-astra")),
+            Some(272_000)
+        );
+        assert_eq!(
+            provider_model_context_window("anthropic", Some("claude-fable-5-1")),
+            Some(1_000_000)
+        );
     }
 
     #[test]
@@ -28363,7 +28407,7 @@ while True:
     }
 
     #[test]
-    fn git_branch_catalog_switches_clean_branches_and_refuses_dirty_workspaces() {
+    fn git_branch_catalog_switches_preserving_edits_and_refuses_conflicts() {
         let repo = tempfile::tempdir().unwrap();
         init_git_repo(repo.path());
         fs::write(repo.path().join("tracked.txt"), "main\n").unwrap();
@@ -28384,12 +28428,40 @@ while True:
         assert_eq!(switched.current.as_deref(), Some("feature/picker"));
 
         fs::write(repo.path().join("tracked.txt"), "dirty\n").unwrap();
-        let error = git_checkout_branch_impl(&GitCheckoutBranchRequest {
-            workspace_path,
+        let switched = git_checkout_branch_impl(&GitCheckoutBranchRequest {
+            workspace_path: workspace_path.clone(),
             branch: "main".into(),
         })
-        .unwrap_err();
-        assert!(error.to_string().contains("commit or stash"));
+        .unwrap();
+        assert_eq!(switched.current.as_deref(), Some("main"));
+        assert_eq!(
+            fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+            "dirty\n"
+        );
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "diverge"]);
+        fs::write(repo.path().join("tracked.txt"), "keep me\n").unwrap();
+        assert!(git_checkout_branch_impl(&GitCheckoutBranchRequest {
+            workspace_path: workspace_path.clone(),
+            branch: "feature/picker".into(),
+        })
+        .is_err());
+        assert_eq!(
+            fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+            "keep me\n"
+        );
+        let renamed = git_rename_branch_impl(&GitCheckoutBranchRequest {
+            workspace_path: workspace_path.clone(),
+            branch: "feature/renamed".into(),
+        })
+        .unwrap();
+        assert_eq!(renamed.current.as_deref(), Some("feature/renamed"));
+        assert!(!renamed.branches.contains(&"main".to_string()));
+        assert!(git_rename_branch_impl(&GitCheckoutBranchRequest {
+            workspace_path,
+            branch: "feature/picker".into(),
+        })
+        .is_err());
     }
 
     #[test]
@@ -28947,11 +29019,11 @@ while True:
     }
 
     #[test]
-    fn automation_notifications_defer_to_the_focused_app() {
-        assert!(!should_show_automation_notification(true, true));
-        assert!(should_show_automation_notification(true, false));
-        assert!(should_show_automation_notification(false, false));
-        assert!(should_show_automation_notification(false, true));
+    fn background_notifications_defer_to_the_focused_app() {
+        assert!(!should_show_background_notification(true, true));
+        assert!(should_show_background_notification(true, false));
+        assert!(should_show_background_notification(false, false));
+        assert!(should_show_background_notification(false, true));
     }
 
     #[test]

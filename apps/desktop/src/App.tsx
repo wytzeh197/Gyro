@@ -3681,12 +3681,17 @@ export function App() {
   const [branchNameRequest, setBranchNameRequest] = useState<{
     startPoint?: string;
     initialValue: string;
+    mode: "create" | "rename";
     resolve: (name: string | undefined) => void;
   }>();
   const requestBranchName = useCallback(
-    (startPoint?: string, initialValue = "") =>
+    (
+      startPoint?: string,
+      initialValue = "",
+      mode: "create" | "rename" = "create",
+    ) =>
       new Promise<string | undefined>((resolve) => {
-        setBranchNameRequest({ startPoint, initialValue, resolve });
+        setBranchNameRequest({ startPoint, initialValue, mode, resolve });
       }),
     [],
   );
@@ -3696,7 +3701,7 @@ export function App() {
   };
 
   const createWorkspaceBranch = useCallback(
-    async (startPoint?: string) => {
+    async (startPoint?: string, rename = false) => {
       const root = activeSession?.workspacePath ?? workspacePath;
       if (!root) {
         notify(
@@ -3726,20 +3731,27 @@ export function App() {
         );
         return;
       }
-      const branch = await requestBranchName(startPoint);
+      const branch = await requestBranchName(
+        rename ? undefined : startPoint,
+        rename ? (startPoint ?? "") : "",
+        rename ? "rename" : "create",
+      );
       if (!branch) {
         return;
       }
       setIsBranchLoading(true);
       try {
         const catalog = isTauriRuntime()
-          ? await invoke<GitBranchCatalog>("git_create_branch", {
-              request: {
-                workspacePath: root,
-                branch,
-                startPoint: startPoint || undefined,
+          ? await invoke<GitBranchCatalog>(
+              rename ? "git_rename_branch" : "git_create_branch",
+              {
+                request: {
+                  workspacePath: root,
+                  branch,
+                  startPoint: startPoint || undefined,
+                },
               },
-            })
+            )
           : { available: true, current: branch, branches: [branch] };
         setBranchCatalog(catalog);
         if (activeSessionId && isTauriRuntime()) {
@@ -3750,9 +3762,17 @@ export function App() {
           await refreshSessions();
         }
         refreshIdeSourceControl(root);
-        notify("terminal", "Branch created", branch);
+        notify(
+          "terminal",
+          rename ? "Branch renamed" : "Branch created",
+          branch,
+        );
       } catch (error) {
-        notify("command-failed", "Could not create branch", String(error));
+        notify(
+          "command-failed",
+          rename ? "Could not rename branch" : "Could not create branch",
+          String(error),
+        );
         await refreshWorkspaceBranches(root);
       } finally {
         setIsBranchLoading(false);
@@ -8913,6 +8933,14 @@ export function App() {
             "The branch name could not be read.",
           );
         }
+        return;
+      }
+
+      if (action.startsWith("rename-current-branch:")) {
+        void createWorkspaceBranch(
+          decodeURIComponent(action.slice("rename-current-branch:".length)),
+          true,
+        );
         return;
       }
 
@@ -16585,6 +16613,7 @@ export function App() {
         <BranchNameDialog
           startPoint={branchNameRequest.startPoint}
           initialValue={branchNameRequest.initialValue}
+          mode={branchNameRequest.mode}
           onFinish={finishBranchNameRequest}
         />
       ) : null}
