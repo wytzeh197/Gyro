@@ -187,15 +187,14 @@ for (const [name, html] of Object.entries(pages)) {
 }
 
 containsAll(pages.home, "Homepage", [
-  "The open-source AI workspace.",
+  "A place to think.",
+  "A space to build.",
+  "workspace-switcher",
+  "ownership-title",
+  "An open-source workspace for your agents, terminal, and code.",
   "Public alpha",
   "Think, build, and ship in one place.",
-  "Open source · No account · No analytics",
-  "Tool switches cost context.",
-  "Terminal without the ask.",
-  "Chat without the run.",
-  "Diff without the why.",
-  'class="premise-list"',
+  "Public alpha",
   "Three surfaces. One task.",
   "Direct work.",
   "Run locally.",
@@ -208,16 +207,12 @@ containsAll(pages.home, "Homepage", [
   'class="mock mock-terminal"',
   'class="mock mock-diff"',
   "Bring your own.",
-  "Use the tools on your Mac.",
+  "Your agents. Your subscriptions.",
   'class="agent-grid"',
   'class="agent-tile agent-ollama"',
   ">Ollama</span>",
-  "assets/screenshots/hero-600.webp",
-  "assets/screenshots/hero-1200.webp",
-  "assets/screenshots/hero-2400.webp",
-  "assets/screenshots/hero-light-600.webp",
-  "assets/screenshots/hero-light-1200.webp",
-  "assets/screenshots/hero-light-2400.webp",
+  "assets/screenshots/hero-current-dark.webp",
+  "assets/screenshots/hero-current-light.webp",
   "assets/social-preview.png",
   "Download for macOS.",
   "Download DMG",
@@ -258,8 +253,8 @@ check(
   "Download pages must not show an automatic recommendation sentence",
 );
 check(
-  !css.toLowerCase().includes("gradient("),
-  "Site styles must not contain gradient backgrounds",
+  !css.replace(/\.home-page \.product-stage-frame::after\s*\{[^}]*\}/g, "").toLowerCase().includes("gradient("),
+  "Gradients are limited to the requested screenshot outline",
 );
 check(
   !/assets\/screenshots\/(chat|cli|workspace)-/.test(allHtml),
@@ -528,6 +523,8 @@ check(
  * scripts/capture-site-screenshots.mjs; change them together.
  */
 const screenshotSpecs = [
+  ["site/assets/screenshots/hero-current-dark.webp", 1660, 989],
+  ["site/assets/screenshots/hero-current-light.webp", 1666, 999],
   ["site/assets/screenshots/hero-600.webp", 600, 375],
   ["site/assets/screenshots/hero-1200.webp", 1200, 750],
   ["site/assets/screenshots/hero-2400.webp", 2400, 1500],

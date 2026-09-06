@@ -87,12 +87,74 @@ const keepPng = process.argv.includes("--keep-png");
  * background. 1200x750 CSS pixels at a 2x device scale gives the 2400px master
  * the desktop stage picks from.
  *
- * `steps` matter as much as the size. A freshly opened session shows a
- * collapsed run, which photographs as an app that has not done anything — the
- * exact impression the hero should not leave. Expanding the run puts the
- * workspace review, commands, and edited files on screen beside the result.
+ * The hero pairs a completed conversation with a sample code review. Keeping
+ * the run collapsed leaves the edited-file summary visible beside the diff.
  */
-const heroSteps = ["selectSession", "expandRun"];
+const heroSteps = ["selectSession", "openCompanion", "openCompanionReview"];
+
+const heroWorkbench = {
+  diffReview: {
+    files: [
+      {
+        path: "src/sync.js",
+        additions: 8,
+        deletions: 2,
+        source: "agent-generated",
+        state: "pending",
+        comments: 0,
+        lines: [
+          {
+            kind: "context",
+            content: "export async function drain(queue) {",
+            number: 1,
+          },
+          {
+            kind: "context",
+            content: "  const item = queue.shift();",
+            number: 2,
+          },
+          { kind: "removed", content: "  for (;;) {", number: 3 },
+          {
+            kind: "removed",
+            content: "    try { return await send(item); } catch {}",
+            number: 4,
+          },
+          { kind: "added", content: "  const MAX_ATTEMPTS = 5;", number: 3 },
+          {
+            kind: "added",
+            content: "  for (let n = 0; n < MAX_ATTEMPTS; n++) {",
+            number: 4,
+          },
+          { kind: "added", content: "    try {", number: 5 },
+          {
+            kind: "added",
+            content: "      return await send(item);",
+            number: 6,
+          },
+          { kind: "added", content: "    } catch (error) {", number: 7 },
+          {
+            kind: "added",
+            content: "      if (n === 4) throw error;",
+            number: 8,
+          },
+          {
+            kind: "added",
+            content: "      await wait(2 ** n * 100);",
+            number: 9,
+          },
+          { kind: "added", content: "    }", number: 10 },
+          { kind: "context", content: "  }", number: 11 },
+          { kind: "context", content: "}", number: 12 },
+        ],
+      },
+    ],
+    selectedPath: "src/sync.js",
+    approvalState: "pending",
+    commitMessage: "",
+    collapsedDirectories: [],
+    lastAction: "Sample change ready for review",
+  },
+};
 
 const marketingScenes = [
   {
@@ -102,6 +164,7 @@ const marketingScenes = [
     width: 1200,
     height: 750,
     steps: heroSteps,
+    workbench: heroWorkbench,
     outputs: [
       { file: "hero-2400.webp", width: 2400, height: 1500 },
       { file: "hero-1200.webp", width: 1200, height: 750 },
@@ -116,6 +179,7 @@ const marketingScenes = [
     width: 1200,
     height: 750,
     steps: heroSteps,
+    workbench: heroWorkbench,
     outputs: [
       { file: "hero-light-2400.webp", width: 2400, height: 1500 },
       { file: "hero-light-1200.webp", width: 1200, height: 750 },
@@ -131,7 +195,7 @@ const readmeScenes = [
     theme: "dark",
     width: 1200,
     height: 750,
-    steps: heroSteps,
+    steps: ["selectSession", "expandRun"],
     outputs: [
       {
         directory: "readme",
@@ -221,6 +285,13 @@ const clickByText = (text) => `
 `;
 
 const steps = {
+  openCompanion: clickByText("Panel"),
+  openCompanionReview: `(() => {
+    const button = [...document.querySelectorAll('.gyro-companion-launcher button')].find(node => node.textContent.includes('Review'));
+    if (!button) return 'missing:companion-review';
+    button.click();
+    return 'clicked:companion-review';
+  })()`,
   selectSession: `
     (() => {
       const nodes = [...document.querySelectorAll('button, [role="button"], li, a')];
