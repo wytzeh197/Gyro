@@ -28463,12 +28463,19 @@ button.gyro-account-menu-row:hover,
 
 /* -- One column, top to bottom -------------------------------------------- */
 
-/* The thread header used to run edge to edge while the turns below it sat in a
-   772px column, so the title floated ~200px left of the conversation it names.
-   Keep the header's own background full-bleed and pull its content onto the
-   transcript's edges; below that width the gutter falls back to the old 14px. */
+/* Each chat owns the full width of its header. */
 .gyro-chat-surface.is-thread:not(.is-tiled) > .gyro-chat-thread-topbar {
-  padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
+  padding-inline: 14px;
+}
+
+/* Use the same pane-relative gutters for the transcript and composer. */
+.gyro-chat-surface.is-thread:not(.is-tiled) .gyro-chat-transcript,
+.gyro-chat-surface.is-thread:not(.is-tiled) .gyro-chat-composer-dock {
+  padding-inline: clamp(14px, 4%, 44px);
+}
+
+.gyro-chat-surface.is-thread .gyro-chat-transcript {
+  justify-items: stretch;
 }
 
 /* -- Settings rows -------------------------------------------------------- */
@@ -30253,4 +30260,51 @@ button.gyro-account-menu-row:hover,
   .gyro-settings-nav {
     flex-wrap: nowrap;
   }
+}
+
+/* Context menus must paint above the composer controls, including their
+   stacking context, and open above the bottom context strip. */
+.gyro-chat-surface
+  .gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-context-row:has(.gyro-composer-popover) {
+  position: relative;
+  z-index: 130;
+}
+
+.gyro-composer-context-row .gyro-composer-popover {
+  background: var(--gyro-surface-raised);
+  backdrop-filter: none;
+  bottom: calc(100% + 8px);
+  top: auto;
+  min-width: min(300px, calc(100vw - 32px));
+}
+
+.gyro-branch-name-dialog {
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+  border: 1px solid var(--gyro-border);
+  border-radius: 14px;
+  width: min(400px, calc(100vw - 48px));
+  padding: 24px;
+}
+.gyro-branch-name-dialog::backdrop {
+  background: var(--gyro-scrim);
+}
+.gyro-branch-name-dialog form {
+  display: grid;
+  gap: 16px;
+}
+.gyro-branch-name-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.gyro-branch-name-dialog input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+}
+.gyro-branch-name-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

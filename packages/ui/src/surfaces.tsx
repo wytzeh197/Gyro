@@ -9191,6 +9191,7 @@ function ChatContextSection({
         </button>
         {activePopover === "branch" ? (
           <ComposerPopover
+            align="end"
             className="gyro-composer-branch-picker"
             id={`${popoverBaseId}-branch`}
             items={branchPopoverItems({
@@ -18338,11 +18339,25 @@ function branchPopoverItems({
               (worktree) => worktree.branch === branch,
             )
           ? "Checked out in a linked worktree"
-          : "Switch this clean workspace",
+          : "Switch branch; keep compatible local changes",
     icon: GitBranch,
     label: branch,
   }));
-  return [createBranchItem, ...branchItems];
+  return [
+    createBranchItem,
+    ...(branchCatalog.current
+      ? [
+          {
+            action: `rename-current-branch:${encodeURIComponent(branchCatalog.current)}`,
+            disabled: isDisabled,
+            detail: branchCatalog.current,
+            icon: Edit3,
+            label: "Rename current branch…",
+          },
+        ]
+      : []),
+    ...branchItems,
+  ];
 }
 
 function ComposerPopover({

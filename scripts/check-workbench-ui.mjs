@@ -929,19 +929,19 @@ const openAiCatalog = providerCatalog.find(
 );
 expect(
   openAiCatalog?.models
-    .slice(0, 3)
+    .slice(0, 4)
     .map((model) => model.id)
-    .join(",") === "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
+    .join(",") === "gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
     openAiCatalog.selectedModelId === "gpt-5.6-sol" &&
     openAiCatalog.models
-      .slice(0, 3)
+      .slice(1, 4)
       .every(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
             "low,medium,high,xhigh,max,ultra" &&
           model.contextWindowTokens === 1_050_000,
       ),
-  "OpenAI should expose all GPT-5.6 variants with their supported effort levels.",
+  "OpenAI should expose GPT-6 Astra and all GPT-5.6 variants with their supported effort levels.",
 );
 const restoredEnabledConfig = normalizedConfig({
   telemetryEnabled: false,
@@ -961,10 +961,10 @@ const restoredEnabledConfig = normalizedConfig({
 expect(
   restoredEnabledConfig.modelProviders
     .find((provider) => provider.id === "openai")
-    ?.models.slice(0, 3)
+    ?.models.slice(0, 4)
     .map((model) => model.id)
-    .join(",") === "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
-  "Saved legacy provider configs should merge in the current GPT-5.6 catalog.",
+    .join(",") === "gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
+  "Saved legacy provider configs should merge in the current OpenAI catalog.",
 );
 expect(
   providersForConfig(restoredEnabledConfig).find(

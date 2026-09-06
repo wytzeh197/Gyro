@@ -351,12 +351,7 @@ type WorkspaceFileWriteRequest = {
 type IdeCommandOutput = {
   /** Mirrors the Rust bounded-command terminations, not just done/failed. */
   status:
-    | "done"
-    | "failed"
-    | "cancelled"
-    | "timed-out"
-    | "inactive"
-    | "output-limit";
+    "done" | "failed" | "cancelled" | "timed-out" | "inactive" | "output-limit";
   stdout: string;
   stderr: string;
 };
@@ -875,6 +870,11 @@ export function App() {
   const [recentProjectPaths, setRecentProjectPaths] = useState<string[]>(
     loadRecentProjectPaths,
   );
+  const [branchNamePrompt, setBranchNamePrompt] = useState<{
+    title: string;
+    initialValue: string;
+    resolve: (name?: string) => void;
+  }>();
   const [projectRemoveCandidate, setProjectRemoveCandidate] =
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
@@ -3143,7 +3143,7 @@ export function App() {
   );
 
   const createWorkspaceBranch = useCallback(
-    async (startPoint?: string) => {
+    async (startPoint?: string, rename = false) => {
       const root = activeSession?.workspacePath ?? workspacePath;
       if (!root) {
         notify(
@@ -3173,27 +3173,29 @@ export function App() {
         );
         return;
       }
-      const branch = window
-        .prompt(
-          startPoint
-            ? `New branch name (from ${startPoint})`
-            : "New branch name",
-          "",
-        )
-        ?.trim();
+      const branch = await new Promise<string | undefined>((resolve) => {
+        setBranchNamePrompt({
+          title: rename ? "Rename current branch" : "New branch",
+          initialValue: rename ? (startPoint ?? "") : "",
+          resolve,
+        });
+      });
       if (!branch) {
         return;
       }
       setIsBranchLoading(true);
       try {
         const catalog = isTauriRuntime()
-          ? await invoke<GitBranchCatalog>("git_create_branch", {
-              request: {
-                workspacePath: root,
-                branch,
-                startPoint: startPoint || undefined,
+          ? await invoke<GitBranchCatalog>(
+              rename ? "git_rename_branch" : "git_create_branch",
+              {
+                request: {
+                  workspacePath: root,
+                  branch,
+                  startPoint: startPoint || undefined,
+                },
               },
-            })
+            )
           : { available: true, current: branch, branches: [branch] };
         setBranchCatalog(catalog);
         if (activeSessionId && isTauriRuntime()) {
@@ -3204,9 +3206,17 @@ export function App() {
           await refreshSessions();
         }
         refreshIdeSourceControl(root);
-        notify("terminal", "Branch created", branch);
+        notify(
+          "terminal",
+          rename ? "Branch renamed" : "Branch created",
+          branch,
+        );
       } catch (error) {
-        notify("command-failed", "Could not create branch", String(error));
+        notify(
+          "command-failed",
+          rename ? "Could not rename branch" : "Could not create branch",
+          String(error),
+        );
         await refreshWorkspaceBranches(root);
       } finally {
         setIsBranchLoading(false);
@@ -7951,6 +7961,14 @@ export function App() {
             "The branch name could not be read.",
           );
         }
+        return;
+      }
+
+      if (action.startsWith("rename-current-branch:")) {
+        void createWorkspaceBranch(
+          decodeURIComponent(action.slice("rename-current-branch:".length)),
+          true,
+        );
         return;
       }
 
@@ -15034,6 +15052,56 @@ export function App() {
           providerLabel={modelStandardPrompt.providerLabel}
           selectionCount={modelStandardPrompt.count}
         />
+      ) : null}
+      {branchNamePrompt ? (
+        <dialog
+          className="gyro-branch-name-dialog"
+          aria-labelledby="gyro-branch-name-title"
+          ref={(node) => {
+            if (node && !node.open) node.showModal();
+          }}
+          onCancel={() => {
+            branchNamePrompt.resolve();
+            setBranchNamePrompt(undefined);
+          }}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const name = String(
+                new FormData(event.currentTarget).get("branch") ?? "",
+              ).trim();
+              if (name) {
+                branchNamePrompt.resolve(name);
+                setBranchNamePrompt(undefined);
+              }
+            }}
+          >
+            <h2 id="gyro-branch-name-title">{branchNamePrompt.title}</h2>
+            <input
+              aria-label="Branch name"
+              name="branch"
+              defaultValue={branchNamePrompt.initialValue}
+              autoFocus
+              required
+            />
+            <footer>
+              <button
+                type="button"
+                className="gyro-secondary-button"
+                onClick={() => {
+                  branchNamePrompt.resolve();
+                  setBranchNamePrompt(undefined);
+                }}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="gyro-primary-button">
+                Save
+              </button>
+            </footer>
+          </form>
+        </dialog>
       ) : null}
       {projectRemoveCandidate ? (
         <ProjectRemoveConfirmOverlay

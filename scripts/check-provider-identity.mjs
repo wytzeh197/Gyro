@@ -60,3 +60,19 @@ assert.equal(envProvider.authMode, "env");
 assert.equal(envProvider.apiKeyRef, "provider-env:XAI_API_KEY");
 
 console.log("provider identity checks passed");
+
+// New catalog entries remain selectable when restoring saved provider settings.
+for (const [providerId, modelId] of [
+  ["openai", "gpt-6-astra"],
+  ["anthropic", "claude-fable-5-1"],
+]) {
+  const provider = resolved(providerId, {
+    id: providerId,
+    displayName: providerId,
+    enabled: true,
+    models: [],
+    selectedModelId: modelId,
+  });
+  assert.equal(provider.selectedModelId, modelId);
+  assert.ok(provider.models.some((model) => model.id === modelId));
+}

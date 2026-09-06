@@ -86,6 +86,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "gpt-6-astra",
+        displayName: "GPT-6 Astra",
+        description: "Complex reasoning, coding, and long-running work.",
+        // Codex CLI's default window; the API offers a different limit.
+        contextWindowTokens: 272_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+      },
+      {
         id: "gpt-5.6-sol",
         displayName: "GPT-5.6 Sol",
         description: "Frontier model for complex professional work.",
@@ -160,9 +169,17 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "claude-fable-5-1",
+        displayName: "Claude Fable 5.1",
+        description: "Demanding reasoning and long-running agentic work.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
+      },
+      {
         id: "claude-fable-5",
         displayName: "Claude Fable 5",
-        description: "Most capable broadly released Claude model.",
+        description: "Previous-generation Fable model for complex work.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
