@@ -421,8 +421,35 @@ expect(
     surfaceSource.includes('className="gyro-thread-context-branch"') &&
     surfaceSource.includes('id="gyro-thread-workspace-menu"') &&
     surfaceSource.includes("items={threadWorkspaceItems}") &&
+    surfaceSource.includes(
+      "items={threadWorkspaceItems}\n                  keepInBounds",
+    ) &&
     surfaceSource.includes('title="Workspace context"'),
   "Chat headers should keep the title clean and expose one combined workspace context menu.",
+);
+expect(
+  cssRules(
+    styleSource,
+    ".gyro-chat-surface.is-thread > .gyro-chat-thread-topbar",
+  ).some(
+    (rule) =>
+      rule.includes("overflow: visible") &&
+      rule.includes("position: relative") &&
+      rule.includes("z-index: 80"),
+  ) &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas",
+    ).some(
+      (rule) =>
+        rule.includes("position: relative") && rule.includes("z-index: 0"),
+    ) &&
+    styleSource.includes(
+      ".gyro-composer-popover-title\n  + .gyro-composer-popover-section-title",
+    ) &&
+    styleSource.includes("width: min(312px, calc(100vw - 24px))") &&
+    styleSource.includes("min-height: 36px"),
+  "The workspace context menu should layer above the animated chat canvas and use a compact grouped layout.",
 );
 expect(
   !surfaceSource.includes('className="gyro-thread-context-project"') &&
@@ -839,10 +866,22 @@ expect(
 );
 
 expect(
-  styleSource.includes(
-    ".gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {\n  min-height: 44px;\n  padding-right: 18px;",
-  ) && !styleSource.includes("padding-right: 96px;"),
-  "Grid chat controls should align to the right edge without a reserved titlebar gap.",
+  cssRules(
+    styleSource,
+    ".gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar",
+  ).some(
+    (rule) =>
+      rule.includes("height: 38px") &&
+      rule.includes("min-height: 38px") &&
+      rule.includes("padding-inline: max(") &&
+      rule.includes("var(--gyro-chat-content-width)"),
+  ) &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
+    ).some((rule) => rule.includes("border: 0")) &&
+    !styleSource.includes("padding-right: 96px;"),
+  "Grid chat headers should share the compact row, align to the conversation column, and meet at one clean seam.",
 );
 
 const emittedComposerActions = new Set([
@@ -882,7 +921,7 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,kimi,xai,gemini,ollama",
+    "openai,anthropic,kimi,xai,gemini,cursor,opencode,ollama",
   "Provider catalog should include executable local Ollama after the CLI-backed providers.",
 );
 const orderedStreamState = new Map();
@@ -1382,7 +1421,10 @@ expect(
   "Initial workbench state should start without demo diff review files.",
 );
 expect(
-  initialState.providerStatuses.length === 6 &&
+  initialState.providerStatuses.length === providerCatalog.length &&
+    providerCatalog.every((entry) =>
+      initialState.providerStatuses.some((status) => status.id === entry.id),
+    ) &&
     initialState.providerStatuses.some((provider) => provider.id === "kimi") &&
     initialState.providerStatuses.some((provider) => provider.id === "xai") &&
     initialState.providerStatuses.some((provider) => provider.id === "ollama"),
@@ -3951,6 +3993,20 @@ expect(
   "Background chats should keep session-scoped updates and show a rotating sidebar activity indicator.",
 );
 expect(
+  appSource.includes("unreadCompletedSessionIds") &&
+    appSource.includes('latestMenuBarOutcome.kind === "chat"') &&
+    appSource.includes('activeWorkspaceLayoutRef.current !== "thread"') &&
+    appSource.includes("acknowledgeFinishedChat(sessionId);") &&
+    appSource.includes("completedSessionIds={unreadCompletedSessionIds}") &&
+    surfaceSource.includes("isUnreadComplete") &&
+    surfaceSource.includes('"Chat completed, unread"') &&
+    surfaceSource.includes('className="gyro-session-complete-dot"') &&
+    styleSource.includes(".gyro-session-time.is-complete") &&
+    styleSource.includes(".gyro-session-complete-dot") &&
+    styleSource.includes("background: var(--gyro-update-blue)"),
+  "Completed background chats should replace the working icon with a blue unread dot that clears when the chat is opened or focused in Grid.",
+);
+expect(
   typeSource.includes("providerId?: ProviderId") &&
     typeSource.includes("modelId?: string") &&
     surfaceSource.includes("providerIdForSession") &&
@@ -4860,7 +4916,7 @@ expect(
       'await invoke<boolean>("delete_session", { sessionId })',
     ) &&
     workbenchSource.includes("sideChatSessionIds") &&
-    surfaceSource.includes("not saved to history") &&
+    surfaceSource.includes("Temporary chat · Cleared when you close this tab") &&
     styleSource.includes(".gyro-side-chat-composer {"),
   "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
 );
@@ -4993,9 +5049,9 @@ expect(
     // cyclic percentage resolution and reintroduces the vertical strip.
     styleSource.includes("min-width: 280px") &&
     !styleSource.includes("min-width: min(100%, 280px)") &&
-    cssRules(styleSource, ".gyro-chat-thread-canvas").some(
+    cssRules(styleSource, ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas").some(
       (rule) =>
-        rule.includes("grid-template-rows: minmax(0, 1fr) auto") &&
+        rule.includes("grid-template-rows: minmax(0, 1fr);") &&
         rule.includes("grid-template-columns: minmax(0, 1fr)"),
     ) &&
     // Dock children center via margin, not align-self:center (shrink-to-fit).
@@ -5008,6 +5064,12 @@ expect(
     surfaceSource.includes("event.preventDefault()") &&
     styleSource.includes("--gyro-chat-content-width: 760px") &&
     styleSource.includes("max-width: var(--gyro-chat-content-width)") &&
+    cssRules(styleSource, ".gyro-chat-transcript").some(
+      (rule) =>
+        rule.includes("box-sizing: border-box") &&
+        rule.includes("max-width: none") &&
+        rule.includes("width: 100%"),
+    ) &&
     styleSource.includes("border-radius: 20px") &&
     styleSource.includes("color: var(--gyro-warn)") &&
     styleSource.includes(
@@ -5100,6 +5162,13 @@ const updateControlSource = surfaceSource.slice(
   updateControlStart,
   surfaceSource.indexOf("function SettingsSidebarContent", updateControlStart),
 );
+const sidebarFooterStart = surfaceSource.indexOf(
+  'className="gyro-sidebar-footer-row"',
+);
+const sidebarFooterSource = surfaceSource.slice(
+  sidebarFooterStart,
+  surfaceSource.indexOf("{isIdeSurface ?", sidebarFooterStart),
+);
 expect(
   surfaceSource.includes('className="gyro-sidebar-update"') &&
     !surfaceSource.includes("gyro-sidebar-update is-windowbar") &&
@@ -5122,6 +5191,21 @@ expect(
     !surfaceSource.includes("function UpdatePopover") &&
     styleSource.includes(".gyro-sidebar-update-button") &&
     styleSource.includes(".gyro-sidebar-footer-row > .gyro-sidebar-update") &&
+    sidebarFooterSource.includes("<WorkspacePreparationControl") &&
+    sidebarFooterSource.indexOf("<WorkspacePreparationControl") <
+      sidebarFooterSource.indexOf("<SidebarUpdateControl") &&
+    (surfaceSource.match(/<WorkspacePreparationControl/g) ?? []).length === 2 &&
+    styleSource.includes(
+      ".gyro-sidebar-footer-row > .gyro-workspace-preparation",
+    ) &&
+    styleSource.includes(
+      "grid-template-columns: auto minmax(0, 1fr) auto auto;",
+    ) &&
+    styleSource.includes(
+      ".gyro-sidebar-footer-row:has(> .gyro-sidebar-update)",
+    ) &&
+    styleSource.includes("grid-column: 4;") &&
+    styleSource.includes("bottom: calc(100% + 8px);") &&
     styleSource.includes("--gyro-update-blue: #356fd6") &&
     styleSource.includes("background: var(--gyro-update-blue)") &&
     styleSource.includes("display: inline-flex") &&
@@ -5165,7 +5249,7 @@ expect(
     !surfaceSource.includes('label="Release channel"') &&
     !surfaceSource.includes('value="Valid"') &&
     !surfaceSource.includes('value="Today"'),
-  "Updater-signed public Alpha releases should use one direct contextual action above Settings with progress and development safety.",
+  "Workspace preparation should appear before the updater beside Settings while Update keeps the right edge.",
 );
 expect(
   updateControllerSource.includes(
@@ -5931,6 +6015,16 @@ expect(
   "Composer controls should compact before they can overflow a narrow shell.",
 );
 expect(
+  tauriSource.includes("fn normal_chat_requests_plan(message: &str)") &&
+    tauriSource.includes(
+      "request.mode == ChatMode::Normal && normal_chat_requests_plan(&request.message)",
+    ) &&
+    tauriSource.includes("request.mode = ChatMode::Plan") &&
+    tauriSource.includes('"source": "message-intent"') &&
+    tauriSource.includes('"plan-mode-fallback"'),
+  "Explicit plan requests in Normal chat should enter the real read-only Plan mode and always produce a plan document.",
+);
+expect(
   surfaceSource.includes("function PlanDecisionCard") &&
     surfaceSource.includes("{isPlanReadyForDecision && sessionPlan ? (") &&
     surfaceSource.includes('aria-label="Plan ready for approval"') &&
@@ -5995,7 +6089,7 @@ expect(
       ".gyro-composer-control:has(.gyro-composer-popover, .gyro-provider-picker)",
     ) &&
     styleSource.includes(
-      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout\n  .gyro-chat-surface.is-thread\n  > .gyro-chat-thread-topbar",
+      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout\n  .gyro-chat-surface.is-thread:not(.is-tiled)\n  > .gyro-chat-thread-topbar",
     ) &&
     styleSource.lastIndexOf("z-index: 120") >
       styleSource.lastIndexOf("/* Ordered chat activity"),
@@ -6111,6 +6205,8 @@ expect(
     cssRules(styleSource, ".gyro-sidebar-restore-button").every(
       (rule) => !rule.includes("top: 16px"),
     ) &&
+    styleSource.includes(".gyro-chat-grid.has-multiple-panes") &&
+    styleSource.includes(".gyro-sidebar-restore-button {\n  top: 7px;") &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
     styleSource.includes("margin: auto -8px 0"),
@@ -7017,9 +7113,16 @@ expect(
       "COMPACT_MILLIONS_THRESHOLD",
     ) &&
     providerCatalog.every((provider) =>
-      provider.models.every((model) => (model.contextWindowTokens ?? 0) > 0),
+      provider.models.every((model) =>
+        // CLI default aliases resolve the actual model at runtime. They must
+        // not advertise a made-up catalog context window.
+        (provider.id === "cursor" && model.id === "cursor-default") ||
+        (provider.id === "opencode" && model.id === "opencode-default")
+          ? model.contextWindowTokens === undefined
+          : (model.contextWindowTokens ?? 0) > 0,
+      ),
     ),
-  "Every provider should resolve a real context window, whether or not its CLI reports token usage.",
+  "Named models should declare context windows; CLI default aliases should defer to runtime usage.",
 );
 
 expect(
@@ -7119,6 +7222,16 @@ expect(
     ) &&
     surfaceSource.includes("function LiveFileChanges") &&
     surfaceSource.includes("gyro-composer-live-changes") &&
+    surfaceSource.indexOf('className="gyro-composer-live-changes"') >
+      surfaceSource.indexOf("{queuedMessages.length > 0 ?") &&
+    surfaceSource.indexOf('className="gyro-composer-live-changes"') >
+      surfaceSource.indexOf("{isPlanReadyForDecision && sessionPlan ?") &&
+    cssRules(styleSource, ".gyro-chat-message-queue-wrap").every(
+      (rule) => !/margin-bottom:\s*-/.test(rule),
+    ) &&
+    cssRules(styleSource, ".gyro-chat-message-queue").every(
+      (rule) => !/margin-bottom:\s*-/.test(rule),
+    ) &&
     surfaceSource.includes(
       'className="gyro-chat-run-change-summary is-complete"',
     ) &&
@@ -7126,7 +7239,7 @@ expect(
     styleSource.includes(".gyro-session-goal-status") &&
     styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
     styleSource.includes(".gyro-change-summary-details"),
-  "Live file changes should sit by the composer and completed edits should retain their file review card.",
+  "Live file changes should sit below queued turns without negative-margin overlap, and completed edits should retain their file review card.",
 );
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

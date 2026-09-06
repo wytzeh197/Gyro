@@ -8991,7 +8991,7 @@ textarea:focus-visible {
   }
 }
 
-/* Workspace preparation lives in window chrome, separate from Settings. */
+/* Workspace preparation is a compact status action beside the footer update. */
 .gyro-workspace-preparation {
   margin-left: auto;
   position: relative;
@@ -24731,6 +24731,8 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-companion-content {
+  container-name: gyro-companion-content;
+  container-type: inline-size;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
@@ -25677,6 +25679,25 @@ button.gyro-account-menu-row:hover,
   animation: gyro-chat-activity-spin 900ms linear infinite;
 }
 
+.gyro-session-time.is-complete {
+  align-items: center;
+  display: inline-flex;
+  height: 16px;
+  justify-content: center;
+  max-width: 16px;
+  width: 16px;
+}
+
+.gyro-session-complete-dot {
+  background: var(--gyro-update-blue);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--gyro-update-blue) 14%, transparent);
+  display: block;
+  height: 8px;
+  width: 8px;
+}
+
 /* Codex parity for the sent prompt and the leading edge of an AI response. */
 .gyro-chat-turn > .gyro-message.is-user {
   margin-bottom: 26px;
@@ -25894,11 +25915,11 @@ button.gyro-account-menu-row:hover,
   border-radius: 16px 16px 8px 8px;
   box-sizing: border-box;
   color: var(--gyro-text);
-  margin-bottom: -12px;
+  margin-bottom: 8px;
   max-height: 132px;
   max-width: var(--gyro-composer-width);
   overflow: auto;
-  padding: 4px 10px 17px;
+  padding: 4px 10px;
   width: min(var(--gyro-composer-width), 100%);
   z-index: 1;
 }
@@ -26551,13 +26572,29 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
-  .gyro-chat-surface.is-thread
+  .gyro-chat-surface.is-thread:not(.is-tiled)
   > .gyro-chat-thread-topbar {
   padding-left: 128px;
 }
 
+.gyro-app-shell.is-sidebar-hidden.is-thread-layout
+  .gyro-chat-grid.has-multiple-panes
+  .gyro-chat-grid-slot:first-child
+  .gyro-chat-surface.is-thread
+  > .gyro-chat-thread-topbar {
+  padding-left: max(128px, calc((100% - var(--gyro-chat-content-width)) / 2));
+}
+
 @media (max-width: 720px) {
   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
+    .gyro-chat-surface.is-thread:not(.is-tiled)
+    > .gyro-chat-thread-topbar {
+    padding-left: 122px;
+  }
+
+  .gyro-app-shell.is-sidebar-hidden.is-thread-layout
+    .gyro-chat-grid.has-multiple-panes
+    .gyro-chat-grid-slot:first-child
     .gyro-chat-surface.is-thread
     > .gyro-chat-thread-topbar {
     padding-left: 122px;
@@ -29755,6 +29792,10 @@ button.gyro-account-menu-row:hover,
   gap: 1px;
 }
 
+.gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot {
+  border: 0;
+}
+
 /* Focus stops dimming the other chat. Both transcripts stay legible; the
    active pane is marked at its top edge and the inactive one simply recedes. */
 .gyro-chat-grid.has-multiple-panes
@@ -29931,8 +29972,10 @@ button.gyro-account-menu-row:hover,
 
 .gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
-  min-height: 42px;
-  padding-right: 10px;
+  box-sizing: border-box;
+  height: 38px;
+  min-height: 38px;
+  padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
 }
 
 .gyro-chat-surface.is-tiled .gyro-chat-thread-identity > strong {
@@ -30388,14 +30431,36 @@ button.gyro-account-menu-row:hover,
   font-size: 16px;
 }
 
-/* Canvas must be two rows (transcript + dock). The older 46px/48px first track
-   assumed the topbar lived inside the canvas; it is a surface sibling now.
-   One definite column so the dock width comes from the surface, not content. */
-.gyro-chat-thread-canvas {
+/* The transcript fills the canvas; the composer floats over its lower edge. */
+.gyro-chat-surface.is-thread > .gyro-chat-thread-canvas {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   width: 100%;
+}
+
+.gyro-chat-surface.is-thread .gyro-chat-thread-canvas > .gyro-chat-transcript {
+  padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 18px);
+  scroll-padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 18px);
+}
+
+.gyro-chat-surface.is-thread .gyro-chat-thread-canvas > .gyro-chat-composer-dock {
+  position: absolute;
+  inset: auto 0 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.gyro-chat-thread-canvas > .gyro-chat-composer-dock > * {
+  pointer-events: auto;
+}
+
+.gyro-chat-thread-canvas > .gyro-chat-composer-dock > .gyro-composer-live-changes {
+  pointer-events: none;
+}
+
+.gyro-chat-thread-canvas .gyro-composer-live-changes > * {
+  pointer-events: auto;
 }
 
 /* -- One column, top to bottom -------------------------------------------- */
@@ -30504,6 +30569,14 @@ button.gyro-account-menu-row:hover,
   top: 11px;
   width: 28px;
   z-index: 120;
+}
+
+.gyro-app-shell.is-sidebar-hidden.is-thread-layout:has(
+    .gyro-chat-grid.has-multiple-panes
+  )
+  > .gyro-sidebar-restore-cluster
+  .gyro-sidebar-restore-button {
+  top: 7px;
 }
 
 .gyro-sidebar-restore-button:hover {
@@ -32899,18 +32972,43 @@ button.gyro-account-menu-row:hover,
   background: var(--gyro-control-hover);
 }
 
-/* The bottom row deliberately owns update status: Settings remains anchored on
-   the left and the blue action is always in the bottom-right corner. */
+/* Footer status actions read left-to-right while Update keeps its right edge. */
 .gyro-sidebar-footer-row {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
 }
 
 .gyro-sidebar-footer-row > .gyro-account-button + .gyro-shell-optimizing {
   grid-column: 2;
 }
 
-.gyro-sidebar-footer-row > .gyro-sidebar-update {
+.gyro-sidebar-footer-row > .gyro-workspace-preparation {
   grid-column: 3;
+  justify-self: end;
+  margin-left: 0;
+}
+
+.gyro-sidebar-footer-row
+  > .gyro-workspace-preparation
+  .gyro-workspace-preparation-popover {
+  bottom: calc(100% + 8px);
+  top: auto;
+}
+
+.gyro-sidebar-footer-row:has(> .gyro-sidebar-update)
+  > .gyro-workspace-preparation
+  .gyro-workspace-preparation-button {
+  padding-right: 4px;
+}
+
+.gyro-sidebar-footer-row:has(> .gyro-sidebar-update)
+  > .gyro-workspace-preparation
+  .gyro-workspace-preparation-button
+  > span:last-child {
+  display: none;
+}
+
+.gyro-sidebar-footer-row > .gyro-sidebar-update {
+  grid-column: 4;
   justify-self: end;
 }
 
@@ -33548,17 +33646,19 @@ button.gyro-account-menu-row:hover,
 .gyro-environment-rail.is-tool .gyro-diff-review,
 .gyro-environment-rail.is-tool .gyro-diff-review.is-compact {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: clamp(112px, 24vh, 200px) minmax(0, 1fr);
 }
 
-/* Enough room for the header plus a few entries, never more than a third of
-   the rail — the diff itself is what the panel is for. */
+/* Enough room for the header plus a few entries. A fixed responsive track is
+   important here: a percentage max-height only shrank the list itself while
+   its grid row still reserved 38% of the panel, leaving a large blank band. */
 .gyro-environment-rail.is-tool .gyro-diff-file-list {
   border-bottom: 1px solid var(--gyro-border);
   border-right: 0;
   grid-template-rows: auto minmax(0, 1fr);
-  max-height: 38%;
-  min-height: 96px;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
 }
 
 .gyro-environment-rail.is-tool .gyro-diff-file-list header {
@@ -33645,6 +33745,52 @@ button.gyro-account-menu-row:hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Expanded Review is a work surface, not a stretched version of the narrow
+   rail. At useful widths the changed-file tree becomes a stable sidebar and
+   the diff, file actions, and compact footer use the remaining canvas. Keep
+   these overrides after the narrow defaults so the container state wins. */
+@container gyro-companion-content (min-width: 760px) {
+  .gyro-environment-rail.is-tool .gyro-diff-review,
+  .gyro-environment-rail.is-tool .gyro-diff-review.is-compact {
+    grid-template-columns: clamp(220px, 22cqi, 280px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .gyro-environment-rail.is-tool .gyro-diff-file-list {
+    border-bottom: 0;
+    border-right: 1px solid var(--gyro-border);
+  }
+
+  .gyro-environment-rail.is-tool .gyro-diff-review-toolbar,
+  .gyro-environment-rail.is-tool .gyro-diff-actions {
+    flex-wrap: nowrap;
+  }
+
+  .gyro-environment-rail.is-tool .gyro-diff-review-footer {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .gyro-environment-rail.is-tool .gyro-git-action-strip {
+    display: flex;
+    flex: 1 1 440px;
+  }
+
+  .gyro-environment-rail.is-tool .gyro-diff-review-footer > div:last-child {
+    display: flex;
+    flex: 0 0 auto;
+  }
+
+  .gyro-environment-rail.is-tool .gyro-git-action-strip > button,
+  .gyro-environment-rail.is-tool
+    .gyro-diff-review-footer
+    > div:last-child
+    > button {
+    width: auto;
+  }
 }
 
 /*
@@ -34098,35 +34244,62 @@ button.gyro-account-menu-row:hover,
   width: 32px;
 }
 
-/* Workspace context is a compact menu, not a stack of nested composer cards.
-   Its rows deliberately use one quiet selection treatment and a tighter
-   vertical rhythm so the branch list stays readable without taking the screen. */
+/* The thread canvas is an animated stacking context and follows the topbar in
+   the DOM. Keep the topbar above it so downward-opening menus are not painted
+   over by the conversation canvas. */
+.gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
+  overflow: visible;
+  position: relative;
+  z-index: 80;
+}
+
+.gyro-chat-surface.is-thread > .gyro-chat-thread-canvas {
+  position: relative;
+  z-index: 0;
+}
+
+/* Workspace context is a compact, grouped menu. The header and section labels
+   establish hierarchy without turning each option into a nested card. */
 .gyro-thread-context-control > .gyro-thread-workspace-menu {
   background: var(--gyro-surface);
   border-color: var(--gyro-border);
-  border-radius: 12px;
-  box-shadow: 0 14px 32px rgb(28 39 52 / 14%);
-  gap: 2px;
-  max-height: min(520px, calc(100vh - 72px));
+  border-radius: 10px;
+  box-shadow:
+    0 16px 40px rgb(28 39 52 / 16%),
+    0 2px 8px rgb(28 39 52 / 8%);
+  gap: 0;
+  max-height: min(420px, calc(100vh - 58px));
   overflow-y: auto;
-  padding: 8px;
-  width: min(336px, calc(100vw - 24px));
+  padding: 6px;
+  width: min(312px, calc(100vw - 24px));
 }
 
 .gyro-thread-workspace-menu .gyro-composer-popover-title {
-  color: var(--gyro-muted);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-text);
   font-size: 12px;
-  font-weight: 650;
-  padding: 3px 4px 8px;
+  font-weight: 620;
+  line-height: 18px;
+  margin: 0 2px 4px;
+  padding: 4px 6px 8px;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-popover-section-title {
   border-top-color: var(--gyro-border-soft);
   color: var(--gyro-faint);
-  font-size: 12px;
-  letter-spacing: 0.075em;
-  margin-top: 5px;
-  padding: 10px 4px 4px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  margin: 4px 2px 0;
+  padding: 8px 6px 3px;
+}
+
+.gyro-thread-workspace-menu
+  .gyro-composer-popover-title
+  + .gyro-composer-popover-section-title {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 3px;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item,
@@ -34134,12 +34307,12 @@ button.gyro-account-menu-row:hover,
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: none;
-  gap: 9px;
+  gap: 8px;
   grid-template-columns: 18px minmax(0, 1fr) 18px;
-  min-height: 44px;
-  padding: 7px 8px;
+  min-height: 36px;
+  padding: 5px 7px;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item:hover:not(:disabled),
@@ -34155,8 +34328,13 @@ button.gyro-account-menu-row:hover,
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item.is-active,
 .gyro-thread-workspace-menu .gyro-composer-menu-item.is-active:disabled {
-  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  background: color-mix(in srgb, var(--gyro-accent) 8%, transparent);
   color: var(--gyro-text);
+}
+
+.gyro-thread-workspace-menu .gyro-composer-menu-item:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item > svg:first-child {
@@ -34173,15 +34351,15 @@ button.gyro-account-menu-row:hover,
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item strong {
   color: var(--gyro-text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.25;
 }
 
 .gyro-thread-workspace-menu .gyro-composer-menu-item small {
   color: var(--gyro-muted);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 @media (max-width: 620px) {
@@ -34342,7 +34520,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-message-queue-wrap {
   align-self: stretch;
   box-sizing: border-box;
-  margin-bottom: -12px;
+  margin-bottom: 8px;
   margin-inline: auto;
   max-width: min(100%, var(--gyro-composer-width));
   min-width: 0;
@@ -35030,9 +35208,10 @@ textarea:focus-visible,
 }
 
 .gyro-chat-transcript {
-  margin-inline: auto;
-  max-width: var(--gyro-chat-content-width);
-  width: min(100%, var(--gyro-chat-content-width));
+  box-sizing: border-box;
+  margin-inline: 0;
+  max-width: none;
+  width: 100%;
 }
 
 .gyro-response-actions button {
@@ -37066,7 +37245,8 @@ textarea:focus-visible,
   opacity: 0.8;
 }
 .gyro-effort-slider-popover[data-max-effort="true"]
-  .gyro-effort-slider-stops .is-filled {
+  .gyro-effort-slider-stops
+  .is-filled {
   background: #ddbcff;
 }
 .gyro-effort-slider input {
@@ -37691,4 +37871,81 @@ textarea:focus-visible,
   padding: 3px 8px;
   gap: 4px;
   font-weight: 500;
+}
+
+/* Run and Test: fixed heading, searchable catalog, readable command states. */
+.gyro-sidebar-section:has(.gyro-run-command-filter) > .gyro-sidebar-list {
+  align-content: start;
+  padding: 0 6px 12px;
+  scroll-padding-top: 44px;
+}
+
+.gyro-run-command-filter {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 32px;
+  margin-bottom: 10px;
+  background: var(--gyro-surface-deep);
+}
+
+.gyro-run-task-group-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.gyro-run-task-group-label small {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.gyro-run-task-row {
+  gap: 5px;
+  padding-right: 6px;
+  border: 1px solid transparent;
+}
+
+.gyro-run-task-main {
+  min-height: 44px;
+  padding: 7px 8px;
+  gap: 10px;
+}
+
+.gyro-run-task-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.gyro-run-task-main small {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.gyro-run-task-status {
+  border-radius: 4px;
+  background: var(--gyro-surface-soft);
+  padding: 3px 5px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: capitalize;
+}
+
+.gyro-run-task-row[data-status="running"] {
+  background: var(--gyro-sidebar-soft);
+  border-color: var(--gyro-border-soft);
+}
+
+.gyro-run-task-main:focus-visible,
+.gyro-run-command-filter:focus-visible,
+.gyro-run-task-remove:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: -2px;
 }

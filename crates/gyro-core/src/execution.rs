@@ -37,6 +37,9 @@ pub struct ExecutionRequest {
     pub args: Vec<OsString>,
     pub current_dir: Option<PathBuf>,
     pub env: Vec<(OsString, Option<OsString>)>,
+    /// Optional finite input file; avoids blocking output/cancellation on a
+    /// large multimodal message being written to a pipe.
+    pub stdin_file: Option<PathBuf>,
     /// Which inherited credentials the child is allowed to keep. Defaults to
     /// `Inherit` so Gyro's own tooling is unaffected; agent-driven runs set a
     /// scrubbed policy explicitly. See `credentials`.
@@ -56,6 +59,7 @@ impl ExecutionRequest {
             args: Vec::new(),
             current_dir: None,
             env: Vec::new(),
+            stdin_file: None,
             credentials: CredentialPolicy::Inherit,
             timeout: Duration::from_secs(180),
             inactivity_timeout: None,
@@ -138,7 +142,10 @@ where
     let mut command = Command::new(&request.program);
     command
         .args(&request.args)
-        .stdin(Stdio::null())
+        .stdin(match request.stdin_file.as_ref() {
+            Some(path) => Stdio::from(std::fs::File::open(path).context("open execution input")?),
+            None => Stdio::null(),
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(current_dir) = request.current_dir.as_ref() {
@@ -550,6 +557,20 @@ pub(crate) fn terminate_process_group(child: &mut std::process::Child) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finite_stdin_delivers_large_input_and_eof() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("input.jsonl");
+        let bytes = vec![b'x'; 2 * 1024 * 1024];
+        std::fs::write(&path, &bytes).unwrap();
+        let mut request = super::ExecutionRequest::new("/usr/bin/wc");
+        request.args = vec!["-c".into()];
+        request.stdin_file = Some(path);
+        let outcome = super::run_command(request, super::CancellationToken::default(), |_| {}).unwrap();
+        assert_eq!(outcome.stdout.trim(), bytes.len().to_string());
+        assert_eq!(outcome.termination, super::ExecutionTermination::Exited { code: Some(0) });
+    }
+
     use super::*;
     use std::io::{self, Cursor};
 

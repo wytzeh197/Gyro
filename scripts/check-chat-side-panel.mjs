@@ -137,15 +137,39 @@ expect(
   cssRules(
     styles,
     ".gyro-environment-rail.is-tool .gyro-diff-review,\n.gyro-environment-rail.is-tool .gyro-diff-review.is-compact",
-  ).some((rule) => rule.includes("grid-template-columns: minmax(0, 1fr)")) &&
+  ).some(
+    (rule) =>
+      rule.includes("grid-template-columns: minmax(0, 1fr)") &&
+      rule.includes(
+        "grid-template-rows: clamp(112px, 24vh, 200px) minmax(0, 1fr)",
+      ),
+  ) &&
     cssRules(
       styles,
       ".gyro-environment-rail.is-tool .gyro-diff-file-list",
     ).some(
       (rule) =>
-        rule.includes("max-height: 38%") && rule.includes("min-height: 96px"),
+        rule.includes("height: 100%") &&
+        rule.includes("max-height: none") &&
+        rule.includes("min-height: 0"),
     ),
-  "At rail width the file list stacks above the diff and keeps a floor and a ceiling — side by side leaves the diff about 40px wide.",
+  "At rail width the file list must own a bounded grid track; a percentage max-height leaves its larger grid row behind as blank space.",
+);
+
+expect(
+  cssRules(styles, ".gyro-chat-companion-content").some(
+    (rule) =>
+      rule.includes("container-name: gyro-companion-content") &&
+      rule.includes("container-type: inline-size"),
+  ) &&
+    styles.includes("@container gyro-companion-content (min-width: 760px)") &&
+    styles.includes(
+      "grid-template-columns: clamp(220px, 22cqi, 280px) minmax(0, 1fr)",
+    ) &&
+    /@container gyro-companion-content \(min-width: 760px\)[\s\S]{0,1800}?\.gyro-environment-rail\.is-tool \.gyro-diff-review-footer \{[\s\S]{0,180}?display: flex;/.test(
+      styles,
+    ),
+  "Expanded Review should become a file-tree sidebar beside the diff and flatten the footer instead of stretching the narrow stacked layout.",
 );
 
 expect(

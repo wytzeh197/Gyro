@@ -952,6 +952,9 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const [unreadCompletedSessionIds, setUnreadCompletedSessionIds] = useState<
+    string[]
+  >([]);
   const [menuBarOutcome, setMenuBarOutcome] = useState<MenuBarOutcome>();
   const [finishedMenuBarOutcomes, setFinishedMenuBarOutcomes] = useState<
     MenuBarOutcome[]
@@ -2245,6 +2248,11 @@ export function App() {
     (sessionId: string, isSending: boolean) => {
       if (isSending) {
         sendingSessionIdsRef.current.add(sessionId);
+        setUnreadCompletedSessionIds((current) =>
+          current.includes(sessionId)
+            ? current.filter((id) => id !== sessionId)
+            : current,
+        );
       } else {
         sendingSessionIdsRef.current.delete(sessionId);
       }
@@ -2351,6 +2359,17 @@ export function App() {
             outcome.targetId !== latestMenuBarOutcome.targetId,
         ),
       ]);
+      if (
+        latestMenuBarOutcome.kind === "chat" &&
+        (activeWorkspaceLayoutRef.current !== "thread" ||
+          activeSessionIdRef.current !== latestMenuBarOutcome.targetId)
+      ) {
+        setUnreadCompletedSessionIds((current) =>
+          current.includes(latestMenuBarOutcome.targetId)
+            ? current
+            : [latestMenuBarOutcome.targetId, ...current],
+        );
+      }
     }
   }, [latestMenuBarOutcome]);
 
@@ -6703,6 +6722,11 @@ export function App() {
   );
 
   const acknowledgeFinishedChat = useCallback((sessionId: string) => {
+    setUnreadCompletedSessionIds((current) =>
+      current.includes(sessionId)
+        ? current.filter((id) => id !== sessionId)
+        : current,
+    );
     setFinishedMenuBarOutcomes((current) =>
       current.filter(
         (outcome) => outcome.kind !== "chat" || outcome.targetId !== sessionId,
@@ -6714,6 +6738,12 @@ export function App() {
         : current,
     );
   }, []);
+
+  useEffect(() => {
+    if (activeWorkspaceLayout === "thread" && activeSessionId) {
+      acknowledgeFinishedChat(activeSessionId);
+    }
+  }, [acknowledgeFinishedChat, activeSessionId, activeWorkspaceLayout]);
 
   const selectSession = useCallback(
     (
@@ -6936,6 +6966,9 @@ export function App() {
       const alreadyActiveSession =
         pane.kind === "session" &&
         activeSessionIdRef.current === pane.sessionId;
+      if (pane.kind === "session") {
+        acknowledgeFinishedChat(pane.sessionId);
+      }
       // Grid slots call this on every pointerdown inside the pane. When the
       // user is already in that chat, re-selecting + reloading events only
       // re-lays out the surface mid-click — which was able to land a stop on
@@ -6946,7 +6979,6 @@ export function App() {
       dispatchChatGrid({ type: "focus-pane", projectKey, paneId: pane.paneId });
       setWorkspacePath(pane.workspacePath);
       if (pane.kind === "session") {
-        acknowledgeFinishedChat(pane.sessionId);
         suppressSessionAutoSelectRef.current = false;
         activeSessionIdRef.current = pane.sessionId;
         setActiveSessionId(pane.sessionId);
@@ -6986,6 +7018,7 @@ export function App() {
         );
         return;
       }
+      acknowledgeFinishedChat(sessionId);
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
@@ -6998,7 +7031,13 @@ export function App() {
       dispatchWorkbench({ type: "set-chat-panel" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     },
-    [chatGrid.layouts, focusChatPane, notify, sessions],
+    [
+      acknowledgeFinishedChat,
+      chatGrid.layouts,
+      focusChatPane,
+      notify,
+      sessions,
+    ],
   );
 
   const pinSession = useCallback(
@@ -7090,6 +7129,9 @@ export function App() {
         return next;
       });
       setPinnedSessionIds((current) =>
+        current.filter((id) => id !== sessionId),
+      );
+      setUnreadCompletedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
       );
       setChatMessageQueues((current) => {
@@ -8530,6 +8572,36 @@ export function App() {
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
   );
 
+  const attachBrowserSnapshot = useCallback(async () => {
+    if (!isTauriRuntime() || !activeSessionId) {
+      notify(
+        "command-failed",
+        "No browser to capture",
+        "Open a page in this chat's Browser first",
+      );
+      return;
+    }
+    try {
+      const attachment = await invoke<ChatAttachment>(
+        "prepare_browser_attachment",
+        {
+          sessionId: activeSessionId,
+        },
+      );
+      setChatAttachments((current) => ({
+        ...current,
+        [activeDraftKey]: [...(current[activeDraftKey] ?? []), attachment],
+      }));
+      notify(
+        "terminal",
+        "Browser snapshot attached",
+        "The captured page includes its URL and capture time",
+      );
+    } catch (error) {
+      notify("command-failed", "Browser snapshot unavailable", String(error));
+    }
+  }, [activeDraftKey, activeSessionId, notify]);
+
   const attachEditorSnapshot = useCallback(async () => {
     if (!isTauriRuntime() || !workspacePath || !selectedFile) {
       notify(
@@ -9059,6 +9131,9 @@ export function App() {
         case "attach-editor-snapshot":
           void attachEditorSnapshot();
           break;
+        case "attach-browser-snapshot":
+          void attachBrowserSnapshot();
+          break;
         case "select-project":
         case "select-workspace":
         case "select-folder":
@@ -9248,6 +9323,7 @@ export function App() {
     },
     [
       attachEditorSnapshot,
+      attachBrowserSnapshot,
       activeChatMode,
       activeSession?.workspacePath,
       checkProviderReadiness,
@@ -12312,7 +12388,10 @@ export function App() {
         height: number;
       } | null,
     ) => {
-      if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
+      if (
+        !isTauriRuntime() ||
+        (!sessionBrowserWorkspaceKey && !activeSessionId)
+      ) {
         return false;
       }
       try {
@@ -12344,7 +12423,7 @@ export function App() {
         return false;
       }
     },
-    [notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
+    [activeSessionId, notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
   );
 
   const handleBrowserHostBoundsChange = useCallback(
@@ -15607,6 +15686,7 @@ export function App() {
       activeDestination={activeDestination}
       activeSessionId={sidebarActiveSessionId}
       sendingSessionIds={sendingSessionIds}
+      completedSessionIds={unreadCompletedSessionIds}
       modelTerminalSessionIds={modelTerminalSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}

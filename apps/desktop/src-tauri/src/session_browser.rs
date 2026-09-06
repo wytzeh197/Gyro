@@ -56,6 +56,13 @@ pub struct SessionBrowserSnapshot {
     pub label: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct SessionBrowserCapture {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserConsoleEntry {
@@ -546,6 +553,20 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return null;
   }};
 
+  const pageState = () => ({{
+    url: location.href,
+    title: document.title || "",
+    readyState: document.readyState,
+    viewport: {{
+      width: Math.max(0, Math.round(window.innerWidth || 0)),
+      height: Math.max(0, Math.round(window.innerHeight || 0)),
+      deviceScaleFactor: Number(window.devicePixelRatio || 1),
+      scrollX: Math.round(window.scrollX || 0),
+      scrollY: Math.round(window.scrollY || 0),
+    }},
+    history: {{ length: Math.max(0, Number(window.history.length || 0)) }},
+  }});
+
   const serializeTree = (root, depth, maxDepth, budget) => {{
     if (!root || depth > maxDepth || budget.left <= 0) return null;
     if (root.nodeType === 3) {{
@@ -628,13 +649,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
       const budget = {{ left: {MAX_TREE_CHARS} }};
       const tree = serializeTree(document.body || document.documentElement, 0, maxDepth, budget);
-      return {{
+      return Object.assign({{
         ok: true,
-        url: location.href,
-        title: document.title || "",
         framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED",
         tree,
-      }};
+      }}, pageState());
     }},
     find(options) {{
       const query = ((options && options.query) || "").trim();
@@ -720,12 +739,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries: networkBuf.slice(-limit) }};
     }},
     status() {{
-      return {{
-        ok: true,
-        url: location.href,
-        title: document.title || "",
-        readyState: document.readyState,
-      }};
+      return Object.assign({{ ok: true }}, pageState());
     }},
   }};
 }})();"#
@@ -1229,7 +1243,7 @@ fn sanitize_agent_result(value: Value) -> Result<Value, String> {
 pub fn capture_session_browser_png<R: Runtime>(
     app: &AppHandle<R>,
     session_id: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<SessionBrowserCapture, String> {
     let manager = app.state::<SessionBrowserManager>();
     let label = manager.webview_label_for(session_id)?;
     let webview = app
@@ -1272,7 +1286,11 @@ pub fn capture_session_browser_png<R: Runtime>(
                             .ok_or_else(|| {
                                 "native browser snapshot could not create PNG data".to_string()
                             })?;
-                        Ok::<Vec<u8>, String>(png.to_vec())
+                        Ok::<SessionBrowserCapture, String>(SessionBrowserCapture {
+                            png: png.to_vec(),
+                            width: bitmap.pixelsWide().max(0) as u32,
+                            height: bitmap.pixelsHigh().max(0) as u32,
+                        })
                     })();
                     let _ = sender.send(snapshot);
                 });
@@ -1297,8 +1315,18 @@ pub fn capture_session_browser_png<R: Runtime>(
 #[tauri::command]
 pub async fn session_browser_open(
     app: AppHandle,
-    request: SessionBrowserOpenRequest,
+    mut request: SessionBrowserOpenRequest,
 ) -> Result<SessionBrowserSnapshot, String> {
+    if request.workspace_key.is_empty() {
+        let store = super::open_store()?;
+        let session = store
+            .get_session(super::parse_uuid(&request.session_id)?)
+            .map_err(super::to_string)?
+            .ok_or_else(|| "browser chat no longer exists".to_string())?;
+        request.workspace_key = super::session_execution_workspace(&session, store.paths())?
+            .display()
+            .to_string();
+    }
     open_session_browser(&app, request)
 }
 

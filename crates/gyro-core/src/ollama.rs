@@ -33,6 +33,7 @@ pub struct OllamaModel {
     pub quantization_level: Option<String>,
     pub context_window_tokens: Option<u64>,
     pub supports_tools: bool,
+    pub supports_images: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -334,6 +335,12 @@ fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
         quantization_level: tag.details.quantization_level,
         context_window_tokens,
         supports_tools,
+        supports_images: show.as_ref().is_some_and(|value| {
+            value
+                .capabilities
+                .iter()
+                .any(|capability| capability == "vision")
+        }),
     }
 }
 
@@ -421,53 +428,61 @@ mod tests {
 
     #[test]
     fn discovers_local_models_and_tool_capability() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut reader = BufReader::new(&mut stream);
-                let mut request_line = String::new();
-                reader.read_line(&mut request_line).unwrap();
-                let mut content_length = 0;
-                loop {
-                    let mut header = String::new();
-                    reader.read_line(&mut header).unwrap();
-                    if header.is_empty() || header == "\r\n" {
-                        break;
-                    }
-                    if let Some((name, value)) = header.split_once(':') {
-                        if name.eq_ignore_ascii_case("content-length") {
-                            content_length = value.trim().parse().unwrap();
+        for (capabilities, expected_tools, expected_images) in [
+            (vec!["completion"], false, false),
+            (vec!["completion", "tools"], true, false),
+            (vec!["completion", "vision"], false, true),
+            (vec!["completion", "tools", "vision"], true, true),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut reader = BufReader::new(&mut stream);
+                    let mut request_line = String::new();
+                    reader.read_line(&mut request_line).unwrap();
+                    let mut content_length = 0;
+                    loop {
+                        let mut header = String::new();
+                        reader.read_line(&mut header).unwrap();
+                        if header.is_empty() || header == "\r\n" {
+                            break;
+                        }
+                        if let Some((name, value)) = header.split_once(':') {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                content_length = value.trim().parse().unwrap();
+                            }
                         }
                     }
-                }
-                let mut request_body = vec![0; content_length];
-                reader.read_exact(&mut request_body).unwrap();
-                drop(reader);
-                let body = if request_line.starts_with("GET /api/tags") {
-                    r#"{"models":[{"name":"qwen3-coder:latest","details":{"family":"qwen3","parameter_size":"8B","quantization_level":"Q4"}}]}"#
-                } else {
-                    r#"{"capabilities":["completion","tools"],"model_info":{"qwen3.context_length":32768}}"#
-                };
-                write!(
+                    let mut request_body = vec![0; content_length];
+                    reader.read_exact(&mut request_body).unwrap();
+                    drop(reader);
+                    let body = if request_line.starts_with("GET /api/tags") {
+                        r#"{"models":[{"name":"qwen3-coder:latest","details":{"family":"qwen3","parameter_size":"8B","quantization_level":"Q4"}}]}"#.to_string()
+                    } else {
+                        serde_json::json!({"capabilities": capabilities, "model_info": {"qwen3.context_length": 32768}}).to_string()
+                    };
+                    write!(
                     stream,
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
                     body
                 )
                 .unwrap();
-                stream.flush().unwrap();
-                // Drain a POST body before closing. Otherwise a slow client
-                // can see a broken write and treat `/api/show` as unavailable.
-                let _ = stream.shutdown(Shutdown::Both);
-            }
-        });
-        let discovery = discover_ollama_models(Some(&format!("http://{address}/api"))).unwrap();
-        server.join().unwrap();
-        assert_eq!(discovery.models.len(), 1);
-        assert_eq!(discovery.models[0].id, "qwen3-coder:latest");
-        assert!(discovery.models[0].supports_tools);
-        assert_eq!(discovery.models[0].context_window_tokens, Some(32768));
+                    stream.flush().unwrap();
+                    // Drain a POST body before closing. Otherwise a slow client
+                    // can see a broken write and treat `/api/show` as unavailable.
+                    let _ = stream.shutdown(Shutdown::Both);
+                }
+            });
+            let discovery = discover_ollama_models(Some(&format!("http://{address}/api"))).unwrap();
+            server.join().unwrap();
+            assert_eq!(discovery.models.len(), 1);
+            assert_eq!(discovery.models[0].id, "qwen3-coder:latest");
+            assert_eq!(discovery.models[0].supports_tools, expected_tools);
+            assert_eq!(discovery.models[0].supports_images, expected_images);
+            assert_eq!(discovery.models[0].context_window_tokens, Some(32768));
+        }
     }
 }

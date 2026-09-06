@@ -820,11 +820,16 @@ where
         let message = connection.receive()?;
         if message.get("id").and_then(Value::as_u64) == Some(expected_id) {
             if let Some(error) = message.get("error") {
-                let detail = error
+                let mut detail = error
                     .get("message")
                     .and_then(Value::as_str)
                     .map(str::to_string)
                     .unwrap_or_else(|| format!("{} ACP request failed", connection.provider_label));
+                if let Some(data) = error.get("data").filter(|data| !data.is_null()) {
+                    let data = redact_secrets(&data.to_string());
+                    detail.push_str(": ");
+                    detail.extend(data.chars().take(2000));
+                }
                 anyhow::bail!(redact_secrets(&detail));
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));

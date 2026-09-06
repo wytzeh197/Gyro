@@ -668,7 +668,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,
         class: CapabilityClass::BrowserNavigate,
-        description: "Open a URL in this chat's Gyro Browser rail. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+        description: "Open a URL in this chat's app-owned Gyro Browser rail. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserInspect,
