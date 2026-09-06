@@ -84,6 +84,16 @@ const CONTRACTS: &[ProviderCliContract] = &[
         program: "gemini",
         prompt_delivery: PromptDelivery::Protocol,
     },
+    ProviderCliContract {
+        provider_id: "cursor",
+        program: "cursor-agent",
+        prompt_delivery: PromptDelivery::Protocol,
+    },
+    ProviderCliContract {
+        provider_id: "opencode",
+        program: "opencode",
+        prompt_delivery: PromptDelivery::Protocol,
+    },
 ];
 
 pub fn provider_cli_contracts() -> &'static [ProviderCliContract] {
@@ -360,9 +370,13 @@ mod tests {
     }
 
     #[test]
-    fn readiness_only_providers_declare_no_contract() {
-        assert!(provider_cli_contract("cursor").is_none());
-        assert!(provider_cli_contract("opencode").is_none());
+    fn cursor_and_opencode_use_protocol_contracts() {
+        for provider in ["cursor", "opencode"] {
+            assert_eq!(
+                provider_cli_contract(provider).unwrap().prompt_delivery,
+                PromptDelivery::Protocol
+            );
+        }
     }
 
     #[test]

@@ -149,6 +149,17 @@ impl KimiAcpConnection {
         for (key, _) in request.credentials.env_overrides() {
             command.env_remove(key);
         }
+        if std::path::Path::new(&request.program)
+            .file_name()
+            .is_some_and(|name| name == "opencode")
+            || request.provider_label == "OpenCode"
+        {
+            // OpenCode defaults to allowing native tools. Require its ACP
+            // permission callbacks so Gyro can apply the user's policy.
+            // Agent-specific OpenCode configuration can override this default;
+            // live validation is still required before declaring full support.
+            command.env("OPENCODE_PERMISSION", r#"{"*":"ask","read":{"*":"ask","*.env":"deny","*.env.*":"deny"},"edit":"ask","bash":"ask","task":"ask","external_directory":"ask"}"#);
+        }
         configure_process_group(&mut command);
         let mut child = command.spawn().map_err(|error| {
             anyhow!(
@@ -864,6 +875,19 @@ where
                 };
                 connection.send_result(id, json!({"outcome": outcome}))?;
             }
+            "cursor/ask_question" | "cursor/create_plan" => {
+                if let Some(id) = message.get("id").cloned() {
+                    // These require richer UI than the current approval card.
+                    // Explicitly cancel instead of hanging or inventing consent.
+                    connection.send_result(id, json!({"outcome": {"outcome": "cancelled"}}))?;
+                    on_activity(&KimiAcpActivity {
+                        id: "cursor-input-required".into(), kind: "tool".into(),
+                        label: "Cursor needs input".into(),
+                        detail: Some("Cursor's interactive question or plan was cancelled. Continue with instructions in chat.".into()),
+                        status: "failed".into(),
+                    });
+                }
+            }
             "fs/read_text_file" => {
                 let Some(id) = message.get("id").cloned() else {
                     continue;
@@ -1555,6 +1579,58 @@ mod tests {
             inactivity_timeout: Duration::from_secs(3),
             cancellation,
             credentials: CredentialPolicy::for_provider("kimi"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_acp_providers_stream_only_after_permission_denial_and_cancel_extension_input() {
+        for (provider, auth) in [("Cursor", "cursor_login"), ("OpenCode", "opencode-login")] {
+            let script = r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"AUTH"}],"agentCapabilities":{}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"provider-session"}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":"permission","method":"session/request_permission","params":{"toolCall":{"kind":"execute","title":"Run shell command","rawInput":{"command":"touch forbidden"}},"options":[{"optionId":"yes","kind":"allow_once"},{"optionId":"no","kind":"reject_once"}]}}' ;;
+    *'"id":"permission"'*)
+      case "$line" in *'"optionId":"no"'*) ;; *) exit 7 ;; esac
+      printf '%s\n' '{"jsonrpc":"2.0","id":"question","method":"cursor/ask_question","params":{"questions":[]}}' ;;
+    *'"id":"question"'*)
+      case "$line" in *'"outcome":"cancelled"'*) ;; *) exit 8 ;; esac
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Denied safely."}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#.replace("AUTH", auth);
+            let (temp, program) = acp_fixture(&script);
+            let mut request = fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                None,
+            );
+            request.provider_label = provider.into();
+            request.auth_method_ids = vec![auth.into()];
+            request.model = "provider-default".into();
+            let mut permissions = 0;
+            let result = run_kimi_acp(
+                request,
+                |_| {},
+                |_| {},
+                |approval| {
+                    assert_eq!(approval.kind, KimiAcpApprovalKind::Command);
+                    permissions += 1;
+                    Ok(KimiAcpApprovalDecision::RejectOnce)
+                },
+                |_, _| panic!("Denied command must not write a file"),
+            )
+            .unwrap();
+            assert_eq!(permissions, 1);
+            assert_eq!(result.response, "Denied safely.");
+            assert!(!temp.path().join("forbidden").exists());
         }
     }
 

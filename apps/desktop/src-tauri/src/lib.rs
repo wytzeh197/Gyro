@@ -13859,6 +13859,24 @@ fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
             default_model: "gemini-default",
             runner: "gemini-acp",
         }),
+        "cursor" => Some(AcpProviderRuntime {
+            label: "Cursor",
+            args: &["acp"],
+            auth_methods: &["cursor_login"],
+            cursor_kind: "cursor-acp-session",
+            default_model: "cursor-default",
+            program: "cursor-agent",
+            runner: "cursor-acp",
+        }),
+        "opencode" => Some(AcpProviderRuntime {
+            label: "OpenCode",
+            args: &["acp"],
+            auth_methods: &["opencode-login"],
+            cursor_kind: "opencode-acp-session",
+            default_model: "opencode-default",
+            program: "opencode",
+            runner: "opencode-acp",
+        }),
         _ => None,
     }
 }
@@ -25279,7 +25297,7 @@ while True:
 
         // ACP agents receive the prompt over stdio, but Gyro still chooses the
         // flags that start them, and those can drift just as easily.
-        for provider_id in ["kimi", "xai", "gemini"] {
+        for provider_id in ["kimi", "xai", "gemini", "cursor", "opencode"] {
             let runtime = acp_provider_runtime(provider_id).expect("acp runtime");
             vectors.push((
                 provider_id,
@@ -25403,14 +25421,19 @@ while True:
         assert_eq!(kimi.kind, ProviderAdapterKind::KimiAcp);
         assert_eq!(kimi.runner, "kimi-acp");
 
-        for (provider_id, runner) in [("xai", "grok-acp"), ("gemini", "gemini-acp")] {
+        for (provider_id, runner) in [
+            ("xai", "grok-acp"),
+            ("gemini", "gemini-acp"),
+            ("cursor", "cursor-acp"),
+            ("opencode", "opencode-acp"),
+        ] {
             let adapter = provider_adapter_for(provider_id);
             assert_eq!(adapter.kind, ProviderAdapterKind::KimiAcp);
             assert_eq!(adapter.runner, runner);
             assert!(adapter.timeout_seconds > 0);
         }
         assert_eq!(
-            provider_adapter_for("cursor").kind,
+            provider_adapter_for("unknown").kind,
             ProviderAdapterKind::ReadinessOnly
         );
     }

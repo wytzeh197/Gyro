@@ -1759,6 +1759,20 @@ fn cli_acp_provider_runtime(provider_id: &str) -> Option<CliAcpProviderRuntime> 
             cursor_kind: "gemini-acp-session",
             default_model: "gemini-default",
         }),
+        "cursor" => Some(CliAcpProviderRuntime {
+            label: "Cursor",
+            args: &["acp"],
+            auth_methods: &["cursor_login"],
+            cursor_kind: "cursor-acp-session",
+            default_model: "cursor-default",
+        }),
+        "opencode" => Some(CliAcpProviderRuntime {
+            label: "OpenCode",
+            args: &["acp"],
+            auth_methods: &["opencode-login"],
+            cursor_kind: "opencode-acp-session",
+            default_model: "opencode-default",
+        }),
         _ => None,
     }
 }
@@ -6272,6 +6286,8 @@ done
         for (provider_id, profile_id, command, expected_cursor) in [
             ("gemini", "gemini-cli", "gemini", "gemini-acp-session"),
             ("xai", "grok-build", "grok", "xai-acp-session"),
+            ("cursor", "cursor", "cursor-agent", "cursor-acp-session"),
+            ("opencode", "opencode", "opencode", "opencode-acp-session"),
         ] {
             let profile = CommandProfile {
                 id: profile_id.into(),

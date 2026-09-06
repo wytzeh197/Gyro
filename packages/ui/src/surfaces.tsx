@@ -26087,8 +26087,10 @@ function commandProfilesWithDefaults(
       id: "cursor",
       displayName: "Cursor Agent",
       command: "cursor-agent",
-      args: ["run"],
+      args: [],
       workingDirectory: "Workspace",
+      providerId: "cursor",
+      defaultModel: "cursor-default",
     },
     {
       id: "gemini",
@@ -26101,8 +26103,10 @@ function commandProfilesWithDefaults(
       id: "opencode",
       displayName: "OpenCode",
       command: "opencode",
-      args: ["run"],
+      args: [],
       workingDirectory: "Workspace",
+      providerId: "opencode",
+      defaultModel: "opencode-default",
     },
     {
       id: "custom",
