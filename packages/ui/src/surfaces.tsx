@@ -10342,9 +10342,18 @@ function SideChatPanel({
 }) {
   const [draft, setDraft] = useState("");
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const temporaryNoteId = useId();
   const messages = sideChat?.messages ?? [];
   const isSending = sideChat?.isSending === true;
   const canSend = Boolean(sideChat?.onSend) && draft.trim().length > 0;
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = "auto";
+    composer.style.height = `${Math.min(composer.scrollHeight, 168)}px`;
+  }, [draft]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -10354,7 +10363,7 @@ function SideChatPanel({
 
   const send = () => {
     const message = draft.trim();
-    if (!message || !sideChat?.onSend) return;
+    if (!message || !sideChat?.onSend || isSending) return;
     sideChat.onSend(message);
     setDraft("");
   };
@@ -10363,15 +10372,18 @@ function SideChatPanel({
     <div className="gyro-side-chat">
       <div className="gyro-side-chat-transcript" ref={transcriptRef}>
         {messages.length === 0 && !sideChat?.streamingMessage ? (
-          <div className="gyro-companion-empty">
-            <MessageSquare size={22} />
-            <strong>Side chat</strong>
-            <span>
-              A throwaway thread on{" "}
-              {workspaceName(workspacePath) || "this project"}
-              {branchName ? ` · ${branchName}` : ""}. It knows the project but
-              not this conversation, and it disappears when you close the tab.
-            </span>
+          <div className="gyro-side-chat-empty">
+            <h2>What would you like to explore?</h2>
+            <p>A separate conversation with the same project context.</p>
+            {workspacePath ? (
+              <span className="gyro-side-chat-context" title={workspacePath}>
+                <Folder aria-hidden="true" size={13} />
+                <span>{workspaceName(workspacePath)}</span>
+                {branchName ? (
+                  <span title={branchName}>{branchName}</span>
+                ) : null}
+              </span>
+            ) : null}
           </div>
         ) : (
           <>
@@ -10380,7 +10392,6 @@ function SideChatPanel({
                 className={`gyro-side-chat-message is-${message.role}`}
                 key={message.id}
               >
-                <small>{message.role === "user" ? "You" : "Gyro"}</small>
                 {message.role === "assistant" ? (
                   <div className="gyro-response-body">
                     {assistantResponseBlocks(message.text).map(
@@ -10394,13 +10405,14 @@ function SideChatPanel({
                     )}
                   </div>
                 ) : (
-                  <p>{message.text}</p>
+                  <div className="gyro-user-message-bubble">
+                    <p>{message.text}</p>
+                  </div>
                 )}
               </article>
             ))}
             {sideChat?.streamingMessage ? (
               <article className="gyro-side-chat-message is-assistant">
-                <small>Gyro</small>
                 <p className="gyro-response-streaming-text">
                   {sideChat.streamingMessage}
                 </p>
@@ -10414,45 +10426,56 @@ function SideChatPanel({
           {sideChat.error}
         </p>
       ) : null}
-      <div className="gyro-side-chat-composer">
-        <textarea
-          aria-label="Side chat message"
-          disabled={!sideChat?.onSend}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              send();
+      <div className="gyro-side-chat-composer gyro-chat-composer-dock">
+        <div className="gyro-composer-shell">
+          <textarea
+            ref={composerRef}
+            aria-label="Side chat message"
+            aria-describedby={temporaryNoteId}
+            disabled={!sideChat?.onSend}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                send();
+              }
+            }}
+            placeholder={
+              sideChat?.onSend
+                ? "Ask a side question"
+                : "Connect a provider to use side chat"
             }
-          }}
-          placeholder={
-            sideChat?.onSend
-              ? "Ask a side question"
-              : "Connect a provider to use side chat"
-          }
-          rows={2}
-          value={draft}
-        />
-        <button
-          aria-label="Send side chat message"
-          className="gyro-send-button"
-          disabled={!canSend || isSending}
-          onClick={send}
-          type="button"
-        >
-          {isSending ? (
-            <RefreshCw className="is-spinning" size={15} />
-          ) : (
-            <ArrowUp size={15} />
-          )}
-        </button>
+            rows={2}
+            value={draft}
+          />
+          <div className="gyro-composer-bar">
+            <span className="gyro-side-chat-model" title={sideChat?.modelLabel}>
+              <Sparkles aria-hidden="true" size={13} />
+              <span>{sideChat?.modelLabel || "No provider connected"}</span>
+            </span>
+            <button
+              aria-label="Send side chat message"
+              className="gyro-send-button"
+              disabled={!canSend || isSending}
+              onClick={send}
+              type="button"
+            >
+              {isSending ? (
+                <RefreshCw className="is-spinning" size={15} />
+              ) : (
+                <ArrowUp size={15} />
+              )}
+            </button>
+          </div>
+        </div>
+        <footer className="gyro-side-chat-note" id={temporaryNoteId}>
+          Temporary chat · Cleared when you close this tab
+        </footer>
       </div>
-      <footer className="gyro-side-chat-note">
-        <Sparkles aria-hidden="true" size={12} />
-        {sideChat?.modelLabel
-          ? `${sideChat.modelLabel} · temporary, not saved to history`
-          : "Temporary — this thread is not saved to history"}
-      </footer>
     </div>
   );
 }
@@ -24288,9 +24311,9 @@ function ChatRunChangeSummary({
     { additions: 0, deletions: 0 },
   );
   const fileLabel = files.length === 1 ? "file" : "files";
-  const canExpandDiff = isReviewable && Boolean(onLoadChangeDiff);
+  const canExpandDiff = Boolean(onLoadChangeDiff);
   const reviewFiles = () => {
-    // Ask-first keeps the turn's own diff and Keep controls in this card.
+    // Completed edits stay in the transcript in every approval mode.
     if (canExpandDiff) {
       setOpenPath(files[0]?.path);
       return;
@@ -24368,10 +24391,17 @@ function ChatRunChangeSummary({
               );
               return (
                 <div className="gyro-change-summary-file" key={file.path}>
-                  {onReview ? (
+                  {canExpandDiff || onReview ? (
                     <button
-                      onClick={() => onReview(file.path)}
-                      title={`Review ${file.path}`}
+                      aria-expanded={canExpandDiff ? isOpen : undefined}
+                      onClick={() => {
+                        if (canExpandDiff) {
+                          setOpenPath(isOpen ? undefined : file.path);
+                        } else {
+                          onReview?.(file.path);
+                        }
+                      }}
+                      title={`${isOpen ? "Hide" : "Show"} the change to ${file.path}`}
                       type="button"
                     >
                       {contents}
@@ -24381,6 +24411,9 @@ function ChatRunChangeSummary({
                       {contents}
                     </div>
                   )}
+                  {isOpen && onLoadChangeDiff ? (
+                    <ChangeSummaryDiff onLoad={onLoadChangeDiff} path={file.path} />
+                  ) : null}
                 </div>
               );
             }

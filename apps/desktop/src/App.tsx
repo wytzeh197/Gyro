@@ -5308,9 +5308,14 @@ export function App() {
       }
 
       const normalizedPath = path.replaceAll("\\", "/");
-      const file = workbench.ide.sourceControl.files.find(
-        (item) => item.path.replaceAll("\\", "/") === normalizedPath,
-      );
+      const normalizedRoot = root.replaceAll("\\", "/").replace(/\/$/, "");
+      const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
+        ? normalizedPath.slice(normalizedRoot.length + 1)
+        : normalizedPath;
+      const file = workbench.ide.sourceControl.files.find((item) => {
+        const candidate = item.path.replaceAll("\\", "/");
+        return candidate === normalizedPath || candidate === relativePath;
+      });
       const requests: Array<Promise<IdeCommandOutput>> = [];
       if (file?.staged) {
         requests.push(
@@ -6623,6 +6628,11 @@ export function App() {
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
       const draftKey = `new:${projectKey}`;
+      // The solo surface is reused between sessions. A fresh draft must not
+      // inherit its previous chat's dock, or a previously opened draft's dock.
+      dispatchCompanion({ type: "forget-pane", paneId: SOLO_CHAT_PANE_ID });
+      dispatchCompanion({ type: "forget-pane", paneId: `draft:${projectKey}` });
+      dispatchWorkbench({ type: "set-chat-panel" });
       const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
         layout.slots.some(
           (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,

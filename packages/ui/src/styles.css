@@ -24815,97 +24815,157 @@ button.gyro-response-changed-files:hover {
 
 /* Side chat: a throwaway thread that lives entirely inside the dock. */
 .gyro-side-chat {
-  display: grid;
-  grid-auto-rows: auto;
-  grid-template-rows: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .gyro-side-chat-transcript {
-  align-content: start;
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 24px;
   min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: 24px 20px;
+  scrollbar-gutter: stable;
 }
 
-.gyro-side-chat-transcript > .gyro-companion-empty {
-  padding: 26px 14px;
+.gyro-side-chat-empty {
+  margin-block: auto;
+  padding: 32px 0;
+  text-align: center;
 }
 
-.gyro-side-chat-message {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: 12px;
-  padding: 9px 11px;
-}
-
-.gyro-side-chat-message.is-user {
-  background: var(--gyro-control-bg);
-  justify-self: end;
-  max-width: 92%;
-}
-
-.gyro-side-chat-message > small {
-  color: var(--gyro-faint);
-  display: block;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.gyro-side-chat-message > p {
-  margin: 4px 0 0;
-  white-space: pre-wrap;
-}
-
-.gyro-side-chat-message > .gyro-response-body {
-  margin-top: 4px;
-}
-
-.gyro-side-chat-error {
-  border-top: 1px solid var(--gyro-border-soft);
-  color: var(--gyro-danger);
-  font-size: 12px;
-  margin: 0;
-  padding: 8px 14px;
-}
-
-.gyro-side-chat-composer {
-  align-items: end;
-  border-top: 1px solid var(--gyro-border-soft);
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 10px;
-}
-
-.gyro-side-chat-composer > textarea {
-  background: var(--gyro-control-bg);
-  border: 1px solid var(--gyro-border);
-  border-radius: 10px;
+.gyro-side-chat-empty h2 {
   color: var(--gyro-text);
-  font: inherit;
-  max-height: 168px;
-  min-height: 46px;
-  padding: 8px 10px;
-  resize: vertical;
+  font-size: clamp(20px, 3cqi, 26px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+  margin: 0 0 10px;
 }
 
-.gyro-side-chat-composer > textarea:focus-visible {
-  border-color: var(--gyro-accent);
-  outline: none;
+.gyro-side-chat-empty p {
+  color: var(--gyro-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: 32ch;
 }
 
-.gyro-side-chat-note {
+.gyro-side-chat-context {
   align-items: center;
-  border-top: 1px solid var(--gyro-border-soft);
   color: var(--gyro-faint);
   display: flex;
   font-size: 11px;
   gap: 6px;
-  padding: 8px 14px;
+  justify-content: center;
+  margin-top: 18px;
+  min-width: 0;
+}
+
+.gyro-side-chat-context > svg,
+.gyro-side-chat-model > svg {
+  flex-shrink: 0;
+}
+
+.gyro-side-chat-context > span,
+.gyro-side-chat-model > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-side-chat-context > span + span {
+  border-left: 1px solid var(--gyro-border-soft);
+  padding-left: 6px;
+}
+
+.gyro-side-chat-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gyro-side-chat-message.is-user {
+  align-self: flex-end;
+  max-width: 88%;
+}
+
+.gyro-side-chat-message .gyro-user-message-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.gyro-side-chat-message > p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.gyro-side-chat-message > .gyro-response-body,
+.gyro-side-chat-message > .gyro-response-streaming-text {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.gyro-side-chat-error {
+  color: var(--gyro-danger);
+  font-size: 12px;
+  margin: 0;
+  padding: 8px 16px;
+}
+
+.gyro-side-chat .gyro-side-chat-composer {
+  background: transparent;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  position: static;
+}
+
+.gyro-side-chat-composer .gyro-composer-shell > textarea {
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  max-height: 168px;
+  min-height: 72px;
+  padding: 14px 14px 6px;
+  resize: none;
+}
+
+.gyro-side-chat-composer .gyro-composer-shell:focus-within {
+  border-color: var(--gyro-accent);
+}
+
+.gyro-side-chat-composer .gyro-composer-bar {
+  background: transparent;
+  border: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px 10px;
+}
+
+.gyro-side-chat-model {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gyro-side-chat-composer .gyro-send-button {
+  flex-shrink: 0;
+}
+
+.gyro-side-chat-note {
+  color: var(--gyro-faint);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 /* Tiled panes are too narrow to give the dock a column of its own, so it floats
@@ -36974,6 +37034,40 @@ textarea:focus-visible,
 }
 .gyro-effort-slider-stops .is-filled {
   background: #8fbbff;
+}
+.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value-button {
+  color: #a45cff;
+}
+.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-slider-fill {
+  width: 100%;
+  background:
+    radial-gradient(ellipse at 48% 105%, #e2b4ff 0%, transparent 57%),
+    linear-gradient(100deg, #443ee8 0%, #9451ff 47%, #783cf3 100%);
+  box-shadow: inset 0 0 9px rgb(218 166 255 / 45%);
+}
+.gyro-effort-slider-popover[data-max-effort="true"]
+  .gyro-effort-slider-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 6% 62%, #fff 0 0.7px, transparent 1.3px),
+    radial-gradient(circle at 11% 39%, #ead7ff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 17% 77%, #fff 0 0.7px, transparent 1.3px),
+    radial-gradient(circle at 27% 32%, #fff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 43% 67%, #fff 0 0.8px, transparent 1.4px),
+    radial-gradient(circle at 47% 27%, #fff 0 0.8px, transparent 1.4px),
+    radial-gradient(circle at 51% 49%, #f7eaff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 57% 70%, #fff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 68% 25%, #fff 0 0.7px, transparent 1.3px),
+    radial-gradient(circle at 78% 43%, #ead7ff 0 0.6px, transparent 1.2px),
+    radial-gradient(circle at 86% 75%, #fff 0 0.7px, transparent 1.3px);
+  opacity: 0.8;
+}
+.gyro-effort-slider-popover[data-max-effort="true"]
+  .gyro-effort-slider-stops .is-filled {
+  background: #ddbcff;
 }
 .gyro-effort-slider input {
   position: absolute;

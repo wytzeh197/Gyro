@@ -67,6 +67,7 @@ export function ComposerEffortSelector({
     <div
       aria-label="Model and effort"
       className="gyro-composer-popover gyro-effort-slider-popover"
+      data-max-effort={labels.length > 1 && index === labels.length - 1}
       data-align="end"
       data-placement={placement}
       id={id}
