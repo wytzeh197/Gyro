@@ -187,20 +187,19 @@ for (const [name, html] of Object.entries(pages)) {
 }
 
 containsAll(pages.home, "Homepage", [
-  "Stop switching tools. Say it once.",
+  "The open-source AI workspace.",
   "Public alpha",
-  "Chat, CLI, and review in one session — on the agent CLIs you",
+  "Think, build, and ship in one place.",
   "Open source · No account · No analytics",
-  "Every tool switch costs you the context.",
-  "A terminal that never saw the ask.",
-  "A chat that never saw the run.",
-  "A diff that never saw the reasoning.",
+  "Tool switches cost context.",
+  "Terminal without the ask.",
+  "Chat without the run.",
+  "Diff without the why.",
   'class="premise-list"',
-  "One task. Three connected surfaces.",
-  "Direct the work.",
-  "Run it locally.",
-  "Review every change.",
-  "nothing summarized away",
+  "Three surfaces. One task.",
+  "Direct work.",
+  "Run locally.",
+  "Review changes.",
   "assets/gyro-mark.png",
   'class="spine"',
   'class="surface-card"',
@@ -209,8 +208,10 @@ containsAll(pages.home, "Homepage", [
   'class="mock mock-terminal"',
   'class="mock mock-diff"',
   "Bring your own.",
-  "Use what you already paid for",
+  "Use the tools on your Mac.",
   'class="agent-grid"',
+  'class="agent-tile agent-ollama"',
+  ">Ollama</span>",
   "assets/screenshots/hero-600.webp",
   "assets/screenshots/hero-1200.webp",
   "assets/screenshots/hero-2400.webp",
@@ -218,13 +219,11 @@ containsAll(pages.home, "Homepage", [
   "assets/screenshots/hero-light-1200.webp",
   "assets/screenshots/hero-light-2400.webp",
   "assets/social-preview.png",
-  "Download Gyro for macOS.",
-  "Install it, point it at a repo, and keep working.",
-  "Requires an agent CLI",
+  "Download for macOS.",
   "Download DMG",
-  "DMG · Apple Silicon &amp; Intel",
+  "Apple Silicon + Intel",
   "Install guide",
-  "Do I need Claude, Codex, or another agent CLI first?",
+  "Need a CLI or local model first?",
   "data-download-surface",
 ]);
 
@@ -278,8 +277,8 @@ check(
 );
 
 containsAll(pages.install, "Install page", [
-  "Download Gyro.",
-  "Choose Apple Silicon or Intel.",
+  "Download for macOS.",
+  "Choose the right build for your Mac.",
   "Choose your Mac processor",
   "Apple Silicon",
   "M1–M4 and newer",
@@ -308,7 +307,7 @@ check(
 );
 
 containsAll(pages.changelog, "Changelog page", [
-  "Every published alpha from version 21 onward.",
+  "Public alpha releases.",
   "data-version-rail",
   "data-version-jump",
   "data-changelog-list",
@@ -522,13 +521,19 @@ check(
   `Site text must be at least 13px; found ${undersizedPixelFonts.join(", ")}`,
 );
 
+/*
+ * 16:10, not 16:9. The app puts a sidebar, a conversation and an environment
+ * panel side by side, and a 16:9 crop of that either loses a column or pads
+ * the thread with empty space. These numbers match the capture scenes in
+ * scripts/capture-site-screenshots.mjs; change them together.
+ */
 const screenshotSpecs = [
-  ["site/assets/screenshots/hero-600.webp", 600, 338],
-  ["site/assets/screenshots/hero-1200.webp", 1200, 675],
-  ["site/assets/screenshots/hero-2400.webp", 2400, 1350],
-  ["site/assets/screenshots/hero-light-600.webp", 600, 338],
-  ["site/assets/screenshots/hero-light-1200.webp", 1200, 675],
-  ["site/assets/screenshots/hero-light-2400.webp", 2400, 1350],
+  ["site/assets/screenshots/hero-600.webp", 600, 375],
+  ["site/assets/screenshots/hero-1200.webp", 1200, 750],
+  ["site/assets/screenshots/hero-2400.webp", 2400, 1500],
+  ["site/assets/screenshots/hero-light-600.webp", 600, 375],
+  ["site/assets/screenshots/hero-light-1200.webp", 1200, 750],
+  ["site/assets/screenshots/hero-light-2400.webp", 2400, 1500],
 ];
 for (const [path, width, height] of screenshotSpecs) {
   const dimensions = webpDimensions(resolve(repoRoot, path));

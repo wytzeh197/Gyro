@@ -9,6 +9,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { menuBarModelProvider } from "./menu-bar-model-provider";
 
+const MAX_VISIBLE_JOBS = 4;
+
 const EMPTY_SNAPSHOT: MenuBarSnapshot = {
   state: "idle",
   jobs: [],
@@ -68,16 +70,9 @@ function jobStatusLabel(job: MenuBarJob) {
   return "Working";
 }
 
-function GyroMark({ compact = false }: { compact?: boolean }) {
+function GyroMark() {
   return (
-    <span
-      aria-hidden="true"
-      className={
-        compact
-          ? "gyro-menu-bar-brand-mark is-compact"
-          : "gyro-menu-bar-brand-mark"
-      }
-    >
+    <span aria-hidden="true" className="gyro-menu-bar-brand-mark">
       <img alt="" src={gyroLogoMark} />
     </span>
   );
@@ -102,16 +97,7 @@ function ModelMark({ job }: { job: MenuBarJob }) {
         </svg>
       ) : providerId === "gemini" ? (
         <svg viewBox="0 0 24 24">
-          <defs>
-            <linearGradient id="menu-gemini" x1="2" x2="22" y1="22" y2="2">
-              <stop stopColor="#4e84ee" />
-              <stop offset="1" stopColor="#a76edb" />
-            </linearGradient>
-          </defs>
-          <path
-            d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
-            fill="url(#menu-gemini)"
-          />
+          <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
         </svg>
       ) : providerId === "anthropic" ? (
         <svg viewBox="0 0 24 24">
@@ -137,8 +123,9 @@ export function MenuBarPopover() {
   const [snapshot, setSnapshot] = useState<MenuBarSnapshot>(EMPTY_SNAPSHOT);
   const [now, setNow] = useState(Date.now());
   const [stoppingIds, setStoppingIds] = useState<string[]>([]);
-  // Show every concurrent provider slot (cap 4) plus automations; scroll if more.
-  const visibleJobs = snapshot.jobs.slice(0, 8);
+  // Kept in step with MENU_BAR_MAX_VISIBLE_JOBS in menu_bar.rs, which sizes the
+  // popover window; anything past the cap is summarised by the "+N more" row.
+  const visibleJobs = snapshot.jobs.slice(0, MAX_VISIBLE_JOBS);
   const overflow = Math.max(0, snapshot.jobs.length - visibleJobs.length);
   const header = useMemo(() => headerCopy(snapshot), [snapshot]);
   const recentOutcome = snapshot.recentOutcome;

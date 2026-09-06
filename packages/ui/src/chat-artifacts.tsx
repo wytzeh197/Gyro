@@ -266,11 +266,7 @@ function ChatArtifactContent({
         >
           <span className="gyro-chat-artifact-preview-media">
             {artifact.captureUrl ? (
-              <img
-                alt=""
-                draggable={false}
-                src={artifact.captureUrl}
-              />
+              <img alt="" draggable={false} src={artifact.captureUrl} />
             ) : (
               <span className="gyro-chat-artifact-preview-fallback">
                 <Globe2 aria-hidden="true" size={18} />
@@ -282,7 +278,9 @@ function ChatArtifactContent({
             {artifact.url ? (
               <code className="gyro-chat-artifact-url">{artifact.url}</code>
             ) : null}
-            {artifact.description ? <small>{artifact.description}</small> : null}
+            {artifact.description ? (
+              <small>{artifact.description}</small>
+            ) : null}
             <em>{statusLabel}</em>
           </span>
         </button>
@@ -526,7 +524,10 @@ function normalizeChatArtifact(value: unknown): ChatArtifact | undefined {
       description: stringValue(item?.description),
       capturePath: stringValue(item?.capturePath ?? item?.capture_path),
       captureUrl: stringValue(
-        item?.captureUrl ?? item?.capture_url ?? item?.imageUrl ?? item?.image_url,
+        item?.captureUrl ??
+          item?.capture_url ??
+          item?.imageUrl ??
+          item?.image_url,
       ),
     };
   if (kind === "table") {

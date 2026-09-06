@@ -334,6 +334,31 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     effort: "medium",
     allowedTools: ["files", "terminal", "diff"],
   },
+  {
+    id: "ollama",
+    displayName: "Ollama",
+    apiKeyRef: "local-runtime:ollama",
+    enabled: false,
+    authMode: "sdk",
+    authStatus: "not-connected",
+    baseUrl: "http://localhost:11434/api",
+    // The installed-model list is supplied by the local runtime rather than
+    // shipping a catalog that could advertise a model this Mac does not have.
+    defaultModelId: "",
+    selectedModelId: "",
+    capabilities: {
+      executionKind: "ollama-api",
+      executable: true,
+      supportsApprovals: true,
+      supportsImages: false,
+      supportsResume: true,
+      supportsUsage: false,
+      visibility: "standard",
+    },
+    models: [],
+    effort: "medium",
+    allowedTools: ["files", "terminal", "diff", "browser"],
+  },
 ];
 
 export function isProviderId(value: unknown): value is ProviderId {
@@ -465,6 +490,10 @@ export function providerNeedsSignInRepair(
 ) {
   return (
     provider.authStatus === "connected" &&
+    // A missing local model is a runtime setup task, not an expired sign-in.
+    // Keeping this distinction here prevents any caller from offering a
+    // credential-repair action for a model-install problem.
+    health?.runtimeStatus !== "no-models" &&
     !isProviderRuntimeUsable(provider, health)
   );
 }
@@ -478,6 +507,7 @@ export function providerConnectionStatusFromRuntime(
       return "connected";
     case "not-installed":
     case "not-logged-in":
+    case "no-models":
       return "not-configured";
     case "warning":
       return "failed";
@@ -501,7 +531,8 @@ export function isProviderRuntimeUsable(
   }
   if (
     health?.runtimeStatus === "not-installed" ||
-    health?.runtimeStatus === "not-logged-in"
+    health?.runtimeStatus === "not-logged-in" ||
+    health?.runtimeStatus === "no-models"
   ) {
     return false;
   }
@@ -595,6 +626,19 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
 
 export function normalizedConfig(config: GyroConfig): GyroConfig {
   const providers = providersForConfig(config);
+  // Configs written before selectedProviderId was part of the native schema
+  // can contain ready providers but no active choice. Use the first enabled
+  // provider in catalog order so a restored installation can start a new chat
+  // with the default model it already configured. The native config migration
+  // makes the same choice, and future saves preserve it.
+  const selectedProviderId =
+    isProviderId(config.selectedProviderId) &&
+    providers.some(
+      (provider) =>
+        provider.id === config.selectedProviderId && provider.enabled,
+    )
+      ? config.selectedProviderId
+      : providers.find((provider) => provider.enabled)?.id;
   return {
     ...config,
     accountOidc: config.accountOidc ?? {
@@ -604,9 +648,7 @@ export function normalizedConfig(config: GyroConfig): GyroConfig {
       scopes: ["openid", "profile", "email", "offline_access"],
     },
     accountSession: config.accountSession ?? { signedIn: false },
-    selectedProviderId: isProviderId(config.selectedProviderId)
-      ? config.selectedProviderId
-      : undefined,
+    selectedProviderId,
     modelProviders: providers,
   };
 }

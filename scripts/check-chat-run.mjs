@@ -10,6 +10,7 @@ import {
 import {
   buildRunModel,
   formatRunDuration,
+  groupRunSteps,
   isGenericProviderToolLabel,
   isRunPhaseLive,
   runHeaderLabel,
@@ -121,7 +122,7 @@ assert.deepEqual(
       }),
     ),
   }),
-  { label: "Ran command", description: "Run the suite" },
+  { label: "Ran tests", description: "Run the suite" },
   "a Bash description reclassified as note should win over the raw command",
 );
 
@@ -137,10 +138,10 @@ assert.equal(
   "tools that share a name but not a target should not coalesce",
 );
 
-// --- distinct work never batches ----------------------------------------------
+// --- exact work is preserved; the view groups it --------------------------------
 
-// Parallel calls arrive milliseconds apart. The reference design is a flat rail,
-// so each distinct one is its own row; nothing collapses work that differs.
+// Parallel calls arrive milliseconds apart. The run model preserves each exact
+// action, while the view can summarize them into meaningful phases.
 const parallel = buildRunModel([
   activity("tool", "Read a.ts", {}, 0),
   activity("tool", "Read b.ts", {}, 0),
@@ -150,6 +151,18 @@ assert.equal(parallel.steps.length, 3, "each activity should be its own beat");
 assert.ok(
   parallel.steps.every((step) => step.kind === "work"),
   "activities should all be work steps",
+);
+assert.deepEqual(
+  groupRunSteps(parallel.steps).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind,
+  ),
+  [
+    ["review", 2],
+    ["verify", 1],
+  ],
+  "consecutive review work should become one expandable summary before checks",
 );
 
 // --- the rail interleaves prose and work --------------------------------------
@@ -172,7 +185,7 @@ assert.deepEqual(
   ),
   [
     "say:Adding subscription options.",
-    "work:command",
+    "work:read",
     "say:Updating the business plan document.",
     "work:file",
   ],
@@ -283,7 +296,12 @@ assert.equal(repeatedCommand.steps[0].repeat, 3);
 
 const separatedCommand = buildRunModel([
   activity("command", "pnpm test", { detail: "pnpm test" }, 0),
-  activity("search", "Searched project", { query: "rail", scope: "project" }, 1),
+  activity(
+    "search",
+    "Searched project",
+    { query: "rail", scope: "project" },
+    1,
+  ),
   activity("command", "pnpm test", { detail: "pnpm test" }, 2),
 ]);
 assert.deepEqual(
@@ -610,7 +628,10 @@ assert.ok(
   "peeled plan lines should remain visible on the run rail",
 );
 assert.equal(isOrphanAssistantFragment("e."), true);
-assert.equal(isOrphanAssistantFragment("Chat, CLI, and IDE in one place."), false);
+assert.equal(
+  isOrphanAssistantFragment("Chat, CLI, and IDE in one place."),
+  false,
+);
 assert.equal(isTransientStatusGreeting("Gyro chat mode is up."), true);
 assert.equal(
   isTransientStatusGreeting("Chat, CLI, and IDE in one place."),
@@ -718,7 +739,7 @@ const rowText = (activityKind, label, extra) =>
   });
 
 assert.deepEqual(rowText("command", "Ran it", { detail: "pnpm test" }), {
-  label: "Ran command",
+  label: "Ran tests",
   description: "pnpm test",
 });
 assert.deepEqual(
@@ -726,7 +747,7 @@ assert.deepEqual(
     detail: "pnpm test",
     intent: "Check the suite",
   }),
-  { label: "Ran command", description: "Check the suite" },
+  { label: "Ran tests", description: "Check the suite" },
   "a provider intent should win over the raw command",
 );
 assert.deepEqual(rowText("file", "Updated create_gyro_bp.js"), {
@@ -745,7 +766,25 @@ assert.deepEqual(rowText("memory", "Edited memory"), {
 });
 assert.deepEqual(rowText("context", "Compacted context"), {
   label: "Compacted context",
+  description: "Earlier conversation summarized",
 });
+
+const compactionVisible = buildRunModel([
+  activity("tool", "Read a.ts", {}, 0),
+  activity("context", "Compacting context", { status: "running" }, 1),
+  activity("tool", "Read b.ts", {}, 2),
+]);
+assert.deepEqual(
+  groupRunSteps(compactionVisible.steps).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind === "work"
+        ? step.item.kind
+        : step.kind,
+  ),
+  [["review", 1], "context", ["review", 1]],
+  "context compaction stays visible instead of being folded into a review group",
+);
 
 // An unknown kind stays a beat rather than vanishing.
 assert.deepEqual(rowText("something-new", "Rendered a diagram"), {
@@ -830,7 +869,7 @@ assert.deepEqual(
 // persisted before that change keep rendering.
 assert.deepEqual(
   rowText("command", "Ran it", { command: "pnpm build", detail: "ignored" }),
-  { label: "Ran command", description: "pnpm build" },
+  { label: "Built project", description: "pnpm build" },
   "the named command field should win over detail",
 );
 assert.deepEqual(
@@ -851,11 +890,52 @@ assert.deepEqual(
 
 // --- what never reaches the rail ----------------------------------------------------
 
-// Commentary is prose; it arrives as an assistant message, never as a work row.
+// Commentary is prose, never a work row or a generic system-event card.
 assert.equal(
   workItemFromEvent(activity("commentary", "Let me check the config.")),
   undefined,
   "commentary should not become a work row",
+);
+const commentary = buildRunModel([
+  activity("commentary", "I’ll inspect the existing sidebar first.", {}, 0),
+  activity("command", "rg sidebar", { detail: "rg sidebar" }, 1),
+]);
+assert.deepEqual(
+  commentary.steps.map((step) => step.kind),
+  ["say", "work"],
+  "provider commentary should render as a plain-language update",
+);
+
+const shellSearch = workItemFromEvent(
+  activity("command", 'rg -n "workspace" packages/ui/src', {
+    command: 'cd /tmp/project && rg -n "workspace" packages/ui/src',
+  }),
+);
+assert.equal(
+  shellSearch?.kind,
+  "search",
+  "ripgrep should read as workspace search",
+);
+
+const shellRead = workItemFromEvent(
+  activity("command", "sed -n '1,80p' src/app.ts", {
+    command: "sed -n '1,80p' src/app.ts",
+  }),
+);
+assert.equal(
+  shellRead?.kind,
+  "read",
+  "range reads should read as file inspection",
+);
+
+const shellTest = workItemFromEvent(
+  activity("command", "pnpm test", { command: "pnpm test" }),
+);
+assert.deepEqual(
+  shellTest &&
+    runRowText({ kind: "work", id: "test", at: at(0), item: shellTest }),
+  { label: "Ran tests", description: "pnpm test" },
+  "test commands should use a purpose-first label",
 );
 
 // The hidden title marker is an instruction to the app, not a beat.
@@ -866,6 +946,15 @@ assert.equal(
   ]).steps.length,
   1,
   "the session title marker should be dropped",
+);
+
+assert.equal(
+  buildRunModel([
+    activity("commentary", 'GYRO_ARTIFACTS: {"items":[]}', {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "the artifact marker should be dropped",
 );
 
 // A non-activity system event becomes an approval beat rather than being lost.
@@ -885,11 +974,11 @@ assert.equal(
 assert.equal(formatRunDuration(3_600), "1h", "whole hours drop empty places");
 assert.equal(formatRunDuration(3_661), "1h 1m 1s");
 
-assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working for 12s");
-assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working for 1s");
+assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working · 12s");
+assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working · 1s");
 assert.equal(
   runHeaderLabel({ name: "done", durationMs: 231_000 }, "3m 51s"),
-  "Worked for 3m 51s",
+  "Worked · 3m 51s",
 );
 
 // A failed or interrupted turn has no recorded end, so the header must not
@@ -936,7 +1025,11 @@ assert.ok(railStart > 0, "the run rail block should be findable in styles.css");
 // quoting the selector. Start past the banner, then drop the remaining comments,
 // so only declarations are measured.
 const bannerEnd = stylesheet.indexOf("*/", railStart);
-const rail = stylesheet.slice(bannerEnd).replace(/\/\*[\s\S]*?\*\//g, "");
+const railEnd = stylesheet.indexOf("End run rail (gyro-run-*)", bannerEnd);
+assert.ok(railEnd > bannerEnd, "the run rail end marker should be findable");
+const rail = stylesheet
+  .slice(bannerEnd, railEnd)
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 const literalColour = rail.match(
   /(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/gi,

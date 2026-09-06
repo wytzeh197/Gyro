@@ -2,13 +2,7 @@ import type { WorkspaceScopedSettings } from "./types";
 import { normalizedWorkspaceFolderPath } from "./workspace-project.ts";
 
 export const defaultWorkspaceUserSettings: Required<WorkspaceScopedSettings> = {
-  filesExclude: [
-    ".git/**",
-    "node_modules/**",
-    "dist/**",
-    "build/**",
-    "target/**",
-  ],
+  filesExclude: [".git/**"],
   searchExclude: [
     ".git/**",
     "node_modules/**",
@@ -19,6 +13,27 @@ export const defaultWorkspaceUserSettings: Required<WorkspaceScopedSettings> = {
   searchMaxResults: 200,
   editorMinimapEnabled: true,
 };
+
+export function normalizedWorkspaceUserSettings(
+  value: WorkspaceScopedSettings | undefined,
+) {
+  const settings = normalizedWorkspaceScopedSettings(value);
+  const legacy = [
+    ".git/**",
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "target/**",
+  ];
+  // Previous releases persisted these defaults as user settings. Upgrade only
+  // that exact set; custom exclusions and per-folder settings remain intentional.
+  if (
+    settings.filesExclude?.length === legacy.length &&
+    legacy.every((pattern) => settings.filesExclude?.includes(pattern))
+  )
+    settings.filesExclude = [...defaultWorkspaceUserSettings.filesExclude];
+  return settings;
+}
 
 function normalizedPatterns(value: unknown) {
   if (!Array.isArray(value)) return undefined;

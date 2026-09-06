@@ -1,5 +1,6 @@
 /**
- * Clean-machine activation path: open a project, connect a provider, then send.
+ * Clean-machine activation path: optionally open a project, connect a
+ * provider, then send.
  *
  * This is the product gate from ROADMAP launch blocker 3 and the v0.2 provider
  * setup exit criteria. Pure logic so the UI, smoke checks, and manual playbook
@@ -46,6 +47,11 @@ export type CleanMachinePathInput = {
   preferredProviderLabel?: string;
   /** Health summary when a selected provider is blocked. */
   providerBlockMessage?: string;
+  /** More useful than reconnecting when the runtime needs a local repair. */
+  providerBlockAction?: string;
+  providerBlockActionLabel?: string;
+  providerBlockPlaceholder?: string;
+  providerBlockStepLabel?: string;
 };
 
 const DEFAULT_CONNECT_PROVIDER: ProviderId = "openai";
@@ -63,9 +69,15 @@ export function resolveCleanMachinePath(
   const hasReadyProvider = input.hasReadyProvider === true;
   const canSend = canSendChat(hasReadyProvider, input.workspacePath);
 
-  const connectProviderId = input.preferredProviderId ?? DEFAULT_CONNECT_PROVIDER;
+  const connectProviderId =
+    input.preferredProviderId ?? DEFAULT_CONNECT_PROVIDER;
   const connectLabel = input.preferredProviderLabel ?? DEFAULT_CONNECT_LABEL;
   const connectAction = `connect-provider:${connectProviderId}`;
+  const providerBlockMessage = input.providerBlockMessage?.trim();
+  const providerBlockAction =
+    input.providerBlockAction?.trim() || connectAction;
+  const providerBlockActionLabel =
+    input.providerBlockActionLabel?.trim() || `Connect ${connectLabel}`;
 
   const projectStep: CleanMachineStep = hasProject
     ? {
@@ -76,11 +88,9 @@ export function resolveCleanMachinePath(
       }
     : {
         id: "project",
-        status: "active",
-        label: "Open a project",
-        detail: "Choose the local folder this chat is allowed to use.",
-        action: "select-workspace",
-        actionLabel: "Open project",
+        status: "done",
+        label: "No folder",
+        detail: "This chat has no file or workspace context.",
       };
 
   const providerStep: CleanMachineStep = hasReadyProvider
@@ -92,13 +102,13 @@ export function resolveCleanMachinePath(
       }
     : {
         id: "provider",
-        status: hasProject ? "active" : "todo",
-        label: "Connect a provider",
+        status: "active",
+        label: input.providerBlockStepLabel?.trim() || "Connect a provider",
         detail:
-          input.providerBlockMessage?.trim() ||
+          providerBlockMessage ||
           `Sign in with ${connectLabel} or another supported CLI. Gyro uses the provider's own login — no config file.`,
-        action: connectAction,
-        actionLabel: `Connect ${connectLabel}`,
+        action: providerBlockAction,
+        actionLabel: providerBlockActionLabel,
       };
 
   const readyStep: CleanMachineStep = canSend
@@ -113,9 +123,9 @@ export function resolveCleanMachinePath(
         id: "ready",
         status: "todo",
         label: "Send a first message",
-        detail: hasProject
-          ? "Connect a provider, then describe what you want done."
-          : "Open a project and connect a provider first.",
+        detail: providerBlockMessage
+          ? "Finish the provider setup, then describe what you want done."
+          : "Connect a provider, then describe what you want done.",
       };
 
   let blockedReason: string | undefined;
@@ -124,23 +134,22 @@ export function resolveCleanMachinePath(
   let placeholder: string;
   let readinessLabel: string;
 
-  if (!hasProject) {
-    blockedReason = "Choose a project folder before sending.";
-    nextAction = "select-workspace";
-    nextActionLabel = "Open project";
-    placeholder = "Open a project to start…";
-    readinessLabel = "Choose a project folder to unlock send.";
-  } else if (!hasReadyProvider) {
+  if (!hasReadyProvider) {
     blockedReason =
-      input.providerBlockMessage?.trim() ||
-      "Connect a local provider before sending.";
-    nextAction = connectAction;
-    nextActionLabel = `Connect ${connectLabel}`;
-    placeholder = `Connect ${connectLabel} (or another provider), then describe a task…`;
+      providerBlockMessage || "Connect a local provider before sending.";
+    nextAction = providerBlockAction;
+    nextActionLabel = providerBlockActionLabel;
+    placeholder = input.providerBlockPlaceholder?.trim()
+      ? input.providerBlockPlaceholder.trim()
+      : providerBlockMessage
+        ? `${connectLabel} needs attention — reconnect to send…`
+        : `Connect ${connectLabel} to send a message…`;
     readinessLabel = blockedReason;
   } else {
     placeholder = "Describe a task or attach images";
-    readinessLabel = "Project and provider ready. Approvals stay on for edits.";
+    readinessLabel = hasProject
+      ? "Project and provider ready. Approvals stay on for edits."
+      : "Provider ready. Choose a folder anytime to work with files.";
   }
 
   return {

@@ -18,7 +18,11 @@ export type AppDestination =
   | "providers"
   | "onboarding";
 
-export type ThemeMode = "dark" | "light";
+/** The persisted appearance preference. System is the new-install default. */
+export type ThemeMode = "system" | "dark" | "light";
+
+/** The concrete palette currently painted by the application. */
+export type ResolvedTheme = Exclude<ThemeMode, "system">;
 
 export type WorkbenchPaneTab =
   "diff" | "terminal" | "browser" | "problems" | "output" | "test-results";
@@ -33,11 +37,15 @@ export type WorkbenchMode = "local" | "worktree";
  * picking one never closes the pane.
  */
 export type ChatSidePanelId =
+  | "tools"
   | "environment"
   | "plan"
+  | "review"
   | "browser"
   | "changes"
-  | "terminal";
+  | "terminal"
+  | "files"
+  | "side-chat";
 
 export type ChatMode = "normal" | "plan" | "council";
 
@@ -154,6 +162,10 @@ export type WorkspaceContextSnapshot = {
   workspaceKey: string;
   revision: number;
   capturedAt: string;
+  /** Whether Workspace supplied a usable project-signal snapshot for this turn. */
+  availability?: "available" | "unavailable";
+  /** A safe, user-actionable explanation when no project signals are available. */
+  unavailableReason?: string;
   activePath?: string;
   activeView?: IdeViewId;
   visibleTabs: string[];
@@ -348,6 +360,8 @@ export type TerminalPane = {
   missionSessionId?: string;
   /** Short task label for the mission board (not the profile display name). */
   taskTitle?: string;
+  /** Run and Test task backed by this terminal, when the command stays live. */
+  workspaceTaskId?: string;
 };
 
 export type TaskStatus = "todo" | "in-progress" | "in-review" | "complete";
@@ -459,7 +473,7 @@ export type MenuBarSnapshot = {
   jobs: MenuBarJob[];
   totalActive: number;
   recentOutcome?: MenuBarOutcome;
-  theme: ThemeMode;
+  theme: ResolvedTheme;
   reduceMotion: boolean;
 };
 
@@ -488,6 +502,41 @@ export type DiffFile = {
 
 export type DiffApprovalState =
   "pending" | "approved" | "rejected" | "partially-approved";
+
+/**
+ * End-of-turn file review.
+ *
+ * This is a reading record, not an apply queue. In "Ask first" the agent has
+ * already asked before each edit, so by the time the card appears the change is
+ * on disk. Keeping a file says the user read it and is fine with it; a file
+ * nobody marks is unread, which is why there is no "pending" badge and no
+ * decision that removes anything.
+ */
+export type FileReviewDecision = "kept";
+
+/** Where a file's one-line summary came from, so the card never oversells it. */
+export type FileReviewSummarySource = "provider" | "intent" | "fallback";
+
+/** The identity of the reviewed content: it retires stale summaries and Keeps. */
+export const FILE_REVIEW_SCHEMA = "gyro.file-review.v1";
+
+export type FileReviewSummary = {
+  path: string;
+  /** Hash of the exact diff the summary describes. A later edit changes it. */
+  contentHash: string;
+  summary: string;
+  source: FileReviewSummarySource;
+};
+
+/** What the review card knows about one file, once summaries and Keeps merge. */
+export type FileReviewEntry = {
+  path: string;
+  turnId?: string;
+  contentHash?: string;
+  summary?: string;
+  summarySource?: FileReviewSummarySource;
+  decision?: FileReviewDecision;
+};
 
 export type GitReviewActionId = "create-branch" | "commit" | "push" | "open-pr";
 
@@ -595,11 +644,7 @@ export type NotificationPermissionState =
   "granted" | "denied" | "prompt" | "prompt-with-rationale";
 
 export type SystemAccessScopeId =
-  | "desktop"
-  | "documents"
-  | "downloads"
-  | "removable-volumes"
-  | "full-disk";
+  "desktop" | "documents" | "downloads" | "removable-volumes" | "full-disk";
 
 export type SystemAccessStatus =
   "granted" | "denied" | "unavailable" | "unsupported";
@@ -618,10 +663,22 @@ export type ProviderConnectionStatus =
   "not-configured" | "checking" | "connected" | "failed" | "disconnected";
 
 export type ProviderId =
-  "openai" | "anthropic" | "kimi" | "xai" | "cursor" | "gemini" | "opencode";
+  | "openai"
+  | "anthropic"
+  | "kimi"
+  | "xai"
+  | "cursor"
+  | "gemini"
+  | "opencode"
+  | "ollama";
 
 export type ProviderExecutionKind =
-  "codex-cli" | "claude-code" | "kimi-acp" | "acp-cli" | "readiness-only";
+  | "codex-cli"
+  | "claude-code"
+  | "kimi-acp"
+  | "acp-cli"
+  | "ollama-api"
+  | "readiness-only";
 
 export type ProviderCapabilities = {
   executionKind: ProviderExecutionKind;
@@ -639,7 +696,12 @@ export type ProviderAuthStatus =
   "not-connected" | "connecting" | "connected" | "failed";
 
 export type ProviderRuntimeStatus =
-  "not-installed" | "not-logged-in" | "ready" | "warning" | "unknown";
+  | "not-installed"
+  | "not-logged-in"
+  | "no-models"
+  | "ready"
+  | "warning"
+  | "unknown";
 
 export type ProviderAuthOwner =
   "provider-cli" | "provider-env" | "provider-sdk";
@@ -664,6 +726,8 @@ export type ProviderModel = {
   contextWindowTokens?: number;
   defaultReasoningEffort?: ReasoningEffort;
   supportedReasoningEfforts?: ReasoningEffort[];
+  /** Runtime-discovered capability; absent for static provider catalogs. */
+  supportsTools?: boolean;
 };
 
 export type ReasoningEffort =
@@ -953,7 +1017,12 @@ export type OnboardingState = {
 
 export type WorkbenchPreferences = {
   theme: ThemeMode;
+  /** User-selected brand accents applied across every local Gyro surface. */
+  mainColor: string;
+  secondaryColor: string;
   density: WorkbenchDensity;
+  /** Whether new chats show the four starter prompt shortcuts. */
+  showQuickActions: boolean;
   lastSettingsSection: SettingsSectionId;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;
@@ -968,6 +1037,18 @@ export type WorkbenchPreferences = {
   missionSessionIds: string[];
   /** Default command profile for new mission workers (e.g. same CLI × N). */
   missionDefaultProfileId?: string;
+  /**
+   * Sessions backing an open Side chat companion tab. They are transient: kept
+   * out of the sidebar and history, and deleted when the tab closes. The list
+   * is recorded so an unclean exit can be swept on the next launch.
+   */
+  sideChatSessionIds: string[];
+  /** Width of compact chat companion tools, shared by every chat pane. */
+  chatCompanionWidth?: number;
+  /** Width of the primary in-chat Browser canvas, shared by every chat pane. */
+  browserCompanionWidth?: number;
+  /** Shared full-height panel width. Omitted uses the window's available space. */
+  chatPanelWidth?: number;
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
   showMenuBarIcon: boolean;
@@ -1095,7 +1176,15 @@ export type WorkbenchTurn = {
   reconciledAt?: string;
 };
 
+export type SourceControlDiff = {
+  workspacePath: string;
+  path: string;
+  originalPath?: string;
+  staged: boolean;
+};
+
 export type EditorTab = {
+  sourceControlDiff?: SourceControlDiff;
   path: string;
   title: string;
   dirty: boolean;
@@ -1249,6 +1338,15 @@ export type SourceControlFile = {
 };
 
 export type SourceControlState = {
+  history?: Array<{
+    hash: string;
+    shortHash: string;
+    subject: string;
+    author: string;
+    relativeDate: string;
+    refs: string;
+  }>;
+  historyError?: string;
   provider: "git";
   available: boolean;
   branch?: string;
@@ -1620,11 +1718,7 @@ export type CouncilRunStatus =
   | "cancelled";
 
 export type CouncilSeatStatus =
-  | "queued"
-  | "running"
-  | "done"
-  | "failed"
-  | "cancelled";
+  "queued" | "running" | "done" | "failed" | "cancelled";
 
 export type CouncilPreset = {
   id: string;
@@ -1671,8 +1765,7 @@ export type UsageGuardConfig = {
 
 /** Why Gyro is holding provider runs. A pause carries its provenance. */
 export type PauseReason =
-  | { kind: "manual" }
-  | { kind: "budgetExhausted"; providerId: string };
+  { kind: "manual" } | { kind: "budgetExhausted"; providerId: string };
 
 /** What a pause covers. Automations can be stopped without stopping chat. */
 export type PauseScope = "all" | "automations";
@@ -1937,6 +2030,7 @@ export type GyroConfig = {
   requireCommandApproval: boolean;
   requireFileEditApproval: boolean;
   fullAccess?: boolean;
+  changeSummariesEnabled?: boolean;
   accountOidc?: GyroAccountOidcConfig;
   accountSession?: GyroAccountSession;
   selectedProviderId?: ProviderId;

@@ -159,57 +159,60 @@ fn check_one_cli(
         }
     }
 
-    // 2) npm outdated for packages installed globally.
+    // 2) npm registry checks for CLIs with npm releases.
+    //
+    // `npm outdated -g` describes the package tree owned by whichever npm is
+    // on PATH. That can differ from the executable we will launch: for
+    // example, a standalone Codex install in `~/.local/bin` wins over an
+    // older Homebrew npm install. Always take the installed version from the
+    // executable above, and use npm only to learn the latest release. This
+    // keeps an offer and its update command pointed at the same CLI.
     if let Some(package) = spec.npm_package {
-        if let Some(entry) = npm_outdated.get(package) {
-            let current_version = entry
-                .current
-                .clone()
-                .or_else(|| current.clone())
-                .map(|value| normalize_version(&value));
-            let latest_version = entry
-                .latest
-                .clone()
-                .or_else(|| entry.wanted.clone())
-                .map(|value| normalize_version(&value));
-            let update_available =
-                versions_differ(current_version.as_deref(), latest_version.as_deref());
-            return Some(CliUpdateOffer {
-                provider_id: spec.provider_id.into(),
-                display_name: spec.display_name.into(),
-                program: spec.program.into(),
-                current_version,
-                latest_version,
-                update_available,
-                check_source: "npm".into(),
-                update_command,
-            });
-        }
-        // Package not in outdated list: either up to date or not npm-installed.
-        // If we have both installed + registry latest, compare when npm is available.
-        if let (Some(current_version), Some(latest)) =
-            (current.clone(), npm_view_version(package).ok())
-        {
-            let current_version = normalize_version(&current_version);
-            let latest_version = normalize_version(&latest);
-            let update_available = versions_differ(Some(&current_version), Some(&latest_version));
-            return Some(CliUpdateOffer {
-                provider_id: spec.provider_id.into(),
-                display_name: spec.display_name.into(),
-                program: spec.program.into(),
-                current_version: Some(current_version),
-                latest_version: Some(latest_version),
-                update_available,
-                check_source: "npm-view".into(),
-                update_command,
-            });
-        }
+        // A version we could not read cannot be compared safely. In that case
+        // omit the notice rather than offering an update for a different
+        // installation of the same CLI.
+        let latest = npm_outdated
+            .get(package)
+            .and_then(|entry| entry.latest.clone().or(entry.wanted.clone()))
+            .or_else(|| npm_view_version(package).ok());
+        let check_source = if npm_outdated.contains_key(package) {
+            "npm"
+        } else {
+            "npm-view"
+        };
+        return npm_update_offer(
+            spec,
+            current.as_deref(),
+            latest.as_deref(),
+            check_source,
+            update_command,
+        );
     }
 
     // 3) Installed but no update channel we can query — omit from the notice.
     // Kimi and similar still get an entry only when we can prove an update.
-    let _ = current;
     None
+}
+
+fn npm_update_offer(
+    spec: &CliUpdateSpec,
+    current: Option<&str>,
+    latest: Option<&str>,
+    check_source: &str,
+    update_command: Vec<String>,
+) -> Option<CliUpdateOffer> {
+    let (current_version, latest_version) = npm_update_versions(current, latest)?;
+    let update_available = versions_differ(Some(&current_version), Some(&latest_version));
+    Some(CliUpdateOffer {
+        provider_id: spec.provider_id.into(),
+        display_name: spec.display_name.into(),
+        program: spec.program.into(),
+        current_version: Some(current_version),
+        latest_version: Some(latest_version),
+        update_available,
+        check_source: check_source.into(),
+        update_command,
+    })
 }
 
 fn check_via_native_json(
@@ -261,15 +264,25 @@ fn apply_one_cli_update(offer: &CliUpdateOffer) -> CliUpdateApplyResult {
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     match run_cli_capture(&program, &arg_refs, CLI_UPDATE_TIMEOUT) {
         Ok(output) => {
-            let message = summarize_command_output(&output);
-            CliUpdateApplyResult {
-                provider_id: offer.provider_id.clone(),
-                display_name: offer.display_name.clone(),
-                ok: true,
-                message: if message.is_empty() {
-                    format!("{} updated", offer.display_name)
-                } else {
-                    message
+            match verify_applied_cli_update(offer, installed_version(&offer.program).as_deref()) {
+                Ok(verification) => {
+                    let summary = summarize_command_output(&output);
+                    CliUpdateApplyResult {
+                        provider_id: offer.provider_id.clone(),
+                        display_name: offer.display_name.clone(),
+                        ok: true,
+                        message: if summary.is_empty() {
+                            verification
+                        } else {
+                            format!("{verification} · {summary}")
+                        },
+                    }
+                }
+                Err(message) => CliUpdateApplyResult {
+                    provider_id: offer.provider_id.clone(),
+                    display_name: offer.display_name.clone(),
+                    ok: false,
+                    message,
                 },
             }
         }
@@ -280,6 +293,59 @@ fn apply_one_cli_update(offer: &CliUpdateOffer) -> CliUpdateApplyResult {
             message: error.to_string(),
         },
     }
+}
+
+/// Confirm that the exact executable Gyro launched for the update reached the
+/// advertised release. A zero exit code alone is not proof: another package
+/// manager may have been updated while this CLI remained unchanged.
+fn verify_applied_cli_update(
+    offer: &CliUpdateOffer,
+    observed_version: Option<&str>,
+) -> std::result::Result<String, String> {
+    let observed = observed_version
+        .map(normalize_version)
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "{} finished its update command, but Gyro could not read the version it uses",
+                offer.display_name
+            )
+        })?;
+
+    if let Some(expected) = offer
+        .latest_version
+        .as_deref()
+        .map(normalize_version)
+        .filter(|version| !version.is_empty())
+    {
+        if observed != expected {
+            return Err(format!(
+                "{} finished its update command, but Gyro still uses {} (expected {})",
+                offer.display_name, observed, expected
+            ));
+        }
+        return Ok(format!("{} updated to {}", offer.display_name, observed));
+    }
+
+    if let Some(previous) = offer
+        .current_version
+        .as_deref()
+        .map(normalize_version)
+        .filter(|version| !version.is_empty())
+    {
+        if observed == previous {
+            return Err(format!(
+                "{} finished its update command, but Gyro still uses {}",
+                offer.display_name, observed
+            ));
+        }
+        return Ok(format!("{} updated to {}", offer.display_name, observed));
+    }
+
+    Err(format!(
+        "{} finished its update command, but Gyro cannot verify which version it should use",
+        offer.display_name
+    ))
 }
 
 fn update_command_for(spec: &CliUpdateSpec) -> Vec<String> {
@@ -355,6 +421,19 @@ fn normalize_version(value: &str) -> String {
         .to_string()
 }
 
+/// Pair the version of the executable Gyro will launch with npm's latest
+/// registry version. Never substitute npm's package-tree `current` field: it
+/// can belong to a shadowed installation.
+fn npm_update_versions(current: Option<&str>, latest: Option<&str>) -> Option<(String, String)> {
+    let current = current
+        .map(normalize_version)
+        .filter(|value| !value.is_empty())?;
+    let latest = latest
+        .map(normalize_version)
+        .filter(|value| !value.is_empty())?;
+    Some((current, latest))
+}
+
 fn versions_differ(current: Option<&str>, latest: Option<&str>) -> bool {
     match (current, latest) {
         (Some(current), Some(latest)) if !current.is_empty() && !latest.is_empty() => {
@@ -366,7 +445,6 @@ fn versions_differ(current: Option<&str>, latest: Option<&str>) -> bool {
 
 #[derive(Clone, Debug, Default)]
 struct NpmOutdatedEntry {
-    current: Option<String>,
     wanted: Option<String>,
     latest: Option<String>,
 }
@@ -386,10 +464,6 @@ fn npm_global_outdated() -> Result<HashMap<String, NpmOutdatedEntry>> {
         .ok_or_else(|| anyhow!("npm outdated json was not an object"))?;
     let mut map = HashMap::new();
     for (name, entry) in object {
-        let current = entry
-            .get("current")
-            .and_then(|item| item.as_str())
-            .map(str::to_string);
         let wanted = entry
             .get("wanted")
             .and_then(|item| item.as_str())
@@ -398,14 +472,7 @@ fn npm_global_outdated() -> Result<HashMap<String, NpmOutdatedEntry>> {
             .get("latest")
             .and_then(|item| item.as_str())
             .map(str::to_string);
-        map.insert(
-            name.clone(),
-            NpmOutdatedEntry {
-                current,
-                wanted,
-                latest,
-            },
-        );
+        map.insert(name.clone(), NpmOutdatedEntry { wanted, latest });
     }
     Ok(map)
 }
@@ -520,6 +587,60 @@ mod tests {
         assert!(versions_differ(Some("0.53.0"), Some("0.54.0")));
         assert!(!versions_differ(Some("0.53.0"), Some("0.53.0")));
         assert!(!versions_differ(None, Some("0.53.0")));
+    }
+
+    #[test]
+    fn npm_update_versions_uses_the_running_cli_not_a_shadowed_global_package() {
+        // npm may report 0.151.0 from Homebrew while Gyro launches the
+        // standalone 0.152.1 executable from ~/.local/bin.
+        assert_eq!(
+            npm_update_versions(Some("0.152.1"), Some("0.152.1")),
+            Some(("0.152.1".into(), "0.152.1".into()))
+        );
+    }
+
+    #[test]
+    fn shadowed_global_npm_package_does_not_create_a_cli_update_offer() {
+        let codex = CLI_UPDATE_SPECS
+            .iter()
+            .find(|spec| spec.provider_id == "openai")
+            .unwrap();
+
+        // npm's stale 0.151.0 `current` is deliberately not an input here.
+        // The executable Gyro will run is already 0.152.1, as is npm's latest.
+        let offer = npm_update_offer(
+            codex,
+            Some("0.152.1"),
+            Some("0.152.1"),
+            "npm",
+            update_command_for(codex),
+        )
+        .unwrap();
+
+        assert_eq!(offer.current_version.as_deref(), Some("0.152.1"));
+        assert_eq!(offer.latest_version.as_deref(), Some("0.152.1"));
+        assert!(!offer.update_available);
+    }
+
+    #[test]
+    fn post_update_verification_rejects_an_unchanged_selected_cli() {
+        let offer = CliUpdateOffer {
+            provider_id: "openai".into(),
+            display_name: "Codex".into(),
+            program: "codex".into(),
+            current_version: Some("0.151.0".into()),
+            latest_version: Some("0.152.1".into()),
+            update_available: true,
+            check_source: "npm".into(),
+            update_command: vec!["codex".into(), "update".into()],
+        };
+
+        let error = verify_applied_cli_update(&offer, Some("0.151.0")).unwrap_err();
+        assert!(error.contains("still uses 0.151.0 (expected 0.152.1)"));
+        assert_eq!(
+            verify_applied_cli_update(&offer, Some("0.152.1")).unwrap(),
+            "Codex updated to 0.152.1"
+        );
     }
 
     #[test]

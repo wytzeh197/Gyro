@@ -69,6 +69,10 @@ export type {
   DiffLineKind,
   DiffReview,
   DiffSource,
+  FileReviewDecision,
+  FileReviewEntry,
+  FileReviewSummary,
+  FileReviewSummarySource,
   EditorBuffer,
   EditorBufferStatus,
   EditorGroup,
@@ -171,6 +175,7 @@ export type {
   TerminalPaneLayout,
   TerminalPaneStatus,
   TerminalTemplate,
+  ResolvedTheme,
   TestTreeItem,
   ThemeMode,
   UpdateState,
@@ -220,6 +225,23 @@ export type {
   CliUpdatePhase,
   CliUpdateNoticeState,
 } from "./types";
+export { FILE_REVIEW_SCHEMA } from "./types";
+export {
+  askAboutFilePrompt,
+  changeSummaryLine,
+  diffPreviewLines,
+  fileReviewDecisions,
+  isKeptCurrent,
+  latestFileReviewTurn,
+} from "./file-review";
+export type {
+  DiffPreviewKind,
+  DiffPreviewLine,
+  FileReviewFile,
+  FileReviewLine,
+  FileReviewRecord,
+  FileReviewTurn,
+} from "./file-review";
 export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
   createInitialWorkbenchState,
@@ -233,12 +255,14 @@ export {
   missionDefaultProfile,
   missionWorkerPanes,
   normalizeCliLaunchPreset,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   parseProviderHealthOutput,
   sanitizeStoredIdeState,
   workbenchReducer,
   CLI_LAUNCH_PRESET_MAX_PANES,
   CHAT_GRID_MAX_SLOTS,
+  chatProjectKey,
   chatGridReducer,
   chatPaneIdentity,
   createChatProjectLayout,
@@ -247,6 +271,36 @@ export {
   persistableChatGridState,
   sanitizeStoredChatGridState,
 } from "./workbench-state";
+export {
+  activeChatCompanionTab,
+  BROWSER_COMPANION_DEFAULT_WIDTH,
+  BROWSER_COMPANION_MAX_WIDTH,
+  BROWSER_COMPANION_MIN_WIDTH,
+  CHAT_COMPANION_DEFAULT_WIDTH,
+  CHAT_COMPANION_MAX_WIDTH,
+  CHAT_COMPANION_MIN_WIDTH,
+  CHAT_COMPANION_OVERLAY_BELOW,
+  chatCompanionPane,
+  chatCompanionReducer,
+  chatCompanionTabIds,
+  chatCompanionTabLabels,
+  clampBrowserCompanionWidth,
+  clampChatCompanionWidth,
+  clampChatPanelWidth,
+  activeChatCompanionPanel,
+  createInitialChatCompanionState,
+  discardedSideChatSessionIds,
+  isChatCompanionTabId,
+  staleSideChatSessionIds,
+  withoutSideChatSessions,
+} from "./chat-companion";
+export type {
+  ChatCompanionAction,
+  ChatCompanionPaneState,
+  ChatCompanionState,
+  ChatCompanionTabId,
+  ChatCompanionWidthMode,
+} from "./chat-companion";
 export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
   preferredCleanMachineConnectProvider,
@@ -292,10 +346,7 @@ export {
   readyCouncilProviders,
   resolveCouncilSeatRequests,
 } from "./council";
-export type {
-  CouncilSeatRequest,
-  CouncilSeatResolution,
-} from "./council";
+export type { CouncilSeatRequest, CouncilSeatResolution } from "./council";
 export {
   estimateTurnCost,
   formatTokenCount,
@@ -303,16 +354,24 @@ export {
   ledgerWindowSpecsForProvider,
   ledgerWindows,
   ledgerWindowsCaption,
+  PLAN_USAGE_NOTICE_THRESHOLDS,
+  planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
 } from "./usage-ledger";
 export type {
   LedgerWindowView,
+  PlanUsageNotice,
   SessionCostSummary,
   TurnCostEstimate,
   UsageSafetyNotice,
 } from "./usage-ledger";
 export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
+export { selectQueuedMessageDelivery } from "./chat-message-queue";
+export type {
+  QueuedDeliverySelection,
+  QueuedMessageDelivery,
+} from "./chat-message-queue";
 export {
   createGlobalSearchTarget,
   globalSearchMatch,
@@ -420,4 +479,14 @@ export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,
   ModelFocusPeekContent,
+  SideChatMessage,
+  SideChatState,
 } from "./surfaces";
+
+export { ScmReviewToolbar } from "./source-control-review";
+
+export { languages, getLanguage, resolveLanguage, searchLanguages, editorFilePolicy } from "./editor/languages/registry";
+export type { LanguageDefinition, LanguageInput, SyntaxSource } from "./editor/languages/types";
+export { createSyntaxTheme, tokenRoles, tokenRoleAliases, normalizeTokenRole } from "./editor/themes/syntax-theme";
+export { workspaceEditorColors } from "./editor/themes/workspace-colors";
+export type { TokenRole, GyroSyntaxTheme } from "./editor/themes/syntax-theme";

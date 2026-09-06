@@ -1365,14 +1365,18 @@ impl SessionStore {
         let file = open_session_event_log_for_read(&events_path)?;
         let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
             .with_context(|| format!("lock {} for read", events_path.display()))?;
-        let reader = BufReader::new(file);
+        let mut reader = BufReader::new(file);
         let mut ring: std::collections::VecDeque<SessionEvent> =
             std::collections::VecDeque::with_capacity(limit.saturating_add(1));
         let mut dropped_before_ring = false;
         let mut found_cursor = false;
         let mut line_index = 0usize;
-        for line in reader.lines() {
-            let line = line.with_context(|| format!("read {}", events_path.display()))?;
+        loop {
+            let Some(line) = read_bounded_session_event_line(&mut reader)
+                .with_context(|| format!("read {}", events_path.display()))?
+            else {
+                break;
+            };
             if line.trim().is_empty() {
                 line_index = line_index.saturating_add(1);
                 continue;
@@ -1418,6 +1422,7 @@ impl SessionStore {
         if user_version >= SESSION_STORE_SCHEMA_VERSION {
             self.ensure_core_tables()?;
             crate::usage::ensure_usage_schema(&self.conn)?;
+            crate::file_review::ensure_file_review_schema(&self.conn)?;
             return Ok(());
         }
         self.ensure_core_tables()?;
@@ -1437,6 +1442,7 @@ impl SessionStore {
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
+        crate::file_review::ensure_file_review_schema(&self.conn)?;
         self.conn
             .pragma_update(None, "user_version", SESSION_STORE_SCHEMA_VERSION)?;
         Ok(())
@@ -1635,6 +1641,24 @@ impl SessionStore {
     /// that burned tokens and then timed out still spent them.
     pub fn record_usage(&self, entry: &crate::usage::UsageEntry) -> Result<Uuid> {
         crate::usage::insert_usage_entry(&self.conn, entry)
+    }
+
+    /// Summaries already bought for these exact file contents.
+    pub fn cached_file_change_summaries(
+        &self,
+        workspace_key: &str,
+        wanted: &[(String, String)],
+    ) -> Result<Vec<crate::file_review::FileChangeSummary>> {
+        crate::file_review::cached_summaries(&self.conn, workspace_key, wanted)
+    }
+
+    /// Remember what a change-summary call produced, so it is bought once.
+    pub fn store_file_change_summaries(
+        &self,
+        workspace_key: &str,
+        summaries: &[crate::file_review::FileChangeSummary],
+    ) -> Result<()> {
+        crate::file_review::store_summaries(&self.conn, workspace_key, summaries)
     }
 
     /// What one chat has cost, across every call it produced.
@@ -2771,6 +2795,48 @@ mod tests {
         file.flush().unwrap();
 
         let error = store.read_events(session.id).unwrap_err().to_string();
+        assert!(error.contains("line exceeds"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn pagination_rejects_oversized_historical_event_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "oversized history page",
+            )
+            .unwrap();
+        let cursor = SessionEvent::new(
+            session.id,
+            SessionEventKind::AssistantMessage,
+            "cursor",
+            serde_json::json!({}),
+        );
+        let event_prefix = serde_json::to_string(&SessionEvent::new(
+            session.id,
+            SessionEventKind::UserMessage,
+            "older",
+            serde_json::json!({}),
+        ))
+        .unwrap();
+        let oversized_line = "x".repeat(MAX_SESSION_EVENT_LINE_BYTES + 1);
+        let cursor_line = serde_json::to_string(&cursor).unwrap();
+        std::fs::write(
+            &session.events_path,
+            format!("{event_prefix}\n{oversized_line}\n{cursor_line}\n"),
+        )
+        .unwrap();
+
+        let error = store
+            .read_events_before(session.id, cursor.id, 10)
+            .unwrap_err()
+            .chain()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(": ");
         assert!(error.contains("line exceeds"), "unexpected error: {error}");
     }
 

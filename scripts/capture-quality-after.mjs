@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,33 +19,72 @@ const outputRoot = resolve(
   "artifacts/screenshots/gyro-quality-after",
 );
 const appOrigin = "http://127.0.0.1:1420";
-const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const playwrightCache = resolve(homedir(), "Library/Caches/ms-playwright");
+const cachedHeadlessShells = existsSync(playwrightCache)
+  ? readdirSync(playwrightCache)
+      .filter((entry) => entry.startsWith("chromium_headless_shell-"))
+      .sort((left, right) =>
+        right.localeCompare(left, undefined, { numeric: true }),
+      )
+      .map((entry) =>
+        resolve(
+          playwrightCache,
+          entry,
+          "chrome-headless-shell-mac-arm64/chrome-headless-shell",
+        ),
+      )
+  : [];
+const chrome = [
+  process.env.GYRO_CAPTURE_BROWSER,
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ...cachedHeadlessShells,
+].find((candidate) => candidate && existsSync(candidate));
 const debugPort = 9344;
 
-const shots = [
+const states = [
+  { name: "welcome", scene: "welcome", clicks: [] },
   {
-    name: "01-chat-start-dark",
-    url: `${appOrigin}/capture.html?scene=chat`,
-    width: 1440,
-    height: 900,
-    theme: "dark",
+    name: "active-chat",
+    scene: "active-chat",
+    clicks: ["Bound the sync"],
   },
   {
-    name: "05-chat-start-light",
-    url: `${appOrigin}/capture.html?scene=chat`,
-    width: 1440,
-    height: 900,
-    theme: "light",
+    name: "workspace-source-control",
+    scene: "workspace-source-control",
+    clicks: ["Workspace", "Source Control"],
   },
   {
-    name: "06-settings-dark",
-    url: `${appOrigin}/capture.html?scene=chat`,
-    width: 1440,
-    height: 900,
-    theme: "dark",
-    click: "Settings",
+    name: "selected-diff",
+    scene: "selected-diff",
+    clicks: ["Workspace", "Source Control", "sync.js"],
+  },
+  {
+    name: "appearance",
+    scene: "appearance",
+    clicks: ["Settings", "Appearance"],
   },
 ];
+
+const viewports = [
+  { name: "reference", width: 1600, height: 975 },
+  { name: "desktop", width: 1440, height: 900 },
+  { name: "compact", width: 1024, height: 700 },
+];
+
+const captureFilter = process.env.GYRO_CAPTURE_FILTER;
+const shots = states
+  .flatMap((state) =>
+    viewports.flatMap((viewport) =>
+      ["light", "dark"].map((theme) => ({
+        ...state,
+        ...viewport,
+        name: `${state.name}-${viewport.name}-${theme}`,
+        theme,
+        url: `${appOrigin}/capture.html?scene=${state.scene}&theme=${theme}`,
+      })),
+    ),
+  )
+  .filter((shot) => !captureFilter || shot.name.includes(captureFilter));
 
 async function fetchJson(url) {
   const response = await fetch(url);
@@ -100,6 +146,11 @@ class Devtools {
 }
 
 mkdirSync(outputRoot, { recursive: true });
+if (!chrome) {
+  throw new Error(
+    "No capture browser found. Set GYRO_CAPTURE_BROWSER or install a Playwright Chromium browser.",
+  );
+}
 const profile = mkdtempSync(resolve(tmpdir(), "gyro-quality-"));
 const browser = spawn(
   chrome,
@@ -143,7 +194,7 @@ try {
     await call("Page.navigate", { url: `${appOrigin}/capture.html` });
     await new Promise((done) => setTimeout(done, 400));
     await call("Runtime.evaluate", {
-      expression: `localStorage.setItem('gyro.theme', ${JSON.stringify(shot.theme ?? "dark")});`,
+      expression: `localStorage.clear(); localStorage.setItem('gyro.theme', ${JSON.stringify(shot.theme ?? "dark")});`,
     });
     await call("Page.navigate", { url: shot.url });
     await waitFor(
@@ -158,16 +209,27 @@ try {
       { label: `${shot.name} app shell`, timeoutMs: 60000 },
     );
     await new Promise((done) => setTimeout(done, 800));
-    if (shot.click) {
-      await call("Runtime.evaluate", {
+    for (const click of shot.clicks) {
+      const result = await call("Runtime.evaluate", {
         expression: `(() => {
-          const wanted = ${JSON.stringify(shot.click)};
-          const nodes = [...document.querySelectorAll('button, [role="button"]')];
-          const match = nodes.find((node) => (node.textContent || '').trim() === wanted);
+          const wanted = ${JSON.stringify(click)};
+          const nodes = [...document.querySelectorAll('button, [role="button"], [role="tab"], a')];
+          const labels = (node) => [
+            (node.textContent || '').trim(),
+            node.getAttribute('aria-label') || '',
+            node.getAttribute('title') || '',
+          ].filter(Boolean);
+          const match = nodes
+            .filter((node) => labels(node).some((label) => label.startsWith(wanted)))
+            .sort((a, b) => Math.min(...labels(a).map((label) => label.length)) - Math.min(...labels(b).map((label) => label.length)))[0];
           match?.click();
-          return match ? 'clicked' : 'missing';
+          return match ? 'clicked:' + labels(match)[0] : 'missing:' + wanted;
         })()`,
+        returnByValue: true,
       });
+      if (!String(result.result.value).startsWith("clicked:")) {
+        throw new Error(`${shot.name} ${result.result.value}`);
+      }
       await new Promise((done) => setTimeout(done, 700));
     }
     const png = await call("Page.captureScreenshot", {

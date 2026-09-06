@@ -1,3 +1,7 @@
+import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
+import { BranchNameDialog } from "./branch-name-dialog";
+import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
+import { useSyntax } from "./editor/use-syntax";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -18,6 +22,8 @@ import {
   CommandPaletteOverlay,
   IdeStatusBar,
   IdeSurface,
+  askAboutFilePrompt,
+  latestFileReviewTurn,
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
@@ -27,10 +33,19 @@ import {
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
   WorkspaceToolPanel,
+  activeChatCompanionPanel,
+  chatProjectKey,
+  chatCompanionPane,
+  chatCompanionReducer,
   chatGridReducer,
   createChatProjectLayout,
+  createInitialChatCompanionState,
   createInitialChatGridState,
   createInitialWorkbenchState,
+  discardedSideChatSessionIds,
+  isChatCompanionTabId,
+  staleSideChatSessionIds,
+  withoutSideChatSessions,
   createNotification,
   createTerminalPane,
   isMissionSession,
@@ -50,7 +65,6 @@ import {
   workspaceFilesForRoot,
   workspaceRootForPath,
   workspacePathExcluded,
-  normalizedChatProjectKey,
   normalizedConfig,
   COUNCIL_COMING_SOON,
   normalizedCouncilConfig,
@@ -66,7 +80,9 @@ import {
   providerHealthAfterSignInRejection,
   providerSupportsUsage,
   providersForConfig,
+  resolveCleanMachinePath,
   resolvedWorkspaceSettings,
+  selectQueuedMessageDelivery,
   persistableChatGridState,
   sanitizeStoredIdeState,
   sanitizeStoredChatGridState,
@@ -91,6 +107,9 @@ import {
   type ChatPaneRef,
   type ChatRailDiffTools,
   type ChatRailTerminalTools,
+  type ChatCompanionTabId,
+  type SideChatMessage,
+  type SideChatState,
   type ChatSidePanelId,
   type CliLaunchPreset,
   type CommandProfile,
@@ -129,6 +148,7 @@ import {
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
   type ReasoningEffort,
+  type ResolvedTheme,
   type ProviderSession,
   type ProblemDiagnostic,
   type Session,
@@ -150,6 +170,7 @@ import {
   type TerminalPaneStatus,
   type TerminalPane,
   type TerminalTemplate,
+  type ThemeMode,
   type UpdateState,
   type CliUpdateOffer,
   type CliUpdateCheckReport,
@@ -170,6 +191,7 @@ import {
   type WorkspaceScopedSettings,
   type WorkspaceSettingScope,
   type WorkspaceLayoutId,
+  type FileReviewSummary,
 } from "@gyro-dev/ui";
 import {
   lazy,
@@ -182,6 +204,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
 } from "react";
 import {
   applyProviderChatStreamDeltas,
@@ -198,6 +221,7 @@ import {
   type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
+import { useWorkspaceExplorerFiles } from "./workspace-explorer";
 import { useGyroUpdater } from "./update-controller";
 import {
   deriveLatestMenuBarOutcome,
@@ -205,6 +229,9 @@ import {
 } from "./menu-bar-state";
 
 const MonacoEditor = lazy(() => import("./monaco-editor"));
+const SourceControlDiffEditor = lazy(
+  () => import("./source-control-diff-editor"),
+);
 
 type AppNotification = {
   kind: "open-session" | "attach-session";
@@ -290,6 +317,10 @@ type ProviderChatResponse = {
   statusEvent: SessionEvent;
 };
 
+type ProviderContextCompactionResponse = {
+  activityEvents?: SessionEvent[];
+};
+
 type CouncilChatInvokeResponse = {
   councilRun: CouncilRun;
   assistantEvent: SessionEvent;
@@ -324,6 +355,11 @@ type ChatTurnContextSnapshot = {
   sessionModel?: SessionModelSelection;
   requireCommandApproval?: boolean;
   requireFileEditApproval?: boolean;
+  /**
+   * Internal delivery target for queued turns. A queued message must keep
+   * running in its original chat after the user switches to another one.
+   */
+  sessionId?: string;
   fullAccess?: boolean;
   workspacePath?: string;
   workspaceContext?: WorkspaceContextSnapshot;
@@ -414,6 +450,7 @@ const EMPTY_CONFIG: GyroConfig = {
   requireCommandApproval: true,
   requireFileEditApproval: true,
   fullAccess: false,
+  changeSummariesEnabled: false,
   accountOidc: {
     issuerUrl: "local-device://gyro",
     clientId: "gyro-local-device",
@@ -435,6 +472,18 @@ const THEME_STORAGE_KEY = "gyro.theme";
 const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
+
+function systemTheme(): ResolvedTheme {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function storedThemeMode(value: unknown): ThemeMode | undefined {
+  return value === "system" || value === "dark" || value === "light"
+    ? value
+    : undefined;
+}
 const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
@@ -453,6 +502,8 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 // means dropping the message that was waiting on it.
 const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
+const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
+const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
 const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
@@ -475,6 +526,17 @@ type ProviderUsageSnapshot = {
   providerId: ProviderId;
   windows: ProviderUsageState["windows"];
   fetchedAt: string;
+};
+
+type OllamaDiscovery = {
+  baseUrl: string;
+  models: Array<{
+    id: string;
+    displayName: string;
+    description: string;
+    contextWindowTokens?: number;
+    supportsTools: boolean;
+  }>;
 };
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
 const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
@@ -695,12 +757,20 @@ function saveModelUsageMap(usage: ModelUsageMap) {
   safeSetLocalStorage(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
 }
 
+/** Pane key for the chat surfaces that render outside the tiled grid. */
+const SOLO_CHAT_PANE_ID = "solo-chat";
+
 export function App() {
   const [workbench, dispatchWorkbench] = useReducer(
     workbenchReducer,
     undefined,
     loadInitialWorkbenchState,
   );
+  const themePreference = workbench.preferences.theme;
+  const [systemThemeValue, setSystemThemeValue] =
+    useState<ResolvedTheme>(systemTheme);
+  const resolvedTheme: ResolvedTheme =
+    themePreference === "system" ? systemThemeValue : themePreference;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
@@ -771,6 +841,12 @@ export function App() {
   const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const [languageOverrides, setLanguageOverrides] = useState<
+    Record<string, string>
+  >({});
+  const [detectedDiffLanguages, setDetectedDiffLanguages] = useState<
+    Record<string, string>
+  >({});
   const [selectedWorkspaceRoot, setSelectedWorkspaceRoot] = useState<string>();
   const [workspaceConfigurationFile, setWorkspaceConfigurationFile] =
     useState<string>();
@@ -857,6 +933,8 @@ export function App() {
   const terminalSourceControlRequestRef = useRef<Record<string, number>>({});
   const branchCatalogRequestRef = useRef(0);
   const ideSourceControlRequestRef = useRef(0);
+  const ideSourceControlInFlightRef = useRef(new Set<string>());
+  const ideSourceControlQueuedRef = useRef(new Set<string>());
   const ideServicesRequestRef = useRef(0);
   const workspaceSearchRequestRef = useRef(0);
   const workspaceTreeRequestRef = useRef(0);
@@ -870,11 +948,6 @@ export function App() {
   const [recentProjectPaths, setRecentProjectPaths] = useState<string[]>(
     loadRecentProjectPaths,
   );
-  const [branchNamePrompt, setBranchNamePrompt] = useState<{
-    title: string;
-    initialValue: string;
-    resolve: (name?: string) => void;
-  }>();
   const [projectRemoveCandidate, setProjectRemoveCandidate] =
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
@@ -893,10 +966,33 @@ export function App() {
   const pendingPaneSendRef = useRef<{
     paneId: string;
     message: string;
+    context?: ChatTurnContextSnapshot;
   }>();
-  const [chatPanelByPaneId, setChatPanelByPaneId] = useState<
+  // The companion dock: one strip of tool tabs per chat pane, following
+  // whichever pane has focus. The solo chat surfaces (workspace AI view, empty
+  // grid, onboarding) all share one pane key, since only one of them is ever on
+  // screen at a time.
+  // Plan and Environment are not companion tabs — they still take a pane's rail
+  // on their own, so each pane keeps its own toggle alongside the dock.
+  const [paneLegacyPanelByPaneId, setPaneLegacyPanelByPaneId] = useState<
     Record<string, ChatSidePanelId | undefined>
   >({});
+  const [companion, dispatchCompanion] = useReducer(
+    chatCompanionReducer,
+    {
+      browserWidth: workbench.preferences.browserCompanionWidth,
+      toolWidth: workbench.preferences.chatCompanionWidth,
+      panelWidth: workbench.preferences.chatPanelWidth,
+    },
+    (widths) => ({
+      ...createInitialChatCompanionState(
+        widths.toolWidth,
+        widths.browserWidth,
+        widths.panelWidth,
+      ),
+      focusedPaneId: SOLO_CHAT_PANE_ID,
+    }),
+  );
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [commandPaletteMode, setCommandPaletteMode] = useState<
@@ -1030,9 +1126,18 @@ export function App() {
         .map((provider) => provider.id),
     [config],
   );
+  // Plan and Environment are not companion tabs: they still take the rail on
+  // their own, and take precedence while open so the toggle that opened them
+  // has a visible effect. Closing one hands the rail back to the dock.
+  const legacyRailPanel: ChatSidePanelId | undefined =
+    workbench.preferences.activeChatPanel &&
+    !isChatCompanionTabId(workbench.preferences.activeChatPanel)
+      ? workbench.preferences.activeChatPanel
+      : workbench.preferences.chatEnvironmentRailOpen
+        ? "environment"
+        : undefined;
   const activeChatPanel: ChatSidePanelId | undefined =
-    workbench.preferences.activeChatPanel ??
-    (workbench.preferences.chatEnvironmentRailOpen ? "environment" : undefined);
+    legacyRailPanel ?? activeChatCompanionPanel(companion, SOLO_CHAT_PANE_ID);
   const commandProfiles =
     config.commandProfiles.length > 0
       ? config.commandProfiles
@@ -1084,45 +1189,312 @@ export function App() {
       workbench.preferences.workspaceUserSettings,
     ],
   );
-  const visibleWorkspaceFiles = useMemo(
-    () =>
-      files.filter((file) => {
-        if (file.isWorkspaceRoot || !file.workspacePath) return true;
-        const settings = resolvedWorkspaceSettings(
-          workbench.preferences.workspaceUserSettings,
-          workbench.preferences.workspaceSettingsByWorkspace,
-          workbench.preferences.workspaceSettingsByFolder,
-          activeWorkspaceRoot,
-          file.workspacePath,
-        );
-        return !workspacePathExcluded(
-          file.relativePath ?? relativeFilePath(file.path, file.workspacePath),
-          settings.filesExclude,
-        );
-      }),
-    [
-      activeWorkspaceRoot,
-      files,
-      workbench.preferences.workspaceSettingsByFolder,
-      workbench.preferences.workspaceSettingsByWorkspace,
-      workbench.preferences.workspaceUserSettings,
-    ],
-  );
   const activeCapabilityPolicy =
     capabilityPoliciesByProject[
       normalizeProjectPath(activeSession?.workspacePath ?? workspacePath)
     ];
   const currentChatProjectKey =
     chatGrid.activeProjectKey ??
-    normalizedChatProjectKey(activeSession?.workspacePath ?? workspacePath);
-  const activeChatLayout = currentChatProjectKey
-    ? chatGrid.layouts[currentChatProjectKey]
-    : undefined;
+    chatProjectKey(activeSession?.workspacePath ?? workspacePath);
+  const activeChatLayout = chatGrid.layouts[currentChatProjectKey];
   const displayedChatLayout =
     activeChatLayout ?? createChatProjectLayout(currentChatProjectKey);
   const activeChatPane = activeChatLayout?.slots.find(
     (pane) => pane?.paneId === activeChatLayout.focusedPaneId,
   );
+  const companionFocusPaneId =
+    activeChatLayout?.focusedPaneId ?? SOLO_CHAT_PANE_ID;
+  // The dock speaks for whichever chat pane has focus, including the solo
+  // surfaces outside the grid.
+  useEffect(() => {
+    dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId });
+  }, [companionFocusPaneId]);
+  // Anything that still asks for a companion tool the old way — the browser
+  // opening itself mid-run, a panel restored from preferences — lands here and
+  // becomes a tab in the focused pane's strip.
+  useEffect(() => {
+    const panel = workbench.preferences.activeChatPanel;
+    if (!panel || !isChatCompanionTabId(panel)) return;
+    dispatchCompanion({ type: "open-tab", tab: panel });
+    dispatchWorkbench({ type: "set-chat-panel" });
+  }, [workbench.preferences.activeChatPanel]);
+  const closeLegacyRail = useCallback(() => {
+    dispatchWorkbench({ type: "set-chat-panel" });
+  }, []);
+  const setCompanionWidth = useCallback((width: number) => {
+    dispatchCompanion({ type: "resize-panel", width });
+    dispatchWorkbench({ type: "set-chat-panel-width", width });
+  }, []);
+  // --- Transient side chats -------------------------------------------------
+  // The Side chat tab runs against a session of its own so the model answers
+  // with the same workspace, branch, model and permissions as the chat it sits
+  // beside — and with none of its transcript. That session never reaches the
+  // sidebar or history, and it is deleted when the tab closes.
+  const [sideChatThreads, setSideChatThreads] = useState<
+    Record<
+      string,
+      { messages: SideChatMessage[]; isSending?: boolean; error?: string }
+    >
+  >({});
+  const sideChatSessionIdsRef = useRef<string[]>(
+    workbench.preferences.sideChatSessionIds,
+  );
+  sideChatSessionIdsRef.current = workbench.preferences.sideChatSessionIds;
+  const deleteSideChatSession = useCallback(async (sessionId: string) => {
+    if (!isTauriRuntime()) return true;
+    try {
+      await invoke<boolean>("delete_session", { sessionId });
+      return true;
+    } catch {
+      // Keep the id registered and hidden. The next launch retries deletion;
+      // removing it here would let a failed deletion leak into history.
+      return false;
+    }
+  }, []);
+  const retireSideChatSessions = useCallback(
+    (sessionIds: string[]) => {
+      for (const sessionId of [...new Set(sessionIds)]) {
+        void deleteSideChatSession(sessionId).then((deleted) => {
+          if (!deleted) return;
+          dispatchWorkbench({
+            type: "forget-side-chat-sessions",
+            sessionIds: [sessionId],
+          });
+        });
+      }
+    },
+    [deleteSideChatSession],
+  );
+  // Sweep side chats left behind by an unclean exit. Nothing is bound this
+  // early, so every id still on record belongs to a process that is gone.
+  const sweptSideChatsRef = useRef(false);
+  useEffect(() => {
+    if (sweptSideChatsRef.current) return;
+    sweptSideChatsRef.current = true;
+    const stale = staleSideChatSessionIds(
+      workbench.preferences.sideChatSessionIds,
+      companion,
+    );
+    if (!stale.length) return;
+    retireSideChatSessions(stale);
+  }, [
+    companion,
+    retireSideChatSessions,
+    workbench.preferences.sideChatSessionIds,
+  ]);
+  // Closing the tab, closing the pane, or starting a fresh side chat all retire
+  // the session that was bound — each one is deleted outright.
+  const previousCompanionRef = useRef(companion);
+  useEffect(() => {
+    const discarded = discardedSideChatSessionIds(
+      previousCompanionRef.current,
+      companion,
+    );
+    previousCompanionRef.current = companion;
+    if (!discarded.length) return;
+    setSideChatThreads((current) => {
+      const next = { ...current };
+      for (const paneId of Object.keys(next)) {
+        if (!chatCompanionPane(companion, paneId).sideChatSessionId) {
+          delete next[paneId];
+        }
+      }
+      return next;
+    });
+    retireSideChatSessions(discarded);
+  }, [companion, retireSideChatSessions]);
+  const chatSessionForPane = useCallback(
+    (paneId: string) => {
+      const pane = activeChatLayout?.slots.find(
+        (slot) => slot?.paneId === paneId,
+      );
+      if (pane?.kind === "session") {
+        return sessions.find((session) => session.id === pane.sessionId);
+      }
+      return activeSession;
+    },
+    [activeChatLayout, activeSession, sessions],
+  );
+  const openingSideChatsRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const [paneId, pane] of Object.entries(companion.panes)) {
+      if (!pane.openTabs.includes("side-chat")) continue;
+      if (pane.sideChatSessionId) continue;
+      if (openingSideChatsRef.current.has(paneId)) continue;
+      openingSideChatsRef.current.add(paneId);
+      void (async () => {
+        try {
+          const parent = chatSessionForPane(paneId);
+          const workspace = parent?.workspacePath ?? workspacePath ?? "";
+          if (!isTauriRuntime()) {
+            return;
+          }
+          const session = await invoke<Session>("create_desktop_session", {
+            ...newSessionModelFromConfig(config),
+            ...sessionModelSelectionFromSession(parent),
+            title: "Side chat",
+            workspacePath: workspace,
+          });
+          dispatchWorkbench({
+            type: "register-side-chat-session",
+            sessionId: session.id,
+          });
+          dispatchCompanion({
+            type: "bind-side-chat",
+            sessionId: session.id,
+            paneId,
+          });
+          setSideChatThreads((current) => ({
+            ...current,
+            [paneId]: { messages: [] },
+          }));
+        } catch (error) {
+          setSideChatThreads((current) => ({
+            ...current,
+            [paneId]: {
+              messages: current[paneId]?.messages ?? [],
+              error: `Side chat could not start: ${String(error)}`,
+            },
+          }));
+        } finally {
+          openingSideChatsRef.current.delete(paneId);
+        }
+      })();
+    }
+  }, [chatSessionForPane, companion.panes, config, workspacePath]);
+  const sendSideChatMessage = useCallback(
+    async (paneId: string, sessionId: string, message: string) => {
+      const parent = chatSessionForPane(paneId);
+      const sessionModel = {
+        ...selectedSessionModelFromConfig(config),
+        ...sessionModelSelectionFromSession(parent),
+      };
+      const turnId = crypto.randomUUID();
+      setSideChatThreads((current) => ({
+        ...current,
+        [paneId]: {
+          messages: [
+            ...(current[paneId]?.messages ?? []),
+            { id: turnId, role: "user" as const, text: message },
+          ],
+          isSending: true,
+        },
+      }));
+      try {
+        await invoke<SessionEvent>("append_user_message", {
+          attachments: [],
+          sessionId,
+          message,
+          turnId,
+        });
+        const response = await invoke<ProviderChatResponse>(
+          "run_provider_chat",
+          {
+            request: {
+              sessionId,
+              message,
+              turnId,
+              providerId: sessionModel.providerId ?? config.selectedProviderId,
+              providerLabel: sessionModel.providerLabel,
+              modelId: sessionModel.modelId,
+              modelLabel: sessionModel.modelLabel,
+              reasoningEffort: sessionModel.reasoningEffort,
+              requireCommandApproval: config.requireCommandApproval,
+              requireFileEditApproval: config.requireFileEditApproval,
+              fullAccess: Boolean(config.fullAccess),
+              mode: "normal",
+              attachments: [],
+              suggestTitle: false,
+              workspacePath: parent?.workspacePath ?? workspacePath ?? "",
+            },
+          },
+        );
+        setSideChatThreads((current) => ({
+          ...current,
+          [paneId]: {
+            messages: [
+              ...(current[paneId]?.messages ?? []),
+              {
+                id: response.assistantEvent.id,
+                role: "assistant" as const,
+                text: response.assistantEvent.message,
+              },
+            ],
+            isSending: false,
+          },
+        }));
+      } catch (error) {
+        setSideChatThreads((current) => ({
+          ...current,
+          [paneId]: {
+            messages: current[paneId]?.messages ?? [],
+            isSending: false,
+            error: String(error),
+          },
+        }));
+      }
+    },
+    [chatSessionForPane, config, workspacePath],
+  );
+  const sideChatFor = (paneId: string): SideChatState => {
+    const sessionId = chatCompanionPane(companion, paneId).sideChatSessionId;
+    const thread = sideChatThreads[paneId];
+    const parent = chatSessionForPane(paneId);
+    const sessionModel = {
+      ...selectedSessionModelFromConfig(config),
+      ...sessionModelSelectionFromSession(parent),
+    };
+    return {
+      sessionId,
+      messages: thread?.messages ?? [],
+      isSending: thread?.isSending,
+      error: thread?.error,
+      modelLabel: sessionModel.modelLabel ?? sessionModel.providerLabel,
+      onSend: sessionId
+        ? (message: string) => {
+            void sendSideChatMessage(paneId, sessionId, message);
+          }
+        : undefined,
+    };
+  };
+  const selectSoloChatPanel = useCallback((panel?: ChatSidePanelId) => {
+    if (panel && isChatCompanionTabId(panel)) {
+      dispatchWorkbench({ type: "set-chat-panel" });
+      dispatchCompanion({
+        type: "open-tab",
+        tab: panel,
+        paneId: SOLO_CHAT_PANE_ID,
+      });
+      return;
+    }
+    dispatchWorkbench({ type: "set-chat-panel", panel });
+  }, []);
+  const companionSurfaceProps = (paneId: string) => ({
+    showQuickActions: workbench.preferences.showQuickActions,
+    sideChat: sideChatFor(paneId),
+    companionTabs: chatCompanionPane(companion, paneId).openTabs,
+    companionWidth: companion.panelWidth,
+    browserCompanionWidth: companion.browserDockWidth,
+    onCompanionWidthChange: setCompanionWidth,
+    onOpenCompanionTab: (tab: ChatCompanionTabId) => {
+      closeLegacyRail();
+      dispatchCompanion({ type: "open-tab", tab, paneId });
+    },
+    onCloseCompanionTab: (tab: ChatCompanionTabId) => {
+      dispatchCompanion({ type: "close-tab", tab, paneId });
+    },
+    onCloseCompanionDock: () => {
+      dispatchCompanion({ type: "close-dock", paneId });
+    },
+    onReopenCompanionDock: () => {
+      closeLegacyRail();
+      dispatchCompanion({ type: "reopen-dock", paneId });
+    },
+    onShowCompanionLauncher: () => {
+      closeLegacyRail();
+      dispatchCompanion({ type: "show-launcher", paneId });
+    },
+  });
   const sidebarActiveSessionId =
     activeWorkspaceLayout === "thread" && activeChatLayout?.slots.some(Boolean)
       ? activeChatPane?.kind === "session"
@@ -1305,7 +1677,7 @@ export function App() {
     for (const layout of Object.values(chatGrid.layouts)) {
       if (
         removedProjectPaths.some(
-          (path) => normalizedChatProjectKey(path) === layout.projectKey,
+          (path) => chatProjectKey(path) === layout.projectKey,
         )
       ) {
         dispatchChatGrid({
@@ -1322,8 +1694,7 @@ export function App() {
         if (
           pane?.kind === "session" &&
           (!session ||
-            normalizedChatProjectKey(session.workspacePath) !==
-              layout.projectKey)
+            chatProjectKey(session.workspacePath) !== layout.projectKey)
         ) {
           dispatchChatGrid({
             type: "remove-session-pane",
@@ -1362,7 +1733,7 @@ export function App() {
       ) {
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: normalizedChatProjectKey(requestedSession.workspacePath),
+          projectKey: chatProjectKey(requestedSession.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(requestedSession),
         });
@@ -1445,6 +1816,73 @@ export function App() {
       });
     },
     [],
+  );
+
+  const loadExplorerDirectory = useCallback(
+    async (path: string) => {
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return [];
+      const children = await invoke<WorkspaceFile[]>("list_workspace_tree", {
+        workspacePath: path,
+        depth: 1,
+      });
+      const relativeParent = path === root ? "" : relativeFilePath(path, root);
+      return workspaceFilesForRoot(
+        root,
+        children.map((file) => {
+          const relativePath = relativeParent
+            ? `${relativeParent}/${file.path}`
+            : file.path;
+          return {
+            ...file,
+            path: relativePath,
+            relativePath,
+            depth: relativePath.split("/").length,
+          };
+        }),
+      ).filter((file) => !file.isWorkspaceRoot);
+    },
+    [workspaceRoots],
+  );
+  const reportExplorerError = useCallback(
+    (path: string, error: unknown) => {
+      notify(
+        "command-failed",
+        `Could not read ${workspaceName(path)}`,
+        String(error),
+      );
+    },
+    [notify],
+  );
+  const { explorerFiles, onExpandedDirectoriesChange } =
+    useWorkspaceExplorerFiles(
+      files,
+      isTauriRuntime() ? loadExplorerDirectory : undefined,
+      reportExplorerError,
+    );
+  const visibleWorkspaceFiles = useMemo(
+    () =>
+      explorerFiles.filter((file) => {
+        if (file.isWorkspaceRoot || !file.workspacePath) return true;
+        const settings = resolvedWorkspaceSettings(
+          workbench.preferences.workspaceUserSettings,
+          workbench.preferences.workspaceSettingsByWorkspace,
+          workbench.preferences.workspaceSettingsByFolder,
+          activeWorkspaceRoot,
+          file.workspacePath,
+        );
+        return !workspacePathExcluded(
+          file.relativePath ?? relativeFilePath(file.path, file.workspacePath),
+          settings.filesExclude,
+        );
+      }),
+    [
+      activeWorkspaceRoot,
+      explorerFiles,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+    ],
   );
 
   const refreshProviderLedger = useCallback(async (providerId: ProviderId) => {
@@ -1853,7 +2291,7 @@ export function App() {
         sendingSessionIds,
         sessionEventsById,
         sessions,
-        theme: workbench.preferences.theme,
+        theme: resolvedTheme,
       }),
     [
       finishedMenuBarOutcomes,
@@ -1863,7 +2301,7 @@ export function App() {
       sessionEventsById,
       sessions,
       workbench.automations,
-      workbench.preferences.theme,
+      resolvedTheme,
     ],
   );
 
@@ -1874,6 +2312,17 @@ export function App() {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    if (themePreference !== "system") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setSystemThemeValue(media.matches ? "dark" : "light");
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, [themePreference]);
 
   useEffect(() => {
     if (!menuBarOutcomeInitializedRef.current) {
@@ -1998,14 +2447,19 @@ export function App() {
         (!isProviderId(targetProviderId) ||
           !isProviderExecutable(targetProviderId))
           ? `${targetProvider ?? targetProviderId} is visible for readiness only and cannot execute ${intent} runs`
-          : targetProviderId &&
-              providerSignInRejectionsRef.current[targetProviderId]
-            ? // Naming the rejection matters: the provider CLI still reports a
-              // stored login, so "not connected" would read as a Gyro mistake.
-              `${targetProvider ?? targetProviderId} rejected the sign-in Gyro sent with; sign in again to continue`
-            : targetProvider
-              ? `${targetProvider} is not connected yet`
-              : "Enable and connect a provider before sending";
+          : targetProviderId === "ollama" &&
+              workbench.providerStatuses.find(
+                (status) => status.id === targetProviderId,
+              )?.runtimeStatus === "no-models"
+            ? "Ollama is running, but no models are installed. Run `ollama pull <model>`, then check the local runtime again."
+            : targetProviderId &&
+                providerSignInRejectionsRef.current[targetProviderId]
+              ? // Naming the rejection matters: the provider CLI still reports a
+                // stored login, so "not connected" would read as a Gyro mistake.
+                `${targetProvider ?? targetProviderId} rejected the sign-in Gyro sent with; sign in again to continue`
+              : targetProvider
+                ? `${targetProvider} is not connected yet`
+                : "Enable and connect a provider before sending";
 
       dispatchWorkbench({
         type: "set-provider-readiness",
@@ -2074,7 +2528,10 @@ export function App() {
       return;
     }
     try {
-      const nextSessions = await invoke<Session[]>("list_sessions");
+      const nextSessions = withoutSideChatSessions(
+        await invoke<Session[]>("list_sessions"),
+        sideChatSessionIdsRef.current,
+      );
       const nextVisibleSessions = visibleSessionsForProjects(
         nextSessions,
         removedProjectPaths,
@@ -2594,6 +3051,21 @@ export function App() {
       }
       if (streamEvent.phase === "completed") {
         clearProviderSignInRejection(streamEvent.providerId);
+        // A completed turn is stronger evidence than a CLI status probe: this
+        // exact provider just authenticated and produced a response. Keep the
+        // UI's readiness state in sync so an old blocked banner cannot survive
+        // above a successful chat.
+        if (isProviderId(streamEvent.providerId)) {
+          const provider = providersForConfig(configRef.current).find(
+            (item) => item.id === streamEvent.providerId,
+          );
+          dispatchWorkbench({
+            type: "set-provider-readiness",
+            status: "ready",
+            message: `${provider?.displayName ?? streamEvent.providerId} ready for chat`,
+            providerId: streamEvent.providerId,
+          });
+        }
       }
       if (
         streamEvent.phase === "started" ||
@@ -2654,6 +3126,7 @@ export function App() {
     },
     [
       clearProviderSignInRejection,
+      dispatchWorkbench,
       flushProviderStreamBatches,
       recordProviderSignInRejection,
       scheduleProviderStreamFlush,
@@ -2896,8 +3369,55 @@ export function App() {
     }
     try {
       const nextConfig = await invoke<GyroConfig>("load_config");
-      setConfig(withCouncilConfig(nextConfig));
+      const resolvedConfig = withCouncilConfig(nextConfig);
+      setConfig(resolvedConfig);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
+      const ollama = providersForConfig(resolvedConfig).find(
+        (provider) => provider.id === "ollama",
+      );
+      if (ollama) {
+        // Runtime discovery is optional startup work. A stopped or slow local
+        // service must not hold the whole workspace on its loading screen.
+        void invoke<OllamaDiscovery>("discover_ollama_models_command", {
+          baseUrl: ollama.baseUrl,
+        })
+          .then((discovery) => {
+            const models = discovery.models.map((model) => ({
+              id: model.id,
+              displayName: model.displayName,
+              description: model.description,
+              contextWindowTokens: model.contextWindowTokens,
+              supportsTools: model.supportsTools,
+            }));
+            setConfig((current) => ({
+              ...current,
+              modelProviders: providersForConfig(current).map((provider) =>
+                provider.id === "ollama" && provider.baseUrl === ollama.baseUrl
+                  ? {
+                      ...provider,
+                      baseUrl: discovery.baseUrl,
+                      models,
+                      defaultModelId:
+                        provider.defaultModelId &&
+                        models.some(
+                          (model) => model.id === provider.defaultModelId,
+                        )
+                          ? provider.defaultModelId
+                          : models[0]?.id,
+                      selectedModelId:
+                        provider.selectedModelId &&
+                        models.some(
+                          (model) => model.id === provider.selectedModelId,
+                        )
+                          ? provider.selectedModelId
+                          : models[0]?.id,
+                    }
+                  : provider,
+              ),
+            }));
+          })
+          .catch(() => undefined);
+      }
     } catch {
       setConfig(withCouncilConfig(EMPTY_CONFIG));
       setActiveProfileId("shell");
@@ -2973,7 +3493,11 @@ export function App() {
     [isShellOptimizing, notify],
   );
 
-  const refreshIdeSourceControl = useCallback((root?: string) => {
+  const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+    if (root && ideSourceControlInFlightRef.current.has(root)) {
+      ideSourceControlQueuedRef.current.add(root);
+      return;
+    }
     const requestId = ideSourceControlRequestRef.current + 1;
     ideSourceControlRequestRef.current = requestId;
     if (!root) {
@@ -2997,6 +3521,7 @@ export function App() {
       return;
     }
 
+    ideSourceControlInFlightRef.current.add(root);
     void invoke<SourceControlState>("git_status", { workspacePath: root })
       .then((sourceControl) => {
         if (ideSourceControlRequestRef.current !== requestId) {
@@ -3025,6 +3550,17 @@ export function App() {
             error: String(error),
           },
         });
+      })
+      .finally(() => {
+        ideSourceControlInFlightRef.current.delete(root);
+        // Collapse refresh bursts into one follow-up. Mutations during a read
+        // still get fresh status without spawning overlapping Git processes.
+        if (
+          ideSourceControlQueuedRef.current.delete(root) &&
+          ideSourceControlRequestRef.current === requestId
+        ) {
+          refresh(root);
+        }
       });
   }, []);
 
@@ -3142,6 +3678,28 @@ export function App() {
     ],
   );
 
+  const [branchNameRequest, setBranchNameRequest] = useState<{
+    startPoint?: string;
+    initialValue: string;
+    mode: "create" | "rename";
+    resolve: (name: string | undefined) => void;
+  }>();
+  const requestBranchName = useCallback(
+    (
+      startPoint?: string,
+      initialValue = "",
+      mode: "create" | "rename" = "create",
+    ) =>
+      new Promise<string | undefined>((resolve) => {
+        setBranchNameRequest({ startPoint, initialValue, mode, resolve });
+      }),
+    [],
+  );
+  const finishBranchNameRequest = (name?: string) => {
+    branchNameRequest?.resolve(name);
+    setBranchNameRequest(undefined);
+  };
+
   const createWorkspaceBranch = useCallback(
     async (startPoint?: string, rename = false) => {
       const root = activeSession?.workspacePath ?? workspacePath;
@@ -3173,13 +3731,11 @@ export function App() {
         );
         return;
       }
-      const branch = await new Promise<string | undefined>((resolve) => {
-        setBranchNamePrompt({
-          title: rename ? "Rename current branch" : "New branch",
-          initialValue: rename ? (startPoint ?? "") : "",
-          resolve,
-        });
-      });
+      const branch = await requestBranchName(
+        rename ? undefined : startPoint,
+        rename ? (startPoint ?? "") : "",
+        rename ? "rename" : "create",
+      );
       if (!branch) {
         return;
       }
@@ -3227,6 +3783,7 @@ export function App() {
       activeSessionId,
       isStartingFirstTurn,
       notify,
+      requestBranchName,
       refreshIdeSourceControl,
       refreshSessions,
       refreshWorkspaceBranches,
@@ -3703,7 +4260,13 @@ export function App() {
   const workspaceContextSnapshot = useMemo<
     WorkspaceContextSnapshot | undefined
   >(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    // A chat can start before any editor file is selected.  The workspace is
+    // still known from the active session/root, so never make project signals
+    // contingent on editor focus.
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      workspaceActionRoot ??
+      activeWorkspaceRoot;
     if (!root) return undefined;
     const contextPath = (path?: string) =>
       path ? workspaceContextRelativePath(path, root) : undefined;
@@ -3720,6 +4283,7 @@ export function App() {
       workspaceKey: root,
       revision: Date.now(),
       capturedAt: new Date().toISOString(),
+      availability: "available",
       activePath: undefined,
       activeView: undefined,
       visibleTabs: [],
@@ -3740,7 +4304,11 @@ export function App() {
       activeOutput: activeOutput
         ? {
             ...activeOutput,
-            lines: activeOutput.lines
+            // Output channels may have been created by an older persisted
+            // workbench or a third-party contribution. Do not let a malformed
+            // channel turn attaching Workspace context into an app-wide error.
+            lines: (Array.isArray(activeOutput.lines) ? activeOutput.lines : [])
+              .filter((line) => typeof line === "string")
               .slice(-50)
               .map((line) => line.slice(0, 500)),
           }
@@ -3758,7 +4326,10 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      workspaceActionRoot ??
+      activeWorkspaceRoot;
     if (!root || !isTauriRuntime()) return;
     void invoke("update_capability_ide_evidence", {
       request: {
@@ -3769,6 +4340,8 @@ export function App() {
     });
   }, [
     selectedFile,
+    workspaceActionRoot,
+    activeWorkspaceRoot,
     workbench.ide.diagnostics,
     workspaceContextSnapshot,
     workspaceRoots,
@@ -3910,6 +4483,87 @@ export function App() {
     [notify, workbench.preferences.workspaceTrust, workspaceActionRoot],
   );
 
+  const launchIdeDevTask = useCallback(
+    async (task: TaskDefinition, root: string) => {
+      const profile = getCommandProfile(commandProfiles, "shell");
+      const paneId = workspaceTaskTerminalPaneId(task.id);
+      const commandLine = terminalCommandLine(task);
+      const existingPane = workbench.terminalPanes.find(
+        (pane) => pane.id === paneId,
+      );
+      if (!existingPane) {
+        dispatchWorkbench({
+          type: "add-terminal-pane",
+          pane: createTerminalPane(paneId, profile, "running", {
+            ...workspaceRunMetadata("local", profile.displayName, root),
+            projectPath: root,
+            taskTitle: task.label,
+            workspaceTaskId: task.id,
+          }),
+        });
+      }
+      dispatchWorkbench({
+        type: "run-terminal-pane",
+        paneId,
+        profileId: profile.id,
+        command: commandLine,
+        output: `$ ${commandLine}\n`,
+      });
+      setTerminalOutput(`$ ${commandLine}\n`);
+
+      if (!isTauriRuntime()) {
+        return true;
+      }
+
+      try {
+        const snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: ["-lc", commandLine],
+              command: "zsh",
+              paneId,
+              profileId: profile.id,
+              title: task.label,
+              workspacePath: root,
+              workspaceMode: "local",
+              workingDirectory: "Workspace",
+            },
+          },
+        );
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId: snapshot.paneId,
+          command: snapshot.command,
+          projectPath: snapshot.workspacePath ?? root,
+          workingDirectory: snapshot.workingDirectory,
+          event:
+            snapshot.exitCode === null || snapshot.exitCode === undefined
+              ? snapshot.status
+              : `${snapshot.status} (${snapshot.exitCode})`,
+          output: snapshot.output ?? "",
+          status: terminalStatusFromSnapshot(snapshot.status),
+          hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+        });
+        terminalOutputRevisionRef.current[snapshot.paneId] =
+          snapshot.outputRevision;
+        setTerminalOutput(snapshot.output ?? "");
+        return true;
+      } catch (error) {
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId,
+          command: commandLine,
+          event: "process failed to start",
+          output: `Failed to start ${task.label}\n${String(error)}`,
+          status: "failed",
+        });
+        return false;
+      }
+    },
+    [commandProfiles, workbench.terminalPanes],
+  );
+
   const runIdeTask = useCallback(
     async (task: TaskDefinition) => {
       const root = workspaceActionRoot;
@@ -3963,6 +4617,15 @@ export function App() {
         }
       };
       setTaskStatus("running", task.group === "test" ? "running" : undefined);
+      // Dev servers and watchers run in a live PTY. They remain interactive,
+      // render ANSI output correctly, and are not cut short by task timeouts.
+      if (task.group === "dev") {
+        const started = await launchIdeDevTask(task, root);
+        if (!started) {
+          setTaskStatus("failed");
+        }
+        return;
+      }
       dispatchWorkbench({
         type: "ide-upsert-output-channel",
         channel: {
@@ -4028,6 +4691,7 @@ export function App() {
     },
     [
       notify,
+      launchIdeDevTask,
       workbench.ide.testTree,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
@@ -4048,6 +4712,37 @@ export function App() {
         });
         return;
       }
+      const terminalPane = workbench.terminalPanes.find(
+        (pane) => pane.workspaceTaskId === task.id,
+      );
+      if (terminalPane) {
+        try {
+          const snapshot = await invoke<TerminalPaneSnapshot>(
+            "stop_terminal_pane",
+            { paneId: terminalPane.id },
+          );
+          dispatchWorkbench({
+            type: "sync-terminal-pane-snapshot",
+            paneId: snapshot.paneId,
+            command: snapshot.command,
+            projectPath: snapshot.workspacePath,
+            workingDirectory: snapshot.workingDirectory,
+            event: "stopped",
+            output: snapshot.output ?? terminalPane.output,
+            status: terminalStatusFromSnapshot(snapshot.status),
+            hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+          });
+          dispatchWorkbench({
+            type: "ide-set-task-status",
+            taskId: task.id,
+            status: "cancelled",
+            lastRunAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          notify("command-failed", "Could not stop the command", String(error));
+        }
+        return;
+      }
       try {
         const stopped = await invoke<boolean>("task_cancel", {
           request: { workspacePath: root, taskId: task.id },
@@ -4063,7 +4758,7 @@ export function App() {
         notify("command-failed", "Could not stop the command", String(error));
       }
     },
-    [notify, workspaceActionRoot],
+    [notify, workbench.terminalPanes, workspaceActionRoot],
   );
 
   const createCustomIdeTask = useCallback(
@@ -4567,51 +5262,29 @@ export function App() {
 
   const openSourceControlDiffForRoot = useCallback(
     async (root: string, path: string, staged: boolean) => {
-      const channelId = `git-diff:${path}`;
+      const file = workbench.ide.sourceControl.files.find(
+        (file) => file.path === path && file.staged === staged,
+      );
+      const reviewPath = `gyro-diff:${encodeURIComponent(root)}:${staged ? "index" : "worktree"}:${encodeURIComponent(path)}`;
       dispatchWorkbench({
-        type: "ide-upsert-output-channel",
-        channel: {
-          id: channelId,
-          label: `Diff: ${workspaceName(path)}`,
-          kind: "system",
-          lines: ["Loading Git diff..."],
-          updatedAt: new Date().toISOString(),
+        type: "ide-open-tab",
+        tab: {
+          path: reviewPath,
+          title: `${workspaceName(path)} (${staged ? "Index" : "Working Tree"})`,
+          dirty: false,
+          preview: true,
+          sourceControlDiff: {
+            workspacePath: root,
+            path,
+            originalPath: file?.originalPath,
+            staged,
+          },
         },
       });
-      dispatchWorkbench({ type: "ide-select-output-channel", channelId });
-      dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
-      if (!isTauriRuntime()) {
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: channelId,
-            label: `Diff: ${workspaceName(path)}`,
-            kind: "system",
-            lines: [`Preview diff for ${path}`],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-        return;
-      }
-      try {
-        const output = await invoke<IdeCommandOutput>("git_diff", {
-          request: { workspacePath: root, path, staged },
-        });
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: channelId,
-            label: `Diff: ${workspaceName(path)}`,
-            kind: "system",
-            lines: [output.stdout || output.stderr || "No diff output."],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-      } catch (error) {
-        notify("command-failed", "Git diff failed", String(error));
-      }
+      setSelectedFile(reviewPath);
+      dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [notify],
+    [workbench.ide.sourceControl.files],
   );
 
   const openSourceControlDiff = useCallback(
@@ -4673,6 +5346,121 @@ export function App() {
       workbench.ide.sourceControl.files,
     ],
   );
+
+  /**
+   * End-of-turn file review, in "Ask first" only.
+   *
+   * Every edit in this mode was approved before it was written, so the card at
+   * the end of a turn is a reading pass over work that already landed. Keeping
+   * a file records that it was read; it applies and reverts nothing.
+   */
+  const isFileReviewEnabled =
+    Boolean(config.changeSummariesEnabled) &&
+    !config.fullAccess &&
+    config.requireCommandApproval &&
+    config.requireFileEditApproval;
+  const [fileReviewSummariesBySession, setFileReviewSummariesBySession] =
+    useState<Record<string, Record<string, FileReviewSummary[]>>>({});
+  const [fileReviewPendingTurnIds, setFileReviewPendingTurnIds] = useState<
+    string[]
+  >([]);
+  /**
+   * Turns whose summary call has already been made, keyed by what was actually
+   * described. A turn that keeps editing produces a new key; a turn that is
+   * merely re-rendered does not, so the user is billed once per state.
+   */
+  const fileReviewRequestedRef = useRef(new Set<string>());
+  const activeFileReviewSummaries = activeSessionId
+    ? fileReviewSummariesBySession[activeSessionId]
+    : undefined;
+
+  useEffect(() => {
+    if (!isFileReviewEnabled || !isTauriRuntime()) return;
+    // A summary describes a finished turn. Asking while the provider is still
+    // working would describe a half-written file and would compete with the
+    // run itself for the session's single provider slot.
+    if (!activeSessionId || isActiveSessionSending) return;
+    const target = latestFileReviewTurn(events);
+    if (!target) return;
+    const root = activeSession?.workspacePath ?? workspacePath;
+    if (!root) return;
+    const sessionId = activeSessionId;
+    const { turnId } = target;
+    const key = [
+      sessionId,
+      turnId,
+      ...target.files.map(
+        (file) => `${file.path}:${file.additions}:${file.deletions}`,
+      ),
+    ].join("|");
+    if (fileReviewRequestedRef.current.has(key)) return;
+    fileReviewRequestedRef.current.add(key);
+
+    const sessionModel = {
+      ...selectedSessionModelFromConfig(config),
+      ...sessionModelSelectionFromSession(
+        sessions.find((session) => session.id === sessionId),
+      ),
+    };
+
+    setFileReviewPendingTurnIds((current) =>
+      current.includes(turnId) ? current : [...current, turnId],
+    );
+    void (async () => {
+      try {
+        const files = await Promise.all(
+          target.files.map(async (file) => {
+            // A file whose diff cannot be read still gets a row; it just falls
+            // back to its counts rather than borrowing another file's prose.
+            const diff = await loadInlineChangeDiff(file.path).catch(() => "");
+            return {
+              path: file.path,
+              diff,
+              additions: file.additions,
+              deletions: file.deletions,
+            };
+          }),
+        );
+        const summaries = await invoke<FileReviewSummary[]>(
+          "summarize_file_changes",
+          {
+            request: {
+              sessionId,
+              turnId,
+              workspacePath: root,
+              providerId: sessionModel.providerId ?? config.selectedProviderId,
+              providerLabel: sessionModel.providerLabel,
+              modelId: sessionModel.modelId,
+              modelLabel: sessionModel.modelLabel,
+              files,
+            },
+          },
+        );
+        setFileReviewSummariesBySession((current) => ({
+          ...current,
+          [sessionId]: { ...current[sessionId], [turnId]: summaries },
+        }));
+      } catch (error) {
+        // The card renders from counts without this, so a failed description is
+        // not worth a notification.
+        console.warn("could not summarize the turn's changes", error);
+      } finally {
+        setFileReviewPendingTurnIds((current) =>
+          current.filter((id) => id !== turnId),
+        );
+      }
+    })();
+  }, [
+    activeSession?.workspacePath,
+    activeSessionId,
+    config,
+    events,
+    isActiveSessionSending,
+    isFileReviewEnabled,
+    loadInlineChangeDiff,
+    sessions,
+    workspacePath,
+  ]);
 
   const reviewTerminalChanges = useCallback(
     (file?: SourceControlState["files"][number]) => {
@@ -5171,8 +5959,8 @@ export function App() {
       try {
         switch (actionId) {
           case "create-branch": {
-            const name = window.prompt(
-              "New branch name",
+            const name = await requestBranchName(
+              undefined,
               suggestedBranchName(workbench.diffReview.commitMessage),
             );
             if (!name?.trim()) {
@@ -5248,6 +6036,7 @@ export function App() {
       notify,
       refreshGithub,
       refreshIdeServices,
+      requestBranchName,
       workbench.diffReview.commitMessage,
       workbench.ide.sourceControl,
       workbench.preferences.workspaceTrust,
@@ -5295,10 +6084,10 @@ export function App() {
     [notify, prepareWorkspace, refreshIdeServices],
   );
 
-  const openWorkspace = useCallback(async (): Promise<boolean> => {
+  const openWorkspace = useCallback(async (): Promise<string | undefined> => {
     if (!isTauriRuntime()) {
       await activateWorkspacePath(PREVIEW_WORKSPACE_PATH);
-      return true;
+      return PREVIEW_WORKSPACE_PATH;
     }
     try {
       const selected = await open({
@@ -5307,7 +6096,7 @@ export function App() {
         title: "Open workspace",
       });
       if (typeof selected !== "string") {
-        return false;
+        return undefined;
       }
       const trustPath = normalizedWorkspaceTrustPath(selected);
       if (!(trustPath in workbench.preferences.workspaceTrust)) {
@@ -5318,14 +6107,14 @@ export function App() {
         });
       }
       await activateWorkspacePath(selected);
-      return true;
+      return selected;
     } catch {
       notify(
         "command-failed",
         "Workspace open failed",
         "The current chat was left unchanged.",
       );
-      return false;
+      return undefined;
     }
   }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
 
@@ -5383,7 +6172,7 @@ export function App() {
     } else {
       try {
         const rootFiles = await invoke<WorkspaceFile[]>("list_workspace_tree", {
-          depth: 5,
+          depth: 1,
           workspacePath: selected,
         });
         setFiles((current) =>
@@ -5664,7 +6453,7 @@ export function App() {
       });
 
       invoke<WorkspaceFile[]>("list_workspace_tree", {
-        depth: 5,
+        depth: 1,
         workspacePath: workspace,
       })
         .then((workspaceFiles) => {
@@ -5826,29 +6615,30 @@ export function App() {
   }, [createSession]);
 
   const startNewChat = useCallback(
-    (options: { keepLayout?: boolean } = {}) => {
+    (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
       suppressSessionAutoSelectRef.current = true;
-      const projectPath = activeSession?.workspacePath ?? workspacePath;
-      const projectKey = normalizedChatProjectKey(projectPath);
-      const draftKey = projectKey ? `new:${projectKey}` : NEW_CHAT_DRAFT_KEY;
+      const projectPath =
+        options.workspacePath === undefined
+          ? (activeSession?.workspacePath ?? workspacePath)
+          : options.workspacePath;
+      const projectKey = chatProjectKey(projectPath);
+      const draftKey = `new:${projectKey}`;
       const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
         layout.slots.some(
           (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
         ),
       );
-      if (projectKey && projectPath) {
-        dispatchChatGrid({
-          type: "select-pane",
-          projectKey,
-          mode: "replace",
-          pane: {
-            paneId: `draft:${projectKey}`,
-            kind: "draft",
-            draftKey,
-            workspacePath: projectPath,
-          },
-        });
-      }
+      dispatchChatGrid({
+        type: "select-pane",
+        projectKey,
+        mode: "replace",
+        pane: {
+          paneId: `draft:${projectKey}`,
+          kind: "draft",
+          draftKey,
+          workspacePath: projectPath ?? "",
+        },
+      });
       setIsStartingFirstTurn(false);
       activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
@@ -5882,6 +6672,26 @@ export function App() {
     ],
   );
 
+  /**
+   * A chat's folder is fixed at creation. Selecting a project from its
+   * context row therefore opens a fresh chat that is explicitly bound to the
+   * chosen folder, rather than only changing the surrounding Workspace view.
+   */
+  const selectChatWorkspace = useCallback(
+    async (savedPath?: string) => {
+      const selected = savedPath ? savedPath : await openWorkspace();
+      if (!selected) {
+        return false;
+      }
+      if (savedPath) {
+        await activateWorkspacePath(selected, "Project selected");
+      }
+      startNewChat({ workspacePath: selected });
+      return true;
+    },
+    [activateWorkspacePath, openWorkspace, startNewChat],
+  );
+
   const acknowledgeFinishedChat = useCallback((sessionId: string) => {
     setFinishedMenuBarOutcomes((current) =>
       current.filter(
@@ -5908,7 +6718,7 @@ export function App() {
       if (session) {
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: normalizedChatProjectKey(session.workspacePath),
+          projectKey: chatProjectKey(session.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(session),
         });
@@ -6110,7 +6920,7 @@ export function App() {
 
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
-      const projectKey = normalizedChatProjectKey(pane.workspacePath);
+      const projectKey = chatProjectKey(pane.workspacePath);
       const layout = chatGrid.layouts[projectKey];
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
@@ -6148,7 +6958,7 @@ export function App() {
     (sessionId: string) => {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) return;
-      const projectKey = normalizedChatProjectKey(session.workspacePath);
+      const projectKey = chatProjectKey(session.workspacePath);
       const layout = chatGrid.layouts[projectKey];
       const existingPane = layout?.slots.find(
         (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
@@ -6347,7 +7157,7 @@ export function App() {
     setRemovedProjectPaths(nextRemovedProjectPaths);
     dispatchChatGrid({
       type: "clear-project-layout",
-      projectKey: normalizedChatProjectKey(projectPath),
+      projectKey: chatProjectKey(projectPath),
     });
     setRecentProjectPaths((current) =>
       current.filter((path) => normalizeProjectPath(path) !== projectPath),
@@ -6407,7 +7217,9 @@ export function App() {
       template,
       workspacePathOverride,
       missionSessionId,
+      reveal = true,
       taskTitle,
+      workspaceTaskId,
     }: {
       commandOverride?: string;
       paneId?: string;
@@ -6416,7 +7228,10 @@ export function App() {
       template?: TerminalTemplate;
       workspacePathOverride?: string;
       missionSessionId?: string;
+      /** Background tasks stay visible in the task rail until explicitly opened. */
+      reveal?: boolean;
       taskTitle?: string;
+      workspaceTaskId?: string;
     }) => {
       const process = terminalProcessForProfile(profile, commandOverride);
       const existingPane = workbench.terminalPanes.find(
@@ -6456,11 +7271,14 @@ export function App() {
           projectPath: launchWorkspacePath,
           missionSessionId,
           taskTitle,
+          workspaceTaskId,
         });
         if (template) {
           dispatchWorkbench({ type: "split-terminal-pane", pane, template });
-        } else {
+        } else if (reveal) {
           dispatchWorkbench({ type: "add-terminal-pane", pane });
+        } else {
+          dispatchWorkbench({ type: "upsert-background-terminal-pane", pane });
         }
       }
       dispatchWorkbench({
@@ -6469,6 +7287,7 @@ export function App() {
         profileId: profile.id,
         command: process.displayCommand,
         output: startingOutput,
+        reveal,
       });
       setTerminalOutput(startingOutput);
 
@@ -6912,6 +7731,52 @@ export function App() {
           // the sign-in flow outright instead of believing this answer and
           // sending someone back into the same failure.
           if (!forceLogin && result.connectionStatus === "connected") {
+            if (providerId === "ollama") {
+              const discovery = await invoke<OllamaDiscovery>(
+                "discover_ollama_models_command",
+                { baseUrl: provider?.baseUrl },
+              ).catch(() => undefined);
+              if (discovery) {
+                const models = discovery.models.map((model) => ({
+                  id: model.id,
+                  displayName: model.displayName,
+                  description: model.description,
+                  contextWindowTokens: model.contextWindowTokens,
+                  supportsTools: model.supportsTools,
+                }));
+                const currentConfig = configRef.current;
+                const nextConfig = {
+                  ...currentConfig,
+                  modelProviders: providersForConfig(currentConfig).map(
+                    (candidate) =>
+                      candidate.id === "ollama"
+                        ? {
+                            ...candidate,
+                            baseUrl: discovery.baseUrl,
+                            models,
+                            defaultModelId:
+                              candidate.defaultModelId &&
+                              models.some(
+                                (model) =>
+                                  model.id === candidate.defaultModelId,
+                              )
+                                ? candidate.defaultModelId
+                                : models[0]?.id,
+                            selectedModelId:
+                              candidate.selectedModelId &&
+                              models.some(
+                                (model) =>
+                                  model.id === candidate.selectedModelId,
+                              )
+                                ? candidate.selectedModelId
+                                : models[0]?.id,
+                          }
+                        : candidate,
+                  ),
+                };
+                await persistConfig(nextConfig, { notifySuccess: false });
+              }
+            }
             notify(
               "provider",
               providerId === "openai"
@@ -6944,6 +7809,15 @@ export function App() {
           "approval",
           "Provider env setup needed",
           `${provider.displayName} auth stays in ${provider.apiKeyRef}; configure it outside Gyro and test again.`,
+        );
+        return false;
+      }
+
+      if (providerId === "ollama") {
+        notify(
+          "approval",
+          "Ollama needs setup",
+          "Install and start Ollama locally, then run `ollama pull <model>` before refreshing Gyro.",
         );
         return false;
       }
@@ -7428,6 +8302,81 @@ export function App() {
     [activeDraftKey],
   );
 
+  const keepReviewedFile = useCallback(
+    ({
+      turnId,
+      path,
+      contentHash,
+    }: {
+      turnId: string;
+      path: string;
+      contentHash?: string;
+    }) => {
+      const sessionId = activeSessionIdRef.current;
+      if (!sessionId) return;
+      // Changes already treats an accepted file as read; keeping one here is
+      // the same statement made from the thread.
+      dispatchWorkbench({
+        type: "set-diff-file-state",
+        path,
+        state: "accepted",
+        action: `${path} kept`,
+      });
+      if (!isTauriRuntime()) return;
+      void (async () => {
+        try {
+          const event = await invoke<SessionEvent>(
+            "record_file_review_decision",
+            {
+              request: {
+                sessionId,
+                turnId,
+                path,
+                contentHash: contentHash ?? "",
+                decision: "kept",
+              },
+            },
+          );
+          setEventsForSession(sessionId, (current) =>
+            current.some((item) => item.id === event.id)
+              ? current
+              : [...current, event],
+          );
+        } catch (error) {
+          notify("terminal", "Could not record that", String(error));
+        }
+      })();
+    },
+    [dispatchWorkbench, notify, setEventsForSession],
+  );
+
+  const askAboutReviewedFile = useCallback(
+    (path: string) => {
+      // Prefilled, not sent: the question is the user's to finish and send.
+      updateActiveChatDraft(askAboutFilePrompt(path));
+    },
+    [updateActiveChatDraft],
+  );
+
+  const fileReviewTools = useMemo(
+    () =>
+      isFileReviewEnabled
+        ? {
+            summaries: activeFileReviewSummaries,
+            pendingTurnIds: fileReviewPendingTurnIds,
+            onKeep: keepReviewedFile,
+            onAsk: askAboutReviewedFile,
+          }
+        : undefined,
+    [
+      activeFileReviewSummaries,
+      askAboutReviewedFile,
+      fileReviewPendingTurnIds,
+      isFileReviewEnabled,
+      keepReviewedFile,
+    ],
+  );
+
   const removeChatAttachment = useCallback(
     (attachmentId: string) => {
       setChatAttachments((current) => ({
@@ -7504,11 +8453,13 @@ export function App() {
         const remaining = {
           image: Math.max(
             0,
-            4 - existing.filter((item) => item.kind === "image").length,
+            MAX_CHAT_IMAGES_PER_MESSAGE -
+              existing.filter((item) => item.kind === "image").length,
           ),
           video: Math.max(
             0,
-            2 - existing.filter((item) => item.kind === "video").length,
+            MAX_CHAT_VIDEOS_PER_MESSAGE -
+              existing.filter((item) => item.kind === "video").length,
           ),
         };
         const prepared: ChatAttachment[] = [];
@@ -7559,7 +8510,7 @@ export function App() {
           notify(
             "command-failed",
             "Media limit reached",
-            "Attach up to four images and two videos per message",
+            `Attach up to ${MAX_CHAT_IMAGES_PER_MESSAGE} images and ${MAX_CHAT_VIDEOS_PER_MESSAGE} videos per message`,
           );
         }
       } catch (error) {
@@ -7645,11 +8596,13 @@ export function App() {
       const remaining = {
         image: Math.max(
           0,
-          4 - existing.filter((item) => item.kind === "image").length,
+          MAX_CHAT_IMAGES_PER_MESSAGE -
+            existing.filter((item) => item.kind === "image").length,
         ),
         video: Math.max(
           0,
-          2 - existing.filter((item) => item.kind === "video").length,
+          MAX_CHAT_VIDEOS_PER_MESSAGE -
+            existing.filter((item) => item.kind === "video").length,
         ),
       };
       const prepared: ChatAttachment[] = [];
@@ -7702,7 +8655,7 @@ export function App() {
         notify(
           "command-failed",
           "Media limit reached",
-          "Attach up to four images and two videos per message",
+          `Attach up to ${MAX_CHAT_IMAGES_PER_MESSAGE} images and ${MAX_CHAT_VIDEOS_PER_MESSAGE} videos per message`,
         );
       } else if (rejectedCount > 0) {
         notify(
@@ -7847,6 +8800,28 @@ export function App() {
         applyWorkspaceMode();
       };
 
+      if (action.startsWith("handoff-provider:")) {
+        const providerId = action.replace("handoff-provider:", "");
+        const target = providersForConfig(config).find(
+          (provider) => provider.id === providerId,
+        );
+        if (!isProviderId(providerId) || target?.authStatus !== "connected") {
+          notify(
+            "command-failed",
+            "Handoff unavailable",
+            "Connect another provider before continuing this conversation with it.",
+          );
+          return;
+        }
+        selectProvider(providerId);
+        notify(
+          "provider",
+          "Conversation handed off",
+          `Continuing this thread with ${target.displayName}. Your chat context stays in place.`,
+        );
+        return;
+      }
+
       if (action.startsWith("select-provider:")) {
         const providerId = action.replace("select-provider:", "");
         if (isProviderId(providerId)) {
@@ -7863,8 +8838,14 @@ export function App() {
         return;
       }
 
+      if (action === "open-settings:providers") {
+        openSettingsSection("providers");
+        return;
+      }
+
       if (action.startsWith("select-provider-model:")) {
-        const [, providerId, modelId] = action.split(":");
+        const [, providerId, ...modelParts] = action.split(":");
+        const modelId = modelParts.join(":");
         if (isProviderId(providerId) && modelId) {
           selectProviderModel(providerId, modelId);
         }
@@ -7920,21 +8901,12 @@ export function App() {
       }
 
       if (action === "new-chat-select-workspace") {
-        void openWorkspace().then((selected) => {
-          if (selected) {
-            startNewChat();
-          }
-        });
+        void selectChatWorkspace();
         return;
       }
 
       if (action === "new-local-chat-select-workspace") {
-        void openWorkspace().then((selected) => {
-          if (selected) {
-            startNewChat();
-            dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
-          }
-        });
+        void selectChatWorkspace();
         return;
       }
 
@@ -8040,15 +9012,13 @@ export function App() {
         const encodedPath = action.replace("select-saved-project:", "");
         try {
           const selectedPath = decodeURIComponent(encodedPath);
-          void activateWorkspacePath(selectedPath, "Project selected").catch(
-            () => {
-              notify(
-                "command-failed",
-                "Project unavailable",
-                "The saved project folder could not be opened.",
-              );
-            },
-          );
+          void selectChatWorkspace(selectedPath).catch(() => {
+            notify(
+              "command-failed",
+              "Project unavailable",
+              "The saved project folder could not be opened.",
+            );
+          });
         } catch {
           notify(
             "command-failed",
@@ -8082,7 +9052,18 @@ export function App() {
         case "select-project":
         case "select-workspace":
         case "select-folder":
-          void openWorkspace();
+          void selectChatWorkspace();
+          break;
+        case "select-no-folder":
+          // A persisted chat keeps its original project for reproducibility.
+          // Selecting No folder therefore opens a fresh, detached draft rather
+          // than silently changing the context of an existing conversation.
+          setWorkspacePath(undefined);
+          setSelectedWorkspaceRoot(undefined);
+          setFiles([]);
+          setSelectedFile(undefined);
+          setBranchCatalog(undefined);
+          startNewChat({ workspacePath: "" });
           break;
         case "add-goal":
           dispatchWorkbench({ type: "set-chat-panel" });
@@ -8166,6 +9147,79 @@ export function App() {
         case "select-branch":
           void refreshWorkspaceBranches(currentWorkspacePath);
           break;
+        case "open-source-control":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          dispatchWorkbench({
+            type: "ide-select-view",
+            view: "source-control",
+          });
+          refreshSourceControl();
+          break;
+        case "run-workspace-test": {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          dispatchWorkbench({ type: "ide-select-view", view: "run-test" });
+          const testTask = workbench.ide.taskDefinitions.find(
+            (task) => task.group === "test",
+          );
+          if (!testTask) {
+            refreshIdeServices(currentWorkspacePath);
+            notify(
+              "command-failed",
+              "No test task detected",
+              "Open Run and Test to choose or add a workspace command.",
+            );
+            break;
+          }
+          void runIdeTask(testTask);
+          break;
+        }
+        case "open-diff":
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "code",
+          });
+          openToolPanel("diff");
+          break;
+        case "compact-context": {
+          if (!activeSessionId || activeSession?.providerId !== "openai") {
+            notify(
+              "command-failed",
+              "Context compaction unavailable",
+              "This command is available for resumable OpenAI chats.",
+            );
+            break;
+          }
+          if (sendingSessionIds.includes(activeSessionId)) {
+            notify(
+              "command-failed",
+              "Wait for the current response",
+              "Context can be compacted after the active turn finishes.",
+            );
+            break;
+          }
+          if (!isTauriRuntime()) {
+            break;
+          }
+          void invoke<ProviderContextCompactionResponse>(
+            "compact_provider_chat",
+            { sessionId: activeSessionId },
+          )
+            .then(() => refreshEvents(activeSessionId))
+            .catch((error) =>
+              notify(
+                "command-failed",
+                "Context compaction failed",
+                String(error),
+              ),
+            );
+          break;
+        }
         case "open-terminal-panel":
           openToolPanel("terminal");
           break;
@@ -8186,12 +9240,12 @@ export function App() {
       attachEditorSnapshot,
       activeChatMode,
       activeSession?.workspacePath,
-      activateWorkspacePath,
       checkProviderReadiness,
       changeChatMode,
       connectProvider,
       config,
       createWorkspaceBranch,
+      activeSessionId,
       isShellOptimizing,
       notify,
       openGlobalSearch,
@@ -8199,8 +9253,13 @@ export function App() {
       openToolPanel,
       openWorkspace,
       persistConfig,
+      refreshEvents,
+      refreshIdeServices,
+      refreshSourceControl,
       removeWorkspaceWorktree,
+      runIdeTask,
       savedProjects,
+      selectChatWorkspace,
       selectProvider,
       selectProviderModel,
       selectProviderReasoningEffort,
@@ -8208,11 +9267,133 @@ export function App() {
       refreshWorkspaceBranches,
       startNewChat,
       selectChatAttachment,
+      sendingSessionIds,
       sessions,
+      workbench.ide.taskDefinitions,
       workbench.workspaceMode,
       workspacePath,
     ],
   );
+
+  const providerReadinessNotice = useMemo(() => {
+    const selectedModel = activeSession
+      ? sessionModelSelectionFromSession(activeSession)
+      : chatDraftModels[activeDraftKey];
+    // An empty composer deliberately has no provider target. Do not infer
+    // OpenAI (or any other configured provider) here: this notice represents
+    // a failed runtime check for a model the user chose, not initial setup.
+    const hasSelectedModel = Boolean(
+      selectedModel?.providerId &&
+      (selectedModel.modelId?.trim() || selectedModel.modelLabel?.trim()),
+    );
+    if (!hasSelectedModel) {
+      return undefined;
+    }
+    const providerConfigs = providersForConfig(config);
+    const selectedProvider = providerConfigs.find(
+      (provider) =>
+        provider.id ===
+        (selectedModel?.providerId ?? config.selectedProviderId),
+    );
+    const blockedProvider =
+      workbench.providerReadiness.status === "blocked"
+        ? providerConfigs.find(
+            (provider) =>
+              provider.id === workbench.providerReadiness.providerId,
+          )
+        : undefined;
+    const preferredProvider =
+      selectedProvider ??
+      blockedProvider ??
+      providerConfigs.find((provider) => provider.id === "openai") ??
+      providerConfigs.find((provider) => isProviderExecutable(provider.id));
+    const selectedProviderHealth = workbench.providerStatuses.find(
+      (status) => status.id === selectedProvider?.id,
+    );
+    const readyFromRuntime = Boolean(
+      selectedProvider &&
+      isProviderRuntimeUsable(selectedProvider, selectedProviderHealth),
+    );
+    const readyFromCompletedTurn =
+      workbench.providerReadiness.status === "ready" &&
+      workbench.providerReadiness.providerId === selectedProvider?.id;
+    const hasReadyProvider = readyFromRuntime || readyFromCompletedTurn;
+    const selectedModelLabel =
+      selectedModel?.modelLabel?.trim() || selectedModel?.modelId?.trim();
+    const selectedModelConnectionMessage =
+      selectedModelLabel && selectedProvider && !hasReadyProvider
+        ? `${selectedModelLabel} isn’t ready because ${selectedProvider.displayName} is not connected.`
+        : undefined;
+    const providerRuntimeBlock =
+      selectedProvider?.id === "ollama" &&
+      selectedProviderHealth?.runtimeStatus === "no-models"
+        ? {
+            action: "open-settings:providers",
+            actionLabel: "Open provider settings",
+            message:
+              "Ollama is running, but no models are installed. Run `ollama pull <model>`, then test Ollama in provider settings.",
+            placeholder: "Run ollama pull <model>, then test Ollama…",
+            stepLabel: "Ollama needs a model",
+          }
+        : undefined;
+    const providerReadinessBlock:
+      | {
+          action?: string;
+          actionLabel?: string;
+          message: string;
+          placeholder?: string;
+          stepLabel?: string;
+        }
+      | undefined =
+      providerRuntimeBlock ??
+      (workbench.providerReadiness.status === "blocked" &&
+      workbench.providerReadiness.providerId === selectedProvider?.id
+        ? {
+            message: selectedModelLabel
+              ? `${selectedModelLabel} isn’t ready: ${workbench.providerReadiness.message}`
+              : workbench.providerReadiness.message,
+          }
+        : selectedModelConnectionMessage
+          ? { message: selectedModelConnectionMessage }
+          : undefined);
+    const cleanMachinePath = resolveCleanMachinePath({
+      hasReadyProvider,
+      preferredProviderId: preferredProvider?.id,
+      preferredProviderLabel: preferredProvider?.displayName,
+      providerBlockAction: providerReadinessBlock?.action,
+      providerBlockActionLabel: providerReadinessBlock?.actionLabel,
+      providerBlockMessage: providerReadinessBlock?.message,
+      providerBlockPlaceholder: providerReadinessBlock?.placeholder,
+      providerBlockStepLabel: providerReadinessBlock?.stepLabel,
+      workspacePath: activeSession?.workspacePath ?? workspacePath,
+    });
+
+    const hasProviderRepairAction =
+      cleanMachinePath.nextAction?.startsWith("connect-provider:") ||
+      cleanMachinePath.nextAction === "open-settings:providers";
+    if (
+      !cleanMachinePath.hasProject ||
+      cleanMachinePath.hasReadyProvider ||
+      !cleanMachinePath.blockedReason ||
+      !hasProviderRepairAction
+    ) {
+      return undefined;
+    }
+
+    return {
+      action: cleanMachinePath.nextAction!,
+      actionLabel: cleanMachinePath.nextActionLabel,
+      message: cleanMachinePath.blockedReason,
+    };
+  }, [
+    activeDraftKey,
+    activeSession,
+    chatDraftModels,
+    config,
+    workbench.providerStatuses,
+    workbench.providerReadiness,
+    workspacePath,
+  ]);
 
   const splitTerminalPane = useCallback(
     (template: TerminalTemplate) => {
@@ -8264,14 +9445,26 @@ export function App() {
       const requestedTurnGoal = overrideContext?.goal ?? activeSessionGoal;
       const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal;
       const turnPlan = overrideContext?.plan ?? activeSessionPlan;
+      const targetSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const targetSession = targetSessionId
+        ? sessions.find((session) => session.id === targetSessionId)
+        : undefined;
+      const targetSessionHasTranscriptEvents = targetSessionId
+        ? (sessionEventsById[targetSessionId] ?? []).some(
+            (event) =>
+              event.kind === "user-message" ||
+              event.kind === "assistant-message",
+          )
+        : activeSessionHasTranscriptEvents;
+      const isBackgroundSend = Boolean(
+        targetSessionId && targetSessionId !== activeSessionId,
+      );
       const sessionModel = {
         ...selectedSessionModelFromConfig(config),
         // Prefer the model bound to this session or draft pane over the global
         // picker — required so split-screen chats keep independent models.
-        ...(activeSessionId
-          ? sessionModelSelectionFromSession(
-              sessions.find((session) => session.id === activeSessionId),
-            )
+        ...(targetSessionId
+          ? sessionModelSelectionFromSession(targetSession)
           : chatDraftModels[activeDraftKey]),
         ...overrideContext?.sessionModel,
       };
@@ -8288,7 +9481,7 @@ export function App() {
         overrideContext?.fullAccess ?? Boolean(config.fullAccess);
       const chatWorkspacePath =
         overrideContext?.workspacePath ??
-        activeSession?.workspacePath ??
+        targetSession?.workspacePath ??
         workspacePath;
       const turnWorkspaceContext =
         overrideContext?.workspaceContext ??
@@ -8301,6 +9494,14 @@ export function App() {
       if (message === "") {
         return false;
       }
+      if (isBranchLoading) {
+        notify(
+          "command-failed",
+          "Branch is switching",
+          "Wait for the selected branch to finish checking out before sending.",
+        );
+        return false;
+      }
       if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
         notify(
           "command-failed",
@@ -8309,15 +9510,15 @@ export function App() {
         );
         return false;
       }
-      if (!activeSessionId && isStartingFirstTurn) {
+      if (!targetSessionId && isStartingFirstTurn) {
         return false;
       }
       if (
-        activeSessionId &&
-        sendingSessionIdsRef.current.has(activeSessionId)
+        targetSessionId &&
+        sendingSessionIdsRef.current.has(targetSessionId)
       ) {
         if (
-          (chatMessageQueues[activeSessionId]?.length ?? 0) >=
+          (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
         ) {
           notify(
@@ -8358,13 +9559,14 @@ export function App() {
             requireCommandApproval,
             requireFileEditApproval,
             fullAccess,
+            sessionId: targetSessionId,
             turnId: createTurnId(),
             workspacePath: chatWorkspacePath,
             workspaceContext: turnWorkspaceContext,
           },
         };
         setChatMessageQueues((current) => {
-          const queued = current[activeSessionId] ?? [];
+          const queued = current[targetSessionId] ?? [];
           const totalQueued = Object.values(current).reduce(
             (total, messages) => total + messages.length,
             0,
@@ -8377,7 +9579,7 @@ export function App() {
           }
           return {
             ...current,
-            [activeSessionId]: [...queued, queuedMessage],
+            [targetSessionId]: [...queued, queuedMessage],
           };
         });
         if (!overrideContext?.preserveDraft) {
@@ -8386,20 +9588,20 @@ export function App() {
         notify(
           "terminal",
           "Message queued",
-          "It will send when this chat is active and its current response finishes.",
+          "It will send when this chat's current response finishes, even after you switch chats.",
         );
         return true;
       }
-      if (!isUserSelectedWorkspacePath(chatWorkspacePath)) {
+      const isCouncilTurn = turnMode === "council";
+      if (isCouncilTurn && !isUserSelectedWorkspacePath(chatWorkspacePath)) {
         notify(
           "command-failed",
           "Choose a project",
-          "Select the folder Gyro should use before starting this chat.",
+          "Council needs a folder before starting a chat.",
         );
         void openWorkspace();
         return false;
       }
-      const isCouncilTurn = turnMode === "council";
       if (
         !isCouncilTurn &&
         !checkProviderReadiness("chat", sessionModel.providerId)
@@ -8445,18 +9647,18 @@ export function App() {
           [turnId, sourceControlLineStats(workbench.ide.sourceControl)],
         ]);
       });
-      const isRetry = Boolean(activeSessionId && retryTurnId);
+      const isRetry = Boolean(targetSessionId && retryTurnId);
       const shouldSuggestTitle =
         !isRetry &&
         shouldSuggestSessionTitle(
-          activeSession,
-          activeSessionHasTranscriptEvents,
+          targetSession,
+          targetSessionHasTranscriptEvents,
         );
       const provisionalTitle = shouldSuggestTitle
         ? sessionTitleFromMessage(message)
         : undefined;
 
-      if (!activeSessionId) {
+      if (!targetSessionId) {
         setIsStartingFirstTurn(true);
         // A first message opens the thread layout so the new chat is visible —
         // except when it was sent from the AI view, where the chat is already
@@ -8488,7 +9690,11 @@ export function App() {
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         setWorkspacePath(session.workspacePath);
-        setFiles(workspaceFilesForRoot(session.workspacePath, previewFiles));
+        setFiles(
+          session.workspacePath
+            ? workspaceFilesForRoot(session.workspacePath, previewFiles)
+            : [],
+        );
         setSessions((current) => [session, ...current]);
         dispatchChatGrid({
           type: "migrate-draft-pane",
@@ -8615,18 +9821,37 @@ export function App() {
 
           const contextEvents: SessionEvent[] = [];
           if (turnGoal?.text) {
-            contextEvents.push(
-              await invoke<SessionEvent>("append_chat_context_event", {
-                sessionId: persistedSession.id,
-                eventKind: "goal-updated",
-                message: `Goal set: ${turnGoal.text}`,
-                payload: {
-                  action: "set",
-                  text: turnGoal.text,
-                  status: turnGoal.status,
-                },
-              }),
-            );
+            const goalPayload = {
+              action: "set",
+              text: turnGoal.text,
+              status: turnGoal.status,
+            };
+            try {
+              contextEvents.push(
+                await invoke<SessionEvent>("append_chat_context_event", {
+                  sessionId: persistedSession.id,
+                  eventKind: "goal-updated",
+                  message: `Goal set: ${turnGoal.text}`,
+                  payload: goalPayload,
+                }),
+              );
+            } catch {
+              // Goal metadata must never prevent the first message from
+              // starting. The provider still receives the goal below, and a
+              // local event keeps the outcome visible for this chat.
+              contextEvents.push(
+                createGoalSessionEvent(
+                  persistedSession.id,
+                  `Goal set: ${turnGoal.text}`,
+                  goalPayload,
+                ),
+              );
+              notify(
+                "command-failed",
+                "Goal save failed",
+                "Your message is still sending. Set the goal again after the response.",
+              );
+            }
           }
           if (turnMode === "plan" || turnMode === "council") {
             contextEvents.push(
@@ -8794,46 +10019,48 @@ export function App() {
       const optimisticEvents = isRetry
         ? []
         : createOptimisticTurnEvents(
-            activeSessionId,
+            targetSessionId,
             message,
             turnId,
             selectedProvider,
             turnAttachments,
           );
       if (provisionalTitle) {
-        void updateSessionTitle(activeSessionId, provisionalTitle, {
+        void updateSessionTitle(targetSessionId, provisionalTitle, {
           notifyFailure: false,
         });
       }
-      void saveSessionModel(activeSessionId, sessionModel);
+      void saveSessionModel(targetSessionId, sessionModel);
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
         optimisticEventsRef.current.set(
-          activeSessionId,
-          resetEvents(optimisticEventsRef.current.get(activeSessionId) ?? []),
+          targetSessionId,
+          resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
         );
-        setEvents((current) => resetEvents(current));
+        setEventsForSession(targetSessionId, (current) => resetEvents(current));
         updateOptimisticProviderStatus(
           optimisticEventsRef,
-          setEvents,
-          activeSessionId,
+          (value) => setEventsForSession(targetSessionId, value),
+          targetSessionId,
           turnId,
           "running",
         );
       } else {
         optimisticEventsRef.current.set(
-          activeSessionId,
+          targetSessionId,
           mergePersistedAndOptimisticEvents(
-            optimisticEventsRef.current.get(activeSessionId) ?? [],
+            optimisticEventsRef.current.get(targetSessionId) ?? [],
             optimisticEvents,
           ),
         );
       }
-      setSessionSending(activeSessionId, true);
-      dispatchWorkbench({ type: "set-chat-panel" });
+      setSessionSending(targetSessionId, true);
+      if (!isBackgroundSend) {
+        dispatchWorkbench({ type: "set-chat-panel" });
+      }
       if (!isRetry) {
-        setEvents((current) =>
+        setEventsForSession(targetSessionId, (current) =>
           limitSessionEventsForUi(
             mergePersistedAndOptimisticEvents(current, optimisticEvents),
           ),
@@ -8845,12 +10072,12 @@ export function App() {
       if (!isTauriRuntime()) {
         updateOptimisticProviderStatus(
           optimisticEventsRef,
-          setEvents,
-          activeSessionId,
+          (value) => setEventsForSession(targetSessionId, value),
+          targetSessionId,
           turnId,
           "done",
         );
-        setSessionSending(activeSessionId, false);
+        setSessionSending(targetSessionId, false);
         notify("terminal", "Message added", "Local optimistic event");
         return true;
       }
@@ -8860,7 +10087,7 @@ export function App() {
         if (!isRetry) {
           await invoke<SessionEvent>("append_user_message", {
             attachments: turnAttachments,
-            sessionId: activeSessionId,
+            sessionId: targetSessionId,
             message,
             turnId,
           });
@@ -8880,7 +10107,7 @@ export function App() {
             "run_council_chat",
             {
               request: {
-                sessionId: activeSessionId,
+                sessionId: targetSessionId,
                 message,
                 turnId,
                 presetId: councilResolution.presetId,
@@ -8897,13 +10124,13 @@ export function App() {
               },
             },
           );
-          applyCouncilChatResponse(activeSessionId, councilResponse);
+          applyCouncilChatResponse(targetSessionId, councilResponse);
         } else {
           const providerResponse = await invoke<ProviderChatResponse>(
             "run_provider_chat",
             {
               request: {
-                sessionId: activeSessionId,
+                sessionId: targetSessionId,
                 message,
                 turnId,
                 providerId:
@@ -8927,11 +10154,11 @@ export function App() {
               },
             },
           );
-          applyProviderChatResponse(activeSessionId, providerResponse);
+          applyProviderChatResponse(targetSessionId, providerResponse);
         }
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
-        optimisticEventsRef.current.delete(activeSessionId);
+        optimisticEventsRef.current.delete(targetSessionId);
         const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
         if (usageProviderId && providerSupportsUsage(usageProviderId)) {
           void refreshProviderUsage(usageProviderId);
@@ -8951,20 +10178,20 @@ export function App() {
           });
         updateOptimisticProviderStatus(
           optimisticEventsRef,
-          setEvents,
-          activeSessionId,
+          (value) => setEventsForSession(targetSessionId, value),
+          targetSessionId,
           turnId,
           wasCancelled ? "cancelled" : "failed",
           errorMessage,
         );
-        await refreshEvents(activeSessionId);
+        await refreshEvents(targetSessionId);
         notify(
           wasCancelled ? "terminal" : "command-failed",
           wasCancelled ? "Turn stopped" : "Message fallback",
           wasCancelled ? providerStopDetail(errorMessage) : "Chat stayed local",
         );
       } finally {
-        setSessionSending(activeSessionId, false);
+        setSessionSending(targetSessionId, false);
       }
       return didDeliverProviderResponse;
     },
@@ -8977,6 +10204,7 @@ export function App() {
       activeChatAttachments,
       activeChatDraft,
       activeChatMode,
+      isBranchLoading,
       activeSessionGoal,
       activeSessionPlan,
       applyCouncilChatResponse,
@@ -9151,11 +10379,20 @@ export function App() {
     ],
   );
 
+  const startNewGoalChat = useCallback(
+    (goal: string) => {
+      void sendDraft(goal, {
+        goal: { text: goal, status: "active" },
+      });
+    },
+    [sendDraft],
+  );
+
   useEffect(() => {
     const pending = pendingPaneSendRef.current;
     if (!pending || activeChatPane?.paneId !== pending.paneId) return;
     pendingPaneSendRef.current = undefined;
-    void sendDraft(pending.message);
+    void sendDraft(pending.message, pending.context);
   }, [activeChatPane?.paneId, sendDraft]);
 
   const handlePlanDecision = useCallback(
@@ -9188,52 +10425,47 @@ export function App() {
   );
 
   useEffect(() => {
-    if (
-      !activeSessionId ||
-      sendingSessionIdsRef.current.has(activeSessionId) ||
-      queuedChatDispatchesRef.current.has(activeSessionId)
-    ) {
-      return undefined;
-    }
-    const nextMessage = chatMessageQueues[activeSessionId]?.find(
-      (message) => message.status !== "failed",
-    );
-    if (!nextMessage) {
-      return undefined;
-    }
-    const retryDelay = (nextMessage.retryAt ?? 0) - Date.now();
-    if (retryDelay > 0) {
+    // A queue belongs to its session, not the currently visible pane. Scanning
+    // every session lets a completed background turn promote its own next
+    // message instead of waiting for the user to navigate back to that chat.
+    const now = Date.now();
+    const next = selectQueuedMessageDelivery(chatMessageQueues, {
+      dispatchingSessionIds: queuedChatDispatchesRef.current,
+      now,
+      sendingSessionIds: sendingSessionIdsRef.current,
+    });
+    if (!next) return undefined;
+    if (next.kind === "waiting") {
       const timer = window.setTimeout(
         () => setQueueRetryTick((current) => current + 1),
-        retryDelay,
+        Math.max(0, next.retryAt - now),
       );
       return () => window.clearTimeout(timer);
     }
-    queuedChatDispatchesRef.current.add(activeSessionId);
-    queuedChatDispatchMessageIdsRef.current.set(
-      activeSessionId,
-      nextMessage.id,
-    );
+    const { sessionId, message: nextMessage } = next;
+    queuedChatDispatchesRef.current.add(sessionId);
+    queuedChatDispatchMessageIdsRef.current.set(sessionId, nextMessage.id);
     setChatMessageQueues((current) => {
-      const remaining = (current[activeSessionId] ?? []).filter(
+      const remaining = (current[sessionId] ?? []).filter(
         (item) => item.id !== nextMessage.id,
       );
       if (remaining.length === 0) {
         const next = { ...current };
-        delete next[activeSessionId];
+        delete next[sessionId];
         return next;
       }
-      return { ...current, [activeSessionId]: remaining };
+      return { ...current, [sessionId]: remaining };
     });
     void sendDraft(nextMessage.message, {
       ...nextMessage.context,
       preserveDraft: true,
+      sessionId,
     })
       .then((accepted) => {
         if (!accepted) {
           const willRetry = (nextMessage.deliveryAttempts ?? 0) + 1 < 2;
           setChatMessageQueues((current) => {
-            const queued = current[activeSessionId] ?? [];
+            const queued = current[sessionId] ?? [];
             if (queued.some((item) => item.id === nextMessage.id)) {
               return current;
             }
@@ -9246,7 +10478,7 @@ export function App() {
             const shouldRetry = deliveryAttempts < 2;
             return {
               ...current,
-              [activeSessionId]: [
+              [sessionId]: [
                 {
                   ...nextMessage,
                   context: {
@@ -9272,18 +10504,11 @@ export function App() {
         }
       })
       .finally(() => {
-        queuedChatDispatchesRef.current.delete(activeSessionId);
-        queuedChatDispatchMessageIdsRef.current.delete(activeSessionId);
+        queuedChatDispatchesRef.current.delete(sessionId);
+        queuedChatDispatchMessageIdsRef.current.delete(sessionId);
       });
     return undefined;
-  }, [
-    activeSessionId,
-    chatMessageQueues,
-    notify,
-    queueRetryTick,
-    sendDraft,
-    sendingSessionIds,
-  ]);
+  }, [chatMessageQueues, notify, queueRetryTick, sendDraft, sendingSessionIds]);
 
   const removeQueuedChatMessage = useCallback(
     (messageId: string) => {
@@ -9773,38 +10998,11 @@ export function App() {
 
   const steerQueuedChatMessage = useCallback(
     (messageId: string) => {
-      if (!activeSessionId) {
-        return;
-      }
-      setChatMessageQueues((current) => {
-        const queued = current[activeSessionId] ?? [];
-        const selected = queued.find((item) => item.id === messageId);
-        if (!selected) {
-          return current;
-        }
-        return {
-          ...current,
-          [activeSessionId]: [
-            {
-              ...selected,
-              deliveryAttempts: 0,
-              retryAt: undefined,
-              status: "waiting",
-            },
-            ...queued.filter((item) => item.id !== messageId),
-          ],
-        };
-      });
-      if (sendingSessionIdsRef.current.has(activeSessionId)) {
-        stopActiveChat();
-      }
-      notify(
-        "terminal",
-        "Steering next",
-        "Stopping the current response, then sending this message.",
-      );
+      // Queued turns are context from an earlier moment. Dismissing one must
+      // not promote it into a fresh send (or leave a ghost row in the queue).
+      removeQueuedChatMessage(messageId);
     },
-    [activeSessionId, notify, stopActiveChat],
+    [removeQueuedChatMessage],
   );
 
   const appendPlanEvent = useCallback(
@@ -9896,6 +11094,15 @@ export function App() {
 
   const openEditorFile = useCallback(
     (path: string) => {
+      const reviewTab = workbench.ide.tabs.find(
+        (tab) => tab.path === path && tab.sourceControlDiff,
+      );
+      if (reviewTab) {
+        setSelectedFile(path);
+        dispatchWorkbench({ type: "ide-open-tab", tab: reviewTab });
+        dispatchWorkbench({ type: "close-tool-panel" });
+        return;
+      }
       const entry = files.find((file) => file.path === path);
       if (entry?.kind === "directory") {
         return;
@@ -9914,7 +11121,7 @@ export function App() {
         path,
       });
     },
-    [appendEditorEvent, files],
+    [appendEditorEvent, files, workbench.ide.tabs],
   );
 
   const openEditorLocation = useCallback(
@@ -10038,6 +11245,14 @@ export function App() {
       const root = workspaceRootForPath(workspaceRoots, path);
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
+        return;
+      }
+      if (buffer.truncated) {
+        notify(
+          "command-failed",
+          "Save blocked",
+          "This is a truncated preview. The complete file must be loaded before saving.",
+        );
         return;
       }
       if (!isTauriRuntime()) {
@@ -10803,7 +12018,7 @@ export function App() {
       sessionId?: string;
       workspacePath?: string;
     }) => {
-      const projectKey = normalizedChatProjectKey(candidate.workspacePath);
+      const projectKey = chatProjectKey(candidate.workspacePath);
       // Prefer the active project layout, then the candidate workspace, so a
       // slightly mismatched path still finds the sibling pane in a split.
       const paneLayout =
@@ -10844,7 +12059,8 @@ export function App() {
         activeSessionIdRef.current = undefined;
         setActiveSessionId(undefined);
       }
-      setChatPanelByPaneId((current) => {
+      dispatchCompanion({ type: "forget-pane", paneId: candidate.paneId });
+      setPaneLegacyPanelByPaneId((current) => {
         const next = { ...current };
         delete next[candidate.paneId];
         return next;
@@ -11072,7 +12288,9 @@ export function App() {
     activeSession?.workspacePath ?? activeWorkspaceRoot ?? workspacePath ?? "";
   const browserNativeHost = isTauriRuntime();
   const browserOverlayOccluded =
-    isCommandPaletteOpen || Boolean(modelStandardPrompt);
+    isCommandPaletteOpen ||
+    Boolean(modelStandardPrompt) ||
+    Boolean(branchNameRequest);
 
   const ensureSessionBrowser = useCallback(
     async (
@@ -11085,7 +12303,7 @@ export function App() {
       } | null,
     ) => {
       if (!isTauriRuntime() || !sessionBrowserWorkspaceKey) {
-        return;
+        return false;
       }
       try {
         await invoke("session_browser_open", {
@@ -11103,8 +12321,17 @@ export function App() {
           message: `Native · ${normalizedPreviewUrl(url)}`,
           nativeHost: true,
         });
+        return true;
       } catch (error) {
         notify("command-failed", "Browser open failed", String(error));
+        dispatchWorkbench({
+          type: "browser-status",
+          status: "verification-failed",
+          message:
+            "Gyro could not open the native browser. Retry or open it externally.",
+          nativeHost: true,
+        });
+        return false;
       }
     },
     [notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
@@ -11140,11 +12367,15 @@ export function App() {
 
   const handleBrowserNavigate = useCallback(
     (url: string) => {
-      const next = normalizedPreviewUrl(url);
-      dispatchWorkbench({ type: "browser-navigate", url: next });
-      void ensureSessionBrowser(next);
+      try {
+        const next = normalizedPreviewUrl(url);
+        dispatchWorkbench({ type: "browser-navigate", url: next });
+        void ensureSessionBrowser(next);
+      } catch (error) {
+        notify("command-failed", "Browser address is not valid", String(error));
+      }
     },
-    [ensureSessionBrowser],
+    [ensureSessionBrowser, notify],
   );
 
   const handleBrowserBack = useCallback(() => {
@@ -11177,7 +12408,12 @@ export function App() {
   }, [sessionBrowserKey]);
 
   const toggleBrowserPanel = useCallback(() => {
-    dispatchWorkbench({ type: "toggle-chat-browser" });
+    dispatchWorkbench({ type: "set-chat-panel" });
+    dispatchCompanion({
+      type: "open-tab",
+      tab: "browser",
+      paneId: SOLO_CHAT_PANE_ID,
+    });
   }, []);
 
   useEffect(() => {
@@ -11209,6 +12445,38 @@ export function App() {
       void unlisten.then((dispose) => dispose?.());
     };
   }, [activeSessionId]);
+
+  // The native child webview reports its document title asynchronously. Keep
+  // that small piece of browser state in the React shell so its selected tab
+  // identifies the actual page, just like an in-app browser should.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: Promise<(() => void) | undefined> =
+      Promise.resolve(undefined);
+    try {
+      unlisten = listen<{
+        kind?: string;
+        sessionId: string;
+        title?: string;
+      }>("session-browser-event", (event) => {
+        if (
+          event.payload.sessionId !== sessionBrowserKey ||
+          event.payload.kind !== "title"
+        ) {
+          return;
+        }
+        dispatchWorkbench({
+          type: "browser-title",
+          title: event.payload.title,
+        });
+      });
+    } catch {
+      unlisten = Promise.resolve(undefined);
+    }
+    return () => {
+      void unlisten.then((dispose) => dispose?.());
+    };
+  }, [sessionBrowserKey]);
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
@@ -11375,19 +12643,10 @@ export function App() {
     let disposed = false;
     const url = normalizedPreviewUrl(workbench.browserPreview.url);
 
-    // Native host navigates itself; mark ready without the loopback-only probe.
+    // Native host navigates itself. `ensureSessionBrowser` owns its terminal
+    // state so an open failure cannot be overwritten as a healthy blank page.
     if (isTauriRuntime() && browserNativeHost) {
-      void ensureSessionBrowser(url).finally(() => {
-        if (disposed) return;
-        dispatchWorkbench({
-          type: "browser-status",
-          status: "ready",
-          message: `Native · ${url}`,
-          nativeHost: true,
-          diagnosticsSupported: true,
-          diagnosticsCaptured: false,
-        });
-      });
+      void ensureSessionBrowser(url);
       return () => {
         disposed = true;
         window.clearTimeout(timeout);
@@ -11537,6 +12796,7 @@ export function App() {
           args: [...profile.args, task.title],
         },
         startingOutput: `Starting ${profile.displayName}: ${task.title}`,
+        reveal: false,
       });
       if (!started) {
         dispatchWorkbench({
@@ -11814,6 +13074,12 @@ export function App() {
 
   const testProvider = useCallback(
     async (providerId: string) => {
+      if (providerId === "ollama") {
+        // The readiness probe alone does not update the model picker. Reuse
+        // connection discovery so newly pulled models are immediately usable.
+        await connectProvider("ollama");
+        return;
+      }
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
       );
@@ -11828,14 +13094,25 @@ export function App() {
         provider?.displayName ?? providerId,
       );
 
-      const check =
-        isProviderId(providerId) && isTauriRuntime()
-          ? await invoke<ProviderHealthCheck>("check_provider_health", {
-              request: providerHealthRequest(provider, providerId),
-            }).catch((error) => undefined)
-          : undefined;
-      const output =
-        check?.output ?? createProviderHealthOutput(providerId, provider);
+      // A desktop probe failure is meaningful. Falling back to the preview
+      // fixture here used to turn a failed native request into a fabricated
+      // "authenticated" result, which could make an unavailable provider look
+      // ready and send the next turn into the same failure. Preview still uses
+      // the fixture; the desktop always reports the actual probe outcome.
+      let check: ProviderHealthCheck | undefined;
+      let output: string;
+      if (isProviderId(providerId) && isTauriRuntime()) {
+        try {
+          check = await invoke<ProviderHealthCheck>("check_provider_health", {
+            request: providerHealthRequest(provider, providerId),
+          });
+          output = check.output;
+        } catch (error) {
+          output = `Provider health check unavailable: ${String(error)}`;
+        }
+      } else {
+        output = createProviderHealthOutput(providerId, provider);
+      }
       const result = isProviderId(providerId)
         ? recordProviderHealthOutput(providerId, output, check)
         : parseProviderHealthOutput(providerId, output);
@@ -11860,7 +13137,7 @@ export function App() {
         result.healthSummary ?? providerId,
       );
     },
-    [config, notify, recordProviderHealthOutput],
+    [config, connectProvider, notify, recordProviderHealthOutput],
   );
 
   const queueProviderHandoff = useCallback(
@@ -12062,7 +13339,7 @@ export function App() {
         case "toggle-theme":
           dispatchWorkbench({
             type: "set-theme",
-            theme: workbench.preferences.theme === "dark" ? "light" : "dark",
+            theme: resolvedTheme === "dark" ? "light" : "dark",
           });
           break;
         case "create-task":
@@ -12100,7 +13377,7 @@ export function App() {
       splitTerminalPane,
       startNewChat,
       workbench.browserPreview.url,
-      workbench.preferences.theme,
+      resolvedTheme,
       workbench.selectedAutomationId,
       workbench.selectedTaskId,
       workspaceActionRoot,
@@ -12216,16 +13493,30 @@ export function App() {
   }, [syncTerminalSnapshot]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = workbench.preferences.theme;
+    document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.density = workbench.preferences.density;
+    document.documentElement.style.setProperty(
+      "--gyro-user-main",
+      workbench.preferences.mainColor,
+    );
+    document.documentElement.style.setProperty(
+      "--gyro-user-secondary",
+      workbench.preferences.secondaryColor,
+    );
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        workbench.preferences.theme === "light" ? "#f2f4f7" : "#0e0e0e",
+        resolvedTheme === "light" ? "#f8f9f9" : "#15171a",
       );
-    safeSetLocalStorage(THEME_STORAGE_KEY, workbench.preferences.theme);
-  }, [workbench.preferences.density, workbench.preferences.theme]);
+    safeSetLocalStorage(THEME_STORAGE_KEY, themePreference);
+  }, [
+    resolvedTheme,
+    themePreference,
+    workbench.preferences.density,
+    workbench.preferences.mainColor,
+    workbench.preferences.secondaryColor,
+  ]);
 
   useEffect(() => {
     const syncWindowFocus = () => {
@@ -12274,7 +13565,10 @@ export function App() {
   const requestLanguageFeature = useCallback(
     async (path: string, method: string, params: Record<string, unknown>) => {
       const root = workspaceRootForPath(workspaceRoots, path);
-      const descriptor = languageServerDescriptorForPath(path);
+      const descriptor = languageServerDescriptorForPath(
+        path,
+        languageOverrides[path],
+      );
       if (!root || !descriptor || !isTauriRuntime()) {
         return undefined;
       }
@@ -12289,7 +13583,10 @@ export function App() {
           method,
           params: {
             ...params,
-            textDocument: { uri: workspaceFileUri(root, path) },
+            textDocument: {
+              ...(isRecord(params.textDocument) ? params.textDocument : {}),
+              uri: workspaceFileUri(root, path),
+            },
           },
         },
       });
@@ -12302,7 +13599,7 @@ export function App() {
       }
       return response.result;
     },
-    [workspaceRoots],
+    [workspaceRoots, languageOverrides],
   );
 
   useEffect(() => {
@@ -12509,7 +13806,7 @@ export function App() {
   }, [activeSession, prepareWorkspace, refreshIdeServices]);
 
   useEffect(() => {
-    if (!selectedFile) {
+    if (!selectedFile || selectedFile.startsWith("gyro-diff:")) {
       setSelectedFileContent(undefined);
       setSelectedFileError("");
       setSelectedFileLoadState("idle");
@@ -12618,6 +13915,7 @@ export function App() {
       .map((tab) => tab.path)
       .filter(
         (path) =>
+          !path.startsWith("gyro-diff:") &&
           !workspaceRootForPath(workspaceRoots, path) &&
           !/^(?:[a-z]:)?[/\\]/i.test(path),
       );
@@ -12773,8 +14071,21 @@ export function App() {
   useEffect(() => {
     const root = activeSession?.workspacePath ?? workspacePath;
     const descriptor = selectedFile
-      ? languageServerDescriptorForPath(selectedFile)
+      ? languageServerDescriptorForPath(
+          selectedFile,
+          languageOverrides[selectedFile],
+        )
       : undefined;
+    const fileBuffer = selectedFile
+      ? workbench.ide.buffers[selectedFile]
+      : undefined;
+    const filePolicy = editorFilePolicy(
+      selectedFile ?? "",
+      fileBuffer?.content ?? selectedFileContent?.content ?? "",
+      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
+      fileBuffer?.truncated ?? selectedFileContent?.truncated,
+    );
+    if (filePolicy.limited || filePolicy.binary) return;
     if (
       !root ||
       !selectedFile ||
@@ -12901,6 +14212,7 @@ export function App() {
       cancelled = true;
     };
   }, [
+    languageOverrides,
     selectedFile,
     selectedFileContent?.contentHash,
     workbench.preferences.workspaceTrust,
@@ -12910,11 +14222,24 @@ export function App() {
   useEffect(() => {
     const root = workspaceRootForPath(workspaceRoots, selectedFile);
     const descriptor = selectedFile
-      ? languageServerDescriptorForPath(selectedFile)
+      ? languageServerDescriptorForPath(
+          selectedFile,
+          languageOverrides[selectedFile],
+        )
       : undefined;
     const content = selectedFile
       ? workbench.ide.buffers[selectedFile]?.content
       : undefined;
+    const fileBuffer = selectedFile
+      ? workbench.ide.buffers[selectedFile]
+      : undefined;
+    const filePolicy = editorFilePolicy(
+      selectedFile ?? "",
+      fileBuffer?.content ?? selectedFileContent?.content ?? "",
+      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
+      fileBuffer?.truncated ?? selectedFileContent?.truncated,
+    );
+    if (filePolicy.limited || filePolicy.binary) return;
     if (
       !root ||
       !selectedFile ||
@@ -12970,6 +14295,7 @@ export function App() {
     }, 450);
     return () => window.clearTimeout(timer);
   }, [
+    languageOverrides,
     selectedFile,
     selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
     workspaceRoots,
@@ -13023,6 +14349,31 @@ export function App() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [isActiveSessionSending, refreshTerminalPane, terminalPanePollKey]);
+
+  // Live Run and Test commands complete through terminal snapshots instead of
+  // the bounded task RPC. Reflect that final state back in the command list.
+  useEffect(() => {
+    for (const pane of workbench.terminalPanes) {
+      if (
+        !pane.workspaceTaskId ||
+        (pane.status !== "done" && pane.status !== "failed")
+      ) {
+        continue;
+      }
+      const task = workbench.ide.taskDefinitions.find(
+        (item) => item.id === pane.workspaceTaskId,
+      );
+      if (task?.status !== "running") {
+        continue;
+      }
+      dispatchWorkbench({
+        type: "ide-set-task-status",
+        taskId: task.id,
+        status: pane.status === "done" ? "done" : "failed",
+        lastRunAt: new Date().toISOString(),
+      });
+    }
+  }, [workbench.ide.taskDefinitions, workbench.terminalPanes]);
 
   useEffect(() => {
     const pane = selectedTerminalPane;
@@ -13420,7 +14771,7 @@ export function App() {
           }
           onWrite={writeTerminalInputToPane}
           pane={pane}
-          theme={workbench.preferences.theme}
+          theme={resolvedTheme}
         />
       )}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
@@ -13533,7 +14884,7 @@ export function App() {
         }
         onWrite={writeTerminalInputToPane}
         pane={pane}
-        theme={workbench.preferences.theme}
+        theme={resolvedTheme}
       />
     ),
     selectedTerminalPaneId: workbench.selectedTerminalPaneId,
@@ -13681,7 +15032,7 @@ export function App() {
       notify(
         "terminal",
         `Gyro ${result.nextVersion} is available`,
-        "Use the update control in the titlebar to download it",
+        "Use the update button at the bottom of the sidebar to download it",
       );
     } else if (result.status === "failed") {
       notify("command-failed", "Update check failed", result.error);
@@ -13704,7 +15055,12 @@ export function App() {
 
   const renderChatPane = (
     pane: ChatPaneRef,
-    options: { isMaximized: boolean; isTiled: boolean },
+    options: {
+      isMaximized: boolean;
+      isTiled: boolean;
+      onPaneDragEnd: () => void;
+      onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+    },
   ) => {
     const paneSession =
       pane.kind === "session"
@@ -13726,35 +15082,83 @@ export function App() {
       pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
-    const panePanel = chatPanelByPaneId[pane.paneId];
+    // Plan and Environment still take the rail on their own; the dock's tab
+    // shows through whenever neither is open.
+    const paneLegacyPanel = paneLegacyPanelByPaneId[pane.paneId];
+    const panePanel: ChatSidePanelId | undefined =
+      paneLegacyPanel ?? activeChatCompanionPanel(companion, pane.paneId);
     const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
     const queue =
       pane.kind === "session" ? (chatMessageQueues[pane.sessionId] ?? []) : [];
-    const requestSend = (message: string) => {
+    const requestSend = (
+      message: string,
+      context?: ChatTurnContextSnapshot,
+    ) => {
       if (isFocused) {
-        void sendDraft(message);
+        void sendDraft(message, context);
         return;
       }
-      pendingPaneSendRef.current = { paneId: pane.paneId, message };
+      pendingPaneSendRef.current = { paneId: pane.paneId, message, context };
       focusChatPane(pane);
     };
     const togglePanePanel = (panel: ChatSidePanelId) => {
       focusChatPane(pane);
-      setChatPanelByPaneId((current) => ({
+      setPaneLegacyPanelByPaneId((current) => ({
         ...current,
         [pane.paneId]: current[pane.paneId] === panel ? undefined : panel,
       }));
     };
+    const selectPanePanel = (panel: ChatSidePanelId) => {
+      focusChatPane(pane);
+      if (isChatCompanionTabId(panel)) {
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({
+          type: "open-tab",
+          tab: panel,
+          paneId: pane.paneId,
+        });
+        return;
+      }
+      setPaneLegacyPanelByPaneId((current) => ({
+        ...current,
+        [pane.paneId]: panel,
+      }));
+    };
+    const paneCompanionProps = {
+      ...companionSurfaceProps(pane.paneId),
+      onOpenCompanionTab: (tab: ChatCompanionTabId) => {
+        focusChatPane(pane);
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({ type: "open-tab", tab, paneId: pane.paneId });
+      },
+      onReopenCompanionDock: () => {
+        focusChatPane(pane);
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({ type: "reopen-dock", paneId: pane.paneId });
+      },
+      onShowCompanionLauncher: () => {
+        focusChatPane(pane);
+        setPaneLegacyPanelByPaneId((current) => ({
+          ...current,
+          [pane.paneId]: undefined,
+        }));
+        dispatchCompanion({ type: "show-launcher", paneId: pane.paneId });
+      },
+    };
     return (
       <ChatSurface
         activeChatPanel={panePanel}
-        onSelectChatPanel={(panel) => {
-          focusChatPane(pane);
-          setChatPanelByPaneId((current) => ({
-            ...current,
-            [pane.paneId]: panel,
-          }));
-        }}
+        onSelectChatPanel={selectPanePanel}
+        {...paneCompanionProps}
         railDiffTools={railDiffTools}
         railTerminalTools={railTerminalTools}
         browserPreview={workbench.browserPreview}
@@ -13773,7 +15177,9 @@ export function App() {
         onBrowserUrlChange={(url) =>
           dispatchWorkbench({ type: "set-browser-url", url })
         }
-        onToggleBrowserPanel={() => togglePanePanel("browser")}
+        onToggleBrowserPanel={() =>
+          paneCompanionProps.onOpenCompanionTab("browser")
+        }
         capabilityActivities={
           pane.kind === "session"
             ? Object.values(capabilityRunsBySessionId[pane.sessionId] ?? {})
@@ -13783,6 +15189,8 @@ export function App() {
           capabilityPoliciesByProject[normalizeProjectPath(pane.workspacePath)]
         }
         config={config}
+        files={files}
+        onOpenCompanionFile={openEditorFile}
         modelFocus={
           pane.kind === "session" &&
           workbench.modelFocus?.sessionId === pane.sessionId
@@ -13815,10 +15223,13 @@ export function App() {
             ? sendingSessionIds.includes(pane.sessionId)
             : isFocused && isStartingFirstTurn
         }
+        isCliUpdating={cliUpdatePhase === "updating"}
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isTiled={options.isTiled}
+        onPaneDragEnd={options.onPaneDragEnd}
+        onPaneDragStart={options.onPaneDragStart}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onboarding={workbench.onboarding}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
@@ -13905,7 +15316,23 @@ export function App() {
           focusChatPane(pane);
           return changeGoal(action, value);
         }}
+        onStartGoalChat={
+          pane.kind === "draft"
+            ? (goal) =>
+                requestSend(goal, {
+                  goal: { text: goal, status: "active" },
+                })
+            : undefined
+        }
         onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+        fileReview={
+          // The summaries and the Keep both belong to the focused session, so a
+          // background pane keeps the plain summary card rather than showing
+          // another chat's reading state.
+          pane.kind === "session" && pane.sessionId === activeSessionId
+            ? fileReviewTools
+            : undefined
+        }
         onLoadChangeDiff={loadInlineChangeDiff}
         onEditQueuedMessage={(messageId) => {
           focusChatPane(pane);
@@ -14015,9 +15442,10 @@ export function App() {
     chats: sessions
       .filter(
         (session) =>
-          normalizedChatProjectKey(session.workspacePath) ===
-          currentChatProjectKey,
+          chatProjectKey(session.workspacePath) ===
+          chatProjectKey(activeSession?.workspacePath ?? workspacePath),
       )
+      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
       .slice(0, 8)
       .map((session) => ({
         id: session.id,
@@ -14034,9 +15462,8 @@ export function App() {
     <ChatSurface
       chatSwitcher={workspaceChatSwitcher}
       activeChatPanel={activeChatPanel}
-      onSelectChatPanel={(panel) =>
-        dispatchWorkbench({ type: "set-chat-panel", panel })
-      }
+      onSelectChatPanel={selectSoloChatPanel}
+      {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
       railDiffTools={railDiffTools}
       railTerminalTools={railTerminalTools}
       browserPreview={workbench.browserPreview}
@@ -14058,6 +15485,8 @@ export function App() {
       onToggleBrowserPanel={toggleBrowserPanel}
       capabilityPolicy={activeCapabilityPolicy}
       config={config}
+      files={files}
+      onOpenCompanionFile={openEditorFile}
       modelFocus={
         workbench.modelFocus?.sessionId === activeSessionId
           ? workbench.modelFocus
@@ -14090,6 +15519,7 @@ export function App() {
       isEnvironmentRailOpen={activeChatPanel === "environment"}
       isGoalComposerActive={isGoalComposerActive}
       isComposerSending={isActiveSessionSending}
+      isCliUpdating={cliUpdatePhase === "updating"}
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
@@ -14110,7 +15540,9 @@ export function App() {
       planEditorRequest={planEditorRequest}
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
+      onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
       onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+      fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
       onEditQueuedMessage={editQueuedChatMessage}
       onRemoveQueuedMessage={removeQueuedChatMessage}
@@ -14174,6 +15606,12 @@ export function App() {
       cliUpdatePhase={cliUpdateError ? "failed" : cliUpdatePhase}
       onUpdateClis={() => void applyCliUpdates()}
       onDismissCliUpdates={dismissCliUpdates}
+      providerReadinessNotice={providerReadinessNotice}
+      onProviderReadinessAction={() => {
+        if (providerReadinessNotice) {
+          handleComposerAction(providerReadinessNotice.action);
+        }
+      }}
       workspaceSidebarHidden={workbench.preferences.workspaceSidebarHidden}
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
@@ -14214,6 +15652,7 @@ export function App() {
         const root = activeSession?.workspacePath ?? workspacePath;
         if (root) void prepareWorkspace(root);
       }}
+      onExpandedWorkspaceDirectoriesChange={onExpandedDirectoriesChange}
       onOpenWorkspaceFile={openEditorLocation}
       onPinEditorTab={pinEditorTab}
       onRefreshWorkspace={refreshWorkspaceTree}
@@ -14321,9 +15760,7 @@ export function App() {
                     (item) => item.id === sessionId,
                   );
                   if (!session) return;
-                  const projectKey = normalizedChatProjectKey(
-                    session.workspacePath,
-                  );
+                  const projectKey = chatProjectKey(session.workspacePath);
                   if (
                     sourceProjectKey &&
                     sourceProjectKey !== displayedChatLayout.projectKey
@@ -14368,14 +15805,15 @@ export function App() {
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
                     activeChatPanel={activeChatPanel}
-                    onSelectChatPanel={(panel) =>
-                      dispatchWorkbench({ type: "set-chat-panel", panel })
-                    }
+                    onSelectChatPanel={selectSoloChatPanel}
+                    {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
                     railDiffTools={railDiffTools}
                     railTerminalTools={railTerminalTools}
                     browserPreview={workbench.browserPreview}
                     capabilityPolicy={activeCapabilityPolicy}
                     config={config}
+                    files={files}
+                    onOpenCompanionFile={openEditorFile}
                     modelFocus={
                       workbench.modelFocus?.sessionId === activeSessionId
                         ? workbench.modelFocus
@@ -14410,6 +15848,7 @@ export function App() {
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
                     isComposerSending={isActiveSessionSending}
+                    isCliUpdating={cliUpdatePhase === "updating"}
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
@@ -14442,7 +15881,11 @@ export function App() {
                       setPlanEditorRequest(undefined)
                     }
                     onGoalAction={changeGoal}
+                    onStartGoalChat={
+                      activeSessionId ? undefined : startNewGoalChat
+                    }
                     onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                    fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
                     onEditQueuedMessage={editQueuedChatMessage}
                     onRemoveQueuedMessage={removeQueuedChatMessage}
@@ -14693,27 +16136,134 @@ export function App() {
                 terminalOutput={terminalOutput}
                 terminalPanes={workbench.terminalPanes}
                 terminalTemplate={workbench.terminalTemplate}
-                renderEditor={(props) => (
-                  <MonacoEditorPane
-                    {...props}
-                    onLspRequest={requestLanguageFeature}
-                    theme={workbench.preferences.theme}
-                  />
-                )}
+                renderEditor={(props) => {
+                  const review = workbench.ide.tabs.find(
+                    (tab) => tab.path === props.path,
+                  )?.sourceControlDiff;
+                  return review ? (
+                    <Suspense
+                      fallback={
+                        <div className="gyro-code-empty">
+                          Loading diff editor...
+                        </div>
+                      }
+                    >
+                      <SourceControlDiffEditor
+                        key={props.path}
+                        review={review}
+                        onDetectedLanguage={(id) => {
+                          const key = props.path;
+                          if (key)
+                            setDetectedDiffLanguages((previous) =>
+                              previous[key] === id
+                                ? previous
+                                : { ...previous, [key]: id },
+                            );
+                        }}
+                        refreshKey={workbench.ide.sourceControl.lastCheckedAt}
+                        languageOverride={
+                          languageOverrides[
+                            absoluteWorkspaceFilePath(
+                              review.workspacePath,
+                              review.path,
+                            )
+                          ]
+                        }
+                        theme={resolvedTheme}
+                        onOpenFile={() =>
+                          openEditorFile(
+                            absoluteWorkspaceFilePath(
+                              review.workspacePath,
+                              review.path,
+                            ),
+                          )
+                        }
+                      />
+                    </Suspense>
+                  ) : (
+                    <MonacoEditorPane
+                      {...props}
+                      languageOverride={
+                        props.path ? languageOverrides[props.path] : undefined
+                      }
+                      fileError={selectedFileError}
+                      semanticReady={
+                        workbench.ide.languageServers?.find(
+                          (server) =>
+                            server.activePath === props.path &&
+                            server.status === "ready",
+                        )?.serverId
+                      }
+                      onLspRequest={requestLanguageFeature}
+                      theme={resolvedTheme}
+                    />
+                  );
+                }}
               />
             </section>
           ) : null}
 
           {activeWorkspaceLayout !== "terminal-grid" &&
           (activeWorkspaceLayout !== "code" ||
-            Boolean(activeSession?.workspacePath ?? workspacePath))
-            ? workbench.isToolPanelOpen
-              ? renderWorkspaceToolPanel(false)
-              : null
-            : null}
+            Boolean(activeSession?.workspacePath ?? workspacePath)) ? (
+            workbench.isToolPanelOpen ? (
+              renderWorkspaceToolPanel(false)
+            ) : activeWorkspaceLayout === "code" ? (
+              <nav
+                className="gyro-workspace-tool-launcher"
+                aria-label="Workspace tools"
+              >
+                {(
+                  [
+                    ["diff", "Diff"],
+                    ["terminal", "Terminal"],
+                    ["browser", "Browser"],
+                    ["problems", "Problems"],
+                    ["test-results", "Test Results"],
+                    ["output", "Output"],
+                  ] as const
+                ).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => openToolPanel(tab)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            ) : null
+          ) : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             <IdeStatusBar
+              detectedLanguage={
+                selectedFile ? detectedDiffLanguages[selectedFile] : undefined
+              }
+              languageOverride={(() => {
+                const review = workbench.ide.tabs.find(
+                  (tab) => tab.path === selectedFile,
+                )?.sourceControlDiff;
+                const path = review
+                  ? absoluteWorkspaceFilePath(review.workspacePath, review.path)
+                  : selectedFile;
+                return path ? languageOverrides[path] : undefined;
+              })()}
+              onLanguageChange={(id) => {
+                const review = workbench.ide.tabs.find(
+                  (tab) => tab.path === selectedFile,
+                )?.sourceControlDiff;
+                const path = review
+                  ? absoluteWorkspaceFilePath(review.workspacePath, review.path)
+                  : selectedFile;
+                if (path)
+                  setLanguageOverrides((previous) => {
+                    const next = { ...previous };
+                    if (id) next[path] = id;
+                    else delete next[path];
+                    return next;
+                  });
+              }}
               activeBuffer={activeEditorBuffer}
               branchCatalog={branchCatalog}
               editorSelection={workbench.ide.selection}
@@ -14740,6 +16290,9 @@ export function App() {
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
+          mainColor={workbench.preferences.mainColor}
+          secondaryColor={workbench.preferences.secondaryColor}
+          showQuickActions={workbench.preferences.showQuickActions}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
           onConfigChange={handleConfigChange}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
@@ -14748,6 +16301,9 @@ export function App() {
           }
           onDensityChange={(density) =>
             dispatchWorkbench({ type: "set-density", density })
+          }
+          onQuickActionsVisibilityChange={(visible) =>
+            dispatchWorkbench({ type: "set-quick-actions-visible", visible })
           }
           onMenuBarVisibilityChange={(visible) =>
             dispatchWorkbench({ type: "set-menu-bar-visible", visible })
@@ -14786,6 +16342,13 @@ export function App() {
           }
           onThemeChange={(theme) =>
             dispatchWorkbench({ type: "set-theme", theme })
+          }
+          onAppearanceColorsChange={(mainColor, secondaryColor) =>
+            dispatchWorkbench({
+              type: "set-appearance-colors",
+              mainColor,
+              secondaryColor,
+            })
           }
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
@@ -14943,9 +16506,8 @@ export function App() {
       {activeDestination === "onboarding" ? (
         <ChatSurface
           activeChatPanel={activeChatPanel}
-          onSelectChatPanel={(panel) =>
-            dispatchWorkbench({ type: "set-chat-panel", panel })
-          }
+          onSelectChatPanel={selectSoloChatPanel}
+          {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
           railDiffTools={railDiffTools}
           railTerminalTools={railTerminalTools}
           capabilityActivities={
@@ -14955,6 +16517,8 @@ export function App() {
           }
           capabilityPolicy={activeCapabilityPolicy}
           config={config}
+          files={files}
+          onOpenCompanionFile={openEditorFile}
           providerUsageByProvider={providerUsageByProvider}
           sessionUsage={activeSessionUsage}
           usageSafety={usageSafety}
@@ -14973,6 +16537,7 @@ export function App() {
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isGoalComposerActive={isGoalComposerActive}
           isComposerSending={isActiveSessionSending}
+          isCliUpdating={cliUpdatePhase === "updating"}
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
@@ -14997,6 +16562,7 @@ export function App() {
           planEditorRequest={planEditorRequest}
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
+          onStartGoalChat={activeSessionId ? undefined : startNewGoalChat}
           onCancelGoalComposer={() => setIsGoalComposerActive(false)}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
@@ -15043,6 +16609,14 @@ export function App() {
           workspacePath={workspacePath}
         />
       ) : null}
+      {branchNameRequest ? (
+        <BranchNameDialog
+          startPoint={branchNameRequest.startPoint}
+          initialValue={branchNameRequest.initialValue}
+          mode={branchNameRequest.mode}
+          onFinish={finishBranchNameRequest}
+        />
+      ) : null}
       {modelStandardPrompt ? (
         <ModelStandardPromptOverlay
           modelLabel={modelStandardPrompt.modelLabel}
@@ -15052,56 +16626,6 @@ export function App() {
           providerLabel={modelStandardPrompt.providerLabel}
           selectionCount={modelStandardPrompt.count}
         />
-      ) : null}
-      {branchNamePrompt ? (
-        <dialog
-          className="gyro-branch-name-dialog"
-          aria-labelledby="gyro-branch-name-title"
-          ref={(node) => {
-            if (node && !node.open) node.showModal();
-          }}
-          onCancel={() => {
-            branchNamePrompt.resolve();
-            setBranchNamePrompt(undefined);
-          }}
-        >
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = String(
-                new FormData(event.currentTarget).get("branch") ?? "",
-              ).trim();
-              if (name) {
-                branchNamePrompt.resolve(name);
-                setBranchNamePrompt(undefined);
-              }
-            }}
-          >
-            <h2 id="gyro-branch-name-title">{branchNamePrompt.title}</h2>
-            <input
-              aria-label="Branch name"
-              name="branch"
-              defaultValue={branchNamePrompt.initialValue}
-              autoFocus
-              required
-            />
-            <footer>
-              <button
-                type="button"
-                className="gyro-secondary-button"
-                onClick={() => {
-                  branchNamePrompt.resolve();
-                  setBranchNamePrompt(undefined);
-                }}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="gyro-primary-button">
-                Save
-              </button>
-            </footer>
-          </form>
-        </dialog>
       ) : null}
       {projectRemoveCandidate ? (
         <ProjectRemoveConfirmOverlay
@@ -15174,7 +16698,9 @@ export function App() {
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState();
-  const legacyTheme = readBoundedLocalStorage(THEME_STORAGE_KEY, 16);
+  const legacyTheme = storedThemeMode(
+    readBoundedLocalStorage(THEME_STORAGE_KEY, 16),
+  );
   const stored = readBoundedLocalStorage(
     WORKBENCH_STORAGE_KEY,
     MAX_STORED_WORKBENCH_STATE_CHARS,
@@ -15184,7 +16710,7 @@ function loadInitialWorkbenchState(): WorkbenchState {
       ...base,
       preferences: {
         ...base.preferences,
-        theme: legacyTheme === "light" ? "light" : base.preferences.theme,
+        theme: legacyTheme ?? base.preferences.theme,
       },
     };
   }
@@ -15300,9 +16826,9 @@ function loadInitialWorkbenchState(): WorkbenchState {
         activeChatPanel: undefined,
         chatEnvironmentRailOpen: false,
         theme:
-          legacyTheme === "light" || legacyTheme === "dark"
-            ? legacyTheme
-            : (parsed.preferences?.theme ?? base.preferences.theme),
+          legacyTheme ??
+          storedThemeMode(parsed.preferences?.theme) ??
+          base.preferences.theme,
       },
       providerStatuses: Array.isArray(parsed.providerStatuses)
         ? hasSeededDemoState
@@ -15521,7 +17047,7 @@ function LiveTerminalPaneBody({
   onSelect: (paneId: string) => void;
   onWrite: (paneId: string, input: string) => void;
   pane: TerminalPane;
-  theme: WorkbenchState["preferences"]["theme"];
+  theme: ResolvedTheme;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermInstance | null>(null);
@@ -15781,7 +17307,7 @@ function LiveTerminalPaneBody({
   );
 }
 
-function terminalThemeFor(theme: WorkbenchState["preferences"]["theme"]) {
+function terminalThemeFor(theme: ResolvedTheme) {
   if (theme === "light") {
     return {
       background: "#f6f8fa",
@@ -16234,9 +17760,17 @@ function chatMessagePreview(value: string) {
 
 function normalizedPreviewUrl(value: string) {
   const trimmed = value.trim();
-  const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed)
+  if (!trimmed) throw new Error("Enter a URL or search term");
+  const isHostWithPort = /^[^/\s:]+:\d+(?:[/?#]|$)/.test(trimmed);
+  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(trimmed) && !isHostWithPort;
+  const isAddress =
+    isHostWithPort ||
+    /^(?:localhost|\[[\da-f:]+\]|[^\s/]+\.[^\s/]+)(?:[/?#]|$)/i.test(trimmed);
+  const candidate = hasScheme
     ? trimmed
-    : `http://${trimmed}`;
+    : isAddress
+      ? `http://${trimmed}`
+      : `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
   const url = new URL(candidate);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Preview URLs must use http or https");
@@ -16272,52 +17806,15 @@ function browserUnreachableMessage(detail: string) {
   return `Unreachable · ${trimmed}`;
 }
 
-function languageServerDescriptorForPath(path: string) {
-  const extension = path.split(".").pop()?.toLowerCase();
-  switch (extension) {
-    case "ts":
-    case "tsx":
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs":
-      return {
-        languageId:
-          extension === "tsx"
-            ? "typescriptreact"
-            : extension === "jsx"
-              ? "javascriptreact"
-              : extension?.startsWith("j") ||
-                  extension === "mjs" ||
-                  extension === "cjs"
-                ? "javascript"
-                : "typescript",
-        command: "typescript-language-server --stdio",
-      };
-    case "rs":
-      return { languageId: "rust", command: "rust-analyzer" };
-    case "json":
-    case "jsonc":
-      return {
-        languageId: "json",
-        command: "vscode-json-language-server --stdio",
-      };
-    case "css":
-    case "scss":
-    case "less":
-      return {
-        languageId: extension,
-        command: "vscode-css-language-server --stdio",
-      };
-    case "html":
-    case "htm":
-      return {
-        languageId: "html",
-        command: "vscode-html-language-server --stdio",
-      };
-    default:
-      return undefined;
-  }
+function languageServerDescriptorForPath(path: string, override?: string) {
+  if (path.startsWith("gyro-diff:")) return undefined;
+  const language = resolveLanguage({ path, override });
+  return language.lsp
+    ? {
+        languageId: language.lsp.languageId ?? language.id,
+        command: language.lsp.command,
+      }
+    : undefined;
 }
 
 function workspaceFileUri(workspacePath: string, relativePath: string) {
@@ -16452,6 +17949,17 @@ function terminalProcessForProfile(
       .filter(Boolean)
       .join(" "),
   };
+}
+
+/** Preserve discovered task arguments when a task is launched through zsh. */
+function terminalCommandLine(task: TaskDefinition) {
+  return [task.command, ...task.args]
+    .map((part) => `'${part.replace(/'/g, "'\\''")}'`)
+    .join(" ");
+}
+
+function workspaceTaskTerminalPaneId(taskId: string) {
+  return `workspace-task-${encodeURIComponent(taskId)}`;
 }
 
 function terminalStatusFromSnapshot(
@@ -17504,7 +19012,13 @@ function MonacoEditorPane({
   path,
   revealTarget,
   theme,
+  languageOverride,
+  semanticReady,
+  fileError,
 }: {
+  languageOverride?: string;
+  semanticReady?: string;
+  fileError?: string;
   buffer?: EditorBuffer;
   fileContent?: WorkspaceFileContent;
   loadState: "idle" | "loading" | "ready" | "error";
@@ -17518,11 +19032,19 @@ function MonacoEditorPane({
   onSelectionChange: (selection?: EditorSelection) => void;
   path?: string;
   revealTarget?: EditorRevealTarget;
-  theme: WorkbenchState["preferences"]["theme"];
+  theme: ResolvedTheme;
 }) {
+  const syntax = useSyntax(
+    path ?? "",
+    buffer?.content ?? fileContent?.content ?? "",
+    languageOverride,
+    buffer?.sizeBytes ?? fileContent?.sizeBytes,
+    buffer?.truncated ?? fileContent?.truncated,
+  );
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
   const hasMountedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
   const revealEditorTarget = useCallback(
     (editor: Parameters<OnMount>[0]) => {
       if (!revealTarget || revealTarget.path !== path) {
@@ -17559,14 +19081,23 @@ function MonacoEditorPane({
   const editorOptions = useMemo(
     () => ({
       automaticLayout: true,
-      bracketPairColorization: { enabled: true },
+      bracketPairColorization: { enabled: !syntax.policy.limited },
+      readOnly: syntax.policy.readOnly,
+      "semanticHighlighting.enabled": !syntax.policy.limited,
+      maxTokenizationLineLength: 20000,
       fontFamily:
         "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
       fontLigatures: false,
       fontSize: 13.5,
-      guides: { bracketPairs: true, indentation: true },
+      guides: {
+        bracketPairs: !syntax.policy.limited,
+        indentation: !syntax.policy.limited,
+      },
       lineHeight: 21,
-      minimap: { enabled: minimapEnabled, scale: 0.75 },
+      minimap: {
+        enabled: minimapEnabled && !syntax.policy.limited,
+        scale: 0.75,
+      },
       overviewRulerBorder: false,
       padding: { top: 8, bottom: 12 },
       renderWhitespace: "selection" as const,
@@ -17576,205 +19107,297 @@ function MonacoEditorPane({
       },
       scrollBeyondLastLine: false,
       smoothScrolling: true,
-      stickyScroll: { enabled: true, maxLineCount: 3 },
+      stickyScroll: { enabled: !syntax.policy.limited, maxLineCount: 3 },
       tabSize: 2,
       wordWrap: "off" as const,
     }),
-    [minimapEnabled],
+    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly],
   );
+
+  useEffect(() => {
+    if (!mounted) return;
+    let disposed = false;
+    void import("monaco-editor").then((monaco) => {
+      if (disposed) return;
+      languageRegistrationsRef.current.forEach((registration) =>
+        registration.dispose(),
+      );
+      languageRegistrationsRef.current = [];
+      if (
+        path &&
+        onLspRequest &&
+        !syntax.policy.limited &&
+        syntax.language !== "plaintext"
+      ) {
+        const language = syntax.language;
+        const completionRegistration =
+          monaco.languages.registerCompletionItemProvider(language, {
+            triggerCharacters: [".", '"', "'", "/", "<", ":"],
+            provideCompletionItems: async (model, position, context) => {
+              if (model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return { suggestions: [] };
+              try {
+                const result = await onLspRequest(
+                  path,
+                  "textDocument/completion",
+                  {
+                    position: {
+                      line: position.lineNumber - 1,
+                      character: position.column - 1,
+                    },
+                    context: {
+                      triggerKind: context.triggerKind,
+                      triggerCharacter: context.triggerCharacter,
+                    },
+                  },
+                );
+                const resultRecord = isRecord(result) ? result : undefined;
+                const items = Array.isArray(result)
+                  ? result
+                  : Array.isArray(resultRecord?.items)
+                    ? resultRecord.items
+                    : [];
+                const word = model.getWordUntilPosition(position);
+                const fallbackRange = new monaco.Range(
+                  position.lineNumber,
+                  word.startColumn,
+                  position.lineNumber,
+                  word.endColumn,
+                );
+                return {
+                  suggestions: items.flatMap((value) => {
+                    if (!isRecord(value)) {
+                      return [];
+                    }
+                    const label = completionLabel(value.label);
+                    if (!label) {
+                      return [];
+                    }
+                    const textEdit = isRecord(value.textEdit)
+                      ? value.textEdit
+                      : undefined;
+                    const rangeValue = textEdit?.range ?? value.range;
+                    const range =
+                      monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
+                    const insertText =
+                      typeof textEdit?.newText === "string"
+                        ? textEdit.newText
+                        : typeof value.insertText === "string"
+                          ? value.insertText
+                          : label;
+                    return [
+                      {
+                        label,
+                        detail:
+                          typeof value.detail === "string"
+                            ? value.detail
+                            : undefined,
+                        documentation: completionDocumentation(
+                          value.documentation,
+                        ),
+                        insertText,
+                        kind: monacoCompletionKind(monaco, value.kind),
+                        range,
+                      },
+                    ];
+                  }),
+                };
+              } catch {
+                return { suggestions: [] };
+              }
+            },
+          });
+        const hoverRegistration = monaco.languages.registerHoverProvider(
+          language,
+          {
+            provideHover: async (_model, position) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(path, "textDocument/hover", {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                });
+                if (!isRecord(result)) {
+                  return null;
+                }
+                const markdown = lspMarkdown(result.contents);
+                if (!markdown) {
+                  return null;
+                }
+                return {
+                  contents: [{ value: markdown }],
+                  range: monacoRangeFromLsp(monaco, result.range),
+                };
+              } catch {
+                return null;
+              }
+            },
+          },
+        );
+        const definitionRegistration =
+          monaco.languages.registerDefinitionProvider(language, {
+            provideDefinition: async (_model, position) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(
+                  path,
+                  "textDocument/definition",
+                  {
+                    position: {
+                      line: position.lineNumber - 1,
+                      character: position.column - 1,
+                    },
+                  },
+                );
+                return monacoLocationsFromLsp(monaco, result);
+              } catch {
+                return [];
+              }
+            },
+          });
+        const referencesRegistration =
+          monaco.languages.registerReferenceProvider(language, {
+            provideReferences: async (_model, position) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(
+                  path,
+                  "textDocument/references",
+                  {
+                    position: {
+                      line: position.lineNumber - 1,
+                      character: position.column - 1,
+                    },
+                    context: { includeDeclaration: true },
+                  },
+                );
+                return monacoLocationsFromLsp(monaco, result);
+              } catch {
+                return [];
+              }
+            },
+          });
+        const renameRegistration = monaco.languages.registerRenameProvider(
+          language,
+          {
+            provideRenameEdits: async (_model, position, newName) => {
+              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
+                return null;
+              try {
+                const result = await onLspRequest(path, "textDocument/rename", {
+                  position: {
+                    line: position.lineNumber - 1,
+                    character: position.column - 1,
+                  },
+                  newName,
+                });
+                return monacoWorkspaceEditFromLsp(monaco, result);
+              } catch (error) {
+                return {
+                  edits: [],
+                  rejectReason: String(error),
+                };
+              }
+            },
+          },
+        );
+        const semanticRegistration =
+          monaco.languages.registerDocumentSemanticTokensProvider(language, {
+            getLegend: () => semanticLegend,
+            provideDocumentSemanticTokens: async (model, _previous, token) => {
+              if (
+                !semanticReady ||
+                model.uri.toString() !== monaco.Uri.parse(path).toString() ||
+                token.isCancellationRequested
+              )
+                return null;
+              const version = model.getVersionId();
+              try {
+                const legend = await onLspRequest(
+                  path,
+                  "$/gyro/semanticTokensLegend",
+                  {},
+                );
+                if (
+                  !legend ||
+                  token.isCancellationRequested ||
+                  model.isDisposed() ||
+                  model.getVersionId() !== version
+                )
+                  return null;
+                await onLspRequest(path, "textDocument/didChange", {
+                  textDocument: { version: Date.now() },
+                  contentChanges: [{ text: model.getValue() }],
+                });
+                if (
+                  token.isCancellationRequested ||
+                  model.isDisposed() ||
+                  model.getVersionId() !== version
+                )
+                  return null;
+                const response = await onLspRequest(
+                  path,
+                  "textDocument/semanticTokens/full",
+                  {},
+                );
+                if (
+                  token.isCancellationRequested ||
+                  model.isDisposed() ||
+                  model.getVersionId() !== version
+                )
+                  return null;
+                const data = decodeSemanticTokens(
+                  response,
+                  legend,
+                  model.getLinesContent().map((line) => line.length),
+                );
+                return data ? { data } : null;
+              } catch {
+                return null;
+              }
+            },
+            releaseDocumentSemanticTokens: () => {},
+          });
+        languageRegistrationsRef.current = [
+          semanticRegistration,
+          completionRegistration,
+          hoverRegistration,
+          definitionRegistration,
+          referencesRegistration,
+          renameRegistration,
+        ];
+      }
+    });
+    return () => {
+      disposed = true;
+      languageRegistrationsRef.current.forEach((item) => item.dispose());
+      languageRegistrationsRef.current = [];
+    };
+  }, [
+    mounted,
+    path,
+    syntax.language,
+    syntax.policy.limited,
+    onLspRequest,
+    semanticReady,
+  ]);
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     hasMountedRef.current = true;
+    setMounted(true);
     void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
       remeasureMonacoFonts(),
     );
     revealEditorTarget(editor);
-    languageRegistrationsRef.current.forEach((registration) =>
-      registration.dispose(),
-    );
-    languageRegistrationsRef.current = [];
-    if (path && onLspRequest) {
-      const language = languageForPath(path);
-      const completionRegistration =
-        monaco.languages.registerCompletionItemProvider(language, {
-          triggerCharacters: [".", '"', "'", "/", "<", ":"],
-          provideCompletionItems: async (model, position, context) => {
-            try {
-              const result = await onLspRequest(
-                path,
-                "textDocument/completion",
-                {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  context: {
-                    triggerKind: context.triggerKind,
-                    triggerCharacter: context.triggerCharacter,
-                  },
-                },
-              );
-              const resultRecord = isRecord(result) ? result : undefined;
-              const items = Array.isArray(result)
-                ? result
-                : Array.isArray(resultRecord?.items)
-                  ? resultRecord.items
-                  : [];
-              const word = model.getWordUntilPosition(position);
-              const fallbackRange = new monaco.Range(
-                position.lineNumber,
-                word.startColumn,
-                position.lineNumber,
-                word.endColumn,
-              );
-              return {
-                suggestions: items.flatMap((value) => {
-                  if (!isRecord(value)) {
-                    return [];
-                  }
-                  const label = completionLabel(value.label);
-                  if (!label) {
-                    return [];
-                  }
-                  const textEdit = isRecord(value.textEdit)
-                    ? value.textEdit
-                    : undefined;
-                  const rangeValue = textEdit?.range ?? value.range;
-                  const range =
-                    monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
-                  const insertText =
-                    typeof textEdit?.newText === "string"
-                      ? textEdit.newText
-                      : typeof value.insertText === "string"
-                        ? value.insertText
-                        : label;
-                  return [
-                    {
-                      label,
-                      detail:
-                        typeof value.detail === "string"
-                          ? value.detail
-                          : undefined,
-                      documentation: completionDocumentation(
-                        value.documentation,
-                      ),
-                      insertText,
-                      kind: monacoCompletionKind(monaco, value.kind),
-                      range,
-                    },
-                  ];
-                }),
-              };
-            } catch {
-              return { suggestions: [] };
-            }
-          },
-        });
-      const hoverRegistration = monaco.languages.registerHoverProvider(
-        language,
-        {
-          provideHover: async (_model, position) => {
-            try {
-              const result = await onLspRequest(path, "textDocument/hover", {
-                position: {
-                  line: position.lineNumber - 1,
-                  character: position.column - 1,
-                },
-              });
-              if (!isRecord(result)) {
-                return null;
-              }
-              const markdown = lspMarkdown(result.contents);
-              if (!markdown) {
-                return null;
-              }
-              return {
-                contents: [{ value: markdown }],
-                range: monacoRangeFromLsp(monaco, result.range),
-              };
-            } catch {
-              return null;
-            }
-          },
-        },
-      );
-      const definitionRegistration =
-        monaco.languages.registerDefinitionProvider(language, {
-          provideDefinition: async (_model, position) => {
-            try {
-              const result = await onLspRequest(
-                path,
-                "textDocument/definition",
-                {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                },
-              );
-              return monacoLocationsFromLsp(monaco, result);
-            } catch {
-              return [];
-            }
-          },
-        });
-      const referencesRegistration = monaco.languages.registerReferenceProvider(
-        language,
-        {
-          provideReferences: async (_model, position) => {
-            try {
-              const result = await onLspRequest(
-                path,
-                "textDocument/references",
-                {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  context: { includeDeclaration: true },
-                },
-              );
-              return monacoLocationsFromLsp(monaco, result);
-            } catch {
-              return [];
-            }
-          },
-        },
-      );
-      const renameRegistration = monaco.languages.registerRenameProvider(
-        language,
-        {
-          provideRenameEdits: async (_model, position, newName) => {
-            try {
-              const result = await onLspRequest(path, "textDocument/rename", {
-                position: {
-                  line: position.lineNumber - 1,
-                  character: position.column - 1,
-                },
-                newName,
-              });
-              return monacoWorkspaceEditFromLsp(monaco, result);
-            } catch (error) {
-              return {
-                edits: [],
-                rejectReason: String(error),
-              };
-            }
-          },
-        },
-      );
-      languageRegistrationsRef.current = [
-        completionRegistration,
-        hoverRegistration,
-        definitionRegistration,
-        referencesRegistration,
-        renameRegistration,
-      ];
-    }
     editor.onDidChangeCursorSelection((event) => {
       const model = editor.getModel();
-      if (!model || !path) {
+      if (!model) {
         onSelectionChange(undefined);
         return;
       }
@@ -17784,7 +19407,7 @@ function MonacoEditorPane({
         return;
       }
       onSelectionChange({
-        path,
+        path: model.uri.path,
         startLineNumber: event.selection.startLineNumber,
         startColumn: event.selection.startColumn,
         endLineNumber: event.selection.endLineNumber,
@@ -17804,90 +19427,36 @@ function MonacoEditorPane({
     return <div className="gyro-code-empty">Loading file preview...</div>;
   }
 
+  if (syntax.policy.binary || loadState === "error")
+    return (
+      <div className="gyro-code-empty" role="status">
+        {syntax.policy.reason ?? fileError ?? "This file cannot be displayed."}
+      </div>
+    );
   return (
-    <Suspense
-      fallback={<div className="gyro-code-empty">Loading editor...</div>}
-    >
-      <MonacoEditor
-        height="100%"
-        keepCurrentModel
-        language={languageForPath(path)}
-        onChange={(value) => onChange(value ?? "")}
-        onMount={handleMount}
-        options={editorOptions}
-        path={path}
-        theme={theme === "light" ? "gyro-light" : "gyro-dark"}
-        value={buffer?.content ?? fileContent?.content ?? ""}
-      />
-    </Suspense>
+    <div className="gyro-syntax-editor">
+      {syntax.notice && (
+        <div className="gyro-syntax-notice" role="status">
+          {syntax.notice}
+        </div>
+      )}
+      <Suspense
+        fallback={<div className="gyro-code-empty">Loading editor...</div>}
+      >
+        <MonacoEditor
+          height="100%"
+          keepCurrentModel
+          language={syntax.language}
+          onChange={(value) => onChange(value ?? "")}
+          onMount={handleMount}
+          options={editorOptions}
+          path={path}
+          theme={theme === "light" ? "gyro-light" : "gyro-dark"}
+          value={buffer?.content ?? fileContent?.content ?? ""}
+        />
+      </Suspense>
+    </div>
   );
-}
-
-function languageForPath(path: string) {
-  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
-  if (name === "dockerfile" || name.startsWith("dockerfile.")) {
-    return "dockerfile";
-  }
-  if (name === "makefile" || name === "cargo.lock") {
-    return "plaintext";
-  }
-  const extension = name.includes(".") ? name.split(".").at(-1) : undefined;
-  switch (extension) {
-    case "css":
-      return "css";
-    case "scss":
-      return "scss";
-    case "less":
-      return "less";
-    case "html":
-    case "htm":
-      return "html";
-    case "json":
-    case "jsonc":
-      return "json";
-    case "md":
-    case "mdx":
-      return "markdown";
-    case "rs":
-      return "gyro-rust";
-    case "ts":
-    case "tsx":
-    case "mts":
-    case "cts":
-      return "typescript";
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs":
-      return "javascript";
-    case "yml":
-    case "yaml":
-      return "yaml";
-    case "toml":
-      return "ini";
-    case "ini":
-    case "cfg":
-    case "conf":
-      return "ini";
-    case "sh":
-    case "bash":
-    case "zsh":
-      return "shell";
-    case "py":
-      return "python";
-    case "go":
-      return "go";
-    case "sql":
-      return "sql";
-    case "xml":
-    case "svg":
-      return "xml";
-    case "graphql":
-    case "gql":
-      return "graphql";
-    default:
-      return "plaintext";
-  }
 }
 
 function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {

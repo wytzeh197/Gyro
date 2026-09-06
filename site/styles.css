@@ -204,9 +204,11 @@ pre,
 .cost-figure,
 .product-stage figcaption,
 .mock-bar-meta,
-.mock-steps span,
 .mock-delta,
-.mock-files li,
+.mock-key,
+.mock-age,
+.mock-state,
+.mock-pill,
 .mock-body-term,
 .mock-mono,
 .mock-diff-lines,
@@ -663,20 +665,97 @@ pre {
 }
 
 .product-stage-frame {
+  position: relative;
+  isolation: isolate;
   display: block;
   padding: clamp(10px, 1.6vw, 22px);
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--stage);
-  box-shadow: 0 30px 70px var(--shadow-stage);
+  box-shadow:
+    inset 0 1px 0 var(--inset-highlight),
+    0 30px 70px var(--shadow-stage);
+}
+
+.product-stage-frame::after {
+  position: absolute;
+  z-index: -1;
+  inset: 6px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  content: "";
+  pointer-events: none;
+}
+
+/*
+ * The window: a title bar drawn in markup, sitting directly on top of the
+ * screenshot so the two read as one pane. Only the bottom corners of the shot
+ * are rounded, because the top two now belong to the bar.
+ */
+.stage-chrome {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: var(--surface-raised);
+  box-shadow: inset 0 1px 0 var(--inset-highlight);
+}
+
+.stage-light {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+/*
+ * Traffic lights, in the order macOS draws them. They are flat fills rather
+ * than the real gloss: the point is the shape the eye reads as a Mac window,
+ * and a gradient would be the one on the whole page.
+ */
+.stage-light:nth-child(1) {
+  background: #ec6a5e;
+}
+
+.stage-light:nth-child(2) {
+  background: #f4bf4f;
+}
+
+.stage-light:nth-child(3) {
+  background: #61c554;
+}
+
+.stage-chrome-title {
+  overflow: hidden;
+  flex: 1;
+  margin-right: 46px;
+  color: var(--quiet);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-shot-frame {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 0 0 10px 10px;
+  background: var(--visual);
+  box-shadow: 0 10px 30px var(--shadow-card);
 }
 
 .product-stage img {
+  display: block;
   width: 100%;
   height: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  box-shadow: 0 10px 30px var(--shadow-card);
 }
 
 /* Dark is the default site theme; show the light shot only after the toggle. */
@@ -693,12 +772,19 @@ pre {
 }
 
 .product-stage figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-top: 16px;
   color: var(--quiet);
   font-family: var(--mono);
   font-size: 13px;
   letter-spacing: 0.04em;
-  text-align: center;
+}
+
+.stage-caption-detail {
+  color: var(--muted);
 }
 
 .product-section,
@@ -978,9 +1064,11 @@ pre {
  * ---------------------------------------------------------------------------
  */
 .mock {
+  display: grid;
   overflow: hidden;
   width: 100%;
   min-width: 0;
+  grid-template-columns: 184px minmax(0, 1fr);
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
@@ -988,6 +1076,161 @@ pre {
   font-size: 13px;
   line-height: 1.5;
   user-select: none;
+}
+
+/*
+ * Every surface carries the rail, because the app does: the same sidebar is on
+ * screen whether you are reading a thread, watching a terminal, or stepping
+ * through a diff. Drawing it once per surface is what makes the three read as
+ * one window shown three times instead of three unrelated products.
+ */
+.mock-rail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.mock-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+/* The Sessions / Workspace switch at the top of the real sidebar. */
+.mock-segment {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  text-align: center;
+}
+
+.mock-segment span {
+  overflow: hidden;
+  padding: 4px 0;
+  border-radius: 6px;
+  color: var(--quiet);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mock-segment .is-active {
+  background: var(--chip);
+  color: var(--text);
+  font-weight: 620;
+}
+
+.mock-rail-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 1px;
+  list-style: none;
+}
+
+.mock-rail-list li {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  color: var(--muted);
+}
+
+.mock-rail-list li.is-active {
+  background: var(--surface-soft);
+  color: var(--text);
+  font-weight: 620;
+}
+
+/*
+ * The three content lists — sessions, profiles, changed files — are all a
+ * label on the left and one piece of metadata on the right, so they share a
+ * row rhythm and differ only in what the metadata says.
+ */
+.mock-sessions li,
+.mock-profiles li,
+.mock-changed li {
+  gap: 8px;
+}
+
+.mock-rail-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0 7px;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+
+/* A fixed slot so the labels line up whatever glyph sits in front of them. */
+.mock-glyph {
+  width: 13px;
+  flex: none;
+  color: var(--quiet);
+  text-align: center;
+}
+
+.mock-key {
+  margin-left: auto;
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/*
+ * The provider dots are the CLIs' own colours, set flat rather than themed —
+ * the same reasoning as the agent marks further down the page. Which agent ran
+ * a session is a fact about the session, not about the reader's theme.
+ */
+.mock-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--quiet);
+}
+
+.mock-dot-claude {
+  background: #d97757;
+}
+
+.mock-dot-codex {
+  background: #9aa0a6;
+}
+
+.mock-dot-gemini {
+  background: #5b8def;
+}
+
+/* min-width: 0 or the flex item refuses to shrink and widens the whole rail. */
+.mock-truncate {
+  overflow: hidden;
+  min-width: 0;
+  margin-right: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mock-age,
+.mock-state {
+  flex: none;
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.mock-state.is-live {
+  color: var(--add);
 }
 
 .mock-bar {
@@ -1024,7 +1267,7 @@ pre {
 }
 
 .mock-tab.is-active {
-  background: var(--chip);
+  background: var(--surface-soft);
   color: var(--text);
   font-weight: 620;
 }
@@ -1036,9 +1279,22 @@ pre {
  */
 .mock-body {
   display: grid;
+  align-content: start;
+  flex: 1;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   padding: 16px 14px;
+}
+
+/* The branch the session is pinned to, next to its title. */
+.mock-pill {
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
 }
 
 /* 01 — the thread */
@@ -1064,42 +1320,53 @@ pre {
   color: var(--muted);
 }
 
-.mock-steps {
-  display: flex;
-  gap: 6px;
+.mock-run-continue {
   margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
 }
 
-.mock-steps span {
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--surface-soft);
+/*
+ * The activity rows are the argument of surface 01. A run here is not a
+ * spinner and a summary: it is the list of what the agent actually did, still
+ * on screen after it finished.
+ */
+.mock-activity {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.mock-activity li {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  gap: 8px;
+}
+
+.mock-act {
+  flex: none;
+  color: var(--text);
+}
+
+/* Same reasoning as .mock-truncate: the detail is the part that gives way. */
+.mock-act-detail {
+  overflow: hidden;
+  min-width: 0;
+  margin-right: auto;
   color: var(--quiet);
-  font-family: var(--mono);
-  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mock-say {
   margin: 0;
   color: var(--muted);
-}
-
-.mock-card {
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: var(--surface-raised);
-}
-
-.mock-card-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 13px;
-  border-bottom: 1px solid var(--line);
-}
-
-.mock-card-title {
-  font-weight: 620;
 }
 
 .mock-delta {
@@ -1110,33 +1377,65 @@ pre {
   font-size: 13px;
 }
 
-.mock-files {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/*
+ * The composer is the one control here that has to look ready rather than
+ * finished: an empty field, the model and effort the next run will use, and
+ * the send key. It is what the reader would have been looking at a second
+ * before everything above it happened.
+ */
+.mock-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
 }
 
-.mock-files li {
+.mock-composer-field {
+  margin: 0;
+  color: var(--quiet);
+}
+
+.mock-composer-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 13px;
-  font-family: var(--mono);
-  font-size: 13px;
+  gap: 6px;
 }
 
-.mock-files li + li {
-  border-top: 1px solid var(--line);
+.mock-composer-spacer {
+  flex: 1;
 }
 
-/* min-width: 0 or the flex item refuses to shrink and widens the whole page. */
-.mock-path {
+.mock-chip {
   overflow: hidden;
-  min-width: 0;
-  margin-right: auto;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mock-send {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+}
+
+/*
+ * The counts sit at the end of rows that are already fighting for room, so
+ * they hold their width and let the path beside them give way instead.
+ */
+.mock-add,
+.mock-remove {
+  flex: none;
+  font-family: var(--mono);
 }
 
 .mock-add {
@@ -1236,6 +1535,7 @@ pre {
 }
 
 .mock-body-diff {
+  align-content: space-between;
   gap: 0;
   padding: 0;
 }
@@ -1323,9 +1623,9 @@ pre {
 }
 
 /*
- * The agents read as a plain roster. The point is how ordinary the list is —
- * these are the CLIs already on the reader's machine — so nothing here is
- * animated or staged.
+ * Providers read as a plain roster. The point is how ordinary the list is —
+ * these are the CLIs and local runtimes already on the reader's machine — so
+ * nothing here is animated or staged.
  */
 .agent-grid {
   display: grid;
@@ -1356,7 +1656,7 @@ pre {
 }
 
 /* The mark sits in a chip of its own, which keeps five different logos, drawn
- * at five different weights, reading as one row. */
+ * at different weights, reading as one row. */
 .agent-mark {
   display: grid;
   width: 38px;
@@ -1379,9 +1679,10 @@ pre {
 /*
  * The marks carry their owners' published colours, nothing invented. Claude
  * Code has a brand hex; Gemini has a brand gradient, applied in the SVG itself
- * (see index.html). OpenAI, xAI and Moonshot publish black-and-white marks with
- * no brand colour at all, so Codex, Grok and Kimi stay on --text and flip with
- * the theme, which is how those three are meant to be shown.
+ * (see index.html). OpenAI, xAI, Moonshot, and Ollama publish black-and-white
+ * marks with no brand colour at all, so Codex, Grok, Kimi, and Ollama stay on
+ * --text and flip with the theme, which is how those marks are meant to be
+ * shown.
  */
 .agent-claude .agent-mark {
   color: #d97757;
@@ -1392,7 +1693,8 @@ pre {
   fill: #3b82f6;
 }
 
-/* Not wired up yet, so these two are stated more quietly than the rest. */
+/* Upcoming integrations stay in the roster, but read as an annotation rather
+ * than as a feature pill. */
 .agent-tile.is-soon {
   border-style: dashed;
 }
@@ -1403,15 +1705,25 @@ pre {
 }
 
 .agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--surface-soft);
   color: var(--quiet);
   font-family: var(--mono);
   font-size: 13px;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agent-badge::before {
+  width: 14px;
+  height: 1px;
+  background: currentColor;
+  content: "";
+  opacity: 0.65;
 }
 
 .text-link,
@@ -1441,12 +1753,12 @@ pre {
 }
 
 .download-shell {
-  max-width: 920px;
+  max-width: 560px;
 }
 
 .download-heading {
-  max-width: 680px;
-  margin: 0 auto 42px;
+  max-width: 500px;
+  margin: 0 auto 36px;
   text-align: center;
 }
 
@@ -1456,17 +1768,10 @@ pre {
 
 .download-stack {
   display: grid;
-  width: min(100%, 460px);
+  width: min(100%, 500px);
   min-width: 0;
-  gap: 17px;
+  gap: 14px;
   margin-inline: auto;
-}
-
-.download-platform-note {
-  margin: 0 0 5px;
-  color: var(--quiet);
-  font-size: 13px;
-  text-align: center;
 }
 
 .macos-card,
@@ -1478,12 +1783,14 @@ pre {
 
 .macos-card {
   display: grid;
-  gap: 20px;
-  padding: 32px 28px 26px;
+  gap: 18px;
+  padding: 26px;
   border-color: var(--line-strong);
   border-radius: 18px;
   background: var(--surface-raised);
-  box-shadow: 0 20px 50px var(--shadow-drop);
+  box-shadow:
+    inset 0 1px 0 var(--inset-highlight),
+    0 20px 50px var(--shadow-drop);
 }
 
 .platform-identity {
@@ -1494,6 +1801,17 @@ pre {
 
 .platform-identity img {
   filter: var(--icon-filter);
+}
+
+.platform-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-soft);
 }
 
 .platform-identity h2,
@@ -1510,9 +1828,9 @@ pre {
 }
 
 .macos-card .platform-identity {
-  flex-direction: column;
+  flex-direction: row;
   gap: 12px;
-  text-align: center;
+  text-align: left;
 }
 
 .macos-card .platform-identity h3 {
@@ -1589,7 +1907,7 @@ pre {
 }
 
 .macos-card .segmented-control label {
-  min-height: 52px;
+  min-height: 48px;
 }
 
 .macos-card .button-download {
@@ -1599,6 +1917,8 @@ pre {
 }
 
 .macos-card .asset-meta {
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
   text-align: center;
 }
 
@@ -1630,9 +1950,12 @@ pre {
 }
 
 .download-stack > .release-meta {
-  width: max-content;
+  width: 100%;
   max-width: calc(100vw - 48px);
-  justify-self: center;
+  padding: 0 4px;
+  justify-self: start;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .release-fallback {
@@ -2209,6 +2532,33 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .download-shell {
+    gap: 36px;
+  }
+
+  .download-heading {
+    max-width: 620px;
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .download-heading .kicker {
+    justify-content: center;
+  }
+
+  .download-stack {
+    margin-inline: auto;
+  }
+
+  .download-stack > .release-meta {
+    text-align: center;
+  }
+
+  .download-stack > .release-meta {
+    justify-self: center;
+    justify-content: center;
+  }
+
   /* Two of the three costs sit side by side; the third takes the next row. */
   .premise-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2248,6 +2598,28 @@ pre {
   }
 }
 
+/* The provider roster remains two columns on phones. Give upcoming providers a
+ * second line for their annotation instead of cramming it beside the name. */
+@media (max-width: 520px) {
+  .agent-tile.is-soon {
+    position: relative;
+    min-height: 78px;
+    align-items: flex-start;
+    padding-top: 12px;
+  }
+
+  .agent-tile.is-soon .agent-name {
+    padding-top: 4px;
+  }
+
+  .agent-tile.is-soon .agent-badge {
+    position: absolute;
+    top: 44px;
+    left: 62px;
+    margin-left: 0;
+  }
+}
+
 @media (max-width: 720px) {
   /*
    * The mockups are the one thing on the page that cannot simply reflow: they
@@ -2267,8 +2639,17 @@ pre {
     gap: 8px;
   }
 
-  .mock-steps {
-    margin-left: 0;
+  /*
+   * The rail is the first thing to go. At this width it costs a third of the
+   * panel to say something the reader has already been told twice, and the
+   * surface it frames is the part worth reading.
+   */
+  .mock {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mock-rail {
+    display: none;
   }
 
   .mock-diff-lines li {
@@ -2407,6 +2788,39 @@ pre {
     border-radius: 14px;
   }
 
+  .product-stage-frame::after {
+    inset: 4px;
+    border-radius: 10px;
+  }
+
+  .stage-chrome {
+    height: 32px;
+    gap: 6px;
+    padding-inline: 12px;
+  }
+
+  .stage-light {
+    width: 9px;
+    height: 9px;
+  }
+
+  .stage-chrome-title {
+    margin-right: 0;
+    font-size: 13px;
+  }
+
+  .hero-shot-frame {
+    border-radius: 0 0 8px 8px;
+  }
+
+  .product-stage figcaption {
+    margin-top: 14px;
+  }
+
+  .stage-caption-detail {
+    display: none;
+  }
+
   .surface-card {
     padding: 34px 0 34px 38px;
   }
@@ -2519,6 +2933,15 @@ pre {
 }
 
 @media (max-width: 390px) {
+  /*
+   * The host name is the first thing that stops earning its keep: at this
+   * width it crowds the tabs it sits beside, and the tabs are what tell the
+   * reader which surface they are looking at.
+   */
+  .mock-bar-meta {
+    display: none;
+  }
+
   .site-header .github-link {
     padding-inline: 8px;
   }
@@ -2535,6 +2958,10 @@ pre {
 
   .segmented-control {
     grid-template-columns: 1fr;
+  }
+
+  .macos-card .segmented-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .macos-card .segmented-control small {

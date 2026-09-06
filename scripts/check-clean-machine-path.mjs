@@ -4,7 +4,7 @@
  *
  * Encodes ROADMAP launch blocker 3 / v0.2 provider-setup gates that can be
  * proven without an authenticated provider CLI:
- *   project required → provider required → send unlocked
+ *   optional project → provider required → send unlocked
  * plus mutation recovery and doctor remediation contracts.
  */
 
@@ -29,20 +29,21 @@ const noProject = resolveCleanMachinePath({
 });
 assert.equal(noProject.canSend, false);
 assert.equal(noProject.hasProject, false);
-assert.equal(noProject.steps[0]?.status, "active");
-assert.equal(noProject.steps[0]?.action, "select-workspace");
-assert.equal(noProject.nextAction, "select-workspace");
-assert.match(noProject.readinessLabel, /project/i);
-assert.match(noProject.placeholder, /project/i);
+assert.equal(noProject.steps[0]?.status, "done");
+assert.equal(noProject.steps[0]?.label, "No folder");
+assert.equal(noProject.steps[1]?.status, "active");
+assert.equal(noProject.nextAction, "connect-provider:openai");
+assert.match(noProject.readinessLabel, /provider|Connect/i);
+assert.match(noProject.placeholder, /Connect/i);
 
 // Session-style auto workspaces must not count as a user project.
 const autoWorkspace = resolveCleanMachinePath({
   hasReadyProvider: true,
   workspacePath: "/tmp/gyro-session-1783969000000",
 });
-assert.equal(autoWorkspace.canSend, false);
+assert.equal(autoWorkspace.canSend, true);
 assert.equal(autoWorkspace.hasProject, false);
-assert.equal(canSendChat(true, "/tmp/gyro-session-1783969000000"), false);
+assert.equal(canSendChat(true, "/tmp/gyro-session-1783969000000"), true);
 
 const projectOnly = resolveCleanMachinePath({
   hasReadyProvider: false,
@@ -74,7 +75,10 @@ const ready = resolveCleanMachinePath({
   workspacePath: "/Users/example/Project",
 });
 assert.equal(ready.canSend, true);
-assert.equal(ready.steps.every((step) => step.status === "done"), true);
+assert.equal(
+  ready.steps.every((step) => step.status === "done"),
+  true,
+);
 assert.equal(ready.nextAction, undefined);
 assert.equal(ready.readinessTone, "ready");
 assert.equal(canSendChat(true, "/Users/example/Project"), true);
@@ -131,9 +135,15 @@ const mutations = readFileSync(
 );
 assert.match(mutations, /recover_provider_mutation_transactions/);
 assert.match(mutations, /PROVIDER_MUTATION_JOURNAL_SCHEMA/);
-assert.match(mutations, /begin_provider_mutation_transaction|apply_provider_mutation_transaction/);
+assert.match(
+  mutations,
+  /begin_provider_mutation_transaction|apply_provider_mutation_transaction/,
+);
 
-const doctor = readFileSync(resolve(root, "crates/gyro-core/src/doctor.rs"), "utf8");
+const doctor = readFileSync(
+  resolve(root, "crates/gyro-core/src/doctor.rs"),
+  "utf8",
+);
 assert.match(doctor, /required:\s*true/);
 assert.match(doctor, /next:/);
 

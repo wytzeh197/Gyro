@@ -1,3 +1,4 @@
+use crate::credentials::CredentialPolicy;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
@@ -36,6 +37,10 @@ pub struct ExecutionRequest {
     pub args: Vec<OsString>,
     pub current_dir: Option<PathBuf>,
     pub env: Vec<(OsString, Option<OsString>)>,
+    /// Which inherited credentials the child is allowed to keep. Defaults to
+    /// `Inherit` so Gyro's own tooling is unaffected; agent-driven runs set a
+    /// scrubbed policy explicitly. See `credentials`.
+    pub credentials: CredentialPolicy,
     pub timeout: Duration,
     pub inactivity_timeout: Option<Duration>,
     pub max_stdout_chars: usize,
@@ -51,6 +56,7 @@ impl ExecutionRequest {
             args: Vec::new(),
             current_dir: None,
             env: Vec::new(),
+            credentials: CredentialPolicy::Inherit,
             timeout: Duration::from_secs(180),
             inactivity_timeout: None,
             max_stdout_chars: 256_000,
@@ -137,6 +143,12 @@ where
         .stderr(Stdio::piped());
     if let Some(current_dir) = request.current_dir.as_ref() {
         command.current_dir(current_dir);
+    }
+    // Credential scrubbing runs before the request's own overrides so an
+    // explicit override still wins: a caller that deliberately passes a secret
+    // is making a decision, not leaking one by inheritance.
+    for (key, _) in request.credentials.env_overrides() {
+        command.env_remove(key);
     }
     for (key, value) in &request.env {
         if let Some(value) = value {
@@ -567,6 +579,57 @@ mod tests {
 
         assert_eq!(output, expected);
         assert!(!output.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn scrubbed_run_hides_credentials_from_the_child_process() {
+        // Proves the boundary end to end: the policy is not just a computed
+        // list, the spawned process genuinely cannot read the secret.
+        std::env::set_var("GYRO_TEST_SCRUB_VENDOR_API_KEY", "secret-value");
+        std::env::set_var("GYRO_TEST_SCRUB_ALLOWED_API_KEY", "kept-value");
+        std::env::set_var("GYRO_TEST_SCRUB_PLAIN", "plain-value");
+
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "printf '%s|%s|%s' \"${GYRO_TEST_SCRUB_VENDOR_API_KEY:-absent}\" \
+             \"${GYRO_TEST_SCRUB_ALLOWED_API_KEY:-absent}\" \
+             \"${GYRO_TEST_SCRUB_PLAIN:-absent}\""
+                .into(),
+        ];
+        request.credentials = CredentialPolicy::Scrubbed {
+            allowed: ["GYRO_TEST_SCRUB_ALLOWED_API_KEY".to_string()]
+                .into_iter()
+                .collect(),
+        };
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert!(outcome.succeeded());
+        assert_eq!(outcome.stdout, "absent|kept-value|plain-value");
+    }
+
+    #[test]
+    fn explicit_env_override_wins_over_the_scrub() {
+        // A caller passing a secret deliberately is making a decision; only
+        // inheritance is treated as a leak.
+        std::env::set_var("GYRO_TEST_OVERRIDE_API_KEY", "inherited");
+
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "printf '%s' \"${GYRO_TEST_OVERRIDE_API_KEY:-absent}\"".into(),
+        ];
+        request.credentials = CredentialPolicy::scrubbed();
+        request.env = vec![(
+            "GYRO_TEST_OVERRIDE_API_KEY".into(),
+            Some("passed-on-purpose".into()),
+        )];
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert!(outcome.succeeded());
+        assert_eq!(outcome.stdout, "passed-on-purpose");
     }
 
     #[test]

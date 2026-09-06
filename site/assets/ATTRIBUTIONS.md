@@ -30,22 +30,22 @@ local provider and contain no customer, account, or private repository data.
   Source: https://github.com/rsms/inter
   License: https://github.com/rsms/inter/blob/master/LICENSE.txt
 
-## Agent marks
+## Provider marks
 
 The Kimi and Grok marks on the homepage come from
 [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT), inlined as SVG.
-The Claude, Gemini, Cursor, and OpenCode marks come from Simple Icons 16.27.1
-(CC0-1.0). The ChatGPT mark is `openai-icon` from
+The Claude, Gemini, Ollama, Cursor, and OpenCode marks come from Simple Icons
+16.27.1 (CC0-1.0). The ChatGPT mark is `openai-icon` from
 [Gil Barbara's logos](https://github.com/gilbarbara/logos) (CC0-1.0). Cursor and
 OpenCode are shown with a "Coming soon" badge and are not yet supported. Each
-mark is a trademark of its owner; they appear here only to identify the agent
-CLIs Gyro can drive, and imply no affiliation or endorsement.
+mark is a trademark of its owner; they appear here only to identify the
+providers Gyro supports, and imply no affiliation or endorsement.
 
 Claude uses its brand hex `#d97757`. Gemini is drawn as its spark and filled
 with an SVG gradient running violet to blue across the mark, matching how Google
 renders it; the stops (`#9061c4`, `#5b83d8`, `#2e93e3`) are sampled to that
-appearance rather than taken from a published spec. OpenAI, xAI, and Moonshot
-publish black-and-white marks with no brand colour, so ChatGPT, Grok, and Kimi
-follow the page's text colour and flip with the theme — except the accent dot on
-Kimi's K, which is set to `#3b82f6`. Cursor and OpenCode stay grey while they
-are unsupported.
+appearance rather than taken from a published spec. OpenAI, xAI, Moonshot, and
+Ollama publish black-and-white marks with no brand colour, so ChatGPT, Grok,
+Kimi, and Ollama follow the page's text colour and flip with the theme — except
+the accent dot on Kimi's K, which is set to `#3b82f6`. Cursor and OpenCode stay
+grey while they are unsupported.

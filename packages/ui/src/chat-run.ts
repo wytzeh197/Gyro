@@ -9,6 +9,7 @@ import {
   expandAssistantMessageSegments,
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
+import { FILE_REVIEW_SCHEMA } from "./types.ts";
 import type { SessionEvent } from "./types.ts";
 
 /**
@@ -23,6 +24,7 @@ import type { SessionEvent } from "./types.ts";
  */
 
 export type WorkStatus = "running" | "done" | "failed";
+type CommandCategory = "inspect" | "test" | "build";
 
 export type WorkItem =
   | {
@@ -30,6 +32,7 @@ export type WorkItem =
       id: string;
       status: WorkStatus;
       command: string;
+      category?: CommandCategory;
       /** What the command was for, when the provider says. Falls back to the command. */
       intent?: string;
     }
@@ -47,6 +50,12 @@ export type WorkItem =
       path: string;
       additions?: number;
       deletions?: number;
+      /**
+       * What the agent said it was doing to this file, in its own words. Free
+       * and already true, so the review card prefers it over a line count when
+       * no summary has been bought.
+       */
+      intent?: string;
     }
   /**
    * The agent looked at something. Deliberately not a `file` item: a read is
@@ -63,6 +72,13 @@ export type WorkItem =
   | { kind: "memory"; id: string; status: WorkStatus }
   | { kind: "context"; id: string; status: WorkStatus }
   | {
+      kind: "browser";
+      id: string;
+      status: WorkStatus;
+      action: "browse" | "inspect" | "capture";
+      target?: string;
+    }
+  | {
       kind: "tool";
       id: string;
       status: WorkStatus;
@@ -75,13 +91,7 @@ export type WorkItem =
       note?: string;
     };
 
-/**
- * One beat of a run. A work step carries exactly one item: the reference design
- * is a flat rail where seven *different* commands read as seven rows, so no
- * grouping happens by time or by kind. The one thing that folds is a beat that
- * would repeat a row verbatim — see `absorbRepeatedWork`. Collapsing the rest
- * happens in the header, by hiding the list entirely.
- */
+/** One exact event in a run. Work is grouped for display below, never discarded. */
 export type RunStep =
   | { kind: "say"; id: string; at: string; text: string }
   | {
@@ -96,6 +106,128 @@ export type RunStep =
       repeat?: number;
     }
   | { kind: "ask"; id: string; at: string; event: SessionEvent };
+
+/** A plain-language phase for a consecutive stretch of work. */
+export type WorkGroupKind = "review" | "change" | "verify" | "command";
+
+export type WorkGroup = {
+  kind: "work-group";
+  id: string;
+  at: string;
+  groupKind: WorkGroupKind;
+  status: WorkStatus;
+  steps: Array<Extract<RunStep, { kind: "work" }>>;
+};
+
+/** What the run view renders: narration and approvals keep their place; tool
+ * noise becomes a compact, expandable phase. Context compaction is deliberately
+ * left as its own row: it changes the conversation the model can see, so hiding
+ * it inside an unrelated “Reviewing workspace” group makes an important state
+ * transition invisible. */
+export type RunDisplayStep = RunStep | WorkGroup;
+
+/**
+ * Group consecutive work into the small number of phases a person can scan:
+ * review, change, verify, and generic commands. The exact steps remain nested
+ * in their group so command output is still inspectable on demand.
+ */
+export function groupRunSteps(steps: RunStep[]): RunDisplayStep[] {
+  const displayed: RunDisplayStep[] = [];
+  for (const step of steps) {
+    if (step.kind !== "work") {
+      displayed.push(step);
+      continue;
+    }
+    // A compaction is not ordinary inspection work. Keep its symbol and status
+    // in the visible timeline, including while it is in progress.
+    if (step.item.kind === "context") {
+      displayed.push(step);
+      continue;
+    }
+    const groupKind = workGroupKind(step.item);
+    const previous = displayed.at(-1);
+    if (previous?.kind === "work-group" && previous.groupKind === groupKind) {
+      previous.steps.push(step);
+      previous.status = workGroupStatus(previous.steps);
+      continue;
+    }
+    displayed.push({
+      kind: "work-group",
+      id: `work-group-${step.id}`,
+      at: step.at,
+      groupKind,
+      status: step.item.status,
+      steps: [step],
+    });
+  }
+  return displayed;
+}
+
+/** Copy for the group headline. The detail deliberately counts actions rather
+ * than exposing implementation commands before someone asks for them. */
+export function runWorkGroupText(group: WorkGroup): RunRowText {
+  const running = group.status === "running";
+  const failed = group.status === "failed";
+  const labels: Record<WorkGroupKind, [string, string, string]> = {
+    review: [
+      "Reviewing workspace",
+      "Reviewed workspace",
+      "Review needs attention",
+    ],
+    change: [
+      "Updating workspace",
+      "Updated workspace",
+      "Update needs attention",
+    ],
+    verify: [
+      "Checking the result",
+      "Checked the result",
+      "Check needs attention",
+    ],
+    command: ["Running commands", "Ran commands", "Command needs attention"],
+  };
+  const [inProgress, complete, problem] = labels[group.groupKind];
+  const count = group.steps.length;
+  return {
+    label: failed ? problem : running ? inProgress : complete,
+    description: `${count} ${count === 1 ? "action" : "actions"}`,
+  };
+}
+
+function workGroupStatus(
+  steps: Array<Extract<RunStep, { kind: "work" }>>,
+): WorkStatus {
+  if (steps.some((step) => step.item.status === "failed")) return "failed";
+  if (steps.some((step) => step.item.status === "running")) return "running";
+  return "done";
+}
+
+function workGroupKind(item: WorkItem): WorkGroupKind {
+  switch (item.kind) {
+    case "file":
+    case "memory":
+      return "change";
+    case "command":
+      if (item.category === "test" || item.category === "build")
+        return "verify";
+      return item.category === "inspect" ? "review" : "command";
+    case "browser":
+      return item.action === "capture" ? "verify" : "review";
+    case "tool": {
+      const label = `${item.tool} ${item.note ?? ""}`.toLowerCase();
+      if (/(?:edit|write|update|apply|propos)/.test(label)) return "change";
+      if (/(?:test|build|check|diff|preview|screenshot)/.test(label)) {
+        return "verify";
+      }
+      if (/(?:terminal|task|command|execute)/.test(label)) return "command";
+      return "review";
+    }
+    case "read":
+    case "search":
+    case "context":
+      return "review";
+  }
+}
 
 /**
  * What the run is doing right now. The shape this replaces spread the same
@@ -130,6 +262,8 @@ export type FileChange = {
   status: WorkStatus;
   additions?: number;
   deletions?: number;
+  /** The agent's own note about this edit, when it left one. */
+  intent?: string;
 };
 
 export type RunModel = {
@@ -195,6 +329,18 @@ export function buildRunModel(
     if (consumedResponseIds.has(event.id)) {
       continue;
     }
+    const commentary = commentaryTextFromEvent(event);
+    if (commentary) {
+      if (!isOrphanAssistantFragment(commentary)) {
+        steps.push({
+          kind: "say",
+          id: event.id,
+          at: event.createdAt,
+          text: commentary,
+        });
+      }
+      continue;
+    }
     const item = workItemFromEvent(event);
     if (item) {
       if (item.kind === "file") {
@@ -223,7 +369,7 @@ export function buildRunModel(
   }
 
   // Plan lines peeled from a trailing multi-block answer rejoin the rail as
-  // say steps so they stay under "Worked for …" instead of the response body.
+  // say steps so they stay under the work summary instead of the response body.
   for (const preamble of closing?.preambles ?? []) {
     const text = preamble.message.trim();
     if (
@@ -492,7 +638,7 @@ function runPhase(
     return {
       name: "failed",
       message: cancelled
-        ? (status.message?.trim() || "Stopped")
+        ? status.message?.trim() || "Stopped"
         : (status.message ?? status.error ?? "The run stopped early"),
       // Normalize so the header and problem tone can tell user-stop from crash.
       recoveryKind: cancelled
@@ -502,6 +648,69 @@ function runPhase(
     };
   }
   return { name: "done", durationMs: options.durationMs };
+}
+
+function classifyCommandActivity({
+  command,
+  id,
+  intent,
+  status,
+}: {
+  command: string;
+  id: string;
+  intent?: string;
+  status: WorkStatus;
+}): WorkItem {
+  const normalized = command
+    .replace(/^\s*(?:cd\s+[^;&|]+\s*(?:&&|;)\s*)+/i, "")
+    .trim();
+  if (/^(?:rg|grep)\b/i.test(normalized)) {
+    return {
+      kind: "search",
+      id,
+      status,
+      scope: "project",
+      query: commandTarget(normalized),
+    };
+  }
+  if (/^(?:sed|head|tail|cat|awk)\b/i.test(normalized)) {
+    const path = commandFileTarget(normalized);
+    return {
+      kind: "read",
+      id,
+      status,
+      path,
+      media: isImagePath(path) ? "image" : "file",
+    };
+  }
+  const category: CommandCategory | undefined =
+    /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?test\b|\bcargo\s+test\b/i.test(
+      normalized,
+    )
+      ? "test"
+      : /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?build\b|\bcargo\s+build\b/i.test(
+            normalized,
+          )
+        ? "build"
+        : /^(?:git\s+(?:status|diff|log|branch)|ls\b|find\b|pwd\b)/i.test(
+              normalized,
+            )
+          ? "inspect"
+          : undefined;
+  return { kind: "command", id, status, command, intent, category };
+}
+
+function commandTarget(command: string) {
+  const quoted = command.match(/["']([^"']+)["']/)?.[1];
+  return (
+    quoted ?? command.replace(/^(?:rg|grep)\s+[^\s]+\s*/i, "").slice(0, 160)
+  );
+}
+
+function commandFileTarget(command: string) {
+  const tokens = command.match(/(?:["'][^"']+["']|\S+)/g) ?? [];
+  const candidate = tokens.at(-1)?.replace(/^['"]|['"]$/g, "");
+  return candidate && !candidate.startsWith("-") ? candidate : undefined;
 }
 
 /**
@@ -536,15 +745,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
 
   switch (text(payload, "activityKind")) {
     case "command":
-      return {
-        kind: "command",
-        id,
-        status,
+      return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
-        // Prefer an explicit intent; fall back to the free-form note when the
-        // backend reclassified Bash with a description in the note slot.
+        id,
         intent: text(payload, "intent") ?? text(payload, "note"),
-      };
+        status,
+      });
     case "file":
       return {
         kind: "file",
@@ -553,6 +759,7 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
         additions: count(payload, "additions"),
         deletions: count(payload, "deletions"),
+        intent: text(payload, "intent") ?? text(payload, "note"),
       };
     case "search": {
       // Prefer the structured query; a note is a secondary scope (path) and is
@@ -604,13 +811,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         path: text(payload, "path") ?? detail ?? stripUpdatedPrefix(label),
       };
     case "execute":
-      return {
-        kind: "command",
-        id,
-        status,
+      return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
+        id,
         intent: text(payload, "intent") ?? text(payload, "note"),
-      };
+        status,
+      });
     case "fetch":
       return {
         kind: "search",
@@ -630,6 +836,19 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
         note: text(payload, "note"),
       };
   }
+}
+
+/** Provider commentary is user-facing narration, not a generic system event. */
+function commentaryTextFromEvent(event: SessionEvent): string | undefined {
+  if (event.kind !== "system-event") return undefined;
+  const payload = record(event.payload);
+  if (
+    text(payload, "kind") !== "provider-activity" ||
+    text(payload, "activityKind") !== "commentary"
+  ) {
+    return undefined;
+  }
+  return (text(payload, "label") ?? event.message).trim() || undefined;
 }
 
 /**
@@ -661,13 +880,12 @@ function workItemFromCapabilityCall(
     capabilityId === "workspace-run-task" ||
     capabilityId === "workspace-run-test"
   ) {
-    return {
-      kind: "command",
-      id,
-      status,
+    return classifyCommandActivity({
       command: summary ?? resourceLabel ?? humanizeCapabilityId(capabilityId),
+      id,
       intent: summary,
-    };
+      status,
+    });
   }
 
   // Project search → search row.
@@ -683,7 +901,10 @@ function workItemFromCapabilityCall(
 
   // Reading a workspace file is the same beat as a provider read, so it gets
   // the same row rather than a generic wrench.
-  if (capabilityId === "workspace-read" || capabilityId === "workspace-read-range") {
+  if (
+    capabilityId === "workspace-read" ||
+    capabilityId === "workspace-read-range"
+  ) {
     const path = resourceLabel ?? summary;
     return {
       kind: "read",
@@ -702,6 +923,26 @@ function workItemFromCapabilityCall(
     };
   }
 
+  if (capabilityId.startsWith("browser-")) {
+    const action =
+      capabilityId === "browser-screenshot"
+        ? "capture"
+        : capabilityId === "browser-inspect" ||
+            capabilityId === "browser-read-page" ||
+            capabilityId === "browser-find" ||
+            capabilityId === "browser-console" ||
+            capabilityId === "browser-network"
+          ? "inspect"
+          : "browse";
+    return {
+      kind: "browser",
+      id,
+      status,
+      action,
+      target: resourceLabel ?? summary,
+    };
+  }
+
   // Everything else (workspace-context, browser-*, ide-*, git, diff, …)
   // is a single tool beat with a human label.
   return {
@@ -713,18 +954,10 @@ function workItemFromCapabilityCall(
 }
 
 function capabilityWorkStatus(value: string | undefined): WorkStatus {
-  if (
-    value === "requested" ||
-    value === "waiting" ||
-    value === "running"
-  ) {
+  if (value === "requested" || value === "waiting" || value === "running") {
     return "running";
   }
-  if (
-    value === "failed" ||
-    value === "denied" ||
-    value === "cancelled"
-  ) {
+  if (value === "failed" || value === "denied" || value === "cancelled") {
     return "failed";
   }
   return "done";
@@ -786,13 +1019,13 @@ export function runHeaderLabel(
     case "thinking":
     case "working":
     case "finalizing":
-      return elapsedLabel ? `Working for ${elapsedLabel}` : "Working";
-    // The clock is still honest here — the turn never ended — but "Working for"
-    // is not, so the header names the wait and the rail row carries the detail.
+      return elapsedLabel ? `Working · ${elapsedLabel}` : "Working";
+    // The clock is still honest here — the turn never ended — and its compact
+    // placement keeps the activity itself as the header's main message.
     case "retrying":
       return elapsedLabel ? `Retrying · ${elapsedLabel}` : "Retrying";
     case "done":
-      return elapsedLabel ? `Worked for ${elapsedLabel}` : "Worked";
+      return elapsedLabel ? `Worked · ${elapsedLabel}` : "Worked";
     case "failed":
       // User cancel is "Stopped"; a real failure is "Failed" so recovery copy
       // and tone can differ without a second chrome system.
@@ -890,10 +1123,10 @@ export function runRowText(step: RunStep): RunRowText {
       return {
         label:
           item.status === "running"
-            ? "Running command"
+            ? commandVerb(item.category, true)
             : item.status === "failed"
-              ? "Command failed"
-              : "Ran command",
+              ? commandFailedVerb(item.category)
+              : commandVerb(item.category, false),
         // Intent (why) wins over the raw command (what). A provider note is the
         // same shape as intent when Bash was reclassified with a description.
         description: item.intent ?? item.command,
@@ -925,6 +1158,26 @@ export function runRowText(step: RunStep): RunRowText {
           item.status === "running"
             ? "Compacting context"
             : "Compacted context",
+        description:
+          item.status === "running"
+            ? "Summarizing earlier conversation"
+            : "Earlier conversation summarized",
+      };
+    case "browser":
+      return {
+        label:
+          item.status === "running"
+            ? item.action === "capture"
+              ? "Capturing preview"
+              : item.action === "inspect"
+                ? "Inspecting page"
+                : "Browsing"
+            : item.action === "capture"
+              ? "Captured preview"
+              : item.action === "inspect"
+                ? "Inspected page"
+                : "Browsed page",
+        description: item.target,
       };
     case "tool": {
       const toolLabel = item.server
@@ -942,9 +1195,7 @@ export function runRowText(step: RunStep): RunRowText {
       // ACP fallbacks look like "xAI tool" / "Kimi tool". Showing
       // "Used tool · xAI tool" is noise — drop the redundant description.
       if (isGenericProviderToolLabel(toolLabel)) {
-        return withNote(
-          item.status === "running" ? "Using tool" : "Used tool",
-        );
+        return withNote(item.status === "running" ? "Using tool" : "Used tool");
       }
       // Familiar capability labels get a progressive verb while in flight.
       if (item.status === "running") {
@@ -958,11 +1209,24 @@ export function runRowText(step: RunStep): RunRowText {
       if (toolLabel && !isRawToolPayload(toolLabel)) {
         return withNote(toolLabel);
       }
-      return withNote(
-        item.status === "running" ? "Using tool" : "Used tool",
-      );
+      return withNote(item.status === "running" ? "Using tool" : "Used tool");
     }
   }
+}
+
+function commandVerb(category: CommandCategory | undefined, running: boolean) {
+  if (category === "inspect")
+    return running ? "Inspecting workspace" : "Inspected workspace";
+  if (category === "test") return running ? "Running tests" : "Ran tests";
+  if (category === "build")
+    return running ? "Building project" : "Built project";
+  return running ? "Running command" : "Ran command";
+}
+
+function commandFailedVerb(category: CommandCategory | undefined) {
+  if (category === "test") return "Tests failed";
+  if (category === "build") return "Build failed";
+  return category === "inspect" ? "Inspection failed" : "Command failed";
 }
 
 /** In-flight wording for the tools users see every turn. */
@@ -1077,7 +1341,9 @@ export function splitToolName(raw: string): { tool: string; server?: string } {
       return { tool: humanizeCapabilityTool(tool) };
     }
     return {
-      server: humanizeToolSegment(server.replace(/^gyro_capabilities$/i, "gyro")),
+      server: humanizeToolSegment(
+        server.replace(/^gyro_capabilities$/i, "gyro"),
+      ),
       tool: humanizeToolSegment(tool),
     };
   }
@@ -1220,6 +1486,8 @@ function workIdentity(item: WorkItem): string | undefined {
       return `command:${item.command}`;
     case "search":
       return item.query ? `search:${item.scope}:${item.query}` : undefined;
+    case "browser":
+      return item.target ? `browser:${item.action}:${item.target}` : undefined;
     case "tool":
       return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
     case "memory":
@@ -1257,25 +1525,38 @@ function mergeFileChange(
       status: item.status,
       additions: item.additions,
       deletions: item.deletions,
+      // Only when the agent actually left a note — an empty key would read as a
+      // note that says nothing.
+      ...(item.intent ? { intent: item.intent } : {}),
     });
     return;
   }
   existing.status = item.status;
   existing.additions = item.additions ?? existing.additions;
   existing.deletions = item.deletions ?? existing.deletions;
+  // The first note explains the edit; later touches of the same file are
+  // usually follow-ups, so an existing note is not overwritten by a vaguer one.
+  if (!existing.intent && item.intent) existing.intent = item.intent;
 }
 
-/** The title marker is an instruction to the app, never a beat in the run. */
+/** Control markers are instructions to the app, never beats in the run. */
 function isHiddenRunEvent(event: SessionEvent) {
   if (event.kind !== "system-event") {
     return false;
   }
   const payload = record(event.payload);
+  // A "Kept" is the user's reading record, not something the run did. Without
+  // this it would fall through to the unrecognized-event branch and draw as an
+  // approval row the agent never asked for.
+  if (text(payload, "schema") === FILE_REVIEW_SCHEMA) {
+    return true;
+  }
   if (text(payload, "kind") !== "provider-activity") {
     return false;
   }
-  return (text(payload, "label") ?? event.message).includes(
-    "GYRO_SESSION_TITLE:",
+  const label = text(payload, "label") ?? event.message;
+  return (
+    label.includes("GYRO_SESSION_TITLE:") || label.includes("GYRO_ARTIFACTS:")
   );
 }
 

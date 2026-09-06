@@ -325,7 +325,10 @@ fn first_meaningful_line(output: &str) -> Option<&str> {
 pub fn executable_provider_contracts() -> impl Iterator<Item = &'static ProviderCliContract> {
     CONTRACTS.iter().filter(|contract| {
         provider_descriptor(contract.provider_id).is_some_and(|descriptor| {
-            descriptor.execution_kind != ProviderExecutionKind::ReadinessOnly
+            !matches!(
+                descriptor.execution_kind,
+                ProviderExecutionKind::ReadinessOnly | ProviderExecutionKind::OllamaApi
+            )
         })
     })
 }
@@ -341,7 +344,10 @@ mod tests {
     #[test]
     fn every_executable_provider_declares_a_contract() {
         for descriptor in crate::provider_registry::provider_registry() {
-            if descriptor.execution_kind == ProviderExecutionKind::ReadinessOnly {
+            if matches!(
+                descriptor.execution_kind,
+                ProviderExecutionKind::ReadinessOnly | ProviderExecutionKind::OllamaApi
+            ) {
                 continue;
             }
             assert!(

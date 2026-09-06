@@ -622,6 +622,16 @@ pub fn prepare_provider_text_replacement_transaction(
     target: &Path,
     desired: &str,
 ) -> Result<PreparedProviderMutationTransaction> {
+    Ok(prepare_provider_text_replacement_review(workspace, target, desired)?.0)
+}
+
+/// Prepare the exact mutation and its review payload together. An ACP permission
+/// request is a separate operation and cannot authorize a later arbitrary write.
+pub fn prepare_provider_text_replacement_review(
+    workspace: &Path,
+    target: &Path,
+    desired: &str,
+) -> Result<(PreparedProviderMutationTransaction, serde_json::Value)> {
     let workspace_path = workspace
         .canonicalize()
         .with_context(|| format!("resolve provider workspace {}", workspace.display()))?;
@@ -648,7 +658,13 @@ pub fn prepare_provider_text_replacement_transaction(
             diff: desired.to_string(),
         }
     };
-    prepare_provider_mutation_transaction(&workspace_path, &[change])
+    let details = serde_json::json!({
+        "kind": "edit",
+        "title": "Write workspace file",
+        "patch": { "changes": [change.clone()] },
+    });
+    let transaction = prepare_provider_mutation_transaction(&workspace_path, &[change])?;
+    Ok((transaction, details))
 }
 
 pub fn prepare_claude_provider_mutation_transaction(

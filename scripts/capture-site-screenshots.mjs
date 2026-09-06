@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Captures the marketing screenshots under `site/assets/screenshots/` from the
- * real Gyro UI.
+ * Captures marketing and README screenshots from the real Gyro UI.
  *
  * The desktop UI is rendered in headless Chrome against `capture.html`, which
  * installs a fake Tauri IPC layer (see `apps/desktop/src/capture-fixtures.ts`)
@@ -16,21 +15,59 @@
  *
  * Options:
  *   --scene <name>   capture a single scene
+ *   --readme         capture the three README product-tour scenes
  *   --keep-png       also write the intermediate PNGs next to the WebP output
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = resolve(repoRoot, "site/assets/screenshots");
+const readmeOutputRoot = resolve(repoRoot, "docs/screenshots/readme");
 const stagingRoot = resolve(repoRoot, "docs/screenshots/site-v4");
 const appOrigin = "http://127.0.0.1:1420";
-const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const debugPort = 9333;
+
+/*
+ * Any Chromium will do — the capture only ever speaks the DevTools protocol, so
+ * the engine matters and the badge on it does not. Chrome is tried first
+ * because it is what CI installs; the rest are here so a contributor who keeps
+ * a different Chromium on their Mac is not blocked. GYRO_CAPTURE_BROWSER wins
+ * over all of them for anything installed somewhere unusual.
+ */
+const browserCandidates = [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+];
+
+function resolveBrowser() {
+  const override = process.env.GYRO_CAPTURE_BROWSER;
+  if (override) {
+    if (!existsSync(override)) {
+      fail(`GYRO_CAPTURE_BROWSER points at ${override}, which does not exist`);
+    }
+    return override;
+  }
+  const found = browserCandidates.find((path) => existsSync(path));
+  if (!found) {
+    fail(
+      `no Chromium found. Install Google Chrome, or set GYRO_CAPTURE_BROWSER to a Chromium binary. Looked in:\n  ${browserCandidates.join("\n  ")}`,
+    );
+  }
+  return found;
+}
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -44,24 +81,118 @@ const keepPng = process.argv.includes("--keep-png");
  * the responsive variants the site references. `steps` are run in the page
  * after load to drive the UI into the state we want to photograph.
  */
-const scenes = [
+/*
+ * The hero is one 16:10 frame. The earlier 5:4 crop left a column of empty
+ * thread under the last message: a taller frame does not add app, it adds
+ * background. 1200x750 CSS pixels at a 2x device scale gives the 2400px master
+ * the desktop stage picks from.
+ *
+ * `steps` matter as much as the size. A freshly opened session shows a
+ * collapsed run, which photographs as an app that has not done anything — the
+ * exact impression the hero should not leave. Expanding the run puts the
+ * workspace review, commands, and edited files on screen beside the result.
+ */
+const heroSteps = ["selectSession", "expandRun"];
+
+const marketingScenes = [
   {
-    /*
-     * One 5:4 hero for every viewport. The app is laid out at 1200x960 CSS
-     * pixels because that density is what reads well in the frame; the 2x
-     * device scale gives us a 2400px master, so the desktop stage still has a
-     * retina-sharp source to pick from.
-     */
     name: "hero",
     urlScene: "chat",
+    theme: "dark",
     width: 1200,
-    height: 960,
-    steps: ["selectSession"],
+    height: 750,
+    steps: heroSteps,
     outputs: [
-      { file: "hero-2400.webp", width: 2400, height: 1920 },
-      { file: "hero-1200.webp", width: 1200, height: 960 },
-      { file: "hero-600.webp", width: 600, height: 480 },
+      { file: "hero-2400.webp", width: 2400, height: 1500 },
+      { file: "hero-1200.webp", width: 1200, height: 750 },
+      { file: "hero-600.webp", width: 600, height: 375 },
     ],
+  },
+  {
+    /* The same frame in the light theme, for visitors who flip the toggle. */
+    name: "hero-light",
+    urlScene: "chat",
+    theme: "light",
+    width: 1200,
+    height: 750,
+    steps: heroSteps,
+    outputs: [
+      { file: "hero-light-2400.webp", width: 2400, height: 1500 },
+      { file: "hero-light-1200.webp", width: 1200, height: 750 },
+      { file: "hero-light-600.webp", width: 600, height: 375 },
+    ],
+  },
+];
+
+const readmeScenes = [
+  {
+    name: "readme-chat",
+    urlScene: "chat",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: heroSteps,
+    outputs: [
+      {
+        directory: "readme",
+        file: "chat-workflow.webp",
+        width: 2400,
+        height: 1500,
+      },
+    ],
+  },
+  {
+    name: "readme-workspace",
+    urlScene: "workspace-source-control",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: [
+      "selectSession",
+      "openWorkspace",
+      "openSourceControl",
+      "openChangedFile",
+      "maximizeToolPanel",
+    ],
+    outputs: [
+      {
+        directory: "readme",
+        file: "workspace-review.webp",
+        width: 2400,
+        height: 1500,
+      },
+    ],
+  },
+  {
+    name: "readme-cli",
+    urlScene: "cli",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: ["openWorkspace", "openTerminal", "maximizeToolPanel"],
+    outputs: [
+      {
+        directory: "readme",
+        file: "cli-workbench.webp",
+        width: 2400,
+        height: 1500,
+      },
+    ],
+  },
+];
+
+// Manual-only visual regression scenes. They are deliberately excluded from
+// the normal marketing capture, but `--scene <name>` gives release validation
+// a clean-profile way to inspect states that should never become site assets.
+const testScenes = [
+  {
+    name: "ollama-empty",
+    urlScene: "ollama-empty",
+    theme: "dark",
+    width: 1200,
+    height: 750,
+    steps: [],
+    outputs: [],
   },
 ];
 
@@ -100,19 +231,61 @@ const steps = {
       return 'clicked:session';
     })()
   `,
+  /*
+   * The run summary collapses to a single "Worked ·" line. Expanded, it is
+   * the transcript: what was searched, what was run, and which files changed.
+   */
+  expandRun: `
+    (() => {
+      const toggle = document.querySelector('.gyro-run-header-toggle');
+      if (!toggle) return 'missing:run-header';
+      if (toggle.getAttribute('aria-expanded') === 'true') return 'already:run';
+      toggle.click();
+      return 'clicked:run';
+    })()
+  `,
+  openEnvironment: `
+    (() => {
+      const button = [...document.querySelectorAll('button')].find(
+        (node) => node.getAttribute('aria-label') === 'Open right side panel');
+      if (!button) return 'missing:environment';
+      button.click();
+      return 'clicked:environment';
+    })()
+  `,
   openPane: clickByText("Claude Code"),
   openWorkspace: clickByText("Workspace"),
-  openSourceControl: clickByText("Source Control"),
+  openSourceControl: `
+    (() => {
+      const view = document.querySelector(
+        '.gyro-workspace-activity-rail button[aria-label^="Source Control"]',
+      );
+      if (!view) return 'missing:source-control';
+      view.click();
+      return 'clicked:source-control';
+    })()
+  `,
+  openTerminal: clickByText("Terminal"),
   closeCompanion: clickByText("Close AI companion"),
   openDiffTab: clickByText("Diff"),
   openChangedFile: `
     (() => {
-      const nodes = [...document.querySelectorAll('button, [role="button"], li')];
-      const match = nodes.find((node) =>
-        (node.textContent || '').includes('sync.js'));
+      const match = document.querySelector(
+        'button[aria-label="Open diff for src/sync.js"]',
+      );
       if (!match) return 'missing:changed-file';
       match.click();
       return 'clicked:changed-file';
+    })()
+  `,
+  maximizeToolPanel: `
+    (() => {
+      const button = document.querySelector(
+        'button[aria-label^="Maximize tool panel"]',
+      );
+      if (!button) return 'missing:maximize-tool-panel';
+      button.click();
+      return 'clicked:maximize-tool-panel';
     })()
   `,
 };
@@ -209,7 +382,14 @@ function encodeWebp(sourcePng, target, width, height) {
 
 async function main() {
   const only = argument("--scene");
-  const selected = only ? scenes.filter((s) => s.name === only) : scenes;
+  const readmeOnly = process.argv.includes("--readme");
+  const selected = only
+    ? [...marketingScenes, ...readmeScenes, ...testScenes].filter(
+        (scene) => scene.name === only,
+      )
+    : readmeOnly
+      ? readmeScenes
+      : marketingScenes;
   if (!selected.length) fail(`unknown scene ${only}`);
 
   try {
@@ -224,13 +404,16 @@ async function main() {
   }
 
   mkdirSync(outputRoot, { recursive: true });
+  mkdirSync(readmeOutputRoot, { recursive: true });
   mkdirSync(stagingRoot, { recursive: true });
 
   // A fresh profile per run keeps localStorage clean and avoids colliding with
   // a Chrome instance that has not fully exited yet.
   const profile = mkdtempSync(resolve(tmpdir(), "gyro-capture-"));
+  const browserBinary = resolveBrowser();
+  console.log(`Driving ${browserBinary}`);
   const browser = spawn(
-    chrome,
+    browserBinary,
     [
       "--headless=new",
       "--disable-gpu",
@@ -274,11 +457,12 @@ async function main() {
       // Seed the theme before the app boots, then load the harness.
       await call("Page.navigate", { url: `${appOrigin}/capture.html` });
       await new Promise((done) => setTimeout(done, 1500));
+      const theme = scene.theme ?? "dark";
       await call("Runtime.evaluate", {
-        expression: `localStorage.setItem('gyro.theme','dark');
+        expression: `localStorage.setItem('gyro.theme', ${JSON.stringify(theme)});
           localStorage.setItem('gyro.workbench-state', JSON.stringify(${JSON.stringify(
             {
-              preferences: { theme: "dark", density: "compact" },
+              preferences: { theme, density: "compact" },
               lastSessionsLayout: "thread",
               isToolPanelOpen: false,
               ...(scene.workbench ?? {}),
@@ -286,7 +470,7 @@ async function main() {
           )}));`,
       });
       await call("Page.navigate", {
-        url: `${appOrigin}/capture.html?scene=${scene.urlScene}`,
+        url: `${appOrigin}/capture.html?scene=${scene.urlScene}&theme=${theme}`,
       });
 
       await waitFor(
@@ -307,7 +491,12 @@ async function main() {
           returnByValue: true,
         });
         console.log(`  ${scene.name}: ${step} -> ${result.value}`);
-        await new Promise((done) => setTimeout(done, 900));
+        // Workspace preparation starts only after a session has been selected.
+        // Give the activity rail time to mount before a following step selects
+        // one of its icon-only views.
+        await new Promise((done) =>
+          setTimeout(done, step === "openWorkspace" ? 2_000 : 900),
+        );
       }
 
       await new Promise((done) => setTimeout(done, 1200));
@@ -341,7 +530,10 @@ async function main() {
       writeFileSync(png, Buffer.from(shot.data, "base64"));
 
       for (const output of scene.outputs) {
-        const target = resolve(outputRoot, output.file);
+        const target = resolve(
+          output.directory === "readme" ? readmeOutputRoot : outputRoot,
+          output.file,
+        );
         encodeWebp(png, target, output.width, output.height);
         console.log(
           `  wrote ${output.file} (${output.width}x${output.height})`,

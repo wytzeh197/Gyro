@@ -5,9 +5,32 @@ import {
   ledgerWindows,
   formatTokenCount,
   isOutsizedTurn,
+  planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
 } from "../packages/ui/src/usage-ledger.ts";
+
+assert.deepEqual(
+  planUsageNotices("openai", [
+    {
+      id: "five-hour",
+      label: "5-hour window",
+      usedPercent: 82,
+      resetsAt: "2026-08-29T00:00:00.000Z",
+    },
+    { id: "week", label: "Weekly window", usedPercent: 49 },
+  ]),
+  [
+    {
+      providerId: "openai",
+      windowId: "five-hour",
+      windowLabel: "5-hour window",
+      percent: 82,
+      threshold: 80,
+      cycleId: "2026-08-29T00:00:00.000Z",
+    },
+  ],
+);
 
 function totals(overrides = {}) {
   return {
@@ -42,7 +65,9 @@ const plainChat = summarizeSessionCost(
     calls: 6,
     measuredCalls: 6,
     totalTokens: 240_000,
-    byOrigin: [{ origin: "chat", label: "Chat", calls: 6, totalTokens: 240_000 }],
+    byOrigin: [
+      { origin: "chat", label: "Chat", calls: 6, totalTokens: 240_000 },
+    ],
   }),
 );
 assert.equal(plainChat.label, "240K tokens · 6 calls");
@@ -86,7 +111,9 @@ const mixed = summarizeSessionCost(
     measuredCalls: 3,
     estimatedCalls: 2,
     totalTokens: 80_000,
-    byOrigin: [{ origin: "chat", label: "Chat", calls: 5, totalTokens: 80_000 }],
+    byOrigin: [
+      { origin: "chat", label: "Chat", calls: 5, totalTokens: 80_000 },
+    ],
   }),
 );
 assert.equal(mixed.estimateNote, "2 estimated");
@@ -97,7 +124,9 @@ const allEstimated = summarizeSessionCost(
     calls: 2,
     estimatedCalls: 2,
     totalTokens: 40_000,
-    byOrigin: [{ origin: "chat", label: "Chat", calls: 2, totalTokens: 40_000 }],
+    byOrigin: [
+      { origin: "chat", label: "Chat", calls: 2, totalTokens: 40_000 },
+    ],
   }),
 );
 assert.equal(allEstimated.estimateNote, "estimated");
@@ -132,7 +161,9 @@ const toolHeavy = summarizeSessionCost(
     inputTokens: 567_771,
     cachedInputTokens: 565_389,
     totalTokens: 600_000,
-    byOrigin: [{ origin: "chat", label: "Chat", calls: 9, totalTokens: 600_000 }],
+    byOrigin: [
+      { origin: "chat", label: "Chat", calls: 9, totalTokens: 600_000 },
+    ],
   }),
 );
 assert.equal(toolHeavy.label, "600K tokens · 9 calls");
@@ -148,7 +179,9 @@ assert.equal(
       measuredCalls: 4,
       cachedInputTokens: 20_000,
       totalTokens: 200_000,
-      byOrigin: [{ origin: "chat", label: "Chat", calls: 4, totalTokens: 200_000 }],
+      byOrigin: [
+        { origin: "chat", label: "Chat", calls: 4, totalTokens: 200_000 },
+      ],
     }),
   ).cachedNote,
   undefined,
@@ -159,7 +192,10 @@ assert.equal(allEstimated.cachedNote, undefined);
 const baseline = totals({ calls: 6, totalTokens: 600_000 });
 assert.equal(isOutsizedTurn(400_000, baseline), true);
 assert.equal(isOutsizedTurn(120_000, baseline), false);
-assert.equal(isOutsizedTurn(400_000, totals({ calls: 2, totalTokens: 10 })), false);
+assert.equal(
+  isOutsizedTurn(400_000, totals({ calls: 2, totalTokens: 10 })),
+  false,
+);
 assert.equal(isOutsizedTurn(0, baseline), false);
 
 // An ordinary turn is one call and never interrupts.

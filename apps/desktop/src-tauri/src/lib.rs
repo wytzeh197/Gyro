@@ -5,17 +5,18 @@ use gyro_core::augmented_gui_path;
 use gyro_core::user_cli_paths;
 use gyro_core::{
     apply_cli_updates, apply_provider_mutation_transaction_with_cancellation, barrier_decision,
-    begin_provider_mutation_transaction, build_synthesizer_user_prompt, check_cli_updates,
-    council_run_dir, create_worktree, decide_mutation_proposal, final_run_status,
+    begin_provider_mutation_transaction, build_summary_prompt, build_synthesizer_user_prompt,
+    check_cli_updates, council_run_dir, create_worktree, decide_mutation_proposal,
+    discover_ollama_models, fallback_summary, file_review_content_hash, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
         request_desktop_provider_capability, versions_compatible, AppNotification,
         DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
-    logout_account as account_logout, mutation_approval_payload, parse_council_synthesis,
-    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
-    prepare_provider_text_replacement_transaction, provider_descriptor,
+    logout_account as account_logout, mutation_approval_payload, ollama_chat, ollama_tool_chat,
+    parse_council_synthesis, parse_summary_response, prepare_claude_provider_mutation_transaction,
+    prepare_provider_mutation_transaction, provider_descriptor,
     recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
     run_kimi_acp, seat_label_map, start_account_login as account_start_login,
     stored_account_session as account_stored_session, successful_seat_answers,
@@ -28,17 +29,19 @@ use gyro_core::{
     CapabilityRunMode, CapabilityStatus, CliUpdateApplyResult, CliUpdateCheckReport,
     CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
     CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
-    CreateSessionContext, ExecutionRequest, ExecutionStream, ExecutionTermination, GyroConfig,
+    CreateSessionContext, CredentialPolicy, ExecutionRequest, ExecutionStream,
+    ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision, GyroConfig,
     GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
-    KimiAcpRequest, MutationDecision, MutationProposal, PendingProviderMutationCommit,
-    PreparedProviderMutationTransaction, ProjectCapabilityGrant, ProjectCapabilityPolicy,
-    ProviderCapabilitySupport, ProviderDiagnosticsPayload, ProviderExecutionKind,
-    ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest, ProviderHealthService,
-    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
-    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode, UsageEntry,
-    UsageOrigin, UsageOutcome, UsageTokens, UsageTotals, WorkspaceContextSnapshot,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
+    KimiAcpRequest, MutationDecision, MutationProposal, OllamaChatRequest, OllamaToolChatRequest,
+    PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProjectCapabilityGrant,
+    ProjectCapabilityPolicy, ProviderCapabilitySupport, ProviderDiagnosticsPayload,
+    ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest,
+    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload,
+    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens,
+    UsageTotals, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
+    CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, FILE_REVIEW_SCHEMA,
+    MAX_SUMMARY_FILES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
 };
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
@@ -63,6 +66,7 @@ use walkdir::WalkDir;
 
 mod menu_bar;
 mod session_browser;
+mod source_control_review;
 mod system_access;
 
 #[cfg(test)]
@@ -83,7 +87,7 @@ const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
 const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
-const MAX_CHAT_IMAGES: usize = 4;
+const MAX_CHAT_IMAGES: usize = 10;
 const MAX_CHAT_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_CHAT_VIDEOS: usize = 2;
 const MAX_CHAT_ATTACHMENTS: usize = 16;
@@ -105,8 +109,14 @@ const MAX_LSP_HEADER_BYTES: usize = 16 * 1024;
 const IDE_PROTOCOL_CHANNEL_CAPACITY: usize = 8;
 const MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE: usize = 32;
 const MAX_IDE_PROTOCOL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 1024 * 1024;
-const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 64;
+// Codex app-server can legitimately return a multi-megabyte JSONL frame (for
+// example, a completed item with rich tool output). Keep this aligned with the
+// desktop IPC frame limit: the aggregate protocol budget below still bounds a
+// noisy or malicious child process.
+const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+// Preserve the former 64 MiB maximum of queued protocol frames even though an
+// individual frame can now be four times larger.
+const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 16;
 const MAX_CODEX_APP_SERVER_ACTIVITIES: usize = 256;
 const MAX_CODEX_APP_SERVER_PATCHES: usize = 64;
 const MAX_CODEX_APP_SERVER_PATCH_BYTES: usize = 256 * 1024;
@@ -304,8 +314,45 @@ impl Drop for HiddenWebviewGuard {
 struct WorkspaceWatchManager {
     snapshots: Arc<Mutex<HashMap<PathBuf, WorkspaceTreeSnapshot>>>,
     watchers: Arc<Mutex<HashMap<PathBuf, RecommendedWatcher>>>,
-    debounce_serials: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    rescan_state: Arc<Mutex<WorkspaceRescanState>>,
     next_generation: Arc<AtomicU64>,
+}
+
+#[derive(Default)]
+struct WorkspaceRescanState {
+    serials: HashMap<PathBuf, u64>,
+    active_roots: HashSet<PathBuf>,
+}
+
+impl WorkspaceRescanState {
+    /// Returns true only for the event that needs to start a worker. Later
+    /// events for the same workspace update the serial and are coalesced into
+    /// that worker's next debounced scan.
+    fn request(&mut self, root: PathBuf) -> bool {
+        let serial = self.serials.entry(root.clone()).or_default();
+        *serial = serial.saturating_add(1);
+        self.active_roots.insert(root)
+    }
+
+    fn serial(&self, root: &Path) -> Option<u64> {
+        self.serials.get(root).copied()
+    }
+
+    /// Returns true when an event arrived while a scan was in progress.
+    /// Leaving the root active means the already-running worker will debounce
+    /// and scan once more instead of spawning another thread.
+    fn finish_round(&mut self, root: &Path, serial: u64) -> bool {
+        if self.serial(root) != Some(serial) {
+            return true;
+        }
+        self.active_roots.remove(root);
+        false
+    }
+
+    fn remove(&mut self, root: &Path) {
+        self.serials.remove(root);
+        self.active_roots.remove(root);
+    }
 }
 
 #[derive(Clone)]
@@ -846,6 +893,8 @@ struct SourceControlStatus {
     deletions: usize,
     stats_partial: bool,
     files: Vec<SourceControlFile>,
+    history: Vec<source_control_review::HistoryEntry>,
+    history_error: Option<String>,
     last_checked_at: Option<String>,
     error: Option<String>,
 }
@@ -1188,6 +1237,7 @@ struct LanguageServerProcess {
     stdin: ChildStdin,
     messages: mpsc::Receiver<Result<serde_json::Value, String>>,
     next_request_id: u64,
+    semantic_tokens: serde_json::Value,
     language_id: String,
     command: String,
 }
@@ -1448,6 +1498,15 @@ struct ProviderChatResponse {
     resume_cursor: Option<ProviderResumeCursor>,
 }
 
+/// Manual context compaction is a provider operation, not a synthetic chat
+/// message. The response only returns the durable activity rows; the live
+/// status travels through the normal provider activity stream.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderContextCompactionResponse {
+    activity_events: Vec<SessionEvent>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserPreviewCheckRequest {
@@ -1618,6 +1677,7 @@ enum ProviderAdapterKind {
     OpenAiCodex,
     AnthropicClaude,
     KimiAcp,
+    Ollama,
     ReadinessOnly,
 }
 
@@ -3266,6 +3326,45 @@ async fn run_provider_chat(
     result?
 }
 
+/// Ask a resumable Codex thread to compact its existing context. This uses the
+/// app-server's dedicated request instead of sending `/compact` as a normal
+/// prompt, so providers without that capability never receive a faux command.
+#[tauri::command]
+async fn compact_provider_chat(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<ProviderContextCompactionResponse, String> {
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&session_id) {
+            return Err("a provider turn is already running for this session".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err(format!(
+                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+            ));
+        }
+        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
+    }
+    let worker_app = app.clone();
+    let worker_session_id = session_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        compact_provider_chat_blocking(worker_app, worker_session_id)
+    })
+    .await
+    .map_err(|error| format!("context compaction worker failed: {error}"));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&session_id));
+    result?
+}
+
 #[tauri::command]
 async fn stop_provider_chat(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
     stop_provider_run(&app, &session_id, ProviderStopReason::User)
@@ -4328,6 +4427,243 @@ fn retry_council_synthesis_blocking(
     })
 }
 
+/// What the end-of-turn review card asks for: one plain sentence per file.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SummarizeFileChangesRequest {
+    session_id: String,
+    /// The turn whose edits these are, so the call lands on that turn's line in
+    /// the usage ledger instead of floating free.
+    turn_id: Option<String>,
+    workspace_path: String,
+    provider_id: String,
+    provider_label: Option<String>,
+    model_id: Option<String>,
+    model_label: Option<String>,
+    files: Vec<FileChangeInput>,
+}
+
+#[tauri::command]
+async fn summarize_file_changes(
+    app: tauri::AppHandle,
+    request: SummarizeFileChangesRequest,
+) -> Result<Vec<FileChangeSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || summarize_file_changes_blocking(app, request))
+        .await
+        .map_err(|error| format!("change summary worker failed: {error}"))?
+}
+
+/// Describe a turn's changed files in one batched provider call.
+///
+/// The card has to render either way, so every file leaves here with a line:
+/// a sentence already bought for this exact content, a sentence from this
+/// call, or a count of what moved. A provider that is offline, paused by the
+/// budget guard, or busy with the next turn costs the user prose, not their
+/// review card, so those are not errors — see `fallback_summary`.
+fn summarize_file_changes_blocking(
+    app: tauri::AppHandle,
+    request: SummarizeFileChangesRequest,
+) -> Result<Vec<FileChangeSummary>, String> {
+    let store = open_store()?;
+    let root = workspace_root(&request.workspace_path).map_err(to_string)?;
+    let workspace_key = root.display().to_string();
+
+    let files: Vec<FileChangeInput> = request
+        .files
+        .iter()
+        .filter(|file| !file.path.trim().is_empty())
+        .take(MAX_SUMMARY_FILES)
+        .cloned()
+        .collect();
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // The hash is the identity of the reviewed content: it is what lets a
+    // summary be bought once, and what retires it the moment the file moves on.
+    let hashes: Vec<String> = files
+        .iter()
+        .map(|file| file_review_content_hash(&file.path, &file.diff))
+        .collect();
+    let wanted: Vec<(String, String)> = files
+        .iter()
+        .zip(&hashes)
+        .map(|(file, hash)| (file.path.clone(), hash.clone()))
+        .collect();
+
+    let mut resolved: HashMap<String, FileChangeSummary> = store
+        .cached_file_change_summaries(&workspace_key, &wanted)
+        .map_err(to_string)?
+        .into_iter()
+        .map(|summary| (summary.path.clone(), summary))
+        .collect();
+
+    let pending: Vec<FileChangeInput> = files
+        .iter()
+        .filter(|file| !resolved.contains_key(&file.path))
+        .cloned()
+        .collect();
+
+    if !pending.is_empty() {
+        let (prompt, requested) = build_summary_prompt(&pending);
+        if !requested.is_empty() {
+            match run_change_summary_call(&store, &app, &request, prompt) {
+                Ok(raw) => {
+                    let mut fresh: Vec<FileChangeSummary> = Vec::new();
+                    for (path, summary) in parse_summary_response(&raw, &requested) {
+                        let Some(index) = files.iter().position(|file| file.path == path) else {
+                            continue;
+                        };
+                        fresh.push(FileChangeSummary {
+                            path,
+                            content_hash: hashes[index].clone(),
+                            summary,
+                            source: SummarySource::Provider,
+                        });
+                    }
+                    let _ = store.store_file_change_summaries(&workspace_key, &fresh);
+                    for summary in fresh {
+                        resolved.insert(summary.path.clone(), summary);
+                    }
+                }
+                Err(error) => eprintln!("could not summarize file changes: {error}"),
+            }
+        }
+    }
+
+    Ok(files
+        .into_iter()
+        .zip(hashes)
+        .map(|(file, content_hash)| {
+            resolved.remove(&file.path).unwrap_or_else(|| {
+                let summary = fallback_summary(&file.diff, file.additions, file.deletions);
+                FileChangeSummary {
+                    path: file.path,
+                    content_hash,
+                    summary,
+                    source: SummarySource::Fallback,
+                }
+            })
+        })
+        .collect())
+}
+
+/// One metered provider call for a whole turn's worth of files.
+fn run_change_summary_call(
+    store: &SessionStore,
+    app: &tauri::AppHandle,
+    request: &SummarizeFileChangesRequest,
+    prompt: String,
+) -> Result<String, String> {
+    // A summarizer must not touch the workspace it is describing. Council mode
+    // is Gyro's existing shape for exactly that — deny-all at the capability
+    // gate, no tools, no approvals — so this borrows it rather than inventing a
+    // weaker policy of its own.
+    let summary_request = ProviderChatRequest {
+        session_id: request.session_id.clone(),
+        message: format!("{CHANGE_SUMMARY_SYSTEM_PROMPT}\n\n---\n\n{prompt}"),
+        turn_id: request.turn_id.clone(),
+        provider_id: request.provider_id.clone(),
+        provider_label: request
+            .provider_label
+            .clone()
+            .or_else(|| Some(request.provider_id.clone())),
+        model_id: request.model_id.clone(),
+        model_label: request.model_label.clone(),
+        reasoning_effort: None,
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: Some(request.workspace_path.clone()),
+        mode: ChatMode::Council,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+    };
+
+    // The runners read their cancellation control out of this map, and the chat
+    // command refuses a second run for the same session. Reserving here means a
+    // message sent during the (short) summary call is refused rather than run
+    // twice; skipping when the session is already busy means the next turn
+    // always wins over a description of the last one.
+    {
+        let manager = app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(&request.session_id) {
+            return Err("the session is busy, so the change summary was skipped".into());
+        }
+        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+            return Err("too many provider runs are active for a change summary".into());
+        }
+        flags.insert(
+            request.session_id.clone(),
+            Arc::new(ProviderRunControl::default()),
+        );
+    }
+    let result = run_provider_chat_with_retry(
+        store,
+        app,
+        &summary_request,
+        None,
+        UsageContext::new(UsageOrigin::ChangeSummary),
+    )
+    .map(|output| output.response)
+    .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()));
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .map(|mut flags| flags.remove(&request.session_id));
+    result
+}
+
+/// What the user did with one file on the review card.
+///
+/// Keeping is a reading record, not an apply step: the change is already on
+/// disk, and a file nobody marks is unread rather than rejected or pending.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileReviewDecisionRequest {
+    session_id: String,
+    turn_id: String,
+    path: String,
+    content_hash: String,
+    decision: FileReviewDecision,
+}
+
+#[tauri::command]
+async fn record_file_review_decision(
+    request: FileReviewDecisionRequest,
+) -> Result<SessionEvent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session_id = parse_uuid(&request.session_id)?;
+        let turn_id = parse_uuid(&request.turn_id)?;
+        store
+            .append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                format!("Kept {}", request.path),
+                serde_json::json!({
+                    "schema": FILE_REVIEW_SCHEMA,
+                    "kind": "file-review",
+                    "path": request.path,
+                    "contentHash": request.content_hash,
+                    "decision": request.decision.as_str(),
+                }),
+                Some(turn_id),
+            )
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("file review worker failed: {error}"))?
+}
+
 /// Run one chat turn to completion.
 ///
 /// `origin` says whether this is an interactive turn or an unattended
@@ -4785,6 +5121,87 @@ fn run_provider_chat_blocking(
     })
 }
 
+fn compact_provider_chat_blocking(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<ProviderContextCompactionResponse, String> {
+    let store = open_store()?;
+    let session_uuid = parse_uuid(&session_id)?;
+    let session = store
+        .get_session(session_uuid)
+        .map_err(to_string)?
+        .ok_or_else(|| "provider chat session no longer exists".to_string())?;
+    let paths = GyroPaths::for_current_user().map_err(to_string)?;
+    let config = GyroConfig::load(&paths).map_err(to_string)?;
+    let run_id = Uuid::new_v4();
+    let mut request = ProviderChatRequest {
+        session_id: session_id.clone(),
+        message: "/compact".into(),
+        turn_id: Some(run_id.to_string()),
+        provider_id: "openai".into(),
+        provider_label: None,
+        model_id: session.model_id.clone(),
+        model_label: session.model_label.clone(),
+        reasoning_effort: session.reasoning_effort.clone(),
+        require_command_approval: true,
+        require_file_edit_approval: true,
+        full_access: false,
+        suggest_title: false,
+        workspace_path: None,
+        mode: ChatMode::Normal,
+        goal: None,
+        plan: None,
+        attachments: Vec::new(),
+        workspace_context: None,
+    };
+    bind_provider_chat_request(&mut request, &session, &config)?;
+    if request.provider_id != "openai" {
+        return Err("manual context compaction is not supported by this provider".into());
+    }
+    let binding = store
+        .get_provider_session_binding(session_uuid, &request.provider_id)
+        .map_err(to_string)?
+        .and_then(|binding| compatible_provider_session_binding(binding, &request))
+        .ok_or_else(|| "this chat does not have a resumable Codex context yet".to_string())?;
+    let resume_cursor = provider_resume_cursor_from_binding(&binding)
+        .filter(|cursor| cursor.kind == "codex-session")
+        .ok_or_else(|| "this chat does not have a resumable Codex context yet".to_string())?;
+    let activity_params = serde_json::json!({ "turnId": run_id.to_string() });
+    let running = codex_context_compaction_activity(&activity_params, "running");
+    emit_provider_activity_event(&app, &request, &running, Some(0));
+
+    let completed = match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
+        Ok(()) => codex_context_compaction_activity(&activity_params, "done"),
+        Err(error) => {
+            let error = gyro_core::security::redact_secrets(&error.to_string());
+            let failed = ProviderActivity {
+                id: running.id,
+                kind: "context".into(),
+                label: "Context compaction failed".into(),
+                detail: Some(error.clone()),
+                note: None,
+                status: "failed".into(),
+            };
+            emit_provider_activity_event(&app, &request, &failed, Some(0));
+            let _ = store.append_system_events_with_turn_id(
+                session_uuid,
+                vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
+            );
+            return Err(error);
+        }
+    };
+    emit_provider_activity_event(&app, &request, &completed, Some(0));
+    let activity_events = store
+        .append_system_events_with_turn_id(
+            session_uuid,
+            vec![provider_activity_event_entry(
+                &request, run_id, 0, &completed,
+            )],
+        )
+        .map_err(to_string)?;
+    Ok(ProviderContextCompactionResponse { activity_events })
+}
+
 fn bind_provider_chat_request(
     request: &mut ProviderChatRequest,
     session: &Session,
@@ -5145,7 +5562,7 @@ fn provider_context_message_with_history(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
         );
     } else if gyro_core::provider_capability_support(&request.provider_id).available {
-        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy.".into());
+        context.push("Gyro Workspace tools are available throughout this turn. Use gyro_workspace_get_context for project signals such as diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy. If context is unavailable or stale, continue with bounded Workspace tools and describe the evidence you found, never internal workspace mechanics.".into());
         // The file the user happens to have open in Workspace is not context.
         // Only what the user attaches from the composer, or names in the
         // message, puts a file in front of the model.
@@ -6272,12 +6689,13 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
         .into_iter()
         .filter_entry(|entry| {
             let name = entry.file_name().to_string_lossy();
-            !matches!(
-                name.as_ref(),
-                ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
-            )
+            name != ".git"
+                && (max_depth == 1
+                    || !matches!(
+                        name.as_ref(),
+                        ".next" | "node_modules" | "target" | "dist" | "build"
+                    ))
         })
-        .take(1200)
     {
         let entry = entry.map_err(to_string)?;
         let path = entry.path().strip_prefix(root).map_err(to_string)?;
@@ -6370,8 +6788,8 @@ impl WorkspaceWatchManager {
             if let Ok(mut watchers) = self.watchers.lock() {
                 watchers.remove(&path);
             }
-            if let Ok(mut serials) = self.debounce_serials.lock() {
-                serials.remove(&path);
+            if let Ok(mut rescan_state) = self.rescan_state.lock() {
+                rescan_state.remove(&path);
             }
         }
         Ok(snapshot)
@@ -6381,7 +6799,7 @@ impl WorkspaceWatchManager {
         let root = PathBuf::from(workspace_path)
             .canonicalize()
             .map_err(to_string)?;
-        let snapshot = scan_workspace_tree(&root, 5)?;
+        let snapshot = scan_workspace_tree(&root, 1)?;
         self.cache_snapshot(root, snapshot)
     }
 
@@ -6412,7 +6830,7 @@ impl WorkspaceWatchManager {
             }
         }
 
-        let snapshot = scan_workspace_tree(&root, 5)?;
+        let snapshot = scan_workspace_tree(&root, 1)?;
         self.cache_snapshot(root, snapshot)
             .map(|snapshot| snapshot.files)
     }
@@ -6452,39 +6870,57 @@ impl WorkspaceWatchManager {
         if !workspace_watch_event_is_relevant(&root, &event) {
             return;
         }
-        let serial = {
-            let Ok(mut serials) = self.debounce_serials.lock() else {
+        let should_start_worker = {
+            let Ok(mut rescan_state) = self.rescan_state.lock() else {
                 return;
             };
-            let serial = serials.entry(root.clone()).or_default();
-            *serial = serial.saturating_add(1);
-            *serial
+            rescan_state.request(root.clone())
         };
+        if !should_start_worker {
+            return;
+        }
         let manager = self.clone();
-        std::thread::spawn(move || {
+        std::thread::spawn(move || loop {
             std::thread::sleep(WORKSPACE_CHANGE_DEBOUNCE);
-            let is_latest = manager
-                .debounce_serials
+            let serial = manager
+                .rescan_state
                 .lock()
                 .ok()
-                .and_then(|serials| serials.get(&root).copied())
-                == Some(serial);
-            if !is_latest {
-                return;
-            }
-            let Ok(snapshot) = scan_workspace_tree(&root, 5)
-                .and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
-            else {
+                .and_then(|rescan_state| rescan_state.serial(&root));
+            let Some(serial) = serial else {
                 return;
             };
-            let _ = app.emit(
-                WORKSPACE_CHANGED_EVENT,
-                WorkspaceChangedEvent {
-                    workspace_path: root.display().to_string(),
-                    generation: snapshot.generation,
-                    files: snapshot.files,
-                },
-            );
+
+            let scanned = scan_workspace_tree(&root, 1);
+            let superseded = manager
+                .rescan_state
+                .lock()
+                .map(|rescan_state| rescan_state.serial(&root) != Some(serial))
+                .unwrap_or(true);
+            if superseded {
+                continue;
+            }
+            if let Ok(snapshot) =
+                scanned.and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
+            {
+                let _ = app.emit(
+                    WORKSPACE_CHANGED_EVENT,
+                    WorkspaceChangedEvent {
+                        workspace_path: root.display().to_string(),
+                        generation: snapshot.generation,
+                        files: snapshot.files,
+                    },
+                );
+            }
+
+            let should_rescan = manager
+                .rescan_state
+                .lock()
+                .map(|mut rescan_state| rescan_state.finish_round(&root, serial))
+                .unwrap_or(false);
+            if !should_rescan {
+                return;
+            }
         });
     }
 }
@@ -6495,12 +6931,9 @@ fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
             let Ok(relative) = path.strip_prefix(root) else {
                 return false;
             };
-            !relative.components().any(|component| {
-                matches!(
-                    component.as_os_str().to_string_lossy().as_ref(),
-                    ".git" | ".next" | "node_modules" | "target" | "dist" | "build"
-                )
-            })
+            !relative
+                .components()
+                .any(|component| matches!(component.as_os_str().to_string_lossy().as_ref(), ".git"))
         })
 }
 
@@ -7843,6 +8276,7 @@ impl LanguageServerManager {
             stdin,
             messages: spawn_lsp_message_reader(stdout),
             next_request_id: 2,
+            semantic_tokens: serde_json::Value::Null,
             language_id: request.language_id.clone(),
             command: command_text.clone(),
         };
@@ -7864,7 +8298,13 @@ impl LanguageServerManager {
                             "publishDiagnostics": { "relatedInformation": true },
                             "completion": { "completionItem": { "snippetSupport": true } },
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
-                            "definition": { "linkSupport": true }
+                            "definition": { "linkSupport": true },
+                            "semanticTokens": {
+                                "requests": { "full": true },
+                                "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
+                                "tokenModifiers": ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"],
+                                "formats": ["relative"], "overlappingTokenSupport": false, "multilineTokenSupport": false
+                            }
                         }
                     }
                 }
@@ -7883,6 +8323,10 @@ impl LanguageServerManager {
                 "params": {}
             }),
         )?;
+        process.semantic_tokens = initialize_response
+            .pointer("/result/capabilities/semanticTokensProvider")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let capability_count = initialize_response
             .pointer("/result/capabilities")
             .and_then(|value| value.as_object())
@@ -7926,6 +8370,14 @@ impl LanguageServerManager {
             anyhow::bail!("language server exited with {status}");
         }
 
+        if request.method == "$/gyro/semanticTokensLegend" {
+            let full = process.semantic_tokens.get("full");
+            let supported = full
+                .is_some_and(|value| value == &serde_json::Value::Bool(true) || value.is_object());
+            return Ok(
+                serde_json::json!({ "serverId": request.server_id, "status": "ok", "result": if supported { process.semantic_tokens.get("legend").cloned().unwrap_or(serde_json::Value::Null) } else { serde_json::Value::Null } }),
+            );
+        }
         if request.method == "$/gyro/poll" {
             let messages = drain_lsp_messages(&mut process)?;
             return Ok(serde_json::json!({
@@ -8241,6 +8693,19 @@ fn task_working_directory(root: &Path, cwd: Option<&str>) -> Result<PathBuf, Str
     }
 }
 
+/// A task started from the desktop has no terminal available for package-manager
+/// prompts. pnpm documents `CI=1` as the noninteractive mode, which lets a
+/// user-requested task repair its module layout instead of aborting before it
+/// runs.
+fn configure_noninteractive_task_environment(command: &mut Command, program: &str) {
+    if Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == "pnpm")
+    {
+        command.env("CI", "1");
+    }
+}
+
 fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String> {
     let _admission = IdeCommandAdmission::acquire()?;
     let root = workspace_root(&request.workspace_path).map_err(to_string)?;
@@ -8255,9 +8720,10 @@ fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOutput, String
     let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
     command.current_dir(working_directory).args(&task.args);
+    configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
-        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+        run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     if output.status == "done" {
         output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
     }
@@ -8339,9 +8805,10 @@ fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOutput, String
     let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
     command.current_dir(working_directory).args(&task.args);
+    configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
-        run_command_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+        run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
     output.stdout = format!("tests {:?}\n{}", vec![task.id], output.stdout);
     Ok(output)
 }
@@ -8769,7 +9236,7 @@ fn read_workspace_file_with_limit(
         anyhow::bail!("binary workspace files cannot be previewed");
     }
     let content_hash = content_hash(&bytes);
-    let content = String::from_utf8_lossy(&bytes).to_string();
+    let content = decode_workspace_utf8(&bytes, truncated)?;
 
     Ok(WorkspaceFileContent {
         path: path.to_string(),
@@ -8778,6 +9245,37 @@ fn read_workspace_file_with_limit(
         size_bytes,
         content_hash,
     })
+}
+
+// A preview may end in the middle of one codepoint; malformed input anywhere
+// else must never be silently replaced and subsequently saved over the file.
+fn decode_workspace_utf8(bytes: &[u8], truncated: bool) -> anyhow::Result<String> {
+    match std::str::from_utf8(bytes) {
+        Ok(content) => Ok(content.to_owned()),
+        Err(error) if truncated && error.error_len().is_none() => {
+            Ok(std::str::from_utf8(&bytes[..error.valid_up_to()])?.to_owned())
+        }
+        Err(_) => anyhow::bail!("This file is not valid UTF-8 and cannot be edited as text."),
+    }
+}
+
+#[cfg(test)]
+mod workspace_utf8_tests {
+    use super::decode_workspace_utf8;
+    #[test]
+    fn rejects_invalid_utf8_even_in_previews() {
+        assert!(decode_workspace_utf8(&[0xff, 0x61], false).is_err());
+        assert!(decode_workspace_utf8(&[0xff, 0x61], true).is_err());
+        assert!(decode_workspace_utf8(&[0x61, 0xe2], false).is_err());
+    }
+    #[test]
+    fn trims_only_a_truncated_codepoint() {
+        assert_eq!(
+            decode_workspace_utf8(&[0x61, 0xe2, 0x82], true).unwrap(),
+            "a"
+        );
+        assert_eq!(decode_workspace_utf8("a€".as_bytes(), false).unwrap(), "a€");
+    }
 }
 
 fn read_bounded_regular_file(
@@ -9337,6 +9835,8 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
                 deletions: 0,
                 stats_partial: false,
                 files: Vec::new(),
+                history: Vec::new(),
+                history_error: None,
                 last_checked_at: None,
                 error: Some(error.to_string()),
             });
@@ -9355,6 +9855,8 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             deletions: 0,
             stats_partial: false,
             files: Vec::new(),
+            history: Vec::new(),
+            history_error: None,
             last_checked_at: None,
             error: Some(bounded_command_error("could not inspect Git status", &output).to_string()),
         });
@@ -9362,6 +9864,13 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
     let mut status = parse_git_status_v2(&output.stdout);
     let repo_root = git_repo_root(&root).unwrap_or(root);
     apply_git_diff_stats(&repo_root, &mut status);
+    match source_control_review::history(&repo_root) {
+        Ok(history) => status.history = history,
+        Err(error) if !output.stdout.contains("# branch.oid (initial)") => {
+            status.history_error = Some(error.to_string());
+        }
+        Err(_) => {}
+    }
     status.repo_root = Some(repo_root.display().to_string());
     status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
     Ok(status)
@@ -9380,6 +9889,8 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         deletions: 0,
         stats_partial: false,
         files: Vec::new(),
+        history: Vec::new(),
+        history_error: None,
         last_checked_at: None,
         error: None,
     };
@@ -10275,10 +10786,39 @@ fn run_command_output_with_cancellation(
     command: Command,
     cancellation: CancellationToken,
 ) -> anyhow::Result<IdeCommandOutput> {
-    let output = run_bounded_command_with_cancellation(
-        &command,
+    run_command_output_with_limits(
+        command,
+        cancellation,
         Duration::from_secs(30 * 60),
         Some(Duration::from_secs(5 * 60)),
+    )
+}
+
+/// Build and test commands can be quiet while they compile or download. Keep
+/// them cancellable, but do not treat silence as a failure or stop them after
+/// the short task window used by incidental helper commands.
+fn run_workspace_task_output_with_cancellation(
+    command: Command,
+    cancellation: CancellationToken,
+) -> anyhow::Result<IdeCommandOutput> {
+    run_command_output_with_limits(
+        command,
+        cancellation,
+        Duration::from_secs(2 * 60 * 60),
+        None,
+    )
+}
+
+fn run_command_output_with_limits(
+    command: Command,
+    cancellation: CancellationToken,
+    timeout: Duration,
+    inactivity_timeout: Option<Duration>,
+) -> anyhow::Result<IdeCommandOutput> {
+    let output = run_bounded_command_with_cancellation(
+        &command,
+        timeout,
+        inactivity_timeout,
         2 * 1024 * 1024,
         1024 * 1024,
         cancellation,
@@ -10597,6 +11137,20 @@ async fn check_provider_health(
     tauri::async_runtime::spawn_blocking(move || check_provider_health_blocking(request))
         .await
         .map_err(|error| format!("provider health worker failed: {error}"))?
+}
+
+/// Discover models installed in the configured loopback Ollama runtime.
+/// This result is transient: a model installed on one Mac is not persisted as
+/// though it were available on another one.
+#[tauri::command]
+async fn discover_ollama_models_command(
+    base_url: Option<String>,
+) -> Result<gyro_core::OllamaDiscovery, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        discover_ollama_models(base_url.as_deref()).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("Ollama discovery worker failed: {error}"))?
 }
 
 /// Scan installed provider CLIs for available updates (npm + native checks).
@@ -12123,7 +12677,7 @@ fn spawn_codex_app_server_reader(
         loop {
             match read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES) {
                 Ok(None) => {
-                    let _ = sender.send(Err("Codex usage service closed unexpectedly".into()));
+                    let _ = sender.send(Err("Codex app server closed unexpectedly".into()));
                     break;
                 }
                 Ok(Some(line)) => match serde_json::from_slice(&line) {
@@ -12134,14 +12688,14 @@ fn spawn_codex_app_server_reader(
                     }
                     Err(error) => {
                         let _ = sender.send(Err(format!(
-                            "Codex usage service returned invalid JSON: {error}"
+                            "Codex app server returned invalid JSON: {error}"
                         )));
                         break;
                     }
                 },
                 Err(error) => {
                     let _ = sender.send(Err(format!(
-                        "could not read the Codex usage response: {error}"
+                        "could not read the Codex app-server response: {error}"
                     )));
                     break;
                 }
@@ -13042,11 +13596,215 @@ fn run_provider_chat_once(
         // The ACP runners only learn their session id from the completed run,
         // so there is nothing to record before one finishes.
         ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor),
+        ProviderAdapterKind::Ollama => run_ollama_chat(app, request),
         ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
             "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
             request.provider_label.as_deref().unwrap_or("Provider")
         ),
     }
+}
+
+fn run_ollama_chat(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    if !request.attachments.is_empty() {
+        anyhow::bail!(
+            "Ollama in Gyro currently supports text-only chats; remove attachments and retry."
+        );
+    }
+    let cancellation = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
+        .get(&request.session_id)
+        .map(|control| control.cancellation.clone())
+        .ok_or_else(|| anyhow::anyhow!("provider run control is unavailable"))?;
+    if cancellation.is_cancelled() {
+        anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled before Ollama started");
+    }
+    let paths = GyroPaths::for_current_user()?;
+    let config = GyroConfig::load(&paths)?;
+    let provider = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == "ollama")
+        .ok_or_else(|| anyhow::anyhow!("Ollama is not configured"))?;
+    let model = request
+        .model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("select an installed Ollama model before sending"))?;
+    let discovery = discover_ollama_models(provider.base_url.as_deref())?;
+    let discovered = discovery
+        .models
+        .iter()
+        .find(|candidate| candidate.id == model)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Ollama model `{model}` is not installed; refresh the model picker or run `ollama pull {model}`"
+            )
+        })?;
+    let system = if discovered.supports_tools {
+        "You are a local Ollama model in Gyro. Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it."
+    } else {
+        "You are a local Ollama model in Gyro. Respond in concise Markdown. This model is chat-only; do not claim to have executed files, commands, browser actions, or edits."
+    };
+    let user = provider_context_message_with_history(
+        request,
+        local_conversation_history_for_request(request).as_deref(),
+    );
+    let mut messages = vec![
+        serde_json::json!({ "role": "system", "content": system }),
+        serde_json::json!({ "role": "user", "content": user }),
+    ];
+    let tools = discovered
+        .supports_tools
+        .then(|| {
+            CAPABILITY_DESCRIPTORS
+                .iter()
+                .map(|descriptor| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": descriptor.id.provider_tool_name(),
+                            "description": descriptor.description,
+                            "parameters": desktop_capability_tool_schema(descriptor.id),
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let bound = if discovered.supports_tools {
+        Some(active_provider_capability_context(
+            app,
+            &request.session_id,
+        )?)
+    } else {
+        None
+    };
+    let nonce = if discovered.supports_tools {
+        Some(active_provider_approval_nonce(app, &request.session_id)?)
+    } else {
+        None
+    };
+    let mut response = None;
+    for _ in 0..12 {
+        let turn = if tools.is_empty() {
+            ollama_chat(OllamaChatRequest {
+                base_url: provider.base_url.as_deref(),
+                model,
+                system,
+                user: messages
+                    .last()
+                    .and_then(|message| message.get("content"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default(),
+            })?
+        } else {
+            ollama_tool_chat(OllamaToolChatRequest {
+                base_url: provider.base_url.as_deref(),
+                model,
+                messages: messages.clone(),
+                tools: tools.clone(),
+            })?
+        };
+        if turn.tool_calls.is_empty() {
+            response = Some(turn);
+            break;
+        }
+        let tool_calls = turn
+            .tool_calls
+            .iter()
+            .map(|call| {
+                serde_json::json!({
+                    "function": { "name": call.name, "arguments": call.arguments }
+                })
+            })
+            .collect::<Vec<_>>();
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": turn.content,
+            "tool_calls": tool_calls,
+        }));
+        for call in turn.tool_calls {
+            let capability_id =
+                CapabilityId::from_provider_tool_name(&call.name).ok_or_else(|| {
+                    anyhow::anyhow!("Ollama requested an unknown Gyro tool `{}`", call.name)
+                })?;
+            let bound = bound
+                .as_ref()
+                .expect("tools require bound capability context");
+            let response = app.state::<ProviderCapabilityBroker>().invoke(
+                app,
+                CapabilityRequest {
+                    schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
+                    sender_version: env!("CARGO_PKG_VERSION").into(),
+                    context: CapabilityInvocationContext {
+                        session_id: bound.session_id.clone(),
+                        turn_id: bound.turn_id.clone(),
+                        provider_id: bound.provider_id.clone(),
+                        run_nonce: nonce.as_deref().unwrap_or_default().to_string(),
+                        call_id: Uuid::new_v4(),
+                        workspace_key: bound.workspace_key.clone(),
+                        mode: bound.policy.mode,
+                        policy_revision: bound.policy.revision,
+                        workspace_context_revision: bound.workspace_context.revision,
+                    },
+                    capability_id,
+                    arguments: call.arguments,
+                },
+            );
+            messages.push(serde_json::json!({
+                "role": "tool",
+                "tool_name": call.name,
+                "content": serde_json::to_string(&response)?,
+            }));
+        }
+    }
+    let response = response
+        .ok_or_else(|| anyhow::anyhow!("Ollama exceeded Gyro's tool-call limit for one turn"))?;
+    if cancellation.is_cancelled() {
+        anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
+    }
+    emit_provider_chat_event(
+        app,
+        request,
+        "delta",
+        Some(HarnessRunStatus::Running),
+        Some(response.content.clone()),
+        None,
+        None,
+    );
+    let response_chars = response.content.chars().count();
+    Ok(ProviderRunnerOutput {
+        activities: provider_activities_for_response(Vec::new(), &response.content),
+        context_usage: Some(ProviderContextUsage {
+            input_tokens: response.input_tokens,
+            output_tokens: response.output_tokens,
+            total_tokens: response
+                .input_tokens
+                .zip(response.output_tokens)
+                .map(|(input, output)| input + output),
+            model_context_window: discovered.context_window_tokens,
+            ..ProviderContextUsage::default()
+        }),
+        billed_usage: None,
+        rate_limits: Vec::new(),
+        response: response.content,
+        resume_cursor: None,
+        retry_count: 0,
+        resumed: false,
+        output_summary: Some(provider_output_summary(
+            "ollama-api",
+            "completed",
+            None,
+            response_chars,
+        )),
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -13132,6 +13890,37 @@ fn acp_auth_methods(runtime: AcpProviderRuntime) -> Vec<String> {
     methods
 }
 
+fn apply_acp_workspace_write(
+    workspace: &Path,
+    target: &Path,
+    content: &str,
+    plan_mode: bool,
+    require_approval: bool,
+    cancellation: &gyro_core::CancellationToken,
+    approve: impl FnOnce(
+        PreparedProviderMutationTransaction,
+        serde_json::Value,
+    ) -> anyhow::Result<ProviderApprovalDecision>,
+) -> anyhow::Result<()> {
+    if plan_mode {
+        anyhow::bail!("ACP file writes are disabled in plan mode");
+    }
+    let (transaction, details) =
+        gyro_core::mutations::prepare_provider_text_replacement_review(workspace, target, content)?;
+    if require_approval {
+        // The resolver applies the exact reviewed transaction. Never reuse a
+        // previous ACP permission grant or apply a committed transaction twice.
+        if approve(transaction, details)? != ProviderApprovalDecision::AppliedByGyro {
+            anyhow::bail!("ACP workspace write was not approved and applied");
+        }
+    } else {
+        apply_provider_mutation_transaction_with_cancellation(&transaction, || {
+            cancellation.is_cancelled()
+        })?;
+    }
+    Ok(())
+}
+
 fn run_kimi_acp_chat(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -13212,9 +14001,6 @@ fn run_kimi_acp_chat(
 
     let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
     let activity_sink = activities.clone();
-    let approved_file_writes = Arc::new(AtomicUsize::new(0));
-    let approval_write_tokens = approved_file_writes.clone();
-    let write_tokens = approved_file_writes.clone();
     let approval_context = ProviderApprovalContext::from(request);
     let plan_mode = request.mode == ChatMode::Plan;
     let require_command_approval = request.require_command_approval;
@@ -13230,6 +14016,7 @@ fn run_kimi_acp_chat(
     );
     let output = run_kimi_acp(
         KimiAcpRequest {
+            credentials: CredentialPolicy::for_provider(&request.provider_id),
             provider_label: provider_label.into(),
             program: runtime.program.into(),
             program_args,
@@ -13332,9 +14119,6 @@ fn run_kimi_acp_chat(
                     None,
                 )? != ProviderApprovalDecision::Reject
             };
-            if allowed && approval.kind == KimiAcpApprovalKind::FileChange {
-                approval_write_tokens.fetch_add(1, Ordering::SeqCst);
-            }
             Ok(if allowed {
                 KimiAcpApprovalDecision::AllowOnce
             } else {
@@ -13342,23 +14126,23 @@ fn run_kimi_acp_chat(
             })
         },
         |target, content| {
-            if plan_mode {
-                anyhow::bail!("{provider_label} file writes are disabled in plan mode");
-            }
-            if write_tokens
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |tokens| {
-                    tokens.checked_sub(1)
-                })
-                .is_err()
-            {
-                anyhow::bail!("{provider_label} requested an unapproved workspace write");
-            }
-            let transaction =
-                prepare_provider_text_replacement_transaction(&workspace, target, content)?;
-            apply_provider_mutation_transaction_with_cancellation(&transaction, || {
-                cancellation.is_cancelled()
-            })?;
-            Ok(())
+            apply_acp_workspace_write(
+                &workspace,
+                target,
+                content,
+                plan_mode,
+                require_file_approval,
+                &cancellation,
+                |transaction, details| {
+                    wait_for_provider_approval_with_transaction(
+                        app,
+                        &approval_context,
+                        "file-change",
+                        sanitize_provider_approval_details(details),
+                        Some(transaction),
+                    )
+                },
+            )
         },
     );
     // Stop heartbeats on every exit path so a finished ACP turn never keeps
@@ -13915,13 +14699,12 @@ fn run_openai_codex_app_server_chat(
                     completed_artifact_response_at = None;
                     if let Some(item_id) = params.get("itemId").and_then(serde_json::Value::as_str)
                     {
-                        if patches
-                            .get(item_id)
-                            .and_then(|patch| patch.get("changes"))
-                            .is_none()
-                        {
-                            insert_codex_app_server_patch(&mut patches, item_id, params.clone())?;
-                        }
+                        // A `fileChange` item can start before its patch is
+                        // available. The later patchUpdated notification is
+                        // authoritative; retaining the empty start payload
+                        // loses the paths and makes the UI fall back to the
+                        // whole workspace diff.
+                        insert_codex_app_server_patch(&mut patches, item_id, params.clone())?;
                     }
                 }
                 "item/started" => {
@@ -13993,14 +14776,19 @@ fn run_openai_codex_app_server_chat(
                             }
                             Some("fileChange") => {
                                 completed_artifact_response_at = None;
-                                let activity = codex_item_activity(item, "file", "Updated files");
-                                record_codex_app_server_activity(
-                                    app,
-                                    request,
-                                    &mut activities,
-                                    &mut completed_activity_ids,
-                                    activity,
-                                );
+                                let patch = item
+                                    .get("id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .and_then(|item_id| patches.get(item_id));
+                                for activity in codex_file_change_activities(item, patch) {
+                                    record_codex_app_server_activity(
+                                        app,
+                                        request,
+                                        &mut activities,
+                                        &mut completed_activity_ids,
+                                        activity,
+                                    );
+                                }
                             }
                             Some("contextCompaction") => {
                                 completed_artifact_response_at = None;
@@ -14079,6 +14867,188 @@ fn run_openai_codex_app_server_chat(
     })();
     heartbeat_stop.store(true, Ordering::Relaxed);
     let _ = heartbeat.join();
+    drop(child);
+    result
+}
+
+/// Execute Codex's explicit `thread/compact/start` request against a persisted
+/// thread. A new app-server process is intentional: normal chat turns use the
+/// same short-lived connection and resume the durable Codex thread each time.
+fn run_openai_codex_context_compaction(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    resume_cursor: &ProviderResumeCursor,
+) -> anyhow::Result<()> {
+    let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
+    let mut process = command_with_gui_path("codex");
+    process
+        .current_dir(&cwd)
+        .args(["app-server", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    configure_provider_process_group(&mut process);
+    let child = process
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    let mut child = ProviderProcessGuard::new(child);
+    let result = (|| -> anyhow::Result<()> {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Codex app server input is unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
+        let messages = spawn_codex_app_server_reader(stdout);
+        let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "gyro",
+                        "title": "Gyro",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    },
+                    "capabilities": { "experimentalApi": true },
+                },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let initialize = receive_codex_app_server_response(&messages, 1, deadline)
+            .map_err(anyhow::Error::msg)?;
+        codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
+        write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
+            .map_err(anyhow::Error::msg)?;
+
+        let model = codex_model_arg(request.model_id.as_deref());
+        let approval_instructions = provider_approval_instructions(request).join("\n");
+        let approval_instructions =
+            (!approval_instructions.is_empty()).then_some(approval_instructions);
+        let (approval_policy, sandbox_mode, _) = codex_app_server_policy(
+            &request.mode,
+            request.require_command_approval,
+            request.require_file_edit_approval,
+            request.full_access,
+            &cwd,
+        );
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 2,
+                "method": "thread/resume",
+                "params": {
+                    "threadId": resume_cursor.session_id,
+                    "cwd": cwd,
+                    "model": model,
+                    "approvalPolicy": approval_policy,
+                    "approvalsReviewer": "user",
+                    "sandbox": sandbox_mode,
+                    "developerInstructions": approval_instructions,
+                },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+        let thread_response = receive_codex_app_server_response(&messages, 2, deadline)
+            .map_err(anyhow::Error::msg)?;
+        let thread_result =
+            codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
+        let thread_id = thread_result
+            .pointer("/thread/id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?;
+
+        write_codex_app_server_message(
+            &mut stdin,
+            &serde_json::json!({
+                "id": 3,
+                "method": "thread/compact/start",
+                "params": { "threadId": thread_id },
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let mut request_confirmed = false;
+        let mut compaction_completed = false;
+        let mut protocol_messages = 0usize;
+        let mut protocol_bytes = 0usize;
+        loop {
+            if provider_chat_cancelled(app, &request.session_id) {
+                anyhow::bail!("{}", provider_stop_message(app, &request.session_id));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                anyhow::bail!("Codex context compaction timed out");
+            }
+            let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
+                Ok(message) => message.map_err(anyhow::Error::msg)?,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("Codex app server disconnected")
+                }
+            };
+            protocol_messages = protocol_messages.saturating_add(1);
+            protocol_bytes = protocol_bytes.saturating_add(serde_json::to_vec(&message)?.len());
+            if protocol_messages > MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES
+                || protocol_bytes > MAX_CODEX_APP_SERVER_PROTOCOL_BYTES
+            {
+                anyhow::bail!("Codex app server exceeded its protocol activity budget");
+            }
+            if message.get("id").and_then(serde_json::Value::as_u64) == Some(3) {
+                codex_app_server_result(&message).map_err(anyhow::Error::msg)?;
+                request_confirmed = true;
+                if compaction_completed {
+                    return Ok(());
+                }
+                continue;
+            }
+            let method = message.get("method").and_then(serde_json::Value::as_str);
+            let params = message.get("params").cloned().unwrap_or_default();
+            match method {
+                Some("thread/compacted") => {
+                    compaction_completed = true;
+                    if request_confirmed {
+                        return Ok(());
+                    }
+                }
+                Some("item/completed") => {
+                    if params
+                        .pointer("/item/type")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("contextCompaction")
+                    {
+                        compaction_completed = true;
+                        if request_confirmed {
+                            return Ok(());
+                        }
+                    }
+                }
+                // Older app-server versions complete the compact operation as
+                // a turn. The response confirms it is this request, so accept
+                // a successful terminal turn only after that acknowledgement.
+                Some("turn/completed") if request_confirmed => {
+                    let status = params
+                        .pointer("/turn/status")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("failed");
+                    if status == "completed" {
+                        return Ok(());
+                    }
+                    let detail = params
+                        .pointer("/turn/error/message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("Codex context compaction did not complete");
+                    anyhow::bail!("{detail}");
+                }
+                _ => {}
+            }
+        }
+    })();
     drop(child);
     result
 }
@@ -14189,7 +15159,7 @@ impl CodexAppServerCommentaryStream {
         item_id: Option<&str>,
         text: Option<&str>,
     ) {
-        if self.active.is_none() && text.is_none_or(str::is_empty) {
+        if self.active.is_none() && text.map_or(true, str::is_empty) {
             return;
         }
         let Some(active) = self.ensure_active(activities, item_id) else {
@@ -14328,6 +15298,50 @@ fn codex_item_activity(
         note: None,
         status,
     }
+}
+
+/// Turn a Codex app-server file-change record into path-specific activity.
+///
+/// A workspace is shared by every chat pane, so a pathless “Updated files” row
+/// has no reliable way to claim the current Git diff. Codex provides exact
+/// paths in the accumulated patch; retain those instead of attributing every
+/// dirty file to this turn.
+fn codex_file_change_activities(
+    item: &serde_json::Value,
+    patch: Option<&serde_json::Value>,
+) -> Vec<ProviderActivity> {
+    let id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("file-change");
+    let status = item
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("done");
+    let changes = patch
+        .and_then(|patch| patch.get("changes"))
+        .or_else(|| item.get("changes"))
+        .and_then(serde_json::Value::as_array);
+
+    changes
+        .into_iter()
+        .flatten()
+        .filter_map(|change| change.get("path").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .enumerate()
+        .map(|(index, path)| {
+            let path = truncate_chars(path, 1_024);
+            ProviderActivity {
+                id: format!("{id}-file-{index}"),
+                kind: "file".into(),
+                label: format!("Updated {path}"),
+                detail: Some(path),
+                note: None,
+                status: status.into(),
+            }
+        })
+        .collect()
 }
 
 fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -> ProviderActivity {
@@ -17074,10 +18088,25 @@ impl StreamingCommandState {
     fn take_stdout_lines(&mut self, chunk: &str) -> Vec<String> {
         self.push_stdout(chunk);
         self.stdout_line_buffer.push_str(chunk);
-        let mut lines = Vec::new();
-        while let Some(newline) = self.stdout_line_buffer.find('\n') {
-            lines.push(self.stdout_line_buffer.drain(..=newline).collect());
-        }
+        // Provider CLIs can flush thousands of JSON frames in one OS chunk.
+        // Draining one line at a time repeatedly shifts the remaining string
+        // and becomes quadratic under a busy stream. Separate every complete
+        // line with one front-drain, leaving an unterminated tail intact for
+        // the next chunk.
+        let complete_bytes = self
+            .stdout_line_buffer
+            .rfind('\n')
+            .map(|newline| newline + 1)
+            .unwrap_or_default();
+        let lines = if complete_bytes == 0 {
+            Vec::new()
+        } else {
+            let complete = self
+                .stdout_line_buffer
+                .drain(..complete_bytes)
+                .collect::<String>();
+            complete.split_inclusive('\n').map(str::to_owned).collect()
+        };
         if self.stdout_line_buffer.chars().count() > MAX_CHAT_RESPONSE_CHARS * 4 {
             self.stdout_line_buffer.clear();
         }
@@ -17227,6 +18256,10 @@ fn run_streaming_command(
         .map(|(key, value)| (key.to_os_string(), value.map(|value| value.to_os_string())))
         .collect();
     execution.timeout = max_runtime;
+    // An agent run keeps only the provider's own auth: the CLI spawns the
+    // agent's tool calls as its children, so anything left here is reachable
+    // by everything the agent runs. See gyro_core::credentials.
+    execution.credentials = CredentialPolicy::for_provider(&request.provider_id);
     // Silence is not completion for chat provider CLIs.
     execution.inactivity_timeout = None;
     execution.max_stdout_chars = MAX_CHAT_RESPONSE_CHARS * 4;
@@ -18495,6 +19528,7 @@ fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
         ProviderExecutionKind::ClaudeCode => ProviderAdapterKind::AnthropicClaude,
         ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
         ProviderExecutionKind::AcpCli => ProviderAdapterKind::KimiAcp,
+        ProviderExecutionKind::OllamaApi => ProviderAdapterKind::Ollama,
         ProviderExecutionKind::ReadinessOnly => ProviderAdapterKind::ReadinessOnly,
     };
     ProviderAdapterDescriptor {
@@ -19367,7 +20401,7 @@ fn wait_for_capability_approval(
             .and_then(|flags| flags.get(&bound.session_id).cloned());
         if active
             .as_ref()
-            .is_none_or(|control| control.cancellation.is_cancelled())
+            .map_or(true, |control| control.cancellation.is_cancelled())
         {
             break Err("capability approval was cancelled".to_string());
         }
@@ -21509,6 +22543,7 @@ pub fn run() {
             debug_send,
             debug_start,
             debug_stop,
+            discover_ollama_models_command,
             delete_session,
             delete_workspace_path,
             export_diagnostics,
@@ -21530,6 +22565,7 @@ pub fn run() {
             git_create_branch,
             git_remove_worktree,
             git_diff,
+            source_control_review::git_review_content,
             git_discard,
             git_fetch,
             git_pull,
@@ -21573,6 +22609,7 @@ pub fn run() {
             resolve_file_mutation_proposal,
             resolve_provider_approval,
             resolve_capability_approval,
+            record_file_review_decision,
             restart_terminal_pane,
             restore_terminal_panes,
             run_automation,
@@ -21580,6 +22617,7 @@ pub fn run() {
             retry_council_synthesis,
             run_council_chat,
             run_provider_chat,
+            compact_provider_chat,
             save_config,
             save_project_capability_policy,
             search_workspace,
@@ -21589,6 +22627,7 @@ pub fn run() {
             set_session_branch,
             set_automation_status,
             stat_workspace_file,
+            summarize_file_changes,
             start_account_login,
             stop_terminal_pane,
             stop_model_terminal_resource,
@@ -22017,6 +23056,112 @@ fn write_bounded_json_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        let a = workspace.join("approved-earlier.txt");
+        let b = workspace.join("actual.txt");
+        fs::write(&a, "safe").unwrap();
+        fs::write(&b, "before\n").unwrap();
+        let cancellation = gyro_core::CancellationToken::default();
+        let denied = apply_acp_workspace_write(
+            &workspace,
+            &b,
+            "different\n",
+            false,
+            true,
+            &cancellation,
+            |_, details| {
+                assert_eq!(details["patch"]["changes"][0]["path"], "actual.txt");
+                assert!(details["patch"]["changes"][0]["diff"]
+                    .as_str()
+                    .unwrap()
+                    .contains("+different"));
+                Ok(ProviderApprovalDecision::Reject)
+            },
+        );
+        assert!(denied.is_err());
+        assert_eq!(fs::read_to_string(&b).unwrap(), "before\n");
+        apply_acp_workspace_write(
+            &workspace,
+            &b,
+            "reviewed\n",
+            false,
+            true,
+            &cancellation,
+            |transaction, _| {
+                gyro_core::apply_provider_mutation_transaction(&transaction)?;
+                Ok(ProviderApprovalDecision::AppliedByGyro)
+            },
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&b).unwrap(), "reviewed\n");
+        assert_eq!(fs::read_to_string(&a).unwrap(), "safe");
+        assert!(apply_acp_workspace_write(
+            &workspace,
+            &b,
+            "plan write",
+            true,
+            false,
+            &cancellation,
+            |_, _| panic!("plan must not ask to write")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn workspace_tree_lists_every_direct_child_without_truncation() {
+        let workspace = tempfile::tempdir().unwrap();
+        for index in 0..1250 {
+            fs::write(workspace.path().join(format!("file-{index}.txt")), "").unwrap();
+        }
+        for folder in [
+            "apps",
+            "packages",
+            "scripts",
+            "node_modules",
+            "target",
+            ".github",
+        ] {
+            fs::create_dir(workspace.path().join(folder)).unwrap();
+            fs::write(workspace.path().join(folder).join("child.txt"), "").unwrap();
+        }
+        let listing =
+            list_workspace_tree_blocking(workspace.path().display().to_string(), Some(1)).unwrap();
+        assert_eq!(listing.len(), 1256);
+        assert!(listing.iter().all(|entry| entry.depth == 1));
+        for folder in [
+            "apps",
+            "packages",
+            "scripts",
+            "node_modules",
+            "target",
+            ".github",
+        ] {
+            assert!(listing
+                .iter()
+                .any(|entry| entry.path == folder && entry.kind == "directory"));
+            let children = list_workspace_tree_blocking(
+                workspace.path().join(folder).display().to_string(),
+                Some(1),
+            )
+            .unwrap();
+            assert_eq!(children.len(), 1);
+            assert_eq!(children[0].path, "child.txt");
+        }
+    }
+
+    #[test]
+    fn workspace_tree_can_expand_beyond_the_old_depth_limit() {
+        let workspace = tempfile::tempdir().unwrap();
+        let nested = workspace.path().join("a/b/c/d/e/f/g/h/i/j");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("deep.txt"), "deep").unwrap();
+        let listing = list_workspace_tree_blocking(nested.display().to_string(), Some(1)).unwrap();
+        assert_eq!(listing[0].path, "deep.txt");
+    }
 
     #[test]
     fn workspace_tree_entries_are_sorted_depth_first() {
@@ -23247,6 +24392,58 @@ while True:
     }
 
     #[test]
+    fn desktop_pnpm_tasks_run_without_an_interactive_prompt() {
+        let mut pnpm = command_with_gui_path("pnpm");
+        configure_noninteractive_task_environment(&mut pnpm, "pnpm");
+        let ci = pnpm
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("CI"))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().to_string());
+        assert_eq!(ci.as_deref(), Some("1"));
+
+        let mut npm = command_with_gui_path("npm");
+        configure_noninteractive_task_environment(&mut npm, "npm");
+        assert!(npm
+            .get_envs()
+            .all(|(key, _)| key != std::ffi::OsStr::new("CI")));
+    }
+
+    #[test]
+    fn desktop_task_runner_passes_ci_to_a_real_pnpm_script() {
+        if command_with_gui_path("pnpm")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            workspace.path().join("package.json"),
+            r#"{"scripts":{"verify-ci":"node -e \"process.exit(process.env.CI === '1' ? 0 : 1)\""}}"#,
+        )
+        .unwrap();
+        // This asks discovery for pnpm without requiring any dependency install.
+        std::fs::write(
+            workspace.path().join("pnpm-lock.yaml"),
+            "lockfileVersion: '9.0'\n",
+        )
+        .unwrap();
+
+        let output = task_run_blocking(TaskRunRequest {
+            workspace_path: workspace.path().display().to_string(),
+            task_id: "package:verify-ci".into(),
+            command: "pnpm".into(),
+            args: vec!["run".into(), "verify-ci".into()],
+        })
+        .unwrap();
+
+        assert_eq!(output.status, "done", "{}{}", output.stdout, output.stderr);
+    }
+
+    #[test]
     fn language_server_manager_initializes_rust_analyzer_when_available() {
         if command_with_gui_path("rust-analyzer")
             .arg("--version")
@@ -23347,14 +24544,42 @@ while True:
     }
 
     #[test]
-    fn workspace_watcher_ignores_generated_and_git_paths() {
+    fn workspace_watcher_includes_dependency_changes_but_ignores_git_internals() {
         let root = PathBuf::from("/tmp/gyro-workspace");
-        let ignored = NotifyEvent::new(notify::EventKind::Any)
+        let ignored =
+            NotifyEvent::new(notify::EventKind::Any).add_path(root.join(".git/objects/object"));
+        let dependency = NotifyEvent::new(notify::EventKind::Any)
             .add_path(root.join("node_modules/package/index.js"));
         let source = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("src/app.ts"));
 
         assert!(!workspace_watch_event_is_relevant(&root, &ignored));
         assert!(workspace_watch_event_is_relevant(&root, &source));
+        assert!(workspace_watch_event_is_relevant(&root, &dependency));
+    }
+
+    #[test]
+    fn workspace_rescan_state_coalesces_event_bursts_per_root() {
+        let root = PathBuf::from("/tmp/gyro-workspace");
+        let mut state = WorkspaceRescanState::default();
+
+        assert!(state.request(root.clone()));
+        let first_serial = state.serial(&root).unwrap();
+        for _ in 0..256 {
+            assert!(!state.request(root.clone()));
+        }
+        let latest_serial = state.serial(&root).unwrap();
+        assert!(latest_serial > first_serial);
+
+        // The original worker remains responsible after a later event rather
+        // than allowing an event storm to create one thread per notification.
+        assert!(state.finish_round(&root, first_serial));
+        assert!(state.active_roots.contains(&root));
+        assert!(!state.finish_round(&root, latest_serial));
+        assert!(!state.active_roots.contains(&root));
+
+        // A later, settled change starts exactly one new worker.
+        assert!(state.request(root.clone()));
+        assert!(!state.request(root));
     }
 
     #[test]
@@ -24647,6 +25872,28 @@ while True:
 
         assert_eq!(state.assistant_text, "hello");
         assert_eq!(state.take_pending_delta(), "hello");
+    }
+
+    #[test]
+    fn streaming_state_splits_large_stdout_batches_without_losing_the_tail() {
+        let mut state = StreamingCommandState::new();
+        let batch = (0..2_048)
+            .map(|index| format!("{{\"frame\":{index}}}\n"))
+            .collect::<String>();
+
+        let lines = state.take_stdout_lines(&batch);
+        assert_eq!(lines.len(), 2_048);
+        assert_eq!(lines.first().map(String::as_str), Some("{\"frame\":0}\n"));
+        assert_eq!(lines.last().map(String::as_str), Some("{\"frame\":2047}\n"));
+        assert!(state.stdout_line_buffer.is_empty());
+
+        let lines = state.take_stdout_lines("partial");
+        assert!(lines.is_empty());
+        assert_eq!(
+            state.take_stdout_lines(" frame\n"),
+            vec!["partial frame\n".to_string()]
+        );
+        assert!(state.stdout_line_buffer.is_empty());
     }
 
     #[test]
@@ -26349,6 +27596,25 @@ while True:
             .contains("newline terminator"));
     }
 
+    #[test]
+    fn codex_protocol_reader_accepts_frames_larger_than_one_megabyte() {
+        // Codex 0.152 emits some valid app-server frames just above the former
+        // 1 MiB cap. Such a frame must reach the JSON decoder rather than
+        // turning a normal chat send into a generic retry failure.
+        let payload_len = 1024 * 1024 + 1;
+        let mut frame = vec![b'x'; payload_len];
+        frame.push(b'\n');
+        let mut reader = BufReader::new(std::io::Cursor::new(frame));
+
+        assert_eq!(
+            read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES)
+                .unwrap()
+                .unwrap()
+                .len(),
+            payload_len
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn ipc_bind_preserves_live_socket_and_replaces_only_stale_socket() {
@@ -26427,6 +27693,35 @@ while True:
             serde_json::json!({ "changes": "x".repeat(MAX_CODEX_APP_SERVER_PATCH_BYTES) }),
         )
         .is_err());
+    }
+
+    #[test]
+    fn codex_file_change_activity_keeps_only_reported_paths() {
+        let item = serde_json::json!({
+            "id": "change-1",
+            "type": "fileChange",
+            "status": "completed",
+        });
+        let patch = serde_json::json!({
+            "changes": [
+                { "path": "packages/ui/src/chat-run.ts" },
+                { "path": "packages/ui/src/surfaces.tsx" },
+            ],
+        });
+
+        let activities = codex_file_change_activities(&item, Some(&patch));
+
+        assert_eq!(
+            activities
+                .iter()
+                .filter_map(|activity| activity.detail.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                "packages/ui/src/chat-run.ts",
+                "packages/ui/src/surfaces.tsx",
+            ],
+        );
+        assert!(codex_file_change_activities(&item, None).is_empty());
     }
 
     #[test]
@@ -27164,6 +28459,37 @@ while True:
             branch: "feature/picker".into(),
         })
         .is_err());
+    }
+
+    #[test]
+    fn git_branch_catalog_creates_a_session_branch_from_the_selected_base() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let tracked = repo.path().join("tracked.txt");
+        fs::write(&tracked, "release base\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "release base"]);
+        run_git(repo.path(), &["branch", "release/base"]);
+        fs::write(&tracked, "main head\n").unwrap();
+        run_git(repo.path(), &["commit", "-am", "main head"]);
+        fs::write(repo.path().join("scratch.txt"), "keep me\n").unwrap();
+
+        let catalog = git_create_branch_impl(&GitCreateBranchRequest {
+            workspace_path: repo.path().to_string_lossy().into_owned(),
+            branch: "feature/session-goal".into(),
+            start_point: Some("release/base".into()),
+        })
+        .unwrap();
+
+        assert_eq!(catalog.current.as_deref(), Some("feature/session-goal"));
+        assert!(catalog
+            .branches
+            .contains(&"feature/session-goal".to_string()));
+        assert_eq!(fs::read_to_string(tracked).unwrap(), "release base\n");
+        assert_eq!(
+            fs::read_to_string(repo.path().join("scratch.txt")).unwrap(),
+            "keep me\n"
+        );
     }
 
     #[test]

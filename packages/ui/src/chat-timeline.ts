@@ -201,7 +201,8 @@ export function chatTurnTimelineSections(
   // Skip trailing file summaries already removed; walk back over trailing
   // narration to form the answer (and peel plan lines when work preceded it).
   let end = sequenced.length;
-  const trailing: Extract<InterleavedChatTimelineItem, { kind: "event" }>[] = [];
+  const trailing: Extract<InterleavedChatTimelineItem, { kind: "event" }>[] =
+    [];
   while (end > 0) {
     const item = sequenced[end - 1]!;
     if (!isNarrationEvent(item) || isBlankMessage(item)) {

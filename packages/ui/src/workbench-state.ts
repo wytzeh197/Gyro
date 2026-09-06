@@ -79,6 +79,11 @@ import {
   defaultProviderStatuses as catalogDefaultProviderStatuses,
   providerHealthAfterSignInRejection,
 } from "./provider-catalog.ts";
+import {
+  clampBrowserCompanionWidth,
+  clampChatCompanionWidth,
+  clampChatPanelWidth,
+} from "./chat-companion.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
   MAX_WORKSPACE_FOLDERS,
@@ -86,6 +91,7 @@ import {
 } from "./workspace-project.ts";
 import {
   defaultWorkspaceUserSettings,
+  normalizedWorkspaceUserSettings,
   normalizedWorkspaceScopedSettings,
 } from "./workspace-settings.ts";
 
@@ -152,6 +158,15 @@ export function normalizedChatProjectKey(path?: string) {
   return path?.trim().replaceAll("\\", "/").replace(/\/+$/, "") ?? "";
 }
 
+/**
+ * Chat layouts need a durable key even when a conversation deliberately has
+ * no project. Keep that sentinel separate from a session's empty
+ * `workspacePath`, which means "no folder" to the provider.
+ */
+export function chatProjectKey(path?: string) {
+  return normalizedChatProjectKey(path) || "__gyro-no-folder__";
+}
+
 export function chatPaneIdentity(pane: ChatPaneRef) {
   return pane.kind === "session"
     ? `session:${pane.sessionId}`
@@ -179,9 +194,9 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
   const layouts: Record<string, ChatProjectLayout> = {};
   if (rawLayouts) {
     for (const [rawKey, rawLayout] of Object.entries(rawLayouts)) {
-      const projectKey = normalizedChatProjectKey(rawKey);
+      const projectKey = chatProjectKey(rawKey);
       const layout = storedRecord(rawLayout);
-      if (!projectKey || !layout || !Array.isArray(layout.slots)) continue;
+      if (!layout || !Array.isArray(layout.slots)) continue;
       const seen = new Set<string>();
       const seenPaneIds = new Set<string>();
       const slots = layout.slots.slice(0, CHAT_GRID_MAX_SLOTS).map((raw) => {
@@ -190,7 +205,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
         const workspacePath = normalizedChatProjectKey(
           storedChatGridText(pane?.workspacePath, 4096),
         );
-        if (!paneId || !workspacePath || seenPaneIds.has(paneId)) return null;
+        if (!paneId || seenPaneIds.has(paneId)) return null;
         let result: ChatPaneRef | null = null;
         if (pane?.kind === "session") {
           const sessionId = storedChatGridText(pane.sessionId, 160);
@@ -204,7 +219,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
           }
         }
         if (!result) return null;
-        if (normalizedChatProjectKey(result.workspacePath) !== projectKey) {
+        if (chatProjectKey(result.workspacePath) !== projectKey) {
           return null;
         }
         const identity = chatPaneIdentity(result);
@@ -228,7 +243,7 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
       };
     }
   }
-  const requestedProjectKey = normalizedChatProjectKey(
+  const requestedProjectKey = chatProjectKey(
     storedChatGridText(stored?.activeProjectKey, 4096),
   );
   return {
@@ -348,13 +363,14 @@ export function chatGridReducer(
     };
   }
   if (action.type === "clear-project-layout") {
+    const projectKey = chatProjectKey(action.projectKey);
     const layouts = { ...state.layouts };
-    const removed = layouts[action.projectKey];
-    delete layouts[action.projectKey];
+    const removed = layouts[projectKey];
+    delete layouts[projectKey];
     return {
       layouts,
       activeProjectKey:
-        state.activeProjectKey === action.projectKey
+        state.activeProjectKey === projectKey
           ? Object.keys(layouts)[0]
           : state.activeProjectKey,
       maximizedPaneId: removed?.slots.some(
@@ -365,8 +381,7 @@ export function chatGridReducer(
     };
   }
 
-  const projectKey = normalizedChatProjectKey(action.projectKey);
-  if (!projectKey) return state;
+  const projectKey = chatProjectKey(action.projectKey);
   if (action.type === "set-arrangement") {
     const layout = state.layouts[projectKey];
     if (!layout) return state;
@@ -498,9 +513,9 @@ export function chatGridReducer(
       slots,
       // A lone pane is no longer a split — clear the two-pane direction so a
       // later drop can establish a fresh Left/Right arrangement.
-      splitDirection: remaining.length === 2 ? current.splitDirection : undefined,
-      arrangement:
-        remaining.length <= 1 ? undefined : current.arrangement,
+      splitDirection:
+        remaining.length === 2 ? current.splitDirection : undefined,
+      arrangement: remaining.length <= 1 ? undefined : current.arrangement,
     });
   } else if (action.type === "move-pane") {
     const fromIndex = current.slots.findIndex(
@@ -872,6 +887,7 @@ function storedRelativeEditorPath(value: unknown) {
   const path = value.trim().replaceAll("\\", "/");
   if (
     !path ||
+    path.startsWith("gyro-diff:") ||
     path.length > 4_096 ||
     path.includes("\0") ||
     path.split("/").some((segment) => segment === "..")
@@ -1282,7 +1298,13 @@ export type WorkbenchAction =
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
   | { type: "set-default-workspace-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
+  | {
+      type: "set-appearance-colors";
+      mainColor: string;
+      secondaryColor: string;
+    }
   | { type: "set-density"; density: WorkbenchDensity }
+  | { type: "set-quick-actions-visible"; visible: boolean }
   | { type: "set-menu-bar-visible"; visible: boolean }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
@@ -1388,6 +1410,11 @@ export type WorkbenchAction =
   | { type: "ide-set-contribution-enabled"; id: string; enabled: boolean }
   | { type: "ide-remove-contribution"; id: string }
   | { type: "ide-record-ai-tool-call"; toolCall: IdeAiToolCall }
+  | { type: "register-side-chat-session"; sessionId: string }
+  | { type: "forget-side-chat-sessions"; sessionIds: string[] }
+  | { type: "set-chat-companion-width"; width: number }
+  | { type: "set-chat-panel-width"; width: number }
+  | { type: "set-browser-companion-width"; width: number }
   | { type: "set-model-focus"; focus: ModelFocus }
   | { type: "clear-model-focus" }
   | { type: "set-model-follow"; mode: ModelFollowMode }
@@ -1449,6 +1476,8 @@ export type WorkbenchAction =
       profileId: string;
       command: string;
       output: string;
+      /** Explicit terminal actions reveal the pane; background work does not. */
+      reveal?: boolean;
     }
   | { type: "rename-terminal-pane"; paneId: string; title: string }
   | { type: "select-task"; taskId: string }
@@ -1507,6 +1536,7 @@ export type WorkbenchAction =
       capture: NonNullable<BrowserPreview["latestCapture"]>;
     }
   | { type: "browser-capture-failure"; error: string }
+  | { type: "browser-title"; title?: string }
   | {
       type: "browser-status";
       status: BrowserPreviewStatus;
@@ -1709,13 +1739,18 @@ export function workbenchReducer(
       };
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
-    case "open-tool-panel":
+    case "open-tool-panel": {
+      const tab = action.tab ?? state.activePaneTab;
+      if (tab === "browser") {
+        return { ...state, ...browserRevealState(state) };
+      }
       return {
         ...state,
         activeDestination: "workspace",
-        activePaneTab: action.tab ?? state.activePaneTab,
+        activePaneTab: tab,
         isToolPanelOpen: true,
       };
+    }
     case "close-tool-panel":
       return { ...state, isToolPanelOpen: false };
     case "set-workbench-mode":
@@ -1741,10 +1776,30 @@ export function workbenchReducer(
         ...state,
         preferences: { ...state.preferences, theme: action.theme },
       };
+    case "set-appearance-colors":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          mainColor: normalizeAppearanceColor(action.mainColor, "#0874df"),
+          secondaryColor: normalizeAppearanceColor(
+            action.secondaryColor,
+            "#8b6fcb",
+          ),
+        },
+      };
     case "set-density":
       return {
         ...state,
         preferences: { ...state.preferences, density: action.density },
+      };
+    case "set-quick-actions-visible":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          showQuickActions: action.visible,
+        },
       };
     case "set-menu-bar-visible":
       return {
@@ -1939,6 +1994,60 @@ export function workbenchReducer(
         },
       };
     }
+    case "register-side-chat-session": {
+      const sessionId = action.sessionId.trim();
+      const existing = state.preferences.sideChatSessionIds ?? [];
+      if (!sessionId || existing.includes(sessionId)) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          sideChatSessionIds: [...existing, sessionId].slice(-100),
+        },
+      };
+    }
+    case "forget-side-chat-sessions": {
+      const discarded = new Set(action.sessionIds);
+      const existing = state.preferences.sideChatSessionIds ?? [];
+      const next = existing.filter((id) => !discarded.has(id));
+      if (next.length === existing.length) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, sideChatSessionIds: next },
+      };
+    }
+    case "set-chat-companion-width": {
+      const width = clampChatCompanionWidth(action.width);
+      if (state.preferences.chatCompanionWidth === width) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, chatCompanionWidth: width },
+      };
+    }
+    case "set-chat-panel-width":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          chatPanelWidth: clampChatPanelWidth(action.width),
+        },
+      };
+    case "set-browser-companion-width": {
+      const width = clampBrowserCompanionWidth(action.width);
+      if (state.preferences.browserCompanionWidth === width) {
+        return state;
+      }
+      return {
+        ...state,
+        preferences: { ...state.preferences, browserCompanionWidth: width },
+      };
+    }
     case "set-mission-default-profile":
       return {
         ...state,
@@ -1970,9 +2079,7 @@ export function workbenchReducer(
     case "toggle-chat-browser":
       return chatPanelState(
         state,
-        state.preferences.activeChatPanel === "browser"
-          ? undefined
-          : "browser",
+        state.preferences.activeChatPanel === "browser" ? undefined : "browser",
       );
     case "set-chat-panel":
       return chatPanelState(state, action.panel);
@@ -3006,16 +3113,7 @@ export function workbenchReducer(
     case "set-terminal-template":
       return { ...state, terminalTemplate: action.template };
     case "set-terminal-pane-status": {
-      const nextActivePaneTab =
-        (state.isToolPanelOpen ||
-          state.activeWorkspaceLayout === "terminal-grid") &&
-        (action.status === "running" ||
-          action.status === "waiting" ||
-          action.status === "failed")
-          ? "terminal"
-          : state.activePaneTab;
       if (
-        state.activePaneTab === nextActivePaneTab &&
         state.terminalPanes.some(
           (pane) =>
             pane.id === action.paneId &&
@@ -3027,7 +3125,6 @@ export function workbenchReducer(
       }
       return {
         ...state,
-        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3066,17 +3163,8 @@ export function workbenchReducer(
         action.governedSessionId ?? existingPane?.governedSessionId;
       const nextGovernedProviderId =
         action.governedProviderId ?? existingPane?.governedProviderId;
-      const nextActivePaneTab =
-        (state.isToolPanelOpen ||
-          state.activeWorkspaceLayout === "terminal-grid") &&
-        (action.status === "running" ||
-          action.status === "waiting" ||
-          action.status === "failed")
-          ? "terminal"
-          : state.activePaneTab;
       if (
         existingPane &&
-        state.activePaneTab === nextActivePaneTab &&
         existingPane.command === nextCommand &&
         existingPane.projectPath === nextProjectPath &&
         existingPane.workingDirectory === nextWorkingDirectory &&
@@ -3091,7 +3179,6 @@ export function workbenchReducer(
       }
       return {
         ...state,
-        activePaneTab: nextActivePaneTab,
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3170,9 +3257,13 @@ export function workbenchReducer(
     case "run-terminal-pane":
       return {
         ...state,
-        activeDestination: "workspace",
-        activePaneTab: "terminal",
-        isToolPanelOpen: true,
+        ...(action.reveal === false
+          ? {}
+          : {
+              activeDestination: "workspace" as const,
+              activePaneTab: "terminal" as const,
+              isToolPanelOpen: true,
+            }),
         terminalPanes: state.terminalPanes.map((pane) =>
           pane.id === action.paneId
             ? {
@@ -3215,7 +3306,7 @@ export function workbenchReducer(
     case "dispatch-task":
       return {
         ...workbenchReducer(state, {
-          type: "add-terminal-pane",
+          type: "upsert-background-terminal-pane",
           pane: action.pane,
         }),
         selectedTaskId: action.taskId,
@@ -3600,15 +3691,14 @@ export function workbenchReducer(
       ];
       return {
         ...state,
-        activeDestination: "workspace",
-        activePaneTab: "browser",
-        isToolPanelOpen: true,
+        ...browserRevealState(state),
         browserPreview: {
           ...state.browserPreview,
           history: nextHistory,
           historyIndex: nextHistory.length - 1,
           status: action.status ?? "loading",
           url: action.url,
+          title: undefined,
           consoleErrors: 0,
           diagnostics: [],
           diagnosticsSupported: false,
@@ -3621,10 +3711,16 @@ export function workbenchReducer(
       };
     }
     case "browser-back": {
+      if (state.browserPreview.historyIndex <= 0) return state;
       const historyIndex = Math.max(0, state.browserPreview.historyIndex - 1);
       return browserHistoryState(state, historyIndex);
     }
     case "browser-forward": {
+      if (
+        state.browserPreview.historyIndex >=
+        state.browserPreview.history.length - 1
+      )
+        return state;
       const historyIndex = Math.min(
         state.browserPreview.history.length - 1,
         state.browserPreview.historyIndex + 1,
@@ -3632,6 +3728,7 @@ export function workbenchReducer(
       return browserHistoryState(state, historyIndex);
     }
     case "browser-reload":
+      if (!state.browserPreview.url.trim()) return state;
       return {
         ...state,
         browserPreview: {
@@ -3683,6 +3780,14 @@ export function workbenchReducer(
           ...state.browserPreview,
           captureStatus: "failed",
           captureError: action.error,
+        },
+      };
+    case "browser-title":
+      return {
+        ...state,
+        browserPreview: {
+          ...state.browserPreview,
+          title: action.title?.trim() || undefined,
         },
       };
     case "browser-status":
@@ -3951,6 +4056,7 @@ export function createTerminalPane(
     workingDirectory?: string;
     missionSessionId?: string;
     taskTitle?: string;
+    workspaceTaskId?: string;
   } = {},
 ): TerminalPane {
   const workspaceMode = options.workspaceMode ?? "local";
@@ -3975,6 +4081,7 @@ export function createTerminalPane(
     workingDirectory: options.workingDirectory,
     missionSessionId: options.missionSessionId,
     taskTitle,
+    workspaceTaskId: options.workspaceTaskId,
     createdAt: new Date().toISOString(),
   };
 }
@@ -3999,6 +4106,10 @@ function normalizeTerminalPane(pane: TerminalPane): TerminalPane {
     taskTitle:
       typeof pane.taskTitle === "string" && pane.taskTitle.trim()
         ? pane.taskTitle.trim()
+        : undefined,
+    workspaceTaskId:
+      typeof pane.workspaceTaskId === "string" && pane.workspaceTaskId.trim()
+        ? pane.workspaceTaskId.trim()
         : undefined,
     hasForegroundJob:
       typeof pane.hasForegroundJob === "boolean"
@@ -4092,6 +4203,12 @@ function normalizedModelFollowMode(value: unknown): ModelFollowMode {
   return value === "off" || value === "follow" ? value : "peek";
 }
 
+function normalizeAppearanceColor(value: unknown, fallback: string) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+    ? value.toLowerCase()
+    : fallback;
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -4104,7 +4221,7 @@ function normalizeWorkbenchPreferences(
           (commandId): commandId is string => typeof commandId === "string",
         )
       : [],
-    density: preferences?.density === "comfortable" ? "comfortable" : "compact",
+    density: preferences?.density === "compact" ? "compact" : "comfortable",
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),
@@ -4123,14 +4240,50 @@ function normalizeWorkbenchPreferences(
       preferences.missionDefaultProfileId.trim()
         ? preferences.missionDefaultProfileId.trim()
         : undefined,
+    sideChatSessionIds: Array.isArray(preferences?.sideChatSessionIds)
+      ? [
+          ...new Set(
+            preferences.sideChatSessionIds.filter(
+              (id): id is string =>
+                typeof id === "string" && id.trim().length > 0,
+            ),
+          ),
+        ].slice(0, 100)
+      : [],
+    chatCompanionWidth:
+      typeof preferences?.chatCompanionWidth === "number" &&
+      Number.isFinite(preferences.chatCompanionWidth)
+        ? clampChatCompanionWidth(preferences.chatCompanionWidth)
+        : undefined,
+    chatPanelWidth:
+      typeof preferences?.chatPanelWidth === "number" &&
+      Number.isFinite(preferences.chatPanelWidth)
+        ? clampChatPanelWidth(preferences.chatPanelWidth)
+        : undefined,
+    browserCompanionWidth:
+      typeof preferences?.browserCompanionWidth === "number" &&
+      Number.isFinite(preferences.browserCompanionWidth)
+        ? clampBrowserCompanionWidth(preferences.browserCompanionWidth)
+        : undefined,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
-    theme: preferences?.theme === "dark" ? "dark" : "light",
+    theme:
+      preferences?.theme === "dark" ||
+      preferences?.theme === "light" ||
+      preferences?.theme === "system"
+        ? preferences.theme
+        : "system",
+    mainColor: normalizeAppearanceColor(preferences?.mainColor, "#0874df"),
+    secondaryColor: normalizeAppearanceColor(
+      preferences?.secondaryColor,
+      "#8b6fcb",
+    ),
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
+    showQuickActions: preferences?.showQuickActions !== false,
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:
@@ -4204,7 +4357,7 @@ function normalizeWorkbenchPreferences(
         : {},
     workspaceUserSettings: {
       ...defaultWorkspaceUserSettings,
-      ...normalizedWorkspaceScopedSettings(preferences?.workspaceUserSettings),
+      ...normalizedWorkspaceUserSettings(preferences?.workspaceUserSettings),
     },
     workspaceSettingsByWorkspace: normalizedWorkspaceSettingsMap(
       preferences?.workspaceSettingsByWorkspace,
@@ -4724,9 +4877,9 @@ function parentDirectoriesForPath(filePath: string) {
 
 function defaultBrowserPreview() {
   return {
-    url: "http://localhost:3000",
-    history: ["http://localhost:3000"],
-    historyIndex: 0,
+    url: "",
+    history: [] as string[],
+    historyIndex: -1,
     device: "desktop" as const,
     consoleErrors: 0,
     diagnostics: [],
@@ -4769,6 +4922,31 @@ function isSessionsLayout(
   return layout === "thread" || layout === "terminal-grid";
 }
 
+/**
+ * Reveal the browser on the surface that can actually draw it.
+ *
+ * In the `thread` layout the bottom tray is terminal-only (`terminalOnly` in
+ * WorkspaceToolPanel pins its tab to "terminal"), so forcing it open for a
+ * browser navigation dropped an empty terminal over the thread and left the
+ * page nowhere to be seen. A chat shows the browser in its side rail instead.
+ */
+function browserRevealState(state: WorkbenchState): Partial<WorkbenchState> {
+  if (state.activeWorkspaceLayout === "thread") {
+    return {
+      preferences: {
+        ...state.preferences,
+        activeChatPanel: "browser",
+        chatEnvironmentRailOpen: true,
+      },
+    };
+  }
+  return {
+    activeDestination: "workspace",
+    activePaneTab: "browser",
+    isToolPanelOpen: true,
+  };
+}
+
 function chatPanelState(
   state: WorkbenchState,
   panel?: ChatSidePanelId,
@@ -4803,8 +4981,28 @@ export function isUserSelectedWorkspacePath(path?: string) {
   return !/^gyro-.+-\d{8,}$/i.test(name);
 }
 
-export function canSendChat(providerReady: boolean, workspacePath?: string) {
-  return providerReady && isUserSelectedWorkspacePath(workspacePath);
+/**
+ * System temporary workspaces are useful for smoke tests and short-lived CLI
+ * runs, but they are not durable projects. Keep their persisted sessions out
+ * of the normal sidebar so an old validation run cannot leak into Recents.
+ */
+export function isTransientWorkspacePath(path?: string) {
+  const normalized = path?.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === "/tmp" ||
+    normalized.startsWith("/tmp/") ||
+    normalized === "/private/tmp" ||
+    normalized.startsWith("/private/tmp/") ||
+    /^\/(?:private\/)?var\/folders\/[^/]+\/[^/]+\/t(?:\/|$)/i.test(normalized)
+  );
+}
+
+export function canSendChat(providerReady: boolean, _workspacePath?: string) {
+  return providerReady;
 }
 
 function browserHistoryState(
@@ -4816,9 +5014,7 @@ function browserHistoryState(
 
   return {
     ...state,
-    activeDestination: "workspace",
-    activePaneTab: "browser",
-    isToolPanelOpen: true,
+    ...browserRevealState(state),
     browserPreview: {
       ...state.browserPreview,
       historyIndex,

@@ -3,9 +3,9 @@ import type {
   MenuBarJob,
   MenuBarOutcome,
   MenuBarSnapshot,
+  ResolvedTheme,
   Session,
   SessionEvent,
-  ThemeMode,
 } from "@gyro-dev/ui";
 
 type MenuBarStateInput = {
@@ -16,7 +16,7 @@ type MenuBarStateInput = {
   sendingSessionIds: string[];
   sessionEventsById: Record<string, SessionEvent[]>;
   sessions: Session[];
-  theme: ThemeMode;
+  theme: ResolvedTheme;
 };
 
 function recordFromUnknown(

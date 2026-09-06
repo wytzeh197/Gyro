@@ -33,7 +33,7 @@ function renderRelease(release, index) {
   const header = document.createElement("header");
   const label = document.createElement("p");
   label.className = "release-kicker";
-  label.textContent = index === 0 ? "Latest public alpha" : "Public alpha";
+  label.textContent = index === 0 ? "Latest alpha" : "Public alpha";
   const title = document.createElement("h2");
   title.textContent = release.name || release.tag_name;
   const meta = document.createElement("p");
@@ -48,7 +48,7 @@ function renderRelease(release, index) {
   const github = document.createElement("a");
   github.className = "text-link";
   github.href = release.html_url;
-  github.textContent = "View release and assets on GitHub";
+  github.textContent = "View on GitHub";
 
   article.append(header, notes, github);
   return article;
@@ -75,11 +75,10 @@ async function loadChangelog() {
       appendVersionLink(jump, release);
       list.append(renderRelease(release, index));
     }
-    if (status) status.textContent = `${releases.length} public alpha releases`;
+    if (status) status.textContent = `${releases.length} releases`;
     if (fallback) fallback.hidden = true;
   } catch {
-    if (status)
-      status.textContent = "Release history is temporarily unavailable.";
+    if (status) status.textContent = "Release history is unavailable.";
     if (fallback) fallback.hidden = false;
     const link = fallback?.querySelector("a");
     if (link) link.href = RELEASES_PAGE;

@@ -10,11 +10,19 @@ document.documentElement.dataset.surface = isMenuBarSurface
   ? "menu-bar"
   : "main";
 
+const systemTheme = () =>
+  window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+
 const initialTheme = (() => {
   try {
-    return localStorage.getItem("gyro.theme") === "light" ? "light" : "dark";
+    const preference = localStorage.getItem("gyro.theme");
+    return preference === "light" || preference === "dark"
+      ? preference
+      : systemTheme();
   } catch {
-    return "dark";
+    return systemTheme();
   }
 })();
 

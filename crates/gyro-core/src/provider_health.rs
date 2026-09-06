@@ -2,17 +2,24 @@ use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
 use crate::{
-    check_acp_health, check_kimi_acp_health, provider_descriptor, KimiAcpHealthStatus,
-    ProviderHealthKind,
+    check_acp_health, check_kimi_acp_health, discover_ollama_models, provider_descriptor,
+    KimiAcpHealthStatus, ProviderHealthKind,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
+use std::thread;
 use std::time::Duration;
 
 const PROVIDER_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_HEALTH_MAX_STDOUT_CHARS: usize = 32 * 1024;
 const PROVIDER_HEALTH_MAX_STDERR_CHARS: usize = 16 * 1024;
+// Local provider CLIs can briefly lose their socket while their own updater,
+// keychain helper, or device-code flow is settling. One short retry keeps that
+// transient state from being presented as a broken provider, without making a
+// settings refresh slow or hiding persistent setup failures.
+const PROVIDER_HEALTH_ATTEMPTS: usize = 2;
+const PROVIDER_HEALTH_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +92,9 @@ impl ProviderHealthService {
                 Some("opencode auth login"),
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
+            ProviderHealthKind::OllamaApi => {
+                Ok(ollama_provider_health(request.base_url.as_deref()))
+            }
         }
     }
 
@@ -148,6 +158,61 @@ impl ProviderHealthService {
             diagnostics_opt_in: false,
             output,
         })
+    }
+}
+
+fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
+    match discover_ollama_models(base_url) {
+        Ok(discovery) => {
+            let model_summary = if discovery.models.is_empty() {
+                "Ollama is running, but no models are installed. Run `ollama pull <model>` and refresh Gyro."
+                    .to_string()
+            } else {
+                format!(
+                    "Ollama is running at {}; {} local model{} discovered.",
+                    discovery.base_url,
+                    discovery.models.len(),
+                    if discovery.models.len() == 1 { "" } else { "s" }
+                )
+            };
+            ProviderHealthCheck {
+                provider_id: "ollama".into(),
+                output: model_summary,
+                // A reachable service without an installed model cannot run a
+                // chat. Keep the runtime distinct from a missing Ollama
+                // install so the UI can tell the user exactly what to do.
+                runtime_status: if discovery.models.is_empty() {
+                    "no-models".into()
+                } else {
+                    "ready".into()
+                },
+                auth_owner: "provider-sdk".into(),
+                auth_command: None,
+                login_command: None,
+                account_label: None,
+                subscription_label: None,
+                provider_mode: Some("local Ollama runtime".into()),
+                secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
+                privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
+                diagnostics_opt_in: false,
+            }
+        }
+        Err(error) => ProviderHealthCheck {
+            provider_id: "ollama".into(),
+            output: crate::security::redact_secrets(&format!(
+                "Ollama is unavailable: {error}. Install and start Ollama, then run `ollama pull <model>`."
+            )),
+            runtime_status: "not-installed".into(),
+            auth_owner: "provider-sdk".into(),
+            auth_command: None,
+            login_command: None,
+            account_label: None,
+            subscription_label: None,
+            provider_mode: Some("local Ollama runtime".into()),
+            secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
+            privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
+            diagnostics_opt_in: false,
+        },
     }
 }
 
@@ -403,13 +468,60 @@ enum CommandOutputError {
 }
 
 fn command_output(command: &str, args: &[&str]) -> std::result::Result<String, CommandOutputError> {
-    command_output_with_limits(
+    let mut result = command_output_with_limits(
         command,
         args,
         PROVIDER_HEALTH_TIMEOUT,
         PROVIDER_HEALTH_MAX_STDOUT_CHARS,
         PROVIDER_HEALTH_MAX_STDERR_CHARS,
-    )
+    );
+
+    for attempt in 1..PROVIDER_HEALTH_ATTEMPTS {
+        if !is_transient_health_result(&result) {
+            break;
+        }
+        // A bounded, deterministic delay avoids retry storms when settings
+        // checks several providers at once. Do not retry authentication or
+        // installation problems: neither can recover without user action.
+        thread::sleep(PROVIDER_HEALTH_RETRY_DELAY * attempt as u32);
+        result = command_output_with_limits(
+            command,
+            args,
+            PROVIDER_HEALTH_TIMEOUT,
+            PROVIDER_HEALTH_MAX_STDOUT_CHARS,
+            PROVIDER_HEALTH_MAX_STDERR_CHARS,
+        );
+    }
+
+    result
+}
+
+fn is_transient_health_result(result: &std::result::Result<String, CommandOutputError>) -> bool {
+    let output = match result {
+        Ok(output) => output,
+        Err(CommandOutputError::Unavailable(output) | CommandOutputError::Terminated(output)) => {
+            output
+        }
+    }
+    .to_ascii_lowercase();
+
+    [
+        "timed out",
+        "temporarily unavailable",
+        "resource temporarily unavailable",
+        "connection reset",
+        "connection refused",
+        "network is unreachable",
+        "broken pipe",
+        "econnreset",
+        "eagain",
+        "rate limit",
+        "too many requests",
+        "service unavailable",
+        "try again",
+    ]
+    .iter()
+    .any(|marker| output.contains(marker))
 }
 
 fn command_output_with_limits(
@@ -502,6 +614,8 @@ fn retained_stream_output(output: &str, truncated: bool, marker: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
 
     #[test]
     fn parses_redacted_cli_health_and_external_auth_ownership() {
@@ -589,5 +703,49 @@ mod tests {
             ),
             "warning"
         );
+    }
+
+    #[test]
+    fn retries_only_transient_provider_health_failures() {
+        assert!(is_transient_health_result(&Err(
+            CommandOutputError::Terminated("timed out after 10s".into())
+        )));
+        assert!(is_transient_health_result(&Ok(
+            "provider health check failed: connection reset by peer".into()
+        )));
+        assert!(!is_transient_health_result(&Ok(
+            "not authenticated; run provider login".into()
+        )));
+        assert!(!is_transient_health_result(&Err(
+            CommandOutputError::Unavailable("No such file or directory".into())
+        )));
+    }
+
+    #[test]
+    fn ollama_without_installed_models_is_not_ready_to_use() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_line = String::new();
+            BufReader::new(&mut stream)
+                .read_line(&mut request_line)
+                .unwrap();
+            assert!(request_line.starts_with("GET /api/tags"));
+            let body = r#"{"models":[]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let health = ollama_provider_health(Some(&format!("http://{address}/api")));
+        server.join().unwrap();
+
+        assert_eq!(health.runtime_status, "no-models");
+        assert!(health.output.contains("no models are installed"));
     }
 }
