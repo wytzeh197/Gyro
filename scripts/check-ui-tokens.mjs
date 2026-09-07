@@ -76,7 +76,12 @@ const gradientLines = styleLines
 
 for (const { line, n } of gradientLines) {
   const window = styleLines.slice(n - 1, n + 4).join("\n");
-  const allowed = allowedGradient.some((pattern) => pattern.test(window));
+  // The maximum-effort slider uses a distinct fill as a state indicator.
+  // Keep this exception confined to its fill and track, not general surfaces.
+  const rulePrefix = styles.slice(0, styleLines.slice(0, n).join("\n").length);
+  const selector = rulePrefix.slice(rulePrefix.lastIndexOf("}") + 1).split("{")[0].trim();
+  const isMaxEffortIndicator = /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(selector);
+  const allowed = isMaxEffortIndicator || allowedGradient.some((pattern) => pattern.test(window));
   expect(
     allowed,
     `Decorative gradient at packages/ui/src/styles.css:${n} is not on the content allowlist: ${line.trim()}`,

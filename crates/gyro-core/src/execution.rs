@@ -566,9 +566,13 @@ mod tests {
         let mut request = super::ExecutionRequest::new("/usr/bin/wc");
         request.args = vec!["-c".into()];
         request.stdin_file = Some(path);
-        let outcome = super::run_command(request, super::CancellationToken::default(), |_| {}).unwrap();
+        let outcome =
+            super::run_command(request, super::CancellationToken::default(), |_| {}).unwrap();
         assert_eq!(outcome.stdout.trim(), bytes.len().to_string());
-        assert_eq!(outcome.termination, super::ExecutionTermination::Exited { code: Some(0) });
+        assert_eq!(
+            outcome.termination,
+            super::ExecutionTermination::Exited { code: Some(0) }
+        );
     }
 
     use super::*;

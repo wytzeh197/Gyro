@@ -5932,8 +5932,12 @@ fn provider_context_message_with_capabilities(
             ChatMode::Council => "council",
             ChatMode::Normal => "normal",
         },
-        (user_requests_gyro_browser(&request.message) || request.message.to_lowercase().contains("browser"))
-            || request.attachments.iter().any(|item| item.kind == "browser-snapshot"),
+        (user_requests_gyro_browser(&request.message)
+            || request.message.to_lowercase().contains("browser"))
+            || request
+                .attachments
+                .iter()
+                .any(|item| item.kind == "browser-snapshot"),
     ));
     context.push(format!(
         "Gyro chat mode: {}.",
@@ -16599,7 +16603,10 @@ fn desktop_claude_approval_response(
     }
 }
 
-fn claude_multimodal_input(prompt: &str, attachments: &[ChatAttachmentRequest]) -> anyhow::Result<serde_json::Value> {
+fn claude_multimodal_input(
+    prompt: &str,
+    attachments: &[ChatAttachmentRequest],
+) -> anyhow::Result<serde_json::Value> {
     let mut content = vec![serde_json::json!({"type": "text", "text": prompt})];
     for attachment in attachments.iter().filter(|item| item.kind == "image") {
         let bytes = std::fs::read(&attachment.path)?;
@@ -16663,7 +16670,10 @@ fn run_anthropic_claude_chat(
     );
     let input_file = if request.attachments.iter().any(|item| item.kind == "image") {
         let mut input = tempfile::NamedTempFile::new()?;
-        serde_json::to_writer(input.as_file_mut(), &claude_multimodal_input(&prompt, &request.attachments)?)?;
+        serde_json::to_writer(
+            input.as_file_mut(),
+            &claude_multimodal_input(&prompt, &request.attachments)?,
+        )?;
         input.as_file_mut().write_all(b"\n")?;
         // Stream JSON replaces the positional prompt, preserving all policy flags.
         args.truncate(args.len() - 2);
@@ -24137,7 +24147,10 @@ mod tests {
         request.require_file_edit_approval = false;
         request.full_access = true;
         let unrestricted = provider_approval_instructions(&request).join("\n");
-        assert!(!unrestricted.is_empty(), "resume must replace stale instructions");
+        assert!(
+            !unrestricted.is_empty(),
+            "resume must replace stale instructions"
+        );
         assert!(!unrestricted.contains("fresh, explicit user approval"));
         assert!(unrestricted.contains("capability broker"));
     }
@@ -24733,11 +24746,18 @@ mod tests {
         assert_eq!(vision.attachments[1].path, image_path.display().to_string());
         let claude_input = claude_multimodal_input(&vision_prompt, &vision.attachments).unwrap();
         assert_eq!(claude_input["message"]["content"][1]["type"], "image");
-        assert_eq!(claude_input["message"]["content"][1]["source"]["media_type"], "image/png");
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(
-                claude_input["message"]["content"][1]["source"]["data"].as_str().unwrap()
-            ).unwrap(),
+            claude_input["message"]["content"][1]["source"]["media_type"],
+            "image/png"
+        );
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(
+                    claude_input["message"]["content"][1]["source"]["data"]
+                        .as_str()
+                        .unwrap()
+                )
+                .unwrap(),
             fs::read(&image_path).unwrap()
         );
         fs::write(&image_path, b"\x89PNG\r\n\x1a\nchanged").unwrap();
@@ -24805,14 +24825,27 @@ mod tests {
     fn browser_knowledge_context_uses_capabilities_across_adapters() {
         let mut request = anthropic_provider_request();
         request.message = "Inspect this page in Gyro Browser".into();
-        for provider in ["openai", "anthropic", "kimi", "xai", "gemini", "cursor", "opencode", "ollama"] {
+        for provider in [
+            "openai",
+            "anthropic",
+            "kimi",
+            "xai",
+            "gemini",
+            "cursor",
+            "opencode",
+            "ollama",
+        ] {
             request.provider_id = provider.into();
             for tools in [false, true] {
                 for images in [false, true] {
-                    let context = provider_context_message_with_capabilities(&request, None, tools, images);
+                    let context =
+                        provider_context_message_with_capabilities(&request, None, tools, images);
                     assert!(context.contains(browser_knowledge::GUIDE));
                     let contract = browser_knowledge::contract(tools, images, "normal").to_string();
-                    assert!(context.contains(&contract), "capability knowledge missing for {provider}");
+                    assert!(
+                        context.contains(&contract),
+                        "capability knowledge missing for {provider}"
+                    );
                 }
             }
         }

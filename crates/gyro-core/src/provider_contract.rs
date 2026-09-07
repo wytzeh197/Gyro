@@ -154,8 +154,12 @@ pub fn audit_provider_args<S: AsRef<str>>(
     // prompt. Require both stream formats before accepting that alternate
     // delivery contract; ordinary text invocations keep the terminator guard.
     if contract.provider_id == "anthropic"
-        && args.windows(2).any(|pair| pair[0].as_ref() == "--input-format" && pair[1].as_ref() == "stream-json")
-        && args.windows(2).any(|pair| pair[0].as_ref() == "--output-format" && pair[1].as_ref() == "stream-json")
+        && args
+            .windows(2)
+            .any(|pair| pair[0].as_ref() == "--input-format" && pair[1].as_ref() == "stream-json")
+        && args
+            .windows(2)
+            .any(|pair| pair[0].as_ref() == "--output-format" && pair[1].as_ref() == "stream-json")
     {
         return Ok(());
     }
@@ -357,9 +361,27 @@ mod tests {
     #[test]
     fn claude_stream_input_uses_protocol_contract_only_with_stream_output() {
         let contract = super::provider_cli_contract("anthropic").unwrap();
-        assert!(super::audit_provider_args(contract, &["--print", "--input-format", "stream-json", "--output-format", "stream-json"]).is_ok());
-        assert!(super::audit_provider_args(contract, &["--print", "--input-format", "stream-json"]).is_err());
-        assert!(super::audit_provider_args(contract, &["--print", "--allowedTools", "Read", "unterminated prompt"]).is_err());
+        assert!(super::audit_provider_args(
+            contract,
+            &[
+                "--print",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json"
+            ]
+        )
+        .is_ok());
+        assert!(super::audit_provider_args(
+            contract,
+            &["--print", "--input-format", "stream-json"]
+        )
+        .is_err());
+        assert!(super::audit_provider_args(
+            contract,
+            &["--print", "--allowedTools", "Read", "unterminated prompt"]
+        )
+        .is_err());
     }
 
     use super::*;

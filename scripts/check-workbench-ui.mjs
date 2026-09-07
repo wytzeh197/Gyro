@@ -3839,7 +3839,9 @@ expect(
     tauriSource.includes("run_streaming_command") &&
     tauriSource.includes("PROVIDER_STREAM_FLUSH_INTERVAL") &&
     tauriSource.includes("StreamingCommandState") &&
-    coreExecutionSource.includes("stdin(Stdio::null())") &&
+    coreExecutionSource.includes(".stdin(match request.stdin_file.as_ref()") &&
+    coreExecutionSource.includes("None => Stdio::null()") &&
+    coreExecutionSource.includes("finite_stdin_delivers_large_input_and_eof") &&
     tauriSource.includes("sanitize_provider_text_delta") &&
     tauriSource.includes("extract_codex_agent_message_text") &&
     tauriSource.includes('"item.completed"') &&
