@@ -24682,6 +24682,8 @@ mod tests {
     #[test]
     fn browser_attachment_images_are_optional_and_integrity_checked() {
         let paths = GyroPaths::for_current_user().unwrap();
+        // Clean CI hosts have not run desktop startup's storage initialization.
+        paths.ensure().unwrap();
         let root = paths.sessions_dir.join("attachments");
         ensure_private_attachment_directory(&root).unwrap();
         let directory = tempfile::tempdir_in(&root).unwrap();
