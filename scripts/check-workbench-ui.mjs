@@ -433,14 +433,27 @@ expect(
 expect(
   surfaceSource.includes('className="gyro-chat-thread-identity"') &&
     !surfaceSource.includes('className="gyro-chat-thread-branch"') &&
-    surfaceSource.includes('className="gyro-thread-context-branch"') &&
-    surfaceSource.includes('id="gyro-thread-workspace-menu"') &&
-    surfaceSource.includes("items={threadWorkspaceItems}") &&
-    surfaceSource.includes(
-      "items={threadWorkspaceItems}\n                  keepInBounds",
-    ) &&
-    surfaceSource.includes('title="Workspace context"'),
-  "Chat headers should keep the title clean and expose one combined workspace context menu.",
+    !surfaceSource.includes('className="gyro-thread-context-branch"') &&
+    !surfaceSource.includes('id="gyro-thread-workspace-menu"') &&
+    surfaceSource.includes("isEnvironmentOpen={isEnvironmentPopoverOpen}") &&
+    surfaceSource.includes("showEnvironment") &&
+    surfaceSource.includes("showToolPanel"),
+  "Chat headers should keep the title clean and move workspace context into the Environment control.",
+);
+expect(
+  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong>\{sessionTitle \?\? "Gyro session"\}<\/strong>/.test(
+    surfaceSource,
+  ) &&
+    !surfaceSource.includes("items={threadWorkspaceItems}") &&
+    surfaceSource.includes('aria-label="Environment"') &&
+    surfaceSource.includes('aria-label="Toggle bottom drawer"'),
+  "The chat header should lead with project and title, then use the three compact surface controls.",
+);
+expect(
+  !surfaceSource.includes("items={threadWorkspaceItems}") &&
+    !surfaceSource.includes('className="gyro-thread-context-branch"') &&
+    styleSource.includes(".gyro-chat-environment-popover"),
+  "The Environment popover should replace the old nested workspace menu.",
 );
 expect(
   cssRules(
@@ -459,26 +472,21 @@ expect(
       (rule) =>
         rule.includes("position: relative") && rule.includes("z-index: 0"),
     ) &&
-    styleSource.includes(
-      ".gyro-composer-popover-title\n  + .gyro-composer-popover-section-title",
-    ) &&
-    styleSource.includes("width: min(312px, calc(100vw - 24px))") &&
-    styleSource.includes("min-height: 36px"),
-  "The workspace context menu should layer above the animated chat canvas and use a compact grouped layout.",
+    cssRules(styleSource, ".gyro-chat-environment-popover").some(
+      (rule) =>
+        rule.includes("position: absolute") &&
+        rule.includes("right: 14px") &&
+        rule.includes("z-index: 100"),
+    ),
+  "The Environment popover should layer above the chat canvas without becoming a persistent column.",
 );
 expect(
   !surfaceSource.includes('className="gyro-thread-context-project"') &&
     !surfaceSource.includes('className="gyro-thread-context-mode"') &&
-    surfaceSource.includes('sectionLabel: index === 0 ? "Branch"') &&
-    styleSource.includes(
-      ".gyro-chat-surface.is-tiled .gyro-thread-pills {\n  display: flex",
-    ) &&
-    styleSource.includes(".gyro-thread-workspace-context-button") &&
-    styleSource.includes(
-      ".gyro-chat-surface.is-tiled .gyro-thread-context-project",
-    ) &&
-    styleSource.includes("max-width: 76px"),
-  "Grid chat headers should collapse the combined workspace control to its branch label.",
+    !surfaceSource.includes('className="gyro-thread-context-branch"') &&
+    surfaceSource.includes("showEnvironment") &&
+    surfaceSource.includes("showToolPanel"),
+  "Grid chat headers should use the same compact Environment, drawer, and companion controls.",
 );
 expect(
   surfaceSource.includes('className="gyro-chat-grid-drop-overlay"') &&
@@ -4419,7 +4427,9 @@ expect(
 expect(
   surfaceSource.includes("function AgentLauncherMenu") &&
     surfaceSource.includes("function TerminalActionsMenu") &&
-    surfaceSource.includes("onRunCommandProfile?.(profile.id)") &&
+    surfaceSource.includes(
+      "onRunCommandProfile?.(profile.id, launchOptions)",
+    ) &&
     surfaceSource.includes("<span>Quick Start</span>") &&
     surfaceSource.includes("cliProfileShortLabel") &&
     surfaceSource.includes("gyro-profile-readiness-dot") &&
@@ -4437,13 +4447,64 @@ expect(
     !surfaceSource.includes('className="gyro-terminal-add"') &&
     appSource.includes("const runCommandProfile = useCallback") &&
     appSource.includes("setActiveProfileId(profileId)") &&
-    appSource.includes("void runProfile(profileId)") &&
+    appSource.includes("void runProfile(profileId, undefined, options)") &&
     appSource.includes("onRunCommandProfile={runCommandProfile}") &&
     appSource.includes('case "configure-cli-launcher"') &&
     styleSource.includes(".gyro-agent-launcher-menu") &&
     styleSource.includes(".gyro-terminal-agent-button") &&
     styleSource.includes(".gyro-terminal-actions-menu"),
   "CLI toolbar agent launcher should start real command profiles while the sidebar stays pane-only.",
+);
+
+expect(
+  !surfaceSource.includes('aria-label="Open a companion tool"') &&
+    !surfaceSource.includes(
+      '<span className="gyro-chat-surface-button-label">Tools</span>',
+    ) &&
+    !surfaceSource.includes(
+      '<span className="gyro-chat-surface-button-label">Panel</span>',
+    ) &&
+    surfaceSource.includes(
+      'aria-label={isDockOpen ? "Hide companion" : "Show companion"}',
+    ) &&
+    surfaceSource.includes('aria-label="Add companion tab"'),
+  "The chat header controls should remain icon-only; the companion itself owns the tool launcher.",
+);
+
+expect(
+  surfaceSource.includes("showPanel={false}") &&
+    surfaceSource.includes("showOverflow={false}") &&
+    surfaceSource.includes("showEnvironment") &&
+    surfaceSource.includes("showToolPanel") &&
+    surfaceSource.includes('aria-label="Environment"') &&
+    surfaceSource.includes('aria-label="Toggle bottom drawer"') &&
+    surfaceSource.includes("showPanel && !isDockOpen && onToggleDock") &&
+    cssRules(
+      styleSource,
+      ".gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings)",
+    ).some((rule) => rule.includes("border-bottom-color: transparent")) &&
+    cssRules(styleSource, ".gyro-chat-thread-topbar").some((rule) =>
+      rule.includes("border-bottom-color: var(--gyro-border-soft)"),
+    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-thread > .gyro-chat-thread-topbar",
+    ).some((rule) => rule.includes("border-bottom: 1px solid")) &&
+    styleSource.includes(
+      ".gyro-app-shell:has(.gyro-chat-surface.is-thread)\n  .gyro-sidebar-persistent-header",
+    ),
+  "The sidebar mode switcher should have no extra divider above it while the thread topbar keeps its own divider.",
+);
+
+expect(
+  surfaceSource.includes('"has-environment-popover"') &&
+    styleSource.includes("--gyro-environment-popover-gutter: 322px") &&
+    styleSource.includes(
+      "> .gyro-chat-thread-canvas\n    > .gyro-chat-composer-dock",
+    ) &&
+    styleSource.includes("right: var(--gyro-environment-popover-gutter)") &&
+    styleSource.includes("width: auto;"),
+  "The temporary Environment popover should reserve the conversation canvas so the transcript and composer shift left without narrowing the top bar.",
 );
 
 expect(
@@ -4811,7 +4872,8 @@ expect(
     surfaceSource.includes(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
-    surfaceSource.includes("const sidePanel = !activeRailPanel ? null :") &&
+    surfaceSource.includes("const isEnvironmentPopoverOpen =") &&
+    surfaceSource.includes("const environmentPopover =") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
     /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
@@ -4863,7 +4925,7 @@ expect(
     surfaceSource.includes(
       'activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : ""',
     ) &&
-    styleSource.includes(".gyro-chat-surface.is-empty.has-environment") &&
+    styleSource.includes(".gyro-chat-environment-popover {") &&
     styleSource.includes(".gyro-chat-start\n  .gyro-composer-shell") &&
     styleSource.includes("padding-top: 60px;") &&
     styleSource.includes("z-index: 71;") &&
@@ -4933,15 +4995,17 @@ expect(
       'await invoke<boolean>("delete_session", { sessionId })',
     ) &&
     workbenchSource.includes("sideChatSessionIds") &&
-    surfaceSource.includes("Temporary chat · Cleared when you close this tab") &&
+    surfaceSource.includes(
+      "Temporary chat · Cleared when you close this tab",
+    ) &&
     styleSource.includes(".gyro-side-chat-composer {"),
   "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
 );
 expect(
-  surfaceSource.includes(
-    '"is-thread",\n        activeRailPanel ? "has-environment" : "",',
-  ) &&
+  surfaceSource.includes('activeRailPanel !== "environment"') &&
     surfaceSource.includes('aria-label="Environment"') &&
+    surfaceSource.includes("function ChatEnvironmentPopover") &&
+    !surfaceSource.includes("function ChatCompanionWorkspaceSummary") &&
     surfaceSource.includes('aria-label="Plan harness"') &&
     surfaceSource.includes("function ChatEnvironmentLauncher") &&
     surfaceSource.includes('className="gyro-chat-tool-launcher"') &&
@@ -5066,7 +5130,10 @@ expect(
     // cyclic percentage resolution and reintroduces the vertical strip.
     styleSource.includes("min-width: 280px") &&
     !styleSource.includes("min-width: min(100%, 280px)") &&
-    cssRules(styleSource, ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas").some(
+    cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas",
+    ).some(
       (rule) =>
         rule.includes("grid-template-rows: minmax(0, 1fr);") &&
         rule.includes("grid-template-columns: minmax(0, 1fr)"),
@@ -6791,8 +6858,11 @@ expect(
     surfaceSource.includes("onKeyDown={resizeWithKeyboard}") &&
     surfaceSource.includes('role="separator"') &&
     surfaceSource.includes("keyboardChatCompanionWidth(") &&
-    styleSource.includes(".gyro-chat-companion-resizer:focus-visible"),
-  "The companion dock resizer should be keyboard-operable and visibly focused like other adjustable workspace surfaces.",
+    styleSource.includes(".gyro-chat-companion-resizer:focus-visible") &&
+    cssRules(styleSource, ".gyro-chat-companion-resizer::after").some((rule) =>
+      rule.includes("width: 1px"),
+    ),
+  "The companion dock resizer should be keyboard-operable with a precise visible seam and a forgiving drag target.",
 );
 
 expect(

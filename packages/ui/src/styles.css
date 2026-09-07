@@ -2387,7 +2387,7 @@ button.gyro-account-menu-row:hover {
   gap: 6px;
 }
 
-.gyro-thread-pills span,
+.gyro-thread-pills > span,
 .gyro-thread-pill-button,
 .gyro-live-pill {
   align-items: center;
@@ -6996,7 +6996,7 @@ textarea:focus-visible {
 .gyro-status-chip,
 .gyro-topbar-activity,
 .gyro-live-pill,
-.gyro-thread-pills span,
+.gyro-thread-pills > span,
 .gyro-thread-pill-button,
 .gyro-preview-tag,
 .gyro-task-badges span,
@@ -7621,7 +7621,7 @@ textarea:focus-visible {
 .gyro-status-chip,
 .gyro-topbar-activity,
 .gyro-live-pill,
-.gyro-thread-pills span,
+.gyro-thread-pills > span,
 .gyro-thread-pill-button,
 .gyro-preview-tag,
 .gyro-task-badges span,
@@ -15204,7 +15204,7 @@ body {
 .gyro-primary-button,
 .gyro-secondary-button,
 .gyro-icon-button,
-.gyro-thread-pills span,
+.gyro-thread-pills > span,
 .gyro-thread-pill-button,
 .gyro-live-pill,
 .gyro-provider-state,
@@ -15698,6 +15698,63 @@ body {
 }
 
 .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
+  .gyro-terminal-empty {
+  margin: 12px 16px;
+}
+
+/* The companion already owns the tool tab. A single terminal should read as
+   one quiet shell beside the chat, not a terminal nested inside a terminal. */
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-toolbar {
+  display: none;
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-workspace {
+  background: #08090b;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid:has(.gyro-terminal-pane:only-child) {
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  padding: 0;
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid:has(.gyro-terminal-pane:only-child)
+  .gyro-terminal-pane {
+  background: #08090b;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid:has(.gyro-terminal-pane:only-child)
+  .gyro-terminal-pane
+  header {
+  display: none;
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid:has(.gyro-terminal-pane:only-child)
+  .gyro-xterm-host {
+  padding: 10px 16px 12px;
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
   .gyro-terminal-empty {
   margin: 12px 16px;
 }
@@ -24490,8 +24547,7 @@ button.gyro-response-changed-files:hover {
   position: relative;
 }
 
-/* Drag the left edge to trade width with the transcript. The handle is wider
-   than it reads so it can be grabbed without hunting for the seam. */
+/* Keep the resize target forgiving without turning the seam into a blue bar. */
 .gyro-chat-companion-resizer {
   background: transparent;
   border: 0;
@@ -24505,16 +24561,31 @@ button.gyro-response-changed-files:hover {
   z-index: 3;
 }
 
+.gyro-chat-companion-resizer::after {
+  background: transparent;
+  bottom: 0;
+  content: "";
+  left: 3px;
+  position: absolute;
+  top: 0;
+  transition: background-color 120ms ease;
+  width: 1px;
+}
+
 .gyro-chat-companion-resizer:hover,
 .gyro-chat-companion-resizer:focus-visible,
 .gyro-chat-companion.is-resizing > .gyro-chat-companion-resizer {
+  background: transparent;
+}
+
+.gyro-chat-companion-resizer:hover::after,
+.gyro-chat-companion-resizer:focus-visible::after,
+.gyro-chat-companion.is-resizing > .gyro-chat-companion-resizer::after {
   background: var(--gyro-accent);
-  opacity: 0.5;
+  opacity: 0.58;
 }
 
 .gyro-chat-companion-resizer:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--gyro-accent);
-  opacity: 1;
   outline: 0;
 }
 
@@ -24724,6 +24795,21 @@ button.gyro-response-changed-files:hover {
   top: calc(100% + 8px);
 }
 
+/* The title menu belongs to the left side of the pane. Anchor it to the
+   title group so short titles cannot push it beyond the pane's left edge. */
+.gyro-chat-thread-identity {
+  position: relative;
+}
+
+.gyro-chat-thread-identity .gyro-chat-surface-menu-anchor {
+  position: static;
+}
+
+.gyro-chat-thread-identity .gyro-chat-companion-menu.is-header {
+  left: 0;
+  right: auto;
+}
+
 /* Tiled panes hide loose labels in the header controls to save room. The menus
    are nothing but labels, so they opt back in. */
 .gyro-chat-surface-controls .gyro-chat-companion-menu.is-header button > span {
@@ -24925,42 +25011,6 @@ button.gyro-response-changed-files:hover {
   gap: 8px;
   padding: 12px 14px 10px;
   position: static;
-}
-
-.gyro-side-chat-composer .gyro-composer-shell > textarea {
-  box-sizing: border-box;
-  font: inherit;
-  font-size: 16px;
-  line-height: 1.5;
-  max-height: 168px;
-  min-height: 72px;
-  padding: 14px 14px 6px;
-  resize: none;
-}
-
-.gyro-side-chat-composer .gyro-composer-shell:focus-within {
-  border-color: var(--gyro-accent);
-}
-
-.gyro-side-chat-composer .gyro-composer-bar {
-  background: transparent;
-  border: 0;
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 10px 10px;
-}
-
-.gyro-side-chat-model {
-  align-items: center;
-  color: var(--gyro-muted);
-  display: flex;
-  font-size: 12px;
-  gap: 6px;
-  min-width: 0;
-}
-
-.gyro-side-chat-composer .gyro-send-button {
-  flex-shrink: 0;
 }
 
 .gyro-side-chat-note {
@@ -28608,7 +28658,7 @@ button.gyro-account-menu-row:hover,
 }
 /* Keep chat navigation closer to the macOS window controls. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
-  margin-bottom: 4px;
+  margin-bottom: 0;
   padding-left: 93px;
 }
 
@@ -29346,6 +29396,7 @@ button.gyro-account-menu-row:hover,
 /* Compact thread chrome: keep context available without dominating the chat. */
 .gyro-chat-surface.is-thread {
   grid-template-rows: 38px minmax(0, 1fr);
+  row-gap: 0;
 }
 
 .gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
@@ -30444,7 +30495,9 @@ button.gyro-account-menu-row:hover,
   scroll-padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 18px);
 }
 
-.gyro-chat-surface.is-thread .gyro-chat-thread-canvas > .gyro-chat-composer-dock {
+.gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock {
   position: absolute;
   inset: auto 0 0;
   background: transparent;
@@ -30455,7 +30508,9 @@ button.gyro-account-menu-row:hover,
   pointer-events: auto;
 }
 
-.gyro-chat-thread-canvas > .gyro-chat-composer-dock > .gyro-composer-live-changes {
+.gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock
+  > .gyro-composer-live-changes {
   pointer-events: none;
 }
 
@@ -30471,17 +30526,6 @@ button.gyro-account-menu-row:hover,
    transcript's edges; below that width the gutter falls back to the old 14px. */
 .gyro-chat-surface.is-thread:not(.is-tiled) > .gyro-chat-thread-topbar {
   padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
-}
-
-/* The browser-style title bar is taller than the compact controls it carries.
-   A small optical offset centers the title and actions within the full bar. */
-.gyro-chat-surface.is-thread:not(.is-tiled)
-  > .gyro-chat-thread-topbar
-  > .gyro-chat-thread-identity,
-.gyro-chat-surface.is-thread:not(.is-tiled)
-  > .gyro-chat-thread-topbar
-  > .gyro-thread-topbar-actions {
-  transform: translateY(4px);
 }
 
 /* -- Settings rows -------------------------------------------------------- */
@@ -34388,6 +34432,241 @@ button.gyro-account-menu-row:hover,
   line-height: 1.25;
 }
 
+/* The chat header follows the app's document chrome: a project mark and title
+   establish where the conversation lives, while the branch is quiet context
+   rather than a competing pill-shaped control. */
+.gyro-chat-surface.is-thread .gyro-thread-project-icon {
+  color: var(--gyro-muted);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-surface.is-thread .gyro-chat-thread-identity {
+  overflow: visible;
+}
+
+.gyro-chat-surface.is-thread
+  .gyro-thread-context-control.is-workspace-context
+  > .gyro-thread-workspace-context-button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 5px;
+  box-shadow: none;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  font-weight: 540;
+  gap: 4px;
+  height: 24px;
+  padding: 0 5px;
+}
+
+.gyro-chat-surface.is-thread
+  .gyro-thread-context-control.is-workspace-context
+  > .gyro-thread-workspace-context-button:hover,
+.gyro-chat-surface.is-thread
+  .gyro-thread-context-control.is-workspace-context
+  > .gyro-thread-workspace-context-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+.gyro-chat-surface.is-thread
+  .gyro-thread-context-control.is-workspace-context
+  > .gyro-thread-workspace-context-button
+  > em {
+  color: inherit;
+  font-weight: inherit;
+}
+
+.gyro-chat-surface.is-thread
+  .gyro-thread-context-control.is-workspace-context
+  > .gyro-thread-workspace-context-button
+  > .lucide-chevron-down {
+  color: var(--gyro-faint);
+}
+
+/* Sessions and Workspace sit directly below the titlebar controls. The
+   sidebar's old divider made that control look like a separate toolbar.
+   This applies only to sidebar chrome; the thread topbar retains its divider. */
+.gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
+  border-bottom-color: transparent;
+}
+
+/* The thread-specific sidebar rule has greater specificity than the quiet
+   windowbar default, so cancel the separator at the same scope. */
+.gyro-app-shell:has(.gyro-chat-surface.is-thread)
+  .gyro-sidebar-persistent-header
+  > .gyro-sidebar-windowbar:not(.is-settings) {
+  border-bottom-color: transparent;
+}
+
+/* Environment is a short-lived glance at chat context, not another permanent
+   column competing with the companion workspace. */
+.gyro-chat-environment-popover {
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(15, 18, 24, 0.16);
+  color: var(--gyro-text);
+  max-height: min(440px, calc(100% - 72px));
+  overflow: auto;
+  padding: 8px;
+  position: absolute;
+  right: 14px;
+  top: 56px;
+  width: min(306px, calc(100% - 28px));
+  z-index: 100;
+}
+
+.gyro-chat-surface.is-empty > .gyro-chat-environment-popover {
+  top: 14px;
+}
+
+.gyro-chat-environment-popover > header,
+.gyro-chat-environment-popover-sources > header,
+.gyro-chat-environment-popover-rows > button {
+  align-items: center;
+  display: flex;
+}
+
+.gyro-chat-environment-popover > header {
+  color: var(--gyro-muted);
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 4px 2px 6px;
+}
+
+.gyro-chat-environment-popover > header > strong,
+.gyro-chat-environment-popover-sources > header > span {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.gyro-chat-environment-popover > header > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.gyro-chat-environment-popover > header > button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+.gyro-chat-environment-popover-rows {
+  display: grid;
+  gap: 1px;
+}
+
+.gyro-chat-environment-popover-rows > button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--gyro-text);
+  cursor: pointer;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-chat-environment-popover-rows > button:hover,
+.gyro-chat-environment-popover-rows > button:focus-visible {
+  background: var(--gyro-control-hover);
+  outline: 0;
+}
+
+.gyro-chat-environment-popover-rows > button > svg:first-child {
+  color: var(--gyro-muted);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-environment-popover-rows > button > span {
+  flex: 0 0 70px;
+  font-size: 13px;
+}
+
+.gyro-chat-environment-popover-rows > button > strong {
+  color: var(--gyro-muted);
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-environment-popover-rows > button > strong.is-changed {
+  color: var(--gyro-positive);
+}
+
+.gyro-chat-environment-popover-rows > button > svg:last-child {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-environment-popover-sources {
+  border-top: 1px solid var(--gyro-border-soft);
+  margin-top: 7px;
+  padding: 9px 6px 3px;
+}
+
+.gyro-chat-environment-popover-sources > header {
+  color: var(--gyro-muted);
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.gyro-chat-environment-popover-sources > header > small {
+  color: var(--gyro-faint);
+  font-size: 11px;
+}
+
+.gyro-chat-environment-popover-sources > ul {
+  display: grid;
+  gap: 5px;
+  list-style: none;
+  margin: 8px 0 2px;
+  padding: 0;
+}
+
+.gyro-chat-environment-popover-sources li {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.gyro-chat-environment-popover-sources li > svg {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+}
+
+.gyro-chat-environment-popover-sources li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-chat-environment-popover-sources > p {
+  color: var(--gyro-faint);
+  font-size: 12px;
+  margin: 8px 0 2px;
+}
+
 @media (max-width: 620px) {
   .gyro-plan-decision-card > header {
     align-items: flex-start;
@@ -36080,7 +36359,7 @@ textarea:focus-visible,
       > .gyro-chat-companion
     ) {
     grid-template-columns: minmax(320px, 1fr) auto;
-    grid-template-rows: 48px minmax(0, 1fr);
+    grid-template-rows: 38px minmax(0, 1fr);
   }
 
   .gyro-chat-surface.is-thread.has-environment.has-companion:not(.is-tiled)
@@ -36121,7 +36400,7 @@ textarea:focus-visible,
   background: var(--gyro-pane);
   border-bottom: 1px solid var(--gyro-border-soft);
   gap: 8px;
-  height: 48px;
+  height: 38px;
   min-width: 0;
   padding: 0 12px 0 16px;
 }
@@ -36220,8 +36499,8 @@ textarea:focus-visible,
   background: var(--gyro-pane);
   border-bottom: 1px solid var(--gyro-border-soft);
   gap: 8px;
-  height: 48px;
-  min-height: 48px;
+  height: 38px;
+  min-height: 38px;
   min-width: 0;
   padding: 0 10px;
 }
@@ -37974,4 +38253,63 @@ textarea:focus-visible,
 .gyro-run-task-remove:focus-visible {
   outline: 2px solid var(--gyro-accent);
   outline-offset: -2px;
+}
+
+/* The conversation header always separates its chrome from the transcript. */
+.gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+
+/* A temporary Environment card reserves only the conversation canvas beneath
+   the header. This keeps the transcript and composer centered in the remaining
+   pane, while the top bar still spans the full window. */
+@media (min-width: 981px) {
+  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
+    --gyro-environment-popover-gutter: 322px;
+  }
+
+  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
+    > .gyro-chat-thread-canvas {
+    box-sizing: border-box;
+    padding-right: var(--gyro-environment-popover-gutter);
+  }
+
+  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
+    > .gyro-chat-thread-canvas
+    > .gyro-chat-composer-dock {
+    right: var(--gyro-environment-popover-gutter);
+    width: auto;
+  }
+}
+
+.gyro-chat-environment-popover .gyro-environment-branch-menu {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-height: 240px;
+  margin: 4px 0;
+  box-shadow: none;
+}
+
+/* Split chats own their overlays; usage details anchor to the composer rather
+   than extending leftward from the small context ring. */
+.gyro-chat-surface.is-tiled .gyro-composer-context-meter {
+  position: static;
+}
+
+.gyro-chat-surface.is-tiled .gyro-composer-bar {
+  position: relative;
+}
+
+.gyro-chat-surface.is-tiled .gyro-composer-context-tooltip {
+  box-sizing: border-box;
+  left: 0;
+  right: 0;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.gyro-chat-surface.is-tiled .gyro-composer-context-tooltip::after {
+  display: none;
 }

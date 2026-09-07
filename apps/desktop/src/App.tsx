@@ -1204,6 +1204,18 @@ export function App() {
   );
   const companionFocusPaneId =
     activeChatLayout?.focusedPaneId ?? SOLO_CHAT_PANE_ID;
+  // The companion Terminal is a complete terminal surface beside the chat.
+  // Do not leave the workspace drawer showing the same pane when the user
+  // selects it from the chat, including through a restored legacy panel.
+  const openCompanionTab = useCallback(
+    (tab: ChatCompanionTabId, paneId?: string) => {
+      if (tab === "terminal") {
+        dispatchWorkbench({ type: "close-tool-panel" });
+      }
+      dispatchCompanion({ type: "open-tab", tab, paneId });
+    },
+    [],
+  );
   // The dock speaks for whichever chat pane has focus, including the solo
   // surfaces outside the grid.
   useEffect(() => {
@@ -1215,9 +1227,9 @@ export function App() {
   useEffect(() => {
     const panel = workbench.preferences.activeChatPanel;
     if (!panel || !isChatCompanionTabId(panel)) return;
-    dispatchCompanion({ type: "open-tab", tab: panel });
+    openCompanionTab(panel);
     dispatchWorkbench({ type: "set-chat-panel" });
-  }, [workbench.preferences.activeChatPanel]);
+  }, [openCompanionTab, workbench.preferences.activeChatPanel]);
   const closeLegacyRail = useCallback(() => {
     dispatchWorkbench({ type: "set-chat-panel" });
   }, []);
@@ -1450,6 +1462,20 @@ export function App() {
       isSending: thread?.isSending,
       error: thread?.error,
       modelLabel: sessionModel.modelLabel ?? sessionModel.providerLabel,
+      onStop: sessionId
+        ? () => {
+            void invoke("stop_provider_chat", { sessionId }).catch((error) => {
+              setSideChatThreads((current) => ({
+                ...current,
+                [paneId]: {
+                  ...current[paneId],
+                  messages: current[paneId]?.messages ?? [],
+                  error: String(error),
+                },
+              }));
+            });
+          }
+        : undefined,
       onSend: sessionId
         ? (message: string) => {
             void sendSideChatMessage(paneId, sessionId, message);
@@ -1460,15 +1486,11 @@ export function App() {
   const selectSoloChatPanel = useCallback((panel?: ChatSidePanelId) => {
     if (panel && isChatCompanionTabId(panel)) {
       dispatchWorkbench({ type: "set-chat-panel" });
-      dispatchCompanion({
-        type: "open-tab",
-        tab: panel,
-        paneId: SOLO_CHAT_PANE_ID,
-      });
+      openCompanionTab(panel, SOLO_CHAT_PANE_ID);
       return;
     }
     dispatchWorkbench({ type: "set-chat-panel", panel });
-  }, []);
+  }, [openCompanionTab]);
   const companionSurfaceProps = (paneId: string) => ({
     showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
@@ -1478,7 +1500,7 @@ export function App() {
     onCompanionWidthChange: setCompanionWidth,
     onOpenCompanionTab: (tab: ChatCompanionTabId) => {
       closeLegacyRail();
-      dispatchCompanion({ type: "open-tab", tab, paneId });
+      openCompanionTab(tab, paneId);
     },
     onCloseCompanionTab: (tab: ChatCompanionTabId) => {
       dispatchCompanion({ type: "close-tab", tab, paneId });
@@ -6491,110 +6513,99 @@ export function App() {
     }
   }, [notify, refreshIdeServices, workbench.preferences.workspaceTrust]);
 
-  const createSession = useCallback(
-    async () => {
-      const sessionLayout: WorkspaceLayoutId = "thread";
-      const title = "New chat";
+  const createSession = useCallback(async () => {
+    const sessionLayout: WorkspaceLayoutId = "thread";
+    const title = "New chat";
+    dispatchWorkbench({
+      type: "select-workspace-layout",
+      layout: sessionLayout,
+    });
+    dispatchWorkbench({ type: "close-tool-panel" });
+    suppressSessionAutoSelectRef.current = false;
+    if (!isTauriRuntime()) {
+      const session = createPreviewSession(
+        sessionLayout,
+        workbench.workspaceMode,
+        newSessionModelFromConfig(config),
+        workspacePath ?? "",
+        title,
+      );
+      setWorkspacePath(session.workspacePath);
+      setFiles([]);
+      setSessions((current) => [session, ...current]);
+      activeSessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
+      setEventsForSession(session.id, []);
       dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: sessionLayout,
+        type: "complete-onboarding-step",
+        step: "first-session",
       });
-      dispatchWorkbench({ type: "close-tool-panel" });
-      suppressSessionAutoSelectRef.current = false;
-      if (!isTauriRuntime()) {
-        const session = createPreviewSession(
-          sessionLayout,
-          workbench.workspaceMode,
-          newSessionModelFromConfig(config),
-          workspacePath ?? "",
-          title,
-        );
-        setWorkspacePath(session.workspacePath);
-        setFiles([]);
-        setSessions((current) => [session, ...current]);
-        activeSessionIdRef.current = session.id;
-        setActiveSessionId(session.id);
-        setEventsForSession(session.id, []);
-        dispatchWorkbench({
-          type: "complete-onboarding-step",
-          step: "first-session",
-        });
+      notify("terminal", "Session created", session.title);
+      return;
+    }
+    try {
+      const workspace = workspacePath ?? "";
+      const shouldCreateWorktree =
+        workbench.workspaceMode === "worktree" && workspace.length > 0;
+      const metadata = workspaceRunMetadata(
+        shouldCreateWorktree ? "worktree" : "local",
+        `${title}-${Date.now()}`,
+      );
+      const session = shouldCreateWorktree
+        ? await invoke<Session>("create_worktree_session", {
+            branch: metadata.branch,
+            ...newSessionModelFromConfig(config),
+            title,
+            worktreeName: metadata.worktreeName,
+            workspacePath: workspace,
+          })
+        : await invoke<Session>("create_desktop_session", {
+            ...newSessionModelFromConfig(config),
+            title,
+            workspacePath: workspace,
+          });
+      setWorkspacePath(session.workspacePath);
+      await refreshSessions();
+      setActiveSessionId(session.id);
+      dispatchWorkbench({
+        type: "complete-onboarding-step",
+        step: "first-session",
+      });
+      if (shouldCreateWorktree) {
         notify(
           "terminal",
-          "Session created",
-          session.title,
+          "Agent workspace ready",
+          session.branch
+            ? `${session.branch} — main project stays untouched.`
+            : "Private branch under Gyro — main project stays untouched.",
         );
-        return;
+      } else {
+        notify("terminal", "Session created", session.title);
       }
-      try {
-        const workspace = workspacePath ?? "";
-        const shouldCreateWorktree =
-          workbench.workspaceMode === "worktree" && workspace.length > 0;
-        const metadata = workspaceRunMetadata(
-          shouldCreateWorktree ? "worktree" : "local",
-          `${title}-${Date.now()}`,
-        );
-        const session = shouldCreateWorktree
-          ? await invoke<Session>("create_worktree_session", {
-              branch: metadata.branch,
-              ...newSessionModelFromConfig(config),
-              title,
-              worktreeName: metadata.worktreeName,
-              workspacePath: workspace,
-            })
-          : await invoke<Session>("create_desktop_session", {
-              ...newSessionModelFromConfig(config),
-              title,
-              workspacePath: workspace,
-            });
-        setWorkspacePath(session.workspacePath);
-        await refreshSessions();
-        setActiveSessionId(session.id);
-        dispatchWorkbench({
-          type: "complete-onboarding-step",
-          step: "first-session",
-        });
-        if (shouldCreateWorktree) {
-          notify(
-            "terminal",
-            "Agent workspace ready",
-            session.branch
-              ? `${session.branch} — main project stays untouched.`
-              : "Private branch under Gyro — main project stays untouched.",
-          );
-        } else {
-          notify(
-            "terminal",
-            "Session created",
-            session.title,
-          );
-        }
-      } catch {
-        const session = createPreviewSession(
-          sessionLayout,
-          workbench.workspaceMode,
-          newSessionModelFromConfig(config),
-          workspacePath ?? "",
-          title,
-        );
-        setWorkspacePath(session.workspacePath);
-        setFiles([]);
-        setSessions((current) => [session, ...current]);
-        activeSessionIdRef.current = session.id;
-        setActiveSessionId(session.id);
-        setEventsForSession(session.id, []);
-        notify("command-failed", "Session fallback", "Created preview session");
-      }
-    },
-    [
-      config,
-      notify,
-      refreshSessions,
-      setEventsForSession,
-      workbench.workspaceMode,
-      workspacePath,
-    ],
-  );
+    } catch {
+      const session = createPreviewSession(
+        sessionLayout,
+        workbench.workspaceMode,
+        newSessionModelFromConfig(config),
+        workspacePath ?? "",
+        title,
+      );
+      setWorkspacePath(session.workspacePath);
+      setFiles([]);
+      setSessions((current) => [session, ...current]);
+      activeSessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
+      setEventsForSession(session.id, []);
+      notify("command-failed", "Session fallback", "Created preview session");
+    }
+  }, [
+    config,
+    notify,
+    refreshSessions,
+    setEventsForSession,
+    workbench.workspaceMode,
+    workspacePath,
+  ]);
 
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
@@ -7277,7 +7288,7 @@ export function App() {
             launchWorkspacePath,
           ),
           projectPath: launchWorkspacePath,
-              taskTitle,
+          taskTitle,
           workspaceTaskId,
         });
         if (template) {
@@ -7408,9 +7419,9 @@ export function App() {
     ],
   );
 
-  const addTerminalPane = useCallback(() => {
+  const addTerminalPane = useCallback((options?: { reveal?: boolean }) => {
     const profile = getCommandProfile(commandProfiles, activeProfileId);
-    void launchTerminalPane({ profile }).then((started) => {
+    void launchTerminalPane({ profile, reveal: options?.reveal }).then((started) => {
       notify(
         started ? "terminal" : "command-failed",
         started ? "Terminal added" : "Terminal start failed",
@@ -7422,8 +7433,14 @@ export function App() {
   const createCliSession = useCallback(
     (profileId: string, projectPath: string) => {
       const profile = getCommandProfile(commandProfiles, profileId);
-      dispatchWorkbench({ type: "select-workspace-layout", layout: "terminal-grid" });
-      void launchTerminalPane({ profile, workspacePathOverride: projectPath }).then((started) => {
+      dispatchWorkbench({
+        type: "select-workspace-layout",
+        layout: "terminal-grid",
+      });
+      void launchTerminalPane({
+        profile,
+        workspacePathOverride: projectPath,
+      }).then((started) => {
         notify(
           started ? "terminal" : "command-failed",
           started ? "CLI session started" : "CLI session failed",
@@ -11776,7 +11793,11 @@ export function App() {
   );
 
   const runProfile = useCallback(
-    async (profileId = activeProfileId, commandOverride?: string) => {
+    async (
+      profileId = activeProfileId,
+      commandOverride?: string,
+      options?: { reveal?: boolean },
+    ) => {
       const profile = getCommandProfile(commandProfiles, profileId);
       const process = terminalProcessForProfile(profile, commandOverride);
       const paneId = workbench.selectedTerminalPaneId || `pane-${Date.now()}`;
@@ -11785,6 +11806,7 @@ export function App() {
         commandOverride,
         paneId,
         profile,
+        reveal: options?.reveal,
         startingOutput: output,
       });
       if (started) {
@@ -11806,14 +11828,14 @@ export function App() {
   );
 
   const runCommandProfile = useCallback(
-    (profileId: string) => {
+    (profileId: string, options?: { reveal?: boolean }) => {
       setActiveProfileId(profileId);
-      void runProfile(profileId);
+      void runProfile(profileId, undefined, options);
     },
     [runProfile],
   );
 
-  const launchCliPreset = useCallback(async () => {
+  const launchCliPreset = useCallback(async (options?: { reveal?: boolean }) => {
     const preset = normalizeCliLaunchPreset(
       workbench.preferences.cliLaunchPreset,
       commandProfiles,
@@ -11840,6 +11862,7 @@ export function App() {
         const started = await launchTerminalPane({
           paneId,
           profile,
+          reveal: options?.reveal,
           startingOutput: "",
         });
         if (!started) {
@@ -15081,11 +15104,7 @@ export function App() {
           ...current,
           [pane.paneId]: undefined,
         }));
-        dispatchCompanion({
-          type: "open-tab",
-          tab: panel,
-          paneId: pane.paneId,
-        });
+        openCompanionTab(panel, pane.paneId);
         return;
       }
       setPaneLegacyPanelByPaneId((current) => ({
@@ -15101,7 +15120,7 @@ export function App() {
           ...current,
           [pane.paneId]: undefined,
         }));
-        dispatchCompanion({ type: "open-tab", tab, paneId: pane.paneId });
+        openCompanionTab(tab, pane.paneId);
       },
       onReopenCompanionDock: () => {
         focusChatPane(pane);

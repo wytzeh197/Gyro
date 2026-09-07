@@ -42,6 +42,7 @@ function cssRules(source, selector) {
 
 const surfaces = read("packages/ui/src/surfaces.tsx");
 const styles = read("packages/ui/src/styles.css");
+const app = read("apps/desktop/src/App.tsx");
 
 // --- The rail column itself -------------------------------------------------
 
@@ -241,6 +242,69 @@ expect(
 expect(
   !surfaces.includes("<small>Open</small>"),
   'The Files row has no state worth a detail: "Open" restated the button, and the folder it opens is already in the rail header.',
+);
+
+expect(
+  surfaces.includes("const openFiles = () => {") &&
+    /const openFiles = \(\) => \{[\s\S]{0,240}?onSelectPanel\("files"\)/.test(
+      surfaces,
+    ) &&
+    surfaces.includes(
+      "aria-label={`Open Files, ${workspaceName(workspacePath)}`}",
+    ),
+  "Files is a companion tab, so the Environment launcher must open it beside the chat instead of leaving the conversation for Workspace.",
+);
+
+expect(
+  surfaces.includes('policy.classes["browser-inspect"]') &&
+    surfaces.includes("<span>Browser viewing</span>") &&
+    surfaces.includes("<span>Browser actions</span>") &&
+    surfaces.includes("function capabilityActivitySummary"),
+  "The permissions panel must distinguish passive browser viewing from browser actions and name an active model action or approval.",
+);
+
+expect(
+  /const openCompanionTab = useCallback\([\s\S]{0,260}?tab === "terminal"[\s\S]{0,160}?type: "close-tool-panel"[\s\S]{0,240}?type: "open-tab"/.test(
+    app,
+  ) &&
+    app.includes("openCompanionTab(panel, SOLO_CHAT_PANE_ID)") &&
+    app.includes("openCompanionTab(tab, paneId)") &&
+    app.includes("openCompanionTab(panel, pane.paneId)") &&
+    app.includes("openCompanionTab(tab, pane.paneId)"),
+  "Opening the companion Terminal from any chat path must close the workspace drawer before showing the same terminal beside the conversation.",
+);
+
+expect(
+  surfaces.includes("revealWorkspaceOnLaunch={!chromeless}") &&
+    surfaces.includes(
+      "const launchOptions = revealWorkspaceOnLaunch ? undefined : { reveal: false };",
+    ) &&
+    surfaces.includes("onAddTerminalPane(launchOptions)") &&
+    surfaces.includes("onRunCommandProfile(profile.id, launchOptions)") &&
+    surfaces.includes("onLaunchCliPreset?.(launchOptions)"),
+  "A terminal created from the chat companion must launch in the background, so Workspace does not open a second terminal drawer.",
+);
+
+expect(
+  /const addTerminalPane = useCallback\(\(options\?: \{ reveal\?: boolean \}\) => \{[\s\S]{0,280}?reveal: options\?\.reveal/.test(
+    app,
+  ) &&
+    /void runProfile\(profileId, undefined, options\)/.test(app) &&
+    /const launchCliPreset = useCallback\(async \(options\?: \{ reveal\?: boolean \}\) => \{[\s\S]{0,1800}?reveal: options\?\.reveal/.test(
+      app,
+    ),
+  "Every terminal launch action must forward the companion's no-reveal choice through to the shared terminal launcher.",
+);
+
+expect(
+  styles.includes(
+    ".gyro-chat-companion\n  .gyro-environment-rail.is-tool.is-chromeless\n  .gyro-terminal-toolbar",
+  ) &&
+    styles.includes(
+      ".gyro-terminal-grid:has(.gyro-terminal-pane:only-child)",
+    ) &&
+    styles.includes(".gyro-terminal-pane\n  header {\n  display: none;"),
+  "A single terminal in the chat companion must be one quiet shell: its dock tab is the title, so the nested toolbar and pane header stay hidden.",
 );
 
 if (failures.length > 0) {
