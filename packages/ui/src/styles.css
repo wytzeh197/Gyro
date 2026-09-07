@@ -32185,6 +32185,32 @@ button.gyro-account-menu-row:hover,
   min-width: 0;
 }
 
+.gyro-run-group-text:has(.gyro-run-read-context) {
+  flex-wrap: wrap;
+  row-gap: 5px;
+}
+
+.gyro-run-read-context {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  flex-basis: 100%;
+  font-size: 12px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gyro-run-read-context > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-run-read-context > svg,
+.gyro-run-read-context > small {
+  flex-shrink: 0;
+}
+
 .gyro-run-group .gyro-run-row-label {
   color: var(--gyro-muted);
 }

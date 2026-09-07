@@ -94,7 +94,6 @@ import {
   SquareTerminal,
   Sun,
   Tablet,
-  Target,
   Telescope,
   Terminal,
   TriangleAlert,
@@ -148,6 +147,7 @@ import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
+  providerResetSummary,
   type ComposerContextUsage,
   type ComposerLimitWindow,
 } from "./context-usage";
@@ -651,11 +651,9 @@ type AppChromeProps = {
   isShellOptimizing?: boolean;
   onOpenCommandPalette: () => void;
   onCreateSession: () => void;
-  onCreateMission?: () => void;
   onCreateCliSession: (
     profileId: string,
     workspacePath: string,
-    options?: { missionSessionId?: string; taskTitle?: string },
   ) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
@@ -1435,7 +1433,6 @@ export function AppChrome({
   isShellOptimizing = false,
   onOpenCommandPalette,
   onCreateSession,
-  onCreateMission,
   onCreateCliSession,
   onSelectSessions,
   onOpenWorkspace,
@@ -1886,7 +1883,6 @@ export function AppChrome({
               onAddTerminalPane={onAddTerminalPane}
               onCloseTerminalPane={onCloseTerminalPane}
               onCreateSession={onCreateSession}
-              onCreateMission={onCreateMission}
               onCreateCliSession={onCreateCliSession}
               onDeleteSession={onDeleteSession}
               onOpenCommandPalette={onOpenCommandPalette}
@@ -2824,7 +2820,6 @@ function WorkspaceSidebarContent({
   onSelectWorkspaceLayout,
   onOpenToolPanel,
   onCreateSession,
-  onCreateMission,
   onCreateCliSession,
   onSelectSessions,
   onOpenWorkspace,
@@ -2906,11 +2901,9 @@ function WorkspaceSidebarContent({
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
   onCreateSession: () => void;
-  onCreateMission?: () => void;
   onCreateCliSession: (
     profileId: string,
     workspacePath: string,
-    options?: { missionSessionId?: string; taskTitle?: string },
   ) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
@@ -2994,10 +2987,7 @@ function WorkspaceSidebarContent({
     if (pinnedSessionIds.includes(session.id)) {
       return false;
     }
-    const hasMissionWorkers = terminalPanes.some(
-      (pane) => pane.missionSessionId === session.id,
-    );
-    return sessionHasStartedForSidebar(session, { hasMissionWorkers });
+    return sessionHasStartedForSidebar(session);
   });
   const projectSessions = recentSessions.filter((session) =>
     isUserSelectedWorkspacePath(session.workspacePath),
@@ -3462,22 +3452,10 @@ function WorkspaceSidebarContent({
       />
     );
   };
-  /** Mission-owned CLIs nest under their goal chat; free CLIs stay top-level. */
-  const renderNavigationItem = (item: SidebarSessionItem) => {
-    if (item.kind === "cli") {
-      return renderCliPaneRow(item.pane, true);
-    }
-    const session = item.session;
-    const missionWorkers = terminalPanes.filter(
-      (pane) => pane.missionSessionId === session.id,
-    );
-    return (
-      <div className="gyro-sidebar-mission-cluster" key={session.id}>
-        {renderSessionRow(session, true)}
-        {missionWorkers.map((pane) => renderCliPaneRow(pane, true))}
-      </div>
-    );
-  };
+  const renderNavigationItem = (item: SidebarSessionItem) =>
+    item.kind === "cli"
+      ? renderCliPaneRow(item.pane, true)
+      : renderSessionRow(item.session, true);
 
   return (
     <>
@@ -4731,23 +4709,7 @@ function WorkspaceSidebarContent({
                       <MessageSquare size={15} />
                       <strong>New Chat</strong>
                     </button>
-                    {onCreateMission ? (
-                      <button
-                        aria-label="New mission"
-                        onClick={() => {
-                          setNewSessionMenuView("closed");
-                          onCreateMission();
-                        }}
-                        role="menuitem"
-                        type="button"
-                      >
-                        <Target size={15} />
-                        <span>
-                          <strong>New mission</strong>
-                          <small>Work toward a goal with CLI agents</small>
-                        </span>
-                      </button>
-                    ) : null}
+
                   </div>
                   <div
                     aria-label="Open CLI sessions"
@@ -5479,10 +5441,6 @@ function sidebarProjectGroups(
         second.normalizedPath.length - first.normalizedPath.length,
     );
   for (const pane of terminalPanes) {
-    // Mission workers render nested under their goal chat, not as peers.
-    if (pane.missionSessionId) {
-      continue;
-    }
     const panePath = normalizeSidebarPath(
       pane.projectPath ?? pane.workingDirectory,
     );
@@ -5551,30 +5509,15 @@ function isSidebarPlaceholderSessionTitle(title: string) {
  * Whether a chat/mission should list in the Projects sidebar.
  * Unstarted shells (empty New chat / New mission) stay out until activity.
  */
-function sessionHasStartedForSidebar(
-  session: Session,
-  options: { hasMissionWorkers?: boolean } = {},
-) {
-  // Mission with workers is already real work even without a goal message.
-  if (options.hasMissionWorkers) {
-    return true;
-  }
+function sessionHasStartedForSidebar(session: Session) {
   if (!isSidebarPlaceholderSessionTitle(session.title)) {
     return true;
   }
   if (session.summary?.trim()) {
     return true;
   }
-  // First turn / rename updates `updatedAt` after create.
-  const created = Date.parse(session.createdAt);
-  const updated = Date.parse(session.updatedAt);
-  if (
-    Number.isFinite(created) &&
-    Number.isFinite(updated) &&
-    updated > created + 1_500
-  ) {
-    return true;
-  }
+  // Settings and other metadata also advance updatedAt. A timestamp alone
+  // must not make an empty placeholder appear as a started session.
   return false;
 }
 
@@ -6642,88 +6585,6 @@ function effectiveChatArrangement(
   return "grid";
 }
 
-/**
- * Mission control strip: workers under one goal chat. Phase 1 is manual
- * spawn (same default profile × N); plan-approve-spawn comes later.
- *
- * When the goal chat is already active, hide the empty-state lecture so the
- * board stays a compact control strip rather than a second empty product.
- */
-function MissionWorkersBoard({
-  defaultProfileLabel,
-  goalActive = false,
-  onAddWorker,
-  onSelectWorker,
-  workers,
-}: {
-  defaultProfileLabel?: string;
-  /** True once the mission has chat turns / a live goal run. */
-  goalActive?: boolean;
-  onAddWorker?: () => void;
-  onSelectWorker?: (paneId: string) => void;
-  workers: TerminalPane[];
-}) {
-  const showEmptyHint = workers.length === 0 && !goalActive;
-  return (
-    <section
-      aria-label="Mission workers"
-      className={[
-        "gyro-mission-workers",
-        goalActive ? "is-goal-active" : "",
-        workers.length === 0 ? "is-empty" : "has-workers",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <div className="gyro-mission-workers-header">
-        <span className="gyro-mission-workers-title">
-          <Target aria-hidden="true" size={13} />
-          Workers
-          {workers.length > 0 ? <em>{workers.length}</em> : null}
-        </span>
-        {onAddWorker ? (
-          <button
-            className="gyro-mission-workers-add"
-            onClick={onAddWorker}
-            type="button"
-          >
-            <Plus size={13} />
-            Add worker
-            {defaultProfileLabel ? <small>{defaultProfileLabel}</small> : null}
-          </button>
-        ) : null}
-      </div>
-      {showEmptyHint ? (
-        <p className="gyro-mission-workers-empty">
-          Optional: add CLI workers for parallel tasks (same runtime by
-          default).
-        </p>
-      ) : null}
-      {workers.length > 0 ? (
-        <ul className="gyro-mission-workers-list">
-          {workers.map((worker) => (
-            <li key={worker.id}>
-              <button
-                className={`gyro-mission-worker is-${worker.status}`}
-                onClick={() => onSelectWorker?.(worker.id)}
-                type="button"
-              >
-                <span className="gyro-mission-worker-title">
-                  {worker.taskTitle ?? worker.title}
-                </span>
-                <span className="gyro-mission-worker-meta">
-                  {worker.status}
-                  {worker.profileId ? ` · ${worker.profileId}` : null}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  );
-}
-
 export type SideChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -6804,12 +6665,6 @@ type ChatSurfaceProps = {
   isGoalComposerActive?: boolean;
   /** Starts a new goal-backed chat instead of only saving goal metadata. */
   onStartGoalChat?: (goal: string) => void;
-  /** When true, this chat is a mission control plane for CLI workers. */
-  isMission?: boolean;
-  missionWorkers?: TerminalPane[];
-  missionDefaultProfileLabel?: string;
-  onAddMissionWorker?: () => void;
-  onSelectMissionWorker?: (paneId: string) => void;
   promptHistory?: string[];
   chatMode?: ChatMode;
   attachments?: ChatAttachment[];
@@ -7144,17 +6999,11 @@ export function ChatSurface({
   capabilityPolicy,
   modelFocus,
   modelFollow = "peek",
-  onLoadModelFocusPeek,
   onOpenModelFocus,
   onboarding,
   sessionPlan,
   sessionGoal,
   isGoalComposerActive = false,
-  isMission = false,
-  missionWorkers = [],
-  missionDefaultProfileLabel,
-  onAddMissionWorker,
-  onSelectMissionWorker,
   promptHistory = [],
   chatMode = "normal",
   attachments = [],
@@ -7261,52 +7110,7 @@ export function ChatSurface({
     activeThreadContextMenu !== null,
     () => setActiveThreadContextMenu(null),
   );
-  const [activePeek, setActivePeek] = useState<{
-    focus: ModelFocus;
-    isLoading: boolean;
-    content?: ModelFocusPeekContent;
-    error?: string;
-  }>();
   const visibleModelFocus = modelFollow === "off" ? undefined : modelFocus;
-  const isModelFocusBusy = Boolean(
-    visibleModelFocus &&
-    capabilityActivities.some(
-      (activity) =>
-        activity.callId === visibleModelFocus.callId &&
-        ["requested", "waiting", "running"].includes(activity.status),
-    ),
-  );
-  const openModelFocusPeek = useCallback(
-    (focus: ModelFocus) => {
-      setActivePeek({ focus, isLoading: Boolean(onLoadModelFocusPeek) });
-      if (!onLoadModelFocusPeek) return;
-      void onLoadModelFocusPeek(focus)
-        .then((content) =>
-          setActivePeek((current) =>
-            current?.focus.callId === focus.callId
-              ? { ...current, content, isLoading: false }
-              : current,
-          ),
-        )
-        .catch((error: unknown) =>
-          setActivePeek((current) =>
-            current?.focus.callId === focus.callId
-              ? { ...current, error: String(error), isLoading: false }
-              : current,
-          ),
-        );
-    },
-    [onLoadModelFocusPeek],
-  );
-  // A peek is tied to one focus; when the model moves on, close it rather than
-  // leaving a stale slice hovering over the thread.
-  useEffect(() => {
-    setActivePeek((current) =>
-      current && current.focus.callId !== modelFocus?.callId
-        ? undefined
-        : current,
-    );
-  }, [modelFocus?.callId]);
   useEffect(() => {
     setLocalDraft(draft);
   }, [draft, draftResetToken]);
@@ -7918,7 +7722,6 @@ export function ChatSurface({
   ) : (
     legacySidePanel
   );
-  const missionHasWorkers = missionWorkers.length > 0;
   if (turns.length === 0 && looseEvents.length === 0) {
     return (
       <div
@@ -7927,8 +7730,6 @@ export function ChatSurface({
           "is-empty",
           activeRailPanel ? "has-environment" : "",
           isCompanionPanel ? "has-companion" : "",
-          isMission ? "is-mission" : "",
-          missionHasWorkers ? "has-mission-workers" : "",
           isTiled ? "is-tiled" : "",
         ]
           .filter(Boolean)
@@ -7949,16 +7750,14 @@ export function ChatSurface({
         <section
           className={[
             "gyro-chat-start",
-            isMission ? "is-mission" : "",
-            missionHasWorkers ? "is-mission-docked" : "",
           ]
             .filter(Boolean)
             .join(" ")}
-          aria-label={isMission ? "New mission" : "New Chat"}
+          aria-label="New Chat"
           ref={startSectionRef}
           style={{ width: "min(860px, 100%)" }}
         >
-          {isMission && missionHasWorkers ? null : (
+          {(
             <span className="gyro-brand-logo">
               <img
                 alt="Gyro"
@@ -7974,22 +7773,7 @@ export function ChatSurface({
             </span>
           )}
           <h1>
-            {isMission ? (
-              startProjectLabel ? (
-                <>
-                  <span>What&apos;s the mission in </span>
-                  <span className="gyro-chat-start-brand-word">
-                    <ChatStartWorkspaceLabel
-                      name={startProjectLabel}
-                      path={workspacePath!}
-                    />
-                    ?
-                  </span>
-                </>
-              ) : (
-                <span>What&apos;s the mission goal?</span>
-              )
-            ) : startProjectLabel ? (
+            {startProjectLabel ? (
               <>
                 <span>What should we do in </span>
                 <span className="gyro-chat-start-brand-word">
@@ -8016,15 +7800,6 @@ export function ChatSurface({
               onClear={() => onGoalAction?.("clear")}
             />
           ) : null}
-          {isMission ? (
-            <MissionWorkersBoard
-              defaultProfileLabel={missionDefaultProfileLabel}
-              goalActive={false}
-              onAddWorker={onAddMissionWorker}
-              onSelectWorker={onSelectMissionWorker}
-              workers={missionWorkers}
-            />
-          ) : null}
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -8044,6 +7819,7 @@ export function ChatSurface({
             providerReadiness={providerReadiness}
             providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
+            providerUsageByProvider={providerUsageByProvider}
             limitWindows={composerLimits}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
@@ -8068,8 +7844,7 @@ export function ChatSurface({
             onResumeUsage={onResumeUsage}
             stabilizeEmptyHeight={isTiled}
           />
-          {isMission ||
-          localDraft.trim().length > 0 ||
+          {localDraft.trim().length > 0 ||
           !showQuickActions ? null : (
             <ChatStartSuggestions onPick={handleStartSuggestion} />
           )}
@@ -8305,41 +8080,10 @@ export function ChatSurface({
               </button>
             </div>
           ) : null}
-          {isMission ? (
-            <MissionWorkersBoard
-              defaultProfileLabel={missionDefaultProfileLabel}
-              goalActive
-              onAddWorker={onAddMissionWorker}
-              onSelectWorker={onSelectMissionWorker}
-              workers={missionWorkers}
-            />
-          ) : null}
           {transcriptContent}
         </div>
 
         <div className="gyro-chat-composer-dock">
-          {activePeek ? (
-            <ModelFocusPeek
-              content={activePeek.content}
-              error={activePeek.error}
-              focus={activePeek.focus}
-              isLoading={activePeek.isLoading}
-              onClose={() => setActivePeek(undefined)}
-              onOpen={() => {
-                const focus = activePeek.focus;
-                setActivePeek(undefined);
-                onOpenModelFocus?.(focus);
-              }}
-            />
-          ) : null}
-          {visibleModelFocus ? (
-            <ModelFocusStrip
-              focus={visibleModelFocus}
-              isBusy={isModelFocusBusy}
-              onOpen={() => onOpenModelFocus?.(visibleModelFocus)}
-              onPeek={() => openModelFocusPeek(visibleModelFocus)}
-            />
-          ) : null}
           {isTranscriptAwayFromBottom ? (
             <button
               aria-label="Jump to latest message"
@@ -8392,6 +8136,7 @@ export function ChatSurface({
             providerReadiness={providerReadiness}
             providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
+            providerUsageByProvider={providerUsageByProvider}
             limitWindows={composerLimits}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
@@ -8829,172 +8574,6 @@ export type ModelFocusPeekContent = {
   startLine?: number;
   highlightLine?: number;
 };
-
-function ModelFocusIcon({ kind }: { kind: ModelFocus["kind"] }) {
-  if (kind === "terminal") return <Terminal size={14} />;
-  if (kind === "browser") return <Globe2 size={14} />;
-  if (kind === "output") return <ScrollText size={14} />;
-  if (kind === "proposal") return <GitPullRequest size={14} />;
-  return <FileCode2 size={14} />;
-}
-
-function modelFocusVerb(focus: ModelFocus) {
-  switch (focus.kind) {
-    case "terminal":
-      return "Running";
-    case "browser":
-      return "Browsing";
-    case "output":
-      return focus.detail === "Tests" ? "Testing" : "Output";
-    case "proposal":
-      return "Proposing";
-    default:
-      return focus.path ? "Reading" : "Opened";
-  }
-}
-
-function modelFocusHeadline(focus: ModelFocus) {
-  if (focus.kind === "ide" && focus.path && focus.line) {
-    return `${focus.label}:${focus.line}`;
-  }
-  if (focus.kind === "browser" || focus.kind === "terminal") {
-    return focus.detail ?? focus.label;
-  }
-  return focus.label;
-}
-
-/**
- * The ambient "the model is working here" line above the composer. It reports
- * position only; navigating is always the user's own click.
- */
-function ModelFocusStrip({
-  focus,
-  isBusy,
-  onOpen,
-  onPeek,
-}: {
-  focus: ModelFocus;
-  isBusy: boolean;
-  onOpen: () => void;
-  onPeek: () => void;
-}) {
-  return (
-    <div
-      aria-live="polite"
-      className={[
-        "gyro-model-focus-strip",
-        `is-${focus.kind}`,
-        isBusy ? "is-busy" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <span aria-hidden="true" className="gyro-model-focus-icon">
-        <ModelFocusIcon kind={focus.kind} />
-      </span>
-      <button
-        aria-label={`Peek at ${modelFocusHeadline(focus)} without leaving the thread`}
-        className="gyro-model-focus-label"
-        onClick={onPeek}
-        title="Peek without leaving the thread"
-        type="button"
-      >
-        <strong>{modelFocusVerb(focus)}</strong>
-        <span>{modelFocusHeadline(focus)}</span>
-      </button>
-      <button className="gyro-model-focus-open" onClick={onOpen} type="button">
-        Open in workspace
-      </button>
-    </div>
-  );
-}
-
-function ModelFocusPeek({
-  content,
-  error,
-  focus,
-  isLoading,
-  onClose,
-  onOpen,
-}: {
-  content?: ModelFocusPeekContent;
-  error?: string;
-  focus: ModelFocus;
-  isLoading: boolean;
-  onClose: () => void;
-  onOpen: () => void;
-}) {
-  const scopeRef = useOutsidePointerDismiss<HTMLDivElement>(true, onClose);
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-  const startLine = content?.startLine ?? 1;
-  return (
-    <div
-      aria-label="Model activity peek"
-      className="gyro-model-focus-peek"
-      ref={scopeRef}
-      role="dialog"
-    >
-      <header>
-        <span aria-hidden="true">
-          <ModelFocusIcon kind={focus.kind} />
-        </span>
-        <div>
-          <strong>{content?.title ?? modelFocusHeadline(focus)}</strong>
-          {(content?.subtitle ?? focus.detail) ? (
-            <small>{content?.subtitle ?? focus.detail}</small>
-          ) : null}
-        </div>
-        <button
-          aria-label="Close peek"
-          className="gyro-chat-tool-close"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={14} />
-        </button>
-      </header>
-      <div className="gyro-model-focus-peek-body">
-        {isLoading ? (
-          <p className="is-pending">Loading…</p>
-        ) : error ? (
-          <p className="is-pending">{error}</p>
-        ) : content && content.lines.length > 0 ? (
-          <pre>
-            {content.lines.map((line, index) => {
-              const lineNumber = startLine + index;
-              return (
-                <code
-                  className={
-                    lineNumber === content.highlightLine
-                      ? "is-highlighted"
-                      : undefined
-                  }
-                  key={lineNumber}
-                >
-                  <small>{lineNumber}</small>
-                  <span>{line || " "}</span>
-                </code>
-              );
-            })}
-          </pre>
-        ) : (
-          <p className="is-pending">Nothing to preview yet.</p>
-        )}
-      </div>
-      <footer>
-        <button onClick={onOpen} type="button">
-          Open in workspace
-        </button>
-      </footer>
-    </div>
-  );
-}
 
 /**
  * The header's right-hand controls: a launcher for the companion tools, a
@@ -21242,6 +20821,7 @@ function Composer({
   providerReadiness,
   providerStatuses,
   providerUsage,
+  providerUsageByProvider,
   limitWindows = [],
   canCompactContext = false,
   onComposerAction,
@@ -21286,6 +20866,7 @@ function Composer({
   providerReadiness?: ProviderReadiness;
   providerStatuses?: ProviderStatus[];
   providerUsage?: ProviderUsageState;
+  providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
   limitWindows?: ComposerLimitWindow[];
   /** This chat has a provider-backed context that can be compacted manually. */
   canCompactContext?: boolean;
@@ -21590,6 +21171,11 @@ function Composer({
       })
       .map((provider) => {
         const isConnected = provider.authStatus === "connected";
+        const resetSummary = isConnected
+          ? providerResetSummary(
+              providerUsageByProvider?.[provider.id]?.windows ?? [],
+            )
+          : "";
         // Clean-machine path: disconnected providers start their own login
         // instead of appearing as dead "Unavailable" rows. Always pass
         // providerId so each row shows that provider's brand mark, not a
@@ -21604,6 +21190,7 @@ function Composer({
           icon: Sparkles,
           kind: "provider" as const,
           label: provider.displayName,
+          detail: resetSummary || undefined,
           providerId: provider.id,
           showChevron: isConnected,
           trailingLabel: isConnected ? undefined : "Connect",

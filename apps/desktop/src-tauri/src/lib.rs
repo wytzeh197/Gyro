@@ -21015,6 +21015,28 @@ fn narrower_capability_access(
     }
 }
 
+fn capability_full_access_enabled(config: &GyroConfig) -> bool {
+    config.full_access
+        && !config.require_command_approval
+        && !config.require_file_edit_approval
+}
+
+fn capability_access_with_full_access(
+    bound: &BoundProviderCapabilityContext,
+    current: &ProjectCapabilityPolicy,
+    class: CapabilityClass,
+    scope_kind: &str,
+    scope_value: &str,
+    full_access: bool,
+) -> CapabilityAccess {
+    // The composer permission mode is authoritative for normal runs. Plan and
+    // Council retain their read-only/advisory contract even with Full access.
+    if full_access && bound.policy.mode == CapabilityRunMode::Normal {
+        return CapabilityAccess::Allow;
+    }
+    capability_access_for_call(bound, current, class, scope_kind, scope_value)
+}
+
 fn capability_access_for_call(
     bound: &BoundProviderCapabilityContext,
     current: &ProjectCapabilityPolicy,
@@ -21170,6 +21192,12 @@ fn wait_for_capability_approval(
             .map_or(true, |control| control.cancellation.is_cancelled())
         {
             break Err("capability approval was cancelled".to_string());
+        }
+        // Selecting Full access also releases an already waiting capability.
+        if bound.policy.mode == CapabilityRunMode::Normal
+            && load_config_blocking().is_ok_and(|config| capability_full_access_enabled(&config))
+        {
+            break Ok(CapabilityApprovalDecision::AllowOnce);
         }
         if started_at.elapsed() >= PROVIDER_APPROVAL_TIMEOUT {
             break Err("capability approval timed out".to_string());
@@ -22530,8 +22558,18 @@ fn handle_desktop_provider_capability_request(
         Ok(policy) => policy,
         Err(error) => return fail("policy-unavailable", error.to_string()),
     };
-    let mut access =
-        capability_access_for_call(&bound, &current_policy, class, &scope_kind, &scope_value);
+    let config = match load_config_blocking() {
+        Ok(config) => config,
+        Err(error) => return fail("policy-unavailable", error),
+    };
+    let mut access = capability_access_with_full_access(
+        &bound,
+        &current_policy,
+        class,
+        &scope_kind,
+        &scope_value,
+        capability_full_access_enabled(&config),
+    );
     // Session-scoped origin memory: once the user allows a site for this chat,
     // continued driving (click/type/scroll) on that origin does not re-prompt.
     if access == CapabilityAccess::Ask
@@ -24334,6 +24372,32 @@ mod tests {
             assert_eq!(
                 capability_access_for_call(&bound, &current, class, "origin", "https://usegyro.io"),
                 CapabilityAccess::Deny
+            );
+        }
+    }
+
+    #[test]
+    fn full_access_overrides_capability_prompts_and_project_denials() {
+        let request = anthropic_provider_request();
+        let mut bound = bound_capability_context(&request);
+        let current = ProjectCapabilityPolicy::deny_all(bound.workspace_key.clone(), 1);
+        for class in current.classes.keys().copied() {
+            assert_eq!(
+                capability_access_with_full_access(&bound, &current, class, "call", "test", true),
+                CapabilityAccess::Allow,
+            );
+            assert_eq!(
+                capability_access_with_full_access(&bound, &current, class, "call", "test", false),
+                CapabilityAccess::Deny,
+            );
+        }
+        for mode in [CapabilityRunMode::Plan, CapabilityRunMode::Council] {
+            bound.policy.mode = mode;
+            assert_eq!(
+                capability_access_with_full_access(
+                    &bound, &current, CapabilityClass::TerminalExecute, "command", "pnpm", true,
+                ),
+                CapabilityAccess::Deny,
             );
         }
     }

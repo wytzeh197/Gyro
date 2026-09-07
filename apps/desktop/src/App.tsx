@@ -48,10 +48,7 @@ import {
   withoutSideChatSessions,
   createNotification,
   createTerminalPane,
-  isMissionSession,
   isUserSelectedWorkspacePath,
-  missionDefaultProfile,
-  missionWorkerPanes,
   defaultCommandProfiles,
   getProviderModel,
   isProviderId,
@@ -1563,17 +1560,6 @@ export function App() {
   const activeSessionGoal = activeSessionId
     ? persistedActiveSessionGoal
     : pendingNewChatGoal;
-  const activeIsMission = isMissionSession(
-    activeSession,
-    workbench.preferences.missionSessionIds,
-  );
-  const activeMissionWorkers = activeSessionId
-    ? missionWorkerPanes(workbench.terminalPanes, activeSessionId)
-    : [];
-  const activeMissionDefaultProfile = missionDefaultProfile(
-    commandProfiles,
-    workbench.preferences.missionDefaultProfileId,
-  );
   const activeSessionUsage = activeSessionId
     ? sessionUsageById[activeSessionId]
     : undefined;
@@ -2038,13 +2024,19 @@ export function App() {
     systemAccessBootstrapRef.current = true;
     const alreadyPrompted =
       readBoundedLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, 8) === "true";
+    if (alreadyPrompted) {
+      dispatchWorkbench({
+        type: "complete-onboarding-step",
+        step: "system-access",
+      });
+      return undefined;
+    }
     void checkSystemAccess().then((scopes) => {
       safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "system-access",
       });
-      if (alreadyPrompted) return;
       const blocked = scopes.filter(
         (scope) => scope.status === "denied" && scope.canPrompt,
       );
@@ -6500,26 +6492,15 @@ export function App() {
   }, [notify, refreshIdeServices, workbench.preferences.workspaceTrust]);
 
   const createSession = useCallback(
-    async (options: { kind?: "chat" | "mission" } = {}) => {
-      const isMission = options.kind === "mission";
+    async () => {
       const sessionLayout: WorkspaceLayoutId = "thread";
-      const title = isMission ? "New mission" : "New chat";
+      const title = "New chat";
       dispatchWorkbench({
         type: "select-workspace-layout",
         layout: sessionLayout,
       });
       dispatchWorkbench({ type: "close-tool-panel" });
       suppressSessionAutoSelectRef.current = false;
-      const registerMission = (sessionId: string) => {
-        if (!isMission) {
-          return;
-        }
-        dispatchWorkbench({
-          type: "register-mission-session",
-          sessionId,
-        });
-        setIsGoalComposerActive(true);
-      };
       if (!isTauriRuntime()) {
         const session = createPreviewSession(
           sessionLayout,
@@ -6528,23 +6509,19 @@ export function App() {
           workspacePath ?? "",
           title,
         );
-        if (isMission) {
-          session.kind = "mission";
-        }
         setWorkspacePath(session.workspacePath);
         setFiles([]);
         setSessions((current) => [session, ...current]);
         activeSessionIdRef.current = session.id;
         setActiveSessionId(session.id);
         setEventsForSession(session.id, []);
-        registerMission(session.id);
         dispatchWorkbench({
           type: "complete-onboarding-step",
           step: "first-session",
         });
         notify(
           "terminal",
-          isMission ? "Mission created" : "Session created",
+          "Session created",
           session.title,
         );
         return;
@@ -6570,20 +6547,9 @@ export function App() {
               title,
               workspacePath: workspace,
             });
-        if (isMission) {
-          session.kind = "mission";
-        }
         setWorkspacePath(session.workspacePath);
         await refreshSessions();
         setActiveSessionId(session.id);
-        setSessions((current) =>
-          current.map((item) =>
-            item.id === session.id
-              ? { ...item, kind: isMission ? "mission" : item.kind }
-              : item,
-          ),
-        );
-        registerMission(session.id);
         dispatchWorkbench({
           type: "complete-onboarding-step",
           step: "first-session",
@@ -6599,7 +6565,7 @@ export function App() {
         } else {
           notify(
             "terminal",
-            isMission ? "Mission created" : "Session created",
+            "Session created",
             session.title,
           );
         }
@@ -6611,16 +6577,12 @@ export function App() {
           workspacePath ?? "",
           title,
         );
-        if (isMission) {
-          session.kind = "mission";
-        }
         setWorkspacePath(session.workspacePath);
         setFiles([]);
         setSessions((current) => [session, ...current]);
         activeSessionIdRef.current = session.id;
         setActiveSessionId(session.id);
         setEventsForSession(session.id, []);
-        registerMission(session.id);
         notify("command-failed", "Session fallback", "Created preview session");
       }
     },
@@ -6633,10 +6595,6 @@ export function App() {
       workspacePath,
     ],
   );
-
-  const createMission = useCallback(() => {
-    void createSession({ kind: "mission" });
-  }, [createSession]);
 
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
@@ -7268,7 +7226,6 @@ export function App() {
       startingOutput = "",
       template,
       workspacePathOverride,
-      missionSessionId,
       reveal = true,
       taskTitle,
       workspaceTaskId,
@@ -7279,7 +7236,6 @@ export function App() {
       startingOutput?: string;
       template?: TerminalTemplate;
       workspacePathOverride?: string;
-      missionSessionId?: string;
       /** Background tasks stay visible in the task rail until explicitly opened. */
       reveal?: boolean;
       taskTitle?: string;
@@ -7321,8 +7277,7 @@ export function App() {
             launchWorkspacePath,
           ),
           projectPath: launchWorkspacePath,
-          missionSessionId,
-          taskTitle,
+              taskTitle,
           workspaceTaskId,
         });
         if (template) {
@@ -7465,97 +7420,19 @@ export function App() {
   }, [activeProfileId, commandProfiles, launchTerminalPane, notify]);
 
   const createCliSession = useCallback(
-    (
-      profileId: string,
-      projectPath: string,
-      options?: { missionSessionId?: string; taskTitle?: string },
-    ) => {
+    (profileId: string, projectPath: string) => {
       const profile = getCommandProfile(commandProfiles, profileId);
-      const isMissionWorker = Boolean(options?.missionSessionId);
-      // Mission workers stay under the goal chat with a docked terminal.
-      // Standalone CLI opens the full terminal grid.
-      if (isMissionWorker) {
-        dispatchWorkbench({
-          type: "select-workspace-layout",
-          layout: "thread",
-        });
-        dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-      } else {
-        dispatchWorkbench({
-          type: "select-workspace-layout",
-          layout: "terminal-grid",
-        });
-      }
-      void launchTerminalPane({
-        profile,
-        workspacePathOverride: projectPath,
-        missionSessionId: options?.missionSessionId,
-        taskTitle: options?.taskTitle,
-      }).then((started) => {
+      dispatchWorkbench({ type: "select-workspace-layout", layout: "terminal-grid" });
+      void launchTerminalPane({ profile, workspacePathOverride: projectPath }).then((started) => {
         notify(
           started ? "terminal" : "command-failed",
-          started
-            ? isMissionWorker
-              ? "Mission worker started"
-              : "CLI session started"
-            : "CLI session failed",
+          started ? "CLI session started" : "CLI session failed",
           `${profile.displayName} · ${workspaceName(projectPath)}`,
         );
-        // Refit after the tool panel has laid out.
-        if (started && isMissionWorker) {
-          window.setTimeout(() => {
-            window.dispatchEvent(new Event("resize"));
-          }, 200);
-        }
       });
     },
     [commandProfiles, launchTerminalPane, notify],
   );
-
-  const addMissionWorker = useCallback(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    const projectPath =
-      activeSession?.workspacePath || workspacePath || savedProjects[0]?.path;
-    if (!projectPath) {
-      notify(
-        "command-failed",
-        "Choose a project",
-        "Missions need a workspace before adding workers",
-      );
-      return;
-    }
-    const profile = missionDefaultProfile(
-      commandProfiles,
-      workbench.preferences.missionDefaultProfileId,
-    );
-    const workerIndex =
-      missionWorkerPanes(workbench.terminalPanes, activeSessionId).length + 1;
-    createCliSession(profile.id, projectPath, {
-      missionSessionId: activeSessionId,
-      taskTitle: `Task ${workerIndex}`,
-    });
-    dispatchWorkbench({
-      type: "set-mission-default-profile",
-      profileId: profile.id,
-    });
-  }, [
-    activeSession?.workspacePath,
-    activeSessionId,
-    commandProfiles,
-    createCliSession,
-    notify,
-    savedProjects,
-    workbench.preferences.missionDefaultProfileId,
-    workbench.terminalPanes,
-    workspacePath,
-  ]);
-
-  const selectMissionWorker = useCallback((paneId: string) => {
-    dispatchWorkbench({ type: "select-terminal-pane", paneId });
-    dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-  }, []);
 
   const saveSessionModel = useCallback(
     async (sessionId: string, model: SessionModelSelection) => {
@@ -15470,47 +15347,6 @@ export function App() {
         }
         sessionPlan={panePlan}
         sessionGoal={paneGoal}
-        isMission={isMissionSession(
-          paneSession,
-          workbench.preferences.missionSessionIds,
-        )}
-        missionWorkers={
-          paneSession
-            ? missionWorkerPanes(workbench.terminalPanes, paneSession.id)
-            : []
-        }
-        missionDefaultProfileLabel={
-          missionDefaultProfile(
-            commandProfiles,
-            workbench.preferences.missionDefaultProfileId,
-          ).displayName
-        }
-        onAddMissionWorker={
-          paneSession &&
-          isMissionSession(paneSession, workbench.preferences.missionSessionIds)
-            ? () => {
-                const projectPath =
-                  paneSession.workspacePath ||
-                  workspacePath ||
-                  savedProjects[0]?.path;
-                if (!projectPath) {
-                  return;
-                }
-                const profile = missionDefaultProfile(
-                  commandProfiles,
-                  workbench.preferences.missionDefaultProfileId,
-                );
-                const workerIndex =
-                  missionWorkerPanes(workbench.terminalPanes, paneSession.id)
-                    .length + 1;
-                createCliSession(profile.id, projectPath, {
-                  missionSessionId: paneSession.id,
-                  taskTitle: `Task ${workerIndex}`,
-                });
-              }
-            : undefined
-        }
-        onSelectMissionWorker={selectMissionWorker}
         sessionSummary={paneSession?.summary}
         sessionTitle={paneSession?.title}
         sourceControl={workbench.ide.sourceControl}
@@ -15663,11 +15499,6 @@ export function App() {
       }
       sessionPlan={activeSessionPlan}
       sessionGoal={activeSessionGoal}
-      isMission={activeIsMission}
-      missionWorkers={activeMissionWorkers}
-      missionDefaultProfileLabel={activeMissionDefaultProfile.displayName}
-      onAddMissionWorker={addMissionWorker}
-      onSelectMissionWorker={selectMissionWorker}
       sessionSummary={activeSession?.summary}
       sessionTitle={activeSession?.title}
       sourceControl={workbench.ide.sourceControl}
@@ -15713,7 +15544,6 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onCloseTerminalPane={requestCloseTerminalPane}
       onCreateSession={startNewChat}
-      onCreateMission={createMission}
       onCreateCliSession={createCliSession}
       onDeleteSession={deleteSession}
       onDismissNotification={(id) =>
@@ -16012,13 +15842,6 @@ export function App() {
                     }
                     sessionPlan={activeSessionPlan}
                     sessionGoal={activeSessionGoal}
-                    isMission={activeIsMission}
-                    missionWorkers={activeMissionWorkers}
-                    missionDefaultProfileLabel={
-                      activeMissionDefaultProfile.displayName
-                    }
-                    onAddMissionWorker={addMissionWorker}
-                    onSelectMissionWorker={selectMissionWorker}
                     sessionSummary={activeSession?.summary}
                     sessionTitle={activeSession?.title}
                     sourceControl={workbench.ide.sourceControl}
@@ -16688,11 +16511,6 @@ export function App() {
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
-          isMission={activeIsMission}
-          missionWorkers={activeMissionWorkers}
-          missionDefaultProfileLabel={activeMissionDefaultProfile.displayName}
-          onAddMissionWorker={addMissionWorker}
-          onSelectMissionWorker={selectMissionWorker}
           showOnboardingSteps
           sourceControl={workbench.ide.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
@@ -17320,7 +17138,7 @@ function LiveTerminalPaneBody({
       return;
     }
     terminalRef.current?.focus();
-    // Refit when the pane becomes selected (e.g. mission worker opens).
+    // Refit when the pane becomes selected.
     const timer = window.setTimeout(() => {
       try {
         const host = hostRef.current;

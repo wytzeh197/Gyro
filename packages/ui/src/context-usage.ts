@@ -336,6 +336,37 @@ export function formatLimitReset(
   }).format(new Date(resetMs))}`;
 }
 
+/**
+ * Compact reset copy for a linked provider in the model picker.
+ *
+ * Providers can expose more than one allowance (for example a five-hour and
+ * weekly window), so keep each real reset beside its window label. Windows
+ * without a valid timestamp stay silent instead of implying a schedule the
+ * provider did not report.
+ */
+export function providerResetSummary(
+  windows: ProviderUsageWindow[],
+  now = Date.now(),
+) {
+  return windows
+    .flatMap((window) => {
+      const resetMs = window.resetsAt
+        ? Date.parse(window.resetsAt)
+        : Number.NaN;
+      const formatted = formatLimitReset(window.resetsAt, now);
+      if (!Number.isFinite(resetMs) || !formatted) return [];
+      const label = window.label.replace(/\s+(?:limit|window)$/i, "");
+      const reset =
+        formatted === "Resetting now"
+          ? "resets now"
+          : formatted.replace(/^Resets /, "resets ");
+      return [{ resetMs, text: `${label} ${reset}` }];
+    })
+    .sort((left, right) => left.resetMs - right.resetMs)
+    .map((item) => item.text)
+    .join(" · ");
+}
+
 function limitSeverity(percent: number | undefined, status: string) {
   if (status === "exhausted" || (percent !== undefined && percent >= 95)) {
     return "critical" as const;
