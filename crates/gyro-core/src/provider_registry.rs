@@ -107,24 +107,24 @@ const PROVIDERS: &[ProviderDescriptor] = &[
     },
     ProviderDescriptor {
         id: "cursor",
-        execution_kind: ProviderExecutionKind::ReadinessOnly,
+        execution_kind: ProviderExecutionKind::AcpCli,
         health_kind: ProviderHealthKind::CursorCli,
-        runner: "readiness-only",
+        runner: "cursor-acp",
         auth_owner: "provider-cli",
-        supports_approvals: false,
+        supports_approvals: true,
         supports_images: false,
-        supports_resume: false,
+        supports_resume: true,
         supports_usage: false,
     },
     ProviderDescriptor {
         id: "opencode",
-        execution_kind: ProviderExecutionKind::ReadinessOnly,
+        execution_kind: ProviderExecutionKind::AcpCli,
         health_kind: ProviderHealthKind::OpenCodeCli,
-        runner: "readiness-only",
+        runner: "opencode-acp",
         auth_owner: "provider-cli",
-        supports_approvals: false,
+        supports_approvals: true,
         supports_images: false,
-        supports_resume: false,
+        supports_resume: true,
         supports_usage: false,
     },
 ];
@@ -154,8 +154,8 @@ mod tests {
         assert!(provider_is_executable("xai"));
         assert!(provider_is_executable("gemini"));
         assert!(provider_is_executable("ollama"));
-        assert!(!provider_is_executable("cursor"));
-        assert!(!provider_is_executable("opencode"));
+        assert!(provider_is_executable("cursor"));
+        assert!(provider_is_executable("opencode"));
         assert_eq!(
             provider_descriptor("kimi").unwrap().execution_kind,
             ProviderExecutionKind::KimiAcp

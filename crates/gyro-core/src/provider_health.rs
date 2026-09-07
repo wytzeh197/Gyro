@@ -64,14 +64,7 @@ impl ProviderHealthService {
                 "Provider CLI, OS Keychain, or provider-owned files",
             ),
             ProviderHealthKind::KimiAcp => Ok(acp_provider_health(&request.provider_id)),
-            ProviderHealthKind::CursorCli => self.cli_check(
-                "cursor",
-                "provider-cli",
-                "cursor-agent",
-                &["login", "status"],
-                Some("cursor-agent login"),
-                "Provider CLI, OS Keychain, or provider-owned files",
-            ),
+            ProviderHealthKind::CursorCli => Ok(acp_provider_health(&request.provider_id)),
             ProviderHealthKind::Environment if request.provider_id == "xai" => Ok(
                 env_provider_health("xai", request.api_key_ref.as_deref(), &["XAI_API_KEY"]),
             ),
@@ -84,14 +77,7 @@ impl ProviderHealthService {
                     "GOOGLE_APPLICATION_CREDENTIALS",
                 ],
             )),
-            ProviderHealthKind::OpenCodeCli => self.cli_check(
-                "opencode",
-                "provider-cli",
-                "opencode",
-                &["auth", "status"],
-                Some("opencode auth login"),
-                "Provider CLI, OS Keychain, or provider-owned files",
-            ),
+            ProviderHealthKind::OpenCodeCli => Ok(acp_provider_health(&request.provider_id)),
             ProviderHealthKind::OllamaApi => {
                 Ok(ollama_provider_health(request.base_url.as_deref()))
             }
@@ -258,6 +244,20 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
             vec!["oauth-personal", "gemini-api-key", "vertex-ai", "login"],
             "gemini",
         ),
+        "cursor" => (
+            "Cursor",
+            "cursor-agent",
+            vec!["acp"],
+            vec!["cursor_login"],
+            "cursor-agent login",
+        ),
+        "opencode" => (
+            "OpenCode",
+            "opencode",
+            vec!["acp"],
+            vec!["opencode-login"],
+            "opencode auth login",
+        ),
         _ => return kimi_provider_health(),
     };
     if provider_id == "xai" {
@@ -294,9 +294,16 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
         KimiAcpHealthStatus::NotLoggedIn => "not-logged-in",
         KimiAcpHealthStatus::Warning => "warning",
     };
+    // OpenCode's ACP authenticate method acknowledges the method id without
+    // validating credentials for its selected model.
+    let output = if provider_id == "opencode" && runtime_status == "ready" {
+        "OpenCode ACP is available. Model credentials and access are verified only when a prompt runs.".into()
+    } else {
+        health.output
+    };
     ProviderHealthCheck {
         provider_id: provider_id.into(),
-        output: health.output,
+        output,
         runtime_status: runtime_status.into(),
         auth_owner: "provider-cli".into(),
         auth_command: Some(format!("{command} ACP handshake")),

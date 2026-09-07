@@ -185,3 +185,36 @@ for (const link of document.querySelectorAll("[data-releases-link]")) {
 }
 
 startDownloadSurfaces();
+
+// Progressive enhancement: every surface remains available without JavaScript.
+const workspaceSwitcher = document.querySelector(".workspace-switcher");
+if (workspaceSwitcher) {
+  const surfaceCards = [...document.querySelectorAll(".spine > .surface-card")];
+  const surfaceButtons = [...workspaceSwitcher.querySelectorAll("button")];
+  function showSurface(index) {
+    surfaceCards.forEach((card, i) => {
+      card.hidden = i !== index;
+    });
+    surfaceButtons.forEach((button, i) => {
+      button.setAttribute("aria-pressed", String(i === index));
+    });
+  }
+  surfaceButtons.forEach((button, index) => {
+    surfaceCards[index].id = `workspace-surface-${index}`;
+    button.setAttribute("aria-controls", surfaceCards[index].id);
+    button.addEventListener("click", () => showSurface(index));
+  });
+  workspaceSwitcher.hidden = false;
+  showSurface(0);
+}
+
+// Keep the hero quiet; restore the navigation surface over scrolling content.
+const homeHeader = document.querySelector(".home-page .site-header");
+if (homeHeader) {
+  const updateHeaderSurface = () => {
+    homeHeader.classList.toggle("is-at-top", window.scrollY <= 8);
+  };
+  updateHeaderSurface();
+  window.addEventListener("scroll", updateHeaderSurface, { passive: true });
+  window.addEventListener("pageshow", updateHeaderSurface);
+}

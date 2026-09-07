@@ -53,6 +53,8 @@ const files = [
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
   ["site/assets/social-preview.png", "assets/social-preview.png"],
   ["site/assets/screenshots/hero-600.webp", "assets/screenshots/hero-600.webp"],
+  ["site/assets/screenshots/hero-current-dark.webp", "assets/screenshots/hero-current-dark.webp"],
+  ["site/assets/screenshots/hero-current-light.webp", "assets/screenshots/hero-current-light.webp"],
   [
     "site/assets/screenshots/hero-1200.webp",
     "assets/screenshots/hero-1200.webp",

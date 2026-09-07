@@ -84,6 +84,16 @@ const CONTRACTS: &[ProviderCliContract] = &[
         program: "gemini",
         prompt_delivery: PromptDelivery::Protocol,
     },
+    ProviderCliContract {
+        provider_id: "cursor",
+        program: "cursor-agent",
+        prompt_delivery: PromptDelivery::Protocol,
+    },
+    ProviderCliContract {
+        provider_id: "opencode",
+        program: "opencode",
+        prompt_delivery: PromptDelivery::Protocol,
+    },
 ];
 
 pub fn provider_cli_contracts() -> &'static [ProviderCliContract] {
@@ -138,6 +148,19 @@ pub fn audit_provider_args<S: AsRef<str>>(
     args: &[S],
 ) -> Result<(), ArgContractViolation> {
     if contract.prompt_delivery == PromptDelivery::Protocol {
+        return Ok(());
+    }
+    // Claude's multimodal messages travel over stdin, not a positional
+    // prompt. Require both stream formats before accepting that alternate
+    // delivery contract; ordinary text invocations keep the terminator guard.
+    if contract.provider_id == "anthropic"
+        && args
+            .windows(2)
+            .any(|pair| pair[0].as_ref() == "--input-format" && pair[1].as_ref() == "stream-json")
+        && args
+            .windows(2)
+            .any(|pair| pair[0].as_ref() == "--output-format" && pair[1].as_ref() == "stream-json")
+    {
         return Ok(());
     }
     let prompt = args.last().map(AsRef::as_ref);
@@ -335,6 +358,32 @@ pub fn executable_provider_contracts() -> impl Iterator<Item = &'static Provider
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claude_stream_input_uses_protocol_contract_only_with_stream_output() {
+        let contract = super::provider_cli_contract("anthropic").unwrap();
+        assert!(super::audit_provider_args(
+            contract,
+            &[
+                "--print",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json"
+            ]
+        )
+        .is_ok());
+        assert!(super::audit_provider_args(
+            contract,
+            &["--print", "--input-format", "stream-json"]
+        )
+        .is_err());
+        assert!(super::audit_provider_args(
+            contract,
+            &["--print", "--allowedTools", "Read", "unterminated prompt"]
+        )
+        .is_err());
+    }
+
     use super::*;
 
     fn claude_contract() -> &'static ProviderCliContract {
@@ -360,9 +409,13 @@ mod tests {
     }
 
     #[test]
-    fn readiness_only_providers_declare_no_contract() {
-        assert!(provider_cli_contract("cursor").is_none());
-        assert!(provider_cli_contract("opencode").is_none());
+    fn cursor_and_opencode_use_protocol_contracts() {
+        for provider in ["cursor", "opencode"] {
+            assert_eq!(
+                provider_cli_contract(provider).unwrap().prompt_delivery,
+                PromptDelivery::Protocol
+            );
+        }
     }
 
     #[test]

@@ -16,6 +16,13 @@ pub struct GyroPaths {
 
 impl GyroPaths {
     pub fn for_current_user() -> Result<Self> {
+        // Keep development acceptance runs separate from the user's projects.
+        #[cfg(debug_assertions)]
+        if let Some(root) = std::env::var_os("GYRO_TEST_DATA_DIR") {
+            let root = PathBuf::from(root);
+            anyhow::ensure!(root.is_absolute(), "GYRO_TEST_DATA_DIR must be absolute");
+            return Ok(Self::from_base_dir(root));
+        }
         let base_dir = dirs::data_dir()
             .context("could not resolve user data directory")?
             .join("Gyro");
@@ -53,6 +60,19 @@ impl GyroPaths {
             ensure_private_directory(directory)?;
         }
         Ok(())
+    }
+
+    /// Give a projectless chat its own execution boundary without treating the
+    /// user's home directory as a project or exposing other chat workspaces.
+    pub fn ensure_chat_workspace(&self, session_id: uuid::Uuid) -> Result<PathBuf> {
+        self.ensure()?;
+        let root = self.sessions_dir.join("workspaces");
+        ensure_private_directory(&root)?;
+        let workspace = root.join(session_id.to_string());
+        ensure_private_directory(&workspace)?;
+        workspace
+            .canonicalize()
+            .context("resolve private chat workspace")
     }
 }
 
@@ -123,6 +143,34 @@ mod tests {
             paths.browser_captures_dir,
             PathBuf::from("/tmp/GyroTest/browser-captures")
         );
+    }
+
+    #[test]
+    fn projectless_chat_workspaces_are_private_stable_and_separate() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let id = uuid::Uuid::new_v4();
+        let first = paths.ensure_chat_workspace(id).unwrap();
+        assert_eq!(first, paths.ensure_chat_workspace(id).unwrap());
+        assert_ne!(
+            first,
+            paths.ensure_chat_workspace(uuid::Uuid::new_v4()).unwrap()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{symlink, PermissionsExt};
+            assert_eq!(
+                std::fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            let other_id = uuid::Uuid::new_v4();
+            symlink(
+                temp.path(),
+                first.parent().unwrap().join(other_id.to_string()),
+            )
+            .unwrap();
+            assert!(paths.ensure_chat_workspace(other_id).is_err());
+        }
     }
 
     #[test]

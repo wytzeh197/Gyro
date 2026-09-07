@@ -1,3 +1,72 @@
+# Split-screen chat chrome — 2026-09-06
+
+final result: blocked
+
+## Source and state
+
+- Source visual truth: `/Users/wytzehemrica/Library/Application Support/Gyro/sessions/attachments/0348e4c2-41ea-4e63-a081-abe80f48a249/425bc24ad221f6cc39bfc437f2ae22879c5e59d0bc46537b9e1ab0e8ed4bae0d.png` (2048 × 1246).
+- Compared state: light theme, sidebar hidden, three tiled chats with the right column split horizontally.
+- Implementation screenshot: unavailable because app capture access was not approved. A same-state pixel comparison and focused crop are therefore blocked.
+
+## Changes made
+
+- The sidebar restore toggle uses a split-screen-specific vertical offset so it keeps the same baseline as the single-pane header.
+- Hidden-sidebar title clearance is limited to the first tiled pane; other pane titles align to their conversation columns.
+- Tiled header height is normalized to the existing 38px grid row, with symmetric content-width-aware padding.
+- Grid slots no longer add transparent borders over the grid gap, leaving one clean divider seam at pane intersections.
+
+## Findings and verification
+
+- Source P2: restore toggle was vertically low in the split layout. Fixed in CSS; rendered confirmation pending.
+- Source P2: titles in non-leading panes inherited left-side toggle clearance. Fixed by scoping the clearance to the first pane.
+- Source P2: tiled headers used a 42px minimum inside a 38px grid row. Fixed by matching both dimensions at 38px.
+- Source P2: slot borders layered over the grid divider. Fixed by making the grid gap the sole pane seam.
+- Typography, copy, colors, icons, and imagery are unchanged by this pass.
+- Prettier, TypeScript checks, the desktop production build, the focused split-screen UI contract, and diff whitespace checks pass. Vite retains its existing bundle-size advisory.
+- The broader workbench smoke check has four unrelated provider/state contract failures. None references the split-screen CSS or its focused assertion.
+
+## Remaining verification
+
+Capture the same three-pane state after rebuilding, then compare the restore-toggle baseline, title/content alignment, header action spacing, and divider intersections against the source image. Until that rendered comparison is available, visual QA remains blocked rather than passed.
+
+---
+
+# Workspace context menu — 2026-09-06
+
+final result: blocked
+
+## Source and state
+
+- Source visual truth: `/Users/wytzehemrica/Library/Application Support/Gyro/sessions/attachments/e0948833-8662-4caf-8f3f-4d7aa73dbaed/2d524336913cc18a4aefb8c2bc728ded87995cb7a5806c2a37f935642f1de8c0.png`.
+- Source crop: 814 × 158 pixels; density and original CSS viewport are not encoded in the attachment.
+- State: light theme, active chat, workspace context menu opening downward from the thread header.
+- Implementation screenshot: unavailable because the project browser preview could not be opened in this turn.
+
+## Findings and implementation
+
+- P1 clipping: the animated conversation canvas formed a later stacking context and painted over the header-owned menu. The thread topbar now has an explicit elevated stacking layer and visible overflow; the canvas has an explicit base layer.
+- P2 panel hierarchy: the menu used oversized rows, loose spacing, and card-like framing. It now uses a 312px compact grouped layout, a separated title, smaller section labels, 36px rows, restrained active states, and an opaque theme surface.
+- Responsive placement: the existing popover bounds logic is now enabled for the header menu so it constrains height and horizontal placement to the available surface.
+
+## Verification
+
+- Full-view and focused visual comparison: blocked because no browser-rendered implementation capture was available. The supplied source was opened and inspected at original resolution.
+- Typography: existing Gyro font retained; menu title 12px, section labels 10px, row labels 12px, detail copy 11px.
+- Spacing/layout: implementation rules define a 312px bounded menu, 6px outer padding, 36px minimum rows, and 10px radius.
+- Colors/tokens: existing surface, border, text, muted, and accent tokens retained for light/dark compatibility.
+- Assets/icons: existing Lucide UI icons retained; the reference contains no raster assets requiring replacement.
+- Copy/content: existing project, workspace mode, and branch labels and actions are unchanged.
+- Primary interaction and console checks: blocked with the browser-rendered comparison.
+- Automated checks: desktop TypeScript and production build passed; Prettier and diff whitespace passed. The targeted workspace-menu smoke assertion passed. The broader workbench smoke suite still reports four unrelated provider/session failures already present in the working tree.
+
+## Comparison history
+
+- Initial evidence: the source showed the menu visible for roughly one title row before the following canvas covered it.
+- Fix applied: established topbar/canvas z-order, enabled bounded popover placement, and tightened the dedicated menu styling.
+- Post-fix visual evidence: unavailable; final visual comparison remains blocked.
+
+---
+
 # Inline approval cards — 2026-09-06
 
 final result: blocked

@@ -39,7 +39,7 @@ policy are what make it safe to trust one place with the work.
 - **Bring your own agent.** Codex CLI, Claude Code, Kimi Code, Gemini CLI, and
   Grok Build run through provider-owned local logins. Ollama runs downloaded
   models through a loopback-only local API. Cursor and OpenCode remain clearly
-  marked until their approval-safe adapters exist.
+  marked as coming soon while their experimental ACP adapters await live validation.
 - **Local by default.** Session history, configuration, and worktrees stay on
   your Mac. Gyro does not send telemetry by default.
 - **Visible control.** Commands and file changes follow an explicit approval

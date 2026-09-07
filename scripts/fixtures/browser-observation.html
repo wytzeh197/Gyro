@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gyro Browser Observation Fixture</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+      }
+
+      main {
+        display: grid;
+        gap: 24px;
+        margin: 0 auto;
+        max-width: 760px;
+      }
+
+      .responsive-state::after {
+        content: "desktop";
+      }
+
+      @media (max-width: 600px) {
+        body {
+          padding: 16px;
+        }
+
+        .responsive-state::after {
+          content: "compact";
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p>Deterministic loopback page for Gyro Browser acceptance.</p>
+        <h1>Browser observation ready</h1>
+        <p class="responsive-state">Viewport:</p>
+      </header>
+
+      <section aria-labelledby="interaction-heading">
+        <h2 id="interaction-heading">State-changing control</h2>
+        <button id="change-state" type="button">Change visible state</button>
+        <output id="visible-state" aria-live="polite">State: initial</output>
+      </section>
+
+      <section aria-labelledby="form-heading">
+        <h2 id="form-heading">Form controls</h2>
+        <form id="safe-form">
+          <label for="project-name">Project name</label>
+          <input id="project-name" name="projectName" value="Gyro" />
+          <button type="submit">Save project</button>
+          <output id="form-state" aria-live="polite">Form: untouched</output>
+        </form>
+
+        <label for="fixture-password">Blocked credential field</label>
+        <input
+          id="fixture-password"
+          name="password"
+          type="password"
+          value="fixture-secret"
+        />
+      </section>
+    </main>
+
+    <script>
+      document.querySelector("#change-state").addEventListener("click", () => {
+        document.querySelector("#visible-state").textContent = "State: changed";
+      });
+
+      document
+        .querySelector("#safe-form")
+        .addEventListener("submit", (event) => {
+          event.preventDefault();
+          const name = document.querySelector("#project-name").value;
+          document.querySelector("#form-state").textContent =
+            `Form: saved ${name}`;
+        });
+
+      console.info("gyro-browser-fixture-ready");
+      fetch("/__gyro_missing_network_fixture__").catch(() => {
+        console.warn("gyro-browser-fixture-network-failed");
+      });
+    </script>
+  </body>
+</html>

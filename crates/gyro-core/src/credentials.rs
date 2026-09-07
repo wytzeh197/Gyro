@@ -30,6 +30,7 @@ fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str] {
             "GOOGLE_APPLICATION_CREDENTIALS",
         ],
         "kimi" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "cursor" => &["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"],
         _ => &[],
     }
 }

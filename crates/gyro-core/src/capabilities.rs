@@ -668,7 +668,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,
         class: CapabilityClass::BrowserNavigate,
-        description: "Open a URL in this chat's Gyro Browser rail. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+        description: "Open a URL in this chat's app-owned Gyro Browser rail. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserInspect,
@@ -803,10 +803,7 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
 /// ACP providers get it through `session/new`. Readiness-only providers have no
 /// chat runner at all, so there is nowhere to attach tools.
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
-    let available = matches!(
-        provider_id,
-        "openai" | "anthropic" | "kimi" | "xai" | "gemini" | "ollama"
-    );
+    let available = crate::provider_registry::provider_is_executable(provider_id);
     ProviderCapabilitySupport {
         provider_id: provider_id.into(),
         available,
@@ -1008,13 +1005,22 @@ mod tests {
     fn every_chat_capable_provider_can_receive_tools() {
         // Providers that run a chat adapter get the tools; readiness-only
         // providers have no runner to attach an MCP server to.
-        for provider_id in ["openai", "anthropic", "kimi", "xai", "gemini", "ollama"] {
+        for provider_id in [
+            "openai",
+            "anthropic",
+            "kimi",
+            "xai",
+            "gemini",
+            "ollama",
+            "cursor",
+            "opencode",
+        ] {
             let support = provider_capability_support(provider_id);
             assert!(support.available, "{provider_id} should support Gyro tools");
             assert_eq!(support.capabilities.len(), CAPABILITY_DESCRIPTORS.len());
             assert!(support.reason.is_none());
         }
-        for provider_id in ["cursor", "opencode", "unknown"] {
+        for provider_id in ["unknown"] {
             let support = provider_capability_support(provider_id);
             assert!(
                 !support.available,

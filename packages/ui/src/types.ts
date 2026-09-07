@@ -294,7 +294,7 @@ export type SessionGoal = {
 };
 
 export type ChatAttachmentKind =
-  "ide-snapshot" | "image" | "video" | "workspace-file";
+  "ide-snapshot" | "browser-snapshot" | "image" | "video" | "workspace-file";
 
 export type ChatAttachment = {
   id: string;

@@ -26,6 +26,10 @@ const cargo = readFileSync(
   join(root, "apps/desktop/src-tauri/Cargo.toml"),
   "utf8",
 );
+const observationFixture = readFileSync(
+  join(root, "scripts/fixtures/browser-observation.html"),
+  "utf8",
+);
 
 /** New drive-capable browser tools (plus the original four). */
 const BROWSER_TOOLS = [
@@ -127,6 +131,18 @@ assert.match(
   "tauri unstable feature must be enabled for child webviews",
 );
 
+const knowledge = JSON.parse(readFileSync(join(root, "docs/product-knowledge/browser.contract.json"), "utf8"));
+assert.equal(knowledge.schema, "gyro.product-knowledge.browser.v1");
+assert.deepEqual(
+  knowledge.commands.map(command => command.name).sort(),
+  BROWSER_TOOLS.map(command => command.tool).sort(),
+  "Product knowledge must cover the browser tool registry",
+);
+for (const tool of BROWSER_TOOLS) {
+  const command = knowledge.commands.find(command => command.name === tool.tool);
+  assert.deepEqual(command.inputSchema.required, tool.required, `${tool.tool} knowledge schema drift`);
+}
+
 assert.match(
   types,
   /ChatSidePanelId =[\s\S]*?\|\s*"browser"/,
@@ -221,6 +237,40 @@ assert.match(sessionBrowser, /WebviewBuilder::new/);
 assert.match(lib, /mod session_browser/);
 assert.match(lib, /register_bridge_protocol/);
 assert.match(lib, /SessionBrowserManager/);
+
+// Every provider adapter sees the same evidence shape. A screenshot path is
+// intentionally not counted as model-visible pixels until image transport is
+// implemented by the shared broker.
+assert.match(lib, /gyro\.browser-observation\.v1/);
+assert.match(lib, /struct BrowserObservation/);
+assert.match(lib, /screenshot_model_visible: false/);
+assert.match(lib, /fn browser_observation\(/);
+assert.match(lib, /fn user_requests_gyro_browser\(/);
+assert.match(lib, /browser_knowledge::context/);
+assert.match(readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"), /Do not silently substitute/);
+assert.match(readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"), /Do not silently substitute HTTP fetching, web search, or OS control/);
+assert.match(sessionBrowser, /const pageState = \(\) =>/);
+assert.match(sessionBrowser, /deviceScaleFactor/);
+assert.match(sessionBrowser, /history: \{\{ length:/);
+assert.match(sessionBrowser, /struct SessionBrowserCapture/);
+
+// The loopback fixture carries one stable example of every evidence class the
+// browser acceptance path needs to exercise.
+for (const marker of [
+  "Browser observation ready",
+  'id="change-state"',
+  'id="visible-state"',
+  'id="safe-form"',
+  'id="fixture-password"',
+  "@media (max-width: 600px)",
+  "gyro-browser-fixture-ready",
+  "/__gyro_missing_network_fixture__",
+]) {
+  assert.ok(
+    observationFixture.includes(marker),
+    `browser observation fixture missing ${marker}`,
+  );
+}
 
 // Navigation gate is split from loopback-only diagnostics.
 assert.match(sessionBrowser, /fn browser_url_is_navigable/);

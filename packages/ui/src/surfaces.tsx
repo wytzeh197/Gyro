@@ -606,6 +606,8 @@ type AppChromeProps = {
   savedProjects: Array<{ path: string; label: string }>;
   activeSessionId?: string;
   sendingSessionIds?: string[];
+  /** Completed chats whose latest result has not been viewed yet. */
+  completedSessionIds?: string[];
   /** Sessions that own a live model terminal (power-relevant even when idle). */
   modelTerminalSessionIds?: string[];
   activeDestination: AppDestination;
@@ -1397,6 +1399,7 @@ export function AppChrome({
   savedProjects,
   activeSessionId,
   sendingSessionIds = [],
+  completedSessionIds = [],
   modelTerminalSessionIds = [],
   activeDestination,
   activeWorkspaceLayout,
@@ -1863,16 +1866,6 @@ export function AppChrome({
               }}
               onSectionChange={onSettingsSectionChange}
               onToggleSidebar={() => setIsSidebarHidden(true)}
-              isWorkspacePreparationOpen={isWorkspacePreparationOpen}
-              onCloseWorkspacePreparation={() =>
-                setIsWorkspacePreparationOpen(false)
-              }
-              onRetryWorkspacePreparation={onRetryWorkspacePreparation}
-              onToggleWorkspacePreparation={() =>
-                setIsWorkspacePreparationOpen((current) => !current)
-              }
-              workspacePreparation={workspacePreparation}
-              workspacePreparationRef={workspacePreparationRef}
             />
           ) : (
             <WorkspaceSidebarContent
@@ -1882,6 +1875,7 @@ export function AppChrome({
               activeSession={activeSession}
               activeSessionId={activeSessionId}
               sendingSessionIds={sendingSessionIds}
+              completedSessionIds={completedSessionIds}
               modelTerminalSessionIds={modelTerminalSessionIds}
               activeWorkspaceLayout={activeWorkspaceLayout}
               commandProfiles={commandProfiles}
@@ -1956,16 +1950,6 @@ export function AppChrome({
               selectedTerminalPaneId={selectedTerminalPaneId}
               sessions={sessions}
               terminalPanes={terminalPanes}
-              isWorkspacePreparationOpen={isWorkspacePreparationOpen}
-              onCloseWorkspacePreparation={() =>
-                setIsWorkspacePreparationOpen(false)
-              }
-              onRetryWorkspacePreparation={onRetryWorkspacePreparation}
-              onToggleWorkspacePreparation={() =>
-                setIsWorkspacePreparationOpen((current) => !current)
-              }
-              workspacePreparation={workspacePreparation}
-              workspacePreparationRef={workspacePreparationRef}
               workspacePath={workspacePath}
             />
           )}
@@ -2017,6 +2001,16 @@ export function AppChrome({
                     aria-hidden="true"
                   />
                 )}
+                <WorkspacePreparationControl
+                  controlRef={workspacePreparationRef}
+                  isOpen={isWorkspacePreparationOpen}
+                  onClose={() => setIsWorkspacePreparationOpen(false)}
+                  onRetry={onRetryWorkspacePreparation}
+                  onToggle={() =>
+                    setIsWorkspacePreparationOpen((current) => !current)
+                  }
+                  progress={workspacePreparation}
+                />
                 {showSidebarUpdate && updateState ? (
                   <SidebarUpdateControl
                     onAction={onUpdateAction}
@@ -2424,24 +2418,12 @@ function SettingsSidebarContent({
   onBack,
   onSectionChange,
   onToggleSidebar,
-  workspacePreparation,
-  isWorkspacePreparationOpen,
-  onToggleWorkspacePreparation,
-  onCloseWorkspacePreparation,
-  onRetryWorkspacePreparation,
-  workspacePreparationRef,
 }: {
   activeSection: SettingsSectionId;
   backLabel: string;
   onBack: () => void;
   onSectionChange?: (section: SettingsSectionId) => void;
   onToggleSidebar: () => void;
-  workspacePreparation?: WorkspacePreparationProgress;
-  isWorkspacePreparationOpen: boolean;
-  onToggleWorkspacePreparation: () => void;
-  onCloseWorkspacePreparation: () => void;
-  onRetryWorkspacePreparation?: () => void;
-  workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
     <>
@@ -2470,14 +2452,6 @@ function SettingsSidebarContent({
               <span>{backLabel}</span>
             </button>
           </div>
-          <WorkspacePreparationControl
-            controlRef={workspacePreparationRef}
-            isOpen={isWorkspacePreparationOpen}
-            onClose={onCloseWorkspacePreparation}
-            onRetry={onRetryWorkspacePreparation}
-            onToggle={onToggleWorkspacePreparation}
-            progress={workspacePreparation}
-          />
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
@@ -2830,6 +2804,7 @@ function WorkspaceSidebarContent({
   savedProjects,
   activeSessionId,
   sendingSessionIds,
+  completedSessionIds = [],
   modelTerminalSessionIds = [],
   activeSession,
   activeDestination,
@@ -2903,13 +2878,7 @@ function WorkspaceSidebarContent({
   onToggleChatsCollapsed,
   onToggleSidebar,
   canHideSidebar = true,
-  workspacePreparation,
-  isWorkspacePreparationOpen,
-  onToggleWorkspacePreparation,
-  onCloseWorkspacePreparation,
-  onRetryWorkspacePreparation,
   renderAiChat,
-  workspacePreparationRef,
 }: {
   renderAiChat?: () => ReactNode;
   sessions: Session[];
@@ -2917,6 +2886,7 @@ function WorkspaceSidebarContent({
   savedProjects: Array<{ path: string; label: string }>;
   activeSessionId?: string;
   sendingSessionIds: string[];
+  completedSessionIds?: string[];
   modelTerminalSessionIds?: string[];
   activeSession?: Session;
   activeDestination: AppDestination;
@@ -3012,12 +2982,6 @@ function WorkspaceSidebarContent({
   onToggleSidebar: () => void;
   /** When false, the hide control is omitted (Workspace code layout). */
   canHideSidebar?: boolean;
-  workspacePreparation?: WorkspacePreparationProgress;
-  isWorkspacePreparationOpen: boolean;
-  onToggleWorkspacePreparation: () => void;
-  onCloseWorkspacePreparation: () => void;
-  onRetryWorkspacePreparation?: () => void;
-  workspacePreparationRef: RefObject<HTMLDivElement | null>;
 }) {
   const sidebarSessions = sessions.filter(
     (session) => !isTransientWorkspacePath(session.workspacePath),
@@ -3435,6 +3399,7 @@ function WorkspaceSidebarContent({
     <SessionSidebarRow
       isActive={session.id === activeSessionId}
       isSending={sendingSessionIds.includes(session.id)}
+      isUnreadComplete={completedSessionIds.includes(session.id)}
       hasModelTerminal={modelTerminalSessionIds.includes(session.id)}
       isNested={isNested}
       isMenuOpen={openSessionMenuId === session.id}
@@ -3536,14 +3501,6 @@ function WorkspaceSidebarContent({
               <ArrowRight size={13} />
             </button>
           </div>
-          <WorkspacePreparationControl
-            controlRef={workspacePreparationRef}
-            isOpen={isWorkspacePreparationOpen}
-            onClose={onCloseWorkspacePreparation}
-            onRetry={onRetryWorkspacePreparation}
-            onToggle={onToggleWorkspacePreparation}
-            progress={workspacePreparation}
-          />
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
@@ -4488,7 +4445,7 @@ function WorkspaceSidebarContent({
                   </p>
                 </form>
               ) : null}
-              {(ide?.taskDefinitions.length ?? 0) > 8 ? (
+              {(ide?.taskDefinitions.length ?? 0) > 0 ? (
                 <input
                   aria-label="Filter commands"
                   className="gyro-run-command-filter"
@@ -4502,6 +4459,7 @@ function WorkspaceSidebarContent({
                   <div className="gyro-run-task-group" key={group.id}>
                     <div className="gyro-run-task-group-label">
                       {group.label}
+                      <small>{group.tasks.length}</small>
                     </div>
                     {group.tasks.map((task) => (
                       <RunTaskRow
@@ -5229,6 +5187,7 @@ function SessionSidebarRow({
   session,
   isActive,
   isSending,
+  isUnreadComplete = false,
   hasModelTerminal = false,
   isNested,
   isPinned,
@@ -5248,6 +5207,7 @@ function SessionSidebarRow({
   session: Session;
   isActive: boolean;
   isSending: boolean;
+  isUnreadComplete?: boolean;
   hasModelTerminal?: boolean;
   isNested?: boolean;
   isPinned: boolean;
@@ -5280,6 +5240,7 @@ function SessionSidebarRow({
   const isAgentWorkspace = session.workspaceMode === "worktree";
   const isCliOrigin = session.origin === "cli";
   const badgeLabels = [
+    isUnreadComplete ? "Completed, unread" : undefined,
     isAgentWorkspace ? "Isolated agent workspace" : undefined,
     isCliOrigin ? "Started from CLI" : undefined,
   ].filter(Boolean);
@@ -5353,27 +5314,36 @@ function SessionSidebarRow({
           aria-label={
             isSending
               ? "Chat working"
-              : hasModelTerminal
-                ? "Model terminal running"
-                : undefined
+              : isUnreadComplete
+                ? "Chat completed, unread"
+                : hasModelTerminal
+                  ? "Model terminal running"
+                  : undefined
           }
           className={[
             "gyro-session-time",
             isSending ? "is-working" : "",
-            !isSending && hasModelTerminal ? "is-model-terminal" : "",
+            !isSending && isUnreadComplete ? "is-complete" : "",
+            !isSending && !isUnreadComplete && hasModelTerminal
+              ? "is-model-terminal"
+              : "",
           ]
             .filter(Boolean)
             .join(" ")}
           title={
             isSending
               ? "Chat working in the background"
-              : hasModelTerminal
-                ? "Model-owned terminal is still running"
-                : undefined
+              : isUnreadComplete
+                ? "Chat completed — open to view"
+                : hasModelTerminal
+                  ? "Model-owned terminal is still running"
+                  : undefined
           }
         >
           {isSending ? (
             <CircleDashed aria-hidden="true" size={13} />
+          ) : isUnreadComplete ? (
+            <span aria-hidden="true" className="gyro-session-complete-dot" />
           ) : hasModelTerminal ? (
             <Terminal aria-hidden="true" size={12} />
           ) : (
@@ -5855,7 +5825,7 @@ function runTaskStatusCopy(task: TaskDefinition): string | undefined {
     case "running":
       return task.group === "dev" ? "live" : "running";
     case "done":
-      return "passed";
+      return task.group === "test" ? "passed" : "done";
     case "failed":
       return "failed";
     case "cancelled":
@@ -5894,8 +5864,14 @@ function RunTaskRow({
       >
         {isRunning ? <Square size={11} /> : <LaunchIcon size={13} />}
         <span>
-          {task.label}
-          <small>{commandLine}</small>
+          <strong>
+            {task.source === "suggested" && task.args[0] === "run"
+              ? task.args.slice(1).join(" ")
+              : task.label}
+          </strong>
+          {commandLine !== task.label || task.args[0] === "run" ? (
+            <small>{commandLine}</small>
+          ) : null}
         </span>
       </button>
       {status ? <em className="gyro-run-task-status">{status}</em> : null}
@@ -7543,20 +7519,34 @@ export function ChatSurface({
     });
     return () => window.cancelAnimationFrame(animationFrame);
   }, [pinTranscriptToBottom, transcriptEvents, updateTranscriptScrollPosition]);
-  // A composer that grew, a rail that opened, a resized window: the transcript
-  // gets shorter without the event list changing, and the bottom moves with it.
+  // The dock overlays the transcript. Reserve its changing height only at the
+  // end of the scroll content so older messages remain visible behind it.
   useEffect(() => {
     const transcript = transcriptRef.current;
+    const dock = liveChangesTarget?.parentElement;
     if (!transcript || typeof ResizeObserver === "undefined") {
       return;
     }
-    const observer = new ResizeObserver(() => {
+    const updateDockClearance = () => {
+      if (dock) {
+        transcript.style.setProperty(
+          "--gyro-composer-dock-height",
+          `${Math.ceil(dock.getBoundingClientRect().height)}px`,
+        );
+      }
       pinTranscriptToBottom();
       updateTranscriptScrollPosition();
-    });
+    };
+    updateDockClearance();
+    const observer = new ResizeObserver(updateDockClearance);
     observer.observe(transcript);
+    if (dock) observer.observe(dock);
     return () => observer.disconnect();
-  }, [pinTranscriptToBottom, updateTranscriptScrollPosition]);
+  }, [
+    liveChangesTarget,
+    pinTranscriptToBottom,
+    updateTranscriptScrollPosition,
+  ]);
   const contextModel = useMemo(() => {
     // Prefer the chat's own model over the global picker state so split panes
     // keep independent context windows when each thread uses a different model.
@@ -8255,6 +8245,7 @@ export function ChatSurface({
                   className="gyro-thread-workspace-menu"
                   id="gyro-thread-workspace-menu"
                   items={threadWorkspaceItems}
+                  keepInBounds
                   onAction={(action) => {
                     setActiveThreadContextMenu(null);
                     if (action) {
@@ -10342,9 +10333,18 @@ function SideChatPanel({
 }) {
   const [draft, setDraft] = useState("");
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const temporaryNoteId = useId();
   const messages = sideChat?.messages ?? [];
   const isSending = sideChat?.isSending === true;
   const canSend = Boolean(sideChat?.onSend) && draft.trim().length > 0;
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = "auto";
+    composer.style.height = `${Math.min(composer.scrollHeight, 168)}px`;
+  }, [draft]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -10354,7 +10354,7 @@ function SideChatPanel({
 
   const send = () => {
     const message = draft.trim();
-    if (!message || !sideChat?.onSend) return;
+    if (!message || !sideChat?.onSend || isSending) return;
     sideChat.onSend(message);
     setDraft("");
   };
@@ -10363,15 +10363,18 @@ function SideChatPanel({
     <div className="gyro-side-chat">
       <div className="gyro-side-chat-transcript" ref={transcriptRef}>
         {messages.length === 0 && !sideChat?.streamingMessage ? (
-          <div className="gyro-companion-empty">
-            <MessageSquare size={22} />
-            <strong>Side chat</strong>
-            <span>
-              A throwaway thread on{" "}
-              {workspaceName(workspacePath) || "this project"}
-              {branchName ? ` · ${branchName}` : ""}. It knows the project but
-              not this conversation, and it disappears when you close the tab.
-            </span>
+          <div className="gyro-side-chat-empty">
+            <h2>What would you like to explore?</h2>
+            <p>A separate conversation with the same project context.</p>
+            {workspacePath ? (
+              <span className="gyro-side-chat-context" title={workspacePath}>
+                <Folder aria-hidden="true" size={13} />
+                <span>{workspaceName(workspacePath)}</span>
+                {branchName ? (
+                  <span title={branchName}>{branchName}</span>
+                ) : null}
+              </span>
+            ) : null}
           </div>
         ) : (
           <>
@@ -10380,7 +10383,6 @@ function SideChatPanel({
                 className={`gyro-side-chat-message is-${message.role}`}
                 key={message.id}
               >
-                <small>{message.role === "user" ? "You" : "Gyro"}</small>
                 {message.role === "assistant" ? (
                   <div className="gyro-response-body">
                     {assistantResponseBlocks(message.text).map(
@@ -10394,13 +10396,14 @@ function SideChatPanel({
                     )}
                   </div>
                 ) : (
-                  <p>{message.text}</p>
+                  <div className="gyro-user-message-bubble">
+                    <p>{message.text}</p>
+                  </div>
                 )}
               </article>
             ))}
             {sideChat?.streamingMessage ? (
               <article className="gyro-side-chat-message is-assistant">
-                <small>Gyro</small>
                 <p className="gyro-response-streaming-text">
                   {sideChat.streamingMessage}
                 </p>
@@ -10414,45 +10417,56 @@ function SideChatPanel({
           {sideChat.error}
         </p>
       ) : null}
-      <div className="gyro-side-chat-composer">
-        <textarea
-          aria-label="Side chat message"
-          disabled={!sideChat?.onSend}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              send();
+      <div className="gyro-side-chat-composer gyro-chat-composer-dock">
+        <div className="gyro-composer-shell">
+          <textarea
+            ref={composerRef}
+            aria-label="Side chat message"
+            aria-describedby={temporaryNoteId}
+            disabled={!sideChat?.onSend}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                send();
+              }
+            }}
+            placeholder={
+              sideChat?.onSend
+                ? "Ask a side question"
+                : "Connect a provider to use side chat"
             }
-          }}
-          placeholder={
-            sideChat?.onSend
-              ? "Ask a side question"
-              : "Connect a provider to use side chat"
-          }
-          rows={2}
-          value={draft}
-        />
-        <button
-          aria-label="Send side chat message"
-          className="gyro-send-button"
-          disabled={!canSend || isSending}
-          onClick={send}
-          type="button"
-        >
-          {isSending ? (
-            <RefreshCw className="is-spinning" size={15} />
-          ) : (
-            <ArrowUp size={15} />
-          )}
-        </button>
+            rows={2}
+            value={draft}
+          />
+          <div className="gyro-composer-bar">
+            <span className="gyro-side-chat-model" title={sideChat?.modelLabel}>
+              <Sparkles aria-hidden="true" size={13} />
+              <span>{sideChat?.modelLabel || "No provider connected"}</span>
+            </span>
+            <button
+              aria-label="Send side chat message"
+              className="gyro-send-button"
+              disabled={!canSend || isSending}
+              onClick={send}
+              type="button"
+            >
+              {isSending ? (
+                <RefreshCw className="is-spinning" size={15} />
+              ) : (
+                <ArrowUp size={15} />
+              )}
+            </button>
+          </div>
+        </div>
+        <footer className="gyro-side-chat-note" id={temporaryNoteId}>
+          Temporary chat · Cleared when you close this tab
+        </footer>
       </div>
-      <footer className="gyro-side-chat-note">
-        <Sparkles aria-hidden="true" size={12} />
-        {sideChat?.modelLabel
-          ? `${sideChat.modelLabel} · temporary, not saved to history`
-          : "Temporary — this thread is not saved to history"}
-      </footer>
     </div>
   );
 }
@@ -21715,10 +21729,16 @@ function Composer({
   });
   const contextItems: ComposerPopoverItem[] = [
     {
+      action: "attach-browser-snapshot",
+      icon: Globe2,
+      label: "Browser",
+      sectionLabel: "Context",
+      tooltip: "Capture page text and a screenshot as read-only context",
+    },
+    {
       action: "attach-editor-snapshot",
       icon: FileCode2,
       label: "Editor",
-      sectionLabel: "Context",
       tooltip: "Capture saved or unsaved editor text",
     },
     {
@@ -24288,9 +24308,9 @@ function ChatRunChangeSummary({
     { additions: 0, deletions: 0 },
   );
   const fileLabel = files.length === 1 ? "file" : "files";
-  const canExpandDiff = isReviewable && Boolean(onLoadChangeDiff);
+  const canExpandDiff = Boolean(onLoadChangeDiff);
   const reviewFiles = () => {
-    // Ask-first keeps the turn's own diff and Keep controls in this card.
+    // Completed edits stay in the transcript in every approval mode.
     if (canExpandDiff) {
       setOpenPath(files[0]?.path);
       return;
@@ -24368,10 +24388,17 @@ function ChatRunChangeSummary({
               );
               return (
                 <div className="gyro-change-summary-file" key={file.path}>
-                  {onReview ? (
+                  {canExpandDiff || onReview ? (
                     <button
-                      onClick={() => onReview(file.path)}
-                      title={`Review ${file.path}`}
+                      aria-expanded={canExpandDiff ? isOpen : undefined}
+                      onClick={() => {
+                        if (canExpandDiff) {
+                          setOpenPath(isOpen ? undefined : file.path);
+                        } else {
+                          onReview?.(file.path);
+                        }
+                      }}
+                      title={`${isOpen ? "Hide" : "Show"} the change to ${file.path}`}
                       type="button"
                     >
                       {contents}
@@ -24381,6 +24408,12 @@ function ChatRunChangeSummary({
                       {contents}
                     </div>
                   )}
+                  {isOpen && onLoadChangeDiff ? (
+                    <ChangeSummaryDiff
+                      onLoad={onLoadChangeDiff}
+                      path={file.path}
+                    />
+                  ) : null}
                 </div>
               );
             }
@@ -26087,8 +26120,10 @@ function commandProfilesWithDefaults(
       id: "cursor",
       displayName: "Cursor Agent",
       command: "cursor-agent",
-      args: ["run"],
+      args: [],
       workingDirectory: "Workspace",
+      providerId: "cursor",
+      defaultModel: "cursor-default",
     },
     {
       id: "gemini",
@@ -26101,8 +26136,10 @@ function commandProfilesWithDefaults(
       id: "opencode",
       displayName: "OpenCode",
       command: "opencode",
-      args: ["run"],
+      args: [],
       workingDirectory: "Workspace",
+      providerId: "opencode",
+      defaultModel: "opencode-default",
     },
     {
       id: "custom",
