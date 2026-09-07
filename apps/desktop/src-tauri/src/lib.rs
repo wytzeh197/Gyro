@@ -28986,6 +28986,9 @@ while True:
                         Err(error) => panic!("accept provider request: {error}"),
                     }
                 };
+                // macOS inherits O_NONBLOCK from the listening socket. Poll
+                // acceptance above, then read the complete request in blocking mode.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(3)))
                     .unwrap();
