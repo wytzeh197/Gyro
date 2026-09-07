@@ -191,7 +191,7 @@ containsAll(pages.home, "Homepage", [
   "A space to build.",
   "workspace-switcher",
   "ownership-title",
-  "An open-source workspace for your agents, terminal, and code.",
+  "An open-source AI coding workspace for your agents, terminal,",
   "Public alpha",
   "Think, build, and ship in one place.",
   "Public alpha",
@@ -272,8 +272,8 @@ check(
 );
 
 containsAll(pages.install, "Install page", [
-  "Download for macOS.",
-  "Choose the right build for your Mac.",
+  "Download Gyro for macOS.",
+  "Choose your build, then follow the setup steps below.",
   "Choose your Mac processor",
   "Apple Silicon",
   "M1–M4 and newer",
@@ -302,7 +302,7 @@ check(
 );
 
 containsAll(pages.changelog, "Changelog page", [
-  "Public alpha releases.",
+  "Release notes for the Gyro AI coding workspace for macOS.",
   "data-version-rail",
   "data-version-jump",
   "data-changelog-list",
