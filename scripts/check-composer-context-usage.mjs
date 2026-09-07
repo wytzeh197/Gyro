@@ -4,6 +4,7 @@ import {
   composerLimitWindows,
   estimateComposerContextUsage,
   formatLimitReset,
+  providerResetSummary,
 } from "../packages/ui/src/context-usage.ts";
 
 function event(id, kind, message, payload = {}) {
@@ -198,6 +199,33 @@ assert.equal(
 assert.equal(formatLimitReset(undefined, now), undefined);
 // A reset beyond the day is a calendar point; a countdown in days says less.
 assert.match(formatLimitReset("2026-08-02T18:59:00.000Z", now), /^Resets \w/);
+
+assert.equal(
+  providerResetSummary(
+    [
+      {
+        id: "weekly",
+        label: "Weekly limit",
+        resetsAt: "2026-07-27T22:00:00.000Z",
+      },
+      {
+        id: "five-hour",
+        label: "5-hour window",
+        resetsAt: "2026-07-27T10:20:00.000Z",
+      },
+      { id: "unreported", label: "Other limit" },
+    ],
+    now,
+  ),
+  "5-hour resets in 20 min · Weekly resets in 12 hr",
+);
+assert.equal(
+  providerResetSummary(
+    [{ id: "invalid", label: "Invalid limit", resetsAt: "not-a-date" }],
+    now,
+  ),
+  "",
+);
 
 // Claude Code names its windows and their resets but never measures how full
 // they are. An unmeasured window must stay unmeasured rather than render as a

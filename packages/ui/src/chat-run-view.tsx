@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  FileCode2,
   Globe2,
   Image as ImageIcon,
   ListChecks,
@@ -280,6 +281,11 @@ function RunWorkGroup({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const text = runWorkGroupText(group);
+  const reads = group.steps.flatMap((step) =>
+    step.item.kind === "read" && step.item.path ? [step.item] : [],
+  );
+  const activeRead = reads.find((item) => item.status === "running") ?? reads.at(-1);
+  const readPaths = [...new Set(reads.map((item) => item.path))];
   const Icon = WORK_GROUP_ICON[group.groupKind];
   const className = [
     "gyro-run-group",
@@ -307,6 +313,13 @@ function RunWorkGroup({
         <span className="gyro-run-group-text">
           <span className="gyro-run-row-label">{text.label}</span>
           <span className="gyro-run-row-detail">{text.description}</span>
+          {activeRead ? (
+            <span className="gyro-run-read-context" title={readPaths.join("\n")}>
+              <FileCode2 aria-hidden="true" size={13} />
+              <span>{activeRead.path}</span>
+              {readPaths.length > 1 ? <small>+{readPaths.length - 1} more</small> : null}
+            </span>
+          ) : null}
         </span>
         <span aria-hidden="true" className="gyro-run-group-disclosure">
           <span>{detailLabel}</span>

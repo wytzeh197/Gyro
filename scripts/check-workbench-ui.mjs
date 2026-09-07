@@ -313,6 +313,21 @@ const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
 );
 const appAndStreamSource = `${appSource}\n${providerStreamSource}`;
+const systemAccessBootstrapStart = appSource.indexOf("const alreadyPrompted =");
+const systemAccessRestartGuard = appSource.indexOf(
+  "if (alreadyPrompted)",
+  systemAccessBootstrapStart,
+);
+const systemAccessStartupProbe = appSource.indexOf(
+  "void checkSystemAccess().then",
+  systemAccessBootstrapStart,
+);
+expect(
+  systemAccessBootstrapStart >= 0 &&
+    systemAccessRestartGuard > systemAccessBootstrapStart &&
+    systemAccessStartupProbe > systemAccessRestartGuard,
+  "Restarting Gyro should not re-probe macOS folder access after the first prompt.",
+);
 const indexSource = readRepoFile("packages/ui/src/index.ts");
 const packageSource = readRepoFile("package.json");
 const readmeSource = readRepoFile("README.md");
