@@ -69,6 +69,7 @@ use walkdir::WalkDir;
 mod menu_bar;
 mod session_browser;
 mod source_control_review;
+mod git_line_counts;
 mod system_access;
 
 #[cfg(test)]
@@ -137,9 +138,6 @@ const MAX_WORKSPACE_PREPARATION_CACHES: usize = MAX_WORKSPACE_WATCH_CACHES;
 const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
 const MAX_WORKSPACE_SEARCH_FALLBACK_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_GIT_UNTRACKED_STAT_FILES: usize = 256;
-const MAX_GIT_UNTRACKED_STAT_BYTES: usize = 16 * 1024 * 1024;
-const GIT_UNTRACKED_STAT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 const CODEX_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROVIDER_CHAT_EVENT: &str = "gyro://provider-chat-event";
@@ -883,6 +881,14 @@ struct SourceControlFile {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct MainComparisonStats {
+    additions: usize,
+    deletions: usize,
+    partial: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SourceControlStatus {
     provider: String,
     available: bool,
@@ -894,6 +900,7 @@ struct SourceControlStatus {
     additions: usize,
     deletions: usize,
     stats_partial: bool,
+    compared_to_main: Option<MainComparisonStats>,
     files: Vec<SourceControlFile>,
     history: Vec<source_control_review::HistoryEntry>,
     history_error: Option<String>,
@@ -10346,6 +10353,7 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
                 additions: 0,
                 deletions: 0,
                 stats_partial: false,
+                compared_to_main: None,
                 files: Vec::new(),
                 history: Vec::new(),
                 history_error: None,
@@ -10366,6 +10374,7 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             additions: 0,
             deletions: 0,
             stats_partial: false,
+                compared_to_main: None,
             files: Vec::new(),
             history: Vec::new(),
             history_error: None,
@@ -10400,6 +10409,7 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         additions: 0,
         deletions: 0,
         stats_partial: false,
+                compared_to_main: None,
         files: Vec::new(),
         history: Vec::new(),
         history_error: None,
@@ -10498,9 +10508,7 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
         status.deletions = status.deletions.saturating_add(*deletions);
     }
 
-    let untracked_started_at = Instant::now();
-    let mut untracked_files = 0usize;
-    let mut untracked_bytes = 0usize;
+    let mut untracked_additions = 0usize;
     for file in &mut status.files {
         if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
             file.original_path
@@ -10511,25 +10519,35 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
             file.deletions = *deletions;
         }
         if file.state == "untracked" {
-            if untracked_files >= MAX_GIT_UNTRACKED_STAT_FILES
-                || untracked_bytes >= MAX_GIT_UNTRACKED_STAT_BYTES
-                || untracked_started_at.elapsed() >= GIT_UNTRACKED_STAT_TIMEOUT
-            {
-                status.stats_partial = true;
-                continue;
-            }
-            let (additions, partial, bytes_read) = untracked_text_additions(
-                repo_root,
-                &file.path,
-                MAX_GIT_UNTRACKED_STAT_BYTES - untracked_bytes,
-            );
-            untracked_files += 1;
-            untracked_bytes = untracked_bytes.saturating_add(bytes_read);
+            let additions = match git_line_counts::untracked_lines(&repo_root.join(&file.path)) {
+                Ok(lines) => lines,
+                Err(_) => { status.stats_partial = true; continue; }
+            };
             file.additions = additions;
+            untracked_additions = untracked_additions.saturating_add(additions);
             status.additions = status.additions.saturating_add(additions);
-            status.stats_partial |= partial;
         }
     }
+    status.compared_to_main = git_main_comparison(repo_root, untracked_additions, status.stats_partial);
+}
+
+fn git_main_comparison(repo_root: &Path, untracked_additions: usize, partial: bool) -> Option<MainComparisonStats> {
+    let mut command = git_command();
+    command.arg("-C").arg(repo_root)
+        .args(["diff", "--numstat", "--no-renames", "refs/heads/main", "--"]);
+    let output = run_bounded_command(&command, Duration::from_secs(15),
+        Some(Duration::from_secs(10)), 4 * 1024 * 1024, 64 * 1024).ok()?;
+    if !output.succeeded() { return None; }
+    let (stats, parse_partial) = parse_git_numstat(&output.stdout);
+    let mut result = MainComparisonStats {
+        additions: untracked_additions, deletions: 0,
+        partial: partial || parse_partial || output.stdout_truncated,
+    };
+    for (additions, deletions) in stats.values() {
+        result.additions = result.additions.saturating_add(*additions);
+        result.deletions = result.deletions.saturating_add(*deletions);
+    }
+    Some(result)
 }
 
 fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
@@ -10597,6 +10615,11 @@ fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
         if path.is_empty() {
             continue;
         }
+        // Git's binary marker means no text line counts, not missing data.
+        if additions == "-" && deletions == "-" {
+            totals.insert(path.to_string(), (0, 0));
+            continue;
+        }
         let (Ok(additions), Ok(deletions)) = (additions.parse(), deletions.parse()) else {
             partial = true;
             continue;
@@ -10604,34 +10627,6 @@ fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
         totals.insert(path.to_string(), (additions, deletions));
     }
     (totals, partial)
-}
-
-fn untracked_text_additions(
-    repo_root: &Path,
-    relative_path: &str,
-    remaining_bytes: usize,
-) -> (usize, bool, usize) {
-    let path = repo_root.join(relative_path);
-    let Ok(metadata) = fs::metadata(&path) else {
-        return (0, true, 0);
-    };
-    let max_bytes = MAX_WORKSPACE_FILE_EDIT_BYTES.min(remaining_bytes);
-    if !metadata.is_file() || metadata.len() > max_bytes as u64 {
-        return (0, metadata.is_file(), 0);
-    }
-    let Ok((bytes, _)) = read_bounded_regular_file(&path, max_bytes, "untracked workspace file")
-    else {
-        return (0, true, 0);
-    };
-    if bytes.len() > max_bytes {
-        return (0, true, 0);
-    }
-    if bytes.contains(&0) {
-        return (0, false, bytes.len());
-    }
-    let lines = bytes.iter().filter(|byte| **byte == b'\n').count()
-        + usize::from(!bytes.is_empty() && bytes.last() != Some(&b'\n'));
-    (lines, false, bytes.len())
 }
 
 /// Porcelain v2 reports two statuses per file: X for the index and Y for the
@@ -11487,6 +11482,46 @@ async fn read_terminal_output(
     })
     .await
     .map_err(|error| format!("terminal read worker failed: {error}"))?
+}
+
+// Query only when splitting; do not run process inspection on every output poll.
+fn terminal_current_directory(pid: Option<u32>, fallback: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    if let Some(pid) = pid {
+        #[cfg(target_os = "macos")]
+        {
+            let mut command = Command::new("/usr/sbin/lsof");
+            command.args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]);
+            if let Ok(output) = run_bounded_command(&command, Duration::from_secs(3), None, 16 * 1024, 4096) {
+                if output.succeeded() && !output.stdout_truncated {
+                    if let Some(path) = output.stdout.lines().find_map(|line| line.strip_prefix('n')) {
+                        let path = PathBuf::from(path);
+                        if path.is_dir() { return Ok(path); }
+                    }
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(path) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
+            if path.is_dir() { return Ok(path); }
+        }
+    }
+    fallback.map(Ok).unwrap_or_else(user_home_directory)
+}
+
+#[tauri::command]
+async fn terminal_pane_working_directory(
+    manager: tauri::State<'_, TerminalProcessManager>,
+    pane_id: String,
+) -> Result<String, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (pid, fallback) = {
+            let processes = manager.processes.lock().map_err(|_| "terminal process manager lock poisoned".to_string())?;
+            let process = processes.get(&pane_id).ok_or_else(|| "terminal pane not found".to_string())?;
+            (process.child.process_id(), process.working_directory.clone())
+        };
+        terminal_current_directory(pid, fallback).map(|path| path.display().to_string()).map_err(to_string)
+    }).await.map_err(|error| format!("terminal directory worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -13625,6 +13660,10 @@ fn resolve_terminal_cwd(request: &TerminalPaneRequest) -> anyhow::Result<Option<
     let Some(mut workspace) = workspace else {
         return Ok(Some(user_home_directory()?));
     };
+    // A folder picker or split explicitly selected this path, including worktrees.
+    if request.working_directory.as_deref() == Some("Exact workspace") {
+        return Ok(Some(workspace));
+    }
     if request.workspace_mode.as_deref() != Some("worktree") {
         workspace = terminal_local_workspace(&workspace).unwrap_or(workspace);
     }
@@ -23521,6 +23560,7 @@ pub fn run() {
             rename_workspace_path,
             refresh_account_session,
             resize_terminal_pane,
+            terminal_pane_working_directory,
             resolve_file_mutation_proposal,
             resolve_provider_approval,
             resolve_capability_approval,
@@ -29258,6 +29298,40 @@ while True:
     }
 
     #[test]
+    fn terminal_explicit_folder_preserves_selected_subdirectory() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("chosen folder");
+        std::fs::create_dir(&folder).unwrap();
+        let request = TerminalPaneRequest {
+            workspace_path: Some(folder.display().to_string()),
+            working_directory: Some("Exact workspace".into()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_terminal_cwd(&request).unwrap(), Some(folder.canonicalize().unwrap()));
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn terminal_current_directory_follows_shell_cd() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("changed directory");
+        std::fs::create_dir(&folder).unwrap();
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "cd \"$1\" && echo ready && exec sleep 10", "--"])
+            .arg(&folder)
+            .stdout(Stdio::piped())
+            .spawn().unwrap();
+        let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
+        let resolved = terminal_current_directory(Some(child.id()), Some(temp.path().to_path_buf()));
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(line.trim(), "ready");
+        assert_eq!(resolved.unwrap().canonicalize().unwrap(), folder.canonicalize().unwrap());
+    }
+
+    #[test]
     fn terminal_cwd_ignores_blank_workspace_path() {
         let request = TerminalPaneRequest {
             pane_id: "blank-workspace".into(),
@@ -30753,6 +30827,50 @@ while True:
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         manager.read(pane_id, None).unwrap()
+    }
+
+    #[test]
+    fn exact_stats_handle_binary_files_and_many_untracked_files() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        std::fs::write(repo.path().join("image.bin"), [0u8, 1, 2]).unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        std::fs::write(repo.path().join("image.bin"), [0u8, 3, 4]).unwrap();
+        for index in 0..300 {
+            std::fs::write(repo.path().join(format!("new-{index}.txt")), "new\n").unwrap();
+        }
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert_eq!(status.additions, 300);
+        assert!(!status.stats_partial);
+        let comparison = status.compared_to_main.unwrap();
+        assert_eq!((comparison.additions, comparison.deletions), (300, 0));
+        assert!(!comparison.partial);
+        let (_, malformed) = parse_git_numstat("invalid\t1\tfile.txt");
+        assert!(malformed);
+    }
+
+    #[test]
+    fn source_control_main_comparison_includes_committed_and_untracked_changes() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        std::fs::write(repo.path().join("file.txt"), "base\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        run_git(repo.path(), &["checkout", "-b", "feature"]);
+        std::fs::write(repo.path().join("file.txt"), "base\ncommitted\n").unwrap();
+        run_git(repo.path(), &["commit", "-am", "feature"]);
+        std::fs::write(repo.path().join("file.txt"), "base\ncommitted\nworking\n").unwrap();
+        std::fs::write(repo.path().join("new.txt"), "new\n").unwrap();
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert_eq!(status.additions, 2);
+        let comparison = status.compared_to_main.unwrap();
+        assert_eq!((comparison.additions, comparison.deletions), (3, 0));
+        assert!(!comparison.partial);
+        run_git(repo.path(), &["branch", "-D", "main"]);
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(status.compared_to_main.is_none());
+        assert_eq!(status.additions, 2);
     }
 
     fn init_git_repo(repo: &Path) {

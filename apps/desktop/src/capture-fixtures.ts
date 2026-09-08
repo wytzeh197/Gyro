@@ -446,6 +446,7 @@ const sourceControl = {
   additions: 73,
   deletions: 6,
   statsPartial: false,
+  comparedToMain: { additions: 73, deletions: 6, partial: false },
   files: changedFiles,
   lastCheckedAt: NOW,
 };

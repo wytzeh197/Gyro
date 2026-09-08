@@ -4072,9 +4072,9 @@ expect(
     surfaceSource.includes('"gyro-terminal-workspace"') &&
     surfaceSource.includes('"is-empty"') &&
     surfaceSource.includes("gyro-terminal-toolbar is-empty") &&
-    surfaceSource.includes("AgentLauncherMenu") &&
+    surfaceSource.includes("onAddTerminalPane?.(launchOptions)") &&
     surfaceSource.includes('className="gyro-terminal-agent-button"') &&
-    surfaceSource.includes('className="gyro-terminal-surface-title"') &&
+    surfaceSource.includes('aria-label="Terminals"') &&
     surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
     surfaceSource.includes('aria-label="Start a terminal"') &&
     surfaceSource.includes("<span>New terminal</span>") &&
@@ -4286,16 +4286,17 @@ expect(
   "Desktop terminal backend should use PTYs instead of piped stdio.",
 );
 expect(
-  appSource.includes(': "Home"') &&
-    tauriSource.includes(
-      'request.working_directory.as_deref() == Some("Home")',
-    ) &&
-    tauriSource.includes("fn user_home_directory()") &&
+  appSource.includes('startInHome: !folderPath') &&
+    appSource.includes('directory: true, multiple: false, title: "Open terminal in folder"') &&
+    appSource.includes('(template ? selectedPane?.projectPath : undefined) ??') &&
+    !appSource.includes('selectedPane?.projectPath ??\n        workspaceActionRoot ??\n        savedProjects[0]?.path') &&
+    tauriSource.includes('request.working_directory.as_deref() == Some("Home")') &&
     tauriSource.includes("return Ok(Some(user_home_directory()?));"),
-  "Interactive CLI terminals should start in the user's home directory instead of inheriting the Gyro workspace.",
+  "Standalone terminals should default home and allow explicit folder selection.",
 );
 expect(
-  appSource.includes("Restart to reconnect") &&
+  appSource.includes("Previous output · process is no longer running") &&
+    appSource.includes("Start again") &&
     appSource.includes("macOptionIsMeta") &&
     appSource.includes("rightClickSelectsWord"),
   "Live terminal panes should expose real-terminal behavior and a restored-pane reconnect path.",
@@ -4421,14 +4422,13 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("function AgentLauncherMenu") &&
+  surfaceSource.includes("onAddTerminalPane?.(launchOptions)") &&
     surfaceSource.includes("function TerminalActionsMenu") &&
     surfaceSource.includes(
-      "onRunCommandProfile?.(profile.id, launchOptions)",
+      "onRunCommandProfile(profile.id, launchOptions)",
     ) &&
     surfaceSource.includes("<span>New terminal</span>") &&
     surfaceSource.includes("cliProfileShortLabel") &&
-    surfaceSource.includes("gyro-profile-readiness-dot") &&
     !surfaceSource.includes(
       'className="gyro-agent-launcher-heading">Start a terminal',
     ) &&
@@ -4674,7 +4674,7 @@ expect(
 expect(
   appSource.includes("const createCliSession = useCallback") &&
     appSource.includes("workspacePathOverride: projectPath") &&
-    appSource.includes("workingDirectory: launchWorkspacePath") &&
+    appSource.includes('workspacePathOverride ? "Exact workspace"') &&
     appSource.includes("existingPane?.projectPath") &&
     appSource.includes("selectedPane?.projectPath") &&
     appSource.includes("projectPath: snapshot.workspacePath") &&
@@ -6474,7 +6474,7 @@ for (const className of [
 
 expect(
   appSource.includes("drawBoldTextInBrightColors: true") &&
-    appSource.includes("minimumContrastRatio: 2.6") &&
+    appSource.includes("minimumContrastRatio: 1") &&
     appSource.includes('brightMagenta: "#f08cff"') &&
     appSource.includes('magenta: "#d86cff"') &&
     appSource.includes('brightYellow: "#ffd166"'),
@@ -6806,7 +6806,7 @@ expect(
     surfaceSource.includes('onThemeChange("system")') &&
     appSource.includes("function terminalThemeFor") &&
     appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
-    appSource.includes('background: "#f6f8fa"') &&
+    appSource.includes('background: "#ffffff"') &&
     appSource.includes('background: "#0c0c0c"') &&
     appSource.includes('brightMagenta: "#f08cff"') &&
     appSource.includes('brightYellow: "#ffd166"'),

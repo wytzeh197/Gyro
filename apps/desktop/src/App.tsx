@@ -1,3 +1,5 @@
+import { terminalLaunchProfiles } from "@gyro-dev/ui";
+import { terminalOutputUpdate } from "./terminal-output";
 import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
 import { BranchNameDialog } from "./branch-name-dialog";
 import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
@@ -1138,10 +1140,9 @@ export function App() {
         : undefined;
   const activeChatPanel: ChatSidePanelId | undefined =
     legacyRailPanel ?? activeChatCompanionPanel(companion, SOLO_CHAT_PANE_ID);
-  const commandProfiles =
-    config.commandProfiles.length > 0
-      ? config.commandProfiles
-      : defaultCommandProfiles();
+  const commandProfiles = terminalLaunchProfiles(
+    config.commandProfiles, providersForConfig(config), workbench.providerStatuses,
+  );
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
     [activeSessionId, sessions],
@@ -7237,6 +7238,7 @@ export function App() {
       startingOutput = "",
       template,
       workspacePathOverride,
+      startInHome = false,
       reveal = true,
       taskTitle,
       workspaceTaskId,
@@ -7247,11 +7249,21 @@ export function App() {
       startingOutput?: string;
       template?: TerminalTemplate;
       workspacePathOverride?: string;
+      startInHome?: boolean;
       /** Background tasks stay visible in the task rail until explicitly opened. */
       reveal?: boolean;
       taskTitle?: string;
       workspaceTaskId?: string;
     }) => {
+      // Resolve again at the launch boundary: saved profiles and alternate actions
+      // must obey the same connection gate as the start screen.
+      const resolved = terminalLaunchProfiles([profile], providersForConfig(config), workbench.providerStatuses)[0];
+      if (!resolved) return false;
+      if (resolved.launchUnavailableReason) {
+        notify("command-failed", `${profile.displayName}: ${resolved.launchUnavailableReason}`, "Check this provider in Settings before launching its CLI.");
+        return false;
+      }
+      profile = resolved;
       const process = terminalProcessForProfile(profile, commandOverride);
       const existingPane = workbench.terminalPanes.find(
         (pane) => pane.id === paneId,
@@ -7259,12 +7271,11 @@ export function App() {
       const selectedPane = workbench.terminalPanes.find(
         (pane) => pane.id === workbench.selectedTerminalPaneId,
       );
-      const launchWorkspacePath =
+      const launchWorkspacePath = startInHome ? undefined :
         workspacePathOverride ??
         existingPane?.projectPath ??
-        selectedPane?.projectPath ??
-        workspaceActionRoot ??
-        savedProjects[0]?.path;
+        (template ? selectedPane?.projectPath : undefined) ??
+        workspaceActionRoot;
       if (
         launchWorkspacePath &&
         !isWorkspaceTrusted(
@@ -7336,9 +7347,7 @@ export function App() {
           title: profile.displayName,
           workspacePath: launchWorkspacePath,
           workspaceMode: "local",
-          workingDirectory: launchWorkspacePath
-            ? "Workspace"
-            : profile.workingDirectory,
+          workingDirectory: workspacePathOverride ? "Exact workspace" : launchWorkspacePath ? "Workspace" : "Home",
         };
         // Ask for governance when the profile supports it. If the backend
         // cannot honour it the pane still opens, but ungoverned and labelled
@@ -7409,8 +7418,9 @@ export function App() {
       }
     },
     [
+      config,
+      workbench.providerStatuses,
       notify,
-      savedProjects,
       workbench.selectedTerminalPaneId,
       workbench.terminalPanes,
       workbench.preferences.workspaceTrust,
@@ -7419,19 +7429,27 @@ export function App() {
     ],
   );
 
-  const addTerminalPane = useCallback((options?: { reveal?: boolean }) => {
-    const profile = getCommandProfile(
-      [...commandProfiles, ...defaultCommandProfiles()],
-      "shell",
-    );
-    void launchTerminalPane({ profile, reveal: options?.reveal }).then((started) => {
-      notify(
-        started ? "terminal" : "command-failed",
-        started ? "Terminal added" : "Terminal start failed",
-        profile.displayName,
-      );
-    });
-  }, [commandProfiles, launchTerminalPane, notify]);
+  const addTerminalPane = useCallback(async (options?: { reveal?: boolean; directory?: "home" | "choose"; folderPath?: string }) => {
+    let folderPath = options?.folderPath;
+    try {
+      if (options?.directory === "choose") {
+        const selected = isTauriRuntime()
+          ? await open({ directory: true, multiple: false, title: "Open terminal in folder" })
+          : window.prompt("Open terminal in folder", workspaceActionRoot ?? "");
+        if (typeof selected !== "string" || !selected.trim()) return;
+        folderPath = selected;
+      }
+      const profile = getCommandProfile([...commandProfiles, ...defaultCommandProfiles()], "shell");
+      const started = await launchTerminalPane({
+        profile, reveal: options?.reveal,
+        startInHome: !folderPath,
+        workspacePathOverride: folderPath,
+      });
+      notify(started ? "terminal" : "command-failed", started ? "Terminal added" : "Terminal start failed", profile.displayName);
+    } catch (error) {
+      notify("command-failed", "Could not open terminal", String(error));
+    }
+  }, [commandProfiles, launchTerminalPane, notify, workspaceActionRoot]);
 
   const createCliSession = useCallback(
     (profileId: string, projectPath: string) => {
@@ -9379,17 +9397,20 @@ export function App() {
   ]);
 
   const splitTerminalPane = useCallback(
-    (template: TerminalTemplate) => {
-      const profile = getCommandProfile(commandProfiles, activeProfileId);
-      void launchTerminalPane({ profile, template }).then((started) => {
-        notify(
-          started ? "terminal" : "command-failed",
-          started ? "Terminal split" : "Terminal start failed",
-          started ? `${template}-pane template selected` : profile.displayName,
-        );
-      });
+    async (template: TerminalTemplate) => {
+      const source = workbench.terminalPanes.find((pane) => pane.id === workbench.selectedTerminalPaneId);
+      const profile = getCommandProfile(commandProfiles, source?.profileId || activeProfileId);
+      try {
+        const directory = source && isTauriRuntime()
+          ? await invoke<string>("terminal_pane_working_directory", { paneId: source.id })
+          : source?.workingDirectory || source?.projectPath;
+        const started = await launchTerminalPane({ profile, template, workspacePathOverride: directory, startInHome: !directory });
+        notify(started ? "terminal" : "command-failed", started ? "Terminal split" : "Terminal start failed", profile.displayName);
+      } catch (error) {
+        notify("command-failed", "Could not split terminal", String(error));
+      }
     },
-    [activeProfileId, commandProfiles, launchTerminalPane, notify],
+    [activeProfileId, commandProfiles, launchTerminalPane, notify, workbench.terminalPanes, workbench.selectedTerminalPaneId],
   );
 
   const renameTerminalPane = useCallback(
@@ -11717,15 +11738,19 @@ export function App() {
         return;
       }
       terminalReadInFlightRef.current.add(paneId);
+      const requestedRevision = terminalOutputRevisionRef.current[paneId];
       try {
         const snapshot = await invoke<TerminalPaneSnapshot>(
           "read_terminal_output",
           {
             paneId,
-            knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+            knownOutputRevision: requestedRevision,
           },
         );
-        syncTerminalSnapshot(snapshot);
+        // A restart or capability event can supersede an in-flight read.
+        if (terminalOutputRevisionRef.current[paneId] === requestedRevision) {
+          syncTerminalSnapshot(snapshot);
+        }
       } catch (error) {
         if (terminalPaneProcessIsMissing(error)) {
           dispatchWorkbench({
@@ -11764,11 +11789,10 @@ export function App() {
         return;
       }
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
+        await invoke<TerminalPaneSnapshot>(
           "write_terminal_input",
           { input, paneId },
         );
-        syncTerminalSnapshot(snapshot);
         window.setTimeout(() => {
           void refreshTerminalPane(paneId);
         }, 200);
@@ -12217,16 +12241,16 @@ export function App() {
         return;
       }
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
+        await invoke<TerminalPaneSnapshot>(
           "resize_terminal_pane",
           { cols, paneId, rows },
         );
-        syncTerminalSnapshot(snapshot);
+        void refreshTerminalPane(paneId);
       } catch {
         notify("command-failed", "Terminal resize failed", paneId);
       }
     },
-    [notify, syncTerminalSnapshot],
+    [notify, refreshTerminalPane],
   );
 
   const setTerminalTemplate = useCallback(
@@ -17025,13 +17049,15 @@ function LiveTerminalPaneBody({
         const terminal = new Terminal({
           allowTransparency: true,
           cursorBlink: true,
+          // Browser preview fixtures are plain text; native output is a raw PTY stream.
+          convertEol: !isTauriRuntime(),
           drawBoldTextInBrightColors: true,
           fontFamily:
             "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
           fontSize: 12,
-          lineHeight: 1.35,
+          lineHeight: 1.2,
           macOptionIsMeta: true,
-          minimumContrastRatio: 2.6,
+          minimumContrastRatio: 1,
           rightClickSelectsWord: true,
           scrollOnUserInput: true,
           scrollback: 5000,
@@ -17043,11 +17069,6 @@ function LiveTerminalPaneBody({
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
 
-        const initialOutput = paneOutputRef.current;
-        if (initialOutput) {
-          terminal.write(formatTerminalDelta(initialOutput));
-          renderedOutputRef.current = initialOutput;
-        }
         if (isActive) {
           terminal.focus();
         }
@@ -17080,13 +17101,13 @@ function LiveTerminalPaneBody({
             if (sizeKey === lastSizeRef.current) {
               return;
             }
-            lastSizeRef.current = sizeKey;
             // Tell the PTY for live sessions so full-screen CLIs (Claude Code)
             // redraw instead of leaving garbage from the previous geometry.
             if (
               statusRef.current === "running" ||
               statusRef.current === "waiting"
             ) {
+              lastSizeRef.current = sizeKey;
               onResizeRef.current(pane.id, cols, rows);
             }
           } catch {
@@ -17106,6 +17127,11 @@ function LiveTerminalPaneBody({
 
         const resizeObserver = new ResizeObserver(scheduleFit);
         resizeObserver.observe(hostRef.current);
+        // Fit before replaying cursor-addressed output; xterm defaults to 80×24.
+        fitAndReport();
+        const initialOutput = paneOutputRef.current;
+        terminal.write(initialOutput);
+        renderedOutputRef.current = initialOutput;
         scheduleFit();
         // Panel height often animates open after mount; refit shortly after.
         const lateFit = window.setTimeout(scheduleFit, 120);
@@ -17149,23 +17175,15 @@ function LiveTerminalPaneBody({
     if (nextOutput === previousOutput) {
       return;
     }
-    if (nextOutput.startsWith(previousOutput)) {
-      terminal.write(
-        formatTerminalDelta(nextOutput.slice(previousOutput.length)),
-      );
-    } else {
-      terminal.clear();
-      terminal.write(formatTerminalDelta(nextOutput));
-    }
+    const update = terminalOutputUpdate(previousOutput, nextOutput);
+    if (update.reset) terminal.reset();
+    terminal.write(update.data);
     renderedOutputRef.current = nextOutput;
   }, [pane.output]);
 
   useEffect(() => {
-    if (!isActive) {
-      return;
-    }
-    terminalRef.current?.focus();
-    // Refit when the pane becomes selected.
+    if (isActive) terminalRef.current?.focus();
+    // Also report dimensions when a stopped pane gets a new live process.
     const timer = window.setTimeout(() => {
       try {
         const host = hostRef.current;
@@ -17197,7 +17215,7 @@ function LiveTerminalPaneBody({
       }
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [isActive, pane.id]);
+  }, [isActive, pane.id, pane.status]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -17227,16 +17245,19 @@ function LiveTerminalPaneBody({
         tabIndex={0}
       />
       {pane.status === "restored" ? (
-        <button
-          className="gyro-terminal-reconnect"
-          onClick={(event) => {
-            event.stopPropagation();
-            onReconnect(pane.id);
-          }}
-          type="button"
-        >
-          Restart to reconnect
-        </button>
+        <div className="gyro-terminal-recovery" role="status">
+          <span>Previous output · process is no longer running</span>
+          <button
+            className="gyro-terminal-reconnect"
+            onClick={(event) => {
+              event.stopPropagation();
+              onReconnect(pane.id);
+            }}
+            type="button"
+          >
+            Start again
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -17245,17 +17266,17 @@ function LiveTerminalPaneBody({
 function terminalThemeFor(theme: ResolvedTheme) {
   if (theme === "light") {
     return {
-      background: "#f6f8fa",
+      background: "#ffffff",
       black: "#1f242c",
       blue: "#1f66d1",
-      brightBlack: "#5b6470",
+      brightBlack: "#8e8e93",
       brightBlue: "#2f7dff",
       brightCyan: "#008f9a",
       brightGreen: "#168a50",
       brightMagenta: "#b034c9",
       brightRed: "#d92d20",
       brightWhite: "#171a20",
-      brightYellow: "#a15c00",
+      brightYellow: "#ffbf00",
       cursor: "#1f242c",
       cursorAccent: "#ffffff",
       cyan: "#007c89",
@@ -17264,7 +17285,7 @@ function terminalThemeFor(theme: ResolvedTheme) {
       magenta: "#9b26b6",
       red: "#b42318",
       selectionBackground: "#dfe2e6",
-      white: "#d8d9dc",
+      white: "#ededed",
       yellow: "#875200",
     };
   }
@@ -17292,10 +17313,6 @@ function terminalThemeFor(theme: ResolvedTheme) {
     white: "#dddddd",
     yellow: "#f2c94c",
   };
-}
-
-function formatTerminalDelta(value: string) {
-  return value.replace(/\r?\n/g, "\r\n");
 }
 
 function withCouncilConfig(config: GyroConfig): GyroConfig {

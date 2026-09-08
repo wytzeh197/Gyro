@@ -1357,6 +1357,7 @@ export type SourceControlState = {
   additions: number;
   deletions: number;
   statsPartial: boolean;
+  comparedToMain?: { additions: number; deletions: number; partial: boolean } | null;
   files: SourceControlFile[];
   lastCheckedAt?: string;
   error?: string;
@@ -1982,6 +1983,7 @@ export type CommandProfile = {
   providerId?: string | null;
   defaultModel?: string | null;
   readiness?: "ready" | "waiting" | "blocked";
+  launchUnavailableReason?: string;
 };
 
 export type ModelProviderConfig = {

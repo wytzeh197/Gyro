@@ -34897,60 +34897,12 @@ button.gyro-account-menu-row:hover,
   white-space: nowrap;
 }
 
-.gyro-terminal-connection-notice {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-warn) 8%, var(--gyro-app));
-  border-bottom: 0.5px solid
-    color-mix(in srgb, var(--gyro-warn) 28%, var(--gyro-premium-hairline));
-  color: var(--gyro-warn);
-  display: flex;
-  gap: 9px;
-  min-width: 0;
-  padding: 8px 14px;
-}
 
-.gyro-terminal-connection-notice > div {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
 
-.gyro-terminal-connection-notice strong {
-  color: var(--gyro-premium-text);
-  font-size: 12px;
-  font-weight: 620;
-}
 
-.gyro-terminal-connection-notice span {
-  color: var(--gyro-premium-muted);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.gyro-terminal-connection-notice button {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-warn) 14%, transparent);
-  border: 0.5px solid color-mix(in srgb, var(--gyro-warn) 36%, transparent);
-  border-radius: var(--gyro-premium-radius-sm);
-  color: var(--gyro-premium-text);
-  display: inline-flex;
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 600;
-  gap: 5px;
-  min-height: 28px;
-  padding: 0 9px;
-}
 
-.gyro-terminal-connection-notice button:hover {
-  background: color-mix(in srgb, var(--gyro-warn) 22%, transparent);
-}
 
-.gyro-terminal-workspace.has-connection-issue {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
 
 .gyro-terminal-workspace.is-empty {
   grid-template-rows: auto minmax(0, 1fr);
@@ -35018,13 +34970,7 @@ button.gyro-account-menu-row:hover,
     justify-content: flex-end;
   }
 
-  .gyro-terminal-connection-notice {
-    align-items: flex-start;
-  }
 
-  .gyro-terminal-connection-notice span {
-    white-space: normal;
-  }
 }
 
 @media (max-width: 520px) {
@@ -35034,13 +34980,7 @@ button.gyro-account-menu-row:hover,
     padding-inline: 8px;
   }
 
-  .gyro-terminal-connection-notice button {
-    padding: 0 7px;
-  }
 
-  .gyro-terminal-connection-notice button svg {
-    display: none;
-  }
 }
 
 /* --------------------------------------------------------------------------
@@ -38411,9 +38351,6 @@ textarea:focus-visible,
 :root[data-theme] .gyro-terminal-workspace:not(.is-empty) {
   grid-template-rows: 48px minmax(0, 1fr);
 }
-:root[data-theme] .gyro-terminal-workspace.has-connection-issue:not(.is-empty) {
-  grid-template-rows: 48px auto minmax(0, 1fr);
-}
 :root[data-theme] .gyro-terminal-toolbar {
   display: flex;
   flex-wrap: nowrap;
@@ -38550,4 +38487,539 @@ textarea:focus-visible,
 }
 :root[data-theme] .gyro-terminal-pane {
   grid-template-rows: 40px minmax(0, 1fr);
+}
+
+/* Terminal focus keeps hidden renderers mounted so switching panes preserves TUI state. */
+:root[data-theme] .gyro-terminal-grid[data-focused="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-grid[data-focused="true"] > .gyro-terminal-pane:not(.is-active) {
+  display: none;
+}
+:root[data-theme] .gyro-terminal-grid[data-focused="true"] > .gyro-terminal-pane.is-active {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+:root[data-theme] .gyro-terminal-pane.is-active > header {
+  box-shadow: inset 0 -2px 0 var(--gyro-accent, #3974d5);
+}
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-terminal-grid {
+  gap: 6px;
+}
+.gyro-terminal-pane-state {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--gyro-muted);
+  text-transform: capitalize;
+}
+.gyro-terminal-focus-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 12px;
+}
+.gyro-terminal-recovery {
+  position: absolute;
+  inset: auto 10px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-muted);
+  font-size: 12px;
+}
+.gyro-terminal-recovery .gyro-terminal-reconnect {
+  position: static;
+  flex-shrink: 0;
+}
+
+/* Shared terminal chrome: quiet tabs and a neutral terminal canvas. */
+:root[data-theme="light"] { --gyro-terminal-canvas: #fff; --gyro-terminal-tab: #f3f3f3; }
+:root[data-theme="dark"] { --gyro-terminal-canvas: #0c0c0c; --gyro-terminal-tab: #222; }
+:root[data-theme] .gyro-terminal-pane,
+:root[data-theme] .gyro-terminal-live-body,
+:root[data-theme] .gyro-xterm-frame,
+:root[data-theme] .gyro-xterm-host {
+  background: var(--gyro-terminal-canvas);
+}
+:root[data-theme] .gyro-terminal-pane,
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-terminal-pane {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  grid-template-rows: 42px minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-pane > header,
+:root[data-theme] .gyro-terminal-pane.is-active > header {
+  height: 42px;
+  min-height: 42px;
+  padding: 5px 10px;
+  gap: 4px;
+  border-bottom: 0;
+  background: var(--gyro-terminal-canvas);
+  box-shadow: none;
+}
+:root[data-theme] .gyro-terminal-pane-title {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 9px;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-pane.is-active .gyro-terminal-pane-title {
+  background: var(--gyro-terminal-tab);
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-pane-title strong,
+:root[data-theme] .gyro-terminal-pane.is-active .gyro-terminal-pane-title strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: inherit;
+}
+:root[data-theme] .gyro-terminal-pane-title > svg { flex-shrink: 0; }
+:root[data-theme] .gyro-terminal-pane .gyro-terminal-pane-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 22px;
+  margin-left: 14px;
+  color: var(--gyro-muted);
+  opacity: 1;
+}
+:root[data-theme] .gyro-terminal-drag-handle {
+  width: 0;
+  overflow: hidden;
+}
+:root[data-theme] .gyro-terminal-pane:hover .gyro-terminal-drag-handle,
+:root[data-theme] .gyro-terminal-drag-handle:focus-visible { width: 14px; }
+:root[data-theme] .gyro-terminal-grid,
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-terminal-grid {
+  gap: 1px;
+  padding: 0;
+  background: var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-xterm-host,
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-xterm-host {
+  padding: 10px 16px;
+}
+:root[data-theme] .gyro-terminal-focus-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-focus-toggle:hover,
+:root[data-theme] .gyro-terminal-pane-close:hover {
+  background: var(--gyro-terminal-tab);
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-recovery {
+  inset: auto 16px 12px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--gyro-terminal-canvas);
+  font-size: 11px;
+}
+:root[data-theme] .gyro-terminal-pane > header {
+  justify-content: flex-start;
+}
+:root[data-theme] .gyro-terminal-pane pre,
+:root[data-theme] .gyro-xterm-host .xterm,
+:root[data-theme] .gyro-xterm-host .xterm-viewport,
+:root[data-theme] .gyro-xterm-host .xterm-screen {
+  background: var(--gyro-terminal-canvas);
+}
+
+/* One shared terminal tab strip; pane bodies stay mounted when tabs are hidden. */
+:root[data-theme] .gyro-terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+:root[data-theme] .gyro-terminal-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 34px;
+  max-width: 240px;
+  border-radius: 11px;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-tab.is-active { background: var(--gyro-terminal-tab); color: var(--gyro-text); }
+:root[data-theme] .gyro-terminal-tab > button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+}
+:root[data-theme] .gyro-terminal-tab > button[role="tab"] { cursor: grab; }
+:root[data-theme] .gyro-terminal-tab > button[role="tab"]:active { cursor: grabbing; }
+:root[data-theme] .gyro-terminal-tab > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 155px; }
+:root[data-theme] .gyro-terminal-tab > button > svg { flex-shrink: 0; }
+:root[data-theme] .gyro-terminal-tab .gyro-terminal-tab-close { padding: 0 8px; margin-right: 3px; color: var(--gyro-muted); }
+:root[data-theme] .gyro-terminal-tab-grip { opacity: 0; }
+:root[data-theme] .gyro-terminal-tab:hover .gyro-terminal-tab-grip,
+:root[data-theme] .gyro-terminal-tab:focus-within .gyro-terminal-tab-grip { opacity: 1; }
+:root[data-theme] .gyro-terminal-tab-close:hover { background: var(--gyro-control-hover); }
+:root[data-theme] .gyro-terminal-toolbar { gap: 8px; padding: 6px 12px; }
+:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher { flex-shrink: 0; }
+:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher-button { border: 0; background: transparent; }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count] { position: relative; }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="1"],
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="vertical"] { grid-template-columns: minmax(0, 1fr); }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="horizontal"],
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="3"],
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="1"],
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="horizontal"] { grid-template-rows: minmax(0, 1fr); }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="vertical"],
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="3"],
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="4"] { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count] > .gyro-terminal-pane { grid-template-rows: minmax(0, 1fr); min-height: 0; }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count] > .gyro-terminal-pane > header { display: none; }
+:root[data-theme] .gyro-terminal-pane[data-terminal-hidden="true"] { display: none; }
+:root[data-theme] .gyro-terminal-drop-zones {
+  position: absolute;
+  inset: 8px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+:root[data-theme] .gyro-terminal-drop-zone {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--gyro-muted);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--gyro-terminal-canvas) 90%, transparent);
+  color: var(--gyro-text);
+  font-size: 13px;
+}
+:root[data-theme] .gyro-terminal-drop-zone.is-hovered {
+  border-style: solid;
+  border-color: var(--gyro-accent, #3974d5);
+  background: color-mix(in srgb, var(--gyro-terminal-canvas) 82%, #3974d5);
+}
+:root[data-theme] .gyro-terminal-tab,
+:root[data-theme] .gyro-terminal-tab.is-active,
+:root[data-theme] .gyro-terminal-tab > button[role="tab"] {
+  box-shadow: none;
+  border: 0;
+}
+:root[data-theme] .gyro-terminal-tab > button:focus-visible {
+  outline: 2px solid var(--gyro-accent, #3974d5);
+  outline-offset: -2px;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button {
+  border: 0;
+  background: transparent;
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button > span,
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button > svg:last-child { display: none; }
+
+/* Hover belongs to the complete tab, not a second pill around its label. */
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, var(--gyro-terminal-canvas));
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab > button[role="tab"],
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab > button[role="tab"]:hover,
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab > button[role="tab"]:active {
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+:root[data-theme] .gyro-terminal-tab-grip { color: var(--gyro-muted); }
+:root[data-theme] .gyro-terminal-tab:hover .gyro-terminal-tab-grip,
+:root[data-theme] .gyro-terminal-tab:focus-within .gyro-terminal-tab-grip { opacity: 0.5; }
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab .gyro-terminal-tab-close {
+  height: 24px;
+  width: 24px;
+  padding: 0;
+  margin: 0 5px 0 0;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab .gyro-terminal-tab-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  color: var(--gyro-text);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-theme] .gyro-terminal-tab { transition: background-color 120ms ease; }
+  :root[data-theme] .gyro-terminal-tab-grip { transition: opacity 120ms ease; }
+}
+
+:root[data-theme] .gyro-terminal-pane { position: relative; }
+:root[data-theme] .gyro-terminal-corner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(280px, 100%);
+  z-index: 10;
+  pointer-events: none;
+}
+:root[data-theme] .gyro-terminal-corner-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gyro-muted);
+  opacity: 0;
+  pointer-events: auto;
+}
+:root[data-theme] .gyro-terminal-corner-trigger:hover,
+:root[data-theme] .gyro-terminal-corner-trigger:focus-visible,
+:root[data-theme] .gyro-terminal-corner.is-open .gyro-terminal-corner-trigger {
+  opacity: 1;
+  background: var(--gyro-terminal-tab);
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-corner-menu {
+  margin: 0 6px 6px;
+  padding: 5px;
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px #00000014;
+  pointer-events: auto;
+}
+:root[data-theme] .gyro-terminal-corner-menu p {
+  margin: 0;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--gyro-muted);
+  white-space: normal;
+}
+:root[data-theme] .gyro-terminal-corner-menu button {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-corner-menu button svg { flex-shrink: 0; margin-top: 1px; }
+:root[data-theme] .gyro-terminal-corner-menu button:hover { background: var(--gyro-control-hover); }
+:root[data-theme] .gyro-terminal-corner-menu button.is-danger { color: var(--gyro-danger, #b42318); }
+:root[data-theme] .gyro-terminal-corner-menu small { display: block; margin-top: 3px; font-size: 11px; color: var(--gyro-muted); }
+@media (hover: none) { :root[data-theme] .gyro-terminal-corner-trigger { opacity: 1; } }
+.gyro-sidebar-project-terminal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--gyro-muted);
+  opacity: 0;
+}
+.gyro-sidebar-project-row:hover .gyro-sidebar-project-terminal,
+.gyro-sidebar-project-terminal:focus-visible { opacity: 1; }
+.gyro-sidebar-project-terminal:hover { background: var(--gyro-control-hover); color: var(--gyro-text); }
+:root[data-theme] .gyro-sidebar-project-row:has(.gyro-sidebar-project-terminal) {
+  grid-template-columns: minmax(0, 1fr) 24px;
+}
+:root[data-theme] .gyro-sidebar-project-row.has-remove:has(.gyro-sidebar-project-terminal) {
+  grid-template-columns: minmax(0, 1fr) 24px 24px;
+}
+
+/* Terminal overflow menu: compact native-style rows, not stacked buttons. */
+:root[data-theme] .gyro-terminal-actions-menu {
+  width: 252px;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  max-height: min(620px, calc(100dvh - 88px));
+  overflow-y: auto;
+  padding: 5px;
+  gap: 0;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 10px;
+  background: var(--gyro-pane);
+  box-shadow: 0 8px 28px #00000014, 0 2px 6px #00000008;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.3;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button:hover:not(:disabled),
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button:focus-visible {
+  background: var(--gyro-control-hover);
+  box-shadow: none;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button:disabled {
+  opacity: 0.4;
+  background: transparent;
+  cursor: default;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button.is-danger,
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button.is-danger > svg {
+  color: var(--gyro-danger, #b42318);
+}
+:root[data-theme] .gyro-terminal-actions-menu > .gyro-terminal-actions-separator {
+  height: 1px;
+  min-height: 1px;
+  margin: 5px 4px;
+  background: var(--gyro-border-soft);
+  border: 0;
+}
+
+/* The empty workspace uses the same canvas and quiet controls as live terminals. */
+:root[data-theme] .gyro-terminal-workspace.is-empty {
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--gyro-terminal-canvas);
+}
+:root[data-theme] .gyro-terminal-workspace.is-empty > .gyro-terminal-toolbar {
+  display: none;
+}
+:root[data-theme] .gyro-terminal-workspace.is-empty > .gyro-terminal-grid {
+  grid-row: 1;
+  grid-template: minmax(min-content, 1fr) / minmax(0, 1fr);
+  background: var(--gyro-terminal-canvas);
+  padding: 32px 24px;
+  overflow: auto;
+}
+:root[data-theme] .gyro-terminal-workspace.is-empty .gyro-terminal-empty {
+  width: 100%;
+  max-width: 480px;
+  margin: auto;
+  padding: 0;
+  gap: 28px;
+  background: transparent;
+}
+.gyro-terminal-empty-intro { width: 100%; text-align: center; }
+.gyro-terminal-empty-intro > svg { color: var(--gyro-muted); margin-bottom: 12px; }
+.gyro-terminal-empty-intro h2 { margin: 0; font-size: 20px; font-weight: 550; letter-spacing: -0.4px; color: var(--gyro-text); }
+.gyro-terminal-empty-intro p { margin: 8px 0 20px; font-size: 13px; line-height: 1.5; color: var(--gyro-muted); }
+.gyro-terminal-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+:root[data-theme] .gyro-terminal-empty-actions > button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 34px; padding: 0 12px; border: 1px solid var(--gyro-border-soft);
+  border-radius: 7px; background: transparent; color: var(--gyro-text);
+  font: inherit; font-size: 12px; box-shadow: none;
+}
+:root[data-theme] .gyro-terminal-empty-actions > button:first-child { background: var(--gyro-terminal-tab); border-color: transparent; }
+:root[data-theme] .gyro-terminal-empty-actions > button:hover { background: var(--gyro-control-hover); }
+:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher {
+  width: 100%; gap: 2px 12px; padding-top: 18px;
+  border-top: 1px solid var(--gyro-border-soft);
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+}
+.gyro-terminal-launcher-label {
+  grid-column: 1 / -1; margin: 0 8px 8px; text-align: left;
+  font-size: 11px; font-weight: 500; color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button {
+  min-height: 36px; border: 0; background: transparent; box-shadow: none; padding: 0 8px;
+}
+:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button:hover:not(:disabled) { background: var(--gyro-control-hover); }
+:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button > span { font-size: 12px; }
+:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button > small { font-size: 10px; }
+
+/* Working-tree totals share the source-control heading's type scale. */
+:root[data-theme] .gyro-sidebar-section:has(.gyro-scm-panel) > .gyro-sidebar-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0 6px 7px;
+  padding: 0;
+  min-height: 0;
+  font-size: 12px;
+}
+:root[data-theme] .gyro-sidebar-section:has(.gyro-scm-panel) > .gyro-sidebar-section-heading > .gyro-nav-label {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+}
+.gyro-scm-heading-totals {
+  display: inline-flex;
+  gap: 6px;
+  font-size: inherit;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.gyro-scm-heading-totals .is-added { color: var(--gyro-success); }
+.gyro-scm-heading-totals .is-removed { color: var(--gyro-danger); }
+.gyro-scm-heading-unavailable {
+  color: var(--gyro-muted);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
 }

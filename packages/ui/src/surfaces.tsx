@@ -1,3 +1,4 @@
+import { placeTerminalTab, type TerminalDropEdge, type TerminalSplitLayout } from "./terminal-layout";
 import { SettingsHelp } from "./settings-help";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
@@ -710,7 +711,7 @@ type AppChromeProps = {
   onStartDebugSession?: (command: string) => void;
   onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
   onStopDebugSession?: (session: DebugSessionState) => void;
-  onAddTerminalPane?: () => void;
+  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
   onCloseTerminalPane?: (paneId: string) => void;
   onSelectTerminalPane?: (paneId: string) => void;
   onPinSession?: (sessionId: string) => void;
@@ -2958,7 +2959,7 @@ function WorkspaceSidebarContent({
   onStartDebugSession?: (command: string) => void;
   onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
   onStopDebugSession?: (session: DebugSessionState) => void;
-  onAddTerminalPane?: () => void;
+  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
   onCloseTerminalPane?: (paneId: string) => void;
   onSelectTerminalPane?: (paneId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
@@ -2970,8 +2971,11 @@ function WorkspaceSidebarContent({
   /** When false, the hide control is omitted (Workspace code layout). */
   canHideSidebar?: boolean;
 }) {
+  // CLI sessions belong to the terminal surface, including when pinned.
   const sidebarSessions = sessions.filter(
-    (session) => !isTransientWorkspacePath(session.workspacePath),
+    (session) =>
+      session.origin !== "cli" &&
+      !isTransientWorkspacePath(session.workspacePath),
   );
   const pinnedSessions = sidebarSessions.filter((session) =>
     pinnedSessionIds.includes(session.id),
@@ -3978,7 +3982,26 @@ function WorkspaceSidebarContent({
           ) : null}
 
           {activeIdeView === "source-control" ? (
-            <SidebarSection grow title="Source control">
+            <SidebarSection
+              grow
+              title="Source control"
+              headerActions={ide?.sourceControl.comparedToMain ? (
+                ide.sourceControl.comparedToMain.partial ? (
+                  <span className="gyro-scm-heading-unavailable" title="Could not finish counting changes compared to main. Refresh to retry.">Count unavailable</span>
+                ) : (
+                  <span
+                    className="gyro-scm-heading-totals"
+                    title="Compared to main"
+                    aria-label={`Compared to main: ${ide.sourceControl.comparedToMain.additions.toLocaleString()} additions, ${ide.sourceControl.comparedToMain.deletions.toLocaleString()} deletions`}
+                  >
+                    <span className="is-added">+{ide.sourceControl.comparedToMain.additions.toLocaleString()}</span>
+                    <span className="is-removed">−{ide.sourceControl.comparedToMain.deletions.toLocaleString()}</span>
+                  </span>
+                )
+              ) : ide?.sourceControl.available ? (
+                <span className="gyro-scm-heading-unavailable" title="Comparison with local main is unavailable. Check that the branch exists and refresh to retry.">Count unavailable</span>
+              ) : undefined}
+            >
               <div className="gyro-scm-panel">
                 <div className="gyro-sidebar-scm-group-label">
                   <span className="gyro-scm-label-text">Repository</span>
@@ -4918,6 +4941,7 @@ function WorkspaceSidebarContent({
                     }}
                   >
                     <SidebarProjectRow
+                      onOpenTerminal={() => onAddTerminalPane?.({ folderPath: project.key })}
                       draggable
                       icon={
                         project.hasWorkspace
@@ -5129,6 +5153,7 @@ function SidebarProjectRow({
   onDragStart,
   onKeyDown,
   onRemove,
+  onOpenTerminal,
 }: {
   draggable?: boolean;
   icon: IconComponent;
@@ -5141,6 +5166,7 @@ function SidebarProjectRow({
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onRemove?: () => void;
+  onOpenTerminal?: () => void;
 }) {
   return (
     <div
@@ -5178,6 +5204,9 @@ function SidebarProjectRow({
         <span>{label}</span>
         {isCollapsed === undefined ? meta ? <small>{meta}</small> : null : null}
       </button>
+      {onOpenTerminal ? (
+        <button className="gyro-sidebar-project-terminal" aria-label={`Open terminal in ${label}`} title="Open terminal here" onClick={onOpenTerminal} type="button"><Terminal size={13} /></button>
+      ) : null}
       {onRemove ? (
         <button
           aria-label={`Remove ${label} from Gyro app`}
@@ -10490,7 +10519,7 @@ type CliWorkspaceSurfaceProps = {
   onProfileChange: (profileId: string) => void;
   onPaneTabChange: (tab: WorkbenchPaneTab) => void;
   onRunProfile: () => void;
-  onAddTerminalPane?: () => void;
+  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
   onOpenCommandPalette?: () => void;
   onSplitTerminalPane?: (template: TerminalTemplate) => void;
   onSelectTerminalPane?: (paneId: string) => void;
@@ -10706,7 +10735,7 @@ export function CliWorkspaceSurface({
             ) : (
               <button
                 className="gyro-empty-action-row"
-                onClick={onAddTerminalPane}
+                onClick={() => onAddTerminalPane?.()}
                 type="button"
               >
                 <Plus size={14} />
@@ -11361,7 +11390,7 @@ type IdeSurfaceProps = {
   onPaneTabChange: (tab: WorkbenchPaneTab) => void;
   onSelectTerminalPane?: (paneId: string) => void;
   onRenameTerminalPane?: (paneId: string) => void;
-  onAddTerminalPane?: () => void;
+  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
   onSplitTerminalPane?: (template: TerminalTemplate) => void;
   onRestartTerminalPane?: (paneId: string) => void;
   onKillTerminalPane?: (paneId: string) => void;
@@ -12407,6 +12436,8 @@ export type ChatRailTerminalTools = Omit<
 
 type TerminalLaunchOptions = {
   reveal?: boolean;
+  directory?: "home" | "choose";
+  folderPath?: string;
 };
 
 type TerminalPanelProps = {
@@ -12621,83 +12652,6 @@ function cliProfileShortLabel(profile: CommandProfile) {
   return profile.displayName;
 }
 
-function AgentLauncherMenu({
-  profiles,
-  activeProfileId,
-  onProfileChange,
-  onRunCommandProfile,
-  launchOptions,
-}: {
-  profiles: CommandProfile[];
-  activeProfileId: string;
-  onProfileChange: (profileId: string) => void;
-  onRunCommandProfile?: (
-    profileId: string,
-    options?: TerminalLaunchOptions,
-  ) => void;
-  launchOptions?: TerminalLaunchOptions;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
-    setIsOpen(false),
-  );
-
-  return (
-    <div className="gyro-agent-launcher" ref={menuRef}>
-      <button
-        aria-label="New terminal"
-        aria-expanded={isOpen}
-        aria-haspopup="menu"
-        className="gyro-terminal-agent-button"
-        onClick={() => setIsOpen((current) => !current)}
-        title="Start a CLI"
-        type="button"
-      >
-        <Plus size={14} />
-        <span>New terminal</span>
-        <ChevronDown size={13} />
-      </button>
-      {isOpen ? (
-        <div className="gyro-agent-launcher-menu" role="menu">
-          {profiles.map((profile) => {
-            const readiness = profile.readiness ?? "ready";
-            const isBlocked = readiness === "blocked";
-            const readinessLabel = isBlocked
-              ? "Unavailable"
-              : readiness === "waiting"
-                ? "Setup needed"
-                : "Ready";
-            const shortLabel = cliProfileShortLabel(profile);
-            return (
-              <button
-                aria-label={`${shortLabel}: ${readinessLabel}`}
-                className={profile.id === activeProfileId ? "is-active" : ""}
-                disabled={isBlocked}
-                key={profile.id}
-                onClick={() => {
-                  onProfileChange(profile.id);
-                  onRunCommandProfile?.(profile.id, launchOptions);
-                  setIsOpen(false);
-                }}
-                role="menuitem"
-                title={`${profile.displayName}: ${readinessLabel}`}
-                type="button"
-              >
-                <Terminal size={14} />
-                <strong>{shortLabel}</strong>
-                <span
-                  aria-hidden="true"
-                  className={`gyro-profile-readiness-dot is-${readiness}`}
-                />
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function TerminalActionsMenu({
   extraActions = [],
   paneId,
@@ -12867,7 +12821,6 @@ export function TerminalPanel({
   onTerminalUtilityAction,
   onRefreshTerminalSourceControl,
   onReviewTerminalChanges,
-  onWriteTerminalInput,
   renderTerminalPaneBody,
   revealWorkspaceOnLaunch = true,
 }: TerminalPanelProps) {
@@ -12886,7 +12839,6 @@ export function TerminalPanel({
   );
   const canStopActivePane =
     activePane?.status === "running" || activePane?.status === "waiting";
-  const connectionIssue = terminalConnectionIssue(activePane?.output);
   const presetLabel = cliLaunchPreset
     ? cliLaunchPresetLabel(cliLaunchPreset, profiles)
     : "Start preset";
@@ -12898,7 +12850,50 @@ export function TerminalPanel({
     presetCount > 0 &&
     presetCount <= CLI_LAUNCH_PRESET_MAX_PANES &&
     !isLaunchingCliPreset;
+  const [splitLayout, setSplitLayout] = useState<TerminalSplitLayout>({
+    ids: [],
+    axis: "horizontal",
+  });
+  const [dropEdge, setDropEdge] = useState<TerminalDropEdge>();
+  const availableSplitIds = splitLayout.ids.filter((id) =>
+    panes.some((pane) => pane.id === id),
+  );
+  const visibleIds =
+    activePaneId && availableSplitIds.includes(activePaneId)
+      ? availableSplitIds
+      : activePaneId
+        ? [activePaneId]
+        : [];
+  const finishTerminalDrag = () => {
+    setDraggedPaneId(undefined);
+    setDropEdge(undefined);
+  };
+  const dropTerminal = (edge: TerminalDropEdge) => {
+    if (!draggedPaneId || !activePaneId) return;
+    const next = placeTerminalTab(
+      { ...splitLayout, ids: visibleIds },
+      activePaneId,
+      draggedPaneId,
+      edge,
+    );
+    setSplitLayout(next);
+    if (next.ids.includes(draggedPaneId)) onSelectTerminalPane?.(draggedPaneId);
+    finishTerminalDrag();
+  };
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
+  useEffect(() => {
+    if (!draggedPaneId) return;
+    const cancel = () => {
+      setDraggedPaneId(undefined);
+      setDropEdge(undefined);
+    };
+    window.addEventListener("blur", cancel);
+    window.addEventListener("dragend", cancel);
+    return () => {
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("dragend", cancel);
+    };
+  }, [draggedPaneId]);
   const movePaneByKeyboard = (paneId: string, direction: -1 | 1) => {
     const index = panes.findIndex((pane) => pane.id === paneId);
     const target = panes[index + direction];
@@ -12908,11 +12903,7 @@ export function TerminalPanel({
   };
   return (
     <div
-      className={[
-        "gyro-terminal-workspace",
-        hasPanes ? "" : "is-empty",
-        connectionIssue ? "has-connection-issue" : "",
-      ]
+      className={["gyro-terminal-workspace", hasPanes ? "" : "is-empty"]
         .filter(Boolean)
         .join(" ")}
     >
@@ -12921,26 +12912,125 @@ export function TerminalPanel({
           hasPanes ? "gyro-terminal-toolbar" : "gyro-terminal-toolbar is-empty"
         }
       >
-        <strong className="gyro-terminal-surface-title">Terminals</strong>
-        {activePane?.projectPath ? (
-          <span
-            className="gyro-terminal-project"
-            title={activePane.projectPath}
-          >
-            {workspaceName(activePane.projectPath)}
-          </span>
-        ) : null}
+        <div
+          className="gyro-terminal-tabs"
+          role="tablist"
+          aria-label="Terminals"
+        >
+          {panes.map((pane) => (
+            <div
+              className={`gyro-terminal-tab ${pane.id === activePaneId ? "is-active" : ""}`}
+              key={pane.id}
+            >
+              <button
+                onClick={() => onSelectTerminalPane?.(pane.id)}
+                role="tab"
+                aria-selected={pane.id === activePaneId}
+                aria-controls={`terminal-panel-${pane.id}`}
+                id={`terminal-tab-${pane.id}`}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData(
+                    "application/x-gyro-terminal",
+                    pane.id,
+                  );
+                  setDraggedPaneId(pane.id);
+                }}
+                onDragEnd={finishTerminalDrag}
+                onDragOver={(event) => {
+                  if (draggedPaneId) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggedPaneId && draggedPaneId !== pane.id)
+                    onMoveTerminalPane?.(draggedPaneId, pane.id);
+                  finishTerminalDrag();
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.altKey &&
+                    [
+                      "ArrowLeft",
+                      "ArrowRight",
+                      "ArrowUp",
+                      "ArrowDown",
+                    ].includes(event.key)
+                  ) {
+                    event.preventDefault();
+                    const edge = (
+                      {
+                        ArrowLeft: "left",
+                        ArrowRight: "right",
+                        ArrowUp: "top",
+                        ArrowDown: "bottom",
+                      } as const
+                    )[event.key as "ArrowLeft"];
+                    if (activePaneId) {
+                      setSplitLayout(
+                        placeTerminalTab(
+                          { ...splitLayout, ids: visibleIds },
+                          activePaneId,
+                          pane.id,
+                          edge,
+                        ),
+                      );
+                      onSelectTerminalPane?.(pane.id);
+                    }
+                  }
+                }}
+                title={`${pane.title} · ${pane.status} · ${pane.workingDirectory || pane.projectPath || "Terminal"} · Drag to split; Alt+arrow to place`}
+                type="button"
+              >
+                <Terminal size={15} aria-hidden="true" />
+                <span>{pane.title}</span>
+                <GripVertical
+                  className="gyro-terminal-tab-grip"
+                  size={12}
+                  aria-hidden="true"
+                />
+              </button>
+              <button
+                className="gyro-terminal-tab-close"
+                aria-label={`Close ${pane.title}`}
+                onClick={() => onCloseTerminalPane?.(pane.id)}
+                type="button"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          className="gyro-terminal-agent-button"
+          aria-label="New terminal"
+          title="New terminal"
+          onClick={() => onAddTerminalPane?.(launchOptions)}
+          type="button"
+        >
+          <Plus size={14} />
+          <span>New terminal</span>
+        </button>
         <span className="gyro-terminal-toolbar-spacer" />
-        <AgentLauncherMenu
-          activeProfileId={activeProfileId}
-          launchOptions={launchOptions}
-          onProfileChange={onProfileChange}
-          onRunCommandProfile={onRunCommandProfile}
-          profiles={profiles}
-        />
+        {visibleIds.length > 1 ? (
+          <button
+            className="gyro-terminal-focus-toggle"
+            aria-label="Focus terminal"
+            title="Focus terminal"
+            onClick={() => setSplitLayout({ ids: [], axis: "horizontal" })}
+            type="button"
+          >
+            <Maximize2 size={15} />
+          </button>
+        ) : null}
         {hasPanes ? (
           <TerminalActionsMenu
             extraActions={[
+              {
+                label: "Open terminal in folder…",
+                icon: FolderOpen,
+                onClick: () => onAddTerminalPane?.({ ...launchOptions, directory: "choose" }),
+              },
               {
                 label: "Split terminal",
                 icon: Columns2,
@@ -12996,20 +13086,26 @@ export function TerminalPanel({
           />
         ) : null}
       </div>
-      {connectionIssue ? (
-        <TerminalConnectionNotice
-          issue={connectionIssue}
-          onRunSignIn={
-            connectionIssue.command && onWriteTerminalInput
-              ? () => onWriteTerminalInput(`${connectionIssue.command}\r`)
-              : undefined
-          }
-        />
-      ) : null}
-      <div className="gyro-terminal-grid" aria-label="Terminal grid">
+      <div
+        className="gyro-terminal-grid"
+        data-terminal-count={visibleIds.length}
+        data-terminal-axis={splitLayout.axis}
+        aria-label="Terminal grid"
+      >
         {panes.length > 0 ? (
           panes.map((pane) => (
             <TerminalPaneView
+              hidden={!visibleIds.includes(pane.id)}
+              placementStyle={{
+                gridColumn:
+                  visibleIds.length <= 2 && splitLayout.axis === "vertical"
+                    ? 1
+                    : (visibleIds.indexOf(pane.id) % 2) + 1,
+                gridRow:
+                  visibleIds.length <= 2 && splitLayout.axis === "vertical"
+                    ? visibleIds.indexOf(pane.id) + 1
+                    : Math.floor(visibleIds.indexOf(pane.id) / 2) + 1,
+              }}
               command={pane.command}
               draggedPaneId={draggedPaneId}
               isActive={pane.id === activePaneId}
@@ -13019,14 +13115,14 @@ export function TerminalPanel({
                 event.preventDefault();
               }}
               onDragStart={() => setDraggedPaneId(pane.id)}
-              onDrop={() => {
-                if (draggedPaneId) {
-                  onMoveTerminalPane?.(draggedPaneId, pane.id);
-                }
-                setDraggedPaneId(undefined);
-              }}
+              onDrop={finishTerminalDrag}
               onMoveBackward={() => movePaneByKeyboard(pane.id, -1)}
               onMoveForward={() => movePaneByKeyboard(pane.id, 1)}
+              onRemoveFromSplit={visibleIds.length > 1 ? () => {
+                const remaining = visibleIds.filter((id) => id !== pane.id);
+                setSplitLayout({ ...splitLayout, ids: remaining });
+                if (pane.id === activePaneId && remaining[0]) onSelectTerminalPane?.(remaining[0]);
+              } : undefined}
               onClose={() => onCloseTerminalPane?.(pane.id)}
               onSelect={() => onSelectTerminalPane?.(pane.id)}
               output={pane.output}
@@ -13044,20 +13140,28 @@ export function TerminalPanel({
             className="gyro-terminal-empty"
             aria-label="No terminal panes"
           >
+            <div className="gyro-terminal-empty-intro">
+              <Terminal aria-hidden="true" size={24} />
+              <h2>Start a terminal</h2>
+              <p>Open a shell in your home folder, or choose where to work.</p>
+              {onAddTerminalPane ? (
+                <div className="gyro-terminal-empty-actions">
+                  <button onClick={() => onAddTerminalPane(launchOptions)} type="button">
+                    <Plus aria-hidden="true" size={15} />
+                    New terminal
+                  </button>
+                  <button onClick={() => onAddTerminalPane({ ...launchOptions, directory: "choose" })} type="button">
+                    <FolderOpen aria-hidden="true" size={15} />
+                    Open in folder…
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <nav
               className="gyro-companion-launcher gyro-terminal-launcher"
-              aria-label="Start a terminal"
+              aria-label="Start a CLI"
             >
-              {onAddTerminalPane ? (
-                <button
-                  onClick={() => onAddTerminalPane(launchOptions)}
-                  type="button"
-                >
-                  <Terminal aria-hidden="true" size={15} />
-                  <span>New terminal</span>
-                  <Plus aria-hidden="true" size={14} />
-                </button>
-              ) : null}
+              <p className="gyro-terminal-launcher-label">Or launch a CLI</p>
               {onRunCommandProfile
                 ? profiles
                     .filter((profile) => profile.id !== "shell")
@@ -13069,15 +13173,15 @@ export function TerminalPanel({
                           onProfileChange(profile.id);
                           onRunCommandProfile(profile.id, launchOptions);
                         }}
-                        title={profile.displayName}
+                        title={profile.launchUnavailableReason ? `${profile.displayName} · ${profile.launchUnavailableReason}` : [profile.command, ...profile.args].join(" ")}
                         type="button"
                       >
                         <Terminal aria-hidden="true" size={15} />
                         <span>{profile.displayName}</span>
                         {profile.readiness === "blocked" ? (
-                          <small>Unavailable</small>
+                          <small>{profile.launchUnavailableReason ?? "Not connected"}</small>
                         ) : profile.readiness === "waiting" ? (
-                          <small>Setup needed</small>
+                          <small>Not connected</small>
                         ) : (
                           <Plus aria-hidden="true" size={14} />
                         )}
@@ -13098,60 +13202,40 @@ export function TerminalPanel({
             </nav>
           </section>
         )}
+        {draggedPaneId && panes.length > 1 ? (
+          <div
+            className="gyro-terminal-drop-zones"
+            aria-label="Place terminal in split view"
+          >
+            {(["left", "right", "top", "bottom"] as const).map((edge) => (
+              <div
+                key={edge}
+                className={`gyro-terminal-drop-zone is-${edge} ${dropEdge === edge ? "is-hovered" : ""}`}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDropEdge(edge);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dropTerminal(edge);
+                }}
+              >
+                <span>
+                  Split{" "}
+                  {edge === "top"
+                    ? "above"
+                    : edge === "bottom"
+                      ? "below"
+                      : edge}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
-  );
-}
-
-type TerminalConnectionIssue = {
-  command?: string;
-  server?: string;
-};
-
-function terminalConnectionIssue(
-  output?: string,
-): TerminalConnectionIssue | undefined {
-  if (
-    !output ||
-    !/mcp startup incomplete|mcp server is not logged in/i.test(output)
-  ) {
-    return undefined;
-  }
-  const server =
-    output.match(
-      /\b([a-z0-9][a-z0-9._-]*)\s+MCP server is not logged in/i,
-    )?.[1] ??
-    output.match(
-      /MCP startup incomplete[^\r\n]*failed:\s*([a-z0-9][a-z0-9._-]*)/i,
-    )?.[1];
-  const command = output.match(/run\s*[`']([^`']+)[`']/i)?.[1];
-  return { command, server };
-}
-
-function TerminalConnectionNotice({
-  issue,
-  onRunSignIn,
-}: {
-  issue: TerminalConnectionIssue;
-  onRunSignIn?: () => void;
-}) {
-  const serviceLabel = issue.server ?? "an MCP service";
-  return (
-    <aside className="gyro-terminal-connection-notice" role="status">
-      <TriangleAlert aria-hidden="true" size={15} />
-      <div>
-        <strong>Sign in to {serviceLabel}</strong>
-        <span>
-          This CLI session started without an authenticated connection.
-        </span>
-      </div>
-      {onRunSignIn ? (
-        <button onClick={onRunSignIn} type="button">
-          Run sign-in
-          <ArrowRight size={13} />
-        </button>
-      ) : null}
-    </aside>
   );
 }
 
@@ -13282,7 +13366,7 @@ function WorkbenchPaneContent({
   onRunCommandProfile?: (profileId: string) => void;
   onLaunchCliPreset?: () => void;
   onRunProfile: () => void;
-  onAddTerminalPane?: () => void;
+  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
   onOpenCommandPalette?: () => void;
   onSplitTerminalPane?: (template: TerminalTemplate) => void;
   onSelectTerminalPane?: (paneId: string) => void;
@@ -13552,7 +13636,7 @@ type WorkspaceToolPanelProps = {
   onRunCommandProfile?: (profileId: string) => void;
   onLaunchCliPreset?: () => void;
   onRunProfile: () => void;
-  onAddTerminalPane?: () => void;
+  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
   onOpenCommandPalette?: () => void;
   onSplitTerminalPane?: (template: TerminalTemplate) => void;
   onSelectTerminalPane?: (paneId: string) => void;
@@ -25387,6 +25471,8 @@ type TerminalStatus = "restored" | "running" | "waiting" | "done" | "failed";
 
 function TerminalPaneView({
   pane,
+  hidden,
+  placementStyle,
   draggedPaneId,
   isActive,
   onDragEnd,
@@ -25396,9 +25482,12 @@ function TerminalPaneView({
   onMoveBackward,
   onMoveForward,
   onClose,
+  onRemoveFromSplit,
   onSelect,
   renderBody,
 }: {
+  hidden?: boolean;
+  placementStyle?: CSSProperties;
   title: string;
   command: string;
   output: string;
@@ -25415,6 +25504,7 @@ function TerminalPaneView({
   onMoveBackward?: () => void;
   onMoveForward?: () => void;
   onClose?: () => void;
+  onRemoveFromSplit?: () => void;
   onSelect?: () => void;
   pane: TerminalPane;
   renderBody?: (pane: TerminalPane) => ReactNode;
@@ -25429,6 +25519,9 @@ function TerminalPaneView({
     worktreeName,
   } = pane;
   const paneRef = useRef<HTMLElement>(null);
+  const [closeMenuOpen, setCloseMenuOpen] = useState(false);
+  const closeMenuRef = useOutsidePointerDismiss<HTMLDivElement>(closeMenuOpen, () => setCloseMenuOpen(false));
+  useEffect(() => { if (hidden) setCloseMenuOpen(false); }, [hidden]);
   useEffect(() => {
     if (isActive)
       paneRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -25464,17 +25557,16 @@ function TerminalPaneView({
   return (
     <section
       ref={paneRef}
+      id={`terminal-panel-${pane.id}`}
+      role="tabpanel"
+      aria-labelledby={`terminal-tab-${pane.id}`}
+      data-terminal-hidden={hidden ? "true" : undefined}
+      style={placementStyle}
       className={className}
       data-layout={pane.layout ?? "auto"}
-      draggable
       data-dragging={draggedPaneId === pane.id ? "true" : undefined}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", pane.id);
-        onDragStart?.();
-      }}
       onDrop={(event) => {
         event.preventDefault();
         onDrop?.();
@@ -25485,9 +25577,15 @@ function TerminalPaneView({
         title={`${title} · ${activity} · ${contextLabel || workspaceMode}`}
       >
         <button
+          onClick={(event) => event.stopPropagation()}
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", pane.id);
+            onDragStart?.();
+          }}
           aria-label={`Move ${title}`}
           className="gyro-terminal-drag-handle"
-          onClick={(event) => event.stopPropagation()}
           onKeyDown={handleMoveKeyDown}
           title="Drag to move"
           type="button"
@@ -25495,30 +25593,60 @@ function TerminalPaneView({
           <GripVertical size={14} />
         </button>
         <div className="gyro-terminal-pane-title">
-          <span
-            className={`gyro-ring is-${activity}`}
-            role="img"
-            aria-label={activity}
-          />
+          <Terminal aria-hidden="true" size={14} />
           <strong>{title}</strong>
+          {status === "restored" || status === "failed" || pane.attention ? (
+            <span className="gyro-terminal-pane-state">
+              {status === "restored" ? "Stopped" : activity}
+            </span>
+          ) : null}
+          {onClose ? (
+            <button
+              aria-label={`Close ${title}`}
+              className="gyro-terminal-pane-close"
+              draggable={false}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+              onDragStart={(event) => event.preventDefault()}
+              title={`Close ${title}`}
+              type="button"
+            >
+              <X size={13} />
+            </button>
+          ) : null}
         </div>
-        {onClose ? (
-          <button
-            aria-label={`Close ${title}`}
-            className="gyro-terminal-pane-close"
-            draggable={false}
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose();
-            }}
-            onDragStart={(event) => event.preventDefault()}
-            title={`Close ${title}`}
-            type="button"
-          >
-            <X size={13} />
-          </button>
-        ) : null}
       </header>
+      {onClose ? (
+        <div className={`gyro-terminal-corner ${closeMenuOpen ? "is-open" : ""}`} ref={closeMenuRef}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault(); event.stopPropagation(); setCloseMenuOpen(false);
+              closeMenuRef.current?.querySelector<HTMLButtonElement>(".gyro-terminal-corner-trigger")?.focus();
+            }
+          }}
+        >
+          <button className="gyro-terminal-corner-trigger" aria-label={`Close options for ${title}`} aria-haspopup="menu" aria-expanded={closeMenuOpen}
+            onClick={() => setCloseMenuOpen((open) => !open)} type="button" title="Close options">
+            <X size={15} />
+          </button>
+          {closeMenuOpen ? (
+            <div className="gyro-terminal-corner-menu" role="menu" aria-label={`${title} close options`}>
+              {terminalPaneHasActiveWork(pane) ? <p role="note">This terminal may still be doing active work. Terminating it will stop its process.</p> : null}
+              {onRemoveFromSplit ? (
+                <button role="menuitem" autoFocus onClick={() => { setCloseMenuOpen(false); onRemoveFromSplit(); }} type="button">
+                  <Minimize2 size={14} /><span>Remove from split<small>Keep the terminal open in its tab</small></span>
+                </button>
+              ) : null}
+              <button role="menuitem" autoFocus={!onRemoveFromSplit} className="is-danger" onClick={() => { setCloseMenuOpen(false); onClose(); }} type="button">
+                <X size={14} /><span>Terminate terminal<small>Stop the process and close its tab</small></span>
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="gyro-terminal-live-body">
         {renderBody ? (
           renderBody(pane)
