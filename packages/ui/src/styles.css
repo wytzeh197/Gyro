@@ -148,8 +148,8 @@
   --gyro-font-display:
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --gyro-font-micro: 12px;
-  --gyro-font-chrome: 13px;
-  --gyro-font-support: 12px;
+  --gyro-font-chrome: 14px;
+  --gyro-font-support: 13px;
   --gyro-font-body: 14px;
   --gyro-font-lead: 16px;
   --gyro-font-heading: 24px;
@@ -1167,7 +1167,7 @@ button {
   border-radius: 6px;
   color: var(--gyro-sidebar-text);
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   font-weight: 650;
   justify-content: center;
   min-height: 28px;
@@ -1187,7 +1187,7 @@ button {
   border-radius: 8px;
   color: var(--gyro-sidebar-text);
   display: grid;
-  font-size: 13px;
+  font-size: var(--gyro-font-body);
   gap: 7px;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   min-height: 30px;
@@ -2594,7 +2594,7 @@ button.gyro-account-menu-row:hover {
   padding: 15px 15px 5px;
   resize: none;
   width: 100%;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-composer-shell.is-hero textarea {
@@ -2603,7 +2603,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-composer-shell textarea::placeholder {
   color: var(--gyro-faint);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-clean-machine-path {
@@ -7094,7 +7094,7 @@ textarea:focus-visible {
 
 .gyro-composer-shell textarea {
   min-height: 84px;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-composer-bar {
@@ -7874,7 +7874,7 @@ textarea:focus-visible {
 
 .gyro-composer-shell textarea {
   min-height: 72px;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-composer-shell.is-hero {
@@ -10050,7 +10050,7 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-project-row {
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   height: 26px;
   min-height: 26px;
 }
@@ -11292,7 +11292,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
   border-radius: 6px;
   color: #d7d4cf;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   min-height: 28px;
   padding: 0 6px;
 }
@@ -11310,7 +11310,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
   border-radius: 6px;
   color: #d7d4cf;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   gap: 7px;
   min-height: 28px;
   padding: 0 7px;
@@ -11834,7 +11834,7 @@ textarea:focus-visible {
   border: 1px solid #3c3d3f;
   border-bottom: 0;
   border-radius: 20px 20px 0 0;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   min-height: 60px;
   padding: 17px 12px 7px;
   position: relative;
@@ -11843,7 +11843,7 @@ textarea:focus-visible {
 
 .gyro-chat-start .gyro-composer-shell textarea:focus-visible {
   outline: 0;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-shell:focus-within textarea {
@@ -11858,7 +11858,7 @@ textarea:focus-visible {
   background: transparent;
   border: 0;
   border-radius: 0;
-  font-size: 14px;
+  font-size: var(--gyro-font-body);
   height: 38px;
   line-height: 38px;
   min-height: 38px;
@@ -11892,7 +11892,7 @@ textarea:focus-visible {
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell textarea {
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   min-height: 50px;
   padding: 10px 12px 4px;
 }
@@ -11900,7 +11900,7 @@ textarea:focus-visible {
 .gyro-chat-start .gyro-composer-shell textarea::placeholder,
 .gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder {
   color: #858a92;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-composer-bar {
@@ -13225,7 +13225,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
   border-radius: 6px;
   color: #d8d9dc;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   font-weight: 650;
   min-height: 27px;
   padding: 0 6px;
@@ -13258,7 +13258,7 @@ textarea:focus-visible {
   border: 1px solid transparent;
   border-radius: 8px;
   color: #d8d9dc;
-  font-size: 13px;
+  font-size: var(--gyro-font-body);
   font-weight: 400;
   gap: 8px;
   min-height: 30px;
@@ -13440,7 +13440,7 @@ textarea:focus-visible {
   color: var(--gyro-muted);
   display: inline-flex;
   flex: 0 1 auto;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   gap: 7px;
   min-height: 30px;
   min-width: 0;
@@ -13803,7 +13803,7 @@ body {
   border-radius: 20px 20px 0 0;
   box-shadow: none;
   color: #f3f0eb;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed):focus-within {
@@ -14158,7 +14158,7 @@ body {
 }
 
 .gyro-chat-transcript .gyro-message p {
-  font-size: 14px;
+  font-size: var(--gyro-font-body);
   line-height: 1.62;
   margin: 0;
 }
@@ -14213,7 +14213,7 @@ body {
   color: #ece9e3;
   min-height: 84px;
   padding: 14px 14px 8px;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-composer-dock .gyro-composer-bar {
@@ -15089,7 +15089,7 @@ body {
     max-width: 100%;
     min-width: 0;
     width: 100%;
-    font-size: 16px;
+    font-size: var(--gyro-font-body);
   }
 
   .gyro-chat-start .gyro-composer-shell:not(.is-provider-collapsed) {
@@ -15244,7 +15244,7 @@ body {
 .gyro-composer-shell.is-hero textarea,
 .gyro-chat-start .gyro-composer-bar {
   border-color: transparent;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-context-row {
@@ -15491,7 +15491,7 @@ body {
 .gyro-chat-composer-dock .gyro-composer-shell textarea {
   caret-color: #f1eee8;
   color: #f0ede7;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.45;
   min-height: 56px;
   padding: 13px 13px 2px;
@@ -15499,7 +15499,7 @@ body {
 
 .gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder {
   color: #86888e;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-composer-dock .gyro-composer-bar {
@@ -17098,7 +17098,7 @@ body {
 .gyro-composer-shell.is-hero textarea {
   border-radius: var(--gyro-premium-radius-composer)
     var(--gyro-premium-radius-composer) 0 0;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-bar,
@@ -17451,7 +17451,7 @@ textarea,
   box-shadow: none;
   outline: 0;
   outline-offset: 0;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-shell:focus-within textarea,
@@ -17493,7 +17493,7 @@ textarea,
 
 .gyro-chat-transcript .gyro-message.is-assistant > div:last-child {
   width: 100%;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
@@ -17575,7 +17575,7 @@ textarea,
 
 .gyro-response-body {
   display: grid;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   gap: 18px;
   letter-spacing: 0;
   line-height: 1.6;
@@ -17601,7 +17601,7 @@ textarea,
 
 .gyro-response-body h3 {
   color: #f4f2ee;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   font-weight: 650;
   line-height: 1.6;
   padding-top: 2px;
@@ -17754,7 +17754,7 @@ textarea,
   }
 
   .gyro-response-body {
-    font-size: 16px;
+    font-size: var(--gyro-font-body);
     gap: 14px;
     line-height: 1.6;
   }
@@ -18432,7 +18432,7 @@ textarea,
   textarea {
   caret-color: var(--gyro-hero-text);
   color: var(--gyro-hero-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 :root[data-theme="light"]
@@ -18441,7 +18441,7 @@ textarea,
   textarea::placeholder {
   color: var(--gyro-hero-placeholder);
   opacity: 1;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-composer-chip,
@@ -18501,7 +18501,7 @@ textarea,
   background: #ffffff;
   border-color: #d9dde5;
   color: var(--gyro-hero-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 :root[data-theme="light"]
@@ -18511,7 +18511,7 @@ textarea,
 :root[data-theme="light"] .gyro-composer-shell.is-hero textarea::placeholder {
   color: var(--gyro-hero-placeholder);
   opacity: 1;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-context-row {
@@ -18912,7 +18912,7 @@ body,
 }
 
 .gyro-sidebar-persistent-header > .gyro-sidebar-mode-group {
-  margin-right: -3px;
+  margin-right: 0;
 }
 
 .gyro-sidebar-mode-group::before {
@@ -18943,7 +18943,7 @@ body,
   box-shadow: none;
   color: var(--gyro-premium-muted);
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   font-weight: 450;
   justify-content: center;
   letter-spacing: 0;
@@ -19386,7 +19386,7 @@ textarea:focus-visible,
 
 .gyro-chat-transcript .gyro-message.is-assistant > div:last-child {
   color: var(--gyro-premium-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
@@ -19437,13 +19437,13 @@ textarea:focus-visible,
   background: transparent;
   border-color: var(--gyro-premium-hairline-soft);
   color: var(--gyro-premium-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder,
 .gyro-chat-start .gyro-composer-shell textarea::placeholder {
   color: var(--gyro-premium-faint);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-surface.has-environment .gyro-environment-rail,
@@ -19728,7 +19728,7 @@ textarea:focus-visible,
   min-height: 58px;
   padding: 14px 13px 6px;
   z-index: 1;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start
@@ -19772,7 +19772,7 @@ textarea:focus-visible,
   > .gyro-composer-bar {
   border-color: transparent;
   box-shadow: none;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 @media (max-width: 780px) {
@@ -21085,7 +21085,7 @@ textarea:focus-visible,
 
 .gyro-sidebar-action.is-settings-page {
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   min-height: 29px;
   padding-inline: 8px;
 }
@@ -22547,7 +22547,7 @@ button.gyro-settings-row em::after {
   caret-color: var(--gyro-hero-text);
   color: var(--gyro-hero-text);
   flex: 0 0 auto;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   min-height: 67px;
   padding: 14px 13px 4px;
 }
@@ -22573,7 +22573,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-start .gyro-composer-shell textarea::placeholder {
   color: var(--gyro-hero-placeholder);
   opacity: 1;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-chip,
@@ -22662,7 +22662,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider > textarea {
   caret-color: var(--gyro-hero-text);
   color: var(--gyro-hero-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   min-height: 67px;
   padding: 14px 13px 4px;
 }
@@ -22693,7 +22693,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-composer-dock .gyro-composer-shell textarea::placeholder {
   color: var(--gyro-hero-placeholder);
   opacity: 1;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-composer-dock .gyro-composer-chip,
@@ -22762,7 +22762,7 @@ button.gyro-settings-row em::after {
   > textarea {
   caret-color: var(--gyro-hero-text);
   color: var(--gyro-hero-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 :root[data-theme="light"]
@@ -23446,7 +23446,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-run-timeline.is-narration .gyro-response-body,
 .gyro-run-narration {
   color: var(--gyro-muted);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   font-weight: 400;
   letter-spacing: -0.005em;
   line-height: 1.6;
@@ -24314,7 +24314,7 @@ button.gyro-settings-row em::after {
 .gyro-chat-run .gyro-response,
 .gyro-chat-run .gyro-response-body {
   color: var(--gyro-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   font-weight: 400;
   letter-spacing: -0.011em;
   line-height: 1.6;
@@ -24337,7 +24337,7 @@ button.gyro-settings-row em::after {
 
 .gyro-chat-run .gyro-response-body h3 {
   color: var(--gyro-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   font-weight: 550;
 }
 
@@ -24994,7 +24994,7 @@ button.gyro-response-changed-files:hover {
 
 .gyro-side-chat-message > .gyro-response-body,
 .gyro-side-chat-message > .gyro-response-streaming-text {
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
@@ -25500,13 +25500,13 @@ button.gyro-account-menu-row:hover,
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-row.gyro-sidebar-explorer-row {
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   height: 24px;
   min-height: 24px;
 }
 
 .gyro-app-shell:has(.gyro-workspace-route.is-code) .gyro-sidebar-project-row {
-  font-size: 12px;
+  font-size: var(--gyro-font-body);
   height: 26px;
   min-height: 26px;
 }
@@ -25776,7 +25776,7 @@ button.gyro-account-menu-row:hover,
   color: #f3f3f3;
   max-width: 100%;
   padding: 8px 13px;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
@@ -26391,7 +26391,7 @@ button.gyro-account-menu-row:hover,
 .gyro-composer-shell > textarea {
   position: relative;
   z-index: 1;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-composer-shell > .gyro-composer-bar,
@@ -26988,19 +26988,19 @@ button.gyro-account-menu-row:hover,
   background: var(--gyro-hero-composer);
 }
 
-/* Conversation text shares the 16px system-font measure in every layout. */
+/* Conversation text shares the body scale across full, split, and side chats. */
 .gyro-chat-run .gyro-response-body {
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
 .gyro-chat-run .gyro-response-body h3 {
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
 .gyro-user-message-bubble {
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
   border-radius: 16px;
 }
@@ -27011,7 +27011,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider > textarea,
 .gyro-chat-start .gyro-composer-shell.is-hero.has-provider > textarea {
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 20px;
 }
 
@@ -29144,7 +29144,7 @@ button.gyro-account-menu-row:hover,
   max-height: 148px;
   min-height: 52px;
   resize: none;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-composer-dock
@@ -30016,7 +30016,7 @@ button.gyro-account-menu-row:hover,
   > textarea {
   min-height: 46px;
   padding: 11px 12px 2px;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 /* -- Topbar --------------------------------------------------------------- */
@@ -30479,7 +30479,7 @@ button.gyro-account-menu-row:hover,
   box-sizing: border-box;
   min-width: 0;
   width: 100%;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 /* The transcript fills the canvas; the composer floats over its lower edge. */
@@ -32000,7 +32000,10 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-mode-row,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-mode-row {
   border-radius: var(--gyro-radius-md);
+  font-size: var(--gyro-font-support);
   min-height: 30px;
+  min-width: 0;
+  padding-block: 5px;
 }
 
 .gyro-sidebar-action,
@@ -33319,7 +33322,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-sidebar-action.is-settings-page {
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--gyro-font-body);
   min-height: 34px;
   padding-inline: 9px;
 }
@@ -34778,10 +34781,10 @@ button.gyro-account-menu-row:hover,
 /* Sessions/Workspace is navigation, but it is also a two-way switch. Keep the
    shared track visible in both themes so the selected pill has a stable home. */
 :root[data-theme="light"] {
-  --gyro-sidebar-mode-track: #e6ecf3;
-  --gyro-sidebar-mode-track-border: rgba(24, 33, 44, 0.12);
+  --gyro-sidebar-mode-track: #e9eaec;
+  --gyro-sidebar-mode-track-border: rgba(24, 33, 44, 0.08);
   --gyro-sidebar-mode-active: #ffffff;
-  --gyro-sidebar-mode-active-border: rgba(24, 33, 44, 0.16);
+  --gyro-sidebar-mode-active-border: rgba(24, 33, 44, 0.1);
   --gyro-sidebar-mode-active-shadow: rgba(24, 33, 44, 0.1);
 }
 
@@ -34791,6 +34794,9 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="light"]
   .gyro-app-shell.is-chat-shell
   .gyro-sidebar-mode-group {
+  margin-top: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
   background: var(--gyro-sidebar-mode-track);
   border: 1px solid var(--gyro-sidebar-mode-track-border);
   box-shadow: inset 0 1px 0 var(--gyro-premium-inset-highlight);
@@ -34798,12 +34804,23 @@ button.gyro-account-menu-row:hover,
   padding: 2px;
 }
 
+/* Let the selected button own its highlight so both segments stay inside
+   their grid cells when the Workspace sidebar is resized. */
 .gyro-sidebar-mode-group::before {
+  content: none;
+}
+
+.gyro-sidebar-mode-group > .gyro-sidebar-mode-row,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group > .gyro-sidebar-mode-row {
+  box-sizing: border-box;
+  border: 1px solid transparent;
+}
+
+.gyro-sidebar-mode-group > .gyro-sidebar-mode-row.is-active,
+.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group > .gyro-sidebar-mode-row.is-active {
   background: var(--gyro-sidebar-mode-active);
   border-color: var(--gyro-sidebar-mode-active-border);
-  box-shadow:
-    inset 0 1px 0 var(--gyro-premium-inset-highlight),
-    0 1px 2px var(--gyro-sidebar-mode-active-shadow);
+  box-shadow: 0 1px 2px var(--gyro-sidebar-mode-active-shadow);
 }
 
 /* Folderless chats remain findable without being represented as a synthetic
@@ -35274,7 +35291,7 @@ textarea:focus-visible,
 .gyro-app-shell.is-chat-shell .gyro-session-row {
   border-radius: var(--gyro-radius-sm);
   box-shadow: none;
-  font-size: 13px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-sidebar-action:hover,
@@ -35482,7 +35499,7 @@ textarea:focus-visible,
   border: 0;
   border-radius: var(--gyro-radius-composer) var(--gyro-radius-composer) 0 0;
   color: var(--gyro-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
 }
 
 .gyro-chat-start .gyro-composer-shell.is-hero.has-provider > .gyro-composer-bar,
@@ -36136,8 +36153,7 @@ textarea:focus-visible,
 :root[data-density="compact"] .gyro-sidebar-project-row,
 :root[data-density="compact"] .gyro-sidebar-thread,
 :root[data-density="compact"] .gyro-session-row,
-:root[data-density="compact"] .gyro-footer-button,
-:root[data-density="compact"] .gyro-sidebar-mode-row {
+:root[data-density="compact"] .gyro-footer-button {
   min-height: 32px;
   padding-block: 4px;
 }
@@ -36147,8 +36163,7 @@ textarea:focus-visible,
 :root[data-density="comfortable"] .gyro-sidebar-project-row,
 :root[data-density="comfortable"] .gyro-sidebar-thread,
 :root[data-density="comfortable"] .gyro-session-row,
-:root[data-density="comfortable"] .gyro-footer-button,
-:root[data-density="comfortable"] .gyro-sidebar-mode-row {
+:root[data-density="comfortable"] .gyro-footer-button {
   min-height: 36px;
   padding-block: 4px;
 }
@@ -36481,7 +36496,7 @@ textarea:focus-visible,
 
 .gyro-chat-surface.has-companion .gyro-user-message-bubble p {
   color: inherit;
-  font-size: 16px;
+  font-size: var(--gyro-font-body);
   line-height: 1.6;
 }
 
@@ -37012,7 +37027,7 @@ textarea:focus-visible,
   }
 
   .gyro-sidebar-ai-chat .gyro-composer-shell.is-hero.has-provider > textarea {
-    font-size: 14px;
+    font-size: var(--gyro-font-body);
     line-height: 20px;
     min-height: 64px;
     padding: 12px;
@@ -38312,4 +38327,227 @@ textarea:focus-visible,
 
 .gyro-chat-surface.is-tiled .gyro-composer-context-tooltip::after {
   display: none;
+}
+
+/* Sessions / CLI: quiet canvas with contextual process navigation. */
+.gyro-cli-sidebar-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 20px;
+}
+.gyro-cli-back {
+  color: var(--gyro-muted);
+  margin-bottom: 14px;
+}
+.gyro-cli-back small {
+  margin-left: auto;
+}
+.gyro-cli-sidebar-empty {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  padding: 0 10px;
+}
+.gyro-cli-sidebar-item {
+  position: relative;
+  margin: 3px 0;
+}
+.gyro-cli-sidebar-select {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--gyro-muted);
+  display: flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 34px 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+.gyro-cli-sidebar-select > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+.gyro-cli-sidebar-select > span:not(.gyro-provider-logo) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-cli-sidebar-select.is-active {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+.gyro-cli-sidebar-select:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-cli-sidebar-close {
+  position: absolute;
+  right: 7px;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  opacity: 0;
+  border-radius: 4px;
+}
+.gyro-cli-sidebar-item:hover .gyro-cli-sidebar-close,
+.gyro-cli-sidebar-item:focus-within .gyro-cli-sidebar-close {
+  opacity: 1;
+}
+.gyro-cli-sidebar-close:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-workspace:not(.is-empty) {
+  grid-template-rows: 48px minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-workspace.has-connection-issue:not(.is-empty) {
+  grid-template-rows: 48px auto minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 48px;
+  min-height: 48px;
+  background: var(--gyro-pane);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  box-shadow: none;
+}
+.gyro-terminal-surface-title {
+  color: var(--gyro-text);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.gyro-terminal-project {
+  color: var(--gyro-muted);
+  font-size: 12px;
+  border-left: 1px solid var(--gyro-border-soft);
+  padding-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button {
+  min-width: 0;
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  gap: 7px;
+  border: 1px solid var(--gyro-border-soft);
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  border-radius: 6px;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions > button {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  width: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher {
+  margin-left: 0;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher-menu {
+  left: auto;
+  right: 0;
+}
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-terminal-grid {
+  gap: 1px;
+  padding: 0;
+  background: var(--gyro-border-soft);
+  border: 0;
+}
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-terminal-pane {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--gyro-pane);
+  grid-template-rows: 40px minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-pane header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  background: var(--gyro-pane);
+  min-height: 40px;
+  height: 40px;
+}
+:root[data-theme] .gyro-terminal-pane-title {
+  flex: 1;
+  min-width: 0;
+}
+:root[data-theme] .gyro-terminal-pane-title strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gyro-muted);
+}
+:root[data-theme]
+  .gyro-terminal-pane.is-active
+  .gyro-terminal-pane-title
+  strong {
+  font-weight: 600;
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-drag-handle {
+  opacity: 0;
+  background: transparent;
+  border: 0;
+  width: 14px;
+  padding: 0;
+}
+:root[data-theme] .gyro-terminal-pane:hover .gyro-terminal-drag-handle,
+:root[data-theme] .gyro-terminal-drag-handle:focus-visible {
+  opacity: 1;
+}
+:root[data-theme] .gyro-terminal-pane .gyro-terminal-pane-close {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+}
+:root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-xterm-host {
+  padding: 14px 16px;
+}
+@media (max-width: 700px) {
+  .gyro-terminal-project {
+    display: none;
+  }
+  :root[data-theme] .gyro-terminal-toolbar {
+    padding: 0 10px;
+    gap: 8px;
+  }
+}
+
+.gyro-cli-sidebar-select > .gyro-provider-logo {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+:root[data-theme] .gyro-terminal-toolbar-spacer {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+:root[data-theme] .gyro-terminal-pane {
+  grid-template-rows: 40px minmax(0, 1fr);
 }

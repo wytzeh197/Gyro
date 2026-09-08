@@ -3028,14 +3028,8 @@ function WorkspaceSidebarContent({
     Record<string, number>
   >({});
   const discoveredSessionNavigation = useMemo(
-    () =>
-      sidebarProjectGroups(
-        projectSessions,
-        terminalPanes,
-        savedProjects,
-        workspacePath,
-      ),
-    [projectSessions, savedProjects, terminalPanes, workspacePath],
+    () => sidebarProjectGroups(projectSessions, savedProjects, workspacePath),
+    [projectSessions, savedProjects, workspacePath],
   );
   const discoveredProjectGroups = discoveredSessionNavigation;
   const [projectOrder, setProjectOrder] = useState<string[]>(() =>
@@ -3247,6 +3241,7 @@ function WorkspaceSidebarContent({
       );
     }
   }, [files, selectedExplorerPath, visibleFiles]);
+  const isCliSidebar = activeWorkspaceLayout === "terminal-grid";
   const isSessionsSidebar =
     activeDestination === "workspace" && activeWorkspaceLayout !== "code";
   const isIdeSidebar =
@@ -3430,26 +3425,6 @@ function WorkspaceSidebarContent({
       session={session}
     />
   );
-  const renderCliPaneRow = (pane: TerminalPane, isNested = false) => {
-    const activity = sidebarTerminalActivity(pane);
-    return (
-      <SidebarThreadRow
-        icon={Terminal}
-        indent={isNested}
-        isActive={pane.id === selectedTerminalPaneId}
-        key={pane.id}
-        label={pane.taskTitle ?? pane.title}
-        meta={sidebarTerminalActivityLabel(activity)}
-        onClick={() => onSelectTerminalPane?.(pane.id)}
-        onClose={() => onCloseTerminalPane?.(pane.id)}
-        state={activity}
-      />
-    );
-  };
-  const renderNavigationItem = (item: SidebarSessionItem) =>
-    item.kind === "cli"
-      ? renderCliPaneRow(item.pane, true)
-      : renderSessionRow(item.session, true);
 
   return (
     <>
@@ -4712,6 +4687,19 @@ function WorkspaceSidebarContent({
                     <span className="gyro-sidebar-session-group-label">
                       Open CLI
                     </span>
+                    {terminalPanes.length > 0 ? (
+                      <button
+                        onClick={() => {
+                          setNewSessionMenuView("closed");
+                          onSelectWorkspaceLayout("terminal-grid");
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <Columns2 size={15} />
+                        <strong>View open terminals</strong>
+                      </button>
+                    ) : null}
                     {cliProjects.length === 0 ? (
                       <button
                         onClick={() => {
@@ -4780,205 +4768,272 @@ function WorkspaceSidebarContent({
             </button>
           </div>
 
-          <div className="gyro-sidebar-project-chat-list">
-            {pinnedSessions.length > 0 ? (
-              <>
-                <div className="gyro-sidebar-small-title">Pinned</div>
-                {pinnedSessions.map((session) => renderSessionRow(session))}
-              </>
-            ) : null}
-            <div className="gyro-sidebar-small-title">Projects</div>
-            {projectGroups.map((project, projectIndex) => {
-              const isCollapsed = collapsedProjectIds.includes(project.key);
-              const projectVisibleCount =
-                projectVisibleCounts[project.key] ??
-                SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
-              const collapsedProjectSessions = project.items.slice(
-                0,
-                projectVisibleCount,
-              );
-              const activeProjectSession = project.items.find((item) =>
-                item.kind === "chat"
-                  ? item.session.id === activeSessionId
-                  : item.pane.id === selectedTerminalPaneId,
-              );
-              const visibleProjectSessions =
-                activeProjectSession &&
-                !collapsedProjectSessions.includes(activeProjectSession)
-                  ? [
-                      ...collapsedProjectSessions.slice(
-                        0,
-                        Math.max(0, projectVisibleCount - 1),
-                      ),
-                      activeProjectSession,
+          {isCliSidebar ? (
+            <section
+              className="gyro-cli-sidebar-list"
+              aria-label="CLI sessions"
+            >
+              <button
+                className="gyro-sidebar-action gyro-cli-back"
+                onClick={() => onSelectWorkspaceLayout("thread")}
+                type="button"
+              >
+                <ArrowLeft size={14} />
+                <span>Back to chats</span>
+              </button>
+              {terminalPanes.length > 0 ? (
+                <div className="gyro-sidebar-small-title">Open terminals</div>
+              ) : null}
+              {terminalPanes.map((pane) => {
+                const providerId = commandProfiles.find(
+                  (profile) => profile.id === pane.profileId,
+                )?.providerId;
+                const status =
+                  pane.attention ??
+                  (pane.status === "running" && !terminalPaneHasActiveWork(pane)
+                    ? "idle"
+                    : pane.status);
+                return (
+                  <div className="gyro-cli-sidebar-item" key={pane.id}>
+                    <button
+                      className={`gyro-cli-sidebar-select${pane.id === selectedTerminalPaneId ? " is-active" : ""}`}
+                      onClick={() => onSelectTerminalPane?.(pane.id)}
+                      type="button"
+                      title={`${pane.title} · ${status}`}
+                      aria-current={
+                        pane.id === selectedTerminalPaneId ? "true" : undefined
+                      }
+                    >
+                      {providerId ? (
+                        <ProviderLogo providerId={providerId as ProviderId} />
+                      ) : (
+                        <Terminal size={16} />
+                      )}
+                      <span>{pane.taskTitle ?? pane.title}</span>
+                      <i
+                        className={`gyro-ring is-${status}`}
+                        aria-label={status}
+                      />
+                    </button>
+                    <button
+                      className="gyro-cli-sidebar-close"
+                      onClick={() => onCloseTerminalPane?.(pane.id)}
+                      aria-label={`Close ${pane.title}`}
+                      title={`Close ${pane.title}`}
+                      type="button"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+            </section>
+          ) : (
+            <div className="gyro-sidebar-project-chat-list">
+              {pinnedSessions.length > 0 ? (
+                <>
+                  <div className="gyro-sidebar-small-title">Pinned</div>
+                  {pinnedSessions.map((session) => renderSessionRow(session))}
+                </>
+              ) : null}
+              <div className="gyro-sidebar-small-title">Projects</div>
+              {projectGroups.map((project, projectIndex) => {
+                const isCollapsed = collapsedProjectIds.includes(project.key);
+                const projectVisibleCount =
+                  projectVisibleCounts[project.key] ??
+                  SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
+                const collapsedProjectSessions = project.items.slice(
+                  0,
+                  projectVisibleCount,
+                );
+                const activeProjectSession = project.items.find(
+                  (session) => session.id === activeSessionId,
+                );
+                const visibleProjectSessions =
+                  activeProjectSession &&
+                  !collapsedProjectSessions.includes(activeProjectSession)
+                    ? [
+                        ...collapsedProjectSessions.slice(
+                          0,
+                          Math.max(0, projectVisibleCount - 1),
+                        ),
+                        activeProjectSession,
+                      ]
+                    : collapsedProjectSessions;
+                const hiddenCount = Math.max(
+                  0,
+                  project.items.length - visibleProjectSessions.length,
+                );
+                const hasRevealedMore =
+                  projectVisibleCount > SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
+                return (
+                  <div
+                    className={[
+                      "gyro-sidebar-project-group",
+                      draggedProjectKey === project.key ? "is-dragging" : "",
+                      projectDropTarget?.key === project.key
+                        ? `is-drop-${projectDropTarget.position}`
+                        : "",
                     ]
-                  : collapsedProjectSessions;
-              const hiddenCount = Math.max(
-                0,
-                project.items.length - visibleProjectSessions.length,
-              );
-              const hasRevealedMore =
-                projectVisibleCount > SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
-              return (
-                <div
-                  className={[
-                    "gyro-sidebar-project-group",
-                    draggedProjectKey === project.key ? "is-dragging" : "",
-                    projectDropTarget?.key === project.key
-                      ? `is-drop-${projectDropTarget.position}`
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  key={project.key}
-                  onDragOver={(event) => {
-                    if (
-                      !draggedProjectKey ||
-                      draggedProjectKey === project.key
-                    ) {
-                      return;
-                    }
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    const rect =
-                      event.currentTarget
-                        .querySelector<HTMLElement>(".gyro-sidebar-project-row")
-                        ?.getBoundingClientRect() ??
-                      event.currentTarget.getBoundingClientRect();
-                    setProjectDropTarget({
-                      key: project.key,
-                      position:
-                        event.clientY < rect.top + rect.height / 2
-                          ? "before"
-                          : "after",
-                    });
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const sourceKey =
-                      event.dataTransfer.getData("text/plain") ||
-                      draggedProjectKey;
-                    if (sourceKey && projectDropTarget) {
-                      moveProject(
-                        sourceKey,
-                        project.key,
-                        projectDropTarget.position,
-                      );
-                    }
-                    finishProjectDrag();
-                  }}
-                >
-                  <SidebarProjectRow
-                    draggable
-                    icon={
-                      project.hasWorkspace
-                        ? isCollapsed
-                          ? Folder
-                          : FolderOpen
-                        : HardDrive
-                    }
-                    isDragging={draggedProjectKey === project.key}
-                    isCollapsed={isCollapsed}
-                    label={project.label}
-                    onDragEnd={finishProjectDrag}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", project.key);
-                      setDraggedProjectKey(project.key);
-                    }}
-                    onKeyDown={(event) => {
-                      if (!event.altKey) {
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={project.key}
+                    onDragOver={(event) => {
+                      if (
+                        !draggedProjectKey ||
+                        draggedProjectKey === project.key
+                      ) {
                         return;
                       }
-                      if (event.key === "ArrowUp" && projectIndex > 0) {
-                        event.preventDefault();
-                        const previous = projectGroups[projectIndex - 1];
-                        if (previous) {
-                          moveProject(project.key, previous.key, "before");
-                        }
-                      } else if (
-                        event.key === "ArrowDown" &&
-                        projectIndex < projectGroups.length - 1
-                      ) {
-                        event.preventDefault();
-                        const next = projectGroups[projectIndex + 1];
-                        if (next) {
-                          moveProject(project.key, next.key, "after");
-                        }
-                      }
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      const rect =
+                        event.currentTarget
+                          .querySelector<HTMLElement>(
+                            ".gyro-sidebar-project-row",
+                          )
+                          ?.getBoundingClientRect() ??
+                        event.currentTarget.getBoundingClientRect();
+                      setProjectDropTarget({
+                        key: project.key,
+                        position:
+                          event.clientY < rect.top + rect.height / 2
+                            ? "before"
+                            : "after",
+                      });
                     }}
-                    onClick={() => toggleProject(project.key)}
-                    onRemove={
-                      project.hasWorkspace
-                        ? () =>
-                            onRemoveProject?.({
-                              path: project.key,
-                              label: project.label,
-                            })
-                        : undefined
-                    }
-                  />
-                  {!isCollapsed ? (
-                    <>
-                      {visibleProjectSessions.length > 0 ? (
-                        visibleProjectSessions.map(renderNavigationItem)
-                      ) : (
-                        <button
-                          className="gyro-sidebar-thread is-empty"
-                          onClick={onCreateSession}
-                          type="button"
-                        >
-                          <span>No recent sessions</span>
-                        </button>
-                      )}
-                      {hiddenCount > 0 || hasRevealedMore ? (
-                        <div className="gyro-sidebar-more-actions">
-                          {hiddenCount > 0 ? (
-                            <button
-                              aria-expanded={hasRevealedMore}
-                              className="gyro-sidebar-more-button"
-                              onClick={() =>
-                                showMoreProjectSessions(
-                                  project.key,
-                                  project.items.length,
-                                )
-                              }
-                              type="button"
-                            >
-                              <ChevronDown aria-hidden="true" size={12} />
-                              <span>more</span>
-                            </button>
-                          ) : null}
-                          {hasRevealedMore ? (
-                            <button
-                              className="gyro-sidebar-more-button"
-                              onClick={() =>
-                                showLessProjectSessions(project.key)
-                              }
-                              type="button"
-                            >
-                              <ChevronUp aria-hidden="true" size={12} />
-                              <span>less</span>
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-              );
-            })}
-            <section aria-label="Recent chats" className="gyro-sidebar-recents">
-              <div className="gyro-sidebar-small-title">Recents</div>
-              {unprojectedRecentSessions.length > 0 ? (
-                unprojectedRecentSessions.map((session) =>
-                  renderSessionRow(session),
-                )
-              ) : (
-                <div className="gyro-sidebar-recents-empty">No Chats</div>
-              )}
-            </section>
-          </div>
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const sourceKey =
+                        event.dataTransfer.getData("text/plain") ||
+                        draggedProjectKey;
+                      if (sourceKey && projectDropTarget) {
+                        moveProject(
+                          sourceKey,
+                          project.key,
+                          projectDropTarget.position,
+                        );
+                      }
+                      finishProjectDrag();
+                    }}
+                  >
+                    <SidebarProjectRow
+                      draggable
+                      icon={
+                        project.hasWorkspace
+                          ? isCollapsed
+                            ? Folder
+                            : FolderOpen
+                          : HardDrive
+                      }
+                      isDragging={draggedProjectKey === project.key}
+                      isCollapsed={isCollapsed}
+                      label={project.label}
+                      onDragEnd={finishProjectDrag}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", project.key);
+                        setDraggedProjectKey(project.key);
+                      }}
+                      onKeyDown={(event) => {
+                        if (!event.altKey) {
+                          return;
+                        }
+                        if (event.key === "ArrowUp" && projectIndex > 0) {
+                          event.preventDefault();
+                          const previous = projectGroups[projectIndex - 1];
+                          if (previous) {
+                            moveProject(project.key, previous.key, "before");
+                          }
+                        } else if (
+                          event.key === "ArrowDown" &&
+                          projectIndex < projectGroups.length - 1
+                        ) {
+                          event.preventDefault();
+                          const next = projectGroups[projectIndex + 1];
+                          if (next) {
+                            moveProject(project.key, next.key, "after");
+                          }
+                        }
+                      }}
+                      onClick={() => toggleProject(project.key)}
+                      onRemove={
+                        project.hasWorkspace
+                          ? () =>
+                              onRemoveProject?.({
+                                path: project.key,
+                                label: project.label,
+                              })
+                          : undefined
+                      }
+                    />
+                    {!isCollapsed ? (
+                      <>
+                        {visibleProjectSessions.length > 0 ? (
+                          visibleProjectSessions.map((session) =>
+                            renderSessionRow(session, true),
+                          )
+                        ) : (
+                          <button
+                            className="gyro-sidebar-thread is-empty"
+                            onClick={onCreateSession}
+                            type="button"
+                          >
+                            <span>No recent sessions</span>
+                          </button>
+                        )}
+                        {hiddenCount > 0 || hasRevealedMore ? (
+                          <div className="gyro-sidebar-more-actions">
+                            {hiddenCount > 0 ? (
+                              <button
+                                aria-expanded={hasRevealedMore}
+                                className="gyro-sidebar-more-button"
+                                onClick={() =>
+                                  showMoreProjectSessions(
+                                    project.key,
+                                    project.items.length,
+                                  )
+                                }
+                                type="button"
+                              >
+                                <ChevronDown aria-hidden="true" size={12} />
+                                <span>more</span>
+                              </button>
+                            ) : null}
+                            {hasRevealedMore ? (
+                              <button
+                                className="gyro-sidebar-more-button"
+                                onClick={() =>
+                                  showLessProjectSessions(project.key)
+                                }
+                                type="button"
+                              >
+                                <ChevronUp aria-hidden="true" size={12} />
+                                <span>less</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <section
+                aria-label="Recent chats"
+                className="gyro-sidebar-recents"
+              >
+                <div className="gyro-sidebar-small-title">Recents</div>
+                {unprojectedRecentSessions.length > 0 ? (
+                  unprojectedRecentSessions.map((session) =>
+                    renderSessionRow(session),
+                  )
+                ) : (
+                  <div className="gyro-sidebar-recents-empty">No Chats</div>
+                )}
+              </section>
+            </div>
+          )}
         </>
       ) : null}
     </>
@@ -5364,14 +5419,11 @@ function providerIdForSession(session: Session): ProviderId | undefined {
     : undefined;
 }
 
-type SidebarSessionItem =
-  { kind: "chat"; session: Session } | { kind: "cli"; pane: TerminalPane };
-
 type SidebarProjectGroupData = {
   hasWorkspace: boolean;
   key: string;
   label: string;
-  items: SidebarSessionItem[];
+  items: Session[];
 };
 
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
@@ -5381,7 +5433,6 @@ const SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15;
 
 function sidebarProjectGroups(
   sessions: Session[],
-  terminalPanes: TerminalPane[],
   savedProjects: Array<{ path: string; label: string }>,
   workspacePath?: string,
 ): SidebarProjectGroupData[] {
@@ -5399,63 +5450,17 @@ function sidebarProjectGroups(
   const groupKeyForPath = (path?: string) =>
     projectGroupKey(path, primaryGyroProjectPath);
   const currentProjectKey = groupKeyForPath(workspacePath);
-  const fallbackProject = [
-    workspacePath
-      ? { path: workspacePath, label: projectSidebarName(workspacePath) }
-      : undefined,
-    ...savedProjects,
-  ].find((project): project is { path: string; label: string } =>
-    Boolean(project && isUserSelectedWorkspacePath(project.path)),
-  );
-
   for (const session of sessions) {
     const key = groupKeyForPath(session.workspacePath);
     const existing = groups.get(key);
     if (existing) {
-      existing.items.push({ kind: "chat", session });
+      existing.items.push(session);
     } else {
       groups.set(key, {
         hasWorkspace: key !== "gyro" && isUserSelectedWorkspacePath(key),
         key,
         label: projectSidebarName(session.workspacePath),
-        items: [{ kind: "chat", session }],
-      });
-    }
-  }
-
-  const projectPaths = savedProjects
-    .map((project) => ({
-      ...project,
-      normalizedPath: normalizeSidebarPath(project.path),
-    }))
-    .filter((project) => project.normalizedPath)
-    .sort(
-      (first, second) =>
-        second.normalizedPath.length - first.normalizedPath.length,
-    );
-  for (const pane of terminalPanes) {
-    const panePath = normalizeSidebarPath(
-      pane.projectPath ?? pane.workingDirectory,
-    );
-    const project = projectPaths.find(
-      (candidate) =>
-        panePath === candidate.normalizedPath ||
-        panePath.startsWith(`${candidate.normalizedPath}/`),
-    );
-    const linkedProject = project ?? fallbackProject;
-    const linkedPath = linkedProject?.path;
-    const key = groupKeyForPath(linkedPath);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.items.push({ kind: "cli", pane });
-    } else {
-      groups.set(key, {
-        hasWorkspace: Boolean(
-          linkedPath && isUserSelectedWorkspacePath(linkedPath),
-        ),
-        key,
-        label: linkedProject?.label ?? projectSidebarName(linkedPath),
-        items: [{ kind: "cli", pane }],
+        items: [session],
       });
     }
   }
@@ -5472,16 +5477,11 @@ function sidebarProjectGroups(
   for (const group of groups.values()) {
     group.items.sort(
       (first, second) =>
-        sidebarSessionTimestamp(second) - sidebarSessionTimestamp(first),
+        (new Date(second.updatedAt).getTime() || 0) -
+        (new Date(first.updatedAt).getTime() || 0),
     );
   }
   return [...groups.values()];
-}
-
-function sidebarSessionTimestamp(item: SidebarSessionItem) {
-  const value =
-    item.kind === "chat" ? item.session.updatedAt : item.pane.createdAt;
-  return new Date(value).getTime() || 0;
 }
 
 /** Placeholder titles used before the first real turn or auto-title. */
@@ -5583,109 +5583,6 @@ function projectGroupKey(path?: string, primaryGyroProjectPath?: string) {
     return primaryGyroProjectPath || "gyro";
   }
   return normalizedPath || "gyro";
-}
-
-function SidebarThreadRow({
-  icon: Icon,
-  label,
-  meta,
-  indent,
-  isActive,
-  onClick,
-  onClose,
-  state,
-}: {
-  icon?: IconComponent;
-  label: string;
-  meta: string;
-  indent?: boolean;
-  isActive?: boolean;
-  onClick: () => void;
-  onClose?: () => void;
-  state?: SidebarTerminalActivity;
-}) {
-  return (
-    <div className="gyro-sidebar-terminal-row">
-      <button
-        className={[
-          "gyro-sidebar-thread",
-          Icon ? "has-icon" : "",
-          indent ? "is-indent" : "",
-          isActive ? "is-active" : "",
-        ].join(" ")}
-        data-state={state}
-        onClick={onClick}
-        title={`${label} · ${meta}`}
-        type="button"
-      >
-        {Icon ? (
-          <span className="gyro-sidebar-terminal-icon" aria-hidden="true">
-            <Icon size={13} />
-          </span>
-        ) : null}
-        <span className="gyro-sidebar-terminal-label">{label}</span>
-        <small className="gyro-sidebar-terminal-state">
-          <i aria-hidden="true" />
-          {meta}
-        </small>
-      </button>
-      {onClose ? (
-        <button
-          aria-label={`Close ${label}`}
-          className="gyro-sidebar-terminal-close"
-          onClick={onClose}
-          title={`Close ${label}`}
-          type="button"
-        >
-          <X size={12} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-type SidebarTerminalActivity =
-  "checking" | "idle" | "running" | "waiting" | "done" | "failed" | "offline";
-
-function sidebarTerminalActivity(pane: TerminalPane): SidebarTerminalActivity {
-  if (pane.status === "waiting") {
-    return "waiting";
-  }
-  if (pane.status === "done") {
-    return "done";
-  }
-  if (pane.status === "failed") {
-    return "failed";
-  }
-  if (pane.status === "restored") {
-    return "offline";
-  }
-  if (!isInteractiveShellPane(pane)) {
-    return "running";
-  }
-  if (pane.hasForegroundJob === undefined) {
-    return "checking";
-  }
-  return pane.hasForegroundJob ? "running" : "idle";
-}
-
-function sidebarTerminalActivityLabel(activity: SidebarTerminalActivity) {
-  switch (activity) {
-    case "checking":
-      return "Checking";
-    case "idle":
-      return "Idle";
-    case "running":
-      return "Running";
-    case "waiting":
-      return "Waiting";
-    case "done":
-      return "Exited";
-    case "failed":
-      return "Failed";
-    case "offline":
-      return "Offline";
-  }
 }
 
 function isInteractiveShellPane(pane: TerminalPane) {
@@ -12748,7 +12645,7 @@ function AgentLauncherMenu({
   return (
     <div className="gyro-agent-launcher" ref={menuRef}>
       <button
-        aria-label="Quick Start"
+        aria-label="New terminal"
         aria-expanded={isOpen}
         aria-haspopup="menu"
         className="gyro-terminal-agent-button"
@@ -12756,8 +12653,8 @@ function AgentLauncherMenu({
         title="Start a CLI"
         type="button"
       >
-        <Terminal size={14} />
-        <span>Quick Start</span>
+        <Plus size={14} />
+        <span>New terminal</span>
         <ChevronDown size={13} />
       </button>
       {isOpen ? (
@@ -12802,6 +12699,7 @@ function AgentLauncherMenu({
 }
 
 function TerminalActionsMenu({
+  extraActions = [],
   paneId,
   paneIsWide,
   canMoveToStart,
@@ -12814,6 +12712,12 @@ function TerminalActionsMenu({
   onMoveToEnd,
   onSetLayout,
 }: {
+  extraActions?: Array<{
+    label: string;
+    icon: IconComponent;
+    onClick: () => void;
+    disabled?: boolean;
+  }>;
   paneId?: string;
   paneIsWide?: boolean;
   canMoveToStart?: boolean;
@@ -12851,6 +12755,21 @@ function TerminalActionsMenu({
       </button>
       {isOpen && paneId ? (
         <div className="gyro-terminal-actions-menu" role="menu">
+          {extraActions.map(({ label, icon: Icon, onClick, disabled }) => (
+            <button
+              key={label}
+              role="menuitem"
+              type="button"
+              disabled={disabled}
+              onClick={() => runAction(onClick)}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+          {extraActions.length ? (
+            <div className="gyro-terminal-actions-separator" role="separator" />
+          ) : null}
           <button
             onClick={() =>
               runAction(() =>
@@ -12968,8 +12887,6 @@ export function TerminalPanel({
   const canStopActivePane =
     activePane?.status === "running" || activePane?.status === "waiting";
   const connectionIssue = terminalConnectionIssue(activePane?.output);
-  const waitingPanes = panes.filter((pane) => pane.attention === "waiting");
-  const failedPanes = panes.filter((pane) => pane.attention === "failed");
   const presetLabel = cliLaunchPreset
     ? cliLaunchPresetLabel(cliLaunchPreset, profiles)
     : "Start preset";
@@ -13004,6 +12921,16 @@ export function TerminalPanel({
           hasPanes ? "gyro-terminal-toolbar" : "gyro-terminal-toolbar is-empty"
         }
       >
+        <strong className="gyro-terminal-surface-title">Terminals</strong>
+        {activePane?.projectPath ? (
+          <span
+            className="gyro-terminal-project"
+            title={activePane.projectPath}
+          >
+            {workspaceName(activePane.projectPath)}
+          </span>
+        ) : null}
+        <span className="gyro-terminal-toolbar-spacer" />
         <AgentLauncherMenu
           activeProfileId={activeProfileId}
           launchOptions={launchOptions}
@@ -13011,119 +12938,62 @@ export function TerminalPanel({
           onRunCommandProfile={onRunCommandProfile}
           profiles={profiles}
         />
-        <button
-          aria-label={`Launch ${presetLabel}`}
-          className="gyro-terminal-preset-button"
-          disabled={!canLaunchPreset}
-          onClick={() => onLaunchCliPreset?.(launchOptions)}
-          title={`Launch ${presetLabel}`}
-          type="button"
-        >
-          <Plus size={14} />
-          <span>{isLaunchingCliPreset ? "Starting" : presetLabel}</span>
-        </button>
-        {hasPanes && activePane ? (
-          <div className="gyro-terminal-session-summary">
-            <span
-              aria-hidden="true"
-              className={`gyro-ring is-${activePane.attention ?? activePane.status}`}
-            />
-            <strong>{activePane.title}</strong>
-            <small>
-              {activePane.profileId} · {activePane.branch || "workspace"}
-            </small>
-          </div>
-        ) : null}
-        <span className="gyro-terminal-toolbar-spacer" />
         {hasPanes ? (
-          <div className="gyro-terminal-awareness" aria-label="CLI awareness">
-            <TerminalDiffControl
-              isLoading={isTerminalSourceControlLoading}
-              onRefresh={onRefreshTerminalSourceControl}
-              onReview={onReviewTerminalChanges}
-              sourceControl={terminalSourceControl}
-            />
-            {waitingPanes.length > 0 ? (
-              <button
-                className="gyro-terminal-attention is-waiting"
-                onClick={() => onSelectTerminalPane?.(waitingPanes[0]!.id)}
-                title="Focus waiting terminal"
-                type="button"
-              >
-                <CircleDashed size={13} />
-                <span>{waitingPanes.length} waiting</span>
-              </button>
-            ) : null}
-            {failedPanes.length > 0 ? (
-              <button
-                className="gyro-terminal-attention is-failed"
-                onClick={() => onSelectTerminalPane?.(failedPanes[0]!.id)}
-                title="Focus failed terminal"
-                type="button"
-              >
-                <X size={13} />
-                <span>{failedPanes.length} failed</span>
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {hasPanes ? (
-          <div className="gyro-terminal-tools">
-            <button
-              aria-label="Open commands"
-              className="gyro-icon-button gyro-terminal-search"
-              onClick={onOpenCommandPalette}
-              title="Commands"
-              type="button"
-            >
-              <Command size={15} />
-            </button>
-            <button
-              aria-label="Split terminal"
-              onClick={() => onSplitTerminalPane?.(2)}
-              title="Split terminal"
-              type="button"
-            >
-              <Columns2 size={15} />
-            </button>
-            {canStopActivePane ? (
-              <button
-                aria-label="Stop active terminal"
-                onClick={() =>
-                  activePaneId && onKillTerminalPane?.(activePaneId)
-                }
-                title="Stop active terminal"
-                type="button"
-              >
-                <Square size={14} />
-              </button>
-            ) : null}
-            <TerminalActionsMenu
-              canMoveToEnd={
-                activePaneIndex >= 0 && activePaneIndex < panes.length - 1
+          <TerminalActionsMenu
+            extraActions={[
+              {
+                label: "Split terminal",
+                icon: Columns2,
+                onClick: () => onSplitTerminalPane?.(2),
+              },
+              {
+                label: "Stop active terminal",
+                icon: Square,
+                disabled: !canStopActivePane,
+                onClick: () =>
+                  activePaneId && onKillTerminalPane?.(activePaneId),
+              },
+              {
+                label: "Review changes",
+                icon: GitPullRequest,
+                onClick: () => onReviewTerminalChanges?.(),
+              },
+              {
+                label: "Open commands",
+                icon: Command,
+                onClick: () => onOpenCommandPalette?.(),
+              },
+              {
+                label: `Launch ${presetLabel}`,
+                icon: Plus,
+                disabled: !canLaunchPreset,
+                onClick: () => onLaunchCliPreset?.(launchOptions),
+              },
+            ]}
+            canMoveToEnd={
+              activePaneIndex >= 0 && activePaneIndex < panes.length - 1
+            }
+            canMoveToStart={activePaneIndex > 0}
+            onClose={onCloseTerminalPane}
+            onMoveToEnd={(paneId) => {
+              const lastPane = panes[panes.length - 1];
+              if (lastPane) {
+                onMoveTerminalPane?.(paneId, lastPane.id);
               }
-              canMoveToStart={activePaneIndex > 0}
-              onClose={onCloseTerminalPane}
-              onMoveToEnd={(paneId) => {
-                const lastPane = panes[panes.length - 1];
-                if (lastPane) {
-                  onMoveTerminalPane?.(paneId, lastPane.id);
-                }
-              }}
-              onMoveToStart={(paneId) => {
-                const firstPane = panes[0];
-                if (firstPane) {
-                  onMoveTerminalPane?.(paneId, firstPane.id);
-                }
-              }}
-              onRefresh={() => onTerminalUtilityAction?.("read-screen")}
-              onRename={onRenameTerminalPane}
-              onRestart={onRestartTerminalPane}
-              onSetLayout={onSetTerminalPaneLayout}
-              paneId={activePaneId}
-              paneIsWide={activePaneIsWide}
-            />
-          </div>
+            }}
+            onMoveToStart={(paneId) => {
+              const firstPane = panes[0];
+              if (firstPane) {
+                onMoveTerminalPane?.(paneId, firstPane.id);
+              }
+            }}
+            onRefresh={() => onTerminalUtilityAction?.("read-screen")}
+            onRename={onRenameTerminalPane}
+            onRestart={onRestartTerminalPane}
+            onSetLayout={onSetTerminalPaneLayout}
+            paneId={activePaneId}
+            paneIsWide={activePaneIsWide}
+          />
         ) : null}
       </div>
       {connectionIssue ? (
@@ -13247,9 +13117,13 @@ function terminalConnectionIssue(
   ) {
     return undefined;
   }
-  const server = output.match(
-    /(?:mcp server|failed:\s*)([a-z0-9][a-z0-9._-]*)/i,
-  )?.[1];
+  const server =
+    output.match(
+      /\b([a-z0-9][a-z0-9._-]*)\s+MCP server is not logged in/i,
+    )?.[1] ??
+    output.match(
+      /MCP startup incomplete[^\r\n]*failed:\s*([a-z0-9][a-z0-9._-]*)/i,
+    )?.[1];
   const command = output.match(/run\s*[`']([^`']+)[`']/i)?.[1];
   return { command, server };
 }
@@ -25554,6 +25428,16 @@ function TerminalPaneView({
     branch,
     worktreeName,
   } = pane;
+  const paneRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (isActive)
+      paneRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [isActive]);
+  const activity =
+    pane.attention ??
+    (status === "running" && !terminalPaneHasActiveWork(pane)
+      ? "idle"
+      : status);
   const contextLabel =
     workspaceMode === "worktree" && worktreeName
       ? `${worktreeName} · ${branch}`
@@ -25579,6 +25463,7 @@ function TerminalPaneView({
 
   return (
     <section
+      ref={paneRef}
       className={className}
       data-layout={pane.layout ?? "auto"}
       draggable
@@ -25596,7 +25481,9 @@ function TerminalPaneView({
       }}
       onClick={onSelect}
     >
-      <header>
+      <header
+        title={`${title} · ${activity} · ${contextLabel || workspaceMode}`}
+      >
         <button
           aria-label={`Move ${title}`}
           className="gyro-terminal-drag-handle"
@@ -25608,13 +25495,13 @@ function TerminalPaneView({
           <GripVertical size={14} />
         </button>
         <div className="gyro-terminal-pane-title">
-          <span className={`gyro-ring is-${pane.attention ?? status}`} />
+          <span
+            className={`gyro-ring is-${activity}`}
+            role="img"
+            aria-label={activity}
+          />
           <strong>{title}</strong>
-          <span>{pane.attention ?? status}</span>
         </div>
-        <small>
-          {pane.profileId} · {contextLabel || workspaceMode}
-        </small>
         {onClose ? (
           <button
             aria-label={`Close ${title}`}

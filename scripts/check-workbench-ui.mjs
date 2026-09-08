@@ -4074,9 +4074,7 @@ expect(
     surfaceSource.includes("gyro-terminal-toolbar is-empty") &&
     surfaceSource.includes("AgentLauncherMenu") &&
     surfaceSource.includes('className="gyro-terminal-agent-button"') &&
-    surfaceSource.includes(
-      'hasPanes ? (\n          <div className="gyro-terminal-tools">',
-    ) &&
+    surfaceSource.includes('className="gyro-terminal-surface-title"') &&
     surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
     surfaceSource.includes('aria-label="Start a terminal"') &&
     surfaceSource.includes("<span>New terminal</span>") &&
@@ -4089,12 +4087,12 @@ expect(
 );
 expect(
   surfaceSource.includes("const canStopActivePane =") &&
-    surfaceSource.includes('aria-label="Split terminal"') &&
-    surfaceSource.includes('aria-label="Stop active terminal"') &&
-    surfaceSource.includes("<Command size={15} />") &&
-    surfaceSource.includes("<Columns2 size={15} />") &&
-    surfaceSource.includes("<Square size={14} />"),
-  "CLI toolbar icons should match commands, splitting, and stopping a live terminal.",
+    surfaceSource.includes('label: "Split terminal"') &&
+    surfaceSource.includes('label: "Stop active terminal"') &&
+    surfaceSource.includes("icon: Command") &&
+    surfaceSource.includes("icon: Columns2") &&
+    surfaceSource.includes("icon: Square"),
+  "CLI overflow actions should preserve commands, splitting, and stopping a live terminal.",
 );
 expect(
   styleSource.includes(
@@ -4128,17 +4126,14 @@ expect(
   "Terminal panes should support persisted structural layout and movement actions.",
 );
 expect(
-  surfaceSource.includes("gyro-sidebar-terminal-close") &&
+  !surfaceSource.includes("gyro-sidebar-terminal-row") &&
     surfaceSource.includes("gyro-terminal-pane-close") &&
     surfaceSource.includes("onCloseTerminalPane?.(pane.id)") &&
     appSource.includes("onCloseTerminalPane={requestCloseTerminalPane}") &&
     styleSource.includes(
       ".gyro-terminal-pane.is-active .gyro-terminal-pane-close",
-    ) &&
-    styleSource.includes(
-      ".gyro-sidebar-terminal-row:hover .gyro-sidebar-terminal-close",
     ),
-  "Terminal panes should expose minimal close controls in the grid and sidebar.",
+  "Terminal panes should expose close controls in the grid without appearing in chat project lists.",
 );
 expect(
   surfaceSource.includes("TerminalTerminateConfirmOverlay") &&
@@ -4174,8 +4169,9 @@ expect(
     surfaceSource.includes("TerminalDiffControl") &&
     surfaceSource.includes("gyro-terminal-diff-popover") &&
     surfaceSource.includes("Review in Workspace") &&
-    surfaceSource.includes("gyro-terminal-attention is-waiting") &&
-    surfaceSource.includes("gyro-terminal-attention is-failed") &&
+    surfaceSource.includes('label: "Review changes"') &&
+    surfaceSource.includes('aria-label="CLI sessions"') &&
+    surfaceSource.includes("pane.attention") &&
     styleSource.includes(".gyro-terminal-awareness") &&
     styleSource.includes(".gyro-terminal-diff-stats") &&
     styleSource.includes(".gyro-terminal-pane.needs-waiting") &&
@@ -4185,7 +4181,7 @@ expect(
     appSource.includes("terminal.onBell") &&
     tauriSource.includes("apply_git_diff_stats") &&
     tauriSource.includes("untracked_text_additions"),
-  "The CLI awareness layer should show selected-pane Git changes and exceptional terminal attention.",
+  "CLI should keep changes accessible in the menu and terminal attention visible in its contextual sidebar.",
 );
 expect(
   appSource.includes("sessionEventsRequestRef") &&
@@ -4264,7 +4260,7 @@ expect(
 expect(
   typeSource.includes("type CliLaunchPreset") &&
     reducerSource.includes("set-cli-launch-preset") &&
-    surfaceSource.includes("gyro-terminal-preset-button") &&
+    surfaceSource.includes("onLaunchCliPreset?.(launchOptions)") &&
     surfaceSource.includes("CliLaunchPresetEditor") &&
     surfaceSource.includes("Launch preset") &&
     styleSource.includes(".gyro-cli-launch-preset") &&
@@ -4430,7 +4426,7 @@ expect(
     surfaceSource.includes(
       "onRunCommandProfile?.(profile.id, launchOptions)",
     ) &&
-    surfaceSource.includes("<span>Quick Start</span>") &&
+    surfaceSource.includes("<span>New terminal</span>") &&
     surfaceSource.includes("cliProfileShortLabel") &&
     surfaceSource.includes("gyro-profile-readiness-dot") &&
     !surfaceSource.includes(
@@ -4447,13 +4443,13 @@ expect(
     !surfaceSource.includes('className="gyro-terminal-add"') &&
     appSource.includes("const runCommandProfile = useCallback") &&
     appSource.includes("setActiveProfileId(profileId)") &&
-    appSource.includes("void runProfile(profileId, undefined, options)") &&
+    appSource.includes("void launchTerminalPane({ profile, reveal: options?.reveal })") &&
     appSource.includes("onRunCommandProfile={runCommandProfile}") &&
     appSource.includes('case "configure-cli-launcher"') &&
     styleSource.includes(".gyro-agent-launcher-menu") &&
     styleSource.includes(".gyro-terminal-agent-button") &&
     styleSource.includes(".gyro-terminal-actions-menu"),
-  "CLI toolbar agent launcher should start real command profiles while the sidebar stays pane-only.",
+  "CLI launcher should add command profiles in new panes while Sessions keeps its contextual sidebar.",
 );
 
 expect(
@@ -4690,9 +4686,10 @@ expect(
       'const newCliWorkspacePath = cliProjects[0]?.path ?? "";',
     ) &&
     surfaceSource.includes("!newCliWorkspacePath") &&
-    surfaceSource.includes("pane.projectPath ?? pane.workingDirectory") &&
+    surfaceSource.includes("items: Session[]") &&
+    !surfaceSource.includes('kind: "cli"; pane: TerminalPane') &&
     surfaceSource.includes("selectedTerminalPaneId"),
-  "New CLI should require a project and restore beneath that project in Sessions.",
+  "New CLI should require a project while sidebar project lists contain only chats.",
 );
 expect(
   styleSource.includes(".gyro-sidebar-mode-row:focus-visible") &&
@@ -6323,7 +6320,7 @@ expect(
     !surfaceSource.includes("3 changed") &&
     surfaceSource.includes('aria-label="No terminal panes"') &&
     surfaceSource.includes("hasPanes ? (") &&
-    surfaceSource.includes("gyro-terminal-tools") &&
+    surfaceSource.includes("TerminalActionsMenu") &&
     surfaceSource.includes("No file selected") &&
     surfaceSource.includes("Loading file preview") &&
     appSource.includes(
@@ -7280,9 +7277,10 @@ expect(
 
 expect(
   styleSource.includes(
-    "Conversation text shares the 16px system-font measure",
+    "Conversation text shares the body scale",
   ) &&
-    styleSource.includes("font-size: 16px;\n  line-height: 1.6;") &&
+    styleSource.includes("--gyro-font-body: 14px;") &&
+    styleSource.includes("font-size: var(--gyro-font-body);\n  line-height: 1.6;") &&
     styleSource.includes(".gyro-user-message-bubble p") &&
     styleSource.includes(".gyro-run-row-detail") &&
     styleSource.includes(".gyro-run-row-stat") &&
@@ -7293,7 +7291,7 @@ expect(
     !styleSource.includes(".gyro-run-step-time") &&
     styleSource.includes(".gyro-run-row-icon") &&
     styleSource.includes(".gyro-run-row-detail"),
-  "Chat typography should use 16px conversation text, 13px controls, and 12px metadata.",
+  "Chat typography should use shared 14px conversation text, 13px controls, and 12px metadata.",
 );
 
 expect(

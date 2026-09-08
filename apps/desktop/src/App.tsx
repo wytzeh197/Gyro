@@ -7420,7 +7420,10 @@ export function App() {
   );
 
   const addTerminalPane = useCallback((options?: { reveal?: boolean }) => {
-    const profile = getCommandProfile(commandProfiles, activeProfileId);
+    const profile = getCommandProfile(
+      [...commandProfiles, ...defaultCommandProfiles()],
+      "shell",
+    );
     void launchTerminalPane({ profile, reveal: options?.reveal }).then((started) => {
       notify(
         started ? "terminal" : "command-failed",
@@ -7428,7 +7431,7 @@ export function App() {
         profile.displayName,
       );
     });
-  }, [activeProfileId, commandProfiles, launchTerminalPane, notify]);
+  }, [commandProfiles, launchTerminalPane, notify]);
 
   const createCliSession = useCallback(
     (profileId: string, projectPath: string) => {
@@ -11830,9 +11833,14 @@ export function App() {
   const runCommandProfile = useCallback(
     (profileId: string, options?: { reveal?: boolean }) => {
       setActiveProfileId(profileId);
-      void runProfile(profileId, undefined, options);
+      const profile = getCommandProfile(commandProfiles, profileId);
+      void launchTerminalPane({ profile, reveal: options?.reveal }).then((started) => {
+        if (!started) {
+          notify("command-failed", "Terminal start failed", profile.displayName);
+        }
+      });
     },
-    [runProfile],
+    [commandProfiles, launchTerminalPane, notify],
   );
 
   const launchCliPreset = useCallback(async (options?: { reveal?: boolean }) => {
