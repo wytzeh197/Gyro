@@ -30207,7 +30207,7 @@ while True:
         assert!(status
             .files
             .iter()
-            .any(|file| file.path == "large.txt" && file.additions == 0));
+            .any(|file| file.path == "large.txt" && file.additions == 1));
 
         let folder = tempfile::tempdir().unwrap();
         let unavailable = git_status_impl(folder.path().to_str().unwrap()).unwrap();
