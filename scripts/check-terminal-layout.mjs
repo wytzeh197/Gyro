@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { placeTerminalTab } from "../packages/ui/src/terminal-layout.ts";
+const empty = { ids: [], axis: "horizontal" };
+assert.deepEqual(placeTerminalTab(empty, "a", "b", "right"), { ids: ["a", "b"], axis: "horizontal" });
+assert.deepEqual(placeTerminalTab(empty, "a", "b", "top"), { ids: ["b", "a"], axis: "vertical" });
+assert.deepEqual(placeTerminalTab(empty, "a", "a", "left").ids, ["a"]);
+const split = { ids: ["a", "b", "c"], axis: "horizontal" };
+assert.deepEqual(placeTerminalTab(split, "a", "b", "left").ids, ["b", "a", "c"]);
+assert.deepEqual(placeTerminalTab(split, "a", "d", "bottom").ids, ["a", "b", "c", "d"]);
+const full = { ids: ["a", "b", "c", "d"], axis: "horizontal" };
+assert.deepEqual(placeTerminalTab(full, "a", "e", "right"), full);
+assert.deepEqual(placeTerminalTab(split, "new", "a", "right").ids, ["new", "a"]);
+console.log("Terminal split placement checks passed");

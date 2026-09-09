@@ -2,7 +2,8 @@
 //!
 //! One child webview per chat session, positioned over the React rail host.
 //! The injected agent captures console/network and exposes DOM read/interaction
-//! tools via `eval` + the `gyro-bridge` custom URI scheme.
+//! tools via native evaluation callbacks. The custom URI scheme carries only
+//! best-effort console/network events; tool results do not depend on page fetch.
 
 use gyro_core::security::redact_secrets;
 use serde::{Deserialize, Serialize};
@@ -85,12 +86,8 @@ pub struct BrowserNetworkEntry {
     pub status: Option<i64>,
     #[serde(default)]
     pub ok: Option<bool>,
-    #[serde(default)]
+    #[serde(default, alias = "resourceType")]
     pub resource_type: Option<String>,
-}
-
-struct PendingAgentCall {
-    sender: mpsc::Sender<Result<Value, String>>,
 }
 
 struct SessionBrowserSlot {
@@ -105,7 +102,6 @@ struct SessionBrowserSlot {
     approved_origins: HashSet<String>,
     console: VecDeque<BrowserConsoleEntry>,
     network: VecDeque<BrowserNetworkEntry>,
-    pending: HashMap<String, PendingAgentCall>,
 }
 
 #[derive(Default)]
@@ -239,33 +235,8 @@ impl SessionBrowserManager {
         });
     }
 
-    fn resolve_pending(&self, session_id: &str, call_id: &str, result: Result<Value, String>) {
-        let sender = self
-            .with_slot_mut(session_id, |slot| slot.pending.remove(call_id))
-            .ok()
-            .flatten();
-        if let Some(pending) = sender {
-            let _ = pending.sender.send(result);
-        }
-    }
-
-    fn register_pending(
-        &self,
-        session_id: &str,
-        call_id: String,
-        sender: mpsc::Sender<Result<Value, String>>,
-    ) -> Result<(), String> {
-        self.with_slot_mut(session_id, |slot| {
-            slot.pending.insert(call_id, PendingAgentCall { sender });
-        })
-    }
-
     fn webview_label_for(&self, session_id: &str) -> Result<String, String> {
         self.with_slot_mut(session_id, |slot| slot.webview_label.clone())
-    }
-
-    fn bridge_nonce_for(&self, session_id: &str) -> Result<String, String> {
-        self.with_slot_mut(session_id, |slot| slot.bridge_nonce.clone())
     }
 
     fn set_url(&self, session_id: &str, url: &str) -> Result<(), String> {
@@ -373,10 +344,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     }}
   }};
 
+  const originalFetch = window.fetch.bind(window);
   const postBridge = (payload) => {{
     try {{
       const body = JSON.stringify(Object.assign({{ nonce: BRIDGE_NONCE }}, payload));
-      fetch("gyro-bridge://call", {{
+      originalFetch("gyro-bridge://call", {{
         method: "POST",
         headers: {{ "content-type": "application/json" }},
         body,
@@ -427,7 +399,6 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     postBridge({{ kind: "network", entry }});
   }};
 
-  const originalFetch = window.fetch.bind(window);
   window.fetch = async function(input, init) {{
     const method = (init && init.method) || (input && input.method) || "GET";
     let url = "";
@@ -537,7 +508,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   }};
 
   const assignRef = (el) => {{
-    if (!el || el.__gyroRef) return el.__gyroRef;
+    if (!el) return null;
+    if (el.__gyroRef) {{
+      refMap.set(el.__gyroRef, el);
+      return el.__gyroRef;
+    }}
     refCounter += 1;
     const ref = "ref_" + refCounter;
     el.__gyroRef = ref;
@@ -590,7 +565,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     }};
     if (el.getAttribute("href")) node.href = String(el.getAttribute("href")).slice(0, 200);
     if (el.getAttribute("type")) node.inputType = el.getAttribute("type");
-    if (el.getAttribute("value") != null && tag === "input") {{
+    if (tag === "input" || tag === "textarea" || tag === "select") {{
       node.value = isCredentialField(el) ? "[redacted-credential]" : String(el.value || "").slice(0, 120);
     }}
     budget.left -= 64;
@@ -606,19 +581,28 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   }};
 
   const dispatch = (el, type, init) => {{
-    const event = new Event(type, Object.assign({{ bubbles: true, cancelable: true }}, init || {{}}));
+    const EventClass = type.startsWith("key") ? KeyboardEvent : Event;
+    const event = new EventClass(type, Object.assign({{ bubbles: true, cancelable: true }}, init || {{}}));
     el.dispatchEvent(event);
   }};
 
   const clickEl = (el) => {{
     el.scrollIntoView({{ block: "center", inline: "nearest", behavior: "instant" }});
-    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => dispatch(el, type));
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => {{
+      const EventClass = type.startsWith("pointer") ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new EventClass(type, {{ bubbles: true, cancelable: true, view: window }}));
+    }});
     if (typeof el.click === "function") el.click();
+    else el.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }}));
   }};
 
   const typeInto = (el, text, submit) => {{
     if (isCredentialField(el)) {{
       return {{ ok: false, error: "credential fields are not writable by the model" }};
+    }}
+    if (el.disabled || el.readOnly ||
+        !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) {{
+      return {{ ok: false, error: "target is not an editable text field" }};
     }}
     el.focus();
     const value = String(text ?? "");
@@ -645,7 +629,6 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   window.__gyroBrowserAgent = {{
     readPage(options) {{
       refMap.clear();
-      refCounter = 0;
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
       const budget = {{ left: {MAX_TREE_CHARS} }};
       const tree = serializeTree(document.body || document.documentElement, 0, maxDepth, budget);
@@ -690,8 +673,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true, ref: options.ref }};
     }},
     type(options) {{
-      let el = resolveRef(options && options.ref);
-      if (!el) el = document.activeElement;
+      const el = options && options.ref ? resolveRef(options.ref) : document.activeElement;
       if (!el) return {{ ok: false, error: "no target element" }};
       return Object.assign({{ ref: el.__gyroRef || null }}, typeInto(el, options && options.text, !!(options && options.submit)));
     }},
@@ -723,6 +705,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       const dx = Number((options && options.dx) || 0);
       const dy = Number((options && options.dy) || 0);
       const el = options && options.ref ? resolveRef(options.ref) : null;
+      if (options && options.ref && !el) return {{ ok: false, error: "unknown or stale ref" }};
       if (el) {{
         el.scrollBy({{ left: dx, top: dy, behavior: "instant" }});
       }} else {{
@@ -860,18 +843,6 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
                             .map(|value| value.to_string()),
                     },
                 );
-            }
-        }
-        "result" => {
-            let call_id = value
-                .get("callId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "callId missing".to_string())?;
-            if let Some(error) = value.get("error").and_then(Value::as_str) {
-                manager.resolve_pending(&session_id, call_id, Err(error.to_string()));
-            } else {
-                let result = value.get("result").cloned().unwrap_or(Value::Null);
-                manager.resolve_pending(&session_id, call_id, Ok(result));
             }
         }
         "title" => {
@@ -1023,7 +994,6 @@ pub fn open_session_browser<R: Runtime>(
             approved_origins: approved,
             console: VecDeque::new(),
             network: VecDeque::new(),
-            pending: HashMap::new(),
         },
     );
     let snapshot = guard
@@ -1158,62 +1128,59 @@ pub fn call_agent<R: Runtime>(
 ) -> Result<Value, String> {
     let manager = app.state::<SessionBrowserManager>();
     let label = manager.webview_label_for(session_id)?;
-    let nonce = manager.bridge_nonce_for(session_id)?;
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
 
-    let call_id = Uuid::new_v4().to_string();
-    let (sender, receiver) = mpsc::channel();
-    manager.register_pending(session_id, call_id.clone(), sender)?;
-
+    // DOM tools are synchronous. Return their result through the native evaluator,
+    // independent of the page's CSP, CORS, custom-scheme fetch, or patched fetch.
     let method_json = serde_json::to_string(method).map_err(|error| error.to_string())?;
     let args_json = serde_json::to_string(&args).map_err(|error| error.to_string())?;
-    let call_id_json = serde_json::to_string(&call_id).map_err(|error| error.to_string())?;
-    let nonce_json = serde_json::to_string(&nonce).map_err(|error| error.to_string())?;
-
     let script = format!(
         r#"(function() {{
-  const callId = {call_id_json};
-  const nonce = {nonce_json};
-  const method = {method_json};
-  const args = {args_json};
-  const post = (payload) => {{
-    try {{
-      fetch("gyro-bridge://call", {{
-        method: "POST",
-        headers: {{ "content-type": "application/json" }},
-        body: JSON.stringify(Object.assign({{ nonce }}, payload)),
-        mode: "cors",
-        credentials: "omit",
-      }}).catch(() => {{}});
-    }} catch (_) {{}}
-  }};
   try {{
     const agent = window.__gyroBrowserAgent;
-    if (!agent || typeof agent[method] !== "function") {{
-      post({{ kind: "result", callId, error: "browser agent is not ready" }});
-      return;
+    if (!agent || typeof agent[{method_json}] !== "function") {{
+      return {{ error: "browser agent is not ready" }};
     }}
-    const result = agent[method](args);
-    Promise.resolve(result).then(
-      (value) => post({{ kind: "result", callId, result: value }}),
-      (error) => post({{ kind: "result", callId, error: String(error && error.message || error) }})
-    );
+    return {{ result: agent[{method_json}]({args_json}) }};
   }} catch (error) {{
-    post({{ kind: "result", callId, error: String(error && error.message || error) }});
+    return {{ error: String(error && error.message || error) }};
   }}
 }})();"#
     );
-
+    let (sender, receiver) = mpsc::channel();
     webview
-        .eval(script)
+        .eval_with_callback(script, move |result| {
+            let _ = sender.send(result);
+        })
         .map_err(|error| format!("could not run browser agent: {error}"))?;
-
-    let result = receiver
+    let encoded = receiver
         .recv_timeout(AGENT_CALL_TIMEOUT)
         .map_err(|_| "browser agent call timed out".to_string())?;
-    let value = result?;
+    let response: Value = serde_json::from_str(&encoded)
+        .map_err(|error| format!("invalid browser agent result: {error}"))?;
+    if let Some(error) = response.get("error").and_then(Value::as_str) {
+        return Err(sanitize_text(error));
+    }
+    let value = response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "browser agent returned no result".to_string())?;
+    if value.get("ok") == Some(&Value::Bool(false)) {
+        return Err(sanitize_text(
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("browser action failed"),
+        ));
+    }
+    if let Some(url) = value.get("url").and_then(Value::as_str) {
+        manager.set_url(session_id, url)?;
+    }
+    if let Some(title) = value.get("title").and_then(Value::as_str) {
+        manager.set_title(session_id, &sanitize_text(title))?;
+    }
     sanitize_agent_result(value)
 }
 

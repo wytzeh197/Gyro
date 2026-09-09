@@ -1,3 +1,5 @@
+import { terminalLaunchProfiles } from "@gyro-dev/ui";
+import { terminalOutputUpdate } from "./terminal-output";
 import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
 import { BranchNameDialog } from "./branch-name-dialog";
 import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
@@ -1138,10 +1140,9 @@ export function App() {
         : undefined;
   const activeChatPanel: ChatSidePanelId | undefined =
     legacyRailPanel ?? activeChatCompanionPanel(companion, SOLO_CHAT_PANE_ID);
-  const commandProfiles =
-    config.commandProfiles.length > 0
-      ? config.commandProfiles
-      : defaultCommandProfiles();
+  const commandProfiles = terminalLaunchProfiles(
+    config.commandProfiles, providersForConfig(config), workbench.providerStatuses,
+  );
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
     [activeSessionId, sessions],
@@ -1204,6 +1205,18 @@ export function App() {
   );
   const companionFocusPaneId =
     activeChatLayout?.focusedPaneId ?? SOLO_CHAT_PANE_ID;
+  // The companion Terminal is a complete terminal surface beside the chat.
+  // Do not leave the workspace drawer showing the same pane when the user
+  // selects it from the chat, including through a restored legacy panel.
+  const openCompanionTab = useCallback(
+    (tab: ChatCompanionTabId, paneId?: string) => {
+      if (tab === "terminal") {
+        dispatchWorkbench({ type: "close-tool-panel" });
+      }
+      dispatchCompanion({ type: "open-tab", tab, paneId });
+    },
+    [],
+  );
   // The dock speaks for whichever chat pane has focus, including the solo
   // surfaces outside the grid.
   useEffect(() => {
@@ -1215,9 +1228,9 @@ export function App() {
   useEffect(() => {
     const panel = workbench.preferences.activeChatPanel;
     if (!panel || !isChatCompanionTabId(panel)) return;
-    dispatchCompanion({ type: "open-tab", tab: panel });
+    openCompanionTab(panel);
     dispatchWorkbench({ type: "set-chat-panel" });
-  }, [workbench.preferences.activeChatPanel]);
+  }, [openCompanionTab, workbench.preferences.activeChatPanel]);
   const closeLegacyRail = useCallback(() => {
     dispatchWorkbench({ type: "set-chat-panel" });
   }, []);
@@ -1450,6 +1463,20 @@ export function App() {
       isSending: thread?.isSending,
       error: thread?.error,
       modelLabel: sessionModel.modelLabel ?? sessionModel.providerLabel,
+      onStop: sessionId
+        ? () => {
+            void invoke("stop_provider_chat", { sessionId }).catch((error) => {
+              setSideChatThreads((current) => ({
+                ...current,
+                [paneId]: {
+                  ...current[paneId],
+                  messages: current[paneId]?.messages ?? [],
+                  error: String(error),
+                },
+              }));
+            });
+          }
+        : undefined,
       onSend: sessionId
         ? (message: string) => {
             void sendSideChatMessage(paneId, sessionId, message);
@@ -1460,15 +1487,11 @@ export function App() {
   const selectSoloChatPanel = useCallback((panel?: ChatSidePanelId) => {
     if (panel && isChatCompanionTabId(panel)) {
       dispatchWorkbench({ type: "set-chat-panel" });
-      dispatchCompanion({
-        type: "open-tab",
-        tab: panel,
-        paneId: SOLO_CHAT_PANE_ID,
-      });
+      openCompanionTab(panel, SOLO_CHAT_PANE_ID);
       return;
     }
     dispatchWorkbench({ type: "set-chat-panel", panel });
-  }, []);
+  }, [openCompanionTab]);
   const companionSurfaceProps = (paneId: string) => ({
     showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
@@ -1478,10 +1501,22 @@ export function App() {
     onCompanionWidthChange: setCompanionWidth,
     onOpenCompanionTab: (tab: ChatCompanionTabId) => {
       closeLegacyRail();
-      dispatchCompanion({ type: "open-tab", tab, paneId });
+      openCompanionTab(tab, paneId);
     },
     onCloseCompanionTab: (tab: ChatCompanionTabId) => {
       dispatchCompanion({ type: "close-tab", tab, paneId });
+      if (tab === "browser") {
+        closeLegacyRail();
+        const sessionId = paneId.startsWith("session:")
+          ? paneId.slice("session:".length)
+          : sessionBrowserKey;
+        if (isTauriRuntime()) {
+          void invoke("session_browser_close", { sessionId }).catch((error) =>
+            notify("command-failed", "Could not close browser", String(error)),
+          );
+        }
+        dispatchWorkbench({ type: "browser-close" });
+      }
     },
     onCloseCompanionDock: () => {
       dispatchCompanion({ type: "close-dock", paneId });
@@ -6491,110 +6526,99 @@ export function App() {
     }
   }, [notify, refreshIdeServices, workbench.preferences.workspaceTrust]);
 
-  const createSession = useCallback(
-    async () => {
-      const sessionLayout: WorkspaceLayoutId = "thread";
-      const title = "New chat";
+  const createSession = useCallback(async () => {
+    const sessionLayout: WorkspaceLayoutId = "thread";
+    const title = "New chat";
+    dispatchWorkbench({
+      type: "select-workspace-layout",
+      layout: sessionLayout,
+    });
+    dispatchWorkbench({ type: "close-tool-panel" });
+    suppressSessionAutoSelectRef.current = false;
+    if (!isTauriRuntime()) {
+      const session = createPreviewSession(
+        sessionLayout,
+        workbench.workspaceMode,
+        newSessionModelFromConfig(config),
+        workspacePath ?? "",
+        title,
+      );
+      setWorkspacePath(session.workspacePath);
+      setFiles([]);
+      setSessions((current) => [session, ...current]);
+      activeSessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
+      setEventsForSession(session.id, []);
       dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: sessionLayout,
+        type: "complete-onboarding-step",
+        step: "first-session",
       });
-      dispatchWorkbench({ type: "close-tool-panel" });
-      suppressSessionAutoSelectRef.current = false;
-      if (!isTauriRuntime()) {
-        const session = createPreviewSession(
-          sessionLayout,
-          workbench.workspaceMode,
-          newSessionModelFromConfig(config),
-          workspacePath ?? "",
-          title,
-        );
-        setWorkspacePath(session.workspacePath);
-        setFiles([]);
-        setSessions((current) => [session, ...current]);
-        activeSessionIdRef.current = session.id;
-        setActiveSessionId(session.id);
-        setEventsForSession(session.id, []);
-        dispatchWorkbench({
-          type: "complete-onboarding-step",
-          step: "first-session",
-        });
+      notify("terminal", "Session created", session.title);
+      return;
+    }
+    try {
+      const workspace = workspacePath ?? "";
+      const shouldCreateWorktree =
+        workbench.workspaceMode === "worktree" && workspace.length > 0;
+      const metadata = workspaceRunMetadata(
+        shouldCreateWorktree ? "worktree" : "local",
+        `${title}-${Date.now()}`,
+      );
+      const session = shouldCreateWorktree
+        ? await invoke<Session>("create_worktree_session", {
+            branch: metadata.branch,
+            ...newSessionModelFromConfig(config),
+            title,
+            worktreeName: metadata.worktreeName,
+            workspacePath: workspace,
+          })
+        : await invoke<Session>("create_desktop_session", {
+            ...newSessionModelFromConfig(config),
+            title,
+            workspacePath: workspace,
+          });
+      setWorkspacePath(session.workspacePath);
+      await refreshSessions();
+      setActiveSessionId(session.id);
+      dispatchWorkbench({
+        type: "complete-onboarding-step",
+        step: "first-session",
+      });
+      if (shouldCreateWorktree) {
         notify(
           "terminal",
-          "Session created",
-          session.title,
+          "Agent workspace ready",
+          session.branch
+            ? `${session.branch} — main project stays untouched.`
+            : "Private branch under Gyro — main project stays untouched.",
         );
-        return;
+      } else {
+        notify("terminal", "Session created", session.title);
       }
-      try {
-        const workspace = workspacePath ?? "";
-        const shouldCreateWorktree =
-          workbench.workspaceMode === "worktree" && workspace.length > 0;
-        const metadata = workspaceRunMetadata(
-          shouldCreateWorktree ? "worktree" : "local",
-          `${title}-${Date.now()}`,
-        );
-        const session = shouldCreateWorktree
-          ? await invoke<Session>("create_worktree_session", {
-              branch: metadata.branch,
-              ...newSessionModelFromConfig(config),
-              title,
-              worktreeName: metadata.worktreeName,
-              workspacePath: workspace,
-            })
-          : await invoke<Session>("create_desktop_session", {
-              ...newSessionModelFromConfig(config),
-              title,
-              workspacePath: workspace,
-            });
-        setWorkspacePath(session.workspacePath);
-        await refreshSessions();
-        setActiveSessionId(session.id);
-        dispatchWorkbench({
-          type: "complete-onboarding-step",
-          step: "first-session",
-        });
-        if (shouldCreateWorktree) {
-          notify(
-            "terminal",
-            "Agent workspace ready",
-            session.branch
-              ? `${session.branch} — main project stays untouched.`
-              : "Private branch under Gyro — main project stays untouched.",
-          );
-        } else {
-          notify(
-            "terminal",
-            "Session created",
-            session.title,
-          );
-        }
-      } catch {
-        const session = createPreviewSession(
-          sessionLayout,
-          workbench.workspaceMode,
-          newSessionModelFromConfig(config),
-          workspacePath ?? "",
-          title,
-        );
-        setWorkspacePath(session.workspacePath);
-        setFiles([]);
-        setSessions((current) => [session, ...current]);
-        activeSessionIdRef.current = session.id;
-        setActiveSessionId(session.id);
-        setEventsForSession(session.id, []);
-        notify("command-failed", "Session fallback", "Created preview session");
-      }
-    },
-    [
-      config,
-      notify,
-      refreshSessions,
-      setEventsForSession,
-      workbench.workspaceMode,
-      workspacePath,
-    ],
-  );
+    } catch {
+      const session = createPreviewSession(
+        sessionLayout,
+        workbench.workspaceMode,
+        newSessionModelFromConfig(config),
+        workspacePath ?? "",
+        title,
+      );
+      setWorkspacePath(session.workspacePath);
+      setFiles([]);
+      setSessions((current) => [session, ...current]);
+      activeSessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
+      setEventsForSession(session.id, []);
+      notify("command-failed", "Session fallback", "Created preview session");
+    }
+  }, [
+    config,
+    notify,
+    refreshSessions,
+    setEventsForSession,
+    workbench.workspaceMode,
+    workspacePath,
+  ]);
 
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
@@ -7226,6 +7250,7 @@ export function App() {
       startingOutput = "",
       template,
       workspacePathOverride,
+      startInHome = false,
       reveal = true,
       taskTitle,
       workspaceTaskId,
@@ -7236,11 +7261,21 @@ export function App() {
       startingOutput?: string;
       template?: TerminalTemplate;
       workspacePathOverride?: string;
+      startInHome?: boolean;
       /** Background tasks stay visible in the task rail until explicitly opened. */
       reveal?: boolean;
       taskTitle?: string;
       workspaceTaskId?: string;
     }) => {
+      // Resolve again at the launch boundary: saved profiles and alternate actions
+      // must obey the same connection gate as the start screen.
+      const resolved = terminalLaunchProfiles([profile], providersForConfig(config), workbench.providerStatuses)[0];
+      if (!resolved) return false;
+      if (resolved.launchUnavailableReason) {
+        notify("command-failed", `${profile.displayName}: ${resolved.launchUnavailableReason}`, "Check this provider in Settings before launching its CLI.");
+        return false;
+      }
+      profile = resolved;
       const process = terminalProcessForProfile(profile, commandOverride);
       const existingPane = workbench.terminalPanes.find(
         (pane) => pane.id === paneId,
@@ -7248,12 +7283,11 @@ export function App() {
       const selectedPane = workbench.terminalPanes.find(
         (pane) => pane.id === workbench.selectedTerminalPaneId,
       );
-      const launchWorkspacePath =
+      const launchWorkspacePath = startInHome ? undefined :
         workspacePathOverride ??
         existingPane?.projectPath ??
-        selectedPane?.projectPath ??
-        workspaceActionRoot ??
-        savedProjects[0]?.path;
+        (template ? selectedPane?.projectPath : undefined) ??
+        workspaceActionRoot;
       if (
         launchWorkspacePath &&
         !isWorkspaceTrusted(
@@ -7277,7 +7311,7 @@ export function App() {
             launchWorkspacePath,
           ),
           projectPath: launchWorkspacePath,
-              taskTitle,
+          taskTitle,
           workspaceTaskId,
         });
         if (template) {
@@ -7325,9 +7359,7 @@ export function App() {
           title: profile.displayName,
           workspacePath: launchWorkspacePath,
           workspaceMode: "local",
-          workingDirectory: launchWorkspacePath
-            ? "Workspace"
-            : profile.workingDirectory,
+          workingDirectory: workspacePathOverride ? "Exact workspace" : launchWorkspacePath ? "Workspace" : "Home",
         };
         // Ask for governance when the profile supports it. If the backend
         // cannot honour it the pane still opens, but ungoverned and labelled
@@ -7398,8 +7430,9 @@ export function App() {
       }
     },
     [
+      config,
+      workbench.providerStatuses,
       notify,
-      savedProjects,
       workbench.selectedTerminalPaneId,
       workbench.terminalPanes,
       workbench.preferences.workspaceTrust,
@@ -7408,22 +7441,39 @@ export function App() {
     ],
   );
 
-  const addTerminalPane = useCallback(() => {
-    const profile = getCommandProfile(commandProfiles, activeProfileId);
-    void launchTerminalPane({ profile }).then((started) => {
-      notify(
-        started ? "terminal" : "command-failed",
-        started ? "Terminal added" : "Terminal start failed",
-        profile.displayName,
-      );
-    });
-  }, [activeProfileId, commandProfiles, launchTerminalPane, notify]);
+  const addTerminalPane = useCallback(async (options?: { reveal?: boolean; directory?: "home" | "choose"; folderPath?: string }) => {
+    let folderPath = options?.folderPath;
+    try {
+      if (options?.directory === "choose") {
+        const selected = isTauriRuntime()
+          ? await open({ directory: true, multiple: false, title: "Open terminal in folder" })
+          : window.prompt("Open terminal in folder", workspaceActionRoot ?? "");
+        if (typeof selected !== "string" || !selected.trim()) return;
+        folderPath = selected;
+      }
+      const profile = getCommandProfile([...commandProfiles, ...defaultCommandProfiles()], "shell");
+      const started = await launchTerminalPane({
+        profile, reveal: options?.reveal,
+        startInHome: !folderPath,
+        workspacePathOverride: folderPath,
+      });
+      notify(started ? "terminal" : "command-failed", started ? "Terminal added" : "Terminal start failed", profile.displayName);
+    } catch (error) {
+      notify("command-failed", "Could not open terminal", String(error));
+    }
+  }, [commandProfiles, launchTerminalPane, notify, workspaceActionRoot]);
 
   const createCliSession = useCallback(
     (profileId: string, projectPath: string) => {
       const profile = getCommandProfile(commandProfiles, profileId);
-      dispatchWorkbench({ type: "select-workspace-layout", layout: "terminal-grid" });
-      void launchTerminalPane({ profile, workspacePathOverride: projectPath }).then((started) => {
+      dispatchWorkbench({
+        type: "select-workspace-layout",
+        layout: "terminal-grid",
+      });
+      void launchTerminalPane({
+        profile,
+        workspacePathOverride: projectPath,
+      }).then((started) => {
         notify(
           started ? "terminal" : "command-failed",
           started ? "CLI session started" : "CLI session failed",
@@ -9359,17 +9409,20 @@ export function App() {
   ]);
 
   const splitTerminalPane = useCallback(
-    (template: TerminalTemplate) => {
-      const profile = getCommandProfile(commandProfiles, activeProfileId);
-      void launchTerminalPane({ profile, template }).then((started) => {
-        notify(
-          started ? "terminal" : "command-failed",
-          started ? "Terminal split" : "Terminal start failed",
-          started ? `${template}-pane template selected` : profile.displayName,
-        );
-      });
+    async (template: TerminalTemplate) => {
+      const source = workbench.terminalPanes.find((pane) => pane.id === workbench.selectedTerminalPaneId);
+      const profile = getCommandProfile(commandProfiles, source?.profileId || activeProfileId);
+      try {
+        const directory = source && isTauriRuntime()
+          ? await invoke<string>("terminal_pane_working_directory", { paneId: source.id })
+          : source?.workingDirectory || source?.projectPath;
+        const started = await launchTerminalPane({ profile, template, workspacePathOverride: directory, startInHome: !directory });
+        notify(started ? "terminal" : "command-failed", started ? "Terminal split" : "Terminal start failed", profile.displayName);
+      } catch (error) {
+        notify("command-failed", "Could not split terminal", String(error));
+      }
     },
-    [activeProfileId, commandProfiles, launchTerminalPane, notify],
+    [activeProfileId, commandProfiles, launchTerminalPane, notify, workbench.terminalPanes, workbench.selectedTerminalPaneId],
   );
 
   const renameTerminalPane = useCallback(
@@ -11697,15 +11750,19 @@ export function App() {
         return;
       }
       terminalReadInFlightRef.current.add(paneId);
+      const requestedRevision = terminalOutputRevisionRef.current[paneId];
       try {
         const snapshot = await invoke<TerminalPaneSnapshot>(
           "read_terminal_output",
           {
             paneId,
-            knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+            knownOutputRevision: requestedRevision,
           },
         );
-        syncTerminalSnapshot(snapshot);
+        // A restart or capability event can supersede an in-flight read.
+        if (terminalOutputRevisionRef.current[paneId] === requestedRevision) {
+          syncTerminalSnapshot(snapshot);
+        }
       } catch (error) {
         if (terminalPaneProcessIsMissing(error)) {
           dispatchWorkbench({
@@ -11744,11 +11801,10 @@ export function App() {
         return;
       }
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
+        await invoke<TerminalPaneSnapshot>(
           "write_terminal_input",
           { input, paneId },
         );
-        syncTerminalSnapshot(snapshot);
         window.setTimeout(() => {
           void refreshTerminalPane(paneId);
         }, 200);
@@ -11776,7 +11832,11 @@ export function App() {
   );
 
   const runProfile = useCallback(
-    async (profileId = activeProfileId, commandOverride?: string) => {
+    async (
+      profileId = activeProfileId,
+      commandOverride?: string,
+      options?: { reveal?: boolean },
+    ) => {
       const profile = getCommandProfile(commandProfiles, profileId);
       const process = terminalProcessForProfile(profile, commandOverride);
       const paneId = workbench.selectedTerminalPaneId || `pane-${Date.now()}`;
@@ -11785,6 +11845,7 @@ export function App() {
         commandOverride,
         paneId,
         profile,
+        reveal: options?.reveal,
         startingOutput: output,
       });
       if (started) {
@@ -11806,14 +11867,19 @@ export function App() {
   );
 
   const runCommandProfile = useCallback(
-    (profileId: string) => {
+    (profileId: string, options?: { reveal?: boolean }) => {
       setActiveProfileId(profileId);
-      void runProfile(profileId);
+      const profile = getCommandProfile(commandProfiles, profileId);
+      void launchTerminalPane({ profile, reveal: options?.reveal }).then((started) => {
+        if (!started) {
+          notify("command-failed", "Terminal start failed", profile.displayName);
+        }
+      });
     },
-    [runProfile],
+    [commandProfiles, launchTerminalPane, notify],
   );
 
-  const launchCliPreset = useCallback(async () => {
+  const launchCliPreset = useCallback(async (options?: { reveal?: boolean }) => {
     const preset = normalizeCliLaunchPreset(
       workbench.preferences.cliLaunchPreset,
       commandProfiles,
@@ -11840,6 +11906,7 @@ export function App() {
         const started = await launchTerminalPane({
           paneId,
           profile,
+          reveal: options?.reveal,
           startingOutput: "",
         });
         if (!started) {
@@ -12186,16 +12253,16 @@ export function App() {
         return;
       }
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
+        await invoke<TerminalPaneSnapshot>(
           "resize_terminal_pane",
           { cols, paneId, rows },
         );
-        syncTerminalSnapshot(snapshot);
+        void refreshTerminalPane(paneId);
       } catch {
         notify("command-failed", "Terminal resize failed", paneId);
       }
     },
-    [notify, syncTerminalSnapshot],
+    [notify, refreshTerminalPane],
   );
 
   const setTerminalTemplate = useCallback(
@@ -12402,6 +12469,17 @@ export function App() {
             message: `Native · ${event.payload.url}`,
             nativeHost: true,
           });
+          void invoke<{ title: string } | null>("session_browser_snapshot", {
+            sessionId: event.payload.sessionId,
+          })
+            .then((snapshot) => {
+              if (snapshot?.title)
+                dispatchWorkbench({
+                  type: "browser-title",
+                  title: snapshot.title,
+                });
+            })
+            .catch(() => {});
         },
       );
     } catch {
@@ -15081,11 +15159,7 @@ export function App() {
           ...current,
           [pane.paneId]: undefined,
         }));
-        dispatchCompanion({
-          type: "open-tab",
-          tab: panel,
-          paneId: pane.paneId,
-        });
+        openCompanionTab(panel, pane.paneId);
         return;
       }
       setPaneLegacyPanelByPaneId((current) => ({
@@ -15101,7 +15175,7 @@ export function App() {
           ...current,
           [pane.paneId]: undefined,
         }));
-        dispatchCompanion({ type: "open-tab", tab, paneId: pane.paneId });
+        openCompanionTab(tab, pane.paneId);
       },
       onReopenCompanionDock: () => {
         focusChatPane(pane);
@@ -16998,13 +17072,15 @@ function LiveTerminalPaneBody({
         const terminal = new Terminal({
           allowTransparency: true,
           cursorBlink: true,
+          // Browser preview fixtures are plain text; native output is a raw PTY stream.
+          convertEol: !isTauriRuntime(),
           drawBoldTextInBrightColors: true,
           fontFamily:
             "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
           fontSize: 12,
-          lineHeight: 1.35,
+          lineHeight: 1.2,
           macOptionIsMeta: true,
-          minimumContrastRatio: 2.6,
+          minimumContrastRatio: 1,
           rightClickSelectsWord: true,
           scrollOnUserInput: true,
           scrollback: 5000,
@@ -17016,11 +17092,6 @@ function LiveTerminalPaneBody({
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
 
-        const initialOutput = paneOutputRef.current;
-        if (initialOutput) {
-          terminal.write(formatTerminalDelta(initialOutput));
-          renderedOutputRef.current = initialOutput;
-        }
         if (isActive) {
           terminal.focus();
         }
@@ -17053,13 +17124,13 @@ function LiveTerminalPaneBody({
             if (sizeKey === lastSizeRef.current) {
               return;
             }
-            lastSizeRef.current = sizeKey;
             // Tell the PTY for live sessions so full-screen CLIs (Claude Code)
             // redraw instead of leaving garbage from the previous geometry.
             if (
               statusRef.current === "running" ||
               statusRef.current === "waiting"
             ) {
+              lastSizeRef.current = sizeKey;
               onResizeRef.current(pane.id, cols, rows);
             }
           } catch {
@@ -17079,6 +17150,11 @@ function LiveTerminalPaneBody({
 
         const resizeObserver = new ResizeObserver(scheduleFit);
         resizeObserver.observe(hostRef.current);
+        // Fit before replaying cursor-addressed output; xterm defaults to 80×24.
+        fitAndReport();
+        const initialOutput = paneOutputRef.current;
+        terminal.write(initialOutput);
+        renderedOutputRef.current = initialOutput;
         scheduleFit();
         // Panel height often animates open after mount; refit shortly after.
         const lateFit = window.setTimeout(scheduleFit, 120);
@@ -17122,23 +17198,15 @@ function LiveTerminalPaneBody({
     if (nextOutput === previousOutput) {
       return;
     }
-    if (nextOutput.startsWith(previousOutput)) {
-      terminal.write(
-        formatTerminalDelta(nextOutput.slice(previousOutput.length)),
-      );
-    } else {
-      terminal.clear();
-      terminal.write(formatTerminalDelta(nextOutput));
-    }
+    const update = terminalOutputUpdate(previousOutput, nextOutput);
+    if (update.reset) terminal.reset();
+    terminal.write(update.data);
     renderedOutputRef.current = nextOutput;
   }, [pane.output]);
 
   useEffect(() => {
-    if (!isActive) {
-      return;
-    }
-    terminalRef.current?.focus();
-    // Refit when the pane becomes selected.
+    if (isActive) terminalRef.current?.focus();
+    // Also report dimensions when a stopped pane gets a new live process.
     const timer = window.setTimeout(() => {
       try {
         const host = hostRef.current;
@@ -17170,7 +17238,7 @@ function LiveTerminalPaneBody({
       }
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [isActive, pane.id]);
+  }, [isActive, pane.id, pane.status]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -17200,16 +17268,19 @@ function LiveTerminalPaneBody({
         tabIndex={0}
       />
       {pane.status === "restored" ? (
-        <button
-          className="gyro-terminal-reconnect"
-          onClick={(event) => {
-            event.stopPropagation();
-            onReconnect(pane.id);
-          }}
-          type="button"
-        >
-          Restart to reconnect
-        </button>
+        <div className="gyro-terminal-recovery" role="status">
+          <span>Previous output · process is no longer running</span>
+          <button
+            className="gyro-terminal-reconnect"
+            onClick={(event) => {
+              event.stopPropagation();
+              onReconnect(pane.id);
+            }}
+            type="button"
+          >
+            Start again
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -17218,17 +17289,17 @@ function LiveTerminalPaneBody({
 function terminalThemeFor(theme: ResolvedTheme) {
   if (theme === "light") {
     return {
-      background: "#f6f8fa",
+      background: "#ffffff",
       black: "#1f242c",
       blue: "#1f66d1",
-      brightBlack: "#5b6470",
+      brightBlack: "#8e8e93",
       brightBlue: "#2f7dff",
       brightCyan: "#008f9a",
       brightGreen: "#168a50",
       brightMagenta: "#b034c9",
       brightRed: "#d92d20",
       brightWhite: "#171a20",
-      brightYellow: "#a15c00",
+      brightYellow: "#ffbf00",
       cursor: "#1f242c",
       cursorAccent: "#ffffff",
       cyan: "#007c89",
@@ -17237,7 +17308,7 @@ function terminalThemeFor(theme: ResolvedTheme) {
       magenta: "#9b26b6",
       red: "#b42318",
       selectionBackground: "#dfe2e6",
-      white: "#d8d9dc",
+      white: "#ededed",
       yellow: "#875200",
     };
   }
@@ -17265,10 +17336,6 @@ function terminalThemeFor(theme: ResolvedTheme) {
     white: "#dddddd",
     yellow: "#f2c94c",
   };
-}
-
-function formatTerminalDelta(value: string) {
-  return value.replace(/\r?\n/g, "\r\n");
 }
 
 function withCouncilConfig(config: GyroConfig): GyroConfig {

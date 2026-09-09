@@ -87,6 +87,52 @@ the Browser context attachment UX, and complete the acceptance matrix below.
   [product knowledge](product-knowledge/README.md) for the guide, drift checks,
   and adapter-level verification policy.
 
+### Browser reliability regression — 2026-09-09
+
+Native DOM tool results now return through Tauri's evaluation callback, so a
+page's CSP or custom-scheme fetch restrictions cannot block the response.
+Bridge telemetry uses the original fetch to avoid recursively logging itself.
+Repeated page reads retain usable element references; clicks fire once; stale
+explicit typing targets fail instead of typing into the focused field. Failed
+DOM actions propagate as tool errors. Console and network tools read their
+in-page buffers through the same native callback.
+
+The opt-in native smoke check passes against a loopback fixture with a restrictive
+CSP. It covers repeat reads, find/click/read with an exact click count, typing
+and submitting, credential/stale-ref rejection, select and checkbox inputs,
+scroll position, PNG capture, console/network, exact URLs after navigation and
+back/forward, reload, title, and native close. Run on macOS with the dev frontend
+available at its configured URL:
+
+```sh
+# In a separate terminal:
+python3 -m http.server 8766 --bind 127.0.0.1 --directory scripts/fixtures
+
+cargo build -p gyro-desktop
+GYRO_TEST_DATA_DIR=/tmp/gyro-browser-smoke \
+GYRO_BROWSER_SMOKE_URL=http://127.0.0.1:8766/browser-observation.html \
+target/debug/gyro-desktop
+```
+
+The isolated directory receives `browser-smoke.json` and `browser-smoke.png`.
+The native check exits nonzero on failure and does not run providers or read
+user session storage. This hook is compiled only in debug builds.
+
+A separate live Codex run (GPT-5.6 Sol) completed open/read twice/click/read/type
+and submit/screenshot on the fixture. The native page visibly showed
+`State: changed`, `Clicks: 1`, and `Form: saved Browser acceptance`.
+A fresh live Codex run also read https://usegyro.io/ successfully, reported
+“A place to think. A space to build.”, and received a desktop screenshot.
+UI inspection confirmed the page title and visible close ×. Closing removed the
+native webview; reopening showed an empty New tab. Inactive browser tabs also
+retain their page title. These checks do not certify every provider adapter,
+cross-origin iframe, or site requiring trusted user gestures.
+
+Validation: the 18 browser Rust tests, desktop TypeScript check, browser
+capability contract check, and chat companion check pass. The broader chat
+side-panel check fails its terminal-launch assertion on both the unchanged
+baseline and this patch; that pre-existing failure is outside this browser fix.
+
 ### Live acceptance matrix
 
 Verification is by adapter boundary and capability class, not every model name.

@@ -490,3 +490,5 @@ export type { LanguageDefinition, LanguageInput, SyntaxSource } from "./editor/l
 export { createSyntaxTheme, tokenRoles, tokenRoleAliases, normalizeTokenRole } from "./editor/themes/syntax-theme";
 export { workspaceEditorColors } from "./editor/themes/workspace-colors";
 export type { TokenRole, GyroSyntaxTheme } from "./editor/themes/syntax-theme";
+
+export { terminalLaunchProfiles, terminalDefaultProfiles } from "./terminal-profiles";
