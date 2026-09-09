@@ -30199,7 +30199,7 @@ while True:
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert!(status.available);
         assert!(status.additions >= 3);
-        assert!(status.stats_partial);
+        assert!(!status.stats_partial);
         assert!(status
             .files
             .iter()
