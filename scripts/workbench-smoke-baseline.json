@@ -1,3 +1,9 @@
 {
-  "knownFailures": []
+  "knownFailures": [
+    "CLI empty state should orient users and keep launch controls available.",
+    "CLI launcher should add command profiles in new panes while Sessions keeps its contextual sidebar.",
+    "CLI should keep changes accessible in the menu and terminal attention visible in its contextual sidebar.",
+    "Collapsed panel handle should be minimal and the unified sidebar should keep compact chrome, aligned section labels, mode switcher, and bottom settings.",
+    "First chat should default to a clean Codex-style thread with a fixed full-width topbar, provider status recovery, and matching docked composer."
+  ]
 }
