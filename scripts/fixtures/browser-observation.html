@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'"
+    />
     <title>Gyro Browser Observation Fixture</title>
     <style>
       :root {
@@ -49,6 +53,7 @@
         <h2 id="interaction-heading">State-changing control</h2>
         <button id="change-state" type="button">Change visible state</button>
         <output id="visible-state" aria-live="polite">State: initial</output>
+        <output id="click-count">Clicks: 0</output>
       </section>
 
       <section aria-labelledby="form-heading">
@@ -56,6 +61,12 @@
         <form id="safe-form">
           <label for="project-name">Project name</label>
           <input id="project-name" name="projectName" value="Gyro" />
+          <select id="project-kind" aria-label="Project kind">
+            <option value="site">Site</option>
+            <option value="app">App</option>
+          </select>
+          <input id="project-enabled" type="checkbox" aria-label="Enabled" />
+          <output id="options-state">Kind: site; enabled: false</output>
           <button type="submit">Save project</button>
           <output id="form-state" aria-live="polite">Form: untouched</output>
         </form>
@@ -68,11 +79,21 @@
           value="fixture-secret"
         />
       </section>
+      <div style="height: 900px" aria-hidden="true"></div>
     </main>
 
     <script>
+      let clicks = 0;
+      for (const id of ["project-kind", "project-enabled"]) {
+        document.getElementById(id).addEventListener("change", () => {
+          document.getElementById("options-state").textContent =
+            `Kind: ${document.getElementById("project-kind").value}; enabled: ${document.getElementById("project-enabled").checked}`;
+        });
+      }
       document.querySelector("#change-state").addEventListener("click", () => {
         document.querySelector("#visible-state").textContent = "State: changed";
+        document.querySelector("#click-count").textContent =
+          `Clicks: ${++clicks}`;
       });
 
       document

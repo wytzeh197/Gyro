@@ -1505,6 +1505,18 @@ export function App() {
     },
     onCloseCompanionTab: (tab: ChatCompanionTabId) => {
       dispatchCompanion({ type: "close-tab", tab, paneId });
+      if (tab === "browser") {
+        closeLegacyRail();
+        const sessionId = paneId.startsWith("session:")
+          ? paneId.slice("session:".length)
+          : sessionBrowserKey;
+        if (isTauriRuntime()) {
+          void invoke("session_browser_close", { sessionId }).catch((error) =>
+            notify("command-failed", "Could not close browser", String(error)),
+          );
+        }
+        dispatchWorkbench({ type: "browser-close" });
+      }
     },
     onCloseCompanionDock: () => {
       dispatchCompanion({ type: "close-dock", paneId });
@@ -12457,6 +12469,17 @@ export function App() {
             message: `Native · ${event.payload.url}`,
             nativeHost: true,
           });
+          void invoke<{ title: string } | null>("session_browser_snapshot", {
+            sessionId: event.payload.sessionId,
+          })
+            .then((snapshot) => {
+              if (snapshot?.title)
+                dispatchWorkbench({
+                  type: "browser-title",
+                  title: snapshot.title,
+                });
+            })
+            .catch(() => {});
         },
       );
     } catch {

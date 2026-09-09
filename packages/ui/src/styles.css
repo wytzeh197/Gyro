@@ -35960,6 +35960,23 @@ textarea:focus-visible,
   max-width: 100%;
 }
 
+/* The toolbar is at layer 120. Lift the menu's entire row above it;
+   a higher z-index on the popup alone cannot escape the row's stacking context. */
+.gyro-composer-shell > .gyro-composer-context-row:has(.gyro-composer-popover),
+.gyro-chat-start
+  .gyro-composer-shell.is-hero.has-provider
+  > .gyro-composer-context-row:has(.gyro-composer-popover) {
+  position: relative;
+  z-index: 121;
+}
+
+.gyro-composer-shell
+  .gyro-composer-context-row
+  .gyro-composer-control
+  > .gyro-composer-popover {
+  background: var(--gyro-surface);
+}
+
 .gyro-context-summary-item {
   align-items: center;
   display: inline-flex;
@@ -36834,13 +36851,20 @@ textarea:focus-visible,
   flex: 1 1 auto;
 }
 
-.gyro-chat-companion .gyro-chat-companion-tab > .gyro-chat-companion-tab-close {
+.gyro-chat-companion .gyro-chat-companion-tab > .gyro-chat-companion-tab-close,
+.gyro-chat-companion .gyro-chat-companion-tab.is-active > .gyro-chat-companion-tab-close {
+  opacity: 0.7;
+  gap: 0;
   flex: 0 0 20px;
   height: 20px;
   max-width: 20px;
   min-height: 20px;
   padding: 0;
   width: 20px;
+}
+
+.gyro-chat-companion-tab-close > svg {
+  flex-shrink: 0;
 }
 
 :root[data-theme="light"]

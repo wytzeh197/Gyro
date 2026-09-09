@@ -7604,13 +7604,10 @@ export function ChatSurface({
         onWidthChange={onCompanionWidthChange}
         openTabs={openTabs}
         browserTabLabel={
-          railPanel === "browser"
-            ? browserPreview?.status === "idle"
-              ? "New tab"
-              : browserPreview?.title?.trim() ||
-                browserPreviewHostLabel(browserPreview?.url) ||
-                "Browser"
-            : undefined
+          browserPreview?.title?.trim() ||
+          (browserPreview?.status === "idle"
+            ? "New tab"
+            : browserPreviewHostLabel(browserPreview?.url) || "Browser")
         }
         width={companionWidth}
       >
@@ -9491,7 +9488,7 @@ function ChatCompanionDock({
             const Icon = chatCompanionTabIcons[id];
             const isActive = id === activeTab;
             const label =
-              id === "browser" && isActive && browserTabLabel
+              id === "browser" && browserTabLabel
                 ? browserTabLabel
                 : chatCompanionTabLabels[id];
             return (

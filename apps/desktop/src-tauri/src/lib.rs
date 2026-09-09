@@ -66,10 +66,12 @@ use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+#[cfg(debug_assertions)]
+mod browser_smoke;
+mod git_line_counts;
 mod menu_bar;
 mod session_browser;
 mod source_control_review;
-mod git_line_counts;
 mod system_access;
 
 #[cfg(test)]
@@ -10374,7 +10376,7 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
             additions: 0,
             deletions: 0,
             stats_partial: false,
-                compared_to_main: None,
+            compared_to_main: None,
             files: Vec::new(),
             history: Vec::new(),
             history_error: None,
@@ -10409,7 +10411,7 @@ fn parse_git_status_v2(output: &str) -> SourceControlStatus {
         additions: 0,
         deletions: 0,
         stats_partial: false,
-                compared_to_main: None,
+        compared_to_main: None,
         files: Vec::new(),
         history: Vec::new(),
         history_error: None,
@@ -10521,26 +10523,48 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
         if file.state == "untracked" {
             let additions = match git_line_counts::untracked_lines(&repo_root.join(&file.path)) {
                 Ok(lines) => lines,
-                Err(_) => { status.stats_partial = true; continue; }
+                Err(_) => {
+                    status.stats_partial = true;
+                    continue;
+                }
             };
             file.additions = additions;
             untracked_additions = untracked_additions.saturating_add(additions);
             status.additions = status.additions.saturating_add(additions);
         }
     }
-    status.compared_to_main = git_main_comparison(repo_root, untracked_additions, status.stats_partial);
+    status.compared_to_main =
+        git_main_comparison(repo_root, untracked_additions, status.stats_partial);
 }
 
-fn git_main_comparison(repo_root: &Path, untracked_additions: usize, partial: bool) -> Option<MainComparisonStats> {
+fn git_main_comparison(
+    repo_root: &Path,
+    untracked_additions: usize,
+    partial: bool,
+) -> Option<MainComparisonStats> {
     let mut command = git_command();
-    command.arg("-C").arg(repo_root)
-        .args(["diff", "--numstat", "--no-renames", "refs/heads/main", "--"]);
-    let output = run_bounded_command(&command, Duration::from_secs(15),
-        Some(Duration::from_secs(10)), 4 * 1024 * 1024, 64 * 1024).ok()?;
-    if !output.succeeded() { return None; }
+    command.arg("-C").arg(repo_root).args([
+        "diff",
+        "--numstat",
+        "--no-renames",
+        "refs/heads/main",
+        "--",
+    ]);
+    let output = run_bounded_command(
+        &command,
+        Duration::from_secs(15),
+        Some(Duration::from_secs(10)),
+        4 * 1024 * 1024,
+        64 * 1024,
+    )
+    .ok()?;
+    if !output.succeeded() {
+        return None;
+    }
     let (stats, parse_partial) = parse_git_numstat(&output.stdout);
     let mut result = MainComparisonStats {
-        additions: untracked_additions, deletions: 0,
+        additions: untracked_additions,
+        deletions: 0,
         partial: partial || parse_partial || output.stdout_truncated,
     };
     for (additions, deletions) in stats.values() {
@@ -11485,24 +11509,37 @@ async fn read_terminal_output(
 }
 
 // Query only when splitting; do not run process inspection on every output poll.
-fn terminal_current_directory(pid: Option<u32>, fallback: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+fn terminal_current_directory(
+    pid: Option<u32>,
+    fallback: Option<PathBuf>,
+) -> anyhow::Result<PathBuf> {
     if let Some(pid) = pid {
         #[cfg(target_os = "macos")]
         {
             let mut command = Command::new("/usr/sbin/lsof");
             command.args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]);
-            if let Ok(output) = run_bounded_command(&command, Duration::from_secs(3), None, 16 * 1024, 4096) {
+            if let Ok(output) =
+                run_bounded_command(&command, Duration::from_secs(3), None, 16 * 1024, 4096)
+            {
                 if output.succeeded() && !output.stdout_truncated {
-                    if let Some(path) = output.stdout.lines().find_map(|line| line.strip_prefix('n')) {
+                    if let Some(path) = output
+                        .stdout
+                        .lines()
+                        .find_map(|line| line.strip_prefix('n'))
+                    {
                         let path = PathBuf::from(path);
-                        if path.is_dir() { return Ok(path); }
+                        if path.is_dir() {
+                            return Ok(path);
+                        }
                     }
                 }
             }
         }
         #[cfg(target_os = "linux")]
         if let Ok(path) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
-            if path.is_dir() { return Ok(path); }
+            if path.is_dir() {
+                return Ok(path);
+            }
         }
     }
     fallback.map(Ok).unwrap_or_else(user_home_directory)
@@ -11516,12 +11553,24 @@ async fn terminal_pane_working_directory(
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let (pid, fallback) = {
-            let processes = manager.processes.lock().map_err(|_| "terminal process manager lock poisoned".to_string())?;
-            let process = processes.get(&pane_id).ok_or_else(|| "terminal pane not found".to_string())?;
-            (process.child.process_id(), process.working_directory.clone())
+            let processes = manager
+                .processes
+                .lock()
+                .map_err(|_| "terminal process manager lock poisoned".to_string())?;
+            let process = processes
+                .get(&pane_id)
+                .ok_or_else(|| "terminal pane not found".to_string())?;
+            (
+                process.child.process_id(),
+                process.working_directory.clone(),
+            )
         };
-        terminal_current_directory(pid, fallback).map(|path| path.display().to_string()).map_err(to_string)
-    }).await.map_err(|error| format!("terminal directory worker failed: {error}"))?
+        terminal_current_directory(pid, fallback)
+            .map(|path| path.display().to_string())
+            .map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("terminal directory worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -21055,9 +21104,7 @@ fn narrower_capability_access(
 }
 
 fn capability_full_access_enabled(config: &GyroConfig) -> bool {
-    config.full_access
-        && !config.require_command_approval
-        && !config.require_file_edit_approval
+    config.full_access && !config.require_command_approval && !config.require_file_edit_approval
 }
 
 fn capability_access_with_full_access(
@@ -22162,10 +22209,15 @@ fn execute_provider_capability(
                 .get("limit")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(50) as usize;
-            let entries = app
-                .state::<session_browser::SessionBrowserManager>()
-                .console_entries(&bound.session_id, limit)
-                .map_err(anyhow::Error::msg)?;
+            let observed = session_browser::call_agent(
+                app,
+                &bound.session_id,
+                "console",
+                serde_json::json!({"limit": limit}),
+            )
+            .map_err(anyhow::Error::msg)?;
+            let entries: Vec<session_browser::BrowserConsoleEntry> =
+                serde_json::from_value(observed["entries"].clone())?;
             let resource = CapabilityResourceRef {
                 id: owned.resource_id,
                 kind: "browser".into(),
@@ -22186,10 +22238,15 @@ fn execute_provider_capability(
                 .get("limit")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(50) as usize;
-            let entries = app
-                .state::<session_browser::SessionBrowserManager>()
-                .network_entries(&bound.session_id, limit)
-                .map_err(anyhow::Error::msg)?;
+            let observed = session_browser::call_agent(
+                app,
+                &bound.session_id,
+                "network",
+                serde_json::json!({"limit": limit}),
+            )
+            .map_err(anyhow::Error::msg)?;
+            let entries: Vec<session_browser::BrowserNetworkEntry> =
+                serde_json::from_value(observed["entries"].clone())?;
             let resource = CapabilityResourceRef {
                 id: owned.resource_id,
                 kind: "browser".into(),
@@ -23429,6 +23486,10 @@ pub fn run() {
         .manage(session_browser::SessionBrowserManager::default())
         .manage(menu_bar::MenuBarController::default())
         .setup(|app| {
+            #[cfg(debug_assertions)]
+            if browser_smoke::start(app.handle())? {
+                return Ok(());
+            }
             menu_bar::setup(app)?;
             #[cfg(target_os = "macos")]
             restore_main_window(app.handle())?;
@@ -24435,7 +24496,12 @@ mod tests {
             bound.policy.mode = mode;
             assert_eq!(
                 capability_access_with_full_access(
-                    &bound, &current, CapabilityClass::TerminalExecute, "command", "pnpm", true,
+                    &bound,
+                    &current,
+                    CapabilityClass::TerminalExecute,
+                    "command",
+                    "pnpm",
+                    true,
                 ),
                 CapabilityAccess::Deny,
             );
@@ -29307,7 +29373,10 @@ while True:
             working_directory: Some("Exact workspace".into()),
             ..Default::default()
         };
-        assert_eq!(resolve_terminal_cwd(&request).unwrap(), Some(folder.canonicalize().unwrap()));
+        assert_eq!(
+            resolve_terminal_cwd(&request).unwrap(),
+            Some(folder.canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -29320,15 +29389,20 @@ while True:
             .args(["-c", "cd \"$1\" && echo ready && exec sleep 10", "--"])
             .arg(&folder)
             .stdout(Stdio::piped())
-            .spawn().unwrap();
+            .spawn()
+            .unwrap();
         let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
         let mut line = String::new();
         std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
-        let resolved = terminal_current_directory(Some(child.id()), Some(temp.path().to_path_buf()));
+        let resolved =
+            terminal_current_directory(Some(child.id()), Some(temp.path().to_path_buf()));
         let _ = child.kill();
         let _ = child.wait();
         assert_eq!(line.trim(), "ready");
-        assert_eq!(resolved.unwrap().canonicalize().unwrap(), folder.canonicalize().unwrap());
+        assert_eq!(
+            resolved.unwrap().canonicalize().unwrap(),
+            folder.canonicalize().unwrap()
+        );
     }
 
     #[test]

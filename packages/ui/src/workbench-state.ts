@@ -1524,6 +1524,7 @@ export type WorkbenchAction =
   | { type: "set-diff-review-state"; state: DiffApprovalState; action: string }
   | { type: "undo-diff-action"; action: string }
   | { type: "add-diff-comment"; path: string }
+  | { type: "browser-close" }
   | { type: "set-browser-url"; url: string }
   | { type: "browser-navigate"; url: string; status?: BrowserPreviewStatus }
   | { type: "browser-back" }
@@ -3674,6 +3675,25 @@ export function workbenchReducer(
               : file,
           ),
           lastAction: "comment added",
+        },
+      };
+    case "browser-close":
+      return {
+        ...state,
+        browserPreview: {
+          ...state.browserPreview,
+          url: "",
+          title: undefined,
+          status: "idle",
+          history: [],
+          historyIndex: -1,
+          consoleErrors: 0,
+          diagnostics: [],
+          diagnosticsCaptured: false,
+          captureStatus: "idle",
+          captureError: undefined,
+          latestCapture: undefined,
+          verificationMessage: "",
         },
       };
     case "set-browser-url":
