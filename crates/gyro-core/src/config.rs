@@ -302,7 +302,7 @@ impl Default for GyroConfig {
                     args: Vec::new(),
                     working_directory: None,
                     provider_id: Some("xai".into()),
-                    default_model: Some("grok-4.5".into()),
+                    default_model: Some("grok-4.6".into()),
                     readiness: CommandProfileReadiness::Waiting,
                 },
                 CommandProfile {
@@ -553,7 +553,7 @@ impl GyroConfig {
                 args: Vec::new(),
                 working_directory: None,
                 provider_id: Some("xai".into()),
-                default_model: Some("grok-4.5".into()),
+                default_model: Some("grok-4.6".into()),
                 readiness: CommandProfileReadiness::Waiting,
             },
             CommandProfile {
@@ -791,6 +791,33 @@ mod tests {
             ]
         );
         assert!(!config.account_session.signed_in);
+        assert_eq!(
+            config
+                .command_profiles
+                .iter()
+                .find(|profile| profile.id == "grok-build")
+                .and_then(|profile| profile.default_model.as_deref()),
+            Some("grok-4.6")
+        );
+    }
+
+    #[test]
+    fn user_permission_choice_survives_save_and_reload() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let config = GyroConfig {
+            require_command_approval: false,
+            require_file_edit_approval: false,
+            full_access: true,
+            ..GyroConfig::default()
+        };
+
+        config.save(&paths).unwrap();
+        let restored = GyroConfig::load(&paths).unwrap();
+
+        assert!(!restored.require_command_approval);
+        assert!(!restored.require_file_edit_approval);
+        assert!(restored.full_access);
     }
 
     #[test]

@@ -24,6 +24,7 @@ export function selectQueuedMessageDelivery<T extends QueuedMessageDelivery>(
   options: {
     dispatchingSessionIds: ReadonlySet<string>;
     now: number;
+    pausedSessionIds?: ReadonlySet<string>;
     sendingSessionIds: ReadonlySet<string>;
   },
 ): QueuedDeliverySelection<T> | undefined {
@@ -35,6 +36,7 @@ export function selectQueuedMessageDelivery<T extends QueuedMessageDelivery>(
     .filter(
       (candidate): candidate is { sessionId: string; message: T } =>
         Boolean(candidate.message) &&
+        !options.pausedSessionIds?.has(candidate.sessionId) &&
         !options.sendingSessionIds.has(candidate.sessionId) &&
         !options.dispatchingSessionIds.has(candidate.sessionId),
     );

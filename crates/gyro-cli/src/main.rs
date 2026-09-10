@@ -1750,7 +1750,7 @@ fn cli_acp_provider_runtime(provider_id: &str) -> Option<CliAcpProviderRuntime> 
             ],
             auth_methods: &["xai.api_key", "cached_token"],
             cursor_kind: "xai-acp-session",
-            default_model: "grok-4.5",
+            default_model: "grok-4.6",
         }),
         "gemini" => Some(CliAcpProviderRuntime {
             label: "Gemini",
@@ -6283,6 +6283,10 @@ done
 
     #[test]
     fn gemini_and_xai_profiles_select_the_shared_acp_runtime() {
+        assert_eq!(
+            cli_acp_provider_runtime("xai").unwrap().default_model,
+            "grok-4.6"
+        );
         for (provider_id, profile_id, command, expected_cursor) in [
             ("gemini", "gemini-cli", "gemini", "gemini-acp-session"),
             ("xai", "grok-build", "grok", "xai-acp-session"),

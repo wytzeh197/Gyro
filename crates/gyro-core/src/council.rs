@@ -204,12 +204,7 @@ impl Default for CouncilConfig {
 impl CouncilConfig {
     /// Merge user presets over built-ins (user id wins). Ensure built-ins exist.
     pub fn normalized(mut self) -> Self {
-        if self.max_seats < COUNCIL_MIN_SEATS {
-            self.max_seats = COUNCIL_MIN_SEATS;
-        }
-        if self.max_seats > COUNCIL_MAX_SEATS {
-            self.max_seats = COUNCIL_MAX_SEATS;
-        }
+        self.max_seats = self.max_seats.clamp(COUNCIL_MIN_SEATS, COUNCIL_MAX_SEATS);
         if self.seat_timeout_seconds == 0 {
             self.seat_timeout_seconds = DEFAULT_SEAT_TIMEOUT_SECONDS;
         }
@@ -1020,7 +1015,7 @@ fn extract_json_object(raw: &str) -> Option<&str> {
         .strip_prefix("json")
         .or_else(|| after.strip_prefix("JSON"))
         .unwrap_or(after)
-        .trim_start_matches(|c: char| c == '\r' || c == '\n');
+        .trim_start_matches(['\r', '\n']);
     let end = after.find("```")?;
     let inner = after[..end].trim();
     if inner.starts_with('{') {

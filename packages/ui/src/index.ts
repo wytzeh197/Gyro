@@ -314,6 +314,7 @@ export type {
   CleanMachineStepStatus,
 } from "./clean-machine-path";
 export {
+  applyProviderCapabilityManifest,
   defaultModelLabel,
   getProviderCatalogEntry,
   getProviderModel,
@@ -485,10 +486,28 @@ export type {
 
 export { ScmReviewToolbar } from "./source-control-review";
 
-export { languages, getLanguage, resolveLanguage, searchLanguages, editorFilePolicy } from "./editor/languages/registry";
-export type { LanguageDefinition, LanguageInput, SyntaxSource } from "./editor/languages/types";
-export { createSyntaxTheme, tokenRoles, tokenRoleAliases, normalizeTokenRole } from "./editor/themes/syntax-theme";
+export {
+  languages,
+  getLanguage,
+  resolveLanguage,
+  searchLanguages,
+  editorFilePolicy,
+} from "./editor/languages/registry";
+export type {
+  LanguageDefinition,
+  LanguageInput,
+  SyntaxSource,
+} from "./editor/languages/types";
+export {
+  createSyntaxTheme,
+  tokenRoles,
+  tokenRoleAliases,
+  normalizeTokenRole,
+} from "./editor/themes/syntax-theme";
 export { workspaceEditorColors } from "./editor/themes/workspace-colors";
 export type { TokenRole, GyroSyntaxTheme } from "./editor/themes/syntax-theme";
 
-export { terminalLaunchProfiles, terminalDefaultProfiles } from "./terminal-profiles";
+export {
+  terminalLaunchProfiles,
+  terminalDefaultProfiles,
+} from "./terminal-profiles";

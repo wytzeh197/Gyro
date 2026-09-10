@@ -202,6 +202,10 @@ pub struct HistoryEntry {
     author: String,
     relative_date: String,
     refs: String,
+    /// Parent hashes, newest first. Two or more means a merge, which the
+    /// history graph draws differently — guessing from a "Merge ..." subject
+    /// would mislabel any commit that merely talks about merging.
+    parents: Vec<String>,
 }
 
 pub fn history(root: &Path) -> anyhow::Result<Vec<HistoryEntry>> {
@@ -211,13 +215,13 @@ pub fn history(root: &Path) -> anyhow::Result<Vec<HistoryEntry>> {
             "log",
             "-30",
             "-z",
-            "--format=%H%x00%h%x00%s%x00%an%x00%ar%x00%D",
+            "--format=%H%x00%h%x00%s%x00%an%x00%ar%x00%D%x00%P",
         ],
         128 * 1024,
     )?;
     let fields: Vec<_> = output.split('\0').collect();
     Ok(fields
-        .chunks_exact(6)
+        .chunks_exact(7)
         .map(|row| HistoryEntry {
             hash: row[0].trim().into(),
             short_hash: row[1].into(),
@@ -225,6 +229,10 @@ pub fn history(root: &Path) -> anyhow::Result<Vec<HistoryEntry>> {
             author: row[3].into(),
             relative_date: row[4].into(),
             refs: row[5].into(),
+            parents: row[6]
+                .split_whitespace()
+                .map(|parent| parent.to_owned())
+                .collect(),
         })
         .collect())
 }
@@ -288,6 +296,7 @@ mod tests {
         assert_eq!(log[0].subject, "Original");
         assert_eq!(log[0].author, "Review Test");
         assert!(log[0].refs.contains("main"));
+        assert!(log[0].parents.is_empty());
     }
 
     #[test]

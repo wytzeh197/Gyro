@@ -41,6 +41,10 @@ store.
 - Approval policy.
 - Secret redaction.
 - Workspace path boundary checks.
+- Fast workspace readiness checks at turn start: folder availability, project
+  kind, and a bounded Git brief. A missing project fails closed before a
+  provider is spawned. A compact briefing is injected so the first model token
+  does not wait on a tool round-trip.
 - Git worktree creation for explicitly isolated sessions.
 - macOS Keychain access for provider keys.
 - Local IPC payloads for CLI-to-app notifications.
@@ -76,21 +80,26 @@ and future editor integrations can render the same state.
 
 Live provider events carry a turn-local monotonic sequence. The desktop orders
 out-of-order events, discards duplicates, bounds pending gaps, and coalesces text
-deltas before updating React state. Terminal events close the turn ordering
-state so a repeated completion or cancellation cannot render twice.
+deltas before updating React state. The first visible token is flushed
+immediately; later deltas still coalesce on the stream interval so a fast model
+does not wait a full coalescing window before anything appears. Terminal events
+close the turn ordering state so a repeated completion or cancellation cannot
+render twice.
 
 Machine-readable CLI responses use the `gyro.cli.v1` envelope. Runtime failures
 use stable categories and exit codes so scripts can distinguish invalid input,
 provider unavailability, rejected approval, execution failure, cancellation,
 and internal failure.
 
-The supported desktop and CLI adapters route OpenAI through the local Codex CLI
-and Anthropic through Claude Code. Both surfaces use the shared bounded process
-runner, provider-stream parser, and provider-health service. xAI and Gemini are readiness-only in V1:
-health checks can report setup state, but execution returns a blocked run
-instead of pretending to start. Provider credentials stay outside Gyro in
-provider CLIs, SDKs, environment variables, Keychain references, or
-provider-owned files.
+The supported desktop and CLI adapters route OpenAI through the local Codex CLI,
+Anthropic through Claude Code, Kimi through its ACP runtime, and xAI, Gemini,
+Cursor, and OpenCode through their ACP-compatible local CLIs. Cursor and
+OpenCode remain experimental. Both surfaces use the shared bounded process
+runner, provider-stream parser, provider-health service, and backend-owned
+provider capability manifest. The desktop reads that manifest at startup; its
+checked-in catalog is an offline preview fallback rather than runtime truth.
+Provider credentials stay outside Gyro in provider CLIs, SDKs, environment
+variables, Keychain references, or provider-owned files.
 
 Ollama is the exception to the CLI/ACP adapter family: Gyro talks directly to
 its loopback HTTP API and keeps conversation continuity in the local session
@@ -106,6 +115,18 @@ timing, retry count, resumed/not-resumed state, timeout/failure reason, and
 sanitized output summary. The diagnostics export command bundles config summary,
 provider health, recent provider-run diagnostics, and session metadata without
 secrets or full message bodies.
+
+## Architecture artifact status
+
+- This document describes current, normative architecture.
+- `Gyro-goals-and-features.md` is current product direction, not runtime proof.
+- `docs/roadmap.md` is forward-looking and may contain unshipped work.
+- `docs/releases/` records historical release behavior.
+- `docs/internal/` contains local planning and is not a public architecture
+  contract.
+- Runtime registries, executable tests, and current-source verification win when
+  prose conflicts with the implementation. Any discovered conflict should still
+  be repaired here rather than left as permanent tribal knowledge.
 
 ## Local Storage
 

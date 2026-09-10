@@ -145,14 +145,6 @@ impl SessionBrowserManager {
         Ok(guard.get(session_id).map(Self::snapshot_locked))
     }
 
-    pub fn take_resource_id(&self, session_id: &str) -> Result<Option<String>, String> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| "session browser state is unavailable".to_string())?;
-        Ok(guard.get(session_id).map(|slot| slot.resource_id.clone()))
-    }
-
     pub fn require_owned(
         &self,
         session_id: &str,
@@ -190,7 +182,7 @@ impl SessionBrowserManager {
             slot.console
                 .iter()
                 .rev()
-                .take(limit.max(1).min(MAX_CONSOLE_ENTRIES))
+                .take(limit.clamp(1, MAX_CONSOLE_ENTRIES))
                 .cloned()
                 .collect::<Vec<_>>()
                 .into_iter()
@@ -208,7 +200,7 @@ impl SessionBrowserManager {
             slot.network
                 .iter()
                 .rev()
-                .take(limit.max(1).min(MAX_NETWORK_ENTRIES))
+                .take(limit.clamp(1, MAX_NETWORK_ENTRIES))
                 .cloned()
                 .collect::<Vec<_>>()
                 .into_iter()
@@ -947,7 +939,7 @@ pub fn open_session_browser<R: Runtime>(
         .initialization_script(script)
         .incognito(true)
         .devtools(false)
-        .on_navigation(|nav_url| browser_url_is_navigable(nav_url))
+        .on_navigation(browser_url_is_navigable)
         .on_document_title_changed(move |_webview, title| {
             let manager = app_for_title.state::<SessionBrowserManager>();
             let _ = manager.set_title(&session_for_title, &sanitize_text(&title));

@@ -15,6 +15,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   AppChrome,
   absoluteWorkspaceFilePath,
+  applyProviderCapabilityManifest,
   CHAT_GRID_MAX_SLOTS,
   CLI_LAUNCH_PRESET_MAX_PANES,
   AutomationsSurface,
@@ -137,6 +138,7 @@ import {
   type ModelProviderConfig,
   type NotificationPermissionState,
   type ProviderHealthDetails,
+  type ProviderCapabilitySupport,
   type ProjectCapabilityPolicy,
   type ProviderId,
   type ProviderUsageState,
@@ -962,6 +964,7 @@ export function App() {
   const menuBarOutcomeInitializedRef = useRef(false);
   const latestMenuBarOutcomeIdRef = useRef<string>();
   const queuedChatDispatchesRef = useRef(new Set<string>());
+  const stoppedChatSessionsRef = useRef(new Set<string>());
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
@@ -1141,7 +1144,9 @@ export function App() {
   const activeChatPanel: ChatSidePanelId | undefined =
     legacyRailPanel ?? activeChatCompanionPanel(companion, SOLO_CHAT_PANE_ID);
   const commandProfiles = terminalLaunchProfiles(
-    config.commandProfiles, providersForConfig(config), workbench.providerStatuses,
+    config.commandProfiles,
+    providersForConfig(config),
+    workbench.providerStatuses,
   );
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
@@ -1484,14 +1489,17 @@ export function App() {
         : undefined,
     };
   };
-  const selectSoloChatPanel = useCallback((panel?: ChatSidePanelId) => {
-    if (panel && isChatCompanionTabId(panel)) {
-      dispatchWorkbench({ type: "set-chat-panel" });
-      openCompanionTab(panel, SOLO_CHAT_PANE_ID);
-      return;
-    }
-    dispatchWorkbench({ type: "set-chat-panel", panel });
-  }, [openCompanionTab]);
+  const selectSoloChatPanel = useCallback(
+    (panel?: ChatSidePanelId) => {
+      if (panel && isChatCompanionTabId(panel)) {
+        dispatchWorkbench({ type: "set-chat-panel" });
+        openCompanionTab(panel, SOLO_CHAT_PANE_ID);
+        return;
+      }
+      dispatchWorkbench({ type: "set-chat-panel", panel });
+    },
+    [openCompanionTab],
+  );
   const companionSurfaceProps = (paneId: string) => ({
     showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
@@ -2441,11 +2449,11 @@ export function App() {
   }, [chatGrid]);
 
   const resetChatDraft = useCallback(() => {
-    const key = activeSessionId ?? NEW_CHAT_DRAFT_KEY;
+    const key = activeDraftKey;
     setChatDrafts((current) => ({ ...current, [key]: "" }));
     setChatAttachments((current) => ({ ...current, [key]: [] }));
     setDraftResetToken((token) => token + 1);
-  }, [activeSessionId]);
+  }, [activeDraftKey]);
 
   const checkProviderReadiness = useCallback(
     (intent: "chat" | "task" | "handoff", providerId?: string) => {
@@ -3258,6 +3266,29 @@ export function App() {
     };
   }, [setEventsForSession]);
 
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<Session>("gyro://session-title-updated", ({ payload }) => {
+      if (disposed) return;
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === payload.id
+            ? { ...session, title: payload.title }
+            : session,
+        ),
+      );
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   const applyProviderChatResponse = useCallback(
     (sessionId: string, response?: ProviderChatResponse) => {
       const updatedSession = response?.session;
@@ -3414,7 +3445,13 @@ export function App() {
       return;
     }
     try {
-      const nextConfig = await invoke<GyroConfig>("load_config");
+      const [nextConfig, capabilityManifest] = await Promise.all([
+        invoke<GyroConfig>("load_config"),
+        invoke<ProviderCapabilitySupport[]>(
+          "list_provider_capability_support",
+        ).catch(() => []),
+      ]);
+      applyProviderCapabilityManifest(capabilityManifest);
       const resolvedConfig = withCouncilConfig(nextConfig);
       setConfig(resolvedConfig);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
@@ -6634,11 +6671,6 @@ export function App() {
       dispatchCompanion({ type: "forget-pane", paneId: SOLO_CHAT_PANE_ID });
       dispatchCompanion({ type: "forget-pane", paneId: `draft:${projectKey}` });
       dispatchWorkbench({ type: "set-chat-panel" });
-      const hasExistingDraft = Object.values(chatGrid.layouts).some((layout) =>
-        layout.slots.some(
-          (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
-        ),
-      );
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
@@ -6653,16 +6685,8 @@ export function App() {
       setIsStartingFirstTurn(false);
       activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
-      setChatDrafts((current) => ({
-        ...current,
-        ...(activeSessionId ? { [activeSessionId]: "" } : {}),
-        ...(hasExistingDraft ? {} : { [draftKey]: "" }),
-      }));
-      setChatAttachments((current) => ({
-        ...current,
-        ...(activeSessionId ? { [activeSessionId]: [] } : {}),
-        ...(hasExistingDraft ? {} : { [draftKey]: [] }),
-      }));
+      // Drafts belong to their chat/project, even when its pane was replaced.
+      // Sending or explicitly discarding a draft is what clears its contents.
       setDraftResetToken((token) => token + 1);
       dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
       // Starting a chat from the AI view keeps the code layout: the chat is
@@ -6675,12 +6699,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [
-      activeSession?.workspacePath,
-      activeSessionId,
-      chatGrid.layouts,
-      workspacePath,
-    ],
+    [activeSession?.workspacePath, workspacePath],
   );
 
   /**
@@ -7269,10 +7288,18 @@ export function App() {
     }) => {
       // Resolve again at the launch boundary: saved profiles and alternate actions
       // must obey the same connection gate as the start screen.
-      const resolved = terminalLaunchProfiles([profile], providersForConfig(config), workbench.providerStatuses)[0];
+      const resolved = terminalLaunchProfiles(
+        [profile],
+        providersForConfig(config),
+        workbench.providerStatuses,
+      )[0];
       if (!resolved) return false;
       if (resolved.launchUnavailableReason) {
-        notify("command-failed", `${profile.displayName}: ${resolved.launchUnavailableReason}`, "Check this provider in Settings before launching its CLI.");
+        notify(
+          "command-failed",
+          `${profile.displayName}: ${resolved.launchUnavailableReason}`,
+          "Check this provider in Settings before launching its CLI.",
+        );
         return false;
       }
       profile = resolved;
@@ -7283,11 +7310,12 @@ export function App() {
       const selectedPane = workbench.terminalPanes.find(
         (pane) => pane.id === workbench.selectedTerminalPaneId,
       );
-      const launchWorkspacePath = startInHome ? undefined :
-        workspacePathOverride ??
-        existingPane?.projectPath ??
-        (template ? selectedPane?.projectPath : undefined) ??
-        workspaceActionRoot;
+      const launchWorkspacePath = startInHome
+        ? undefined
+        : (workspacePathOverride ??
+          existingPane?.projectPath ??
+          (template ? selectedPane?.projectPath : undefined) ??
+          workspaceActionRoot);
       if (
         launchWorkspacePath &&
         !isWorkspaceTrusted(
@@ -7359,7 +7387,11 @@ export function App() {
           title: profile.displayName,
           workspacePath: launchWorkspacePath,
           workspaceMode: "local",
-          workingDirectory: workspacePathOverride ? "Exact workspace" : launchWorkspacePath ? "Workspace" : "Home",
+          workingDirectory: workspacePathOverride
+            ? "Exact workspace"
+            : launchWorkspacePath
+              ? "Workspace"
+              : "Home",
         };
         // Ask for governance when the profile supports it. If the backend
         // cannot honour it the pane still opens, but ungoverned and labelled
@@ -7441,27 +7473,49 @@ export function App() {
     ],
   );
 
-  const addTerminalPane = useCallback(async (options?: { reveal?: boolean; directory?: "home" | "choose"; folderPath?: string }) => {
-    let folderPath = options?.folderPath;
-    try {
-      if (options?.directory === "choose") {
-        const selected = isTauriRuntime()
-          ? await open({ directory: true, multiple: false, title: "Open terminal in folder" })
-          : window.prompt("Open terminal in folder", workspaceActionRoot ?? "");
-        if (typeof selected !== "string" || !selected.trim()) return;
-        folderPath = selected;
+  const addTerminalPane = useCallback(
+    async (options?: {
+      reveal?: boolean;
+      directory?: "home" | "choose";
+      folderPath?: string;
+    }) => {
+      let folderPath = options?.folderPath;
+      try {
+        if (options?.directory === "choose") {
+          const selected = isTauriRuntime()
+            ? await open({
+                directory: true,
+                multiple: false,
+                title: "Open terminal in folder",
+              })
+            : window.prompt(
+                "Open terminal in folder",
+                workspaceActionRoot ?? "",
+              );
+          if (typeof selected !== "string" || !selected.trim()) return;
+          folderPath = selected;
+        }
+        const profile = getCommandProfile(
+          [...commandProfiles, ...defaultCommandProfiles()],
+          "shell",
+        );
+        const started = await launchTerminalPane({
+          profile,
+          reveal: options?.reveal,
+          startInHome: !folderPath,
+          workspacePathOverride: folderPath,
+        });
+        notify(
+          started ? "terminal" : "command-failed",
+          started ? "Terminal added" : "Terminal start failed",
+          profile.displayName,
+        );
+      } catch (error) {
+        notify("command-failed", "Could not open terminal", String(error));
       }
-      const profile = getCommandProfile([...commandProfiles, ...defaultCommandProfiles()], "shell");
-      const started = await launchTerminalPane({
-        profile, reveal: options?.reveal,
-        startInHome: !folderPath,
-        workspacePathOverride: folderPath,
-      });
-      notify(started ? "terminal" : "command-failed", started ? "Terminal added" : "Terminal start failed", profile.displayName);
-    } catch (error) {
-      notify("command-failed", "Could not open terminal", String(error));
-    }
-  }, [commandProfiles, launchTerminalPane, notify, workspaceActionRoot]);
+    },
+    [commandProfiles, launchTerminalPane, notify, workspaceActionRoot],
+  );
 
   const createCliSession = useCallback(
     (profileId: string, projectPath: string) => {
@@ -9410,19 +9464,43 @@ export function App() {
 
   const splitTerminalPane = useCallback(
     async (template: TerminalTemplate) => {
-      const source = workbench.terminalPanes.find((pane) => pane.id === workbench.selectedTerminalPaneId);
-      const profile = getCommandProfile(commandProfiles, source?.profileId || activeProfileId);
+      const source = workbench.terminalPanes.find(
+        (pane) => pane.id === workbench.selectedTerminalPaneId,
+      );
+      const profile = getCommandProfile(
+        commandProfiles,
+        source?.profileId || activeProfileId,
+      );
       try {
-        const directory = source && isTauriRuntime()
-          ? await invoke<string>("terminal_pane_working_directory", { paneId: source.id })
-          : source?.workingDirectory || source?.projectPath;
-        const started = await launchTerminalPane({ profile, template, workspacePathOverride: directory, startInHome: !directory });
-        notify(started ? "terminal" : "command-failed", started ? "Terminal split" : "Terminal start failed", profile.displayName);
+        const directory =
+          source && isTauriRuntime()
+            ? await invoke<string>("terminal_pane_working_directory", {
+                paneId: source.id,
+              })
+            : source?.workingDirectory || source?.projectPath;
+        const started = await launchTerminalPane({
+          profile,
+          template,
+          workspacePathOverride: directory,
+          startInHome: !directory,
+        });
+        notify(
+          started ? "terminal" : "command-failed",
+          started ? "Terminal split" : "Terminal start failed",
+          profile.displayName,
+        );
       } catch (error) {
         notify("command-failed", "Could not split terminal", String(error));
       }
     },
-    [activeProfileId, commandProfiles, launchTerminalPane, notify, workbench.terminalPanes, workbench.selectedTerminalPaneId],
+    [
+      activeProfileId,
+      commandProfiles,
+      launchTerminalPane,
+      notify,
+      workbench.terminalPanes,
+      workbench.selectedTerminalPaneId,
+    ],
   );
 
   const renameTerminalPane = useCallback(
@@ -10000,6 +10078,9 @@ export function App() {
         } catch (error) {
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
+          if (wasCancelled) {
+            stoppedChatSessionsRef.current.add(optimisticSessionId);
+          }
           if (!wasCancelled)
             dispatchWorkbench({
               type: "set-provider-readiness",
@@ -10025,6 +10106,7 @@ export function App() {
               ? providerStopDetail(errorMessage)
               : "Chat stayed local",
           );
+          if (wasCancelled) return true;
         } finally {
           setSessionSending(sendingSessionId, false);
           setIsStartingFirstTurn(false);
@@ -10071,6 +10153,8 @@ export function App() {
           ),
         );
       }
+      // A validated new send explicitly resumes this chat's pending queue.
+      stoppedChatSessionsRef.current.delete(targetSessionId);
       setSessionSending(targetSessionId, true);
       if (!isBackgroundSend) {
         dispatchWorkbench({ type: "set-chat-panel" });
@@ -10185,6 +10269,7 @@ export function App() {
       } catch (error) {
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
+        if (wasCancelled) stoppedChatSessionsRef.current.add(targetSessionId);
         if (!wasCancelled)
           dispatchWorkbench({
             type: "set-provider-readiness",
@@ -10206,6 +10291,7 @@ export function App() {
           wasCancelled ? "Turn stopped" : "Message fallback",
           wasCancelled ? providerStopDetail(errorMessage) : "Chat stayed local",
         );
+        if (wasCancelled) return true;
       } finally {
         setSessionSending(targetSessionId, false);
       }
@@ -10447,6 +10533,7 @@ export function App() {
     const now = Date.now();
     const next = selectQueuedMessageDelivery(chatMessageQueues, {
       dispatchingSessionIds: queuedChatDispatchesRef.current,
+      pausedSessionIds: stoppedChatSessionsRef.current,
       now,
       sendingSessionIds: sendingSessionIdsRef.current,
     });
@@ -10478,6 +10565,7 @@ export function App() {
       sessionId,
     })
       .then((accepted) => {
+        if (stoppedChatSessionsRef.current.has(sessionId)) return;
         if (!accepted) {
           const willRetry = (nextMessage.deliveryAttempts ?? 0) + 1 < 2;
           setChatMessageQueues((current) => {
@@ -10995,22 +11083,28 @@ export function App() {
     ],
   );
 
+  const stopChatSession = useCallback(
+    (sessionId: string) => {
+      // Pause synchronously, before cancellation releases the sender.
+      stoppedChatSessionsRef.current.add(sessionId);
+      void invoke("stop_provider_chat", { sessionId }).catch((error) => {
+        stoppedChatSessionsRef.current.delete(sessionId);
+        setQueueRetryTick((current) => current + 1);
+        notify("command-failed", "Stop failed", String(error));
+      });
+    },
+    [notify],
+  );
+
   const stopActiveChat = useCallback(() => {
     if (
       !activeSessionId ||
       !sendingSessionIdsRef.current.has(activeSessionId)
     ) {
-      notify(
-        "terminal",
-        "No active turn",
-        "There is no provider process to stop",
-      );
       return;
     }
-    void invoke("stop_provider_chat", { sessionId: activeSessionId }).catch(
-      (error) => notify("command-failed", "Stop failed", String(error)),
-    );
-  }, [activeSessionId, notify]);
+    stopChatSession(activeSessionId);
+  }, [activeSessionId, stopChatSession]);
 
   const steerQueuedChatMessage = useCallback(
     (messageId: string) => {
@@ -11801,10 +11895,10 @@ export function App() {
         return;
       }
       try {
-        await invoke<TerminalPaneSnapshot>(
-          "write_terminal_input",
-          { input, paneId },
-        );
+        await invoke<TerminalPaneSnapshot>("write_terminal_input", {
+          input,
+          paneId,
+        });
         window.setTimeout(() => {
           void refreshTerminalPane(paneId);
         }, 200);
@@ -11870,75 +11964,84 @@ export function App() {
     (profileId: string, options?: { reveal?: boolean }) => {
       setActiveProfileId(profileId);
       const profile = getCommandProfile(commandProfiles, profileId);
-      void launchTerminalPane({ profile, reveal: options?.reveal }).then((started) => {
-        if (!started) {
-          notify("command-failed", "Terminal start failed", profile.displayName);
-        }
-      });
+      void launchTerminalPane({ profile, reveal: options?.reveal }).then(
+        (started) => {
+          if (!started) {
+            notify(
+              "command-failed",
+              "Terminal start failed",
+              profile.displayName,
+            );
+          }
+        },
+      );
     },
     [commandProfiles, launchTerminalPane, notify],
   );
 
-  const launchCliPreset = useCallback(async (options?: { reveal?: boolean }) => {
-    const preset = normalizeCliLaunchPreset(
-      workbench.preferences.cliLaunchPreset,
-      commandProfiles,
-    );
-    const launches = preset.entries.flatMap((entry) => {
-      const profile = getCommandProfile(commandProfiles, entry.profileId);
-      return Array.from({ length: entry.count }, () => profile);
-    });
-    if (
-      launches.length === 0 ||
-      launches.length > CLI_LAUNCH_PRESET_MAX_PANES ||
-      isLaunchingCliPreset
-    ) {
-      return;
-    }
-
-    setIsLaunchingCliPreset(true);
-    const paneIds: string[] = [];
-    let failures = 0;
-    try {
-      for (const [index, profile] of launches.entries()) {
-        const paneId = `pane-${Date.now()}-${index}`;
-        paneIds.push(paneId);
-        const started = await launchTerminalPane({
-          paneId,
-          profile,
-          reveal: options?.reveal,
-          startingOutput: "",
-        });
-        if (!started) {
-          failures += 1;
-        }
-      }
-    } finally {
-      setIsLaunchingCliPreset(false);
-    }
-
-    const focusedPaneId =
-      preset.focus === "last" ? paneIds[paneIds.length - 1] : paneIds[0];
-    if (focusedPaneId) {
-      dispatchWorkbench({
-        type: "select-terminal-pane",
-        paneId: focusedPaneId,
+  const launchCliPreset = useCallback(
+    async (options?: { reveal?: boolean }) => {
+      const preset = normalizeCliLaunchPreset(
+        workbench.preferences.cliLaunchPreset,
+        commandProfiles,
+      );
+      const launches = preset.entries.flatMap((entry) => {
+        const profile = getCommandProfile(commandProfiles, entry.profileId);
+        return Array.from({ length: entry.count }, () => profile);
       });
-    }
-    notify(
-      failures > 0 ? "command-failed" : "terminal",
-      failures > 0 ? "Preset partially started" : "Preset started",
-      failures > 0
-        ? `${launches.length - failures}/${launches.length} panes running`
-        : `${launches.length} pane${launches.length === 1 ? "" : "s"} running`,
-    );
-  }, [
-    commandProfiles,
-    isLaunchingCliPreset,
-    launchTerminalPane,
-    notify,
-    workbench.preferences.cliLaunchPreset,
-  ]);
+      if (
+        launches.length === 0 ||
+        launches.length > CLI_LAUNCH_PRESET_MAX_PANES ||
+        isLaunchingCliPreset
+      ) {
+        return;
+      }
+
+      setIsLaunchingCliPreset(true);
+      const paneIds: string[] = [];
+      let failures = 0;
+      try {
+        for (const [index, profile] of launches.entries()) {
+          const paneId = `pane-${Date.now()}-${index}`;
+          paneIds.push(paneId);
+          const started = await launchTerminalPane({
+            paneId,
+            profile,
+            reveal: options?.reveal,
+            startingOutput: "",
+          });
+          if (!started) {
+            failures += 1;
+          }
+        }
+      } finally {
+        setIsLaunchingCliPreset(false);
+      }
+
+      const focusedPaneId =
+        preset.focus === "last" ? paneIds[paneIds.length - 1] : paneIds[0];
+      if (focusedPaneId) {
+        dispatchWorkbench({
+          type: "select-terminal-pane",
+          paneId: focusedPaneId,
+        });
+      }
+      notify(
+        failures > 0 ? "command-failed" : "terminal",
+        failures > 0 ? "Preset partially started" : "Preset started",
+        failures > 0
+          ? `${launches.length - failures}/${launches.length} panes running`
+          : `${launches.length} pane${launches.length === 1 ? "" : "s"} running`,
+      );
+    },
+    [
+      commandProfiles,
+      isLaunchingCliPreset,
+      launchTerminalPane,
+      notify,
+      workbench.preferences.cliLaunchPreset,
+    ],
+  );
 
   const stopTerminalPane = useCallback(
     async (paneId: string) => {
@@ -12253,10 +12356,11 @@ export function App() {
         return;
       }
       try {
-        await invoke<TerminalPaneSnapshot>(
-          "resize_terminal_pane",
-          { cols, paneId, rows },
-        );
+        await invoke<TerminalPaneSnapshot>("resize_terminal_pane", {
+          cols,
+          paneId,
+          rows,
+        });
         void refreshTerminalPane(paneId);
       } catch {
         notify("command-failed", "Terminal resize failed", paneId);
@@ -15305,7 +15409,7 @@ export function App() {
         onStopChat={() => {
           focusChatPane(pane);
           if (pane.kind === "session" && isTauriRuntime()) {
-            void invoke("stop_provider_chat", { sessionId: pane.sessionId });
+            stopChatSession(pane.sessionId);
           }
         }}
         onContinueChat={() => requestSend("Continue")}
@@ -15509,6 +15613,17 @@ export function App() {
       draftResetToken={draftResetToken}
       draft={activeChatDraft}
       events={events}
+      hasMoreBefore={Boolean(
+        activeSessionId && hasMoreBeforeBySession[activeSessionId],
+      )}
+      isLoadingEarlier={Boolean(
+        activeSessionId && loadingEarlierSessionIds.includes(activeSessionId),
+      )}
+      onLoadEarlier={
+        activeSessionId
+          ? () => void loadEarlierEvents(activeSessionId)
+          : undefined
+      }
       branchName={
         workbench.workspaceMode === "local"
           ? (branchCatalog?.current ?? activeSession?.branch)
@@ -15833,6 +15948,19 @@ export function App() {
                     draftResetToken={draftResetToken}
                     draft={activeChatDraft}
                     events={events}
+                    hasMoreBefore={Boolean(
+                      activeSessionId &&
+                      hasMoreBeforeBySession[activeSessionId],
+                    )}
+                    isLoadingEarlier={Boolean(
+                      activeSessionId &&
+                      loadingEarlierSessionIds.includes(activeSessionId),
+                    )}
+                    onLoadEarlier={
+                      activeSessionId
+                        ? () => void loadEarlierEvents(activeSessionId)
+                        : undefined
+                    }
                     branchName={
                       workbench.workspaceMode === "local"
                         ? (branchCatalog?.current ?? activeSession?.branch)

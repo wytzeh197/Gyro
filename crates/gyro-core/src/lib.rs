@@ -27,6 +27,7 @@ pub mod security;
 pub mod sessions;
 pub mod sqlite;
 pub mod usage;
+pub mod workspace_check;
 pub mod worktrees;
 
 pub use account::{
@@ -39,14 +40,15 @@ pub use automations::{
 };
 pub use capabilities::{
     capability_descriptor, capability_path_is_sensitive, normalize_capability_relative_path,
-    provider_capability_support, sanitize_capability_summary, validate_capability_result_data,
-    CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass,
-    CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInvocationContext,
-    CapabilityPolicySnapshot, CapabilityRequest, CapabilityResourceRef, CapabilityResponse,
-    CapabilityResult, CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant,
-    ProjectCapabilityPolicy, ProviderCapabilitySupport, WorkspaceContextSnapshot,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    provider_capability_manifest, provider_capability_support, sanitize_capability_summary,
+    validate_capability_result_data, CapabilityAccess, CapabilityApprovalDecision,
+    CapabilityCallEvent, CapabilityClass, CapabilityDescriptor, CapabilityError, CapabilityId,
+    CapabilityInvocationContext, CapabilityPolicySnapshot, CapabilityRequest,
+    CapabilityResourceRef, CapabilityResponse, CapabilityResult, CapabilityRunMode,
+    CapabilityStatus, ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
+    WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
+    MAX_CAPABILITY_RESULT_BYTES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
 };
 pub use cli_path::{augmented_gui_path, user_cli_paths};
 pub use cli_updates::{
@@ -140,7 +142,7 @@ pub use provider_health::{
 };
 pub use provider_registry::{
     provider_descriptor, provider_is_executable, provider_registry, ProviderDescriptor,
-    ProviderExecutionKind, ProviderHealthKind,
+    ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
 };
 pub use provider_stream::{
     extract_codex_agent_message_text, extract_provider_session_id, extract_provider_text_chunk,
@@ -163,6 +165,11 @@ pub use usage::{
     set_provider_budget, usage_totals_since, BudgetLevel, BudgetState, GuardVerdict, PauseReason,
     PauseScope, PauseState, ProviderRateLimitRecord, RecentUsage, UsageBudget, UsageEntry,
     UsageGuardConfig, UsageOrigin, UsageOriginTotals, UsageOutcome, UsageTokens, UsageTotals,
+};
+pub use workspace_check::{
+    check_workspace, check_workspace_with_timeout, is_workspace_unavailable_error,
+    WorkspaceCheckReport, WorkspaceCheckStatus, WorkspaceGitBrief, WORKSPACE_CHECK_SCHEMA_V1,
+    WORKSPACE_CHECK_TIMEOUT, WORKSPACE_UNAVAILABLE_MESSAGE,
 };
 pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,

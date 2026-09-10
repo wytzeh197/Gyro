@@ -80,16 +80,22 @@ const refreshConfig = hook("refreshConfig", "selectDestination", {
   setActiveProfileId: () => {},
   providersForConfig: (value) => value.modelProviders,
   withCouncilConfig: (value) => value,
-  invoke: (command) =>
-    command === "load_config"
-      ? Promise.resolve({
-          commandProfiles: [{ id: "shell" }],
-          modelProviders: [{ id: "ollama", baseUrl: null, enabled: true }],
-          preference: "original",
-        })
-      : new Promise((resolve) => {
-          finishDiscovery = resolve;
-        }),
+  applyProviderCapabilityManifest: () => {},
+  invoke: (command) => {
+    if (command === "load_config") {
+      return Promise.resolve({
+        commandProfiles: [{ id: "shell" }],
+        modelProviders: [{ id: "ollama", baseUrl: null, enabled: true }],
+        preference: "original",
+      });
+    }
+    if (command === "list_provider_capability_support") {
+      return Promise.resolve([]);
+    }
+    return new Promise((resolve) => {
+      finishDiscovery = resolve;
+    });
+  },
 });
 await refreshConfig();
 assert.equal(
