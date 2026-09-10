@@ -75,6 +75,7 @@ mod menu_bar;
 mod session_browser;
 mod source_control_review;
 mod system_access;
+mod workspace_capability_read;
 
 #[cfg(test)]
 use gyro_core::{
@@ -21711,114 +21712,8 @@ fn execute_provider_capability(
                 None,
             )
         }
-        CapabilityId::WorkspaceRead => {
-            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
-                arguments, "path",
-            )?)?;
-            let file = read_workspace_file_impl(&workspace, &path)?;
-            let candidate = gyro_core::security::assert_path_inside_workspace(
-                &bound.workspace,
-                Path::new(&path),
-            )?;
-            let modified_at = candidate
-                .metadata()
-                .and_then(|metadata| metadata.modified())
-                .ok()
-                .map(chrono::DateTime::<chrono::Utc>::from)
-                .map(|value| value.to_rfc3339());
-            let data = serde_json::json!({
-                "path": file.path,
-                "content": file.content,
-                "truncated": file.truncated,
-                "sizeBytes": file.size_bytes,
-                "contentHash": file.content_hash,
-                "modifiedAt": modified_at,
-            });
-            let resource = CapabilityResourceRef {
-                id: format!("workspace:{}:{}", request.context.session_id, path),
-                kind: "workspace".into(),
-                label: path.clone(),
-            };
-            (format!("Read {path}"), data, Some(resource))
-        }
-        CapabilityId::WorkspaceReadRange => {
-            let path = gyro_core::normalize_capability_relative_path(capability_argument_string(
-                arguments, "path",
-            )?)?;
-            let start_line = capability_positive_position(arguments, "line")?.unwrap_or(1);
-            let end_line = capability_positive_position(arguments, "endLine")?
-                .unwrap_or(start_line.saturating_add(199));
-            if end_line < start_line || end_line.saturating_sub(start_line) > 1_999 {
-                anyhow::bail!("Workspace range must contain at most 2,000 ordered lines");
-            }
-            let latest_context = app
-                .state::<CapabilityIdeEvidenceManager>()
-                .by_workspace
-                .lock()
-                .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-                .get(&bound.workspace_key)
-                .cloned()
-                .unwrap_or_else(|| bound.workspace_context.clone());
-            let editor_buffer = latest_context.buffers.iter().find_map(|buffer| {
-                let buffer_path = buffer.get("path")?.as_str()?;
-                let content = buffer.get("content")?.as_str()?;
-                (buffer_path == path).then(|| {
-                    (
-                        content.to_string(),
-                        buffer.get("contentHash").cloned(),
-                        buffer.get("diskHash").cloned(),
-                        buffer
-                            .get("dirty")
-                            .and_then(serde_json::Value::as_bool)
-                            .unwrap_or(false),
-                    )
-                })
-            });
-            let (content, content_hash, disk_hash, dirty, source) =
-                if let Some((content, content_hash, disk_hash, dirty)) = editor_buffer {
-                    (content, content_hash, disk_hash, dirty, "editor-buffer")
-                } else {
-                    let file = read_workspace_file_impl(&workspace, &path)?;
-                    (
-                        file.content,
-                        Some(serde_json::Value::String(file.content_hash)),
-                        None,
-                        false,
-                        "disk",
-                    )
-                };
-            let lines = content.split('\n').collect::<Vec<_>>();
-            let actual_end = end_line.min(lines.len() as u64);
-            let text = if start_line > actual_end {
-                String::new()
-            } else {
-                lines[(start_line - 1) as usize..actual_end as usize].join("\n")
-            };
-            let data = serde_json::json!({
-                "path": path,
-                "startLine": start_line,
-                "line": start_line,
-                "endLine": actual_end,
-                "content": text,
-                "source": source,
-                "dirty": dirty,
-                "contentHash": content_hash,
-                "diskHash": disk_hash,
-                "contextRevision": latest_context.revision,
-            });
-            let resource = CapabilityResourceRef {
-                id: format!(
-                    "workspace:{}:{}:{}-{}",
-                    request.context.session_id, path, start_line, actual_end
-                ),
-                kind: "ide".into(),
-                label: format!("{path}:{start_line}-{actual_end}"),
-            };
-            (
-                format!("Read {path}:{start_line}-{actual_end}"),
-                data,
-                Some(resource),
-            )
+        CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => {
+            workspace_capability_read::execute(app, bound, request)?
         }
         CapabilityId::WorkspaceDiagnostics => {
             let context = app

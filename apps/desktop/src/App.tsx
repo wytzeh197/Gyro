@@ -16211,33 +16211,12 @@ export function App() {
                 }
                 onSplitTerminalPane={splitTerminalPane}
                 onTerminalUtilityAction={handleTerminalUtilityAction}
-                onToggleAssistant={() =>
-                  dispatchWorkbench({ type: "ide-toggle-assistant" })
-                }
                 onToggleDiffDirectory={(directory) =>
                   dispatchWorkbench({
                     type: "toggle-diff-directory",
                     directory,
                   })
                 }
-                onToggleMinimap={() => {
-                  if (!workspaceActionRoot) {
-                    dispatchWorkbench({ type: "ide-toggle-minimap" });
-                    return;
-                  }
-                  dispatchWorkbench({
-                    type: "set-workspace-settings",
-                    scope: "folder",
-                    path: workspaceActionRoot,
-                    settings: {
-                      ...(workbench.preferences.workspaceSettingsByFolder[
-                        workspaceActionRoot
-                      ] ?? {}),
-                      editorMinimapEnabled:
-                        !effectiveWorkspaceSettings.editorMinimapEnabled,
-                    },
-                  });
-                }}
                 onUndoDiff={() =>
                   dispatchWorkbench({
                     type: "undo-diff-action",

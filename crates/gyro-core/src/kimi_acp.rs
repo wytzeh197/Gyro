@@ -553,14 +553,21 @@ where
         let _ = connection.send_notification("session/cancel", json!({"sessionId": session_id}));
     }
     let result = result?;
+    let stop_reason = result
+        .get("stopReason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} ACP prompt response is missing its stopReason",
+                request.provider_label
+            )
+        })?
+        .to_string();
     Ok(KimiAcpOutput {
         response: response.trim().to_string(),
         session_id,
-        stop_reason: result
-            .get("stopReason")
-            .and_then(Value::as_str)
-            .unwrap_or("end_turn")
-            .to_string(),
+        stop_reason,
         resumed,
         duration_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
     })
@@ -818,7 +825,11 @@ where
 {
     loop {
         let message = connection.receive()?;
-        if message.get("id").and_then(Value::as_u64) == Some(expected_id) {
+        // ACP is bidirectional: an incoming request may reuse our outgoing ID.
+        // Only a response envelope can complete the request we are waiting for.
+        if message.get("method").is_none()
+            && message.get("id").and_then(Value::as_u64) == Some(expected_id)
+        {
             if let Some(error) = message.get("error") {
                 let mut detail = error
                     .get("message")
@@ -832,7 +843,12 @@ where
                 }
                 anyhow::bail!(redact_secrets(&detail));
             }
-            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+            return message.get("result").cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{} ACP response is missing its result",
+                    connection.provider_label
+                )
+            });
         }
         let Some(method) = message.get("method").and_then(Value::as_str) else {
             continue;
@@ -1584,6 +1600,95 @@ mod tests {
             inactivity_timeout: Duration::from_secs(3),
             cancellation,
             credentials: CredentialPolicy::for_provider("kimi"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn completion_fixture(completion: &str, collide: bool) -> (tempfile::TempDir, PathBuf) {
+        let permission = if collide {
+            r#"printf '%s\n' '{"jsonrpc":"2.0","id":6,"method":"session/request_permission","params":{"toolCall":{"kind":"read","title":"Read project code"},"options":[{"optionId":"yes","kind":"allow_once"}]}}'"#
+        } else {
+            "finish"
+        };
+        acp_fixture(&format!(
+            r#"
+finish() {{
+  printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"tool_call_update","toolCallId":"read-code","status":"completed"}}}}}}'
+  printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"The terminal button opens a terminal."}}}}}}}}'
+  printf '%s\n' '{completion}'
+}}
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"authMethods":[{{"id":"login"}}]}}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"sessionId":"collision-session"}}}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"tool_call","toolCallId":"read-code","kind":"read","status":"in_progress"}}}}}}'
+      {permission} ;;
+    *'"id":6'*)
+      case "$line" in *'"optionId":"yes"'*) finish ;; *) exit 7 ;; esac ;;
+  esac
+done
+"#
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_request_with_prompt_id_does_not_complete_turn() {
+        let (temp, program) = completion_fixture(
+            r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}"#,
+            true,
+        );
+        let mut approvals = 0;
+        let mut activities = Vec::new();
+        let output = run_kimi_acp(
+            fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                None,
+            ),
+            |_| {},
+            |activity| activities.push(activity.clone()),
+            |_| {
+                approvals += 1;
+                Ok(KimiAcpApprovalDecision::AllowOnce)
+            },
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(approvals, 1, "the colliding request must be answered");
+        assert_eq!(output.response, "The terminal button opens a terminal.");
+        assert_eq!(output.stop_reason, "end_turn");
+        assert_eq!(activities.last().unwrap().status, "done");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_prompt_completion_is_not_reported_as_end_turn() {
+        for completion in [
+            r#"{"jsonrpc":"2.0","id":6}"#,
+            r#"{"jsonrpc":"2.0","id":6,"result":null}"#,
+            r#"{"jsonrpc":"2.0","id":6,"result":{}}"#,
+            r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":""}}"#,
+        ] {
+            let (temp, program) = completion_fixture(completion, false);
+            let result = run_kimi_acp(
+                fixture_request(
+                    program,
+                    temp.path().into(),
+                    CancellationToken::default(),
+                    None,
+                ),
+                |_| {},
+                |_| {},
+                |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+                |_, _| Ok(()),
+            );
+            assert!(result.is_err(), "invalid completion accepted: {completion}");
         }
     }
 
