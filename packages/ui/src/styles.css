@@ -20666,18 +20666,6 @@ textarea:focus-visible,
   color: var(--gyro-accent);
 }
 
-/* Multi-group: keep split-right + close-group; hide split-down / revert / save. */
-.gyro-editor-groups:not([data-group-count="1"])
-  .gyro-editor-tab-actions
-  button:nth-child(2),
-.gyro-editor-groups:not([data-group-count="1"])
-  .gyro-editor-tab-actions
-  button:nth-child(3),
-.gyro-editor-groups:not([data-group-count="1"])
-  .gyro-editor-tab-actions
-  button:nth-child(4) {
-  display: none;
-}
 
 .gyro-ide-assistant {
   background: var(--gyro-premium-panel);
@@ -39365,4 +39353,16 @@ textarea:focus-visible,
   .gyro-sidebar-scm-group-label.is-github
   > button:last-child {
   margin-right: -4px;
+}
+
+/* File and split menus live outside the horizontally scrolling tab strip. */
+.gyro-editor-action-menu button {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.gyro-editor-action-menu button:disabled {
+  opacity: 0.45;
 }

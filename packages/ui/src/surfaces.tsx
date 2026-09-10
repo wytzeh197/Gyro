@@ -11786,8 +11786,6 @@ type IdeSurfaceProps = {
   ) => void;
   onSplitEditorGroup?: (direction: "right" | "down") => void;
   onCloseEditorGroup?: (groupId: string) => void;
-  onToggleMinimap?: () => void;
-  onToggleAssistant?: () => void;
   onCloseEditorTab?: (path: string, groupId?: string) => void;
   onEditorChange?: (path: string, content: string) => void;
   onEditorSave?: (path: string) => void;
@@ -11868,8 +11866,6 @@ export function IdeSurface({
   onMoveEditorTab,
   onSplitEditorGroup,
   onCloseEditorGroup,
-  onToggleMinimap,
-  onToggleAssistant,
   onCloseEditorTab,
   onEditorChange,
   onEditorSave,
@@ -12078,7 +12074,6 @@ export function IdeSurface({
                     effectiveMinimapEnabled ??
                     ide?.layout.minimapEnabled !== false
                   }
-                  assistantOpen={ide?.activeView === "ai"}
                   onActivate={() => onSelectEditorGroup?.(group.id)}
                   onAssistantAction={onAssistantAction}
                   onCloseGroup={() => onCloseEditorGroup?.(group.id)}
@@ -12096,8 +12091,6 @@ export function IdeSurface({
                     onSelectFile(path);
                   }}
                   onSplitEditorGroup={onSplitEditorGroup}
-                  onToggleAssistant={onToggleAssistant}
-                  onToggleMinimap={onToggleMinimap}
                   renderEditor={renderEditor}
                   revealTarget={
                     editorRevealTarget?.path === groupPath
@@ -12301,7 +12294,6 @@ type EditorGroupPaneProps = {
   fileLoadState: "idle" | "loading" | "ready" | "error";
   filesAvailable: boolean;
   minimapEnabled: boolean;
-  assistantOpen?: boolean;
   /** When Browser is focused and no file is open, de-emphasize editor chrome. */
   browserFocusEmpty?: boolean;
   onActivate: () => void;
@@ -12311,8 +12303,6 @@ type EditorGroupPaneProps = {
   onCloseTab?: (path: string) => void;
   onCloseGroup: () => void;
   onSplitEditorGroup?: (direction: "right" | "down") => void;
-  onToggleMinimap?: () => void;
-  onToggleAssistant?: () => void;
   onEditorChange?: (path: string, content: string) => void;
   onEditorSave?: (path: string) => void;
   onEditorRevert?: (path: string) => void;
@@ -12336,7 +12326,6 @@ function EditorGroupPane({
   fileLoadState,
   filesAvailable,
   minimapEnabled,
-  assistantOpen,
   browserFocusEmpty = false,
   onActivate,
   onSelectFile,
@@ -12345,8 +12334,6 @@ function EditorGroupPane({
   onCloseTab,
   onCloseGroup,
   onSplitEditorGroup,
-  onToggleMinimap,
-  onToggleAssistant,
   onEditorChange,
   onEditorSave,
   onEditorRevert,
@@ -12360,6 +12347,35 @@ function EditorGroupPane({
   const displayPath = review?.path ?? breadcrumbPath ?? activePath;
   const canSave = !review && activeBuffer?.status === "dirty";
   const selectedText = selection?.text.trim();
+  const [actionMenu, setActionMenu] = useState<{
+    kind: "split" | "file";
+    path?: string;
+    x: number;
+    y: number;
+  }>();
+  const actionTriggerRef = useRef<HTMLElement | null>(null);
+  const actionMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
+    Boolean(actionMenu),
+    () => setActionMenu(undefined),
+    actionTriggerRef,
+  );
+  useEffect(() => {
+    if (!actionMenu) return;
+    actionMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    const dismiss = () => setActionMenu(undefined);
+    window.addEventListener("resize", dismiss);
+    return () => window.removeEventListener("resize", dismiss);
+  }, [actionMenu, actionMenuRef]);
+  const openFileMenu = (target: HTMLElement, path: string, x: number, y: number) => {
+    actionTriggerRef.current = target;
+    onSelectFile(path);
+    setActionMenu({ kind: "file", path, x, y });
+  };
+  const runMenuAction = (action: () => void) => {
+    setActionMenu(undefined);
+    action();
+  };
+
 
   return (
     <section
@@ -12409,6 +12425,17 @@ function EditorGroupPane({
               draggable
               key={tab.path}
               onClick={() => onSelectFile(tab.path)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                openFileMenu(event.currentTarget, tab.path, event.clientX, event.clientY);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                openFileMenu(event.currentTarget, tab.path, rect.left, rect.bottom);
+              }}
+              title={`${tab.path} · Right-click for file actions`}
               onDoubleClick={() => onPinTab?.(tab.path)}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";
@@ -12459,48 +12486,21 @@ function EditorGroupPane({
         ) : null}
         <div className="gyro-editor-tab-actions">
           <button
-            aria-label="Split editor right"
-            disabled={!activePath}
-            onClick={() => onSplitEditorGroup?.("right")}
-            title="Split editor right"
+            aria-label="Split editor"
+            aria-expanded={actionMenu?.kind === "split"}
+            aria-haspopup="menu"
+            disabled={!activePath || !onSplitEditorGroup}
+            onClick={(event) => {
+              actionTriggerRef.current = event.currentTarget;
+              const rect = event.currentTarget.getBoundingClientRect();
+              setActionMenu((current) => current?.kind === "split" ? undefined : {
+                kind: "split", x: rect.right - 200, y: rect.bottom + 5,
+              });
+            }}
+            title="Split editor"
             type="button"
           >
             <PanelRight size={14} />
-          </button>
-          <button
-            aria-label="Split editor down"
-            disabled={!activePath}
-            onClick={() => onSplitEditorGroup?.("down")}
-            title="Split editor down"
-            type="button"
-          >
-            <PanelBottom size={14} />
-          </button>
-          <button
-            aria-label="Toggle minimap"
-            onClick={onToggleMinimap}
-            title="Toggle minimap"
-            type="button"
-          >
-            <Activity size={14} />
-          </button>
-          <button
-            aria-label="Toggle chat"
-            className={assistantOpen ? "is-active" : undefined}
-            onClick={onToggleAssistant}
-            title="Toggle chat"
-            type="button"
-          >
-            <MessageSquare size={14} />
-          </button>
-          <button
-            aria-label="Revert file"
-            disabled={!activeBuffer || !!review}
-            onClick={() => activePath && onEditorRevert?.(activePath)}
-            title="Revert file"
-            type="button"
-          >
-            <RefreshCw size={14} />
           </button>
           <button
             aria-label="Save file"
@@ -12523,6 +12523,43 @@ function EditorGroupPane({
           ) : null}
         </div>
       </div>
+      {actionMenu ? createPortal(
+        <div
+          className="gyro-session-menu gyro-editor-action-menu"
+          ref={actionMenuRef}
+          role="menu"
+          aria-label={actionMenu.kind === "split" ? "Split editor" : "File actions"}
+          style={{
+            position: "fixed", right: "auto", width: 200, zIndex: 180,
+            left: Math.max(8, Math.min(actionMenu.x, window.innerWidth - 216)),
+            top: Math.max(8, Math.min(actionMenu.y, window.innerHeight - 120)),
+          }}
+        >
+          {actionMenu.kind === "split" ? (
+            <>
+              <button role="menuitem" type="button" onClick={() => runMenuAction(() => onSplitEditorGroup?.("right"))}>
+                <PanelRight size={14} /> Split right
+              </button>
+              <button role="menuitem" type="button" onClick={() => runMenuAction(() => onSplitEditorGroup?.("down"))}>
+                <PanelBottom size={14} /> Split down
+              </button>
+            </>
+          ) : (
+            <>
+              <button role="menuitem" type="button" disabled={!canSave || actionMenu.path !== activePath} onClick={() => runMenuAction(() => actionMenu.path && onEditorSave?.(actionMenu.path))}>
+                <Check size={14} /> Save file
+              </button>
+              <button role="menuitem" type="button" disabled={!canSave || actionMenu.path !== activePath} onClick={() => runMenuAction(() => actionMenu.path && onEditorRevert?.(actionMenu.path))}>
+                <RotateCcw size={14} /> Revert unsaved changes
+              </button>
+              <button role="menuitem" type="button" onClick={() => runMenuAction(() => actionMenu.path && onCloseTab?.(actionMenu.path))}>
+                <X size={14} /> Close file
+              </button>
+            </>
+          )}
+        </div>,
+        document.body,
+      ) : null}
       <div className="gyro-editor-contextbar">
         <div className="gyro-breadcrumb-row">
           {activePath ? (

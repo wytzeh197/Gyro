@@ -6399,8 +6399,11 @@ expect(
 );
 expect(
   surfaceSource.includes("function EditorGroupPane") &&
-    surfaceSource.includes('aria-label="Split editor down"') &&
-    surfaceSource.includes('aria-label="Toggle chat"') &&
+    surfaceSource.includes('aria-label="Split editor"') &&
+    surfaceSource.includes("Split down") &&
+    surfaceSource.includes('"File actions"') &&
+    surfaceSource.includes("Revert unsaved changes") &&
+    surfaceSource.includes("onContextMenu") &&
     surfaceSource.includes("gyro-sidebar-explorer-toolbar") &&
     surfaceSource.includes('aria-label="New file"') &&
     surfaceSource.includes('aria-label="Source control message"') &&
@@ -6440,7 +6443,7 @@ expect(
     surfaceSource.includes('event.key === " "') &&
     surfaceSource.includes("explorerRowRefs") &&
     styleSource.includes(".gyro-sidebar-explorer-tree"),
-  "Core IDE controls should operate real editor groups, workspace files, Git review, AI context, and language-server lifecycles.",
+  "Core IDE controls should operate real editor groups, workspace files, Git review, and language-server lifecycles.",
 );
 expect(
   !surfaceSource.includes("Keychain ready") &&
