@@ -2219,6 +2219,24 @@ const workspacePreparationStages = [
   { id: "tests", label: "Discover tests" },
 ] as const;
 
+function clampWorkspacePreparationPopover(popover: HTMLElement) {
+  popover.style.transform = "";
+  const margin = 8;
+  const rect = popover.getBoundingClientRect();
+  let dx = 0;
+  let dy = 0;
+  if (rect.left < margin) dx = margin - rect.left;
+  if (rect.right + dx > window.innerWidth - margin) {
+    dx -= rect.right + dx - (window.innerWidth - margin);
+  }
+  if (rect.top < margin) dy = margin - rect.top;
+  if (rect.bottom + dy > window.innerHeight - margin) {
+    dy -= rect.bottom + dy - (window.innerHeight - margin);
+  }
+  popover.style.transform =
+    dx || dy ? `translate(${Math.round(dx)}px, ${Math.round(dy)}px)` : "";
+}
+
 function WorkspacePreparationControl({
   progress,
   isOpen,
@@ -2234,12 +2252,29 @@ function WorkspacePreparationControl({
   onRetry?: () => void;
   controlRef: RefObject<HTMLDivElement | null>;
 }) {
+  const popoverRef = useRef<HTMLElement | null>(null);
+  const percent = progress
+    ? Math.round(
+        (Math.min(progress.completedSteps, progress.totalSteps) /
+          Math.max(1, progress.totalSteps)) *
+          100,
+      )
+    : 0;
+
+  useLayoutEffect(() => {
+    if (!isOpen || !progress) return;
+    const popover = popoverRef.current;
+    if (!popover) return;
+    const place = () => clampWorkspacePreparationPopover(popover);
+    place();
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      popover.style.transform = "";
+    };
+  }, [isOpen, percent, progress, progress?.message, progress?.status]);
+
   if (!progress) return null;
-  const percent = Math.round(
-    (Math.min(progress.completedSteps, progress.totalSteps) /
-      Math.max(1, progress.totalSteps)) *
-      100,
-  );
   const failedPhases = new Set(progress.errors.map((error) => error.phase));
   const phaseIndex = workspacePreparationStages.findIndex(
     (stage) => stage.id === progress.phase,
@@ -2277,6 +2312,7 @@ function WorkspacePreparationControl({
         <section
           aria-label="Workspace preparation details"
           className="gyro-workspace-preparation-popover"
+          ref={popoverRef as never}
           role="dialog"
         >
           <header>

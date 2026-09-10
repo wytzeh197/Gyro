@@ -138,6 +138,11 @@ const DESKTOP_IPC_IO_TIMEOUT: Duration = Duration::from_secs(5);
 const WORKSPACE_TREE_MAX_CACHE_AGE: Duration = Duration::from_secs(30);
 const WORKSPACE_CHANGE_DEBOUNCE: Duration = Duration::from_millis(250);
 const WORKSPACE_PREPARATION_CACHE_AGE: Duration = Duration::from_secs(2);
+const WORKSPACE_PREPARATION_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+const WORKSPACE_PREPARATION_GIT_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_UNTRACKED_LINE_COUNT_BYTES: u64 = 1024 * 1024;
+const MAX_UNTRACKED_LINE_COUNT_FILES: usize = 64;
+const MAX_GIT_STATUS_CACHES: usize = 8;
 const MAX_WORKSPACE_WATCH_CACHES: usize = 8;
 const MAX_WORKSPACE_PREPARATION_CACHES: usize = MAX_WORKSPACE_WATCH_CACHES;
 const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -876,7 +881,7 @@ struct WorkspaceSearchRange {
     end_column: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SourceControlFile {
     path: String,
@@ -7547,9 +7552,13 @@ impl WorkspacePreparationManager {
             if state.in_flight.insert(root.clone()) {
                 break;
             }
-            state = state_changed
-                .wait(state)
+            let (next, wait) = state_changed
+                .wait_timeout(state, WORKSPACE_PREPARATION_WAIT_TIMEOUT)
                 .map_err(|_| "workspace preparation state is unavailable".to_string())?;
+            state = next;
+            if wait.timed_out() && state.in_flight.contains(&root) {
+                return Err("workspace preparation timed out".to_string());
+            }
         }
         drop(state);
 
@@ -7678,33 +7687,51 @@ fn prepare_workspace_impl(
     let git_root = root_text.clone();
     let branch_root = root_text.clone();
     let task_root = root_text.clone();
-    let git_handle = std::thread::spawn(move || git_status_impl(&git_root));
-    let branch_handle = std::thread::spawn(move || git_branch_catalog_impl(&branch_root));
+    let (git_tx, git_rx) = mpsc::sync_channel(1);
+    let (branch_tx, branch_rx) = mpsc::sync_channel(1);
     let task_handle = std::thread::spawn(move || task_discover_impl(&task_root));
+    std::thread::spawn(move || {
+        let _ = git_tx.send(git_status_for_preparation(&git_root));
+    });
+    std::thread::spawn(move || {
+        let _ = branch_tx.send(git_branch_catalog_impl(&branch_root));
+    });
 
-    let source_control = match git_handle
-        .join()
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("Git status worker failed")))
-    {
-        Ok(status) => Some(status),
-        Err(error) => {
+    let git_deadline = Instant::now() + WORKSPACE_PREPARATION_GIT_TIMEOUT;
+    let remaining_git = || git_deadline.saturating_duration_since(Instant::now());
+    let source_control = match git_rx.recv_timeout(remaining_git()) {
+        Ok(Ok(status)) => Some(status),
+        Ok(Err(error)) => {
             errors.push(WorkspacePreparationError {
                 phase: "git".into(),
                 message: error.to_string(),
             });
             None
         }
+        Err(_) => {
+            errors.push(WorkspacePreparationError {
+                phase: "git".into(),
+                message: "Inspecting Git timed out".into(),
+            });
+            None
+        }
     };
-    let branches = match branch_handle
-        .join()
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("Git branch worker failed")))
-    {
-        Ok(catalog) => Some(catalog),
-        Err(error) => {
+    let branches = match branch_rx.recv_timeout(remaining_git()) {
+        Ok(Ok(catalog)) => Some(catalog),
+        Ok(Err(error)) => {
             if git_repo_root(root).is_some() {
                 errors.push(WorkspacePreparationError {
                     phase: "git".into(),
                     message: error.to_string(),
+                });
+            }
+            None
+        }
+        Err(_) => {
+            if git_repo_root(root).is_some() {
+                errors.push(WorkspacePreparationError {
+                    phase: "git".into(),
+                    message: "Inspecting Git timed out".into(),
                 });
             }
             None
@@ -10403,7 +10430,77 @@ fn fallback_search_workspace(
     Ok(results)
 }
 
+fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn git_status_stamp(repo_root: &Path, porcelain: &str, files: &[SourceControlFile]) -> String {
+    let mut material = format!("{}\n{}", repo_root.display(), porcelain);
+    for file in files {
+        for path in [Some(file.path.as_str()), file.original_path.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            material.push('\n');
+            material.push_str(path);
+            match fs::symlink_metadata(repo_root.join(path)) {
+                Ok(metadata) => {
+                    material.push('\t');
+                    material.push_str(&metadata.len().to_string());
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(elapsed) = modified.duration_since(SystemTime::UNIX_EPOCH) {
+                            material.push('\t');
+                            material.push_str(&elapsed.as_nanos().to_string());
+                        }
+                    }
+                }
+                Err(_) => material.push_str("\tmissing"),
+            }
+        }
+    }
+    content_hash(material.as_bytes())
+}
+
+fn cached_git_status(repo_root: &Path, stamp: &str) -> Option<SourceControlStatus> {
+    let cache = git_status_cache().lock().ok()?;
+    let (cached_stamp, status) = cache.get(repo_root)?;
+    if cached_stamp != stamp {
+        return None;
+    }
+    let mut status = status.clone();
+    status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
+    Some(status)
+}
+
+fn store_git_status(repo_root: PathBuf, stamp: String, status: SourceControlStatus) {
+    let Ok(mut cache) = git_status_cache().lock() else {
+        return;
+    };
+    cache.insert(repo_root.clone(), (stamp, status));
+    while cache.len() > MAX_GIT_STATUS_CACHES {
+        let oldest = cache
+            .keys()
+            .find(|path| *path != &repo_root)
+            .cloned()
+            .or_else(|| cache.keys().next().cloned());
+        let Some(path) = oldest else {
+            break;
+        };
+        cache.remove(&path);
+    }
+}
+
 fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+    inspect_git_status(workspace_path, true)
+}
+
+fn git_status_for_preparation(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+    inspect_git_status(workspace_path, false)
+}
+
+fn inspect_git_status(workspace_path: &str, detailed: bool) -> anyhow::Result<SourceControlStatus> {
     let root = workspace_root(workspace_path)?;
     let mut command = git_command();
     command
@@ -10412,11 +10509,11 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
         .arg("status")
         .arg("--porcelain=v2")
         .arg("--branch")
-        .arg("--untracked-files=all");
+        .arg("--untracked-files=normal");
     let output = match run_bounded_command(
         &command,
-        Duration::from_secs(15),
-        Some(Duration::from_secs(10)),
+        Duration::from_secs(if detailed { 15 } else { 6 }),
+        Some(Duration::from_secs(if detailed { 10 } else { 4 })),
         4 * 1024 * 1024,
         64 * 1024,
     ) {
@@ -10464,13 +10561,23 @@ fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> 
     }
     let mut status = parse_git_status_v2(&output.stdout);
     let repo_root = git_repo_root(&root).unwrap_or(root);
-    apply_git_diff_stats(&repo_root, &mut status);
-    match source_control_review::history(&repo_root) {
-        Ok(history) => status.history = history,
-        Err(error) if !output.stdout.contains("# branch.oid (initial)") => {
-            status.history_error = Some(error.to_string());
+    if detailed {
+        let stamp = git_status_stamp(&repo_root, &output.stdout, &status.files);
+        if let Some(cached) = cached_git_status(&repo_root, &stamp) {
+            return Ok(cached);
         }
-        Err(_) => {}
+        apply_git_diff_stats(&repo_root, &mut status);
+        match source_control_review::history(&repo_root) {
+            Ok(history) => status.history = history,
+            Err(error) if !output.stdout.contains("# branch.oid (initial)") => {
+                status.history_error = Some(error.to_string());
+            }
+            Err(_) => {}
+        }
+        status.repo_root = Some(repo_root.display().to_string());
+        status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
+        store_git_status(repo_root, stamp, status.clone());
+        return Ok(status);
     }
     status.repo_root = Some(repo_root.display().to_string());
     status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
@@ -10589,6 +10696,7 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
     }
 
     let mut untracked_additions = 0usize;
+    let mut untracked_counted = 0usize;
     for file in &mut status.files {
         if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
             file.original_path
@@ -10598,18 +10706,34 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
             file.additions = *additions;
             file.deletions = *deletions;
         }
-        if file.state == "untracked" {
-            let additions = match git_line_counts::untracked_lines(&repo_root.join(&file.path)) {
-                Ok(lines) => lines,
-                Err(_) => {
-                    status.stats_partial = true;
-                    continue;
-                }
-            };
-            file.additions = additions;
-            untracked_additions = untracked_additions.saturating_add(additions);
-            status.additions = status.additions.saturating_add(additions);
+        if file.state != "untracked" {
+            continue;
         }
+        let path = repo_root.join(&file.path);
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            status.stats_partial = true;
+            continue;
+        };
+        if metadata.is_dir() {
+            continue;
+        }
+        if untracked_counted >= MAX_UNTRACKED_LINE_COUNT_FILES
+            || metadata.len() > MAX_UNTRACKED_LINE_COUNT_BYTES
+        {
+            status.stats_partial = true;
+            continue;
+        }
+        untracked_counted += 1;
+        let additions = match git_line_counts::untracked_lines(&path) {
+            Ok(lines) => lines,
+            Err(_) => {
+                status.stats_partial = true;
+                continue;
+            }
+        };
+        file.additions = additions;
+        untracked_additions = untracked_additions.saturating_add(additions);
+        status.additions = status.additions.saturating_add(additions);
     }
     status.compared_to_main =
         git_main_comparison(repo_root, untracked_additions, status.stats_partial);
@@ -30472,7 +30596,7 @@ while True:
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert!(status.available);
         assert!(status.additions >= 3);
-        assert!(!status.stats_partial);
+        assert!(status.stats_partial);
         assert!(status
             .files
             .iter()
@@ -30480,12 +30604,87 @@ while True:
         assert!(status
             .files
             .iter()
-            .any(|file| file.path == "large.txt" && file.additions == 1));
+            .any(|file| file.path == "large.txt" && file.additions == 0));
 
         let folder = tempfile::tempdir().unwrap();
         let unavailable = git_status_impl(folder.path().to_str().unwrap()).unwrap();
         assert!(!unavailable.available);
         assert_eq!((unavailable.additions, unavailable.deletions), (0, 0));
+    }
+
+    #[test]
+    fn git_status_for_preparation_skips_line_stats_and_history() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("tracked.txt"), "alpha\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        fs::write(repo.path().join("untracked.txt"), "one\ntwo\n").unwrap();
+
+        let prepared = git_status_for_preparation(repo.path().to_str().unwrap()).unwrap();
+        assert!(prepared.available);
+        assert!(prepared
+            .files
+            .iter()
+            .any(|file| file.path == "untracked.txt"));
+        assert_eq!((prepared.additions, prepared.deletions), (0, 0));
+        assert!(prepared.history.is_empty());
+        assert!(prepared.compared_to_main.is_none());
+
+        let full = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(full.additions >= 2);
+        assert!(!full.history.is_empty());
+    }
+
+    #[test]
+    fn git_status_reuses_decorations_until_porcelain_changes() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("tracked.txt"), "alpha\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        fs::write(repo.path().join("tracked.txt"), "alpha\nbeta\n").unwrap();
+
+        let first = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        let second = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert_eq!(first.additions, second.additions);
+        assert_eq!(first.deletions, second.deletions);
+        assert_eq!(first.files, second.files);
+        assert_eq!(first.history, second.history);
+
+        fs::write(repo.path().join("tracked.txt"), "alpha\nbeta\ngamma\n").unwrap();
+        let third = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(third.additions > first.additions);
+        assert!(third
+            .files
+            .iter()
+            .any(|file| file.path == "tracked.txt" && file.additions >= 2));
+    }
+
+    #[test]
+    fn git_status_skips_oversized_untracked_line_counts() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        fs::write(repo.path().join("ok.txt"), "one\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        fs::write(repo.path().join("ok.txt"), "one\ntwo\n").unwrap();
+        fs::write(
+            repo.path().join("huge.txt"),
+            vec![b'x'; (MAX_UNTRACKED_LINE_COUNT_BYTES as usize) + 1],
+        )
+        .unwrap();
+
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        assert!(status.stats_partial);
+        assert!(status
+            .files
+            .iter()
+            .any(|file| file.path == "ok.txt" && file.additions >= 1));
+        assert!(status
+            .files
+            .iter()
+            .any(|file| file.path == "huge.txt" && file.additions == 0));
     }
 
     #[test]

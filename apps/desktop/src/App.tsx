@@ -4212,6 +4212,7 @@ export function App() {
         dispatchWorkbench({ type: "ide-set-tasks", tasks: snapshot.tasks });
         dispatchWorkbench({ type: "ide-set-test-tree", tests: snapshot.tests });
         settleWorkspacePreparation(snapshot);
+        refreshIdeSourceControl(root);
       } catch (error) {
         if (workspacePreparationRunRef.current !== runId) return;
         settleWorkspacePreparation({
@@ -4226,7 +4227,7 @@ export function App() {
         });
       }
     },
-    [settleWorkspacePreparation, workspaceRoots],
+    [refreshIdeSourceControl, settleWorkspacePreparation, workspaceRoots],
   );
 
   useEffect(() => {
@@ -14187,7 +14188,25 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    if (!workspaceActionRoot || workspaceChangeGeneration === 0) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => refreshIdeSourceControl(workspaceActionRoot),
+      250,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [
+    refreshIdeSourceControl,
+    workspaceActionRoot,
+    workspaceChangeGeneration,
+  ]);
+
+  useEffect(() => {
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      activeSession?.workspacePath ??
+      workspacePath;
     if (!root) {
       return;
     }
@@ -14204,16 +14223,22 @@ export function App() {
       return;
     }
     refreshIdeSourceControl(root);
+    if (workspaceWatchMode === "event") {
+      return;
+    }
     const interval = window.setInterval(
       () => refreshIdeSourceControl(root),
-      800,
+      2500,
     );
     return () => window.clearInterval(interval);
   }, [
     activeSession?.workspacePath,
     deferredEventsForTurn,
     refreshIdeSourceControl,
+    selectedFile,
     workspacePath,
+    workspaceRoots,
+    workspaceWatchMode,
   ]);
 
   useEffect(() => {

@@ -768,10 +768,43 @@ expect(
     ) &&
     desktopRustSource.includes("WORKSPACE_CHANGE_DEBOUNCE") &&
     desktopRustSource.includes("fn test_tree_from_tasks") &&
+    desktopRustSource.includes("WORKSPACE_PREPARATION_GIT_TIMEOUT") &&
+    desktopRustSource.includes("fn git_status_for_preparation") &&
+    desktopRustSource.includes('message: "Inspecting Git timed out"') &&
+    desktopRustSource.includes(
+      "wait_timeout(state, WORKSPACE_PREPARATION_WAIT_TIMEOUT)",
+    ) &&
     appSource.includes('workspaceWatchMode === "polling"') &&
     appSource.includes("workspacePreparationPathRef.current ===") &&
-    appSource.includes("normalizeProjectPath(activeSession.workspacePath)"),
-  "Workspace preparation should expose honest native stages and disable steady polling when the event watcher is healthy.",
+    appSource.includes("normalizeProjectPath(activeSession.workspacePath)") &&
+    appSource.includes(
+      "settleWorkspacePreparation(snapshot);\n        refreshIdeSourceControl(root)",
+    ),
+  "Workspace preparation should expose honest native stages, bound Git inspect, and disable steady polling when the event watcher is healthy.",
+);
+expect(
+  desktopRustSource.includes("MAX_UNTRACKED_LINE_COUNT_BYTES") &&
+    desktopRustSource.includes("MAX_UNTRACKED_LINE_COUNT_FILES") &&
+    desktopRustSource.includes("fn cached_git_status") &&
+    desktopRustSource.includes("fn git_status_stamp") &&
+    desktopRustSource.includes("--untracked-files=normal") &&
+    !desktopRustSource.includes("--untracked-files=all") &&
+    appSource.includes("workspaceChangeGeneration === 0") &&
+    appSource.includes(
+      'if (workspaceWatchMode === "event") {\n      return;',
+    ) &&
+    !appSource.includes("refreshIdeSourceControl(root),\n      800"),
+  "Git status should reuse porcelain stamps, cap untracked line counts, and not poll a full scan every 800ms.",
+);
+expect(
+  surfaceSource.includes("function clampWorkspacePreparationPopover") &&
+    surfaceSource.includes("popover.style.transform") &&
+    surfaceSource.includes('window.addEventListener("resize", place)') &&
+    styleSource.includes("gyro-preparation-spin") &&
+    styleSource.includes("max-height: min(420px, calc(100dvh - 16px));") &&
+    styleSource.includes("right: auto;") &&
+    styleSource.includes("bottom: calc(100% + 8px);"),
+  "Workspace preparation details should stay on-screen when opened from the sidebar footer.",
 );
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
 const composerSourceEnd = surfaceSource.indexOf(
