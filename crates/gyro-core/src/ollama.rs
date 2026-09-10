@@ -108,9 +108,7 @@ pub fn ollama_endpoint(base_url: Option<&str>) -> Result<Url> {
         ));
     }
     let path = url.path().trim_end_matches('/');
-    if path.is_empty() {
-        url.set_path("/api/");
-    } else if path == "/api" {
+    if path.is_empty() || path == "/api" {
         url.set_path("/api/");
     } else if !path.starts_with("/api/") {
         return Err(anyhow!("Ollama endpoint path must be /api"));

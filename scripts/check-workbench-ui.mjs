@@ -57,6 +57,7 @@ import {
 } from "../packages/ui/src/workspace-settings.ts";
 import {
   CLAUDE_REASONING_EFFORTS,
+  GROK_46_REASONING_EFFORTS,
   isProviderExecutable,
   isProviderRuntimeUsable,
   KIMI_K3_REASONING_EFFORTS,
@@ -847,6 +848,7 @@ const releaseWorkflowSource = readRepoFile(".github/workflows/release.yml");
 expect(
   coreCapabilitiesSource.includes("WorkspaceContextSnapshot") &&
     coreCapabilitiesSource.includes('"gyro_workspace_get_context"') &&
+    coreCapabilitiesSource.includes('"gyro_workspace_check"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_read_range"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_propose_edit"') &&
     coreCapabilitiesSource.includes('"gyro_workspace_run_task"') &&
@@ -1139,6 +1141,44 @@ expect(
       KIMI_K3_REASONING_EFFORTS.join(",") &&
     isProviderExecutable("kimi"),
   "Kimi should default to K3 with the low/high/max effort levels it accepts.",
+);
+const xaiCatalog = providerCatalog.find((provider) => provider.id === "xai");
+const grok46 = xaiCatalog?.models.find((model) => model.id === "grok-4.6");
+expect(
+  GROK_46_REASONING_EFFORTS.join(",") === "low,medium,high,xhigh" &&
+    xaiCatalog?.defaultModelId === "grok-4.6" &&
+    xaiCatalog.selectedModelId === "grok-4.6" &&
+    grok46?.displayName === "Grok 4.6" &&
+    grok46.contextWindowTokens === 500_000 &&
+    grok46.defaultReasoningEffort === "high" &&
+    grok46.supportedReasoningEfforts?.join(",") ===
+      GROK_46_REASONING_EFFORTS.join(",") &&
+    xaiCatalog.models.some((model) => model.id === "grok-4.5"),
+  "xAI should expose Grok 4.6 as the default while retaining Grok 4.5.",
+);
+const restoredGrok45Config = normalizedConfig({
+  telemetryEnabled: false,
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  selectedProviderId: "xai",
+  modelProviders: [
+    {
+      ...xaiCatalog,
+      enabled: true,
+      authStatus: "connected",
+      defaultModelId: "grok-4.5",
+      selectedModelId: "grok-4.5",
+    },
+  ],
+  commandProfiles: [],
+});
+expect(
+  restoredGrok45Config.modelProviders.find((provider) => provider.id === "xai")
+    ?.selectedModelId === "grok-4.5" &&
+    restoredGrok45Config.modelProviders
+      .find((provider) => provider.id === "xai")
+      ?.models.some((model) => model.id === "grok-4.6"),
+  "Adding Grok 4.6 should preserve an existing user's saved Grok 4.5 choice.",
 );
 
 const streamRegressionEvents = [
@@ -3779,15 +3819,13 @@ expect(
     runViewSource.includes('<RunPulse label="Thinking"') &&
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
-    // Live runs keep a Thinking pulse between tools; settled incomplete runs
-    // stay expanded so the trail does not vanish under "Worked · …". Fully
-    // answered turns auto-collapse once so the answer is what stays on screen.
+    // Completed and reopened chats retain their narration until the reader
+    // explicitly collapses the work timeline.
     runViewSource.includes("showThinkingPulse") &&
-    runViewSource.includes("const isAnswered =") &&
-    runViewSource.includes('model.phase.name === "done"') &&
-    runViewSource.includes("Boolean(model.response)") &&
-    runViewSource.includes("model.steps.length > 0") &&
-    runViewSource.includes("hasAutoCollapsed") &&
+    runViewSource.includes(
+      "const [isCollapsed, setIsCollapsed] = useState(false)",
+    ) &&
+    !runViewSource.includes("hasAutoCollapsed") &&
     runViewSource.includes("if (isLive)") &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&
@@ -4076,7 +4114,7 @@ expect(
     surfaceSource.includes('className="gyro-terminal-agent-button"') &&
     surfaceSource.includes('aria-label="Terminals"') &&
     surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
-    surfaceSource.includes('aria-label="Start a terminal"') &&
+    surfaceSource.includes('aria-label="Start a CLI"') &&
     surfaceSource.includes("<span>New terminal</span>") &&
     styleSource.includes(
       ".gyro-terminal-workspace.is-empty .gyro-terminal-empty",
@@ -4180,7 +4218,7 @@ expect(
     appSource.includes("openSourceControlDiffForRoot") &&
     appSource.includes("terminal.onBell") &&
     tauriSource.includes("apply_git_diff_stats") &&
-    tauriSource.includes("untracked_text_additions"),
+    tauriSource.includes("git_line_counts::untracked_lines"),
   "CLI should keep changes accessible in the menu and terminal attention visible in its contextual sidebar.",
 );
 expect(
@@ -4286,11 +4324,19 @@ expect(
   "Desktop terminal backend should use PTYs instead of piped stdio.",
 );
 expect(
-  appSource.includes('startInHome: !folderPath') &&
-    appSource.includes('directory: true, multiple: false, title: "Open terminal in folder"') &&
-    appSource.includes('(template ? selectedPane?.projectPath : undefined) ??') &&
-    !appSource.includes('selectedPane?.projectPath ??\n        workspaceActionRoot ??\n        savedProjects[0]?.path') &&
-    tauriSource.includes('request.working_directory.as_deref() == Some("Home")') &&
+  appSource.includes("startInHome: !folderPath") &&
+    /directory: true,[\s\S]{0,100}?multiple: false,[\s\S]{0,100}?title: "Open terminal in folder"/.test(
+      appSource,
+    ) &&
+    appSource.includes(
+      "(template ? selectedPane?.projectPath : undefined) ??",
+    ) &&
+    !appSource.includes(
+      "selectedPane?.projectPath ??\n        workspaceActionRoot ??\n        savedProjects[0]?.path",
+    ) &&
+    tauriSource.includes(
+      'request.working_directory.as_deref() == Some("Home")',
+    ) &&
     tauriSource.includes("return Ok(Some(user_home_directory()?));"),
   "Standalone terminals should default home and allow explicit folder selection.",
 );
@@ -4424,15 +4470,13 @@ expect(
 expect(
   surfaceSource.includes("onAddTerminalPane?.(launchOptions)") &&
     surfaceSource.includes("function TerminalActionsMenu") &&
-    surfaceSource.includes(
-      "onRunCommandProfile(profile.id, launchOptions)",
-    ) &&
+    surfaceSource.includes("onRunCommandProfile(profile.id, launchOptions)") &&
     surfaceSource.includes("<span>New terminal</span>") &&
     surfaceSource.includes("cliProfileShortLabel") &&
     !surfaceSource.includes(
       'className="gyro-agent-launcher-heading">Start a terminal',
     ) &&
-    surfaceSource.includes("Setup needed") &&
+    surfaceSource.includes("Not connected") &&
     surfaceSource.includes("New Terminal") &&
     surfaceSource.includes("Start Codex CLI") &&
     surfaceSource.includes("Start Claude Code") &&
@@ -4443,7 +4487,9 @@ expect(
     !surfaceSource.includes('className="gyro-terminal-add"') &&
     appSource.includes("const runCommandProfile = useCallback") &&
     appSource.includes("setActiveProfileId(profileId)") &&
-    appSource.includes("void launchTerminalPane({ profile, reveal: options?.reveal })") &&
+    appSource.includes(
+      "void launchTerminalPane({ profile, reveal: options?.reveal })",
+    ) &&
     appSource.includes("onRunCommandProfile={runCommandProfile}") &&
     appSource.includes('case "configure-cli-launcher"') &&
     styleSource.includes(".gyro-agent-launcher-menu") &&
@@ -4674,7 +4720,9 @@ expect(
 expect(
   appSource.includes("const createCliSession = useCallback") &&
     appSource.includes("workspacePathOverride: projectPath") &&
-    appSource.includes('workspacePathOverride ? "Exact workspace"') &&
+    /workingDirectory: workspacePathOverride[\s\S]{0,80}?\? "Exact workspace"/.test(
+      appSource,
+    ) &&
     appSource.includes("existingPane?.projectPath") &&
     appSource.includes("selectedPane?.projectPath") &&
     appSource.includes("projectPath: snapshot.workspacePath") &&
@@ -5012,10 +5060,12 @@ expect(
     surfaceSource.includes("<span>Files</span>") &&
     surfaceSource.includes("<span>Plan</span>") &&
     surfaceSource.includes("function chatToolBrowserStatusLabel") &&
-    surfaceSource.includes('return "Waiting"') &&
+    surfaceSource.includes('return "Idle"') &&
     surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
     surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
-    surfaceSource.includes("Open files in Workspace") &&
+    surfaceSource.includes(
+      "aria-label={`Open Files, ${workspaceName(workspacePath)}`}",
+    ) &&
     // Launcher rows spend their detail slot on a state worth knowing and go
     // quiet otherwise. "Open" was neither — it restated the button it sat on.
     surfaceSource.includes('changesLabel === "No changes" ? null') &&
@@ -5045,11 +5095,13 @@ expect(
     styleSource.includes("min-height: 36px;") &&
     styleSource.includes(".gyro-chat-tool-close") &&
     appSource.includes('dispatchWorkbench({ type: "set-chat-panel" })') &&
-    surfaceSource.includes('action: "new-chat-select-workspace"') &&
-    surfaceSource.includes('"new-local-chat-select-workspace"') &&
-    surfaceSource.includes('"start-new-chat-mode:worktree"') &&
-    surfaceSource.includes("Fixed for this chat") &&
-    surfaceSource.includes("Choose another folder") &&
+    surfaceSource.includes('action: "select-workspace"') &&
+    surfaceSource.includes('action: "set-workspace-mode:local"') &&
+    surfaceSource.includes('action: "set-workspace-mode:worktree"') &&
+    surfaceSource.includes('detail: "Chat without a project folder"') &&
+    surfaceSource.includes(
+      'hasUserWorkspace ? "Change folder" : "Select folder"',
+    ) &&
     !surfaceSource.includes('onComposerAction?.("show-project-context")') &&
     !surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
     surfaceSource.includes('onComposerAction?.("select-branch")') &&
@@ -5088,7 +5140,10 @@ expect(
     styleSource.includes("bottom: calc(100% + 10px)") &&
     surfaceSource.includes('popoverPlacement="up"') &&
     surfaceSource.includes('variant="hero"') &&
-    surfaceSource.includes("constrainToParent={Boolean(activeRailPanel)}") &&
+    surfaceSource.includes("constrainToParent={Boolean(") &&
+    surfaceSource.includes(
+      'activeRailPanel && activeRailPanel !== "environment"',
+    ) &&
     surfaceSource.includes('constrainToParent ? "stretch" : "center"') &&
     surfaceSource.includes(
       'isHero && constrainToParent ? "is-constrained" : ""',
@@ -6271,7 +6326,7 @@ expect(
         rule.includes("max-height: 172px") &&
         rule.includes("overflow-y: auto"),
     ) &&
-    styleSource.includes("margin-right: -3px") &&
+    styleSource.includes("margin-right: -4px") &&
     styleSource.includes("padding: 0 8px") &&
     styleSource.includes("height: 58px") &&
     cssRules(styleSource, ".gyro-sidebar-windowbar").some(
@@ -6586,10 +6641,10 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 6px") &&
+    styleSource.includes("--gyro-premium-radius-md: 8px") &&
     styleSource.includes("--gyro-premium-motion: 130ms") &&
     styleSource.includes("--gyro-app: #181818") &&
-    styleSource.includes("--gyro-pane: #212121") &&
+    styleSource.includes("--gyro-pane: #1e1e1e") &&
     styleSource.includes("--gyro-hero-composer: #292929") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
@@ -7276,11 +7331,11 @@ expect(
 );
 
 expect(
-  styleSource.includes(
-    "Conversation text shares the body scale",
-  ) &&
+  styleSource.includes("Conversation text shares the body scale") &&
     styleSource.includes("--gyro-font-body: 14px;") &&
-    styleSource.includes("font-size: var(--gyro-font-body);\n  line-height: 1.6;") &&
+    styleSource.includes(
+      "font-size: var(--gyro-font-body);\n  line-height: 1.6;",
+    ) &&
     styleSource.includes(".gyro-user-message-bubble p") &&
     styleSource.includes(".gyro-run-row-detail") &&
     styleSource.includes(".gyro-run-row-stat") &&

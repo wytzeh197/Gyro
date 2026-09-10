@@ -286,11 +286,13 @@ expect(
 );
 
 expect(
-  /const addTerminalPane = useCallback\(\(options\?: \{ reveal\?: boolean \}\) => \{[\s\S]{0,280}?reveal: options\?\.reveal/.test(
+  /const addTerminalPane = useCallback\([\s\S]{0,1800}?const started = await launchTerminalPane\(\{[\s\S]{0,320}?reveal: options\?\.reveal/.test(
     app,
   ) &&
-    /void runProfile\(profileId, undefined, options\)/.test(app) &&
-    /const launchCliPreset = useCallback\(async \(options\?: \{ reveal\?: boolean \}\) => \{[\s\S]{0,1800}?reveal: options\?\.reveal/.test(
+    /const runCommandProfile = useCallback\([\s\S]{0,900}?launchTerminalPane\(\{ profile, reveal: options\?\.reveal \}\)/.test(
+      app,
+    ) &&
+    /const launchCliPreset = useCallback\([\s\S]{0,2600}?reveal: options\?\.reveal/.test(
       app,
     ),
   "Every terminal launch action must forward the companion's no-reveal choice through to the shared terminal launcher.",

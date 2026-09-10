@@ -1082,7 +1082,7 @@ fn acp_tool_activity_parts(
 }
 
 fn humanize_acp_kind(kind: &str) -> String {
-    kind.split(|ch: char| ch == '_' || ch == '-')
+    kind.split(['_', '-'])
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();

@@ -186,6 +186,13 @@ assert.equal(windowOnly.source, "estimated");
 assert.equal(windowOnly.windowLabel, "131K");
 assert.equal(windowOnly.usedLabel, "1K");
 
+const grok46Fallback = estimateComposerContextUsage([], "hello", {
+  providerId: "xai",
+  modelId: "grok-4.6",
+  modelLabel: "Grok 4.6",
+});
+assert.equal(grok46Fallback.windowLabel, "500K");
+
 const now = Date.parse("2026-07-27T10:00:00.000Z");
 
 assert.equal(

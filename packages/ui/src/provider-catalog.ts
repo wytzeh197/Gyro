@@ -7,6 +7,7 @@ import type {
   ProviderId,
   ProviderModel,
   ProviderRuntimeStatus,
+  ProviderCapabilitySupport,
   ProviderStatus,
   ReasoningEffort,
 } from "./types";
@@ -34,13 +35,19 @@ export const CLAUDE_REASONING_EFFORTS: ReasoningEffort[] = [
  * The levels Grok models offer for `--reasoning-effort`.
  *
  * The CLI's flag parser accepts more words than this, but each model publishes
- * its own selectable set and rejects the rest at turn time. Grok's shipped
- * models list low, medium, and high only.
+ * its own selectable set and rejects the rest at turn time. This is the set
+ * shared by Grok 4.5 and earlier models; Grok 4.6 adds xhigh below.
  */
 export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
   "medium",
   "high",
+];
+
+/** Grok 4.6 adds xhigh to the reasoning levels supported by earlier models. */
+export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
+  ...GROK_REASONING_EFFORTS,
+  "xhigh",
 ];
 
 /**
@@ -268,8 +275,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     authMode: "cli",
     authStatus: "not-connected",
     baseUrl: null,
-    defaultModelId: "grok-4.5",
-    selectedModelId: "grok-4.5",
+    defaultModelId: "grok-4.6",
+    selectedModelId: "grok-4.6",
     selectedReasoningEffort: "high",
     capabilities: {
       executionKind: "acp-cli",
@@ -282,6 +289,15 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       visibility: "standard",
     },
     models: [
+      {
+        id: "grok-4.6",
+        displayName: "Grok 4.6",
+        description:
+          "xAI's frontier model for coding, agentic tasks, and knowledge work.",
+        contextWindowTokens: 500_000,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
+      },
       {
         id: "grok-4.5",
         displayName: "Grok 4.5",
@@ -429,6 +445,64 @@ export function getProviderCatalogEntry(providerId: ProviderId) {
 
 export function providerCapabilities(providerId: ProviderId) {
   return getProviderCatalogEntry(providerId)?.capabilities;
+}
+
+function allowedToolsFromCapabilityIds(
+  capabilityIds: ProviderCapabilitySupport["capabilities"],
+) {
+  const tools = new Set<string>();
+  for (const capabilityId of capabilityIds) {
+    if (capabilityId.startsWith("browser-")) tools.add("browser");
+    if (capabilityId.startsWith("terminal-")) tools.add("terminal");
+    if (
+      capabilityId.startsWith("workspace-") ||
+      capabilityId.startsWith("ide-")
+    ) {
+      tools.add("files");
+    }
+    if (
+      capabilityId === "workspace-diff" ||
+      capabilityId === "workspace-git-status" ||
+      capabilityId.startsWith("github-")
+    ) {
+      tools.add("diff");
+    }
+  }
+  return ["files", "terminal", "diff", "browser"].filter((tool) =>
+    tools.has(tool),
+  );
+}
+
+/**
+ * Apply the backend-owned provider manifest before config normalization.
+ * Preview/browser fixtures keep the checked-in catalog as an offline fallback,
+ * while the desktop runtime is authoritative whenever it is available.
+ */
+export function applyProviderCapabilityManifest(
+  manifest: ProviderCapabilitySupport[],
+) {
+  for (const support of manifest) {
+    if (support.schema !== "gyro.provider-capability-manifest.v1") continue;
+    const provider = providerCatalog.find(
+      (candidate) => candidate.id === support.providerId,
+    );
+    if (!provider || !support.executionKind) continue;
+    provider.capabilities = {
+      executionKind: support.executionKind,
+      executable: support.available,
+      supportsApprovals: support.supportsApprovals,
+      supportsImages: support.supportsImages,
+      supportsResume: support.supportsResume,
+      supportsUsage: support.supportsUsage,
+      visibility:
+        support.supportTier === "experimental"
+          ? "experimental"
+          : support.available
+            ? "standard"
+            : "readiness-only",
+    };
+    provider.allowedTools = allowedToolsFromCapabilityIds(support.capabilities);
+  }
 }
 
 export function isProviderExecutable(providerId: ProviderId) {

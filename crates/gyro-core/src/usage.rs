@@ -54,7 +54,7 @@ impl UsageOrigin {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    pub fn from_storage_value(value: &str) -> Self {
         match value {
             "automation" => Self::Automation,
             "council-seat" => Self::CouncilSeat,
@@ -97,7 +97,7 @@ impl UsageOutcome {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    pub fn from_storage_value(value: &str) -> Self {
         match value {
             "failed" => Self::Failed,
             "cancelled" => Self::Cancelled,
@@ -527,11 +527,12 @@ pub fn budget_state(
     let window_hours = budget.window_hours.max(1);
     let since = now - chrono::Duration::hours(i64::from(window_hours));
     let totals = provider_usage_totals_since(conn, &budget.provider_id, since)?;
-    let percent = if budget.max_tokens == 0 {
-        0
-    } else {
-        ((totals.total_tokens.saturating_mul(100)) / budget.max_tokens).min(255) as u8
-    };
+    let percent = totals
+        .total_tokens
+        .saturating_mul(100)
+        .checked_div(budget.max_tokens)
+        .unwrap_or(0)
+        .min(255) as u8;
     let level = if budget.max_tokens == 0 {
         BudgetLevel::Ok
     } else if percent >= 100 {
@@ -694,7 +695,7 @@ pub fn recent_usage(conn: &Connection, since: DateTime<Utc>) -> Result<RecentUsa
         let (origin, count) = row?;
         let count = count.max(0) as u32;
         recent.calls += count;
-        match UsageOrigin::from_str(&origin) {
+        match UsageOrigin::from_storage_value(&origin) {
             UsageOrigin::Automation => recent.unattended_calls += count,
             UsageOrigin::CouncilResynthesis => recent.resynthesis_calls += count,
             _ => {}
@@ -850,7 +851,7 @@ fn totals_from_rows(
                 existing.total_tokens += total_tokens.max(0) as u64;
             }
             None => {
-                let parsed_origin = UsageOrigin::from_str(&origin);
+                let parsed_origin = UsageOrigin::from_storage_value(&origin);
                 by_origin.push(UsageOriginTotals {
                     origin: parsed_origin.as_str().into(),
                     label: parsed_origin.label().into(),

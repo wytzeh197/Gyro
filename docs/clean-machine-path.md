@@ -12,6 +12,10 @@ run Gyro:
 5. **Review a proposed edit** — approve or reject through Gyro's mutation
    transaction, not a free-floating terminal prompt.
 
+Ask First is the first-install default. If the user explicitly selects Auto
+Approve or Full Access, that choice is persisted and restored rather than reset
+after a run or relaunch. See [permissions.md](permissions.md).
+
 This is launch blocker 3 and the core of the v0.2 private-alpha gate.
 Signing and notarization remain a separate distribution gate.
 

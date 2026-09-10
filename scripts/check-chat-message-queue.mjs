@@ -61,3 +61,39 @@ assert.deepEqual(
 );
 
 console.log("chat message queue checks passed");
+
+// Stop pauses only its own chat, including already-scheduled retry timers.
+const stoppedQueues = {
+  stopped: [message("next"), message("later")],
+  other: [message("other")],
+};
+const pausedSessionIds = new Set(["stopped"]);
+const stoppedOptions = {
+  dispatchingSessionIds: new Set(),
+  sendingSessionIds: new Set(),
+  pausedSessionIds,
+  now: 1000,
+};
+assert.equal(
+  selectQueuedMessageDelivery(stoppedQueues, stoppedOptions).sessionId,
+  "other",
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { stopped: stoppedQueues.stopped },
+    stoppedOptions,
+  ),
+  undefined,
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { stopped: [message("retry", { retryAt: 1500 })] },
+    stoppedOptions,
+  ),
+  undefined,
+);
+pausedSessionIds.delete("stopped");
+assert.equal(
+  selectQueuedMessageDelivery(stoppedQueues, stoppedOptions).message.id,
+  "next",
+);

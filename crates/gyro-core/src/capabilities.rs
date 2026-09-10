@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 pub const CAPABILITY_SCHEMA_V1: &str = "gyro.capability.v1";
 pub const PROVIDER_CAPABILITY_IPC_SCHEMA_V1: &str = "gyro.provider-capability-ipc.v1";
+pub const PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1: &str = "gyro.provider-capability-manifest.v1";
 pub const MAX_CAPABILITY_RESULT_BYTES: usize = 128 * 1024;
 pub const MAX_CAPABILITY_SUMMARY_CHARS: usize = 4_000;
 
@@ -16,6 +17,7 @@ pub const MAX_CAPABILITY_SUMMARY_CHARS: usize = 4_000;
 #[serde(rename_all = "kebab-case")]
 pub enum CapabilityId {
     WorkspaceContext,
+    WorkspaceCheck,
     WorkspaceList,
     WorkspaceSearch,
     WorkspaceRead,
@@ -60,6 +62,7 @@ impl CapabilityId {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::WorkspaceContext => "workspace.context",
+            Self::WorkspaceCheck => "workspace.check",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceSearch => "workspace.search",
             Self::WorkspaceRead => "workspace.read",
@@ -104,6 +107,7 @@ impl CapabilityId {
     pub fn provider_tool_name(self) -> &'static str {
         match self {
             Self::WorkspaceContext => "gyro_workspace_get_context",
+            Self::WorkspaceCheck => "gyro_workspace_check",
             Self::WorkspaceList => "gyro_workspace_list",
             Self::WorkspaceSearch => "gyro_workspace_search",
             Self::WorkspaceRead => "gyro_workspace_read",
@@ -566,8 +570,15 @@ pub struct CapabilityCallEvent {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderCapabilitySupport {
+    pub schema: String,
     pub provider_id: String,
     pub available: bool,
+    pub execution_kind: Option<crate::provider_registry::ProviderExecutionKind>,
+    pub support_tier: crate::provider_registry::ProviderSupportTier,
+    pub supports_approvals: bool,
+    pub supports_images: bool,
+    pub supports_resume: bool,
+    pub supports_usage: bool,
     pub capabilities: Vec<CapabilityId>,
     pub reason: Option<String>,
 }
@@ -584,6 +595,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::WorkspaceContext,
         class: CapabilityClass::WorkspaceInspect,
         description: "Inspect the diagnostics, failing tests, and active output channel in Gyro Workspace. The user's open file, tab list, selection, and unsaved buffer are deliberately not reported here.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceCheck,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Run a fast workspace readiness check: folder availability, project kind, and a bounded Git brief. Use this to refresh turn-start workspace facts without a full catalog.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceList,
@@ -803,10 +819,23 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
 /// ACP providers get it through `session/new`. Readiness-only providers have no
 /// chat runner at all, so there is nowhere to attach tools.
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
-    let available = crate::provider_registry::provider_is_executable(provider_id);
+    let descriptor = crate::provider_registry::provider_descriptor(provider_id);
+    let available = descriptor.is_some_and(|provider| {
+        provider.execution_kind != crate::provider_registry::ProviderExecutionKind::ReadinessOnly
+    });
     ProviderCapabilitySupport {
+        schema: PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1.into(),
         provider_id: provider_id.into(),
         available,
+        execution_kind: descriptor.map(|provider| provider.execution_kind),
+        support_tier: descriptor.map_or(
+            crate::provider_registry::ProviderSupportTier::ReadinessOnly,
+            |provider| provider.support_tier,
+        ),
+        supports_approvals: descriptor.is_some_and(|provider| provider.supports_approvals),
+        supports_images: descriptor.is_some_and(|provider| provider.supports_images),
+        supports_resume: descriptor.is_some_and(|provider| provider.supports_resume),
+        supports_usage: descriptor.is_some_and(|provider| provider.supports_usage),
         capabilities: if available {
             CAPABILITY_DESCRIPTORS.iter().map(|item| item.id).collect()
         } else {
@@ -815,6 +844,13 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         reason: (!available)
             .then(|| "Gyro tools need a provider that runs a chat session on this device.".into()),
     }
+}
+
+pub fn provider_capability_manifest() -> Vec<ProviderCapabilitySupport> {
+    crate::provider_registry::provider_registry()
+        .iter()
+        .map(|provider| provider_capability_support(provider.id))
+        .collect()
 }
 
 pub fn normalize_capability_relative_path(path: &str) -> Result<String> {
@@ -1016,11 +1052,14 @@ mod tests {
             "opencode",
         ] {
             let support = provider_capability_support(provider_id);
+            assert_eq!(support.schema, PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1);
             assert!(support.available, "{provider_id} should support Gyro tools");
+            assert!(support.execution_kind.is_some());
             assert_eq!(support.capabilities.len(), CAPABILITY_DESCRIPTORS.len());
             assert!(support.reason.is_none());
         }
-        for provider_id in ["unknown"] {
+        {
+            let provider_id = "unknown";
             let support = provider_capability_support(provider_id);
             assert!(
                 !support.available,
@@ -1029,6 +1068,16 @@ mod tests {
             assert!(support.capabilities.is_empty());
             assert!(support.reason.is_some());
         }
+
+        let manifest = provider_capability_manifest();
+        assert_eq!(
+            manifest.len(),
+            crate::provider_registry::provider_registry().len()
+        );
+        assert_eq!(
+            provider_capability_support("cursor").support_tier,
+            crate::provider_registry::ProviderSupportTier::Experimental
+        );
     }
 
     #[test]

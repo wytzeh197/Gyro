@@ -642,7 +642,7 @@ function runPhase(
         : (status.message ?? status.error ?? "The run stopped early"),
       // Normalize so the header and problem tone can tell user-stop from crash.
       recoveryKind: cancelled
-        ? (status.recoveryKind ?? "cancelled")
+        ? "cancelled"
         : status.recoveryKind,
       recoveryMessage: status.recoveryMessage,
     };
@@ -967,6 +967,7 @@ function capabilityWorkStatus(value: string | undefined): WorkStatus {
 function humanizeCapabilityId(capabilityId: string): string {
   const known: Record<string, string> = {
     "workspace-context": "Workspace context",
+    "workspace-check": "Workspace check",
     "workspace-list": "List workspace",
     "workspace-search": "Workspace search",
     "workspace-read": "Read file",
@@ -1234,6 +1235,7 @@ function progressiveToolLabel(tool: string): string | undefined {
   const key = tool.trim().toLowerCase();
   const known: Record<string, string> = {
     "workspace context": "Gathering workspace",
+    "workspace check": "Checking workspace",
     "list workspace": "Listing workspace",
     "workspace search": "Searching workspace",
     "read file": "Reading file",

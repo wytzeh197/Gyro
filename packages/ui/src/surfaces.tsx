@@ -95,6 +95,7 @@ import {
   SquareTerminal,
   Sun,
   Tablet,
+  Tag,
   Telescope,
   Terminal,
   TriangleAlert,
@@ -148,7 +149,6 @@ import { orderedChatTimelineEvents } from "./chat-timeline";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
-  providerResetSummary,
   type ComposerContextUsage,
   type ComposerLimitWindow,
 } from "./context-usage";
@@ -2540,6 +2540,148 @@ function scmStateDecoration(state: SourceControlFile["state"]) {
 }
 
 /**
+ * One hue per graph lane, reused as lanes are recycled. The colours are the
+ * only thing that says two commits sit on different branches, so they are
+ * spaced around the wheel rather than shaded from one accent.
+ */
+const SCM_GRAPH_LANE_COLORS = [
+  "#4d9ee0",
+  "#e0a03c",
+  "#c76bd4",
+  "#4bbf9c",
+  "#e0715e",
+  "#948af0",
+];
+
+/** Lanes past this fold back onto the last one; the rail has to stay narrow. */
+const SCM_GRAPH_LANE_LIMIT = 5;
+
+type ScmGraphRow = {
+  /** Lane the commit's dot sits in. */
+  lane: number;
+  /** Every lane carrying a line through this row, the commit's own included. */
+  lanes: number[];
+  /** No child in the loaded window, so the lane's line starts at the dot. */
+  startsHere: boolean;
+  /** No parent in the loaded window, so the lane's line stops at the dot. */
+  endsHere: boolean;
+  isMerge: boolean;
+};
+
+/**
+ * Lay the loaded commits out as `git log --graph` does: walk newest to oldest
+ * carrying, per lane, the hash that lane is still waiting for. A commit claims
+ * the lane that was waiting on it — that is what keeps a branch on one colour
+ * down the rail — and hands the lane to its first parent, while a merge's
+ * extra parents open lanes of their own.
+ *
+ * History arrives as a 30-commit window, so a lane can begin or end mid-view
+ * simply because the other end is out of frame; those rows draw a half line
+ * instead of pretending the branch stops there.
+ */
+function scmGraphRows(
+  history: NonNullable<SourceControlState["history"]>,
+): ScmGraphRow[] {
+  const expected: Array<string | undefined> = [];
+  const claim = (hash: string | undefined) => {
+    const free = expected.indexOf(undefined);
+    const lane = free === -1 ? expected.length : free;
+    expected[lane] = hash;
+    return lane;
+  };
+  return history.map((commit) => {
+    const parents = commit.parents ?? [];
+    const waiting = expected.indexOf(commit.hash);
+    const startsHere = waiting === -1;
+    const lane = startsHere ? claim(commit.hash) : waiting;
+    // A commit with several children is waited on by several lanes; they all
+    // arrive here, so the duplicates close rather than run on empty.
+    for (let index = 0; index < expected.length; index += 1) {
+      if (index !== lane && expected[index] === commit.hash) {
+        expected[index] = undefined;
+      }
+    }
+    const lanes = expected.reduce<number[]>(
+      (open, slot, index) => (slot === undefined ? open : [...open, index]),
+      [],
+    );
+    expected[lane] = parents[0];
+    for (const parent of parents.slice(1)) {
+      if (!expected.includes(parent)) {
+        claim(parent);
+      }
+    }
+    while (expected.length > 0 && expected[expected.length - 1] === undefined) {
+      expected.pop();
+    }
+    return {
+      lane,
+      lanes,
+      startsHere,
+      endsHere: parents.length === 0,
+      isMerge: parents.length > 1,
+    };
+  });
+}
+
+/** Lane pitch in the rail, and the padding that keeps lane 0 off the edge. */
+const SCM_GRAPH_LANE_PITCH = 11;
+const SCM_GRAPH_LANE_INSET = 8;
+
+const scmGraphLaneOffset = (lane: number) =>
+  SCM_GRAPH_LANE_INSET +
+  Math.min(lane, SCM_GRAPH_LANE_LIMIT - 1) * SCM_GRAPH_LANE_PITCH;
+
+const scmGraphLaneColor = (lane: number) =>
+  SCM_GRAPH_LANE_COLORS[
+    Math.min(lane, SCM_GRAPH_LANE_LIMIT - 1) % SCM_GRAPH_LANE_COLORS.length
+  ];
+
+/**
+ * The refs git prints for a commit, as the chips the graph shows: the checked
+ * out branch first, then tags, then everything else. `HEAD -> main` is one
+ * ref in git's output and two facts here — where HEAD is, and which branch.
+ */
+function scmCommitRefs(refs: string) {
+  return refs
+    .split(",")
+    .map((ref) => ref.trim())
+    .filter(Boolean)
+    .map((ref) => {
+      if (ref.startsWith("HEAD -> ")) {
+        return { label: ref.slice("HEAD -> ".length), kind: "head" as const };
+      }
+      if (ref === "HEAD") {
+        return { label: "HEAD", kind: "head" as const };
+      }
+      if (ref.startsWith("tag: ")) {
+        return { label: ref.slice("tag: ".length), kind: "tag" as const };
+      }
+      return { label: ref, kind: "branch" as const };
+    })
+    .sort((first, second) => {
+      const rank = { head: 0, tag: 1, branch: 2 };
+      return rank[first.kind] - rank[second.kind];
+    });
+}
+
+/**
+ * VS Code's sync badge: how far the branch has drifted from its remote, as
+ * "1↓ 2↑". Behind comes first because a pull has to land before a push can,
+ * and a direction that is level is left out rather than shown as a zero.
+ */
+function scmSyncCountLabel(ahead: number, behind: number) {
+  const counts: string[] = [];
+  if (behind > 0) {
+    counts.push(`${behind}↓`);
+  }
+  if (ahead > 0) {
+    counts.push(`${ahead}↑`);
+  }
+  return counts.join(" ");
+}
+
+/**
  * The row that gets a commit off this machine.
  *
  * Committing writes history locally; nothing reaches GitHub until it is
@@ -2547,10 +2689,17 @@ function scmStateDecoration(state: SourceControlFile["state"]) {
  * offers the one press that closes the gap. A branch that has never been
  * published says so plainly — "Publish branch" is a different act from a
  * push, and the count that would normally sit beside it does not exist yet.
+ *
+ * The row only earns its space while there is still something to commit: with
+ * a clean tree the commit button itself becomes the push or pull, so repeating
+ * it here would be a second copy of the same press. A branch level with its
+ * remote has nothing to report either, so it says nothing rather than
+ * announcing that it is up to date.
  */
 function ScmSyncRow({
   ahead,
   behind,
+  hasPendingChanges,
   hasRemote,
   onPull,
   onPush,
@@ -2559,30 +2708,28 @@ function ScmSyncRow({
 }: {
   ahead: number;
   behind: number;
+  hasPendingChanges: boolean;
   hasRemote: boolean;
   onPull?: () => void;
   onPush?: () => void;
   syncing: boolean;
   upstream?: string;
 }) {
-  if (!hasRemote) {
+  const published = Boolean(upstream);
+  if (!hasRemote || !hasPendingChanges) {
     return null;
   }
-  const published = Boolean(upstream);
-  const pushLabel = published
-    ? ahead > 0
-      ? `Push ${ahead}`
-      : "Push"
-    : "Publish branch";
+  if (published && ahead === 0 && behind === 0) {
+    return null;
+  }
+  const pushLabel = published ? "Push" : "Publish branch";
   const summary = !published
     ? "This branch is not on the remote yet"
     : behind > 0 && ahead > 0
       ? `${ahead} to push, ${behind} to pull`
       : ahead > 0
         ? `${ahead} commit${ahead === 1 ? "" : "s"} to push`
-        : behind > 0
-          ? `${behind} commit${behind === 1 ? "" : "s"} to pull`
-          : "Up to date";
+        : `${behind} commit${behind === 1 ? "" : "s"} to pull`;
   return (
     <div className="gyro-sidebar-scm-sync">
       <span className="gyro-scm-sync-summary" title={upstream ?? undefined}>
@@ -2598,7 +2745,8 @@ function ScmSyncRow({
             type="button"
           >
             <ArrowDown size={12} />
-            {`Pull ${behind}`}
+            Pull
+            <span className="gyro-scm-sync-count">{`${behind}↓`}</span>
           </button>
         ) : null}
         <button
@@ -2613,6 +2761,9 @@ function ScmSyncRow({
         >
           <ArrowUp size={12} />
           {syncing ? "Working…" : pushLabel}
+          {!syncing && published && ahead > 0 ? (
+            <span className="gyro-scm-sync-count">{`${ahead}↑`}</span>
+          ) : null}
         </button>
       </div>
     </div>
@@ -2626,6 +2777,49 @@ const SCM_GROUP_LIMIT = 60;
  * One VS Code-style change group — "Staged Changes" or "Changes" — with a
  * collapsible header, a count, group actions, and colour-coded rows.
  */
+function ScmSectionDivider({ label, target, onResize }: {
+  label: string;
+  target: "previous" | "next";
+  onResize: (height: number) => void;
+}) {
+  const drag = useRef<{ y: number; height: number; min: number; max: number }>();
+  const measure = (divider: HTMLDivElement) => {
+    const section = target === "previous" ? divider.previousElementSibling : divider.nextElementSibling;
+    const min = Math.max(52, section ? parseFloat(getComputedStyle(section).minHeight) || 0 : 0);
+    return { height: section?.getBoundingClientRect().height ?? 100, min,
+      max: Math.max(min, (divider.parentElement?.getBoundingClientRect().height ?? 400) * 0.6) };
+  };
+  return <div
+    className="gyro-scm-history-resizer gyro-scm-section-resizer"
+    role="separator" aria-label={label} aria-orientation="horizontal" tabIndex={0}
+    onPointerDown={(event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      drag.current = { y: event.clientY, ...measure(event.currentTarget) };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }}
+    onPointerMove={(event) => {
+      const start = drag.current;
+      if (!start) return;
+      const delta = (event.clientY - start.y) * (target === "previous" ? 1 : -1);
+      onResize(Math.max(start.min, Math.min(start.max, start.height + delta)));
+    }}
+    onPointerUp={(event) => {
+      drag.current = undefined;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    }}
+    onPointerCancel={() => { drag.current = undefined; }}
+    onLostPointerCapture={() => { drag.current = undefined; }}
+    onKeyDown={(event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const current = measure(event.currentTarget);
+      const delta = (event.key === "ArrowDown" ? 12 : -12) * (target === "previous" ? 1 : -1);
+      onResize(Math.max(current.min, Math.min(current.max, current.height + delta)));
+    }}
+  />;
+}
+
 function ScmChangeGroup({
   actions,
   activeDiff,
@@ -3083,6 +3277,33 @@ function WorkspaceSidebarContent({
     (file) => file.path === selectedExplorerPath,
   );
   const [sourceControlMessage, setSourceControlMessage] = useState("");
+  const [scmRepositoryHeight, setScmRepositoryHeight] = useState<number>();
+  const [scmRepositoryMinHeight, setScmRepositoryMinHeight] = useState(180);
+  const scmRepositoryContentRef = useRef<HTMLDivElement>(null);
+  const scmRepositoryMeasuredHeight = useRef(180);
+  useEffect(() => {
+    const content = scmRepositoryContentRef.current;
+    if (!content) return;
+    const update = () => {
+      const height = Math.ceil(content.getBoundingClientRect().height);
+      const delta = height - scmRepositoryMeasuredHeight.current;
+      scmRepositoryMeasuredHeight.current = height;
+      setScmRepositoryMinHeight(height);
+      // Keep the divider close when a conditional row (such as sync) vanishes.
+      // Preserve only the additional space the user deliberately dragged open.
+      if (delta !== 0) setScmRepositoryHeight((previous) =>
+        previous === undefined ? previous : Math.max(height, previous + delta),
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(content);
+    return () => observer.disconnect();
+  });
+  const [scmGithubHeight, setScmGithubHeight] = useState<number>();
+  const [scmStagedHeight, setScmStagedHeight] = useState<number>();
+  const [scmHistoryShare, setScmHistoryShare] = useState(60);
+  const scmHistoryDrag = useRef<{ y: number; share: number; height: number }>();
   const [selectedSourceControlPaths, setSelectedSourceControlPaths] = useState<
     Set<string>
   >(() => new Set());
@@ -3120,6 +3341,48 @@ function WorkspaceSidebarContent({
         .sort((first, second) => first.path.localeCompare(second.path)),
     [sourceControlFiles],
   );
+  // VS Code's source control panel keeps one primary button: it commits while
+  // there is something to commit, and once the tree is clean it turns into the
+  // press that moves that history — pull first when the branch is behind,
+  // otherwise push, or publish a branch the remote has never seen.
+  const hasSourceControlChanges =
+    stagedSourceControlFiles.length > 0 || unstagedSourceControlFiles.length > 0;
+  const sourceControlAhead = ide?.sourceControl.ahead ?? 0;
+  const sourceControlBehind = ide?.sourceControl.behind ?? 0;
+  const sourceControlPublished = Boolean(ide?.sourceControl.upstream);
+  const sourceControlSyncAction: "pull" | "push" | "publish" | undefined =
+    ide?.sourceControl.available !== true
+      ? undefined
+      : !sourceControlPublished
+        ? "publish"
+        : sourceControlBehind > 0
+          ? "pull"
+          : sourceControlAhead > 0
+            ? "push"
+            : undefined;
+  const showSourceControlSyncButton =
+    !hasSourceControlChanges && Boolean(sourceControlSyncAction);
+  // The button carries both counts, so a branch that is behind still says how
+  // much is waiting to go out once the pull lands.
+  const sourceControlSyncCounts = sourceControlPublished
+    ? scmSyncCountLabel(sourceControlAhead, sourceControlBehind)
+    : "";
+
+  const sourceControlHistory = ide?.sourceControl.history;
+  const scmHistoryGraph = useMemo(
+    () => scmGraphRows(sourceControlHistory ?? []),
+    [sourceControlHistory],
+  );
+  // The rail is only as wide as the branches actually in view, so a plain
+  // linear history does not pay for lanes it never uses.
+  const scmHistoryRailWidth = useMemo(
+    () =>
+      scmGraphLaneOffset(
+        scmHistoryGraph.reduce((widest, row) => Math.max(widest, row.lane), 0),
+      ) + SCM_GRAPH_LANE_INSET,
+    [scmHistoryGraph],
+  );
+
   const [debugAdapterCommand, setDebugAdapterCommand] = useState("lldb-dap");
   const [isAddingRunCommand, setIsAddingRunCommand] = useState(false);
   const [runCommandDraft, setRunCommandDraft] = useState("");
@@ -4003,6 +4266,8 @@ function WorkspaceSidebarContent({
               ) : undefined}
             >
               <div className="gyro-scm-panel">
+                <div className="gyro-scm-repository-section" style={{ height: scmRepositoryHeight, minHeight: scmRepositoryMinHeight }}>
+                <div ref={scmRepositoryContentRef} style={{ display: "flow-root" }}>
                 <div className="gyro-sidebar-scm-group-label">
                   <span className="gyro-scm-label-text">Repository</span>
                 </div>
@@ -4083,30 +4348,66 @@ function WorkspaceSidebarContent({
                     }}
                   />
                   <div className="gyro-sidebar-commit-actions">
-                    <button
-                      disabled={
-                        !sourceControlMessage.trim() ||
-                        (stagedSourceControlFiles.length === 0 &&
-                          unstagedSourceControlFiles.length === 0)
-                      }
-                      type="submit"
-                      title={
-                        stagedSourceControlFiles.length > 0
-                          ? "Commit staged changes"
-                          : "Stage all changes and commit"
-                      }
-                    >
-                      <Check size={13} />
-                      {stagedSourceControlFiles.length > 0
-                        ? "Commit"
-                        : "Commit all"}
-                    </button>
+                    {showSourceControlSyncButton ? (
+                      <button
+                        disabled={isSourceControlSyncing}
+                        onClick={
+                          sourceControlSyncAction === "pull"
+                            ? onPullSourceControl
+                            : onPushSourceControl
+                        }
+                        type="button"
+                        title={
+                          sourceControlSyncAction === "pull"
+                            ? `Pull ${sourceControlBehind} from ${ide?.sourceControl.upstream}`
+                            : sourceControlSyncAction === "push"
+                              ? `Push to ${ide?.sourceControl.upstream}`
+                              : "Push this branch to the remote and track it"
+                        }
+                      >
+                        {sourceControlSyncAction === "pull" ? (
+                          <ArrowDown size={13} />
+                        ) : (
+                          <ArrowUp size={13} />
+                        )}
+                        {isSourceControlSyncing
+                          ? "Working…"
+                          : sourceControlSyncAction === "pull"
+                            ? "Pull"
+                            : sourceControlSyncAction === "push"
+                              ? "Push"
+                              : "Publish branch"}
+                        {!isSourceControlSyncing && sourceControlSyncCounts ? (
+                          <span className="gyro-scm-sync-count">
+                            {sourceControlSyncCounts}
+                          </span>
+                        ) : null}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={
+                          !sourceControlMessage.trim() || !hasSourceControlChanges
+                        }
+                        type="submit"
+                        title={
+                          stagedSourceControlFiles.length > 0
+                            ? "Commit staged changes"
+                            : "Stage all changes and commit"
+                        }
+                      >
+                        <Check size={13} />
+                        {stagedSourceControlFiles.length > 0
+                          ? "Commit"
+                          : "Commit all"}
+                      </button>
+                    )}
                   </div>
                 </form>
                 <ScmSyncRow
-                  ahead={ide?.sourceControl.ahead ?? 0}
-                  behind={ide?.sourceControl.behind ?? 0}
+                  ahead={sourceControlAhead}
+                  behind={sourceControlBehind}
                   hasRemote={ide?.sourceControl.available === true}
+                  hasPendingChanges={hasSourceControlChanges}
                   onPull={onPullSourceControl}
                   onPush={onPushSourceControl}
                   syncing={isSourceControlSyncing}
@@ -4123,8 +4424,15 @@ function WorkspaceSidebarContent({
                     Git is not ready for this workspace.
                   </div>
                 ) : null}
-                <div className="gyro-scm-change-list">
+                </div>
+                </div>
+                <ScmSectionDivider label="Resize repository section" target="previous" onResize={setScmRepositoryHeight} />
+                <div
+                  className="gyro-scm-change-list"
+                  style={{ flex: `${100 - scmHistoryShare} 1 0px` }}
+                >
                   {stagedSourceControlFiles.length > 0 ? (
+                    <div className="gyro-scm-staged-section" style={{ height: collapsedScmGroups.has("staged") ? undefined : scmStagedHeight }}>
                     <ScmChangeGroup
                       activeDiff={
                         ide?.tabs.find((tab) => tab.path === ide.activePath)
@@ -4159,6 +4467,10 @@ function WorkspaceSidebarContent({
                       selectedPaths={selectedSourceControlPaths}
                       title="Staged Changes"
                     />
+                    </div>
+                  ) : null}
+                  {stagedSourceControlFiles.length > 0 && !collapsedScmGroups.has("staged") ? (
+                    <ScmSectionDivider label="Resize staged changes" target="previous" onResize={setScmStagedHeight} />
                   ) : null}
                   <ScmChangeGroup
                     activeDiff={
@@ -4259,7 +4571,60 @@ function WorkspaceSidebarContent({
                     title="Changes"
                   />
                 </div>
-                <details className="gyro-scm-history" open>
+                <div
+                  className="gyro-scm-history-resizer"
+                  role="separator"
+                  aria-label="Resize changes and history"
+                  aria-orientation="horizontal"
+                  aria-valuemin={15}
+                  aria-valuemax={85}
+                  aria-valuenow={Math.round(scmHistoryShare)}
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+                    event.preventDefault();
+                    setScmHistoryShare((share) =>
+                      event.key === "Home" ? 15 : event.key === "End" ? 85 :
+                        Math.max(15, Math.min(85, share + (event.key === "ArrowUp" ? 5 : -5))),
+                    );
+                  }}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    const divider = event.currentTarget;
+                    const changes = divider.previousElementSibling;
+                    const history = divider.nextElementSibling;
+                    if (!changes || !history) return;
+                    event.preventDefault();
+                    const height = changes.getBoundingClientRect().height + history.getBoundingClientRect().height;
+                    if (height <= 0) return;
+                    scmHistoryDrag.current = {
+                      y: event.clientY,
+                      share: history.getBoundingClientRect().height / height * 100,
+                      height,
+                    };
+                    divider.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = scmHistoryDrag.current;
+                    if (!drag) return;
+                    setScmHistoryShare(Math.max(15, Math.min(85,
+                      drag.share - (event.clientY - drag.y) / drag.height * 100,
+                    )));
+                  }}
+                  onPointerUp={(event) => {
+                    scmHistoryDrag.current = undefined;
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
+                  }}
+                  onPointerCancel={() => { scmHistoryDrag.current = undefined; }}
+                  onLostPointerCapture={() => { scmHistoryDrag.current = undefined; }}
+                />
+                <details
+                  className="gyro-scm-history"
+                  style={{ flexGrow: scmHistoryShare, flexBasis: 0 }}
+                  open
+                >
                   <summary>
                     <ChevronRight size={12} aria-hidden="true" />
                     <span>History</span>
@@ -4275,37 +4640,96 @@ function WorkspaceSidebarContent({
                     ) : !ide?.sourceControl.history?.length ? (
                       <p className="gyro-sidebar-mini-copy">No commits yet.</p>
                     ) : (
-                      ide.sourceControl.history.map((commit) => (
-                        <div
-                          className="gyro-scm-history-entry"
-                          key={commit.hash}
-                          title={`${commit.subject}\n${commit.author} · ${commit.relativeDate}\n${commit.hash}${commit.refs ? `\n${commit.refs}` : ""}`}
-                        >
-                          <span
-                            className="gyro-scm-history-dot"
-                            aria-hidden="true"
-                          />
-                          <span className="gyro-scm-history-subject">
-                            {commit.subject}
-                          </span>
-                          {commit.refs ? (
+                      ide.sourceControl.history.map((commit, index) => {
+                        const row = scmHistoryGraph[index];
+                        const refs = commit.refs
+                          ? scmCommitRefs(commit.refs)
+                          : [];
+                        const isHead = refs.some((ref) => ref.kind === "head");
+                        return (
+                          <div
+                            className={[
+                              "gyro-scm-history-entry",
+                              isHead ? "is-head" : "",
+                              row?.isMerge ? "is-merge" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            key={commit.hash}
+                            style={{
+                              "--gyro-scm-graph-width": `${scmHistoryRailWidth}px`,
+                            } as CSSProperties}
+                            title={`${commit.subject}\n${commit.author} · ${commit.relativeDate}\n${commit.shortHash}${commit.refs ? `\n${commit.refs}` : ""}`}
+                          >
                             <span
-                              className="gyro-scm-history-refs"
-                              title={commit.refs}
+                              aria-hidden="true"
+                              className="gyro-scm-graph-rail"
                             >
-                              {commit.refs
-                                .replace(/HEAD -> /g, "")
-                                .replace(/tag: /g, "")}
+                              {(row?.lanes ?? []).map((lane) => (
+                                <span
+                                  className={[
+                                    "gyro-scm-graph-line",
+                                    lane === row?.lane && row?.startsHere
+                                      ? "is-start"
+                                      : "",
+                                    lane === row?.lane && row?.endsHere
+                                      ? "is-end"
+                                      : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  key={lane}
+                                  style={{
+                                    background: scmGraphLaneColor(lane),
+                                    left: `${scmGraphLaneOffset(lane)}px`,
+                                  }}
+                                />
+                              ))}
+                              <span
+                                className="gyro-scm-graph-dot"
+                                style={{
+                                  color: scmGraphLaneColor(row?.lane ?? 0),
+                                  left: `${scmGraphLaneOffset(row?.lane ?? 0)}px`,
+                                }}
+                              />
                             </span>
-                          ) : (
-                            <small>{commit.shortHash}</small>
-                          )}
-                        </div>
-                      ))
+                            <span className="gyro-scm-history-subject">
+                              {commit.subject}
+                            </span>
+                            {refs.length ? (
+                              <span className="gyro-scm-history-refs">
+                                {/* The sidebar is too narrow for two refs to
+                                    stay legible, and scmCommitRefs already
+                                    sorts head before tag before branch, so the
+                                    row shows the most meaningful one. The rest
+                                    stay in the row's title tooltip. */}
+                                {refs.slice(0, 1).map((ref) => (
+                                  <span
+                                    className={`gyro-scm-history-ref is-${ref.kind}`}
+                                    key={`${ref.kind}:${ref.label}`}
+                                    title={ref.label}
+                                  >
+                                    {ref.kind === "tag" ? (
+                                      <Tag size={9} aria-hidden="true" />
+                                    ) : (
+                                      <GitBranch size={9} aria-hidden="true" />
+                                    )}
+                                    {ref.label}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : null}
+                            <small className="gyro-scm-history-author">
+                              {commit.author}
+                            </small>
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </details>
-                <div className="gyro-scm-github-section">
+                <ScmSectionDivider label="Resize GitHub section" target="next" onResize={setScmGithubHeight} />
+                <div className="gyro-scm-github-section" style={scmGithubHeight === undefined ? undefined : { height: scmGithubHeight, maxHeight: "none" }}>
                   <GithubSidebarPanel
                     github={ide?.github}
                     branch={ide?.sourceControl.branch}
@@ -10251,7 +10675,12 @@ function ChatEnvironmentPopover({
           <FileDiff size={14} />
           <span>Changes</span>
           <strong className={changedFiles ? "is-changed" : undefined}>
-            {changesDetail}
+            {sourceControl && changedFiles ? (
+              <>
+                <span className="is-added">+{sourceControl.additions}</span>{" "}
+                <span className="is-removed">−{sourceControl.deletions}</span>
+              </>
+            ) : changesDetail}
           </strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
@@ -21241,11 +21670,6 @@ function Composer({
       })
       .map((provider) => {
         const isConnected = provider.authStatus === "connected";
-        const resetSummary = isConnected
-          ? providerResetSummary(
-              providerUsageByProvider?.[provider.id]?.windows ?? [],
-            )
-          : "";
         // Clean-machine path: disconnected providers start their own login
         // instead of appearing as dead "Unavailable" rows. Always pass
         // providerId so each row shows that provider's brand mark, not a
@@ -21260,7 +21684,6 @@ function Composer({
           icon: Sparkles,
           kind: "provider" as const,
           label: provider.displayName,
-          detail: resetSummary || undefined,
           providerId: provider.id,
           showChevron: isConnected,
           trailingLabel: isConnected ? undefined : "Connect",
@@ -21386,16 +21809,10 @@ function Composer({
   });
   const contextItems: ComposerPopoverItem[] = [
     {
-      action: "attach-browser-snapshot",
-      icon: Globe2,
-      label: "Browser",
-      sectionLabel: "Context",
-      tooltip: "Capture page text and a screenshot as read-only context",
-    },
-    {
       action: "attach-editor-snapshot",
       icon: FileCode2,
       label: "Editor",
+      sectionLabel: "Context",
       tooltip: "Capture saved or unsaved editor text",
     },
     {
@@ -22776,8 +23193,7 @@ const ChatEvent = memo(function ChatEvent({
           ) : null}
         </div>
         <div className="gyro-provider-status-actions">
-          {providerStatus.status === "failed" ||
-          providerStatus.status === "cancelled" ? (
+          {providerStatus.status === "failed" ? (
             <>
               <button
                 onClick={() => onProviderStatusAction?.("retry-send", event)}
@@ -23751,8 +24167,7 @@ function ChatTurn({
   // the run model deliberately does not carry.
   const canRetry =
     runModel.phase.name === "interrupted" ||
-    providerStatus?.status === "failed" ||
-    providerStatus?.status === "cancelled";
+    providerStatus?.status === "failed";
   const canReconnect = Boolean(
     providerStatus &&
     providerStatus.status !== "cancelled" &&

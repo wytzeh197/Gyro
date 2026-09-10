@@ -22,14 +22,14 @@
   --gyro-user-main: #0874df;
   --gyro-user-secondary: #8b6fcb;
   --gyro-app: #181818;
-  --gyro-sidebar: #252525;
-  --gyro-sidebar-soft: #2d2d2d;
-  --gyro-pane: #212121;
-  --gyro-surface: #262626;
-  --gyro-surface-raised: #2c2c2c;
-  --gyro-surface-soft: #323232;
-  --gyro-border: #363636;
-  --gyro-border-soft: #2d2d2d;
+  --gyro-sidebar: #202020;
+  --gyro-sidebar-soft: #272727;
+  --gyro-pane: #1e1e1e;
+  --gyro-surface: #242424;
+  --gyro-surface-raised: #2a2a2a;
+  --gyro-surface-soft: #303030;
+  --gyro-border: #343434;
+  --gyro-border-soft: #2a2a2a;
   --gyro-border-strong: #686868;
   --gyro-text: #ededed;
   --gyro-muted: #b5b5b5;
@@ -53,6 +53,7 @@
   --gyro-update-blue: #356fd6;
   --gyro-update-blue-hover: #2f63be;
   --gyro-warn: #e8b45f;
+  --gyro-permission-full: #ff8a3d;
   --gyro-danger: #ef7d7d;
   --gyro-success: #70d39f;
   --gyro-sidebar-text: #d9d9d9;
@@ -86,7 +87,7 @@
   --gyro-sidebar-mode-active-shadow: rgba(0, 0, 0, 0.12);
   --gyro-shadow: rgba(0, 0, 0, 0.34);
   --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
-  --gyro-focus-ring: var(--gyro-text);
+  --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
     in srgb,
@@ -125,11 +126,11 @@
   --gyro-scrim: rgba(0, 0, 0, 0.58);
   /* Corner ladder. Every literal radius in this sheet snaps to one of these
      steps, so 5/6/7 and 14/15/18 no longer read as three different corners. */
-  --gyro-premium-radius-xs: 8px;
+  --gyro-premium-radius-xs: 4px;
   --gyro-premium-radius-sm: 6px;
-  --gyro-premium-radius-md: 6px;
+  --gyro-premium-radius-md: 8px;
   --gyro-premium-radius-lg: 10px;
-  --gyro-premium-radius-xl: 10px;
+  --gyro-premium-radius-xl: 12px;
   --gyro-premium-radius-composer: 16px;
   --gyro-seam-radius: 12px;
   --gyro-radius-xs: var(--gyro-premium-radius-xs);
@@ -867,6 +868,7 @@
     #201033 32%
   );
   --gyro-warn: #9a5b0e;
+  --gyro-permission-full: #c2510a;
   --gyro-danger: #b4232e;
   --gyro-success: #197a4c;
   --gyro-sidebar-text: #343a42;
@@ -890,7 +892,7 @@
   --gyro-segment-active-text: #191b1f;
   --gyro-shadow: rgba(32, 40, 52, 0.12);
   --gyro-heavy-shadow: rgba(32, 40, 52, 0.2);
-  --gyro-focus-ring: var(--gyro-text);
+  --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
   --gyro-secondary-soft: color-mix(
     in srgb,
@@ -8717,12 +8719,19 @@ textarea:focus-visible {
   grid-template-columns: 26px minmax(0, 1fr) auto;
   min-height: 58px;
   padding: 0 14px 0 16px;
+  transition: box-shadow var(--gyro-premium-motion-fast) ease;
+}
+
+/* Keep keyboard focus visible on the search surface instead of drawing a
+   browser-style rectangle around the text inside it. */
+.gyro-command-palette.is-global-search > header:has(input:focus-visible) {
+  box-shadow: inset 0 -2px 0 var(--gyro-focus-ring);
 }
 
 .gyro-global-search-glyph {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 0.5px solid var(--gyro-premium-hairline-soft);
+  background: transparent;
+  border: 0.5px solid transparent;
   border-radius: 8px;
   color: var(--gyro-muted);
   display: inline-flex;
@@ -8732,8 +8741,21 @@ textarea:focus-visible {
 }
 
 .gyro-command-palette.is-global-search > header input {
-  font-size: 16px;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--gyro-text);
+  font-family: inherit;
+  font-size: 15px;
   letter-spacing: -0.01em;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.gyro-command-palette.is-global-search > header input:focus-visible {
+  outline: none;
 }
 
 .gyro-command-palette.is-global-search > header input::placeholder {
@@ -8779,10 +8801,10 @@ textarea:focus-visible {
   background: color-mix(in srgb, var(--gyro-pane) 92%, transparent);
   color: var(--gyro-faint);
   display: flex;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 680;
   gap: 7px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   padding: 9px 10px 6px;
   position: sticky;
   text-transform: uppercase;
@@ -8805,7 +8827,7 @@ textarea:focus-visible {
 .gyro-command-palette.is-global-search .gyro-command-list button {
   align-items: center;
   border: 0.5px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   display: grid;
   gap: 11px;
@@ -8830,7 +8852,7 @@ textarea:focus-visible {
 
 .gyro-command-palette.is-global-search .gyro-command-list button.is-active {
   background: var(--gyro-accent-soft);
-  border-color: color-mix(in srgb, var(--gyro-accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
   transform: none;
 }
 
@@ -8842,8 +8864,8 @@ textarea:focus-visible {
 
 .gyro-global-search-icon {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border: 0.5px solid var(--gyro-premium-hairline-soft);
+  background: transparent;
+  border: 0.5px solid transparent;
   border-radius: 8px;
   color: var(--gyro-muted);
   display: inline-flex;
@@ -8860,7 +8882,7 @@ textarea:focus-visible {
 
 .gyro-global-search-copy {
   display: grid;
-  gap: 1px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -8879,7 +8901,7 @@ textarea:focus-visible {
 
 .gyro-global-search-copy small {
   color: var(--gyro-faint);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 450;
 }
 
@@ -8937,7 +8959,7 @@ textarea:focus-visible {
   border-top: 0.5px solid var(--gyro-premium-hairline-soft);
   color: var(--gyro-faint);
   display: flex;
-  font-size: 10px;
+  font-size: 11px;
   justify-content: space-between;
   min-height: 42px;
   padding: 0 14px 0 18px;
@@ -25965,7 +25987,7 @@ button.gyro-account-menu-row:hover,
   border-radius: 16px 16px 8px 8px;
   box-sizing: border-box;
   color: var(--gyro-text);
-  margin-bottom: 8px;
+  margin-bottom: 0;
   max-height: 132px;
   max-width: var(--gyro-composer-width);
   overflow: auto;
@@ -34610,8 +34632,12 @@ button.gyro-account-menu-row:hover,
   white-space: nowrap;
 }
 
-.gyro-chat-environment-popover-rows > button > strong.is-changed {
-  color: var(--gyro-positive);
+.gyro-chat-environment-popover-rows > button > strong > .is-added {
+  color: var(--gyro-success);
+}
+
+.gyro-chat-environment-popover-rows > button > strong > .is-removed {
+  color: var(--gyro-danger);
 }
 
 .gyro-chat-environment-popover-rows > button > svg:last-child {
@@ -34842,7 +34868,7 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-message-queue-wrap {
   align-self: stretch;
   box-sizing: border-box;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   margin-inline: auto;
   max-width: min(100%, var(--gyro-composer-width));
   min-width: 0;
@@ -37128,6 +37154,7 @@ textarea:focus-visible,
   font-size: 11px;
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-sync {
+  border-bottom: 0;
   min-height: 25px;
   padding-bottom: 3px;
 }
@@ -38045,19 +38072,94 @@ textarea:focus-visible,
 }
 .gyro-scm-panel .gyro-scm-change-list {
   flex: 1 1 160px;
-  min-height: 72px;
+  min-height: 52px;
   max-height: none;
-  border-top: 1px solid var(--gyro-border-soft);
+  border-top: 0;
+}
+.gyro-scm-panel .gyro-sidebar-scm-group-label.is-changes {
+  border-top: 0;
+  margin-top: 0;
 }
 .gyro-scm-panel:has(.gyro-scm-history[open]) .gyro-scm-change-list {
   max-height: none;
 }
 .gyro-scm-panel .gyro-scm-history {
   margin-top: 0;
+  border-top: 0;
+}
+.gyro-scm-history-resizer {
+  flex: 0 0 5px;
+  position: relative;
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+.gyro-scm-repository-section,
+.gyro-scm-staged-section {
+  overflow: auto;
+  flex-shrink: 0;
+}
+.gyro-scm-change-list > .gyro-scm-section-resizer {
+  height: 5px;
+}
+.gyro-scm-repository-section > .gyro-sidebar-scm-group-label {
+  padding-inline: 8px;
+}
+.gyro-scm-history-resizer:hover,
+.gyro-scm-history-resizer:focus-visible {
+  outline: none;
+}
+.gyro-scm-history-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 2px 0;
+  background: transparent;
+}
+.gyro-scm-history-resizer:hover::after,
+.gyro-scm-history-resizer:focus-visible::after {
+  background: color-mix(in srgb, var(--gyro-accent) 45%, var(--gyro-border-soft));
+}
+.gyro-scm-panel:has(.gyro-scm-history:not([open])) .gyro-scm-history-resizer:not(.gyro-scm-section-resizer) {
+  display: none;
+}
+.gyro-scm-panel .gyro-scm-history:not([open]) {
+  flex: 0 0 auto !important;
+  order: 10;
+  margin-top: auto;
+}
+
+/* Closed sections form a footer stack without losing expanded drag sizes. */
+.gyro-scm-panel .gyro-scm-github-section:has(.is-github button[aria-expanded="false"]) {
+  height: auto !important;
+  max-height: none;
+  flex: 0 0 auto;
+  order: 11;
+  margin-top: auto;
+  overflow: visible;
+}
+.gyro-scm-panel:has(.gyro-scm-history:not([open]))
+  .gyro-scm-github-section:has(.is-github button[aria-expanded="false"]) {
+  margin-top: 0;
+}
+.gyro-scm-section-resizer:has(+ .gyro-scm-github-section .is-github button[aria-expanded="false"]) {
+  display: none;
+}
+.gyro-scm-section-resizer:has(+ .gyro-scm-change-list:not(:has(button[aria-expanded="true"]))) {
+  display: none;
+}
+.gyro-scm-panel .gyro-scm-change-list:not(:has(button[aria-expanded="true"])) {
+  flex: 0 0 auto !important;
+  min-height: 0;
+  order: 0;
+  margin-top: 0;
+}
+.gyro-scm-change-list:not(:has(button[aria-expanded="true"])) + .gyro-scm-history-resizer {
+  display: none;
 }
 .gyro-scm-panel .gyro-scm-history[open] {
   flex: 1.4 1 240px;
-  min-height: 130px;
+  min-height: 56px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -38098,38 +38200,19 @@ textarea:focus-visible,
   padding-block: 3px;
 }
 .gyro-scm-panel .gyro-scm-history-entry {
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns:
+    var(--gyro-scm-graph-width, 22px)
+    minmax(88px, 1fr)
+    auto auto;
   min-height: 25px;
-  gap: 6px;
-  padding-inline: 10px 8px;
+  column-gap: 6px;
+  padding-inline: 0 8px;
 }
 .gyro-scm-panel .gyro-scm-history-entry:hover {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
 }
-.gyro-scm-panel .gyro-scm-history-dot {
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid var(--gyro-accent);
-  border-radius: 50%;
-  justify-self: center;
-}
-.gyro-scm-history-entry:first-child .gyro-scm-history-dot {
-  background: var(--gyro-accent);
-}
-.gyro-scm-history-entry:first-child .gyro-scm-history-subject {
-  font-weight: 600;
-}
 .gyro-scm-panel .gyro-scm-history-refs {
-  max-width: 130px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 10px;
-  color: var(--gyro-accent);
-  background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
-}
-.gyro-scm-history-entry > small {
-  color: var(--gyro-muted);
-  font-size: 10px;
+  max-width: 112px;
 }
 .gyro-scm-github-section {
   max-height: 32%;
@@ -38282,9 +38365,9 @@ textarea:focus-visible,
 
 .gyro-chat-surface.is-tiled .gyro-composer-context-tooltip {
   box-sizing: border-box;
-  left: 0;
+  left: auto;
   right: 0;
-  width: auto;
+  width: 340px;
   min-width: 0;
   max-width: 100%;
 }
@@ -39046,4 +39129,240 @@ textarea:focus-visible,
   font-size: 11px;
   font-weight: 400;
   white-space: nowrap;
+}
+
+/* Full access reads orange in the composer, distinct from amber warnings. */
+.gyro-composer-chip.is-warning,
+.gyro-chat-start .gyro-composer-chip.is-warning,
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning,
+:root[data-theme="light"] .gyro-chat-start .gyro-composer-chip.is-warning,
+:root[data-theme="light"]
+  .gyro-chat-composer-dock
+  .gyro-composer-chip.is-warning,
+:root[data-theme="dark"] .gyro-chat-start .gyro-composer-chip.is-warning,
+:root[data-theme="dark"]
+  .gyro-chat-composer-dock
+  .gyro-composer-chip.is-warning {
+  color: var(--gyro-permission-full);
+}
+
+.gyro-composer-chip.is-warning:hover,
+.gyro-chat-start .gyro-composer-chip.is-warning:hover,
+.gyro-chat-composer-dock .gyro-composer-chip.is-warning:hover,
+:root[data-theme="light"] .gyro-chat-start .gyro-composer-chip.is-warning:hover,
+:root[data-theme="light"]
+  .gyro-chat-composer-dock
+  .gyro-composer-chip.is-warning:hover,
+:root[data-theme="dark"] .gyro-chat-start .gyro-composer-chip.is-warning:hover,
+:root[data-theme="dark"]
+  .gyro-chat-composer-dock
+  .gyro-composer-chip.is-warning:hover {
+  background: color-mix(in srgb, var(--gyro-permission-full) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-permission-full) 24%, transparent);
+  color: var(--gyro-permission-full);
+}
+
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct strong,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct svg,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct:hover,
+.gyro-approval-picker .gyro-composer-menu-item.is-permission-direct.is-active {
+  color: var(--gyro-permission-full);
+}
+
+/* VS Code's sync badge: the drift counts ride inside the push and pull
+   buttons, so the press and the amount it moves are one control. */
+.gyro-scm-sync-count {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+/* History as a commit graph: a coloured rail on the left carrying one lane per
+   branch in view, the subject beside it, and the refs and author trailing. The
+   rail width is set per row from the lanes actually in use. */
+.gyro-scm-history-list {
+  padding-bottom: 4px;
+}
+
+.gyro-scm-history-entry {
+  align-items: center;
+  column-gap: 6px;
+  display: grid;
+  grid-template-columns:
+    var(--gyro-scm-graph-width, 22px)
+    minmax(88px, 1fr)
+    auto auto;
+  min-height: 24px;
+  padding: 0 8px 0 0;
+  position: relative;
+}
+
+.gyro-scm-history-entry:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-scm-graph-rail {
+  align-self: stretch;
+  display: block;
+  position: relative;
+}
+
+.gyro-scm-graph-line {
+  border-radius: 1px;
+  bottom: 0;
+  opacity: 0.55;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  width: 1.5px;
+}
+
+.gyro-scm-graph-line.is-start {
+  top: 50%;
+}
+
+.gyro-scm-graph-line.is-end {
+  bottom: 50%;
+}
+
+.gyro-scm-graph-dot {
+  background: currentColor;
+  border-radius: 50%;
+  height: 7px;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 7px;
+}
+
+/* A merge is the one place the rail actually forks, so it reads as a ring
+   rather than another solid dot. */
+.gyro-scm-history-entry.is-merge .gyro-scm-graph-dot {
+  background: var(--gyro-sidebar);
+  box-shadow: inset 0 0 0 2px currentColor;
+  height: 9px;
+  width: 9px;
+}
+
+.gyro-scm-history-entry.is-head .gyro-scm-graph-dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.gyro-scm-history-subject {
+  color: var(--gyro-text);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-scm-history-entry.is-head .gyro-scm-history-subject {
+  font-weight: 620;
+}
+
+.gyro-scm-history-refs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  max-width: 112px;
+  overflow: hidden;
+}
+
+.gyro-scm-history-ref {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  border-radius: 999px;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: 10px;
+  gap: 2px;
+  line-height: 1;
+  max-width: 112px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-scm-history-ref > svg {
+  flex: 0 0 auto;
+}
+
+.gyro-scm-history-ref.is-head {
+  background: color-mix(in srgb, var(--gyro-accent) 20%, transparent);
+  color: var(--gyro-accent);
+}
+
+.gyro-scm-history-ref.is-tag {
+  background: color-mix(in srgb, var(--gyro-warn) 20%, transparent);
+  color: var(--gyro-warn);
+}
+
+.gyro-scm-history-author {
+  color: var(--gyro-faint, var(--gyro-muted));
+  flex: 0 0 auto;
+  font-size: 10px;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* History and GitHub are peer sections, so their headers share one box: same
+   inset, same right edge, same row height. */
+.gyro-scm-panel .gyro-scm-history > summary,
+.gyro-sidebar-section
+  .gyro-scm-github-section
+  .gyro-sidebar-scm-group-label.is-github {
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 8px;
+}
+
+.gyro-sidebar-section
+  .gyro-scm-github-section
+  .gyro-sidebar-scm-group-label.is-github {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
+  padding-left: 8px;
+}
+
+/* The chevron is a bare glyph in History and a button in GitHub; stripping the
+   button's box is what makes the two labels start on the same pixel. */
+.gyro-sidebar-section
+  .gyro-scm-github-section
+  .gyro-sidebar-scm-group-label.is-github
+  > .gyro-sidebar-scm-group-toggle {
+  height: 18px;
+  justify-content: flex-start;
+  width: 12px;
+}
+
+/* GitHub's trailing refresh control is a 20px button against History's bare
+   count glyph; trimming it to 18px is what makes both header rows 26px tall. */
+.gyro-sidebar-section
+  .gyro-scm-github-section
+  .gyro-sidebar-scm-group-label.is-github
+  > button {
+  height: 18px;
+  min-height: 0;
+}
+
+/* The trailing refresh icon is a 20px button; pulling it back by its own
+   padding lands its glyph on the same right edge as History's count. */
+.gyro-sidebar-section
+  .gyro-scm-github-section
+  .gyro-sidebar-scm-group-label.is-github
+  > button:last-child {
+  margin-right: -4px;
 }

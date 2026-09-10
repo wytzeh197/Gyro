@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   Book,
   ChevronDown,
@@ -109,32 +109,12 @@ export function ChatRun({
   renderSay,
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
-  // A fully answered turn — work on the rail plus a final answer — is history:
-  // it starts collapsed, and folds itself away the moment it settles, so the
-  // answer is what stays on screen. Incomplete settles (a mid-task stop, a
-  // failure) stay open, because collapsing those leaves an empty "Worked · …"
-  // void with no answer under it.
-  const isAnswered =
-    model.phase.name === "done" &&
-    Boolean(model.response) &&
-    model.steps.length > 0;
-  const [isCollapsed, setIsCollapsed] = useState(() => !isLive && isAnswered);
-  // One automatic fold per run: after that the user's own toggle wins, so
-  // expanding a just-finished trail does not snap shut under them.
-  const hasAutoCollapsed = useRef(!isLive && isAnswered);
+  // Saved narration is part of the conversation. Keep it visible on reopen
+  // and completion; only an explicit reader action collapses the timeline.
+  const [isCollapsed, setIsCollapsed] = useState(false);
   useEffect(() => {
-    // Re-open when a turn goes live again (retry / reconnect), and arm the next
-    // fold.
-    if (isLive) {
-      hasAutoCollapsed.current = false;
-      setIsCollapsed(false);
-      return;
-    }
-    if (isAnswered && !hasAutoCollapsed.current) {
-      hasAutoCollapsed.current = true;
-      setIsCollapsed(true);
-    }
-  }, [isAnswered, isLive]);
+    if (isLive) setIsCollapsed(false);
+  }, [isLive]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
   const displaySteps = groupRunSteps(model.steps);
@@ -182,7 +162,8 @@ export function ChatRun({
       ? model.phase.name === "retrying"
         ? "is-retrying"
         : "is-live"
-      : model.phase.name === "failed" || model.phase.name === "interrupted"
+      : (model.phase.name === "failed" || model.phase.name === "interrupted") &&
+          !isCancelledRunPhase(model.phase)
         ? "is-problem"
         : "is-settled",
     isCancelledRunPhase(model.phase) ? "is-cancelled" : "",
@@ -558,22 +539,15 @@ function RunProblem({
   const isInterrupted = phase.name === "interrupted";
   const isCancelled =
     phase.name === "failed" && phase.recoveryKind === "cancelled";
+  if (isCancelled) return null; // The neutral Stopped header is sufficient.
   const detail = isInterrupted
     ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
-    : isCancelled
-      ? (phase.recoveryMessage ??
-        "You stopped this response. Continue to pick it back up.")
-      : (phase.recoveryMessage ?? undefined);
-  const title = isInterrupted
-    ? "Previous send was interrupted"
-    : isCancelled
-      ? phase.message?.trim() || "Stopped"
-      : phase.message;
+    : phase.recoveryMessage;
+  const title = isInterrupted ? "Previous send was interrupted" : phase.message;
   return (
     <div
       className={[
         "gyro-run-problem",
-        isCancelled ? "is-cancelled" : "",
         isInterrupted ? "is-interrupted" : "",
       ]
         .filter(Boolean)

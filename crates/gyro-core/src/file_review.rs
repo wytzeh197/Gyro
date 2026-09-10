@@ -55,7 +55,7 @@ impl SummarySource {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    pub fn from_storage_value(value: &str) -> Self {
         match value {
             "provider" => Self::Provider,
             _ => Self::Fallback,
@@ -349,7 +349,7 @@ pub fn cached_summaries(
                 path: path.clone(),
                 content_hash: hash.clone(),
                 summary,
-                source: SummarySource::from_str(&source),
+                source: SummarySource::from_storage_value(&source),
             });
         }
     }

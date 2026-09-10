@@ -11,6 +11,14 @@ pub enum ProviderExecutionKind {
     ReadinessOnly,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderSupportTier {
+    Supported,
+    Experimental,
+    ReadinessOnly,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderHealthKind {
     CodexCli,
@@ -33,6 +41,7 @@ pub struct ProviderDescriptor {
     pub supports_images: bool,
     pub supports_resume: bool,
     pub supports_usage: bool,
+    pub support_tier: ProviderSupportTier,
 }
 
 const PROVIDERS: &[ProviderDescriptor] = &[
@@ -46,6 +55,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: true,
         supports_resume: true,
         supports_usage: true,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "anthropic",
@@ -58,6 +68,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_resume: true,
         // Streamed plan windows stored for display (no live quota command).
         supports_usage: true,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "kimi",
@@ -70,6 +81,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_resume: true,
         // Usage windows scraped live from `kimi acp` `/usage`.
         supports_usage: true,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "xai",
@@ -82,6 +94,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_resume: true,
         // Weekly credit window from Grok ACP `_x.ai/billing`.
         supports_usage: true,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "gemini",
@@ -93,6 +106,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: true,
         supports_resume: true,
         supports_usage: false,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "ollama",
@@ -104,6 +118,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: false,
         supports_resume: true,
         supports_usage: false,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "cursor",
@@ -115,6 +130,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: false,
         supports_resume: true,
         supports_usage: false,
+        support_tier: ProviderSupportTier::Experimental,
     },
     ProviderDescriptor {
         id: "opencode",
@@ -126,6 +142,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: false,
         supports_resume: true,
         supports_usage: false,
+        support_tier: ProviderSupportTier::Experimental,
     },
 ];
 

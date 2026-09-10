@@ -254,13 +254,7 @@ fn apply_one_cli_update(offer: &CliUpdateOffer) -> CliUpdateApplyResult {
         .first()
         .cloned()
         .unwrap_or_else(|| offer.program.clone());
-    let args = offer
-        .update_command
-        .get(1..)
-        .unwrap_or(&[])
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let args = offer.update_command.get(1..).unwrap_or(&[]).to_vec();
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     match run_cli_capture(&program, &arg_refs, CLI_UPDATE_TIMEOUT) {
         Ok(output) => {
@@ -528,7 +522,7 @@ fn run_cli(
     request.inactivity_timeout = Some(timeout);
     request.max_stdout_chars = CLI_CHECK_OUTPUT_CHARS;
     request.max_stderr_chars = CLI_CHECK_OUTPUT_CHARS / 2;
-    run_command(request, CancellationToken::default(), |_| {}).map_err(Into::into)
+    run_command(request, CancellationToken::default(), |_| {})
 }
 
 fn join_output(outcome: &crate::execution::ExecutionOutcome) -> String {

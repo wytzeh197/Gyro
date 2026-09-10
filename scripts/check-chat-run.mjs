@@ -1048,3 +1048,15 @@ assert.equal(
 );
 
 console.log("chat run checks passed");
+
+assert.equal(
+  buildRunModel([], {
+    status: {
+      status: "cancelled",
+      recoveryKind: "unknown",
+      message: "OpenAI was cancelled",
+    },
+  }).phase.recoveryKind,
+  "cancelled",
+  "a stored cancellation must remain a neutral stop even with legacy recovery metadata",
+);

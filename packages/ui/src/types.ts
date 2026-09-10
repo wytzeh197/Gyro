@@ -88,6 +88,7 @@ export type ChatGridState = {
 
 export type CapabilityId =
   | "workspace-context"
+  | "workspace-check"
   | "workspace-list"
   | "workspace-search"
   | "workspace-read"
@@ -259,8 +260,15 @@ export type CapabilityActivity = CapabilityCallEvent & {
 };
 
 export type ProviderCapabilitySupport = {
+  schema: "gyro.provider-capability-manifest.v1";
   providerId: string;
   available: boolean;
+  executionKind?: ProviderExecutionKind;
+  supportTier: "supported" | "experimental" | "readiness-only";
+  supportsApprovals: boolean;
+  supportsImages: boolean;
+  supportsResume: boolean;
+  supportsUsage: boolean;
   capabilities: CapabilityId[];
   reason?: string;
 };
@@ -687,7 +695,7 @@ export type ProviderCapabilities = {
   supportsImages: boolean;
   supportsResume: boolean;
   supportsUsage: boolean;
-  visibility: "standard" | "readiness-only";
+  visibility: "standard" | "experimental" | "readiness-only";
 };
 
 export type ProviderAuthMode = "cli" | "env" | "sdk";
@@ -1345,6 +1353,8 @@ export type SourceControlState = {
     author: string;
     relativeDate: string;
     refs: string;
+    /** Parent hashes, newest first. Two or more marks a merge. */
+    parents?: string[];
   }>;
   historyError?: string;
   provider: "git";
@@ -1357,7 +1367,11 @@ export type SourceControlState = {
   additions: number;
   deletions: number;
   statsPartial: boolean;
-  comparedToMain?: { additions: number; deletions: number; partial: boolean } | null;
+  comparedToMain?: {
+    additions: number;
+    deletions: number;
+    partial: boolean;
+  } | null;
   files: SourceControlFile[];
   lastCheckedAt?: string;
   error?: string;

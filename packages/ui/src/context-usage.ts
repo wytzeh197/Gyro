@@ -41,7 +41,7 @@ const PROVIDER_CONTEXT_WINDOW_FALLBACKS: Partial<Record<ProviderId, number>> = {
   gemini: 1_000_000,
   kimi: 262_144,
   openai: 128_000,
-  xai: 131_072,
+  xai: 500_000,
 };
 
 function recordFromUnknown(value: unknown) {
