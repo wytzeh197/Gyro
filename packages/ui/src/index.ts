@@ -514,3 +514,6 @@ export {
   terminalLaunchProfiles,
   terminalDefaultProfiles,
 } from "./terminal-profiles";
+
+export { ChatRun } from "./chat-run-view";
+export type { RunModel } from "./chat-run";

@@ -79,6 +79,9 @@ function workIcon(item: WorkItem): LucideIcon {
 
 export type ChatRunProps = {
   model: RunModel;
+  /** Optional host state when work is preparing or waiting for a person. */
+  statusLabel?: string;
+  suppressThinkingIndicator?: boolean;
   /** Turn-wide line delta for a provider's generic “files” activity. */
   aggregateFileStats?: { additions: number; deletions: number };
   onOpenChanges?: () => void;
@@ -99,6 +102,8 @@ export type ChatRunProps = {
 
 export function ChatRun({
   model,
+  statusLabel,
+  suppressThinkingIndicator = false,
   aggregateFileStats,
   onOpenChanges,
   onRetry,
@@ -142,6 +147,7 @@ export function ChatRun({
     (step) => step.kind === "work" && step.item.status === "running",
   );
   const showThinkingPulse =
+    !suppressThinkingIndicator &&
     isLive &&
     (model.phase.name === "thinking" ||
       (model.phase.name === "working" && !hasRunningWork));
@@ -174,6 +180,7 @@ export function ChatRun({
   return (
     <div className={shellClass}>
       <RunHeader
+        statusLabel={statusLabel}
         canCollapse={canCollapse}
         headerActions={headerActions}
         isCollapsed={isCollapsed}
@@ -265,7 +272,8 @@ function RunWorkGroup({
   const reads = group.steps.flatMap((step) =>
     step.item.kind === "read" && step.item.path ? [step.item] : [],
   );
-  const activeRead = reads.find((item) => item.status === "running") ?? reads.at(-1);
+  const activeRead =
+    reads.find((item) => item.status === "running") ?? reads.at(-1);
   const readPaths = [...new Set(reads.map((item) => item.path))];
   const Icon = WORK_GROUP_ICON[group.groupKind];
   const className = [
@@ -295,10 +303,15 @@ function RunWorkGroup({
           <span className="gyro-run-row-label">{text.label}</span>
           <span className="gyro-run-row-detail">{text.description}</span>
           {activeRead ? (
-            <span className="gyro-run-read-context" title={readPaths.join("\n")}>
+            <span
+              className="gyro-run-read-context"
+              title={readPaths.join("\n")}
+            >
               <FileCode2 aria-hidden="true" size={13} />
               <span>{activeRead.path}</span>
-              {readPaths.length > 1 ? <small>+{readPaths.length - 1} more</small> : null}
+              {readPaths.length > 1 ? (
+                <small>+{readPaths.length - 1} more</small>
+              ) : null}
             </span>
           ) : null}
         </span>
@@ -326,6 +339,7 @@ function RunWorkGroup({
 
 function RunHeader({
   activeLabel,
+  statusLabel,
   canCollapse,
   headerActions,
   isCollapsed,
@@ -333,6 +347,7 @@ function RunHeader({
   onToggle,
 }: {
   activeLabel?: string;
+  statusLabel?: string;
   canCollapse: boolean;
   headerActions?: ReactNode;
   isCollapsed: boolean;
@@ -345,9 +360,10 @@ function RunHeader({
     elapsed === undefined ? undefined : formatRunDuration(elapsed),
   );
   const headerLabel =
-    activeLabel && elapsed !== undefined
+    statusLabel ??
+    (activeLabel && elapsed !== undefined
       ? `${activeLabel} · ${formatRunDuration(elapsed)}`
-      : (activeLabel ?? label);
+      : (activeLabel ?? label));
   return (
     <div className="gyro-run-header">
       {canCollapse ? (
@@ -546,10 +562,7 @@ function RunProblem({
   const title = isInterrupted ? "Previous send was interrupted" : phase.message;
   return (
     <div
-      className={[
-        "gyro-run-problem",
-        isInterrupted ? "is-interrupted" : "",
-      ]
+      className={["gyro-run-problem", isInterrupted ? "is-interrupted" : ""]
         .filter(Boolean)
         .join(" ")}
       role="alert"

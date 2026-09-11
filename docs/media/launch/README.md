@@ -15,20 +15,29 @@ and low-frequency impacts. It contains no licensed music or voiceover.
 
 ## Creative direction and rights provenance
 
-- The teaser deliberately contains no product screenshots or interface footage.
-- Cinematic 3D plates and abstract interface fragments introduce Gyro's
-  connected Sessions and Workspace surfaces without revealing the interface.
-- The logo comes from `packages/ui/src/assets/gyro-logo-mark.png`.
-- Motion, typography, compositing, and procedural sound design are original to
-  Gyro.
-- The three visual plates in `plates/` were generated specifically for Gyro and
-  then art-directed, cropped, graded, and composited locally. No stock or
-  externally licensed media is included.
+- The teaser is built from real Gyro UI captures and the Gyro logo, not
+  generated interface footage.
+- Chat, CLI, and Workspace plates use the README and site product captures in
+  `docs/screenshots/readme/` and `site/assets/screenshots/hero-2400.webp`.
+- The Gyro mark is `packages/ui/src/assets/gyro-logo-transparent.png`.
+- Provider marks are the same SVGs the public site uses for Claude Code, Codex,
+  Gemini CLI, Grok Build, Kimi Code, and Ollama. Each mark is a trademark of
+  its owner and appears only to identify the agents Gyro already supports.
+- Typography is Inter and Inter Tight from the vendored site fonts.
+- Motion, compositing, and procedural sound design are original to Gyro.
+
+The three abstract stills in `plates/` are the previous cinematic film's art
+direction. The current renderer does not use them.
 
 ## Rendering
 
 Run `pnpm launch:teaser` from the repository root to rebuild both deliverables.
-The renderer requires FFmpeg and the standard macOS Arial fonts.
+The renderer captures compositor plates with a local Chromium (Chrome, Brave,
+Edge, or `GYRO_CAPTURE_BROWSER`), then composites them with FFmpeg. It needs
+Node.js, FFmpeg, and those product screenshot and logo assets.
+
+Compositor source lives in `scripts/launch-teaser/`. Intermediate plates are
+written to a temp directory and discarded after the encode.
 
 ## Repository policy
 
@@ -40,5 +49,5 @@ workflow first.
 
 Current SHA-256 checksums:
 
-- `gyro-launch-film.mp4`: `c56362a9f23a7876c8e08a0b9e764e33b96699145de7dfbd0587b5d3a8cb0027`
-- `gyro-launch-poster.png`: `d9f67649bf4576163f11ad6ef909ebc5c23d2b17767d7859bf4655dab686d385`
+- `gyro-launch-film.mp4`: `1d2565fe65e70a88554519e5e3e46b35c39ec48b54fa1b37a9c709aaf3515624`
+- `gyro-launch-poster.png`: `ead6e4c811f647b5a14c09bee10464da39c89bacb8c9c423e466e66d4df7fe1e`

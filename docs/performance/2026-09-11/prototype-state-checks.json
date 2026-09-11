@@ -1,0 +1,282 @@
+[
+  {
+    "alertCount": 0,
+    "header": null,
+    "scrollWidth": 860,
+    "state": "idle",
+    "stopButton": false,
+    "theme": "light",
+    "verification": null,
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Preparing workspace",
+    "scrollWidth": 860,
+    "state": "preparing",
+    "stopButton": true,
+    "theme": "light",
+    "verification": null,
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Working",
+    "scrollWidth": 860,
+    "state": "working",
+    "stopButton": true,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Awaiting approval",
+    "scrollWidth": 860,
+    "state": "approval",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Stopped",
+    "scrollWidth": 860,
+    "state": "stopped",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 1,
+    "header": "Needs attention",
+    "scrollWidth": 860,
+    "state": "failed",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Completed · 18s",
+    "scrollWidth": 860,
+    "state": "completed",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "✓ Focused checks passed2 tests · sample result",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": null,
+    "scrollWidth": 860,
+    "state": "idle",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": null,
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Preparing workspace",
+    "scrollWidth": 860,
+    "state": "preparing",
+    "stopButton": true,
+    "theme": "dark",
+    "verification": null,
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Working",
+    "scrollWidth": 860,
+    "state": "working",
+    "stopButton": true,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Awaiting approval",
+    "scrollWidth": 860,
+    "state": "approval",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Stopped",
+    "scrollWidth": 860,
+    "state": "stopped",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 1,
+    "header": "Needs attention",
+    "scrollWidth": 860,
+    "state": "failed",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": "Completed · 18s",
+    "scrollWidth": 860,
+    "state": "completed",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "✓ Focused checks passed2 tests · sample result",
+    "width": 860
+  },
+  {
+    "alertCount": 0,
+    "header": null,
+    "scrollWidth": 1440,
+    "state": "idle",
+    "stopButton": false,
+    "theme": "light",
+    "verification": null,
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Preparing workspace",
+    "scrollWidth": 1440,
+    "state": "preparing",
+    "stopButton": true,
+    "theme": "light",
+    "verification": null,
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Working",
+    "scrollWidth": 1440,
+    "state": "working",
+    "stopButton": true,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Awaiting approval",
+    "scrollWidth": 1440,
+    "state": "approval",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Stopped",
+    "scrollWidth": 1440,
+    "state": "stopped",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 1,
+    "header": "Needs attention",
+    "scrollWidth": 1440,
+    "state": "failed",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Completed · 18s",
+    "scrollWidth": 1440,
+    "state": "completed",
+    "stopButton": false,
+    "theme": "light",
+    "verification": "✓ Focused checks passed2 tests · sample result",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": null,
+    "scrollWidth": 1440,
+    "state": "idle",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": null,
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Preparing workspace",
+    "scrollWidth": 1440,
+    "state": "preparing",
+    "stopButton": true,
+    "theme": "dark",
+    "verification": null,
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Working",
+    "scrollWidth": 1440,
+    "state": "working",
+    "stopButton": true,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Awaiting approval",
+    "scrollWidth": 1440,
+    "state": "approval",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Stopped",
+    "scrollWidth": 1440,
+    "state": "stopped",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 1,
+    "header": "Needs attention",
+    "scrollWidth": 1440,
+    "state": "failed",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "Verification pendingNo passing result recorded yet",
+    "width": 1440
+  },
+  {
+    "alertCount": 0,
+    "header": "Completed · 18s",
+    "scrollWidth": 1440,
+    "state": "completed",
+    "stopButton": false,
+    "theme": "dark",
+    "verification": "✓ Focused checks passed2 tests · sample result",
+    "width": 1440
+  }
+]

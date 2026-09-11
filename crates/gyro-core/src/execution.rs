@@ -166,9 +166,11 @@ where
     }
     configure_process_group(&mut command);
 
+    crate::timing::mark(crate::timing::Stage::ProcessStart);
     let mut child = command
         .spawn()
         .with_context(|| format!("start {}", request.program.to_string_lossy()))?;
+    crate::timing::mark(crate::timing::Stage::ProcessSpawned);
     let Some(stdout) = child.stdout.take() else {
         terminate_process_group(&mut child);
         anyhow::bail!("execution stdout was unavailable");

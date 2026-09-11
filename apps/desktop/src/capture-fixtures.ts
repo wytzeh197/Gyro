@@ -804,6 +804,7 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  if (command === "timing_diagnostics_enabled") return false;
   if (parameters.get("edge") === "lazy-explorer") {
     const rootFiles = workspaceTree.filter(
       (entry) => entry.isWorkspaceRoot || entry.depth === 1,

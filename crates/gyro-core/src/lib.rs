@@ -25,6 +25,7 @@ pub mod provider_registry;
 pub mod provider_stream;
 pub mod security;
 pub mod sessions;
+pub mod timing;
 pub mod sqlite;
 pub mod usage;
 pub mod workspace_check;

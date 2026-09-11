@@ -1,0 +1,7520 @@
+[
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "69920642-9a60-41d2-a2cf-f3b76a3b495e",
+    "turnId": "027d7e2b-d84e-4f6a-bcdd-2f8361416a70",
+    "sessionId": "907f6d56-55d9-49bf-b10e-9ddbf3af9135",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.004042,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.26875,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 40.959834,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 54.177125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 58.410542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 64.83500000000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 2198.419792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 2199.8952090000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6627.597792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 76574.258292,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 76994.848917,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "424a8975-6b40-477b-a5d7-bf6c1715fbfb",
+    "turnId": "2997d11d-f6d8-4fd1-8d91-a8ddf2541e04",
+    "sessionId": "d1283952-6557-47b0-8f42-68abaaa4ed0b",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.7822079999999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 16.291625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 97.16762499999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 133.226,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 233.262958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 257.337542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 5183.971958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 5186.606583,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 10418.632958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 65439.788542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 65501.98279200001,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "e328de71-ce33-4aef-bbba-ac3d329e19e9",
+    "turnId": "84c25e49-fc47-4ae5-8205-ecae40402f23",
+    "sessionId": "153948f2-bc18-45bc-a83f-8cb626f29808",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003666,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 5.330833,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 26.738375,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 39.96825,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 45.940791000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 50.944,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 2474.6515000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 2476.1042500000003,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 9834.659291,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 46958.521541,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 46986.618458000004,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "55d41210-4b85-4fc1-b7b0-68c777a499ad",
+    "turnId": "07c71532-1b7e-4456-bece-3072210a6dd6",
+    "sessionId": "ed078a0b-a914-47ce-bfd0-0c39de6dc398",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0037500000000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.3473330000000001,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 31.117333000000002,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 44.72620800000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 47.309125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 56.444167,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 708.827583,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 709.8376669999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6608.444208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 70887.76320799999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 70914.934375,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "30dbe2f1-13c9-48b8-a286-d2424482168a",
+    "turnId": "a78aa21b-fb7d-4d6c-a276-cb71604f4073",
+    "sessionId": "48798739-0bff-443c-946b-a5bf85224ede",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003709,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.1238750000000002,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 29.340958999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 50.031625000000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 52.009125000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 58.275417000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 612.782084,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 612.9785840000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6836.656125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 57724.336125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 57767.518625000004,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "6122345c-7eb9-4178-a766-abc152545622",
+    "turnId": "7cb84621-5cf1-4374-8826-f2c21eb101a3",
+    "sessionId": "430449a0-6291-477b-af3a-26430f532f9f",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003208,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.7347499999999996,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 18.824625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 31.620666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 33.910666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 39.514666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 574.074208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 574.652375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 7274.688791,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 65801.832041,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 65838.2225,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "0b781e81-a311-45f0-a019-b45942204d62",
+    "turnId": "c7717471-960c-4a67-b984-94ee81d30612",
+    "sessionId": "846743ad-b591-4553-839d-de02fe9ab158",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0022919999999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.083542,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 17.070959,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 27.752709,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 28.622334,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 32.832083999999995,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 636.4377089999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 636.641334,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 9419.368834,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 70902.261709,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 70929.8735,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "f419667a-1ea2-45a6-80fc-ebdf9e765076",
+    "turnId": "022a1925-2bd8-4f11-8964-e6a88f37d382",
+    "sessionId": "a02db378-65a0-4066-a665-a160a2330944",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.009708999999999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.0049170000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 96.918417,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 117.30283399999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 121.845667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 127.73545899999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 630.94275,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 631.197375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 10523.929084000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 91729.345292,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 91757.106792,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "0cb75e60-c3b7-45a5-b257-99d7f1555d57",
+    "turnId": "377ce78d-9839-4a92-95d5-5f0790526a39",
+    "sessionId": "204fb9d0-29a9-4a1a-8cd4-ddf489006ff6",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003333,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.19825,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 16.377083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 25.291708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 26.159166000000003,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 30.211416,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 174.353375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 174.55100000000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 10557.772666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 59928.466415999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 59974.278625,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "16adee2b-c3b8-4343-ab6c-ec402d045d77",
+    "turnId": "41995bc5-9492-47be-a67e-0ffe0adf4a7f",
+    "sessionId": "cf1b5935-0516-40e5-bf6f-257fd0f71a95",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.004083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.5869999999999997,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 23.824499999999997,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 35.182875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 38.171,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 42.907541,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 183.37858300000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 184.027583,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 4867.742583,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 54954.386875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 54986.8915,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "9a10810a-6bc9-43e8-a6dd-18792d2a4eea",
+    "turnId": "8bd9248b-3af0-466e-8e3f-258b6262f34a",
+    "sessionId": "068d1831-0382-463e-86c6-08d77467b9f8",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.070125,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 19.561959,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 30.657042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 34.222042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 38.450625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1314.927959,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1315.8155840000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6035.488375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150116.307459,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150134.13575000002,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "d7fd0498-c7b6-451c-94f0-eb07442f84e5",
+    "turnId": "c4bfdefe-ff41-495e-8274-52bde8c84883",
+    "sessionId": "99ef216d-2ac3-480d-aa86-9e0978261428",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.00425,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.9655829999999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 35.706333,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 49.332958000000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 53.972083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 65.964166,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1575.477875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1578.329125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6691.694333,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150195.57279099998,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150210.51887499998,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "7d6554c3-cac5-465f-b419-c5df5a806142",
+    "turnId": "932af192-460f-4d62-b57f-33eebe7f41c6",
+    "sessionId": "c77a3b1a-708f-4c3f-aeea-46435051aade",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0029170000000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.176125,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 15.909708000000002,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 27.294042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 31.623125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 35.778667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 282.960792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 284.60558299999997,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 7701.877417000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 34276.230875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 34299.944583,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "71106ba1-7217-4f26-a796-a5821e9a66eb",
+    "turnId": "e0d42256-48dc-4668-a4bf-1497ae3003b2",
+    "sessionId": "e15beaac-242f-45f0-a5cf-ab357fbead80",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.002542,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 0.540792,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 12.511125,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 23.845042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 26.158084000000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 29.590292,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 328.22166699999997,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 328.996709,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 4220.026334,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150498.766375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150721.502959,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "d3ca1712-237b-482f-b1e5-3e59cc5951c8",
+    "turnId": "6194209b-b4e8-44fb-976a-7fbac5355781",
+    "sessionId": "74b1b630-735d-4737-b507-16814396ed32",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.008124999999999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 4.355208,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 37.297291,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 53.546333000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 125.39304100000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 147.377333,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 971.749375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 975.04875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 5173.773666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 32849.366791,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 33358.785583,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "fa61e9d2-9418-4d63-9318-e51754d4fabd",
+    "turnId": "fa26dff6-1294-4c04-b8e1-863184251af8",
+    "sessionId": "cedaa13d-39dc-403a-99c8-9d50ae4325c8",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.038375,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.402708,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 54.820708,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 66.088041,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 73.507041,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 81.046583,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1012.444666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1012.451666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 3099.2827909999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4221.01475,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4221.4255410000005,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4221.557083000001,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4232.509416,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4232.635125,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4233.2240409999995,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9939.508541000001,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9944.104916,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9949.500625,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9981.291666000001,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10106.231291,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10121.007083,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27283.502708,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 27348.794083,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30351.633958000002,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30354.30725,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30360.894083000003,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30362.970583,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30410.625958,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30499.503582999998,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30514.144874999998,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30589.215791000002,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 34019.832416,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 34047.739875,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "75ff986c-3246-458a-9d41-985a6956f7ae",
+    "turnId": "d3a99bb9-6328-4969-821c-73f8e4f440a2",
+    "sessionId": "b1f37daf-c581-4ede-a6e4-20e1234cf343",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.006167000000000001,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 0.60875,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 15.452499999999999,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 25.626584,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 27.57675,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 31.307000000000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 449.61008400000003,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 449.618709,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 2862.988542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4996.109084000001,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 5001.561709,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 5027.559917,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 5039.3811670000005,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 8237.241542,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 8238.440875,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 8247.673999999999,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 8271.153459000001,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 8373.014959,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 8400.465459,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12953.815042,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12959.991458999999,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17690.735834000003,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 17701.723125,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39732.266459,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39751.631875,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39795.818750000006,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39873.012500000004,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 43500.667334,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 43679.470666999994,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 46100.723084000005,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 46110.052500000005,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 46112.854084,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 46467.056459,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 46595.770834,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 46633.384417,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54179.371667,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54233.231292,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54234.996416999995,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54236.38729200001,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 62892.100542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 63059.013417,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "5e6078e6-d59d-446b-a7d1-48c4d30d904b",
+    "turnId": "97c5c2e3-4fa8-4b8c-81ee-51a37a1bcaf5",
+    "sessionId": "55bbe02d-cb96-4bac-9d23-3d67c3c9ce84",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.00425,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.790292,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 24.304583,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 36.204874999999994,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 42.588958000000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 48.145042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 405.227708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 405.244667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 2749.100042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4162.856333,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4166.3366670000005,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4168.229582999999,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4185.140292,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4185.814083,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4186.986417,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6844.0355,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6865.877125,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6871.186625,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6875.73675,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6887.4355000000005,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6887.6489169999995,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6966.865125,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6993.944625,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14926.114249999999,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14927.216792,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14929.628417,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14943.787291999999,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15007.470707999999,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15030.961958,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31246.417,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31246.830917,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31247.193583,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31247.480542,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31254.3525,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31254.742000000002,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31255.537666999997,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31255.783667,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34820.666375,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34828.933417,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 66104.443583,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 66120.977875,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 66218.662708,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 66296.429292,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 68703.431542,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 68712.165625,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 68782.506208,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 68840.405667,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 74678.001833,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 74684.9745,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 74869.18862500001,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 74931.84375,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 79385.185417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 79685.221,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "ea84110f-7254-4295-9e02-12ff27ff1df4",
+    "turnId": "9586db43-39cf-4d1b-9ce8-dfcfe1e88a89",
+    "sessionId": "b8ece9cf-7023-4cb2-a7d1-ce07795582a8",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.006583,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 46.361708,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 241.31704100000002,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 261.19404099999997,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 274.0405,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 285.907041,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 854.064375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 854.076791,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6477.148916,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7415.329125,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7420.577708,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7440.160541,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7444.679583,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13557.156875,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13587.707957999999,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13698.1635,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14025.486416,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 26676.906375000002,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 26677.493,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 26680.052208,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 26695.05225,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 26738.851415999998,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 26783.550125,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38500.689332999995,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38502.847208,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38505.895166,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38523.069665999996,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38586.338040999995,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38620.962625,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 51876.131083,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52210.642374999996,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54966.758875,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54970.035875,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54975.561624999995,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 55033.650458,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 55129.277291,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 55265.884666,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60254.460416,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60294.168958,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "370bb5bc-4efc-4bd7-aaf8-ca4802efc1bf",
+    "turnId": "6d644c45-f88f-43db-b9e1-2571d5ee122f",
+    "sessionId": "a9874032-aacb-4192-9de9-c90862c1c4ad",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0037500000000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.801833,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 24.132708,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 36.404291,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 41.313708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 46.306541,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 385.966125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 385.98754099999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 2786.6890409999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4798.096165999999,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4799.532041,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4809.372125000001,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4810.147833,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6623.170375,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6626.7485,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6635.7078329999995,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6703.565458,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12110.459625000001,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12115.461915999998,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12116.098666,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12127.32575,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12177.295458,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12201.4825,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19103.432,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19115.734540999998,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27286.824332999997,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27287.264166,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 27293.2605,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 27293.589874999998,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 48515.468624999994,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 48592.9845,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 48677.776541,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 48726.59575,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52103.241791,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52109.906832999994,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52115.577541,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52153.429166,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52247.273666,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52327.34875,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54543.192833,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54547.094458,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 57603.27475,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 57684.188375,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "d111e4ed-28b1-4f84-a418-2e5bbeb954f5",
+    "turnId": "056edcf2-5053-464b-ac33-07d120015342",
+    "sessionId": "23364916-190e-48e0-b937-2af861e97fa0",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003958,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 5.114833,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 23.591333,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 38.442791,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 51.564875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 57.978916,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 466.094708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 466.104083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 7912.793916,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9416.325958,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9417.10225,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9419.137958000001,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9435.331583,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9512.914083,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9559.760583,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17066.452166000003,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 17072.64025,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 83873.190708,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 83883.52525,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 83884.1415,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 83884.28554099999,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 111988.25675,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 112292.343833,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 117931.720916,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 117932.375791,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 117943.918375,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 117947.972666,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 127412.00154099999,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 127480.543416,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 133947.505333,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 133949.688208,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 133957.169875,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 134013.898041,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 134087.044541,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 134200.14424999998,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 139535.821458,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 139577.781666,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "4dc3766c-0d56-4389-b651-7dc5d199a2ee",
+    "turnId": "2be0ec7c-2860-4e46-809e-31752a529a62",
+    "sessionId": "24f39503-4ebe-41a3-8c5d-a631e5524c4d",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.004083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 7.271208000000001,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 31.34925,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 47.125665999999995,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 60.762083000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 66.7965,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 600.629416,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 600.6410410000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 9491.917666,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11037.97,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11172.083583,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11172.952166,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11175.132958,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11175.531833000001,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11175.666083,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19290.524957999998,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19291.141165999998,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19291.465916,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19299.870124999998,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19300.066083,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19300.557833,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 22724.642875,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 22725.978083,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 22726.303832999998,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 22736.47575,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 22736.890708,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 22737.71425,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24632.345416,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24640.698833,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 58874.030125,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 58886.363666000005,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 58890.188875,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 60525.993291,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 60604.006583,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 60994.235375000004,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 86834.487375,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 87010.120958,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 90052.410458,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 90053.686708,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 90054.150708,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 90067.87875,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 90068.334791,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 90068.78658300001,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 99842.600666,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 99913.096791,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103932.995041,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103936.396041,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103940.878875,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 103999.216125,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 104120.991083,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 104173.477625,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 109584.055916,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 109629.951041,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "1a8323fc-8544-4065-949e-37a8bf960e8a",
+    "turnId": "6e810cbc-d2b0-4b25-82e8-a59a7283da8b",
+    "sessionId": "a0802962-389c-4dbe-9d17-3b1fe449cb89",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0022919999999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.176208,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 18.049458,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 27.241542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 29.922250000000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 33.361458,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 538.968708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 538.9775420000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 11761.755333,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13219.838625,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13248.68625,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13294.126125,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13415.081457999999,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13588.792458,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13651.187167,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23019.0495,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23049.913750000003,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23143.407457999998,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23148.039957999998,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 26814.839083,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 26815.941583,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 26826.908750000002,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 26827.357667,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 56935.793792,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 58723.309667,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 60581.988417,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 60589.874,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 60604.150917,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 60604.339833,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 66394.453125,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 66587.975167,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 69434.035083,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 69469.888208,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 69481.591583,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 69794.44258300001,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150313.960042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150330.386167,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "failed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "73101404-43c5-4643-bcf2-0f1ecba4b569",
+    "turnId": "3098a589-19c0-4200-9351-ca91319ec52e",
+    "sessionId": "8f9ad0d2-4e2c-421b-9134-49ef7b822249",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0047090000000000005,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 7.324542,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 36.546375,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 52.348084,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 61.183916999999994,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 76.849584,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1291.250542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1291.34275,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 9929.770084,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11452.851625,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11475.677084,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11485.882167,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11537.478500000001,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11547.209625000001,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11548.395542,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14118.100875,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14118.374749999999,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14130.628250000002,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14134.634042,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23288.615042,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23297.36375,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23297.7545,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23297.899917,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23373.588792,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23384.946042,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23387.665625,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23390.761209,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 29564.33725,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 29794.228292,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52908.705542,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52949.764834,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52952.045042000005,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 53277.87775,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 53281.527792,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 53367.11975,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 68496.209375,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 68516.562584,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 68617.647542,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 68639.742709,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 72290.876334,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 72302.268042,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 72629.974584,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 72690.523875,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 88030.764084,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 88073.362667,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "e1c60c1a-ef70-4190-b6dc-e888de4eae1c",
+    "turnId": "ed9e0053-f23c-4d91-8783-edf7c2aab9c5",
+    "sessionId": "be5c7e11-96ad-4a9d-a8ec-c9bbb6b64ca4",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.002833,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.5586669999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 30.583958000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 40.916792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 43.926208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 50.752792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 2133.749375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 2133.762333,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 13290.908207999999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14568.08625,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14569.019666999999,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14571.067333,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14587.2865,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14592.151833,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14594.199832999999,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 18809.5645,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 18809.998833,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 18811.755167000003,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 18819.311542,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 18825.282708,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18837.455041999998,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18841.27275,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18899.018458,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18932.758625,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18963.223292,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 21809.712625,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 21810.126292,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 21817.60175,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 21820.199458000003,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 35012.939833,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 35013.246083,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 35019.027917,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 35019.499542,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 41969.988708000004,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 42110.200833,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 45696.146917,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 45697.050458,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 45709.104708,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 45709.560042,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 51794.506667,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 51872.482417,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 56492.281583,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 56579.675625,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 56585.994125,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 56645.217667,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 56696.460416999995,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 56842.720042,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 62443.89666699999,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 62491.960125,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "388e8349-d27e-424c-82f6-c2bd0942c924",
+    "turnId": "0856a275-d96b-4b41-91ef-651c15defb64",
+    "sessionId": "0bfdb8b0-97bf-44bf-8490-079c63ed72af",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.004042,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 5.5508750000000004,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 41.776875,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 62.497249999999994,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 66.167667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 71.742792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 760.990875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 761.02075,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 8171.926584,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 8223.388709,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 8250.833209,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11293.956417000001,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11294.63,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11295.436209,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11310.358709,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11312.662542,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11331.81375,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11332.155584,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11422.0285,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11453.817084,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11480.888500000001,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24374.506875000003,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24465.006709,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24507.546709,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24525.578584000003,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24541.707709000002,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24613.611042,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24709.991083999997,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24726.695584,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24814.869084,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 25102.760875,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39547.841834000006,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39549.139959,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39552.382459,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 39554.023625,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39570.038042,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39570.362250000006,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39570.582834,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 39578.732875,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54525.171459,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54543.927292,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54608.778334,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54609.559125,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 56611.624167,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 56885.710959000004,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60095.318167000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60125.369667,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "0569bc2c-57fc-4d78-b6dc-b3836d3b2697",
+    "turnId": "b7459ab7-ac50-40f3-a1aa-29460c91fe33",
+    "sessionId": "018d7db6-bca9-4254-b62d-f1b4032d6ce4",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003042,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.091,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 16.816000000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 30.145334,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 34.277417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 40.076459,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 338.797917,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 338.82475,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 3144.367417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4075.792917,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4077.3520000000003,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4078.1040839999996,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4078.4087500000005,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10250.557667000001,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10251.262375,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10255.678124999999,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10268.469167,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10333.112584,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10358.696209,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13169.689209,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13170.287917,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13174.2605,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13184.387125000001,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13230.374917000001,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13266.330875,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15402.9185,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15403.374,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15406.572542,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15407.118584,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19638.266000000003,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19638.822209,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19639.3435,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19639.74275,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19640.999916999997,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19646.7085,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 28247.731334,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 28256.927292,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 28316.930792,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 28325.815375000002,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36056.628959,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36073.220875,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36125.044292,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36125.848374999994,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 38095.443959000004,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 38496.084834,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 43691.3255,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 43716.644375,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "e5610aa0-eaef-4850-8806-694d9f6dc995",
+    "turnId": "1e74529d-51bc-4ccb-9858-a6a8dc447a86",
+    "sessionId": "3f8f0d5e-7af8-4ee2-8fb8-a7de958022d8",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.002417,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.035792,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 14.734625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 24.918708000000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 29.094375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 33.080417000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 386.137833,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 386.158958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 3122.2439170000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 3984.4332919999997,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 3985.515583,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 3990.455375,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 3990.563083,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7556.110208,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7556.470792,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7557.603375000001,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7561.5495,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7574.3705,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7574.944417000001,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7621.092958,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7648.644792,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13696.45025,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13696.863708,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13699.739208,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13706.476375,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13712.938375,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 13717.199917,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13733.492333,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13733.659791999999,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13766.883291999999,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13793.294542,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13832.574666999999,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13863.334042,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30743.297833,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30745.859333,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30754.923292,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30806.841167000002,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30806.974625,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30807.567208,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 33050.095624999994,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 33335.386292,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 35772.753875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 35794.487958,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "ff828e7c-c2f0-4055-8dd2-8fc0efb5fd67",
+    "turnId": "e5415322-534f-4712-90ee-fa46a44abc6f",
+    "sessionId": "0a7488d2-f0dd-4bff-8671-78e065cbfbdc",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.002375,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 0.37875000000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 13.276667000000002,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 23.035375000000002,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 25.523917,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 29.386,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 412.506792,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 412.518667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 2987.527875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 3948.202958,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 3948.453625,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 3955.295917,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 3955.474917,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7160.521458,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7161.028958,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7162.073833,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7168.821,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7174.862542,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7187.992625,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7191.674042,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7251.204333000001,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7275.64775,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7307.729958000001,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11069.99675,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11070.774125,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11071.653875,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11084.632083,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11085.057,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11085.471833,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16028.382958000002,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16028.655707999998,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16028.90575,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16035.370292,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16039.197000000002,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16039.393457999999,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 26124.549708,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 26131.701792,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 33772.33416699999,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 33780.3615,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 33828.509957999995,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 33829.265542,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 35710.231333,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36108.435999999994,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 41419.855167,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 41449.74075,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "160fc249-778a-4a17-9790-4bf46eacd74c",
+    "turnId": "1b3a796d-a4f8-4521-851b-eb0cda325965",
+    "sessionId": "39596404-34a2-4c6f-b297-26223658afda",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.002209,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 0.355292,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 13.456042,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 21.035542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 22.860667,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 26.766209,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 346.92420899999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 346.937875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 2607.199,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 3414.4015,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 3420.699959,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6447.777209,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6448.176541999999,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6455.183375,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6468.5244170000005,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6530.545375,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6554.990916999999,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9502.6625,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9504.885959,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 9506.444209,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9526.723542,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9528.623417,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 9551.259334,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15479.794125,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15481.199,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15486.830709,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15492.194667,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 15499.298625,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15513.943041999999,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15554.038375,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15582.877459000001,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15606.398125,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 15645.31525,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 25902.776209,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 25903.185708999998,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 25909.096709,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 25912.458292,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34588.581625000006,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34597.333584,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34644.599875,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34645.506375,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36703.832875,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36982.127583999994,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 39641.192625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 39671.955709,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "f879ac1e-8cd6-4fb0-bed1-add53d4338b7",
+    "turnId": "bf265fbc-e658-43e3-b697-652192a5d6d5",
+    "sessionId": "b78e40af-998e-4864-acc7-d09b51657365",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0025,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.379625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 18.386625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 28.736292,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 30.9955,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 34.255958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 461.780042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 461.795917,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 3098.596333,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4380.818792,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4386.002917,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4400.500875,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4400.778542,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12613.364333,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12619.822958,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12633.164583,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12658.8365,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12659.77925,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12660.197333,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17943.188417,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17943.772417,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17945.04925,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17968.651833,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 17976.04925,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18009.772583,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18014.204041999998,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18084.516832999998,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18098.687542,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 18130.783583,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27920.438542,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27925.68275,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27936.699875,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 27949.353708,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 27982.266083,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 28079.411,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 28152.740375,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 28185.144833,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54598.183375,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 54616.331042,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54666.754,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 54799.52375,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81900.91779200001,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81903.06624999999,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81908.804917,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81914.675583,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81983.674792,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81983.804792,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81984.561917,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 82002.972125,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 85909.814833,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 85910.06775,
+        "attempt": 1,
+        "toolIndex": 21
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 85914.802167,
+        "attempt": 1,
+        "toolIndex": 22
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 85924.486125,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 85955.918583,
+        "attempt": 1,
+        "toolIndex": 21
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 85979.49975,
+        "attempt": 1,
+        "toolIndex": 22
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 92066.992708,
+        "attempt": 1,
+        "toolIndex": 23
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 92078.671833,
+        "attempt": 1,
+        "toolIndex": 24
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 92150.313375,
+        "attempt": 1,
+        "toolIndex": 24
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 92369.65695799999,
+        "attempt": 1,
+        "toolIndex": 23
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 97223.708542,
+        "attempt": 1,
+        "toolIndex": 25
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 97225.837583,
+        "attempt": 1,
+        "toolIndex": 26
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 97233.905167,
+        "attempt": 1,
+        "toolIndex": 27
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 97275.699542,
+        "attempt": 1,
+        "toolIndex": 25
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 97370.192792,
+        "attempt": 1,
+        "toolIndex": 26
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150286.0385,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150299.368458,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "failed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "2a97459f-d491-43b6-ae3e-3f2acdb91063",
+    "turnId": "5ccf91e5-c39c-4766-9611-335638a593b8",
+    "sessionId": "0125e5ce-06bc-4536-96b3-d77efec4b337",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.009833,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.422375,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 26.343124999999997,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 40.530708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 43.895916,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 49.552791,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 597.584291,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 597.596083,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 4482.1821660000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6481.283,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6484.093291,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6495.19275,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6499.732291,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6518.497625,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6588.013583000001,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6623.777041,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6656.447791,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11483.21575,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11487.158125,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11494.639375,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11516.707,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11885.067707999999,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12277.327207999999,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 21782.478083,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 21783.920208000003,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 21784.48075,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 21789.645708,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 21790.464958,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 21818.836291,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 42148.039249999994,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 42148.599375000005,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 42150.470875000006,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 42192.735958,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 53223.801208,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 53269.017041,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 62296.707208,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 62306.242249999996,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 62361.934708,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 62362.668708,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 64180.669916,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 65420.74187500001,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 75871.20166600001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 75896.995541,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "e36767a8-f445-4971-8e0f-010da9dbc5b5",
+    "turnId": "9dc220a6-ac78-4875-bf68-78d25c759e43",
+    "sessionId": "d9d3f051-1276-41c5-a388-618d2b38e1d2",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.003083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 2.272083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 20.102083,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 33.628333000000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 44.807791,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 53.659875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 868.56925,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 868.596125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 5954.8085,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10020.937208,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 10578.395625000001,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10582.968499999999,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 10583.254791,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11854.374583,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11866.991750000001,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11887.216416,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11891.960625,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11895.973458,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11964.433958000001,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12076.196625,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12130.066875,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12194.075125,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12234.565416000001,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19012.333041,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19207.048833,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19208.167958,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 19221.811458,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19260.288875000002,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19261.203875,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19661.552166,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 19705.930583,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31513.031708,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31516.078332999998,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 31517.600666,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31587.451625,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31589.043125,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 31792.726000000002,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36280.245916,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36281.913791,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36282.7745,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36284.297416,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 36285.007708000005,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36313.436375000005,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36314.837375,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36319.520832999995,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36321.880833,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 36324.860125,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 49242.214208,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 49737.116,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 49816.577207999995,
+        "attempt": 1,
+        "toolIndex": 21
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 49817.664,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 49817.830041,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 49818.030041,
+        "attempt": 1,
+        "toolIndex": 21
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 59628.649875,
+        "attempt": 1,
+        "toolIndex": 22
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 59640.432250000005,
+        "attempt": 1,
+        "toolIndex": 23
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 59640.827583,
+        "attempt": 1,
+        "toolIndex": 24
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 59641.230166,
+        "attempt": 1,
+        "toolIndex": 22
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 59641.390125,
+        "attempt": 1,
+        "toolIndex": 23
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 59641.532415999995,
+        "attempt": 1,
+        "toolIndex": 24
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 74202.938708,
+        "attempt": 1,
+        "toolIndex": 25
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 74218.17020800001,
+        "attempt": 1,
+        "toolIndex": 26
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 74380.982,
+        "attempt": 1,
+        "toolIndex": 25
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 74483.29258299999,
+        "attempt": 1,
+        "toolIndex": 26
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81984.21483299999,
+        "attempt": 1,
+        "toolIndex": 27
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81986.432708,
+        "attempt": 1,
+        "toolIndex": 28
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81991.32025,
+        "attempt": 1,
+        "toolIndex": 29
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81992.159625,
+        "attempt": 1,
+        "toolIndex": 27
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81992.33529100001,
+        "attempt": 1,
+        "toolIndex": 28
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81994.376291,
+        "attempt": 1,
+        "toolIndex": 29
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 90329.337791,
+        "attempt": 1,
+        "toolIndex": 30
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 90331.846,
+        "attempt": 1,
+        "toolIndex": 31
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 90332.55099999999,
+        "attempt": 1,
+        "toolIndex": 32
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 90332.91883299999,
+        "attempt": 1,
+        "toolIndex": 30
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 90333.083958,
+        "attempt": 1,
+        "toolIndex": 31
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 90333.250791,
+        "attempt": 1,
+        "toolIndex": 32
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 97083.356291,
+        "attempt": 1,
+        "toolIndex": 33
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 97122.788958,
+        "attempt": 1,
+        "toolIndex": 34
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 97182.504625,
+        "attempt": 1,
+        "toolIndex": 34
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 97183.726,
+        "attempt": 1,
+        "toolIndex": 33
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103760.658083,
+        "attempt": 1,
+        "toolIndex": 35
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103762.76225,
+        "attempt": 1,
+        "toolIndex": 36
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103782.990375,
+        "attempt": 1,
+        "toolIndex": 37
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 103790.44658300001,
+        "attempt": 1,
+        "toolIndex": 38
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 103831.570458,
+        "attempt": 1,
+        "toolIndex": 35
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 103933.561625,
+        "attempt": 1,
+        "toolIndex": 37
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 103993.11825,
+        "attempt": 1,
+        "toolIndex": 38
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 104421.474958,
+        "attempt": 1,
+        "toolIndex": 36
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 116750.836583,
+        "attempt": 1,
+        "toolIndex": 39
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 116760.170583,
+        "attempt": 1,
+        "toolIndex": 40
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 116948.320166,
+        "attempt": 1,
+        "toolIndex": 39
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150295.419541,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150311.610875,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "failed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "21945565-e030-4da2-a3b9-ffaeda219453",
+    "turnId": "07338281-24fe-4317-add4-4c76e5b1b8c4",
+    "sessionId": "38492e1a-59b6-4422-b937-90534cae7dbe",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.00425,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 34.29575,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 114.9395,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 256.49120800000003,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 367.02166600000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 392.54287500000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 1458.481208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 1458.5129160000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 10674.951500000001,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14685.428625,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 14843.174208,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14846.218541,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 14846.486708,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 28876.205625000002,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 28888.373832999998,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 28895.925791,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 28902.120083,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 28929.471541000003,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 29004.670665999998,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 29033.898875,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 29061.21325,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34648.644708,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34649.251166,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 34659.033416,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34670.406541,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34713.551541,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 34826.939957999995,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 41958.047291,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 42166.838583,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 42470.745916,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 42813.808666,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 42815.209166,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 43903.764791,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 44245.250666,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 44753.720333,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 50850.78625,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 50865.927833,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 50870.662541,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 50882.662375,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 64019.971833,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 64024.581249999996,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81508.966583,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81513.462708,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81600.20512500001,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 81648.758291,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 87110.620916,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 87115.441541,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 94255.92225,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 94267.040583,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 94322.359583,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 94327.47520799999,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 99986.02612499999,
+        "attempt": 1,
+        "toolIndex": 21
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 99987.162333,
+        "attempt": 1,
+        "toolIndex": 22
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 99996.75775,
+        "attempt": 1,
+        "toolIndex": 23
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 100008.76841599999,
+        "attempt": 1,
+        "toolIndex": 21
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 100012.220875,
+        "attempt": 1,
+        "toolIndex": 23
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 100250.66137500001,
+        "attempt": 1,
+        "toolIndex": 22
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 104840.222916,
+        "attempt": 1,
+        "toolIndex": 24
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 104842.28225,
+        "attempt": 1,
+        "toolIndex": 25
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 104847.514708,
+        "attempt": 1,
+        "toolIndex": 26
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 104857.049875,
+        "attempt": 1,
+        "toolIndex": 27
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 104861.591125,
+        "attempt": 1,
+        "toolIndex": 27
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 104897.189,
+        "attempt": 1,
+        "toolIndex": 24
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 104931.154958,
+        "attempt": 1,
+        "toolIndex": 25
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 105073.243,
+        "attempt": 1,
+        "toolIndex": 26
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 110244.631208,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 110362.71875,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "3a8c31ac-20f6-4a4e-96f1-9b72ca7c49f4",
+    "turnId": "2517dda3-72ce-49f8-a05d-7e7a66118e9f",
+    "sessionId": "d3561b03-a155-4de0-9157-d44a7dfed55b",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.0043749999999999995,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 4.726125000000001,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 27.405833,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 39.928167,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 46.798542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 54.114833000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 362.645583,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 362.658958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 6628.04975,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7900.967792,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7902.611167,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 7911.201,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7916.4003330000005,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7917.107333,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 7920.432917,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12908.291374999999,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12908.820292,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12914.170667,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12919.91875,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 12928.162291999999,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12938.480542000001,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 12994.525791999999,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13023.481416999999,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13061.368792,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 13090.19825,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16553.110375,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16553.611249999998,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16555.235458,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 16562.974667,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16572.124333,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16572.782208,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16602.571292,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 16635.067292,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24143.885917,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24144.51725,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 24146.989708,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24157.212583,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24157.608375,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 24159.417042,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 30627.516292,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 30635.870333,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 47323.480833,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 47331.194583,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 47336.957375,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 47344.903167,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 47418.312333,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 47419.28675,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 47596.310166999996,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 47616.127917,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 57415.360875,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 57730.358708,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60816.027375,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60866.672,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "71ee477c-f587-4fb6-b585-eca1e4b217a8",
+    "turnId": "1a7c5d58-d243-4f1c-ba1e-4950ce717f3b",
+    "sessionId": "0158d1ca-aa69-4e20-af1c-50ba584a528e",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.00325,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 1.474042,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 17.139208,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 29.011875,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 34.529125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 39.172875000000005,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "protocol-ready",
+        "elapsedMs": 349.158042,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "prompt-sent",
+        "elapsedMs": 349.16999999999996,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 3310.635708,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4131.1426249999995,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 4131.635458,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4137.814583,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 4138.841582999999,
+        "attempt": 1,
+        "toolIndex": 1
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6621.692458,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 6622.3640000000005,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6631.33675,
+        "attempt": 1,
+        "toolIndex": 2
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 6688.788708,
+        "attempt": 1,
+        "toolIndex": 3
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11891.474625,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11892.707792,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11895.464583,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 11896.730875,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11906.67575,
+        "attempt": 1,
+        "toolIndex": 4
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11907.090917,
+        "attempt": 1,
+        "toolIndex": 5
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11910.120041999999,
+        "attempt": 1,
+        "toolIndex": 6
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 11910.488833000001,
+        "attempt": 1,
+        "toolIndex": 7
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23054.498125,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23056.376333,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23065.374833,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 23070.923167,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23078.618333000002,
+        "attempt": 1,
+        "toolIndex": 11
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23115.251541999998,
+        "attempt": 1,
+        "toolIndex": 8
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23172.351166999997,
+        "attempt": 1,
+        "toolIndex": 9
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 23199.130125,
+        "attempt": 1,
+        "toolIndex": 10
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52543.332542000004,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52560.975833000004,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 52562.544792,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52600.12625,
+        "attempt": 1,
+        "toolIndex": 13
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52628.001792,
+        "attempt": 1,
+        "toolIndex": 14
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 52717.607833,
+        "attempt": 1,
+        "toolIndex": 12
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 68989.33062499999,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 69123.04091699999,
+        "attempt": 1,
+        "toolIndex": 15
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 81535.60525000001,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 82139.6305,
+        "attempt": 1,
+        "toolIndex": 16
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 86115.33075,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 86120.944875,
+        "attempt": 1,
+        "toolIndex": 18
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 86136.47949999999,
+        "attempt": 1,
+        "toolIndex": 19
+      },
+      {
+        "stage": "tool-start",
+        "elapsedMs": 86148.626625,
+        "attempt": 1,
+        "toolIndex": 20
+      },
+      {
+        "stage": "tool-end",
+        "elapsedMs": 86314.012542,
+        "attempt": 1,
+        "toolIndex": 17
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 150320.747917,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 150339.433333,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "failed",
+    "truncated": false
+  }
+]
