@@ -1,6 +1,6 @@
-mod turn_timing;
 #[cfg(debug_assertions)]
 mod performance_benchmark;
+mod turn_timing;
 use gyro_core::timing::{self, Stage as TimingStage};
 mod browser_knowledge;
 mod command_file_changes;
@@ -19733,7 +19733,8 @@ fn handle_provider_stdout_line(
     };
     stream_state.parsed_stream_json = true;
     if value.get("type").and_then(serde_json::Value::as_str) == Some("system")
-        && value.get("subtype").and_then(serde_json::Value::as_str) == Some("init") {
+        && value.get("subtype").and_then(serde_json::Value::as_str) == Some("init")
+    {
         timing::mark(TimingStage::ProtocolReady);
     }
     if stream_state.provider_session_id.is_none() {

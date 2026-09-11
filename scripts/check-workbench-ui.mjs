@@ -305,6 +305,7 @@ expect(
 );
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const turnTimingSource = readRepoFile("apps/desktop/src/turn-timing.ts");
 const captureFixtureSource = readRepoFile(
   "apps/desktop/src/capture-fixtures.ts",
 );
@@ -908,6 +909,9 @@ const coreCapabilitiesSource = readRepoFile(
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const turnTimingRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/turn_timing.rs",
+);
 const updateStateSource = readRepoFile("packages/ui/src/update-state.ts");
 const updateControllerSource = readRepoFile(
   "apps/desktop/src/update-controller.ts",
@@ -3601,7 +3605,11 @@ expect(
     !appSource.includes("const [draft, setDraft]") &&
     !appSource.includes("onDraftChange={setDraft}") &&
     appSource.includes("maxDraftLength={MAX_CHAT_MESSAGE_CHARS}") &&
-    /invoke<ProviderChatResponse>\(\s*"run_provider_chat"/.test(appSource) &&
+    /invokeTimedProviderChat<ProviderChatResponse>\(\s*"run_provider_chat"/.test(
+      appSource,
+    ) &&
+    appSource.includes("turnTiming.invokeTimedProviderChat") &&
+    turnTimingSource.includes("return await invoke<T>(command, args)") &&
     appSource.includes("sessionTitleFromMessage") &&
     appSource.includes("shouldSuggestSessionTitle") &&
     appSource.includes("applyProviderChatResponse") &&
@@ -3962,8 +3970,11 @@ expect(
     tauriSource.includes("async fn run_provider_chat") &&
     // Interactive sends must be tagged as chat for the usage ledger, so an
     // automation can never be counted against the person at the keyboard.
-    /spawn_blocking\(move \|\|\s*\{?\s*run_provider_chat_blocking\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
+    /spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
       tauriSource,
+    ) &&
+    turnTimingRustSource.includes(
+      "run_provider_chat_blocking(app, request, origin)",
     ) &&
     tauriSource.includes("async fn save_config") &&
     tauriSource.includes("config save worker failed") &&
@@ -6447,14 +6458,30 @@ expect(
         rule.includes("min-height: 48px") &&
         rule.includes("padding: 0 5px 0 84px"),
     ) &&
-    cssRules(styleSource, ".gyro-sidebar-restore-button").some((rule) =>
-      rule.includes("top: 14px"),
+    surfaceSource.includes('className="gyro-sidebar-restore-cluster"') &&
+    surfaceSource.includes('className="gyro-sidebar-window-actions"') &&
+    surfaceSource.includes(
+      'className="gyro-sidebar-restore-button gyro-sidebar-toggle-button"',
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-restore-cluster").some(
+      (rule) =>
+        rule.includes("height: 52px") &&
+        rule.includes("padding-left: 93px") &&
+        rule.includes("position: fixed"),
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-restore-button").some(
+      (rule) =>
+        rule.includes("position: static") &&
+        rule.includes("height: 28px") &&
+        rule.includes("top: auto"),
     ) &&
     cssRules(styleSource, ".gyro-sidebar-restore-button").every(
       (rule) => !rule.includes("top: 16px"),
     ) &&
     styleSource.includes(".gyro-chat-grid.has-multiple-panes") &&
-    styleSource.includes(".gyro-sidebar-restore-button {\n  top: 7px;") &&
+    styleSource.includes(
+      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout:has(\n    .gyro-chat-grid.has-multiple-panes\n  )\n  > .gyro-sidebar-restore-cluster",
+    ) &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
     styleSource.includes("margin: auto -8px 0"),
