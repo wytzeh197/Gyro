@@ -191,11 +191,11 @@ containsAll(pages.home, "Homepage", [
   "A space to build.",
   "workspace-switcher",
   "ownership-title",
-  "An open-source AI coding workspace for your agents, terminal,",
+  "Your agents, terminal, and code review. Together on your Mac.",
   "Public alpha",
   "Think, build, and ship in one place.",
   "Public alpha",
-  "Three surfaces. One task.",
+  "Three surfaces.<br />One task.",
   "Direct work.",
   "Run locally.",
   "Review changes.",
@@ -211,8 +211,8 @@ containsAll(pages.home, "Homepage", [
   'class="agent-grid"',
   'class="agent-tile agent-ollama"',
   ">Ollama</span>",
-  "assets/screenshots/hero-current-dark.webp",
-  "assets/screenshots/hero-current-light.webp",
+  "assets/screenshots/hero-2400.webp",
+  "assets/screenshots/hero-light-2400.webp",
   "assets/social-preview.png",
   "Download for macOS.",
   "Download DMG",
@@ -253,7 +253,10 @@ check(
   "Download pages must not show an automatic recommendation sentence",
 );
 check(
-  !css.replace(/\.home-page \.product-stage-frame::after\s*\{[^}]*\}/g, "").toLowerCase().includes("gradient("),
+  !css
+    .replace(/\.home-page \.product-stage-frame::after\s*\{[^}]*\}/g, "")
+    .toLowerCase()
+    .includes("gradient("),
   "Gradients are limited to the requested screenshot outline",
 );
 check(
@@ -517,10 +520,9 @@ check(
 );
 
 /*
- * 16:10, not 16:9. The app puts a sidebar, a conversation and an environment
- * panel side by side, and a 16:9 crop of that either loses a column or pads
- * the thread with empty space. These numbers match the capture scenes in
- * scripts/capture-site-screenshots.mjs; change them together.
+ * Scenic hero posters use a 16:10 canvas. The current app windows are
+ * captured separately, then composed by scripts/site-motion/render.py.
+ * Change poster dimensions here and in the renderer together.
  */
 const screenshotSpecs = [
   ["site/assets/screenshots/hero-current-dark.webp", 1660, 989],
