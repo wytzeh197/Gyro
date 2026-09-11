@@ -4,16 +4,19 @@
 //! local. This module accepts only loopback HTTP endpoints and keeps runtime
 //! discovery separate from persisted provider configuration.
 
+use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader};
 use std::time::Duration;
 use url::{Host, Url};
 
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/api";
+pub const OLLAMA_CANCELLED_MESSAGE: &str = "Ollama chat cancelled";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-// Loading a local model and generating a complete, non-streamed answer can
-// take considerably longer than a readiness probe, especially on CPU hosts.
-const CHAT_TIMEOUT: Duration = Duration::from_secs(180);
+// A streamed local generation, including model load on a CPU host, can sit
+// quiet for minutes. The 180s non-stream budget is what dropped those answers.
+const CHAT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const MAX_DISCOVERED_MODELS: usize = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -158,6 +161,25 @@ pub fn ollama_chat(request: OllamaChatRequest<'_>) -> Result<OllamaChatResponse>
 /// the returned assistant/tool messages and decide which tool calls may cross
 /// their own approval boundary before asking Ollama for the next turn.
 pub fn ollama_tool_chat(request: OllamaToolChatRequest<'_>) -> Result<OllamaChatResponse> {
+    ollama_tool_chat_with_progress(request, &CancellationToken::default(), |_| {})
+}
+
+/// Stream one Ollama turn, forwarding text deltas as they arrive.
+///
+/// Cancellation is checked between frames so Stop does not wait out the read
+/// timeout. A non-stream JSON body is still accepted so tests and older
+/// Ollama builds keep working.
+pub fn ollama_tool_chat_with_progress<F>(
+    request: OllamaToolChatRequest<'_>,
+    cancellation: &CancellationToken,
+    mut on_delta: F,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+{
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
     let model = request.model.trim();
     if model.is_empty() {
         return Err(anyhow!("select an installed Ollama model before sending"));
@@ -168,34 +190,66 @@ pub fn ollama_tool_chat(request: OllamaToolChatRequest<'_>) -> Result<OllamaChat
         .post(url.as_str())
         .send_json(ureq::json!({
             "model": model,
-            "stream": false,
+            "stream": true,
             "messages": request.messages,
             "tools": request.tools
         }))
         .map_err(ollama_http_error)?;
     ensure_loopback_response(&response, &endpoint)?;
-    let response: OllamaChatWireResponse = response
-        .into_json()
-        .context("invalid Ollama chat response")?;
-    let content = response.message.content.trim().to_string();
-    let tool_calls = response
-        .message
-        .tool_calls
-        .into_iter()
-        .filter_map(|call| {
-            (!call.function.name.trim().is_empty()).then_some(OllamaToolCall {
+    let mut reader = BufReader::new(response.into_reader());
+    let mut content = String::new();
+    let mut tool_calls = Vec::new();
+    let mut input_tokens = None;
+    let mut output_tokens = None;
+    let mut line = String::new();
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+        }
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .context("invalid Ollama chat stream")?;
+        if read == 0 {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let frame: OllamaChatStreamFrame =
+            serde_json::from_str(trimmed).context("invalid Ollama chat response")?;
+        if !frame.message.content.is_empty() {
+            on_delta(&frame.message.content);
+            content.push_str(&frame.message.content);
+        }
+        for call in frame.message.tool_calls {
+            if call.function.name.trim().is_empty() {
+                continue;
+            }
+            tool_calls.push(OllamaToolCall {
                 name: call.function.name,
                 arguments: call.function.arguments,
-            })
-        })
-        .collect::<Vec<_>>();
+            });
+        }
+        if frame.prompt_eval_count.is_some() {
+            input_tokens = frame.prompt_eval_count;
+        }
+        if frame.eval_count.is_some() {
+            output_tokens = frame.eval_count;
+        }
+        if frame.done {
+            break;
+        }
+    }
+    let content = content.trim().to_string();
     if content.is_empty() && tool_calls.is_empty() {
         return Err(anyhow!("Ollama finished without a text response"));
     }
     Ok(OllamaChatResponse {
         content,
-        input_tokens: response.prompt_eval_count,
-        output_tokens: response.eval_count,
+        input_tokens,
+        output_tokens,
         tool_calls,
     })
 }
@@ -205,7 +259,13 @@ fn agent() -> ureq::Agent {
 }
 
 fn chat_agent() -> ureq::Agent {
-    agent_with_read_timeout(CHAT_TIMEOUT)
+    ureq::AgentBuilder::new()
+        .timeout_connect(REQUEST_TIMEOUT)
+        .timeout_read(CHAT_TIMEOUT)
+        .timeout_write(CHAT_TIMEOUT)
+        .timeout(CHAT_TIMEOUT)
+        .redirects(0)
+        .build()
 }
 
 fn agent_with_read_timeout(read_timeout: Duration) -> ureq::Agent {
@@ -267,16 +327,19 @@ struct OllamaShowResponse {
     model_info: serde_json::Value,
 }
 
-#[derive(Deserialize)]
-struct OllamaChatWireResponse {
+#[derive(Default, Deserialize)]
+struct OllamaChatStreamFrame {
+    #[serde(default)]
     message: OllamaChatWireMessage,
+    #[serde(default)]
+    done: bool,
     #[serde(default)]
     prompt_eval_count: Option<u64>,
     #[serde(default)]
     eval_count: Option<u64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct OllamaChatWireMessage {
     #[serde(default)]
     content: String,
@@ -422,6 +485,80 @@ mod tests {
         .unwrap();
         server.join().unwrap();
         assert_eq!(response.content, "Local model ready");
+    }
+
+    #[test]
+    fn chat_streams_deltas_and_honors_cancel() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            let mut content_length = 0;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" || header.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        content_length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0; content_length];
+            reader.read_exact(&mut body).unwrap();
+            drop(reader);
+            let payload = concat!(
+                r#"{"message":{"content":"Hel"},"done":false}"#,
+                "\n",
+                r#"{"message":{"content":"lo"},"done":true,"prompt_eval_count":3,"eval_count":2}"#,
+                "\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            )
+            .unwrap();
+        });
+        let mut deltas = Vec::new();
+        let response = ollama_tool_chat_with_progress(
+            OllamaToolChatRequest {
+                base_url: Some(&format!("http://{address}/api")),
+                model: "test-local-model",
+                messages: vec![serde_json::json!({ "role": "user", "content": "Hi" })],
+                tools: Vec::new(),
+            },
+            &CancellationToken::default(),
+            |delta| deltas.push(delta.to_string()),
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(deltas, ["Hel", "lo"]);
+        assert_eq!(response.content, "Hello");
+        assert_eq!(response.input_tokens, Some(3));
+        assert_eq!(response.output_tokens, Some(2));
+
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+        let error = ollama_tool_chat_with_progress(
+            OllamaToolChatRequest {
+                base_url: Some("http://127.0.0.1:9/api"),
+                model: "test-local-model",
+                messages: Vec::new(),
+                tools: Vec::new(),
+            },
+            &cancellation,
+            |_| {},
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, OLLAMA_CANCELLED_MESSAGE);
     }
 
     #[test]

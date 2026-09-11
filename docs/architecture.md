@@ -42,9 +42,11 @@ store.
 - Secret redaction.
 - Workspace path boundary checks.
 - Fast workspace readiness checks at turn start: folder availability, project
-  kind, and a bounded Git brief. A missing project fails closed before a
-  provider is spawned. A compact briefing is injected so the first model token
-  does not wait on a tool round-trip.
+  kind, and a bounded Git brief, reused for a few seconds so repeated sends
+  do not respawn Git. A missing project fails closed before a provider is
+  spawned. A compact briefing is injected so the first model token does not
+  wait on a tool round-trip. The desktop marks a turn running before the
+  workspace-context JSONL append so fsync cannot hide the first activity.
 - Git worktree creation for explicitly isolated sessions.
 - macOS Keychain access for provider keys.
 - Local IPC payloads for CLI-to-app notifications.
@@ -102,13 +104,19 @@ Provider credentials stay outside Gyro in provider CLIs, SDKs, environment
 variables, Keychain references, or provider-owned files.
 
 Ollama is the exception to the CLI/ACP adapter family: Gyro talks directly to
-its loopback HTTP API and keeps conversation continuity in the local session
-log instead of storing an Ollama session cursor. The default endpoint is
-`http://localhost:11434/api`; URL validation permits only loopback HTTP hosts,
-does not follow redirects, and rejects URL credentials. Model discovery stays
-ephemeral. Models that advertise native function calling receive the desktop
-capability broker and approval policy; unverified models are chat-only.
-Attachments are rejected for this provider in V1.
+its loopback HTTP API, streams tokens as they arrive, and keeps conversation
+continuity in the local session log instead of storing an Ollama session
+cursor. The default endpoint is `http://localhost:11434/api`; URL validation
+permits only loopback HTTP hosts, does not follow redirects, and rejects URL
+credentials. Model discovery stays ephemeral. Models that advertise native
+function calling receive the desktop capability broker and approval policy,
+filtered to the tools the current run mode can actually grant; unverified
+models are chat-only. Attachments are rejected for this provider in V1.
+ACP providers fail the turn rather than silently dropping the Gyro tool
+bridge. Quiet provider processes are not treated as finished: desktop chat
+disables process inactivity, and CLI ACP/Codex inactivity cannot undercut
+the selected run deadline. Transient network errors retry twice with short
+backoff; hard timeouts and cancellations do not.
 
 Provider diagnostics are redacted and metadata-only: provider id, model id,
 timing, retry count, resumed/not-resumed state, timeout/failure reason, and

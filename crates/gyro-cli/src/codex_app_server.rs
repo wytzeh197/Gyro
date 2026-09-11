@@ -38,7 +38,9 @@ impl ProtocolGuard {
     }
 
     fn timed_out_at(&self, now: Instant) -> bool {
-        now >= self.overall_deadline || now >= self.inactivity_deadline
+        // Quiet protocol frames (thinking, long tools) are not completion.
+        // Only the overall run deadline ends a still-open app-server turn.
+        now >= self.overall_deadline
     }
 
     fn record_if_valid_at(&mut self, message: &Value, now: Instant) -> Result<bool> {
@@ -898,6 +900,8 @@ mod tests {
             guard.inactivity_deadline,
             activity_at + APP_SERVER_INACTIVITY_TIMEOUT
         );
+        assert!(!guard.timed_out_at(started_at + Duration::from_secs(30 * 60 + 1)));
+        assert!(guard.timed_out_at(started_at + Duration::from_secs(60 * 60)));
 
         guard.activity_messages = MAX_PROTOCOL_ACTIVITY_MESSAGES;
         assert!(guard

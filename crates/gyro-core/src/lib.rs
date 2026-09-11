@@ -39,16 +39,16 @@ pub use automations::{
     AutomationStatus, AutomationStore, AutomationTriageState, CreateAutomationRequest,
 };
 pub use capabilities::{
-    capability_descriptor, capability_path_is_sensitive, normalize_capability_relative_path,
-    provider_capability_manifest, provider_capability_support, sanitize_capability_summary,
-    validate_capability_result_data, CapabilityAccess, CapabilityApprovalDecision,
-    CapabilityCallEvent, CapabilityClass, CapabilityDescriptor, CapabilityError, CapabilityId,
-    CapabilityInvocationContext, CapabilityPolicySnapshot, CapabilityRequest,
-    CapabilityResourceRef, CapabilityResponse, CapabilityResult, CapabilityRunMode,
-    CapabilityStatus, ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
-    WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
-    MAX_CAPABILITY_RESULT_BYTES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
-    PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
+    advertised_capability_descriptors, capability_advertised_for_mode, capability_descriptor,
+    capability_path_is_sensitive, normalize_capability_relative_path, provider_capability_manifest,
+    provider_capability_support, sanitize_capability_summary, validate_capability_result_data,
+    CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass,
+    CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInvocationContext,
+    CapabilityPolicySnapshot, CapabilityRequest, CapabilityResourceRef, CapabilityResponse,
+    CapabilityResult, CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant,
+    ProjectCapabilityPolicy, ProviderCapabilitySupport, WorkspaceContextSnapshot,
+    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
 };
 pub use cli_path::{augmented_gui_path, user_cli_paths};
 pub use cli_updates::{
@@ -123,9 +123,10 @@ pub use mutations::{
     ProviderMutationResult,
 };
 pub use ollama::{
-    discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat, OllamaChatRequest,
-    OllamaChatResponse, OllamaDiscovery, OllamaModel, OllamaRuntimeStatus, OllamaToolCall,
-    OllamaToolChatRequest, DEFAULT_OLLAMA_BASE_URL,
+    discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat,
+    ollama_tool_chat_with_progress, OllamaChatRequest, OllamaChatResponse, OllamaDiscovery,
+    OllamaModel, OllamaRuntimeStatus, OllamaToolCall, OllamaToolChatRequest,
+    DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,
 };
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};

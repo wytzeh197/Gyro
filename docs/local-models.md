@@ -15,8 +15,8 @@ API key or a Gyro restart. Model downloads are managed by Ollama.
 
 If Gyro says the runtime is unavailable, start Ollama. If it says a model is
 required, pull a model and refresh. A local model may take time to load; Gyro
-allows up to three minutes for a complete response, while connection checks
-remain short.
+streams tokens as they arrive and allows up to thirty minutes per generation,
+while connection checks remain short. Stop still cancels the in-flight request.
 
 Gyro accepts only loopback HTTP Ollama endpoints and does not follow redirects.
 Models that advertise tool support can use governed Gyro tools. Other models

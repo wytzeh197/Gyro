@@ -162,7 +162,7 @@ struct ChatArgs {
     json: bool,
 
     /// Stop a provider turn when this timeout is reached.
-    #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    #[arg(long, default_value_t = 3600, value_parser = clap::value_parser!(u64).range(1..=86400))]
     timeout_seconds: u64,
 }
 
@@ -174,7 +174,7 @@ impl Default for ChatArgs {
             model: None,
             approve: false,
             json: false,
-            timeout_seconds: 180,
+            timeout_seconds: 3600,
         }
     }
 }
@@ -213,7 +213,7 @@ struct RunArgs {
     approve: bool,
 
     /// Stop the provider when this timeout is reached.
-    #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    #[arg(long, default_value_t = 3600, value_parser = clap::value_parser!(u64).range(1..=86400))]
     timeout_seconds: u64,
 
     #[command(flatten)]
@@ -254,7 +254,7 @@ struct ResumeArgs {
     approve: bool,
 
     /// Stop the provider when this timeout is reached.
-    #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    #[arg(long, default_value_t = 3600, value_parser = clap::value_parser!(u64).range(1..=86400))]
     timeout_seconds: u64,
 }
 
@@ -3209,7 +3209,7 @@ fn execute_kimi_acp_provider(
                 .filter(|(kind, _)| *kind == runtime.cursor_kind)
                 .map(|(_, session_id)| session_id.to_string()),
             timeout: Duration::from_secs(timeout_seconds),
-            inactivity_timeout: Duration::from_secs(timeout_seconds.min(30 * 60)),
+            inactivity_timeout: Duration::from_secs(timeout_seconds),
             cancellation: cancellation.clone(),
         },
         |delta| {
@@ -5639,7 +5639,7 @@ done
         assert!(args.no_open);
         assert!(args.json);
         assert!(!args.approve);
-        assert_eq!(args.timeout_seconds, 180);
+        assert_eq!(args.timeout_seconds, 3600);
         assert_eq!(args.task, "inspect this repo");
     }
 
