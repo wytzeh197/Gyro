@@ -1,63 +1,110 @@
+/* Native <dialog> ships a system canvas and push-buttons. Reset both so this
+   prompt uses the same overlay language as project-remove and model-standard. */
 .gyro-branch-name-dialog {
-  background: var(--gyro-topbar, #202124);
-  color: var(--gyro-text, #eee);
-  border: 1px solid var(--gyro-topbar-border, #454545);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px #0006;
-  padding: 24px;
-  width: min(420px, calc(100vw - 32px));
+  appearance: none;
+  background: var(--gyro-premium-panel, var(--gyro-surface-raised));
+  border: 1px solid var(--gyro-premium-line-soft, var(--gyro-border));
+  border-radius: var(--gyro-premium-radius-md, 8px);
+  box-shadow:
+    0 28px 88px var(--gyro-premium-shadow, rgba(0, 0, 0, 0.44)),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight, rgba(255, 255, 255, 0.04));
+  color: var(--gyro-premium-text, var(--gyro-text));
+  color-scheme: inherit;
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-support, 13px);
+  margin: auto;
   max-height: calc(100dvh - 32px);
   overflow: auto;
+  padding: 16px;
+  width: min(390px, calc(100vw - 40px));
 }
+
 .gyro-branch-name-dialog::backdrop {
-  background: #0007;
+  background: var(--gyro-scrim, rgba(0, 0, 0, 0.58));
+  backdrop-filter: blur(6px);
 }
+
 .gyro-branch-name-dialog form {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
+
 .gyro-branch-name-dialog h2 {
-  margin: 0;
   font-size: 18px;
-}
-.gyro-branch-name-dialog p {
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.2;
   margin: 0;
-  opacity: 0.7;
+}
+
+.gyro-branch-name-dialog p {
+  color: var(--gyro-premium-muted, var(--gyro-muted));
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
   overflow-wrap: anywhere;
 }
+
+.gyro-branch-name-dialog code {
+  background: var(--gyro-premium-control, var(--gyro-surface-soft));
+  border-radius: var(--gyro-premium-radius-sm, 6px);
+  color: var(--gyro-premium-text, var(--gyro-text));
+  font-family: var(--gyro-font-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  padding: 1px 5px;
+}
+
+.gyro-branch-name-dialog-field {
+  display: grid;
+  gap: 6px;
+}
+
 .gyro-branch-name-dialog label {
-  font-weight: 600;
+  color: var(--gyro-premium-text, var(--gyro-text));
+  font-size: 12px;
+  font-weight: 650;
 }
+
 .gyro-branch-name-dialog input {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--gyro-topbar-border, #454545);
-  border-radius: 6px;
-  padding: 10px;
-  background: transparent;
-  color: inherit;
+  appearance: none;
+  background: var(--gyro-premium-control, var(--gyro-surface-soft));
+  border: 1px solid var(--gyro-premium-line-soft, var(--gyro-border-soft));
+  border-radius: var(--gyro-radius-sm, 6px);
+  box-shadow: none;
+  color: var(--gyro-premium-text, var(--gyro-text));
   font: inherit;
+  min-height: var(--gyro-control-height, 32px);
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
 }
+
 .gyro-branch-name-dialog input:focus-visible {
-  outline: 2px solid var(--gyro-accent, #e84a8a);
-  outline-offset: 2px;
+  border-color: var(--gyro-accent);
+  outline: 2px solid var(--gyro-focus-ring, var(--gyro-accent));
+  outline-offset: 1px;
 }
+
 .gyro-branch-name-dialog footer {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
+
 .gyro-branch-name-dialog button {
-  padding: 8px 12px;
-  border-radius: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: var(--gyro-premium-radius-sm, 6px);
   cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  min-height: 32px;
+  padding: 0 12px;
 }
-.gyro-branch-name-dialog button[type="submit"] {
-  background: var(--gyro-accent, #e84a8a);
-  color: #fff;
-  border: 1px solid transparent;
-}
+
 .gyro-branch-name-dialog button:disabled {
+  cursor: not-allowed;
   opacity: 0.45;
-  cursor: default;
 }

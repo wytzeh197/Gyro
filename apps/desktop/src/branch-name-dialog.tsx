@@ -51,28 +51,42 @@ export function BranchNameDialog({
           {mode === "rename" ? "Rename current branch" : "New branch"}
         </h2>
         <p id="gyro-branch-name-description">
-          {mode === "rename"
-            ? "Rename the branch checked out in this workspace."
-            : startPoint
-              ? `Create and switch to a branch from ${startPoint}.`
-              : "Create and switch to a branch from the current commit."}
+          {mode === "rename" ? (
+            "Rename the branch checked out in this workspace."
+          ) : startPoint ? (
+            <>
+              Create and switch to a branch from <code>{startPoint}</code>.
+            </>
+          ) : (
+            "Create and switch to a branch from the current commit."
+          )}
         </p>
-        <label htmlFor="gyro-branch-name">Branch name</label>
-        <input
-          ref={inputRef}
-          id="gyro-branch-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="feature/my-change"
-          autoComplete="off"
-          spellCheck={false}
-          required
-        />
+        <div className="gyro-branch-name-dialog-field">
+          <label htmlFor="gyro-branch-name">Branch name</label>
+          <input
+            ref={inputRef}
+            id="gyro-branch-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="feature/my-change"
+            autoComplete="off"
+            spellCheck={false}
+            required
+          />
+        </div>
         <footer>
-          <button type="button" onClick={() => onFinish()}>
+          <button
+            className="gyro-secondary-button"
+            type="button"
+            onClick={() => onFinish()}
+          >
             Cancel
           </button>
-          <button type="submit" disabled={!name.trim()}>
+          <button
+            className="gyro-primary-button"
+            type="submit"
+            disabled={!name.trim()}
+          >
             {mode === "rename" ? "Rename branch" : "Create branch"}
           </button>
         </footer>

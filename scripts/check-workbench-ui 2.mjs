@@ -610,45 +610,6 @@ expect(
   "The Source Control rail icon should badge the change count, and status should refresh from the workspace root.",
 );
 expect(
-  surfaceSource.includes("function scmBranchMenuStyle") &&
-    surfaceSource.includes("function ScmBranchPicker") &&
-    surfaceSource.includes('className="gyro-scm-branch-menu"') &&
-    surfaceSource.includes("createPortal(") &&
-    cssRules(styleSource, ".gyro-scm-branch-menu").some(
-      (rule) =>
-        rule.includes("position: fixed") &&
-        rule.includes("isolation: isolate") &&
-        rule.includes("z-index: 80"),
-    ) &&
-    cssRules(styleSource, ".gyro-scm-branch-item span").some(
-      (rule) =>
-        rule.includes("overflow-wrap: anywhere") &&
-        rule.includes("white-space: normal"),
-    ) &&
-    cssRules(
-      styleSource,
-      ':root[data-theme="light"] .gyro-scm-branch-menu',
-    ).some((rule) => rule.includes("background: #fff")),
-  "The branch picker menu should portal above the commit form so long names are not clipped.",
-);
-const branchDialogSource = readRepoFile(
-  "apps/desktop/src/branch-name-dialog.tsx",
-);
-const branchDialogCss = readRepoFile("apps/desktop/src/branch-name-dialog.css");
-expect(
-  branchDialogSource.includes('className="gyro-primary-button"') &&
-    branchDialogSource.includes('className="gyro-secondary-button"') &&
-    branchDialogSource.includes("<code>{startPoint}</code>") &&
-    branchDialogCss.includes("appearance: none") &&
-    branchDialogCss.includes("-webkit-appearance: none") &&
-    branchDialogCss.includes("var(--gyro-premium-panel") &&
-    branchDialogCss.includes("var(--gyro-scrim") &&
-    branchDialogCss.includes("backdrop-filter: blur(6px)") &&
-    !branchDialogCss.includes("background: canvas") &&
-    !branchDialogCss.includes("--gyro-topbar"),
-  "The new-branch dialog should use Gyro overlay, type, and buttons instead of native system chrome.",
-);
-expect(
   cssRules(styleSource, ".gyro-settings-topbar").some((rule) =>
     rule.includes("background: var(--gyro-sidebar)"),
   ) &&

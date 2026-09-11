@@ -15791,39 +15791,6 @@ function githubRunStateIcon(state: GithubRunState): IconComponent {
  * repository is not on GitHub — the states where showing controls would only
  * promise something Gyro cannot deliver.
  */
-function scmBranchMenuStyle(trigger: HTMLElement): CSSProperties {
-  const rect = trigger.getBoundingClientRect();
-  const padding = 8;
-  const minWidth = Math.max(rect.width, 260);
-  const width = Math.min(minWidth, Math.max(160, window.innerWidth - padding * 2));
-  const spaceBelow = window.innerHeight - rect.bottom - padding;
-  const spaceAbove = rect.top - padding;
-  const openUp = spaceBelow < 148 && spaceAbove > spaceBelow;
-  const left = Math.min(
-    Math.max(padding, rect.right - width),
-    Math.max(padding, window.innerWidth - width - padding),
-  );
-  const maxHeight = Math.min(
-    280,
-    Math.max(96, (openUp ? spaceAbove : spaceBelow) - 4),
-  );
-  return openUp
-    ? {
-        left,
-        width,
-        maxHeight,
-        top: "auto",
-        bottom: window.innerHeight - rect.top + 4,
-      }
-    : {
-        left,
-        width,
-        maxHeight,
-        top: rect.bottom + 4,
-        bottom: "auto",
-      };
-}
-
 function ScmBranchPicker({
   branchCatalog,
   currentBranch,
@@ -15842,11 +15809,8 @@ function ScmBranchPicker({
   onSelectBranch?: (branch: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(open, () =>
+  const rootRef = useOutsidePointerDismiss<HTMLDivElement>(open, () =>
     setOpen(false),
-    triggerRef,
   );
   const branches = branchCatalog?.branches ?? [];
   const label =
@@ -15858,47 +15822,14 @@ function ScmBranchPicker({
           ? "No repository"
           : "Select branch";
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const update = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      setMenuStyle(scmBranchMenuStyle(trigger));
-    };
-    update();
-    window.addEventListener("resize", update);
-    document.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      document.removeEventListener("scroll", update, true);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    menuRef.current
-      ?.querySelector<HTMLElement>(".gyro-scm-branch-item.is-current")
-      ?.scrollIntoView({ block: "nearest" });
-  }, [open, menuRef, currentBranch]);
-
   return (
-    <div className="gyro-scm-branch-picker">
+    <div className="gyro-scm-branch-picker" ref={rootRef}>
       <button
         aria-expanded={open}
         aria-haspopup="listbox"
         className="gyro-scm-branch-trigger"
         disabled={disabled || isLoading}
-        onClick={() => {
-          if (open) {
-            setOpen(false);
-            return;
-          }
-          if (triggerRef.current) {
-            setMenuStyle(scmBranchMenuStyle(triggerRef.current));
-          }
-          setOpen(true);
-        }}
-        ref={triggerRef}
+        onClick={() => setOpen((value) => !value)}
         title={error ?? label}
         type="button"
       >
@@ -15906,65 +15837,54 @@ function ScmBranchPicker({
         <span>{isLoading ? "Loading…" : label}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </button>
-      {open
-        ? createPortal(
-            // The repository section clips overflow, so this menu has to live
-            // on document.body or the current branch is cut off over the form.
-            <div
-              className="gyro-scm-branch-menu"
-              ref={menuRef}
-              role="listbox"
-              style={menuStyle}
-            >
-              <button
-                className="gyro-scm-branch-item is-action"
-                onClick={() => {
-                  setOpen(false);
-                  onCreateBranch?.();
-                }}
-                type="button"
-              >
-                <GitBranchPlus size={12} aria-hidden="true" />
-                Create new branch…
-              </button>
-              {branches.length === 0 ? (
-                <div className="gyro-scm-branch-empty">
-                  {branchCatalog?.error ?? error ?? "No local branches found."}
-                </div>
-              ) : (
-                branches.map((branch) => {
-                  const isCurrent = branch === currentBranch;
-                  return (
-                    <button
-                      aria-selected={isCurrent}
-                      className={[
-                        "gyro-scm-branch-item",
-                        isCurrent ? "is-current" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      key={branch}
-                      onClick={() => {
-                        setOpen(false);
-                        if (!isCurrent) {
-                          onSelectBranch?.(branch);
-                        }
-                      }}
-                      role="option"
-                      title={branch}
-                      type="button"
-                    >
-                      <GitBranch size={12} aria-hidden="true" />
-                      <span>{branch}</span>
-                      {isCurrent ? <Check size={12} aria-hidden="true" /> : null}
-                    </button>
-                  );
-                })
-              )}
-            </div>,
-            document.body,
-          )
-        : null}
+      {open ? (
+        <div className="gyro-scm-branch-menu" role="listbox">
+          <button
+            className="gyro-scm-branch-item is-action"
+            onClick={() => {
+              setOpen(false);
+              onCreateBranch?.();
+            }}
+            type="button"
+          >
+            <GitBranchPlus size={12} aria-hidden="true" />
+            Create new branch…
+          </button>
+          {branches.length === 0 ? (
+            <div className="gyro-scm-branch-empty">
+              {branchCatalog?.error ?? error ?? "No local branches found."}
+            </div>
+          ) : (
+            branches.map((branch) => {
+              const isCurrent = branch === currentBranch;
+              return (
+                <button
+                  aria-selected={isCurrent}
+                  className={[
+                    "gyro-scm-branch-item",
+                    isCurrent ? "is-current" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={branch}
+                  onClick={() => {
+                    setOpen(false);
+                    if (!isCurrent) {
+                      onSelectBranch?.(branch);
+                    }
+                  }}
+                  role="option"
+                  type="button"
+                >
+                  <GitBranch size={12} aria-hidden="true" />
+                  <span>{branch}</span>
+                  {isCurrent ? <Check size={12} aria-hidden="true" /> : null}
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
