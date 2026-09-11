@@ -174,6 +174,7 @@ containsAll(read("site/theme.js"), "Theme runtime", [
   "gyro.site-theme",
   "data-theme-toggle",
   "addEventListener",
+  'stored() === "dark" ? "dark" : "light"',
 ]);
 check(
   !app.includes("data-theme-toggle"),
@@ -184,6 +185,14 @@ for (const [name, html] of Object.entries(pages)) {
     html.includes("data-theme-toggle"),
     `${name} page must expose the header theme toggle`,
   );
+  check(
+    html.includes('content="#ffffff"'),
+    `${name} page must default theme-color to white`,
+  );
+  check(
+    html.includes('aria-label="Switch to dark theme"'),
+    `${name} page must default the theme toggle to light`,
+  );
 }
 
 containsAll(pages.home, "Homepage", [
@@ -191,7 +200,6 @@ containsAll(pages.home, "Homepage", [
   "A space to build.",
   "workspace-switcher",
   "ownership-title",
-  "Your agents, terminal, and code review. Together on your Mac.",
   "Public alpha",
   "Think, build, and ship in one place.",
   "Public alpha",
@@ -238,6 +246,12 @@ for (const mock of ["mock mock-chat", "mock mock-terminal", "mock mock-diff"]) {
 check(
   (pages.home.match(/data-download-surface/g) ?? []).length === 1,
   "Homepage must contain one compact download surface",
+);
+check(
+  !pages.home.includes(
+    "Your agents, terminal, and code review. Together on your Mac.",
+  ),
+  "Homepage hero must not include the removed subtitle",
 );
 check(
   !pages.home.includes("Move Gyro to Applications."),
@@ -388,7 +402,7 @@ check(
 );
 
 // The high-contrast override started life as a light-theme-only palette, which
-// left dark mode — the default — with near-black text on a near-black page.
+// left dark mode with near-black text on a near-black page.
 check(
   /@media \(prefers-contrast: more\) \{[\s\S]*?:root\[data-theme="light"\]/.test(
     css,
