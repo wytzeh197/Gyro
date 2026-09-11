@@ -6946,6 +6946,8 @@ struct ProviderLedgerSummary {
     provider_id: String,
     /// Rolling 5 hours — same window as Claude/Codex session limits.
     five_hour: UsageTotals,
+    /// Rolling 24 hours — daily pace against the weekly/100% limit.
+    day: UsageTotals,
     /// Rolling 7 days — same window as weekly plan limits.
     week: UsageTotals,
     /// Present only when a budget is configured for this provider.
@@ -6961,6 +6963,9 @@ async fn get_provider_usage_ledger(provider_id: String) -> Result<ProviderLedger
         let now = chrono::Utc::now();
         let five_hour = store
             .provider_usage_totals_since(&provider_id, now - chrono::Duration::hours(5))
+            .map_err(to_string)?;
+        let day = store
+            .provider_usage_totals_since(&provider_id, now - chrono::Duration::hours(24))
             .map_err(to_string)?;
         let week = store
             .provider_usage_totals_since(&provider_id, now - chrono::Duration::days(7))
@@ -6978,6 +6983,7 @@ async fn get_provider_usage_ledger(provider_id: String) -> Result<ProviderLedger
         Ok(ProviderLedgerSummary {
             budget,
             daily_reference_tokens: guard.daily_reference_tokens,
+            day,
             five_hour,
             provider_id,
             week,

@@ -153,6 +153,8 @@ import {
   type ComposerLimitWindow,
 } from "./context-usage";
 import {
+  DAILY_PACE_NOTICE_PERCENT,
+  dailyPaceNotice,
   estimateTurnCost,
   formatTokenCount,
   ledgerWindows,
@@ -914,6 +916,12 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     label: "Provider spend",
     detail: "Provider-owned billing and allowance controls",
     keywords: "cost budget billing usage",
+  },
+  {
+    section: "usage-limits",
+    label: "Daily pace warning",
+    detail: "Warn when a day's spend reaches ~14% of the weekly/100% limit",
+    keywords: "daily pace warning 14 percent weekly budget",
   },
   {
     section: "usage-limits",
@@ -7010,6 +7018,10 @@ type ChatSurfaceProps = {
   sessionUsage?: SessionUsageTotals;
   /** The current hold on runs and every configured budget. */
   usageSafety?: UsageSafetySnapshot;
+  /** Per-provider ledger totals, used for the daily pace warning. */
+  providerLedgerById?: Partial<Record<ProviderId, ProviderLedgerSummary>>;
+  /** Warn when a day's spend reaches ~14% of the weekly/100% limit. */
+  dailyPaceWarning?: boolean;
   onResumeUsage?: () => void;
   terminalPanes?: TerminalPane[];
   diffReview?: DiffReview;
@@ -7357,6 +7369,8 @@ export function ChatSurface({
   providerUsageByProvider,
   sessionUsage,
   usageSafety,
+  providerLedgerById,
+  dailyPaceWarning = true,
   onResumeUsage,
   terminalPanes,
   diffReview,
@@ -7764,6 +7778,9 @@ export function ChatSurface({
   );
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
+    : undefined;
+  const composerLedger = contextModel.providerId
+    ? providerLedgerById?.[contextModel.providerId]
     : undefined;
   const composerLimits = useMemo(
     () =>
@@ -8232,6 +8249,8 @@ export function ChatSurface({
             providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
             providerUsageByProvider={providerUsageByProvider}
+            providerLedger={composerLedger}
+            dailyPaceWarning={dailyPaceWarning}
             limitWindows={composerLimits}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
@@ -8447,6 +8466,8 @@ export function ChatSurface({
             providerStatuses={providerStatuses}
             providerUsage={composerProviderUsage}
             providerUsageByProvider={providerUsageByProvider}
+            providerLedger={composerLedger}
+            dailyPaceWarning={dailyPaceWarning}
             limitWindows={composerLimits}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
@@ -18361,6 +18382,7 @@ type SettingsSurfaceProps = {
   ) => void;
   selectedUsageProviderId?: ProviderId;
   usageVisualization?: "bars" | "wheels";
+  dailyPaceWarning?: boolean;
   providerUsage?: ProviderUsageState;
   /** Local ledger summary used for spend-limit controls. */
   providerLedger?: ProviderLedgerSummary;
@@ -18369,6 +18391,7 @@ type SettingsSurfaceProps = {
   onUsagePauseChange?: (paused: boolean) => void;
   onUsageProviderChange?: (providerId: ProviderId) => void;
   onUsageVisualizationChange?: (visualization: "bars" | "wheels") => void;
+  onDailyPaceWarningChange?: (enabled: boolean) => void;
   onRefreshProviderUsage?: (providerId: ProviderId) => void;
   updateState?: UpdateState;
   activeWorkspaceRoot?: string;
@@ -18604,6 +18627,7 @@ export function SettingsSurface({
   onSelectProviderDefaultModel,
   selectedUsageProviderId,
   usageVisualization = "bars",
+  dailyPaceWarning = true,
   providerUsage,
   providerLedger,
   usageSafety,
@@ -18611,6 +18635,7 @@ export function SettingsSurface({
   onUsagePauseChange,
   onUsageProviderChange,
   onUsageVisualizationChange,
+  onDailyPaceWarningChange,
   onRefreshProviderUsage,
   updateState,
   activeWorkspaceRoot,
@@ -19080,6 +19105,16 @@ export function SettingsSurface({
                     ),
                   )}
                 </SettingsSelect>
+              </SettingsRow>
+              <SettingsRow
+                label="Daily pace warning"
+                detail="Warn when a day's spend reaches ~14% of the weekly/100% limit."
+              >
+                <SettingsSwitch
+                  checked={dailyPaceWarning}
+                  label="Daily pace warning"
+                  onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
+                />
               </SettingsRow>
               <SettingsRow
                 label="Pause provider runs"
@@ -20414,22 +20449,36 @@ function loadShownPlanUsageNotices() {
 
 /** A progressive, once-per-window notice for provider-reported plan usage. */
 function PlanUsageNotification({
+  dailyPaceWarning = true,
   onHandoff,
+  paused = false,
   providerId,
+  providerLedger,
   providers,
   windows,
 }: {
+  dailyPaceWarning?: boolean;
   onHandoff: (providerId: ProviderId) => void;
+  paused?: boolean;
   providerId: ProviderId;
+  providerLedger?: ProviderLedgerSummary;
   providers: Array<{ id: ProviderId; label: string }>;
   windows: ProviderUsageState["windows"];
 }) {
   const [shown, setShown] = useState(loadShownPlanUsageNotices);
   const [notice, setNotice] = useState<PlanUsageNotice>();
-  const candidates = useMemo(
-    () => planUsageNotices(providerId, windows),
-    [providerId, windows],
-  );
+  const candidates = useMemo(() => {
+    const plan = planUsageNotices(providerId, windows);
+    const daily = dailyPaceNotice(providerId, {
+      enabled: dailyPaceWarning,
+      ledger: providerLedger,
+      paused,
+      windows,
+    });
+    return daily
+      ? [...plan, daily].sort((left, right) => right.threshold - left.threshold)
+      : plan;
+  }, [dailyPaceWarning, paused, providerId, providerLedger, windows]);
 
   useEffect(() => {
     const next = candidates.find(
@@ -20453,21 +20502,31 @@ function PlanUsageNotification({
   }, [candidates, shown]);
 
   if (!notice) return null;
-  const handoffTarget = notice.threshold >= 95 ? providers[0] : undefined;
+  const isDailyPace = notice.threshold === DAILY_PACE_NOTICE_PERCENT;
+  const handoffTarget =
+    !isDailyPace && notice.threshold >= 95 ? providers[0] : undefined;
   const tone =
     notice.threshold >= 95
       ? "critical"
       : notice.threshold >= 80
         ? "warning"
         : "info";
-  const title =
-    notice.threshold >= 95
+  const title = isDailyPace
+    ? "Daily pace warning"
+    : notice.threshold >= 95
       ? "Plan limit nearly reached"
       : notice.threshold >= 90
         ? "Plan limit is close"
         : notice.threshold >= 80
           ? "Plan usage is getting high"
           : "Half of this plan window is used";
+  const detail = isDailyPace
+    ? notice.windowId === "day"
+      ? `Today is ${notice.percent}% of the weekly/100% limit (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
+      : `${notice.windowLabel} is ${notice.percent}% used — about one day's share of the weekly/100% limit.`
+    : `${notice.windowLabel} is ${notice.percent}% used.${
+        notice.threshold >= 90 ? " Consider wrapping up this window." : ""
+      }`;
 
   return (
     <section
@@ -20478,10 +20537,7 @@ function PlanUsageNotification({
       <TriangleAlert aria-hidden="true" size={17} />
       <div>
         <strong>{title}</strong>
-        <span>
-          {notice.windowLabel} is {notice.percent}% used.
-          {notice.threshold >= 90 ? " Consider wrapping up this window." : ""}
-        </span>
+        <span>{detail}</span>
       </div>
       <div className="gyro-plan-usage-notice-actions">
         {handoffTarget ? (
@@ -21394,6 +21450,8 @@ function Composer({
   providerStatuses,
   providerUsage,
   providerUsageByProvider,
+  providerLedger,
+  dailyPaceWarning = true,
   limitWindows = [],
   canCompactContext = false,
   onComposerAction,
@@ -21439,6 +21497,8 @@ function Composer({
   providerStatuses?: ProviderStatus[];
   providerUsage?: ProviderUsageState;
   providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
+  providerLedger?: ProviderLedgerSummary;
+  dailyPaceWarning?: boolean;
   limitWindows?: ComposerLimitWindow[];
   /** This chat has a provider-backed context that can be compacted manually. */
   canCompactContext?: boolean;
@@ -22525,10 +22585,13 @@ function Composer({
       ) : null}
       {effectiveProviderId ? (
         <PlanUsageNotification
+          dailyPaceWarning={dailyPaceWarning}
           onHandoff={(providerId) =>
             onComposerAction?.(`handoff-provider:${providerId}`)
           }
+          paused={Boolean(usageSafety?.pause.active)}
           providerId={effectiveProviderId}
+          providerLedger={providerLedger}
           providers={handoffProviders}
           windows={providerUsage?.windows ?? []}
         />

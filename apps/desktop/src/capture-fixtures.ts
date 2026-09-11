@@ -1101,6 +1101,7 @@ const invoke: Invoke = (command, args) => {
     return {
       providerId,
       fiveHour: emptyUsageTotals,
+      day: emptyUsageTotals,
       week: emptyUsageTotals,
       dailyReferenceTokens: 200_000,
     };

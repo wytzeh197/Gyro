@@ -349,6 +349,8 @@ export {
 } from "./council";
 export type { CouncilSeatRequest, CouncilSeatResolution } from "./council";
 export {
+  DAILY_PACE_NOTICE_PERCENT,
+  dailyPaceNotice,
   estimateTurnCost,
   formatTokenCount,
   isOutsizedTurn,
@@ -359,6 +361,7 @@ export {
   planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
+  weeklyLimitTokens,
 } from "./usage-ledger";
 export type {
   LedgerWindowView,

@@ -258,6 +258,31 @@ export function ledgerWindowsCaption(providerId: string | undefined) {
   return `Spend in the ${labels.join(" and ")} windows`;
 }
 
+const WEEK_HOURS = 24 * 7;
+
+/**
+ * Token cap for a measured window: a configured budget scaled to the window,
+ * otherwise the daily display reference scaled the same way.
+ */
+function windowLimitTokens(summary: ProviderLedgerSummary, hours: number) {
+  const budgetHours = Math.max(1, summary.budget?.windowHours ?? 24);
+  const budgetMax = summary.budget?.maxTokens ?? 0;
+  if (budgetMax > 0) {
+    return Math.max(1, Math.round((budgetMax * hours) / budgetHours));
+  }
+  const reference = Math.max(1, summary.dailyReferenceTokens);
+  return Math.max(1, Math.round((reference * hours) / 24));
+}
+
+/** Weekly 100% stop in tokens — the denominator for daily pace. */
+export function weeklyLimitTokens(summary: ProviderLedgerSummary) {
+  return windowLimitTokens(summary, WEEK_HOURS);
+}
+
+function isWeeklyUsageWindow(window: { id: string; label: string }) {
+  return /week/i.test(`${window.id} ${window.label}`);
+}
+
 /**
  * Turn a provider's ledger totals into the windows Settings shows.
  *
@@ -269,8 +294,6 @@ export function ledgerWindows(
   providerId?: ProviderId | string,
 ): LedgerWindowView[] {
   if (!summary) return [];
-  const reference = Math.max(1, summary.dailyReferenceTokens);
-  const budgetHours = Math.max(1, summary.budget?.windowHours ?? 24);
   const budgetMax = summary.budget?.maxTokens ?? 0;
   const resolvedProviderId = providerId ?? summary.providerId;
 
@@ -278,11 +301,8 @@ export function ledgerWindows(
     const totals =
       spec.totalsKey === "fiveHour" ? summary.fiveHour : summary.week;
     const biggest = totals.byOrigin[0]?.totalTokens ?? 0;
-    // Scale the daily reference (or a configured budget) to this window's length.
     const hasBudget = budgetMax > 0;
-    const limit = hasBudget
-      ? Math.max(1, Math.round((budgetMax * spec.hours) / budgetHours))
-      : Math.max(1, Math.round((reference * spec.hours) / 24));
+    const limit = windowLimitTokens(summary, spec.hours);
     const percent = Math.min(
       100,
       Math.round((totals.totalTokens / limit) * 100),
@@ -318,12 +338,18 @@ export type UsageSafetyNotice = {
 /** The points at which a measured plan allowance becomes worth interrupting for. */
 export const PLAN_USAGE_NOTICE_THRESHOLDS = [50, 80, 90, 95] as const;
 
+/**
+ * One day's even share of a 100% weekly stop, rounded to the nearest percent.
+ * 100 ÷ 7 ≈ 14.
+ */
+export const DAILY_PACE_NOTICE_PERCENT = Math.round(100 / 7);
+
 export type PlanUsageNotice = {
   providerId: ProviderId;
   windowId: string;
   windowLabel: string;
   percent: number;
-  threshold: (typeof PLAN_USAGE_NOTICE_THRESHOLDS)[number];
+  threshold: number;
   /** A new reset timestamp starts a new notification cycle. */
   cycleId: string;
 };
@@ -357,6 +383,63 @@ export function planUsageNotices(
       ];
     })
     .sort((left, right) => right.threshold - left.threshold);
+}
+
+/**
+ * Informational warning when today's spend reaches one day's share of the
+ * weekly/100% stop (~14%). Not a hard stop. A pause outranks this notice.
+ */
+export function dailyPaceNotice(
+  providerId: ProviderId,
+  input: {
+    enabled: boolean;
+    paused?: boolean;
+    windows?: ProviderUsageWindow[];
+    ledger?: ProviderLedgerSummary;
+    now?: Date;
+  },
+): PlanUsageNotice | undefined {
+  if (!input.enabled || input.paused) return undefined;
+
+  const ledger = input.ledger;
+  if (ledger?.day) {
+    const weeklyLimit = weeklyLimitTokens(ledger);
+    const percent = Math.min(
+      100,
+      Math.max(0, Math.round((ledger.day.totalTokens / weeklyLimit) * 100)),
+    );
+    if (percent >= DAILY_PACE_NOTICE_PERCENT) {
+      const day = (input.now ?? new Date()).toISOString().slice(0, 10);
+      return {
+        cycleId: `day:${day}`,
+        percent,
+        providerId,
+        threshold: DAILY_PACE_NOTICE_PERCENT,
+        windowId: "day",
+        windowLabel: "Today",
+      };
+    }
+    return undefined;
+  }
+
+  const weekly = (input.windows ?? []).find((window) => {
+    if (!isWeeklyUsageWindow(window)) return false;
+    const percent = window.usedPercent;
+    return (
+      typeof percent === "number" &&
+      Number.isFinite(percent) &&
+      percent >= DAILY_PACE_NOTICE_PERCENT
+    );
+  });
+  if (!weekly || weekly.usedPercent === undefined) return undefined;
+  return {
+    cycleId: weekly.resetsAt ?? "rolling",
+    percent: Math.min(100, Math.max(0, Math.round(weekly.usedPercent))),
+    providerId,
+    threshold: DAILY_PACE_NOTICE_PERCENT,
+    windowId: weekly.id,
+    windowLabel: weekly.label,
+  };
 }
 
 function budgetHeadline(budget: BudgetState) {

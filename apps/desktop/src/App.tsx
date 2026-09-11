@@ -1501,6 +1501,8 @@ export function App() {
     [openCompanionTab],
   );
   const companionSurfaceProps = (paneId: string) => ({
+    dailyPaceWarning: workbench.preferences.dailyPaceWarning,
+    providerLedgerById,
     showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
@@ -16476,6 +16478,7 @@ export function App() {
           providerStatuses={workbench.providerStatuses}
           selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
+          dailyPaceWarning={workbench.preferences.dailyPaceWarning}
           onUsageProviderChange={(providerId) => {
             dispatchWorkbench({ type: "set-usage-provider", providerId });
           }}
@@ -16484,6 +16487,9 @@ export function App() {
               type: "set-usage-visualization",
               visualization,
             })
+          }
+          onDailyPaceWarningChange={(enabled) =>
+            dispatchWorkbench({ type: "set-daily-pace-warning", enabled })
           }
           onRefreshProviderUsage={(providerId) =>
             void refreshProviderUsage(providerId, true)

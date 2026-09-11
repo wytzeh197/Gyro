@@ -1597,6 +1597,10 @@ expect(
   "Appearance colors should start with Gyro's blue and violet palette.",
 );
 expect(
+  initialState.preferences.dailyPaceWarning === true,
+  "Daily pace warning should start enabled.",
+);
+expect(
   initialState.preferences.activeChatPanel === undefined,
   "Chat side panel should not default to the environment rail.",
 );
@@ -1650,6 +1654,10 @@ state = workbenchReducer(state, {
   visible: false,
 });
 state = workbenchReducer(state, {
+  type: "set-daily-pace-warning",
+  enabled: false,
+});
+state = workbenchReducer(state, {
   type: "set-appearance-colors",
   mainColor: "#1570ef",
   secondaryColor: "#7f56d9",
@@ -1666,6 +1674,10 @@ expect(
 expect(
   state.preferences.showQuickActions === false,
   "Quick actions visibility reducer did not update.",
+);
+expect(
+  state.preferences.dailyPaceWarning === false,
+  "Daily pace warning reducer did not update.",
 );
 expect(
   state.preferences.mainColor === "#1570ef" &&

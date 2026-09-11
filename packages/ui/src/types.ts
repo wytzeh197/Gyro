@@ -1059,6 +1059,11 @@ export type WorkbenchPreferences = {
   chatPanelWidth?: number;
   usageProviderId?: ProviderId;
   usageVisualization: "bars" | "wheels";
+  /**
+   * Warn when a day's spend reaches ~14% of the weekly/100% limit.
+   * Defaults on; the Usage Limits switch can turn it off.
+   */
+  dailyPaceWarning: boolean;
   showMenuBarIcon: boolean;
   workspaceSidebarHidden: boolean;
   workspaceSidebarWidth?: number;
@@ -1828,6 +1833,8 @@ export type ProviderLedgerSummary = {
   providerId: string;
   /** Rolling 5 hours (same window as Claude/Codex session limits). */
   fiveHour: SessionUsageTotals;
+  /** Rolling 24 hours — daily pace against the weekly/100% limit. */
+  day?: SessionUsageTotals;
   /** Rolling 7 days (same window as weekly plan limits). */
   week: SessionUsageTotals;
   /** Present only when a budget is configured for this provider. */

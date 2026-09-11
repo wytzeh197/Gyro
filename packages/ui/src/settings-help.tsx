@@ -61,7 +61,7 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I manage usage and budgets?",
         answer:
-          "Open Settings → Usage Limits to review provider allowances, set token budgets, or pause provider runs, including automations. Estimated usage is labelled; billing and account allowances are managed by your provider.",
+          "Open Settings → Usage Limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires at about 14% of the weekly/100% limit. Estimated usage is labelled; billing and account allowances are managed by your provider.",
         section: "usage-limits",
       },
       {
