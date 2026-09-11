@@ -1,0 +1,45 @@
+{
+  "checkedAt": "2026-09-11T14:39:29.800740+00:00",
+  "branch": "codex/alpha-47.6",
+  "baseCommit": "dff35c2b3bec4b0a02d0094d6af2610b0623b27c",
+  "fullRustSuite": {
+    "passed": 603,
+    "failed": 0,
+    "ignored": 4
+  },
+  "subsequentFocusedChecks": {
+    "coreTiming": 3,
+    "nativeBenchmarkAndFaults": 4,
+    "frontendTiming": "passed",
+    "summary": "passed"
+  },
+  "reliabilitySuite": "passed with loopback access; sandbox-only attempt could not bind 127.0.0.1",
+  "typecheck": "passed",
+  "desktopFrontendBuild": "passed; existing chunk-size warning",
+  "finalNativeBuild": "passed",
+  "finalBinarySha256": "32afe6da3a9351f76c565d3ff70270fa314ec6c0d956bd4744d900f477770cf3",
+  "benchmarkBinaryNote": "Matrix used the frozen earlier diagnostic build identified in environment.json. Final build includes later diagnostic and checker refinements.",
+  "matrixAudit": {
+    "uniqueSlots": 90,
+    "groupsOfFive": 18,
+    "cleanWorkspaceStarts": 60,
+    "backendTraces": 60,
+    "truncatedTraces": 0,
+    "excludedRateGuardRecords": 0,
+    "successfulResumesPreservingCursor": 20,
+    "allFollowUpsIndependentlyRechecked": true
+  },
+  "timingPermissions": {
+    "directory": "0700",
+    "files": "0600"
+  },
+  "prototype": {
+    "stateThemeSizeCombinations": 28,
+    "longConversationEntries": 120,
+    "continuousStopRuns": 3,
+    "draftPreserved": true,
+    "scrollAndResize": "passed",
+    "productionRenderingMeasured": false
+  },
+  "scope": "No commit, push, release, pooling, or execution-policy change. Existing unrelated edits preserved."
+}

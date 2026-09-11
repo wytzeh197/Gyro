@@ -372,7 +372,9 @@ where
     WriteFile: FnMut(&Path, &str) -> Result<()>,
 {
     let started_at = Instant::now();
+    crate::timing::mark(crate::timing::Stage::ProcessStart);
     let mut connection = KimiAcpConnection::start(&request)?;
+    crate::timing::mark(crate::timing::Stage::ProcessSpawned);
     let mut response = String::new();
     let initialize_id = connection.send_request(
         "initialize",
@@ -506,6 +508,7 @@ where
         );
     }
 
+    crate::timing::mark(crate::timing::Stage::ProtocolReady);
     let mut prompt = request.prompt.clone();
     // Gyro sessions are local. Whenever this provider turn is not continuing an
     // open agent session — first turn after a model handoff, failed reopen, or
@@ -535,6 +538,7 @@ where
         }
     }
 
+    crate::timing::mark(crate::timing::Stage::PromptSent);
     let prompt_id = connection.send_request(
         "session/prompt",
         json!({"sessionId": session_id, "prompt": prompt}),

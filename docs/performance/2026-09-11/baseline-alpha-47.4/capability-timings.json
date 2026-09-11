@@ -1,0 +1,204 @@
+[
+  {
+    "turnId": "027d7e2b-d84e-4f6a-bcdd-2f8361416a70",
+    "toolBusyMs": 866,
+    "openTools": 0,
+    "durationsMs": [
+      6,
+      11,
+      23,
+      61,
+      35,
+      286,
+      89,
+      13,
+      10,
+      41,
+      69,
+      197,
+      25
+    ]
+  },
+  {
+    "turnId": "2997d11d-f6d8-4fd1-8d91-a8ddf2541e04",
+    "toolBusyMs": 1004,
+    "openTools": 0,
+    "durationsMs": [
+      68,
+      9,
+      23,
+      119,
+      14,
+      132,
+      6,
+      312,
+      301,
+      20
+    ]
+  },
+  {
+    "turnId": "84c25e49-fc47-4ae5-8205-ecae40402f23",
+    "toolBusyMs": null,
+    "openTools": 0,
+    "durationsMs": []
+  },
+  {
+    "turnId": "07c71532-1b7e-4456-bece-3072210a6dd6",
+    "toolBusyMs": 359,
+    "openTools": 0,
+    "durationsMs": [
+      13,
+      5,
+      33,
+      11,
+      21,
+      16,
+      61,
+      10,
+      143,
+      7,
+      39
+    ]
+  },
+  {
+    "turnId": "a78aa21b-fb7d-4d6c-a276-cb71604f4073",
+    "toolBusyMs": 851,
+    "openTools": 0,
+    "durationsMs": [
+      28,
+      5,
+      9,
+      29,
+      41,
+      567,
+      32,
+      9,
+      101,
+      30
+    ]
+  },
+  {
+    "turnId": "7cb84621-5cf1-4374-8826-f2c21eb101a3",
+    "toolBusyMs": 367,
+    "openTools": 0,
+    "durationsMs": [
+      66,
+      47,
+      59,
+      9,
+      47,
+      4,
+      6,
+      36,
+      93
+    ]
+  },
+  {
+    "turnId": "c7717471-960c-4a67-b984-94ee81d30612",
+    "toolBusyMs": 199,
+    "openTools": 0,
+    "durationsMs": [
+      15,
+      24,
+      13,
+      22,
+      27,
+      6,
+      92
+    ]
+  },
+  {
+    "turnId": "022a1925-2bd8-4f11-8964-e6a88f37d382",
+    "toolBusyMs": 970,
+    "openTools": 0,
+    "durationsMs": [
+      38,
+      168,
+      38,
+      26,
+      125,
+      12,
+      49,
+      129,
+      222,
+      91,
+      24,
+      5,
+      37,
+      6
+    ]
+  },
+  {
+    "turnId": "377ce78d-9839-4a92-95d5-5f0790526a39",
+    "toolBusyMs": 100,
+    "openTools": 0,
+    "durationsMs": [
+      22,
+      18,
+      7,
+      53
+    ]
+  },
+  {
+    "turnId": "41995bc5-9492-47be-a67e-0ffe0adf4a7f",
+    "toolBusyMs": 403,
+    "openTools": 0,
+    "durationsMs": [
+      17,
+      22,
+      149,
+      12,
+      168,
+      7,
+      5,
+      23
+    ]
+  },
+  {
+    "turnId": "8bd9248b-3af0-466e-8e3f-258b6262f34a",
+    "toolBusyMs": 191,
+    "openTools": 0,
+    "durationsMs": [
+      7,
+      8,
+      150,
+      26
+    ]
+  },
+  {
+    "turnId": "c4bfdefe-ff41-495e-8274-52bde8c84883",
+    "toolBusyMs": 173,
+    "openTools": 0,
+    "durationsMs": [
+      12,
+      5,
+      24,
+      75,
+      23,
+      34
+    ]
+  },
+  {
+    "turnId": "932af192-460f-4d62-b57f-33eebe7f41c6",
+    "toolBusyMs": null,
+    "openTools": 0,
+    "durationsMs": []
+  },
+  {
+    "turnId": "e0d42256-48dc-4668-a4bf-1497ae3003b2",
+    "toolBusyMs": 80,
+    "openTools": 0,
+    "durationsMs": [
+      9,
+      4,
+      60,
+      7
+    ]
+  },
+  {
+    "turnId": "6194209b-b4e8-44fb-976a-7fbac5355781",
+    "toolBusyMs": null,
+    "openTools": 0,
+    "durationsMs": []
+  }
+]

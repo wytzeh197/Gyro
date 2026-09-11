@@ -1,3 +1,7 @@
+#[cfg(debug_assertions)]
+mod performance_benchmark;
+mod turn_timing;
+use gyro_core::timing::{self, Stage as TimingStage};
 mod browser_knowledge;
 mod command_file_changes;
 
@@ -3537,7 +3541,7 @@ async fn run_provider_chat(
     }
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        run_provider_chat_blocking(worker_app, request, UsageOrigin::Chat)
+        turn_timing::run_timed_provider_chat(worker_app, request, UsageOrigin::Chat)
     })
     .await
     .map_err(|error| format!("provider chat worker failed: {error}"));
@@ -4983,7 +4987,9 @@ fn run_provider_chat_blocking(
         );
     }
     let load_persisted_context = turn_status.is_some();
+    timing::mark(TimingStage::WorkspaceStart);
     bind_provider_capability_context(&app, &store, &request, run_id, load_persisted_context)?;
+    timing::mark(TimingStage::WorkspaceReady);
     let bound_context =
         active_provider_capability_context(&app, &request.session_id).map_err(to_string)?;
     let workspace_context = bound_context.workspace_context.clone();
@@ -14250,6 +14256,7 @@ fn run_provider_chat_with_retry(
         run_provider_chat_with_retry_using(store, request, binding, |resume_cursor, attempt| {
             run_provider_chat_once(app, request, resume_cursor, attempt)
         });
+    timing::mark(TimingStage::ProviderComplete);
     let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     match result.as_ref() {
         Ok(output) => record_provider_usage(
@@ -14504,6 +14511,7 @@ fn run_provider_chat_once(
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    timing::attempt();
     let expanded = with_browser_attachment_images(
         request,
         provider_descriptor(&request.provider_id).is_some_and(|provider| provider.supports_images),
@@ -15465,9 +15473,11 @@ fn run_openai_codex_app_server_chat(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     configure_provider_process_group(&mut process);
+    timing::mark(TimingStage::ProcessStart);
     let child = process
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    timing::mark(TimingStage::ProcessSpawned);
     let mut child = ProviderProcessGuard::new(child);
     let cancellation = app
         .state::<ProviderCancellationManager>()
@@ -15578,6 +15588,7 @@ fn run_openai_codex_app_server_chat(
             session_id: thread_id.clone(),
         });
 
+        timing::mark(TimingStage::ProtocolReady);
         let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
         for attachment in request
             .attachments
@@ -15617,6 +15628,7 @@ fn run_openai_codex_app_server_chat(
         let mut response_text = String::new();
         let mut response_text_chars = 0_usize;
         let mut response_text_truncated = false;
+        timing::mark(TimingStage::PromptSent);
         let mut commentary_stream = CodexAppServerCommentaryStream::new();
         let mut completed_message = String::new();
         let mut activities = Vec::new();
@@ -15743,6 +15755,7 @@ fn run_openai_codex_app_server_chat(
                 "item/started" => {
                     completed_artifact_response_at = None;
                     if let Some(item) = params.get("item") {
+                        turn_timing::protocol_item(item, "running");
                         match item.get("type").and_then(serde_json::Value::as_str) {
                             Some("commandExecution") => {
                                 if let (Some(id), Some(command)) = (
@@ -15791,6 +15804,7 @@ fn run_openai_codex_app_server_chat(
                 }
                 "item/completed" => {
                     if let Some(item) = params.get("item") {
+                        turn_timing::protocol_item(item, "done");
                         match item.get("type").and_then(serde_json::Value::as_str) {
                             Some("agentMessage") => {
                                 let text = item.get("text").and_then(serde_json::Value::as_str);
@@ -16606,6 +16620,7 @@ fn wait_for_provider_approval_with_transaction(
     details: serde_json::Value,
     file_transaction: Option<PreparedProviderMutationTransaction>,
 ) -> anyhow::Result<ProviderApprovalDecision> {
+    let _timing = timing::ApprovalScope::start();
     let approval_id = Uuid::new_v4();
     let session_id = Uuid::parse_str(&context.session_id)?;
     let turn_id = context
@@ -19502,6 +19517,7 @@ fn run_streaming_command(
         run_control.cancellation.clone(),
         heartbeat_stop.clone(),
     );
+    timing::cli_prompt_on_spawn();
     let outcome = gyro_core::run_command(execution, run_control.cancellation.clone(), |chunk| {
         if chunk.stream == ExecutionStream::Stdout {
             for line in stream_state.take_stdout_lines(&chunk.text) {
@@ -19716,6 +19732,11 @@ fn handle_provider_stdout_line(
         return;
     };
     stream_state.parsed_stream_json = true;
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("system")
+        && value.get("subtype").and_then(serde_json::Value::as_str) == Some("init")
+    {
+        timing::mark(TimingStage::ProtocolReady);
+    }
     if stream_state.provider_session_id.is_none() {
         stream_state.provider_session_id = extract_provider_session_id(&value);
     }
@@ -20618,6 +20639,9 @@ fn emit_provider_chat_event(
     message: Option<String>,
     error: Option<String>,
 ) {
+    if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
+        timing::mark(TimingStage::FirstActivity);
+    }
     let payload = ProviderChatStreamEvent {
         session_id: request.session_id.clone(),
         turn_id: request.turn_id.clone(),
@@ -20650,6 +20674,10 @@ fn emit_provider_activity_event(
     activity: &ProviderActivity,
     activity_sequence: Option<u64>,
 ) {
+    timing::mark(TimingStage::FirstActivity);
+    if activity.kind != "commentary" {
+        timing::tool(&activity.id, &activity.status);
+    }
     let payload = ProviderChatStreamEvent {
         session_id: request.session_id.clone(),
         turn_id: request.turn_id.clone(),
@@ -23829,6 +23857,10 @@ pub fn run() {
         .manage(menu_bar::MenuBarController::default())
         .setup(|app| {
             #[cfg(debug_assertions)]
+            if performance_benchmark::start(app.handle())? {
+                return Ok(());
+            }
+            #[cfg(debug_assertions)]
             if browser_smoke::start(app.handle())? {
                 return Ok(());
             }
@@ -23867,6 +23899,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            turn_timing::timing_diagnostics_enabled,
+            turn_timing::record_frontend_timing,
             append_chat_context_event,
             append_editor_event,
             append_plan_event,

@@ -18,6 +18,7 @@ type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 const parameters = new URLSearchParams(location.search);
 const scene = parameters.get("scene") ?? "chat";
 const theme = parameters.get("theme") === "light" ? "light" : "dark";
+const isWebsiteCapture = parameters.get("presentation") === "website";
 const supportedScenes = new Set([
   "chat",
   "welcome",
@@ -38,7 +39,10 @@ const isOllamaScene = scene === "ollama" || scene === "ollama-empty";
 const isOllamaEmptyScene = scene === "ollama-empty";
 const WORKSPACE = "/Users/dev/Projects/aurora";
 const SESSION_ID = "ses_capture_1";
-const NOW = "2026-07-25T09:41:00.000Z";
+// Keep relative session ages fresh in marketing captures only.
+const NOW = isWebsiteCapture
+  ? new Date().toISOString()
+  : "2026-07-25T09:41:00.000Z";
 
 function at(minutes: number, seconds = 0) {
   const base = Date.parse(NOW);
@@ -157,7 +161,9 @@ function activity(
 const chatEvents = [
   sessionEvent(
     "user-message",
-    "The sync queue retries forever when the server returns 503. Add a bounded retry with backoff, and cover it with a test.",
+    isWebsiteCapture
+      ? "Stop sync from retrying forever. Add a retry limit and a test."
+      : "The sync queue retries forever when the server returns 503. Add a bounded retry with backoff, and cover it with a test.",
     {},
     -18,
   ),
@@ -186,7 +192,9 @@ const chatEvents = [
   activity("command", "npm test -- sync.test.js", "2 passed in 1.42s", -14),
   sessionEvent(
     "assistant-message",
-    "Done. `drain()` stops after 5 attempts and backs off between them, and both cases are covered.",
+    isWebsiteCapture
+      ? "Added a **5-attempt limit** with exponential backoff. Both tests pass.\n\nReady for your review."
+      : "Done. `drain()` stops after 5 attempts and backs off between them, and both cases are covered.",
     {},
     -12,
   ),
@@ -710,6 +718,8 @@ const preparation = {
 };
 
 const responses: Record<string, unknown> = {
+  // Use the bundled provider catalog in this development-only fixture.
+  list_provider_capability_support: [],
   load_config: config,
   git_status: sourceControl,
   // Staging commands answer with the status the app re-renders from, so the
@@ -794,6 +804,7 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  if (command === "timing_diagnostics_enabled") return false;
   if (parameters.get("edge") === "lazy-explorer") {
     const rootFiles = workspaceTree.filter(
       (entry) => entry.isWorkspaceRoot || entry.depth === 1,

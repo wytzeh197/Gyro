@@ -29,6 +29,10 @@ if (outputRoot === repoRoot || outputRoot === sourceRoot) {
 }
 
 const files = [
+  ["site/motion.js", "motion.js"],
+  ["site/assets/gyro-coast.webp", "assets/gyro-coast.webp"],
+  ["site/assets/motion/workflow-dark.mp4", "assets/motion/workflow-dark.mp4"],
+  ["site/assets/motion/workflow-light.mp4", "assets/motion/workflow-light.mp4"],
   ["site/_headers", "_headers"],
   ["site/robots.txt", "robots.txt"],
   ["site/sitemap.xml", "sitemap.xml"],
@@ -53,8 +57,14 @@ const files = [
   ["site/assets/ATTRIBUTIONS.md", "assets/ATTRIBUTIONS.md"],
   ["site/assets/social-preview.png", "assets/social-preview.png"],
   ["site/assets/screenshots/hero-600.webp", "assets/screenshots/hero-600.webp"],
-  ["site/assets/screenshots/hero-current-dark.webp", "assets/screenshots/hero-current-dark.webp"],
-  ["site/assets/screenshots/hero-current-light.webp", "assets/screenshots/hero-current-light.webp"],
+  [
+    "site/assets/screenshots/hero-current-dark.webp",
+    "assets/screenshots/hero-current-dark.webp",
+  ],
+  [
+    "site/assets/screenshots/hero-current-light.webp",
+    "assets/screenshots/hero-current-light.webp",
+  ],
   [
     "site/assets/screenshots/hero-1200.webp",
     "assets/screenshots/hero-1200.webp",

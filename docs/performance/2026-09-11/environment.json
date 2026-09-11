@@ -1,0 +1,23 @@
+{
+  "baseCommit": "dff35c2b3bec4b0a02d0094d6af2610b0623b27c",
+  "branch": "codex/alpha-47.6",
+  "baseVersion": "0.1.0-alpha.47.5",
+  "build": "debug",
+  "binarySha256": "ec76fc6159172e7308b4c24e0eedf29d7a218cad9eec45217b301192b0f32401",
+  "platform": "Darwin-25.2.0-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "providerConcurrency": 3,
+  "maximumTrialsPerGroup": 5,
+  "timeoutSeconds": 150,
+  "approvalSettings": {
+    "requireCommandApproval": false,
+    "requireFileEditApproval": false,
+    "fullAccess": false
+  },
+  "fixture": "meridian-v1",
+  "timingVersion": "gyro.timing.v1 with direct Codex MCP boundaries",
+  "nodeVersion": "v26.0.0",
+  "codexVersion": "codex-cli 0.152.1",
+  "claudeVersion": "2.1.268 (Claude Code)",
+  "grokVersion": "grok 1.0.25 (f7e67d6988e2) [stable]"
+}

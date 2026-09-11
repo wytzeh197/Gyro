@@ -1,3 +1,4 @@
+import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import { terminalOutputUpdate } from "./terminal-output";
 import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
@@ -217,7 +218,6 @@ import {
   MAX_CHAT_EVENT_RENDER_COUNT,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
-  orderProviderChatStreamEvent,
   resetStreamingAssistantForRetry,
   type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
@@ -1388,6 +1388,7 @@ export function App() {
         ...sessionModelSelectionFromSession(parent),
       };
       const turnId = crypto.randomUUID();
+      turnTiming.beginTurnTiming(turnId);
       setSideChatThreads((current) => ({
         ...current,
         [paneId]: {
@@ -1405,7 +1406,7 @@ export function App() {
           message,
           turnId,
         });
-        const response = await invoke<ProviderChatResponse>(
+        const response = await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
           "run_provider_chat",
           {
             request: {
@@ -3190,17 +3191,11 @@ export function App() {
     ],
   );
 
-  const queueProviderChatStreamEvent = useCallback(
-    (streamEvent: ProviderChatStreamEvent) => {
-      const orderedEvents = orderProviderChatStreamEvent(
-        providerStreamOrderRef.current,
-        streamEvent,
-      );
-      for (const orderedEvent of orderedEvents) {
-        processProviderChatStreamEvent(orderedEvent);
-      }
-    },
-    [processProviderChatStreamEvent],
+  turnTiming.useTurnTiming(events);
+
+  const queueProviderChatStreamEvent = turnTiming.useProviderStreamTiming(
+    providerStreamOrderRef,
+    processProviderChatStreamEvent,
   );
 
   useEffect(() => {
@@ -9735,6 +9730,7 @@ export function App() {
       }
       const retryTurnId = overrideContext?.retryTurnId;
       const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
+      if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
       setTurnSourceControlBaselines((current) => {
         if (current[turnId]) {
           return current;
@@ -10032,7 +10028,7 @@ export function App() {
             );
             applyCouncilChatResponse(persistedSession.id, councilResponse);
           } else {
-            const providerResponse = await invoke<ProviderChatResponse>(
+            const providerResponse = await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
               "run_provider_chat",
               {
                 request: {
@@ -10229,7 +10225,7 @@ export function App() {
           );
           applyCouncilChatResponse(targetSessionId, councilResponse);
         } else {
-          const providerResponse = await invoke<ProviderChatResponse>(
+          const providerResponse = await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
             "run_provider_chat",
             {
               request: {

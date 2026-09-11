@@ -305,6 +305,7 @@ expect(
 );
 
 const appSource = readRepoFile("apps/desktop/src/App.tsx");
+const turnTimingSource = readRepoFile("apps/desktop/src/turn-timing.ts");
 const captureFixtureSource = readRepoFile(
   "apps/desktop/src/capture-fixtures.ts",
 );
@@ -345,6 +346,7 @@ const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
+const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
 const desktopIndexSource = readRepoFile("apps/desktop/index.html");
@@ -610,6 +612,45 @@ expect(
   "The Source Control rail icon should badge the change count, and status should refresh from the workspace root.",
 );
 expect(
+  surfaceSource.includes("function scmBranchMenuStyle") &&
+    surfaceSource.includes("function ScmBranchPicker") &&
+    surfaceSource.includes('className="gyro-scm-branch-menu"') &&
+    surfaceSource.includes("createPortal(") &&
+    cssRules(styleSource, ".gyro-scm-branch-menu").some(
+      (rule) =>
+        rule.includes("position: fixed") &&
+        rule.includes("isolation: isolate") &&
+        rule.includes("z-index: 80"),
+    ) &&
+    cssRules(styleSource, ".gyro-scm-branch-item span").some(
+      (rule) =>
+        rule.includes("overflow-wrap: anywhere") &&
+        rule.includes("white-space: normal"),
+    ) &&
+    cssRules(
+      styleSource,
+      ':root[data-theme="light"] .gyro-scm-branch-menu',
+    ).some((rule) => rule.includes("background: #fff")),
+  "The branch picker menu should portal above the commit form so long names are not clipped.",
+);
+const branchDialogSource = readRepoFile(
+  "apps/desktop/src/branch-name-dialog.tsx",
+);
+const branchDialogCss = readRepoFile("apps/desktop/src/branch-name-dialog.css");
+expect(
+  branchDialogSource.includes('className="gyro-primary-button"') &&
+    branchDialogSource.includes('className="gyro-secondary-button"') &&
+    branchDialogSource.includes("<code>{startPoint}</code>") &&
+    branchDialogCss.includes("appearance: none") &&
+    branchDialogCss.includes("-webkit-appearance: none") &&
+    branchDialogCss.includes("var(--gyro-premium-panel") &&
+    branchDialogCss.includes("var(--gyro-scrim") &&
+    branchDialogCss.includes("backdrop-filter: blur(6px)") &&
+    !branchDialogCss.includes("background: canvas") &&
+    !branchDialogCss.includes("--gyro-topbar"),
+  "The new-branch dialog should use Gyro overlay, type, and buttons instead of native system chrome.",
+);
+expect(
   cssRules(styleSource, ".gyro-settings-topbar").some((rule) =>
     rule.includes("background: var(--gyro-sidebar)"),
   ) &&
@@ -868,6 +909,9 @@ const coreCapabilitiesSource = readRepoFile(
 const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 const tauriSource = readRepoFile("apps/desktop/src-tauri/src/lib.rs");
+const turnTimingRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/turn_timing.rs",
+);
 const updateStateSource = readRepoFile("packages/ui/src/update-state.ts");
 const updateControllerSource = readRepoFile(
   "apps/desktop/src/update-controller.ts",
@@ -3561,7 +3605,11 @@ expect(
     !appSource.includes("const [draft, setDraft]") &&
     !appSource.includes("onDraftChange={setDraft}") &&
     appSource.includes("maxDraftLength={MAX_CHAT_MESSAGE_CHARS}") &&
-    /invoke<ProviderChatResponse>\(\s*"run_provider_chat"/.test(appSource) &&
+    /invokeTimedProviderChat<ProviderChatResponse>\(\s*"run_provider_chat"/.test(
+      appSource,
+    ) &&
+    appSource.includes("turnTiming.invokeTimedProviderChat") &&
+    turnTimingSource.includes("return await invoke<T>(command, args)") &&
     appSource.includes("sessionTitleFromMessage") &&
     appSource.includes("shouldSuggestSessionTitle") &&
     appSource.includes("applyProviderChatResponse") &&
@@ -3922,8 +3970,11 @@ expect(
     tauriSource.includes("async fn run_provider_chat") &&
     // Interactive sends must be tagged as chat for the usage ledger, so an
     // automation can never be counted against the person at the keyboard.
-    /spawn_blocking\(move \|\|\s*\{?\s*run_provider_chat_blocking\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
+    /spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
       tauriSource,
+    ) &&
+    turnTimingRustSource.includes(
+      "run_provider_chat_blocking(app, request, origin)",
     ) &&
     tauriSource.includes("async fn save_config") &&
     tauriSource.includes("config save worker failed") &&
@@ -4455,7 +4506,7 @@ expect(
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 21 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 20 &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
@@ -4581,6 +4632,33 @@ expect(
       ".gyro-app-shell:has(.gyro-chat-surface.is-thread)\n  .gyro-sidebar-persistent-header",
     ),
   "The sidebar mode switcher should have no extra divider above it while the thread topbar keeps its own divider.",
+);
+
+expect(
+  /(?:^|\n)\.gyro-chat-thread-topbar \{\n  background: var\(--gyro-pane\);/.test(
+    styleSource,
+  ) &&
+    /(?:^|\n):root\[data-theme="dark"\] \.gyro-chat-thread-topbar \{\n  background: var\(--gyro-app\);/.test(
+      styleSource,
+    ) &&
+    /gyro-chat-thread-topbar,[\s\S]{0,240}gyro-chat-thread-canvas,[\s\S]{0,240}gyro-chat-transcript,[\s\S]{0,240}gyro-chat-composer-dock \{\n  background: var\(--gyro-pane\);/.test(
+      chatDesignSource,
+    ) &&
+    /data-theme="dark"[\s\S]{0,160}gyro-chat-thread-topbar,[\s\S]{0,500}background: var\(--gyro-app\);/.test(
+      chatDesignSource,
+    ),
+  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark.",
+);
+
+expect(
+  /gyro-run:is\(\.is-live, \.is-retrying\)[\s\S]{0,80}gyro-run-header::before[\s\S]{0,200}display: none/.test(
+    chatDesignSource,
+  ) &&
+    /gyro-run\.is-settled[\s\S]{0,80}gyro-run-header::before[\s\S]{0,80}display: none/.test(
+      chatDesignSource,
+    ) &&
+    !/gyro-run\.is-settled[\s\S]{0,120}content: "✓"/.test(chatDesignSource),
+  "The in-chat run header should not show a working ring or completed check.",
 );
 
 expect(
@@ -5273,7 +5351,7 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 38px minmax(0, 1fr)"),
+      rule.includes("grid-template-rows: 52px minmax(0, 1fr)"),
     ) &&
     threadTopbarRules.some(
       (rule) =>
@@ -6380,14 +6458,30 @@ expect(
         rule.includes("min-height: 48px") &&
         rule.includes("padding: 0 5px 0 84px"),
     ) &&
-    cssRules(styleSource, ".gyro-sidebar-restore-button").some((rule) =>
-      rule.includes("top: 14px"),
+    surfaceSource.includes('className="gyro-sidebar-restore-cluster"') &&
+    surfaceSource.includes('className="gyro-sidebar-window-actions"') &&
+    surfaceSource.includes(
+      'className="gyro-sidebar-restore-button gyro-sidebar-toggle-button"',
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-restore-cluster").some(
+      (rule) =>
+        rule.includes("height: 52px") &&
+        rule.includes("padding-left: 93px") &&
+        rule.includes("position: fixed"),
+    ) &&
+    cssRules(styleSource, ".gyro-sidebar-restore-button").some(
+      (rule) =>
+        rule.includes("position: static") &&
+        rule.includes("height: 28px") &&
+        rule.includes("top: auto"),
     ) &&
     cssRules(styleSource, ".gyro-sidebar-restore-button").every(
       (rule) => !rule.includes("top: 16px"),
     ) &&
     styleSource.includes(".gyro-chat-grid.has-multiple-panes") &&
-    styleSource.includes(".gyro-sidebar-restore-button {\n  top: 7px;") &&
+    styleSource.includes(
+      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout:has(\n    .gyro-chat-grid.has-multiple-panes\n  )\n  > .gyro-sidebar-restore-cluster",
+    ) &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
     styleSource.includes("margin: auto -8px 0"),

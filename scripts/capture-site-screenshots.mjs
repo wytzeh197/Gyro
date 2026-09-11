@@ -82,15 +82,17 @@ const keepPng = process.argv.includes("--keep-png");
  * after load to drive the UI into the state we want to photograph.
  */
 /*
- * The hero is one 16:10 frame. The earlier 5:4 crop left a column of empty
- * thread under the last message: a taller frame does not add app, it adds
- * background. 1200x750 CSS pixels at a 2x device scale gives the 2400px master
- * the desktop stage picks from.
- *
- * The hero pairs a completed conversation with a sample code review. Keeping
- * the run collapsed leaves the edited-file summary visible beside the diff.
+ * Capture the real app at 2x. The website renderer puts these windows on its
+ * 16:10 scenic canvas and writes the responsive hero posters separately:
+ * python3 scripts/site-motion/render.py
  */
-const heroSteps = ["selectSession", "openCompanion", "openCompanionReview"];
+const heroSteps = [
+  "selectSession",
+  "collapseRun",
+  "openCompanion",
+  "openCompanionReview",
+  "scrollThreadTop",
+];
 
 const heroWorkbench = {
   diffReview: {
@@ -160,33 +162,61 @@ const marketingScenes = [
   {
     name: "hero",
     urlScene: "chat",
+    presentation: "website",
     theme: "dark",
-    width: 1200,
-    height: 750,
+    width: 1440,
+    height: 720,
     steps: heroSteps,
     workbench: heroWorkbench,
     outputs: [
-      { file: "hero-2400.webp", width: 2400, height: 1500 },
-      { file: "hero-1200.webp", width: 1200, height: 750 },
-      { file: "hero-600.webp", width: 600, height: 375 },
+      { file: "hero-ui.webp", width: 2880, height: 1440, directory: "staging" },
     ],
   },
   {
     /* The same frame in the light theme, for visitors who flip the toggle. */
     name: "hero-light",
     urlScene: "chat",
+    presentation: "website",
     theme: "light",
-    width: 1200,
-    height: 750,
+    width: 1440,
+    height: 720,
     steps: heroSteps,
     workbench: heroWorkbench,
     outputs: [
-      { file: "hero-light-2400.webp", width: 2400, height: 1500 },
-      { file: "hero-light-1200.webp", width: 1200, height: 750 },
-      { file: "hero-light-600.webp", width: 600, height: 375 },
+      {
+        file: "hero-light-ui.webp",
+        width: 2880,
+        height: 1440,
+        directory: "staging",
+      },
     ],
   },
 ];
+
+for (const theme of ["dark", "light"]) {
+  for (const [name, steps] of [
+    ["conversation", ["selectSession", "collapseRun", "scrollThreadTop"]],
+    ["activity", ["selectSession", "expandRun", "scrollThreadTop"]],
+  ]) {
+    marketingScenes.push({
+      name: `website-${name}-${theme}`,
+      urlScene: "chat",
+      presentation: "website",
+      theme,
+      width: 960,
+      height: 720,
+      steps,
+      outputs: [
+        {
+          file: `website-${name}-${theme}.webp`,
+          width: 1920,
+          height: 1440,
+          directory: "staging",
+        },
+      ],
+    });
+  }
+}
 
 const readmeScenes = [
   {
@@ -285,7 +315,19 @@ const clickByText = (text) => `
 `;
 
 const steps = {
-  openCompanion: clickByText("Panel"),
+  openCompanion: clickByText("Show companion"),
+  collapseRun: `(() => {
+    const button = document.querySelector('.gyro-run-header-toggle');
+    if (!button) return 'missing:run-header';
+    if (button.getAttribute('aria-expanded') === 'true') button.click();
+    return 'collapsed:run';
+  })()`,
+  scrollThreadTop: `(() => {
+    const thread = document.querySelector('.gyro-chat-transcript');
+    if (!thread) return 'missing:transcript';
+    thread.scrollTop = 0;
+    return 'positioned:thread';
+  })()`,
   openCompanionReview: `(() => {
     const button = [...document.querySelectorAll('.gyro-companion-launcher button')].find(node => node.textContent.includes('Review'));
     if (!button) return 'missing:companion-review';
@@ -541,7 +583,7 @@ async function main() {
           )}));`,
       });
       await call("Page.navigate", {
-        url: `${appOrigin}/capture.html?scene=${scene.urlScene}&theme=${theme}`,
+        url: `${appOrigin}/capture.html?scene=${scene.urlScene}&theme=${theme}${scene.presentation ? `&presentation=${scene.presentation}` : ""}`,
       });
 
       await waitFor(
@@ -562,6 +604,9 @@ async function main() {
           returnByValue: true,
         });
         console.log(`  ${scene.name}: ${step} -> ${result.value}`);
+        if (String(result.value).startsWith("missing:")) {
+          fail(`${scene.name}: required capture step failed: ${result.value}`);
+        }
         // Workspace preparation starts only after a session has been selected.
         // Give the activity rail time to mount before a following step selects
         // one of its icon-only views.
@@ -602,7 +647,11 @@ async function main() {
 
       for (const output of scene.outputs) {
         const target = resolve(
-          output.directory === "readme" ? readmeOutputRoot : outputRoot,
+          output.directory === "readme"
+            ? readmeOutputRoot
+            : output.directory === "staging"
+              ? stagingRoot
+              : outputRoot,
           output.file,
         );
         encodeWebp(png, target, output.width, output.height);

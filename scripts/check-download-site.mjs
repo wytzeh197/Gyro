@@ -174,6 +174,7 @@ containsAll(read("site/theme.js"), "Theme runtime", [
   "gyro.site-theme",
   "data-theme-toggle",
   "addEventListener",
+  'stored() === "dark" ? "dark" : "light"',
 ]);
 check(
   !app.includes("data-theme-toggle"),
@@ -184,6 +185,14 @@ for (const [name, html] of Object.entries(pages)) {
     html.includes("data-theme-toggle"),
     `${name} page must expose the header theme toggle`,
   );
+  check(
+    html.includes('content="#ffffff"'),
+    `${name} page must default theme-color to white`,
+  );
+  check(
+    html.includes('aria-label="Switch to dark theme"'),
+    `${name} page must default the theme toggle to light`,
+  );
 }
 
 containsAll(pages.home, "Homepage", [
@@ -191,11 +200,10 @@ containsAll(pages.home, "Homepage", [
   "A space to build.",
   "workspace-switcher",
   "ownership-title",
-  "An open-source AI coding workspace for your agents, terminal,",
   "Public alpha",
   "Think, build, and ship in one place.",
   "Public alpha",
-  "Three surfaces. One task.",
+  "Three surfaces.<br />One task.",
   "Direct work.",
   "Run locally.",
   "Review changes.",
@@ -211,8 +219,8 @@ containsAll(pages.home, "Homepage", [
   'class="agent-grid"',
   'class="agent-tile agent-ollama"',
   ">Ollama</span>",
-  "assets/screenshots/hero-current-dark.webp",
-  "assets/screenshots/hero-current-light.webp",
+  "assets/screenshots/hero-2400.webp",
+  "assets/screenshots/hero-light-2400.webp",
   "assets/social-preview.png",
   "Download for macOS.",
   "Download DMG",
@@ -240,6 +248,12 @@ check(
   "Homepage must contain one compact download surface",
 );
 check(
+  !pages.home.includes(
+    "Your agents, terminal, and code review. Together on your Mac.",
+  ),
+  "Homepage hero must not include the removed subtitle",
+);
+check(
   !pages.home.includes("Move Gyro to Applications."),
   "Homepage must not contain the full first-launch guide",
 );
@@ -253,7 +267,10 @@ check(
   "Download pages must not show an automatic recommendation sentence",
 );
 check(
-  !css.replace(/\.home-page \.product-stage-frame::after\s*\{[^}]*\}/g, "").toLowerCase().includes("gradient("),
+  !css
+    .replace(/\.home-page \.product-stage-frame::after\s*\{[^}]*\}/g, "")
+    .toLowerCase()
+    .includes("gradient("),
   "Gradients are limited to the requested screenshot outline",
 );
 check(
@@ -353,6 +370,8 @@ containsAll(css, "Shared CSS", [
   ".version-rail nav",
   ".legal-layout",
   "scroll-margin-top:",
+  ".site-header {\n  position: sticky;\n  z-index: 50;\n  top: 0;",
+  "width: 100%",
   ":focus-visible",
   "@media (max-width: 900px)",
   "@media (max-width: 720px)",
@@ -383,7 +402,7 @@ check(
 );
 
 // The high-contrast override started life as a light-theme-only palette, which
-// left dark mode — the default — with near-black text on a near-black page.
+// left dark mode with near-black text on a near-black page.
 check(
   /@media \(prefers-contrast: more\) \{[\s\S]*?:root\[data-theme="light"\]/.test(
     css,
@@ -517,10 +536,9 @@ check(
 );
 
 /*
- * 16:10, not 16:9. The app puts a sidebar, a conversation and an environment
- * panel side by side, and a 16:9 crop of that either loses a column or pads
- * the thread with empty space. These numbers match the capture scenes in
- * scripts/capture-site-screenshots.mjs; change them together.
+ * Scenic hero posters use a 16:10 canvas. The current app windows are
+ * captured separately, then composed by scripts/site-motion/render.py.
+ * Change poster dimensions here and in the renderer together.
  */
 const screenshotSpecs = [
   ["site/assets/screenshots/hero-current-dark.webp", 1660, 989],
