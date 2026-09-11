@@ -62,9 +62,21 @@ visible outline; the composer uses its focused border.
 `apps/desktop/prototype.html` mounts a separate React study. It uses the real shared
 `ChatRun` and tokens; the shell, composer, diff, and provider work are simulations.
 The shared component gained optional status-label and thinking-indicator props,
-whose defaults preserve production rendering. No production styling is overridden.
+whose defaults preserve production rendering.
 
-Before adopting the study in the full desktop UI, validate it against real
+The approved main chat and composer treatment is now applied to the desktop UI
+through `packages/ui/src/chat-design.css`. It retains the existing provider,
+approval, attachment, queue, review, and Stop controls and event handling. The
+sidebar and companion retain their existing appearance. This adoption changes
+presentation only; the study's simulated state labels and results remain isolated.
+
+Native checkout screenshots in `../screenshots/chat-design/` use an isolated
+sample conversation, not a measured provider run. Type checking, focused chat,
+queue and context checks, and the desktop bundle build passed. Native checks
+covered composing text, expanding activity, opening model controls, and toggling
+the companion. These checks do not establish streaming or recovery performance.
+
+Before adopting further study behavior in the full desktop UI, validate it against real
 streaming and long transcripts, connect state labels to authoritative events,
 and resolve the measured cancellation/retry ambiguities. Do not copy the sample
 18-second completion label, test result, or seeded diff into a real request.
