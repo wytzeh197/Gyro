@@ -10466,26 +10466,34 @@ fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlS
 
 fn git_status_stamp(repo_root: &Path, porcelain: &str, files: &[SourceControlFile]) -> String {
     let mut material = format!("{}\n{}", repo_root.display(), porcelain);
-    for file in files {
-        for path in [Some(file.path.as_str()), file.original_path.as_deref()]
-            .into_iter()
-            .flatten()
-        {
-            material.push('\n');
-            material.push_str(path);
-            match fs::symlink_metadata(repo_root.join(path)) {
-                Ok(metadata) => {
-                    material.push('\t');
-                    material.push_str(&metadata.len().to_string());
-                    if let Ok(modified) = metadata.modified() {
-                        if let Ok(elapsed) = modified.duration_since(SystemTime::UNIX_EPOCH) {
-                            material.push('\t');
-                            material.push_str(&elapsed.as_nanos().to_string());
-                        }
+    for path in [
+        Some(".git/HEAD"),
+        Some(".git/packed-refs"),
+        Some(".git/refs/heads/main"),
+        Some(".git/refs/heads/master"),
+    ]
+    .into_iter()
+    .chain(
+        files
+            .iter()
+            .flat_map(|file| [Some(file.path.as_str()), file.original_path.as_deref()]),
+    )
+    .flatten()
+    {
+        material.push('\n');
+        material.push_str(path);
+        match fs::symlink_metadata(repo_root.join(path)) {
+            Ok(metadata) => {
+                material.push('\t');
+                material.push_str(&metadata.len().to_string());
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = modified.duration_since(SystemTime::UNIX_EPOCH) {
+                        material.push('\t');
+                        material.push_str(&elapsed.as_nanos().to_string());
                     }
                 }
-                Err(_) => material.push_str("\tmissing"),
             }
+            Err(_) => material.push_str("\tmissing"),
         }
     }
     content_hash(material.as_bytes())
@@ -31496,11 +31504,14 @@ while True:
             std::fs::write(repo.path().join(format!("new-{index}.txt")), "new\n").unwrap();
         }
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
-        assert_eq!(status.additions, 300);
-        assert!(!status.stats_partial);
+        assert_eq!(status.additions, MAX_UNTRACKED_LINE_COUNT_FILES);
+        assert!(status.stats_partial);
         let comparison = status.compared_to_main.unwrap();
-        assert_eq!((comparison.additions, comparison.deletions), (300, 0));
-        assert!(!comparison.partial);
+        assert_eq!(
+            (comparison.additions, comparison.deletions),
+            (MAX_UNTRACKED_LINE_COUNT_FILES, 0)
+        );
+        assert!(comparison.partial);
         let (_, malformed) = parse_git_numstat("invalid\t1\tfile.txt");
         assert!(malformed);
     }
