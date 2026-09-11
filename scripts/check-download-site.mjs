@@ -356,6 +356,8 @@ containsAll(css, "Shared CSS", [
   ".version-rail nav",
   ".legal-layout",
   "scroll-margin-top:",
+  ".site-header {\n  position: sticky;\n  z-index: 50;\n  top: 0;",
+  "width: 100%",
   ":focus-visible",
   "@media (max-width: 900px)",
   "@media (max-width: 720px)",

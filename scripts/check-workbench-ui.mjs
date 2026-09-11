@@ -345,6 +345,7 @@ const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = readRepoFile("packages/ui/src/styles.css");
+const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
 const desktopIndexSource = readRepoFile("apps/desktop/index.html");
@@ -4494,7 +4495,7 @@ expect(
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 21 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 20 &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
@@ -4620,6 +4621,33 @@ expect(
       ".gyro-app-shell:has(.gyro-chat-surface.is-thread)\n  .gyro-sidebar-persistent-header",
     ),
   "The sidebar mode switcher should have no extra divider above it while the thread topbar keeps its own divider.",
+);
+
+expect(
+  /(?:^|\n)\.gyro-chat-thread-topbar \{\n  background: var\(--gyro-pane\);/.test(
+    styleSource,
+  ) &&
+    /(?:^|\n):root\[data-theme="dark"\] \.gyro-chat-thread-topbar \{\n  background: var\(--gyro-app\);/.test(
+      styleSource,
+    ) &&
+    /gyro-chat-thread-topbar,[\s\S]{0,240}gyro-chat-thread-canvas,[\s\S]{0,240}gyro-chat-transcript,[\s\S]{0,240}gyro-chat-composer-dock \{\n  background: var\(--gyro-pane\);/.test(
+      chatDesignSource,
+    ) &&
+    /data-theme="dark"[\s\S]{0,160}gyro-chat-thread-topbar,[\s\S]{0,500}background: var\(--gyro-app\);/.test(
+      chatDesignSource,
+    ),
+  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark.",
+);
+
+expect(
+  /gyro-run:is\(\.is-live, \.is-retrying\)[\s\S]{0,80}gyro-run-header::before[\s\S]{0,200}display: none/.test(
+    chatDesignSource,
+  ) &&
+    /gyro-run\.is-settled[\s\S]{0,80}gyro-run-header::before[\s\S]{0,80}display: none/.test(
+      chatDesignSource,
+    ) &&
+    !/gyro-run\.is-settled[\s\S]{0,120}content: "✓"/.test(chatDesignSource),
+  "The in-chat run header should not show a working ring or completed check.",
 );
 
 expect(
@@ -5312,7 +5340,7 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 38px minmax(0, 1fr)"),
+      rule.includes("grid-template-rows: 52px minmax(0, 1fr)"),
     ) &&
     threadTopbarRules.some(
       (rule) =>

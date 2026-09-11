@@ -1837,15 +1837,23 @@ export function AppChrome({
       />
       {isSidebarHidden ? (
         <div className="gyro-sidebar-restore-cluster">
-          <button
-            aria-label="Show sidebar"
-            className="gyro-sidebar-restore-button"
-            onClick={() => setIsSidebarHidden(false)}
-            title="Show sidebar"
-            type="button"
-          >
-            <PanelLeft size={14} />
-          </button>
+          <div className="gyro-sidebar-window-actions">
+            <button
+              aria-label="Show sidebar"
+              className="gyro-sidebar-restore-button gyro-sidebar-toggle-button"
+              onClick={() => setIsSidebarHidden(false)}
+              title="Show sidebar"
+              type="button"
+            >
+              <PanelLeft size={16} />
+            </button>
+            <button aria-label="Back" disabled type="button">
+              <ArrowLeft size={16} />
+            </button>
+            <button aria-label="Forward" disabled type="button">
+              <ArrowRight size={16} />
+            </button>
+          </div>
           <WorkspacePreparationControl
             controlRef={workspacePreparationRef}
             isOpen={isWorkspacePreparationOpen}
@@ -3749,14 +3757,14 @@ function WorkspaceSidebarContent({
                 onClick={onToggleSidebar}
                 type="button"
               >
-                <PanelLeft size={14} />
+                <PanelLeft size={16} />
               </button>
             ) : null}
             <button aria-label="Back" disabled type="button">
-              <ArrowLeft size={13} />
+              <ArrowLeft size={16} />
             </button>
             <button aria-label="Forward" disabled type="button">
-              <ArrowRight size={13} />
+              <ArrowRight size={16} />
             </button>
           </div>
           <div
@@ -8332,7 +8340,7 @@ export function ChatSurface({
           <Folder
             aria-hidden="true"
             className="gyro-thread-project-icon"
-            size={15}
+            size={16}
           />
           <strong>{sessionTitle ?? "Gyro session"}</strong>
           <ChatSurfaceControls
@@ -8981,7 +8989,7 @@ function ChatSurfaceControls({
           title="Environment"
           type="button"
         >
-          <SlidersHorizontal size={15} />
+          <SlidersHorizontal size={16} />
         </button>
       ) : null}
       {showToolPanel && !isDockOpen && onToggleToolPanel ? (
@@ -8999,7 +9007,7 @@ function ChatSurfaceControls({
           title={isToolPanelOpen ? "Hide bottom drawer" : "Show bottom drawer"}
           type="button"
         >
-          <PanelBottom size={15} />
+          <PanelBottom size={16} />
           {drawerHasModelActivity ? (
             <span aria-hidden="true" className="gyro-model-activity-dot" />
           ) : null}
@@ -9016,7 +9024,7 @@ function ChatSurfaceControls({
           title={isDockOpen ? "Hide companion" : "Show companion"}
           type="button"
         >
-          <PanelRight size={15} />
+          <PanelRight size={16} />
         </button>
       ) : null}
       {showOverflow ? (
@@ -9039,7 +9047,7 @@ function ChatSurfaceControls({
             title="More"
             type="button"
           >
-            <MoreHorizontal size={15} />
+            <MoreHorizontal size={16} />
             {drawerHasModelActivity ? (
               <span aria-hidden="true" className="gyro-model-activity-dot" />
             ) : null}

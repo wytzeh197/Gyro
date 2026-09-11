@@ -309,6 +309,20 @@ expect(
   "A single terminal in the chat companion must be one quiet shell: its dock tab is the title, so the nested toolbar and pane header stay hidden.",
 );
 
+expect(
+  cssRules(styles, ".gyro-environment-rail.is-tool.is-chromeless").some(
+    (rule) => rule.includes("grid-template-rows: minmax(0, 1fr)"),
+  ) &&
+    cssRules(
+      styles,
+      ".gyro-environment-rail.is-tool.is-chromeless > :last-child",
+    ).some(
+      (rule) =>
+        rule.includes("height: 100%") && rule.includes("overflow: hidden"),
+    ),
+  "Chromeless companion tools have no header, so the body must occupy a single 1fr row or xterm sizes to 0 and the new terminal looks empty.",
+);
+
 if (failures.length > 0) {
   console.error(`check-chat-side-panel failed (${failures.length}):`);
   for (const failure of failures) console.error(`- ${failure}`);

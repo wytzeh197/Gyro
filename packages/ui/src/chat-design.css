@@ -6,6 +6,9 @@
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-thread-topbar,
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
   > .gyro-chat-thread-canvas,
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
@@ -14,6 +17,21 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-composer-dock {
   background: var(--gyro-pane);
+}
+
+:root[data-theme="dark"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-thread-topbar,
+:root[data-theme="dark"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-thread-canvas,
+:root[data-theme="dark"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-transcript,
+:root[data-theme="dark"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-chat-composer-dock {
+  background: var(--gyro-app);
 }
 
 :root[data-theme]
@@ -69,6 +87,20 @@
   box-shadow: none;
 }
 
+:root[data-theme="light"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble {
+  background: #000;
+  border-color: transparent;
+  color: #fff;
+}
+
+:root[data-theme="light"]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble p {
+  color: #fff;
+}
+
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-user-message-meta {
@@ -92,14 +124,14 @@
   text-align: left;
 }
 
-/* The state mark stays still. Connection heartbeats do not animate progress. */
+/* Status is the header text. A mark remains only for failures. */
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run
   > .gyro-run {
   box-sizing: border-box;
   position: relative;
-  padding-left: 23px;
+  padding-left: 0;
 }
 
 :root[data-theme]
@@ -107,7 +139,7 @@
   .gyro-run::before {
   content: "";
   position: absolute;
-  left: 5px;
+  left: 0;
   top: 26px;
   bottom: 10px;
   width: 1px;
@@ -130,39 +162,17 @@
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-run-header::before {
-  content: "";
-  position: absolute;
-  top: 7px;
-  left: 0;
-  width: 11px;
-  height: 11px;
-  border: 1.5px solid var(--gyro-accent);
-  border-radius: 50%;
-  box-sizing: border-box;
-}
-
+  .gyro-run-header::before,
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run:is(.is-live, .is-retrying)
-  .gyro-run-header::before {
-  border-right-color: transparent;
-  border-bottom-color: transparent;
-  transform: rotate(-30deg);
-}
-
+  .gyro-run-header::before,
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-run.is-settled
   .gyro-run-header::before {
-  content: "✓";
-  display: grid;
-  place-items: center;
-  width: 13px;
-  height: 13px;
-  border: none;
-  color: var(--gyro-success);
-  font-size: 12px;
+  display: none;
+  content: none;
 }
 
 :root[data-theme]
@@ -172,6 +182,11 @@
   content: "!";
   display: grid;
   place-items: center;
+  position: absolute;
+  top: 7px;
+  left: 0;
+  width: 13px;
+  height: 13px;
   border-radius: 3px;
   border-color: var(--gyro-danger);
   color: var(--gyro-danger);
@@ -183,10 +198,8 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-run.is-cancelled
   .gyro-run-header::before {
-  content: "";
-  border: 1.5px solid var(--gyro-muted);
-  border-radius: 2px;
-  background: transparent;
+  display: none;
+  content: none;
 }
 
 :root[data-theme]
@@ -198,6 +211,7 @@
 
 :root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-run-rail {
   gap: 8px;
+  padding-left: 12px;
 }
 :root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-run-group {
   border: 0;

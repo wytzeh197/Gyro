@@ -2708,8 +2708,8 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-chat-surface-button-label {
-  font-size: 12px;
-  font-weight: 560;
+  font-size: 13px;
+  font-weight: 520;
 }
 
 .gyro-chat-surface.is-tiled .gyro-chat-surface-button-label {
@@ -9209,7 +9209,7 @@ textarea:focus-visible {
 }
 
 .gyro-sidebar-restore-cluster .gyro-workspace-preparation {
-  left: 121px;
+  left: 204px;
   margin: 0;
   position: fixed;
   top: 10px;
@@ -15761,6 +15761,15 @@ body {
   .gyro-terminal-workspace {
   background: #08090b;
   grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid {
+  height: 100%;
+  min-height: 0;
 }
 
 .gyro-chat-companion
@@ -16101,6 +16110,7 @@ body {
 }
 
 .gyro-terminal-live-body {
+  height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -18426,9 +18436,9 @@ textarea,
   .gyro-chat-transcript
   .gyro-message.is-user
   > div:last-child {
-  background: #e7e9ee;
-  border-color: #d4d9e2;
-  color: #171a20;
+  background: transparent;
+  border-color: transparent;
+  color: inherit;
 }
 
 :root[data-theme="light"] .gyro-chat-transcript .gyro-message-meta,
@@ -25882,8 +25892,8 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-user-message-bubble {
-  background: #e7e7e7;
-  color: #202020;
+  background: #000;
+  color: #fff;
 }
 
 :root[data-theme="light"] .gyro-user-message-meta,
@@ -26656,9 +26666,16 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
+  .gyro-chat-surface.is-thread:not(.is-tiled) {
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+
+.gyro-app-shell.is-sidebar-hidden.is-thread-layout
   .gyro-chat-surface.is-thread:not(.is-tiled)
   > .gyro-chat-thread-topbar {
-  padding-left: 128px;
+  box-sizing: border-box;
+  min-height: 52px;
+  padding-left: 212px;
 }
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
@@ -26666,14 +26683,14 @@ button.gyro-account-menu-row:hover,
   .gyro-chat-grid-slot:first-child
   .gyro-chat-surface.is-thread
   > .gyro-chat-thread-topbar {
-  padding-left: max(128px, calc((100% - var(--gyro-chat-content-width)) / 2));
+  padding-left: max(212px, calc((100% - var(--gyro-chat-content-width)) / 2));
 }
 
 @media (max-width: 720px) {
   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
     .gyro-chat-surface.is-thread:not(.is-tiled)
     > .gyro-chat-thread-topbar {
-    padding-left: 122px;
+    padding-left: 200px;
   }
 
   .gyro-app-shell.is-sidebar-hidden.is-thread-layout
@@ -26681,7 +26698,7 @@ button.gyro-account-menu-row:hover,
     .gyro-chat-grid-slot:first-child
     .gyro-chat-surface.is-thread
     > .gyro-chat-thread-topbar {
-    padding-left: 122px;
+    padding-left: 200px;
   }
 }
 
@@ -27416,9 +27433,21 @@ button.gyro-account-menu-row:hover,
   overflow: hidden;
 }
 
+/* Companion already owns the tab strip, so chromeless tools have no header.
+   A leftover auto/1fr pair parks the only child in the auto row, which
+   collapses xterm (height: 100% of nothing) into a blank panel. */
+.gyro-environment-rail.is-tool.is-chromeless {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .gyro-environment-rail.is-tool > :last-child {
   min-height: 0;
   overflow: auto;
+}
+
+.gyro-environment-rail.is-tool.is-chromeless > :last-child {
+  height: 100%;
+  overflow: hidden;
 }
 
 .gyro-chat-tool-header {
@@ -28692,11 +28721,17 @@ button.gyro-account-menu-row:hover,
 }
 /* Keep chat navigation closer to the macOS window controls. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
+  box-sizing: border-box;
+  height: 52px;
   margin-bottom: 0;
+  min-height: 52px;
   padding-left: 93px;
 }
 
 .gyro-sidebar-windowbar.is-settings {
+  box-sizing: border-box;
+  height: 52px;
+  min-height: 52px;
   padding-left: 93px;
 }
 
@@ -29427,33 +29462,35 @@ button.gyro-account-menu-row:hover,
   max-width: 76px;
 }
 
-/* Compact thread chrome: keep context available without dominating the chat. */
+/* Codex-style title bar: one tall row shared with the sidebar window controls. */
 .gyro-chat-surface.is-thread {
-  grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr);
   row-gap: 0;
 }
 
 .gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
+  box-sizing: border-box;
   gap: 8px;
-  min-height: 38px;
-  padding-inline: 14px;
+  min-height: 52px;
+  padding-inline: 16px;
 }
 
 .gyro-chat-thread-topbar strong {
-  font-size: 13px;
-  font-weight: 620;
+  font-size: 14px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
 }
 
 .gyro-thread-topbar-actions {
-  gap: 4px;
+  gap: 6px;
 }
 
 .gyro-thread-workspace-context-button,
 .gyro-chat-thread-topbar .gyro-thread-workspace-context-button {
-  gap: 4px;
-  height: 24px;
+  gap: 6px;
+  height: 28px;
   max-width: min(220px, 32vw);
-  padding: 0 5px;
+  padding: 0 6px;
 }
 
 .gyro-thread-context-branch {
@@ -29461,9 +29498,16 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-thread-topbar .gyro-chat-surface-button {
-  border-radius: 6px;
-  height: 24px;
-  min-width: 24px;
+  border-radius: 8px;
+  height: 28px;
+  min-width: 28px;
+}
+
+.gyro-chat-thread-topbar .gyro-thread-project-icon {
+  color: var(--gyro-muted);
+  flex: 0 0 auto;
+  height: 16px;
+  width: 16px;
 }
 
 .gyro-thread-context-control > .gyro-thread-workspace-menu {
@@ -30619,13 +30663,24 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-faint);
 }
 
-/* Show-sidebar control when the sidebar is hidden (including Workspace code layout). */
+/* Hide-sidebar + history stay where the sidebar windowbar put them. */
 .gyro-sidebar-restore-cluster {
+  align-items: center;
+  box-sizing: border-box;
+  display: flex;
+  gap: 8px;
+  height: 52px;
+  left: 0;
   min-height: 0;
   min-width: 0;
+  padding-left: 93px;
   pointer-events: none;
+  position: fixed;
+  top: 0;
+  z-index: 120;
 }
 
+.gyro-sidebar-restore-cluster .gyro-sidebar-window-actions,
 .gyro-sidebar-restore-cluster .gyro-sidebar-restore-button,
 .gyro-sidebar-restore-cluster .gyro-workspace-preparation {
   pointer-events: auto;
@@ -30641,10 +30696,10 @@ button.gyro-account-menu-row:hover,
   display: inline-flex;
   height: 28px;
   justify-content: center;
-  left: 86px;
+  left: auto;
   padding: 0;
-  position: fixed;
-  top: 11px;
+  position: static;
+  top: auto;
   width: 28px;
   z-index: 120;
 }
@@ -30652,9 +30707,8 @@ button.gyro-account-menu-row:hover,
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout:has(
     .gyro-chat-grid.has-multiple-panes
   )
-  > .gyro-sidebar-restore-cluster
-  .gyro-sidebar-restore-button {
-  top: 7px;
+  > .gyro-sidebar-restore-cluster {
+  height: 52px;
 }
 
 .gyro-sidebar-restore-button:hover {
@@ -30664,8 +30718,8 @@ button.gyro-account-menu-row:hover,
 
 /* Workspace activity rail is 44px; keep the restore control clear of traffic lights. */
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
-  .gyro-sidebar-restore-button {
-  left: 92px;
+  .gyro-sidebar-restore-cluster {
+  padding-left: 49px;
 }
 
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
@@ -30689,10 +30743,11 @@ button.gyro-account-menu-row:hover,
 }
 
 /* Sidebar visibility controls stay icon-only in both shown and hidden states. */
+.gyro-sidebar-window-actions button,
 .gyro-sidebar-window-actions .gyro-sidebar-toggle-button {
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 8px;
   box-shadow: none;
   color: var(--gyro-text);
   height: 28px;
@@ -35532,9 +35587,13 @@ textarea:focus-visible,
 }
 
 .gyro-chat-thread-topbar {
-  background: var(--gyro-app);
+  background: var(--gyro-pane);
   border-bottom-color: var(--gyro-border-soft);
   box-shadow: none;
+}
+
+:root[data-theme="dark"] .gyro-chat-thread-topbar {
+  background: var(--gyro-app);
 }
 
 .gyro-chat-surface.has-environment .gyro-environment-rail,
@@ -36376,7 +36435,7 @@ textarea:focus-visible,
       > .gyro-chat-companion
     ) {
     grid-template-columns: minmax(320px, 1fr) auto;
-    grid-template-rows: 38px minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
   }
 
   .gyro-chat-surface.is-thread.has-environment.has-companion:not(.is-tiled)
@@ -36416,8 +36475,10 @@ textarea:focus-visible,
 .gyro-chat-surface.is-thread.has-companion > .gyro-chat-thread-topbar {
   background: var(--gyro-pane);
   border-bottom: 1px solid var(--gyro-border-soft);
+  box-sizing: border-box;
   gap: 8px;
-  height: 38px;
+  height: 52px;
+  min-height: 52px;
   min-width: 0;
   padding: 0 12px 0 16px;
 }
@@ -36515,9 +36576,10 @@ textarea:focus-visible,
 .gyro-chat-companion.is-browser-focus .gyro-chat-companion-tabs {
   background: var(--gyro-pane);
   border-bottom: 1px solid var(--gyro-border-soft);
+  box-sizing: border-box;
   gap: 8px;
-  height: 38px;
-  min-height: 38px;
+  height: 52px;
+  min-height: 52px;
   min-width: 0;
   padding: 0 10px;
 }
