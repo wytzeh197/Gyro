@@ -1501,6 +1501,8 @@ export function App() {
     [openCompanionTab],
   );
   const companionSurfaceProps = (paneId: string) => ({
+    dailyPaceWarning: workbench.preferences.dailyPaceWarning,
+    providerLedgerById,
     showQuickActions: workbench.preferences.showQuickActions,
     sideChat: sideChatFor(paneId),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
@@ -4212,6 +4214,7 @@ export function App() {
         dispatchWorkbench({ type: "ide-set-tasks", tasks: snapshot.tasks });
         dispatchWorkbench({ type: "ide-set-test-tree", tests: snapshot.tests });
         settleWorkspacePreparation(snapshot);
+        refreshIdeSourceControl(root);
       } catch (error) {
         if (workspacePreparationRunRef.current !== runId) return;
         settleWorkspacePreparation({
@@ -4226,7 +4229,7 @@ export function App() {
         });
       }
     },
-    [settleWorkspacePreparation, workspaceRoots],
+    [refreshIdeSourceControl, settleWorkspacePreparation, workspaceRoots],
   );
 
   useEffect(() => {
@@ -14187,7 +14190,25 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
+    if (!workspaceActionRoot || workspaceChangeGeneration === 0) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => refreshIdeSourceControl(workspaceActionRoot),
+      250,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [
+    refreshIdeSourceControl,
+    workspaceActionRoot,
+    workspaceChangeGeneration,
+  ]);
+
+  useEffect(() => {
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      activeSession?.workspacePath ??
+      workspacePath;
     if (!root) {
       return;
     }
@@ -14204,16 +14225,22 @@ export function App() {
       return;
     }
     refreshIdeSourceControl(root);
+    if (workspaceWatchMode === "event") {
+      return;
+    }
     const interval = window.setInterval(
       () => refreshIdeSourceControl(root),
-      800,
+      2500,
     );
     return () => window.clearInterval(interval);
   }, [
     activeSession?.workspacePath,
     deferredEventsForTurn,
     refreshIdeSourceControl,
+    selectedFile,
     workspacePath,
+    workspaceRoots,
+    workspaceWatchMode,
   ]);
 
   useEffect(() => {
@@ -16451,6 +16478,7 @@ export function App() {
           providerStatuses={workbench.providerStatuses}
           selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
+          dailyPaceWarning={workbench.preferences.dailyPaceWarning}
           onUsageProviderChange={(providerId) => {
             dispatchWorkbench({ type: "set-usage-provider", providerId });
           }}
@@ -16459,6 +16487,9 @@ export function App() {
               type: "set-usage-visualization",
               visualization,
             })
+          }
+          onDailyPaceWarningChange={(enabled) =>
+            dispatchWorkbench({ type: "set-daily-pace-warning", enabled })
           }
           onRefreshProviderUsage={(providerId) =>
             void refreshProviderUsage(providerId, true)

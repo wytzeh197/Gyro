@@ -9077,6 +9077,24 @@ textarea:focus-visible {
   z-index: 1;
 }
 
+.gyro-workspace-preparation-button[data-status="preparing"]
+  .gyro-workspace-preparation-ring {
+  animation: gyro-preparation-spin 1.1s linear infinite;
+}
+
+@keyframes gyro-preparation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-workspace-preparation-button[data-status="preparing"]
+    .gyro-workspace-preparation-ring {
+    animation: none;
+  }
+}
+
 .gyro-workspace-preparation-popover {
   background: color-mix(in srgb, var(--gyro-pane) 98%, transparent);
   border: 0.5px solid var(--gyro-premium-hairline-strong);
@@ -9084,11 +9102,15 @@ textarea:focus-visible {
   box-shadow: 0 20px 60px rgb(0 0 0 / 38%);
   display: grid;
   gap: 12px;
+  /* Open toward the main pane so the card is not clipped by the window. */
+  left: 0;
+  max-height: min(420px, calc(100dvh - 16px));
+  overflow: auto;
   padding: 13px;
   position: absolute;
-  right: 0;
+  right: auto;
   top: 31px;
-  width: min(292px, calc(100vw - 28px));
+  width: min(292px, calc(100vw - 16px));
   z-index: 160;
 }
 
@@ -33074,6 +33096,8 @@ button.gyro-account-menu-row:hover,
   > .gyro-workspace-preparation
   .gyro-workspace-preparation-popover {
   bottom: calc(100% + 8px);
+  left: 0;
+  right: auto;
   top: auto;
 }
 

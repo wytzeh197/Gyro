@@ -113,6 +113,11 @@ one cliff:
 | 90% — throttle | Expensive actions (council, max/ultra effort, automations) require confirmation. Normal turns proceed. |
 | 100% — stop    | New provider calls are refused with a clear reason and a one-click override. In-flight work finishes.  |
 
+A **daily pace warning** (Settings → Usage Limits, on by default) is separate
+from those stop thresholds. It is informational: Gyro warns when a day's spend
+reaches one day's even share of the weekly/100% window (`100 ÷ 7`, rounded to
+**14%**). It does not add a hard stop. A pause still outranks the warning.
+
 Defaults should be derived, not invented: when a provider reports its own
 window (Codex) the budget tracks that window. When it reports only a reset time
 (Claude) the budget is a local token cap over the same period. When it reports

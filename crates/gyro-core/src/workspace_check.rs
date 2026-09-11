@@ -7,9 +7,11 @@
 
 use crate::execution::{run_command, CancellationToken, ExecutionRequest, ExecutionTermination};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub const WORKSPACE_CHECK_SCHEMA_V1: &str = "gyro.workspace-check.v1";
@@ -22,6 +24,8 @@ const GIT_MAX_STDOUT_CHARS: usize = 64 * 1024;
 const GIT_MAX_STDERR_CHARS: usize = 8 * 1024;
 const MAX_MARKERS: usize = 12;
 const MIN_GIT_BUDGET: Duration = Duration::from_millis(50);
+const WORKSPACE_CHECK_CACHE_TTL: Duration = Duration::from_secs(2);
+const MAX_WORKSPACE_CHECK_CACHES: usize = 8;
 
 const PROJECT_MARKERS: &[(&str, &str)] = &[
     ("Cargo.toml", "rust"),
@@ -187,8 +191,39 @@ pub fn is_workspace_unavailable_error(error: &str) -> bool {
     error.contains(WORKSPACE_UNAVAILABLE_MESSAGE)
 }
 
+fn workspace_check_cache() -> &'static Mutex<HashMap<String, (Instant, WorkspaceCheckReport)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, WorkspaceCheckReport)>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn check_workspace(path: impl AsRef<Path>) -> WorkspaceCheckReport {
-    check_workspace_with_timeout(path, WORKSPACE_CHECK_TIMEOUT)
+    let key = path.as_ref().display().to_string();
+    if let Ok(cache) = workspace_check_cache().lock() {
+        if let Some((cached_at, report)) = cache.get(&key) {
+            if cached_at.elapsed() < WORKSPACE_CHECK_CACHE_TTL && !report.is_unavailable() {
+                return report.clone();
+            }
+        }
+    }
+    let report = check_workspace_with_timeout(path, WORKSPACE_CHECK_TIMEOUT);
+    if !report.is_unavailable() {
+        if let Ok(mut cache) = workspace_check_cache().lock() {
+            cache.insert(key.clone(), (Instant::now(), report.clone()));
+            while cache.len() > MAX_WORKSPACE_CHECK_CACHES {
+                let oldest = cache
+                    .iter()
+                    .filter(|(cached_key, _)| *cached_key != &key)
+                    .min_by_key(|(_, (cached_at, _))| *cached_at)
+                    .map(|(cached_key, _)| cached_key.clone());
+                let Some(oldest) = oldest else {
+                    break;
+                };
+                cache.remove(&oldest);
+            }
+        }
+    }
+    report
 }
 
 pub fn check_workspace_with_timeout(
@@ -439,6 +474,17 @@ mod tests {
         assert_eq!(report.status, WorkspaceCheckStatus::Unavailable);
         assert!(report.path_exists);
         assert!(!report.is_directory);
+    }
+
+    #[test]
+    fn ready_workspace_check_is_reused_within_the_ttl() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{}\n").unwrap();
+        let first = check_workspace(temp.path());
+        let second = check_workspace(temp.path());
+        assert_eq!(first, second);
+        assert_eq!(first.duration_ms, second.duration_ms);
+        assert_eq!(first.project_kind.as_deref(), Some("node"));
     }
 
     #[test]

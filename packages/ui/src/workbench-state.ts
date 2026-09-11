@@ -1331,6 +1331,7 @@ export type WorkbenchAction =
   | { type: "set-settings-section"; section: SettingsSectionId }
   | { type: "set-usage-provider"; providerId?: ProviderId }
   | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
+  | { type: "set-daily-pace-warning"; enabled: boolean }
   | { type: "set-cli-launch-preset"; preset: CliLaunchPreset }
   | { type: "register-mission-session"; sessionId: string }
   | { type: "set-mission-default-profile"; profileId?: string }
@@ -1968,6 +1969,14 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           usageVisualization: action.visualization,
+        },
+      };
+    case "set-daily-pace-warning":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          dailyPaceWarning: action.enabled,
         },
       };
     case "set-cli-launch-preset":
@@ -4301,6 +4310,7 @@ function normalizeWorkbenchPreferences(
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:
       preferences?.usageVisualization === "wheels" ? "wheels" : "bars",
+    dailyPaceWarning: preferences?.dailyPaceWarning !== false,
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
     showQuickActions: preferences?.showQuickActions !== false,

@@ -193,7 +193,7 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     hash: String,

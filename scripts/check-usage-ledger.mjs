@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 
 import {
+  DAILY_PACE_NOTICE_PERCENT,
+  dailyPaceNotice,
   estimateTurnCost,
   ledgerWindows,
   formatTokenCount,
@@ -8,6 +10,7 @@ import {
   planUsageNotices,
   summarizeSessionCost,
   summarizeUsageSafety,
+  weeklyLimitTokens,
 } from "../packages/ui/src/usage-ledger.ts";
 
 assert.deepEqual(
@@ -30,6 +33,98 @@ assert.deepEqual(
       cycleId: "2026-08-29T00:00:00.000Z",
     },
   ],
+);
+
+assert.equal(DAILY_PACE_NOTICE_PERCENT, 14);
+
+assert.equal(
+  dailyPaceNotice("openai", {
+    enabled: false,
+    windows: [{ id: "weekly", label: "Weekly limit", usedPercent: 20 }],
+  }),
+  undefined,
+);
+assert.equal(
+  dailyPaceNotice("openai", {
+    enabled: true,
+    paused: true,
+    windows: [{ id: "weekly", label: "Weekly limit", usedPercent: 20 }],
+  }),
+  undefined,
+);
+assert.equal(
+  dailyPaceNotice("openai", {
+    enabled: true,
+    windows: [
+      { id: "five-hour", label: "5-hour window", usedPercent: 40 },
+      { id: "weekly", label: "Weekly limit", usedPercent: 13 },
+    ],
+  }),
+  undefined,
+);
+assert.deepEqual(
+  dailyPaceNotice("openai", {
+    enabled: true,
+    windows: [
+      { id: "five-hour", label: "5-hour window", usedPercent: 40 },
+      {
+        id: "weekly",
+        label: "Weekly limit",
+        usedPercent: 14.4,
+        resetsAt: "2026-09-18T00:00:00.000Z",
+      },
+    ],
+  }),
+  {
+    providerId: "openai",
+    windowId: "weekly",
+    windowLabel: "Weekly limit",
+    percent: 14,
+    threshold: 14,
+    cycleId: "2026-09-18T00:00:00.000Z",
+  },
+);
+
+const pacedDay = dailyPaceNotice("anthropic", {
+  enabled: true,
+  ledger: {
+    providerId: "anthropic",
+    dailyReferenceTokens: 2_000_000,
+    fiveHour: totals({ totalTokens: 100_000 }),
+    day: totals({ totalTokens: 2_100_000 }),
+    week: totals({ totalTokens: 3_000_000 }),
+  },
+  now: new Date("2026-09-11T15:00:00.000Z"),
+});
+assert.equal(pacedDay?.windowId, "day");
+assert.equal(pacedDay?.percent, 15);
+assert.equal(pacedDay?.threshold, 14);
+assert.equal(pacedDay?.cycleId, "day:2026-09-11");
+
+// A measured day under pace must not fall through to cumulative weekly %.
+assert.equal(
+  dailyPaceNotice("openai", {
+    enabled: true,
+    ledger: {
+      providerId: "openai",
+      dailyReferenceTokens: 2_000_000,
+      fiveHour: totals(),
+      day: totals({ totalTokens: 100_000 }),
+      week: totals({ totalTokens: 4_000_000 }),
+    },
+    windows: [{ id: "weekly", label: "Weekly limit", usedPercent: 40 }],
+  }),
+  undefined,
+);
+
+assert.equal(
+  weeklyLimitTokens({
+    providerId: "xai",
+    dailyReferenceTokens: 2_000_000,
+    fiveHour: totals(),
+    week: totals(),
+  }),
+  14_000_000,
 );
 
 function totals(overrides = {}) {

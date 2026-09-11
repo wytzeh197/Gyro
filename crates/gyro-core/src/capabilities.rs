@@ -853,6 +853,37 @@ pub fn provider_capability_manifest() -> Vec<ProviderCapabilitySupport> {
         .collect()
 }
 
+/// Whether this capability should be advertised to a model for the current run.
+///
+/// Broker enforcement still applies at call time. Advertising the tools the
+/// mode cannot grant is what made Plan/Council spend a round on calls that
+/// were guaranteed to fail.
+pub fn capability_advertised_for_mode(id: CapabilityId, mode: CapabilityRunMode) -> bool {
+    match mode {
+        CapabilityRunMode::Council => false,
+        CapabilityRunMode::Plan => {
+            id != CapabilityId::WorkspaceProposeEdit
+                && matches!(
+                    capability_descriptor(id).class,
+                    CapabilityClass::WorkspaceInspect
+                        | CapabilityClass::WorkspaceSensitiveRead
+                        | CapabilityClass::IdeReveal
+                        | CapabilityClass::BrowserInspect
+                        | CapabilityClass::GithubInspect
+                )
+        }
+        CapabilityRunMode::Normal => true,
+    }
+}
+
+pub fn advertised_capability_descriptors(
+    mode: CapabilityRunMode,
+) -> impl Iterator<Item = &'static CapabilityDescriptor> {
+    CAPABILITY_DESCRIPTORS
+        .iter()
+        .filter(move |descriptor| capability_advertised_for_mode(descriptor.id, mode))
+}
+
 pub fn normalize_capability_relative_path(path: &str) -> Result<String> {
     let path = path.trim().replace('\\', "/");
     if path.is_empty() {
@@ -1077,6 +1108,29 @@ mod tests {
         assert_eq!(
             provider_capability_support("cursor").support_tier,
             crate::provider_registry::ProviderSupportTier::Experimental
+        );
+    }
+
+    #[test]
+    fn plan_and_council_advertise_only_the_tools_they_can_grant() {
+        assert!(
+            advertised_capability_descriptors(CapabilityRunMode::Council)
+                .next()
+                .is_none()
+        );
+        let plan = advertised_capability_descriptors(CapabilityRunMode::Plan)
+            .map(|descriptor| descriptor.id)
+            .collect::<Vec<_>>();
+        assert!(plan.contains(&CapabilityId::WorkspaceRead));
+        assert!(plan.contains(&CapabilityId::BrowserReadPage));
+        assert!(plan.contains(&CapabilityId::GithubStatus));
+        assert!(!plan.contains(&CapabilityId::WorkspaceProposeEdit));
+        assert!(!plan.contains(&CapabilityId::TerminalOpen));
+        assert!(!plan.contains(&CapabilityId::BrowserClick));
+        assert!(!plan.contains(&CapabilityId::GithubPush));
+        assert_eq!(
+            advertised_capability_descriptors(CapabilityRunMode::Normal).count(),
+            CAPABILITY_DESCRIPTORS.len()
         );
     }
 
