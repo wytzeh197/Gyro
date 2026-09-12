@@ -288,9 +288,13 @@ export {
   clampChatCompanionWidth,
   clampChatPanelWidth,
   activeChatCompanionPanel,
+  chatEnvironmentPaneKey,
   createInitialChatCompanionState,
+  defaultChatEnvironmentVisible,
   discardedSideChatSessionIds,
   isChatCompanionTabId,
+  resolveChatRailPanel,
+  shouldRevealChatEnvironment,
   staleSideChatSessionIds,
   withoutSideChatSessions,
 } from "./chat-companion";
@@ -301,6 +305,12 @@ export type {
   ChatCompanionTabId,
   ChatCompanionWidthMode,
 } from "./chat-companion";
+export {
+  sourceControlTotals,
+  sourceControlTotalsLabel,
+  sourceControlTotalsScope,
+} from "./source-control-stats";
+export type { SourceControlTotals } from "./source-control-stats";
 export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
   preferredCleanMachineConnectProvider,
@@ -371,7 +381,10 @@ export type {
   UsageSafetyNotice,
 } from "./usage-ledger";
 export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
-export { selectQueuedMessageDelivery } from "./chat-message-queue";
+export {
+  promoteQueuedMessage,
+  selectQueuedMessageDelivery,
+} from "./chat-message-queue";
 export type {
   QueuedDeliverySelection,
   QueuedMessageDelivery,
@@ -425,6 +438,7 @@ export {
   normalizedWorkspaceFolderPath,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  workspaceRelativeFilePath,
   workspaceRootForPath,
   parseGyroWorkspaceFile,
   serializeGyroWorkspaceFile,

@@ -246,6 +246,51 @@ export function activeChatCompanionPanel(
 }
 
 /**
+ * What the chat's right edge shows.
+ *
+ * The Environment is that edge's resting state rather than one more panel
+ * competing for it. A single chat opens with it; anything the user actually put
+ * on the rail — a companion tool, the plan document — displaces it for as long
+ * as that panel is up and hands it back on close. A tiled pane starts without
+ * it, because two chats side by side have no width to spare for a popover that
+ * covers the transcript of one of them.
+ */
+export function resolveChatRailPanel(options: {
+  companionPanel?: ChatSidePanelId;
+  isEnvironmentVisible: boolean;
+  legacyPanel?: ChatSidePanelId;
+}): ChatSidePanelId | undefined {
+  const claimed = options.legacyPanel ?? options.companionPanel;
+  if (claimed) return claimed;
+  return options.isEnvironmentVisible ? "environment" : undefined;
+}
+
+/**
+ * Whether the Environment shows for a pane that has expressed no preference.
+ * Splitting is what changes the answer, so the remembered choice is keyed by
+ * layout too — opening it in a single chat must not drag it into the split.
+ */
+export function defaultChatEnvironmentVisible(isTiled: boolean) {
+  return !isTiled;
+}
+
+export function chatEnvironmentPaneKey(paneId: string, isTiled: boolean) {
+  return `${paneId}:${isTiled ? "tiled" : "solo"}`;
+}
+
+/**
+ * Whether the Environment toggle reveals the rail's resting state or flips it.
+ * With a panel up the toggle's visible job is to clear the rail; only once the
+ * rail is free does it withdraw or restore the Environment itself.
+ */
+export function shouldRevealChatEnvironment(
+  legacyPanel?: ChatSidePanelId,
+  companionPanel?: ChatSidePanelId,
+) {
+  return Boolean(legacyPanel ?? companionPanel);
+}
+
+/**
  * Which tab takes focus after `tab` is closed: the neighbour on its left, so
  * closing along the strip walks back toward the first tab rather than jumping.
  */

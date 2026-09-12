@@ -22,6 +22,11 @@ import {
 } from "../packages/ui/src/chat-run.ts";
 
 let sequence = 0;
+assert.deepEqual(
+  splitToolName("gyro_capabilities__gyro_terminal_wait"),
+  { tool: "Wait for command" },
+  "command waits should have a readable chat activity label",
+);
 const at = (minutes) =>
   new Date(
     Date.parse("2026-08-02T09:00:00.000Z") + minutes * 60_000,

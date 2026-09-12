@@ -104,6 +104,7 @@ export type CapabilityId =
   | "ide-open-panel"
   | "terminal-open"
   | "terminal-read"
+  | "terminal-wait"
   | "terminal-stop"
   | "browser-open"
   | "browser-inspect"
@@ -1074,6 +1075,7 @@ export type WorkbenchPreferences = {
    */
   defaultWorkspaceMode: WorkbenchMode;
   workspaceTrust: Record<string, WorkspaceTrustDecision>;
+  projectDetails?: Record<string, { name: string; pinned: boolean; primaryFolder?: string }>;
   workspaceFolders: Record<string, string[]>;
   workspaceUserSettings: WorkspaceScopedSettings;
   workspaceSettingsByWorkspace: Record<string, WorkspaceScopedSettings>;

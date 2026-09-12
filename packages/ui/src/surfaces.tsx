@@ -1,5 +1,15 @@
-import { placeTerminalTab, type TerminalDropEdge, type TerminalSplitLayout } from "./terminal-layout";
+import { ScmFileActions } from "./scm-file-actions";
+import {
+  SidebarProjectCard,
+  type SidebarProjectSettings,
+} from "./sidebar-project-card";
+import {
+  placeTerminalTab,
+  type TerminalDropEdge,
+  type TerminalSplitLayout,
+} from "./terminal-layout";
 import { SettingsHelp } from "./settings-help";
+import { resolvedWorkspaceSettings } from "./workspace-settings";
 import { InlineApprovalCard } from "./inline-approval-card";
 import { ComposerEffortSelector } from "./composer-effort-selector";
 import { resolveLanguage } from "./editor/languages/registry";
@@ -127,6 +137,9 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import themePreviewSystem from "./assets/theme-preview-system.png";
+import themePreviewLight from "./assets/theme-preview-light.png";
+import themePreviewDark from "./assets/theme-preview-dark.png";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
 import { structuredCommentaryBlocks } from "./chat-commentary";
@@ -139,6 +152,11 @@ import {
   isKeptCurrent,
 } from "./file-review";
 import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
+import {
+  sourceControlTotals,
+  sourceControlTotalsLabel,
+  sourceControlTotalsScope,
+} from "./source-control-stats";
 import { ChatRun } from "./chat-run-view";
 import {
   ChatArtifacts,
@@ -187,6 +205,7 @@ import {
   workspaceModeShortLabel,
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
+import { workspaceRelativeFilePath } from "./workspace-project";
 import type {
   CustomTaskDraft,
   AppDestination,
@@ -719,6 +738,7 @@ type AppChromeProps = {
   onPinSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string) => void;
   onRemoveProject?: (project: { path: string; label: string }) => void;
+  projectSettings?: SidebarProjectSettings;
   onToggleChatsCollapsed?: () => void;
   onSettingsSectionChange?: (section: SettingsSectionId) => void;
   onSettingsBack?: () => void;
@@ -818,6 +838,11 @@ type SettingsSearchEntry = {
 };
 
 const settingsSearchEntries: SettingsSearchEntry[] = [
+  { section: "general", label: "Menu bar", detail: "Show Gyro in the macOS menu bar", keywords: "status icon background" },
+  { section: "general", label: "When the model opens a workspace surface", detail: "Choose Off, Peek, or Follow", keywords: "model activity preview follow" },
+  { section: "usage-limits", label: "Pause provider runs", detail: "Pause all provider runs, including automations", keywords: "stop resume" },
+  { section: "permissions", label: "New chats start in", detail: "Choose Project folder or Agent workspace", keywords: "default worktree branch local isolation" },
+  { section: "permissions", label: "Post-edit summaries", detail: "Generate summaries of changed files", keywords: "review extra provider call" },
   {
     section: "editor-workspace",
     label: "Editor & Search",
@@ -844,13 +869,13 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "general",
     label: "Default workspace",
-    detail: "Choose which folder opens for sessions",
+    detail: "Choose a project folder when a chat needs one",
     keywords: "project path launch",
   },
   {
     section: "general",
     label: "Default surface",
-    detail: "Start in Sessions or Workspace",
+    detail: "Restore the last saved view",
     keywords: "chat destination",
   },
   {
@@ -878,7 +903,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "appearance",
-    label: "Interface colors",
+    label: "Main color",
     detail: "Customize Gyro's main and secondary accents",
     keywords: "main secondary accent brand palette color",
   },
@@ -910,6 +935,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
     section: "usage-limits",
     label: "Usage Limits",
     detail: "Provider allowance, spend, and local guardrails",
+    keywords: "daily budget cap tokens",
   },
   {
     section: "usage-limits",
@@ -926,7 +952,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "usage-limits",
     label: "Parallel agents",
-    detail: "Control multiple simultaneous CLI agents",
+    detail: "Read about parallel CLI agents",
     keywords: "concurrency",
   },
   {
@@ -997,7 +1023,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "permissions",
     label: "Secrets redaction",
-    detail: "Mask secrets in prompts, logs, and diagnostics",
+    detail: "Mask recognized secret patterns in supported output",
     keywords: "privacy api keys tokens",
   },
   {
@@ -1487,6 +1513,7 @@ export function AppChrome({
   onPinSession,
   onRenameSession,
   onRemoveProject,
+  projectSettings,
   onToggleChatsCollapsed,
   onSettingsSectionChange,
   onSettingsBack,
@@ -1917,6 +1944,7 @@ export function AppChrome({
               onPinSession={onPinSession}
               onRenameSession={onRenameSession}
               onRemoveProject={onRemoveProject}
+              projectSettings={projectSettings}
               onRefreshSourceControl={onRefreshSourceControl}
               onOpenSourceControlDiff={onOpenSourceControlDiff}
               onCommitSourceControl={onCommitSourceControl}
@@ -2829,47 +2857,85 @@ const SCM_GROUP_LIMIT = 60;
  * One VS Code-style change group — "Staged Changes" or "Changes" — with a
  * collapsible header, a count, group actions, and colour-coded rows.
  */
-function ScmSectionDivider({ label, target, onResize }: {
+function ScmSectionDivider({
+  label,
+  target,
+  onResize,
+}: {
   label: string;
   target: "previous" | "next";
   onResize: (height: number) => void;
 }) {
-  const drag = useRef<{ y: number; height: number; min: number; max: number }>();
+  const drag = useRef<{
+    y: number;
+    height: number;
+    min: number;
+    max: number;
+  }>();
   const measure = (divider: HTMLDivElement) => {
-    const section = target === "previous" ? divider.previousElementSibling : divider.nextElementSibling;
-    const min = Math.max(52, section ? parseFloat(getComputedStyle(section).minHeight) || 0 : 0);
-    return { height: section?.getBoundingClientRect().height ?? 100, min,
-      max: Math.max(min, (divider.parentElement?.getBoundingClientRect().height ?? 400) * 0.6) };
+    const section =
+      target === "previous"
+        ? divider.previousElementSibling
+        : divider.nextElementSibling;
+    const min = Math.max(
+      52,
+      section ? parseFloat(getComputedStyle(section).minHeight) || 0 : 0,
+    );
+    return {
+      height: section?.getBoundingClientRect().height ?? 100,
+      min,
+      max: Math.max(
+        min,
+        (divider.parentElement?.getBoundingClientRect().height ?? 400) * 0.6,
+      ),
+    };
   };
-  return <div
-    className="gyro-scm-history-resizer gyro-scm-section-resizer"
-    role="separator" aria-label={label} aria-orientation="horizontal" tabIndex={0}
-    onPointerDown={(event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      drag.current = { y: event.clientY, ...measure(event.currentTarget) };
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }}
-    onPointerMove={(event) => {
-      const start = drag.current;
-      if (!start) return;
-      const delta = (event.clientY - start.y) * (target === "previous" ? 1 : -1);
-      onResize(Math.max(start.min, Math.min(start.max, start.height + delta)));
-    }}
-    onPointerUp={(event) => {
-      drag.current = undefined;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    }}
-    onPointerCancel={() => { drag.current = undefined; }}
-    onLostPointerCapture={() => { drag.current = undefined; }}
-    onKeyDown={(event) => {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      event.preventDefault();
-      const current = measure(event.currentTarget);
-      const delta = (event.key === "ArrowDown" ? 12 : -12) * (target === "previous" ? 1 : -1);
-      onResize(Math.max(current.min, Math.min(current.max, current.height + delta)));
-    }}
-  />;
+  return (
+    <div
+      className="gyro-scm-history-resizer gyro-scm-section-resizer"
+      role="separator"
+      aria-label={label}
+      aria-orientation="horizontal"
+      tabIndex={0}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        drag.current = { y: event.clientY, ...measure(event.currentTarget) };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const start = drag.current;
+        if (!start) return;
+        const delta =
+          (event.clientY - start.y) * (target === "previous" ? 1 : -1);
+        onResize(
+          Math.max(start.min, Math.min(start.max, start.height + delta)),
+        );
+      }}
+      onPointerUp={(event) => {
+        drag.current = undefined;
+        if (event.currentTarget.hasPointerCapture(event.pointerId))
+          event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onPointerCancel={() => {
+        drag.current = undefined;
+      }}
+      onLostPointerCapture={() => {
+        drag.current = undefined;
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        const current = measure(event.currentTarget);
+        const delta =
+          (event.key === "ArrowDown" ? 12 : -12) *
+          (target === "previous" ? 1 : -1);
+        onResize(
+          Math.max(current.min, Math.min(current.max, current.height + delta)),
+        );
+      }}
+    />
+  );
 }
 
 function ScmChangeGroup({
@@ -2984,28 +3050,7 @@ function ScmChangeGroup({
                     </small>
                   ) : null}
                 </button>
-                <ProviderDetailsMenu label={`Actions for ${file.path}`}>
-                  <div>
-                    <button
-                      aria-label={`Discard changes in ${file.path}`}
-                      className="gyro-sidebar-scm-discard"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Discard all local changes in ${file.path}? This cannot be undone.`,
-                          )
-                        ) {
-                          void onDiscardFile?.(file.path);
-                        }
-                      }}
-                      title="Discard changes"
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                      <span>Discard local changes</span>
-                    </button>
-                  </div>
-                </ProviderDetailsMenu>
+                <ScmFileActions path={file.path} onDiscard={onDiscardFile} />
                 <button
                   aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
                   className="gyro-sidebar-scm-stage"
@@ -3114,6 +3159,7 @@ function WorkspaceSidebarContent({
   onPinSession,
   onRenameSession,
   onRemoveProject,
+  projectSettings,
   onToggleChatsCollapsed,
   onToggleSidebar,
   canHideSidebar = true,
@@ -3212,6 +3258,7 @@ function WorkspaceSidebarContent({
   onPinSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string) => void;
   onRemoveProject?: (project: { path: string; label: string }) => void;
+  projectSettings?: SidebarProjectSettings;
   onToggleChatsCollapsed?: () => void;
   onToggleSidebar: () => void;
   /** When false, the hide control is omitted (Workspace code layout). */
@@ -3296,7 +3343,16 @@ function WorkspaceSidebarContent({
   const projectGroups = stableSidebarProjectGroups(
     discoveredProjectGroups,
     projectOrder,
-  );
+  )
+    .map((project) => ({
+      ...project,
+      label: projectSettings?.details[project.key]?.name || project.label,
+    }))
+    .sort(
+      (a, b) =>
+        Number(projectSettings?.details[b.key]?.pinned ?? false) -
+        Number(projectSettings?.details[a.key]?.pinned ?? false),
+    );
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -3329,6 +3385,7 @@ function WorkspaceSidebarContent({
     (file) => file.path === selectedExplorerPath,
   );
   const [sourceControlMessage, setSourceControlMessage] = useState("");
+  const scmTotals = sourceControlTotals(ide?.sourceControl);
   const [scmRepositoryHeight, setScmRepositoryHeight] = useState<number>();
   const [scmRepositoryMinHeight, setScmRepositoryMinHeight] = useState(180);
   const scmRepositoryContentRef = useRef<HTMLDivElement>(null);
@@ -3343,9 +3400,12 @@ function WorkspaceSidebarContent({
       setScmRepositoryMinHeight(height);
       // Keep the divider close when a conditional row (such as sync) vanishes.
       // Preserve only the additional space the user deliberately dragged open.
-      if (delta !== 0) setScmRepositoryHeight((previous) =>
-        previous === undefined ? previous : Math.max(height, previous + delta),
-      );
+      if (delta !== 0)
+        setScmRepositoryHeight((previous) =>
+          previous === undefined
+            ? previous
+            : Math.max(height, previous + delta),
+        );
     };
     update();
     const observer = new ResizeObserver(update);
@@ -3398,7 +3458,8 @@ function WorkspaceSidebarContent({
   // press that moves that history — pull first when the branch is behind,
   // otherwise push, or publish a branch the remote has never seen.
   const hasSourceControlChanges =
-    stagedSourceControlFiles.length > 0 || unstagedSourceControlFiles.length > 0;
+    stagedSourceControlFiles.length > 0 ||
+    unstagedSourceControlFiles.length > 0;
   const sourceControlAhead = ide?.sourceControl.ahead ?? 0;
   const sourceControlBehind = ide?.sourceControl.behind ?? 0;
   const sourceControlPublished = Boolean(ide?.sourceControl.upstream);
@@ -4300,229 +4361,266 @@ function WorkspaceSidebarContent({
             <SidebarSection
               grow
               title="Source control"
-              headerActions={ide?.sourceControl.comparedToMain ? (
-                ide.sourceControl.comparedToMain.partial ? (
-                  <span className="gyro-scm-heading-unavailable" title="Could not finish counting changes compared to main. Refresh to retry.">Count unavailable</span>
-                ) : (
-                  <span
-                    className="gyro-scm-heading-totals"
-                    title="Compared to main"
-                    aria-label={`Compared to main: ${ide.sourceControl.comparedToMain.additions.toLocaleString()} additions, ${ide.sourceControl.comparedToMain.deletions.toLocaleString()} deletions`}
-                  >
-                    <span className="is-added">+{ide.sourceControl.comparedToMain.additions.toLocaleString()}</span>
-                    <span className="is-removed">−{ide.sourceControl.comparedToMain.deletions.toLocaleString()}</span>
-                  </span>
-                )
-              ) : ide?.sourceControl.available ? (
-                <span className="gyro-scm-heading-unavailable" title="Comparison with local main is unavailable. Check that the branch exists and refresh to retry.">Count unavailable</span>
-              ) : undefined}
+              headerActions={
+                ide?.sourceControl.available ? (
+                  scmTotals.kind === "branch" ||
+                  scmTotals.kind === "working-tree" ? (
+                    <span
+                      className="gyro-scm-heading-totals"
+                      title={sourceControlTotalsScope(scmTotals)}
+                      aria-label={`${sourceControlTotalsScope(scmTotals)}: ${scmTotals.additions.toLocaleString()} additions, ${scmTotals.deletions.toLocaleString()} deletions`}
+                    >
+                      <span className="is-added">
+                        +{scmTotals.additions.toLocaleString()}
+                      </span>
+                      <span className="is-removed">
+                        −{scmTotals.deletions.toLocaleString()}
+                      </span>
+                    </span>
+                  ) : (
+                    <span
+                      className="gyro-scm-heading-unavailable"
+                      title={sourceControlTotalsScope(scmTotals)}
+                    >
+                      {sourceControlTotalsLabel(scmTotals)}
+                    </span>
+                  )
+                ) : undefined
+              }
             >
               <div className="gyro-scm-panel">
-                <div className="gyro-scm-repository-section" style={{ height: scmRepositoryHeight, minHeight: scmRepositoryMinHeight }}>
-                <div ref={scmRepositoryContentRef} style={{ display: "flow-root" }}>
-                <div className="gyro-sidebar-scm-group-label">
-                  <span className="gyro-scm-label-text">Repository</span>
-                </div>
-                {/* Repository and branch read as one line: what you are in,
-                    and where in it. They stack again when the sidebar is too
-                    narrow to hold both names. */}
-                <div className="gyro-sidebar-scm-head">
-                  <div className="gyro-sidebar-scm-repository">
-                    <HardDrive size={12} aria-hidden="true" />
-                    <strong title={workspacePath}>
-                      {workspaceName(workspacePath)}
-                    </strong>
-                    <button
-                      aria-label="Refresh source control"
-                      onClick={onRefreshSourceControl}
-                      title="Refresh"
-                      type="button"
-                    >
-                      <RefreshCw size={12} />
-                    </button>
-                  </div>
-                  <ScmBranchPicker
-                    branchCatalog={branchCatalog}
-                    currentBranch={
-                      ide?.sourceControl.branch ?? branchCatalog?.current
-                    }
-                    disabled={isBranchLoading}
-                    error={
-                      ide?.sourceControl.error ??
-                      branchCatalog?.error ??
-                      (ide?.sourceControl.available === false
-                        ? "Git is not ready for this workspace."
-                        : undefined)
-                    }
-                    isLoading={isBranchLoading}
-                    onCreateBranch={() =>
-                      onCreateWorkspaceBranch?.(
-                        ide?.sourceControl.branch ?? branchCatalog?.current,
-                      )
-                    }
-                    onSelectBranch={(branch) =>
-                      onSelectWorkspaceBranch?.(branch)
-                    }
-                  />
-                </div>
-                <form
-                  className="gyro-sidebar-commit-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const message = sourceControlMessage.trim();
-                    if (!message) {
-                      return;
-                    }
-                    onCommitSourceControl?.(message);
-                    setSourceControlMessage("");
+                <div
+                  className="gyro-scm-repository-section"
+                  style={{
+                    height: scmRepositoryHeight,
+                    minHeight: scmRepositoryMinHeight,
                   }}
                 >
-                  <input
-                    aria-label="Source control message"
-                    onChange={(event) =>
-                      setSourceControlMessage(event.target.value)
-                    }
-                    placeholder={`Message (${
-                      isMacPlatform() ? "⌘Enter" : "Ctrl+Enter"
-                    } to commit${
-                      ide?.sourceControl.branch
-                        ? ` on "${ide.sourceControl.branch}"`
-                        : ""
-                    })`}
-                    value={sourceControlMessage}
-                    onKeyDown={(event) => {
-                      if (
-                        (event.metaKey || event.ctrlKey) &&
-                        event.key === "Enter"
-                      ) {
-                        event.currentTarget.form?.requestSubmit();
-                      }
-                    }}
-                  />
-                  <div className="gyro-sidebar-commit-actions">
-                    {showSourceControlSyncButton ? (
-                      <button
-                        disabled={isSourceControlSyncing}
-                        onClick={
-                          sourceControlSyncAction === "pull"
-                            ? onPullSourceControl
-                            : onPushSourceControl
+                  <div
+                    ref={scmRepositoryContentRef}
+                    style={{ display: "flow-root" }}
+                  >
+                    <div className="gyro-sidebar-scm-group-label">
+                      <span className="gyro-scm-label-text">Repository</span>
+                    </div>
+                    {/* Repository and branch read as one line: what you are in,
+                    and where in it. They stack again when the sidebar is too
+                    narrow to hold both names. */}
+                    <div className="gyro-sidebar-scm-head">
+                      <div className="gyro-sidebar-scm-repository">
+                        <HardDrive size={12} aria-hidden="true" />
+                        <strong title={workspacePath}>
+                          {workspaceName(workspacePath)}
+                        </strong>
+                        <button
+                          aria-label="Refresh source control"
+                          onClick={onRefreshSourceControl}
+                          title="Refresh"
+                          type="button"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      </div>
+                      <ScmBranchPicker
+                        branchCatalog={branchCatalog}
+                        currentBranch={
+                          ide?.sourceControl.branch ?? branchCatalog?.current
                         }
-                        type="button"
-                        title={
-                          sourceControlSyncAction === "pull"
-                            ? `Pull ${sourceControlBehind} from ${ide?.sourceControl.upstream}`
-                            : sourceControlSyncAction === "push"
-                              ? `Push to ${ide?.sourceControl.upstream}`
-                              : "Push this branch to the remote and track it"
+                        disabled={isBranchLoading}
+                        error={
+                          ide?.sourceControl.error ??
+                          branchCatalog?.error ??
+                          (ide?.sourceControl.available === false
+                            ? "Git is not ready for this workspace."
+                            : undefined)
                         }
-                      >
-                        {sourceControlSyncAction === "pull" ? (
-                          <ArrowDown size={13} />
+                        isLoading={isBranchLoading}
+                        onCreateBranch={() =>
+                          onCreateWorkspaceBranch?.(
+                            ide?.sourceControl.branch ?? branchCatalog?.current,
+                          )
+                        }
+                        onSelectBranch={(branch) =>
+                          onSelectWorkspaceBranch?.(branch)
+                        }
+                      />
+                    </div>
+                    <form
+                      className="gyro-sidebar-commit-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const message = sourceControlMessage.trim();
+                        if (!message) {
+                          return;
+                        }
+                        onCommitSourceControl?.(message);
+                        setSourceControlMessage("");
+                      }}
+                    >
+                      <input
+                        aria-label="Source control message"
+                        onChange={(event) =>
+                          setSourceControlMessage(event.target.value)
+                        }
+                        placeholder={`Message (${
+                          isMacPlatform() ? "⌘Enter" : "Ctrl+Enter"
+                        } to commit${
+                          ide?.sourceControl.branch
+                            ? ` on "${ide.sourceControl.branch}"`
+                            : ""
+                        })`}
+                        value={sourceControlMessage}
+                        onKeyDown={(event) => {
+                          if (
+                            (event.metaKey || event.ctrlKey) &&
+                            event.key === "Enter"
+                          ) {
+                            event.currentTarget.form?.requestSubmit();
+                          }
+                        }}
+                      />
+                      <div className="gyro-sidebar-commit-actions">
+                        {showSourceControlSyncButton ? (
+                          <button
+                            disabled={isSourceControlSyncing}
+                            onClick={
+                              sourceControlSyncAction === "pull"
+                                ? onPullSourceControl
+                                : onPushSourceControl
+                            }
+                            type="button"
+                            title={
+                              sourceControlSyncAction === "pull"
+                                ? `Pull ${sourceControlBehind} from ${ide?.sourceControl.upstream}`
+                                : sourceControlSyncAction === "push"
+                                  ? `Push to ${ide?.sourceControl.upstream}`
+                                  : "Push this branch to the remote and track it"
+                            }
+                          >
+                            {sourceControlSyncAction === "pull" ? (
+                              <ArrowDown size={13} />
+                            ) : (
+                              <ArrowUp size={13} />
+                            )}
+                            {isSourceControlSyncing
+                              ? "Working…"
+                              : sourceControlSyncAction === "pull"
+                                ? "Pull"
+                                : sourceControlSyncAction === "push"
+                                  ? "Push"
+                                  : "Publish branch"}
+                            {!isSourceControlSyncing &&
+                            sourceControlSyncCounts ? (
+                              <span className="gyro-scm-sync-count">
+                                {sourceControlSyncCounts}
+                              </span>
+                            ) : null}
+                          </button>
                         ) : (
-                          <ArrowUp size={13} />
+                          <button
+                            disabled={
+                              !sourceControlMessage.trim() ||
+                              !hasSourceControlChanges
+                            }
+                            type="submit"
+                            title={
+                              stagedSourceControlFiles.length > 0
+                                ? "Commit staged changes"
+                                : "Stage all changes and commit"
+                            }
+                          >
+                            <Check size={13} />
+                            {stagedSourceControlFiles.length > 0
+                              ? "Commit"
+                              : "Commit all"}
+                          </button>
                         )}
-                        {isSourceControlSyncing
-                          ? "Working…"
-                          : sourceControlSyncAction === "pull"
-                            ? "Pull"
-                            : sourceControlSyncAction === "push"
-                              ? "Push"
-                              : "Publish branch"}
-                        {!isSourceControlSyncing && sourceControlSyncCounts ? (
-                          <span className="gyro-scm-sync-count">
-                            {sourceControlSyncCounts}
-                          </span>
-                        ) : null}
-                      </button>
-                    ) : (
-                      <button
-                        disabled={
-                          !sourceControlMessage.trim() || !hasSourceControlChanges
-                        }
-                        type="submit"
-                        title={
-                          stagedSourceControlFiles.length > 0
-                            ? "Commit staged changes"
-                            : "Stage all changes and commit"
-                        }
-                      >
-                        <Check size={13} />
-                        {stagedSourceControlFiles.length > 0
-                          ? "Commit"
-                          : "Commit all"}
-                      </button>
-                    )}
+                      </div>
+                    </form>
+                    <ScmSyncRow
+                      ahead={sourceControlAhead}
+                      behind={sourceControlBehind}
+                      hasRemote={ide?.sourceControl.available === true}
+                      hasPendingChanges={hasSourceControlChanges}
+                      onPull={onPullSourceControl}
+                      onPush={onPushSourceControl}
+                      syncing={isSourceControlSyncing}
+                      upstream={ide?.sourceControl.upstream}
+                    />
+                    {ide?.sourceControl.error ? (
+                      <div className="gyro-sidebar-mini-copy is-error">
+                        {ide.sourceControl.error}
+                      </div>
+                    ) : null}
+                    {ide?.sourceControl.available === false &&
+                    !ide?.sourceControl.error ? (
+                      <div className="gyro-sidebar-mini-copy">
+                        Git is not ready for this workspace.
+                      </div>
+                    ) : null}
                   </div>
-                </form>
-                <ScmSyncRow
-                  ahead={sourceControlAhead}
-                  behind={sourceControlBehind}
-                  hasRemote={ide?.sourceControl.available === true}
-                  hasPendingChanges={hasSourceControlChanges}
-                  onPull={onPullSourceControl}
-                  onPush={onPushSourceControl}
-                  syncing={isSourceControlSyncing}
-                  upstream={ide?.sourceControl.upstream}
+                </div>
+                <ScmSectionDivider
+                  label="Resize repository section"
+                  target="previous"
+                  onResize={setScmRepositoryHeight}
                 />
-                {ide?.sourceControl.error ? (
-                  <div className="gyro-sidebar-mini-copy is-error">
-                    {ide.sourceControl.error}
-                  </div>
-                ) : null}
-                {ide?.sourceControl.available === false &&
-                !ide?.sourceControl.error ? (
-                  <div className="gyro-sidebar-mini-copy">
-                    Git is not ready for this workspace.
-                  </div>
-                ) : null}
-                </div>
-                </div>
-                <ScmSectionDivider label="Resize repository section" target="previous" onResize={setScmRepositoryHeight} />
                 <div
                   className="gyro-scm-change-list"
                   style={{ flex: `${100 - scmHistoryShare} 1 0px` }}
                 >
                   {stagedSourceControlFiles.length > 0 ? (
-                    <div className="gyro-scm-staged-section" style={{ height: collapsedScmGroups.has("staged") ? undefined : scmStagedHeight }}>
-                    <ScmChangeGroup
-                      activeDiff={
-                        ide?.tabs.find((tab) => tab.path === ide.activePath)
-                          ?.sourceControlDiff
-                      }
-                      actions={
-                        <button
-                          aria-label="Unstage all staged changes"
-                          onClick={async () => {
-                            for (const file of stagedSourceControlFiles) {
-                              await onToggleSourceControlFile?.(
-                                file.path,
-                                true,
-                              );
-                            }
-                            onRefreshSourceControl?.();
-                          }}
-                          title="Unstage all"
-                          type="button"
-                        >
-                          <Minus size={11} />
-                        </button>
-                      }
-                      className="is-staged"
-                      collapsed={collapsedScmGroups.has("staged")}
-                      files={stagedSourceControlFiles}
-                      onDiscardFile={onDiscardSourceControlFile}
-                      onOpenDiff={onOpenSourceControlDiff}
-                      onToggleCollapsed={() => toggleScmGroup("staged")}
-                      onToggleSelected={toggleSourceControlSelection}
-                      onToggleStage={onToggleSourceControlFile}
-                      selectedPaths={selectedSourceControlPaths}
-                      title="Staged Changes"
-                    />
+                    <div
+                      className="gyro-scm-staged-section"
+                      style={{
+                        height: collapsedScmGroups.has("staged")
+                          ? undefined
+                          : scmStagedHeight,
+                      }}
+                    >
+                      <ScmChangeGroup
+                        activeDiff={
+                          ide?.tabs.find((tab) => tab.path === ide.activePath)
+                            ?.sourceControlDiff
+                        }
+                        actions={
+                          <button
+                            aria-label="Unstage all staged changes"
+                            onClick={async () => {
+                              for (const file of stagedSourceControlFiles) {
+                                await onToggleSourceControlFile?.(
+                                  file.path,
+                                  true,
+                                );
+                              }
+                              onRefreshSourceControl?.();
+                            }}
+                            title="Unstage all"
+                            type="button"
+                          >
+                            <Minus size={11} />
+                          </button>
+                        }
+                        className="is-staged"
+                        collapsed={collapsedScmGroups.has("staged")}
+                        files={stagedSourceControlFiles}
+                        onDiscardFile={onDiscardSourceControlFile}
+                        onOpenDiff={onOpenSourceControlDiff}
+                        onToggleCollapsed={() => toggleScmGroup("staged")}
+                        onToggleSelected={toggleSourceControlSelection}
+                        onToggleStage={onToggleSourceControlFile}
+                        selectedPaths={selectedSourceControlPaths}
+                        title="Staged Changes"
+                      />
                     </div>
                   ) : null}
-                  {stagedSourceControlFiles.length > 0 && !collapsedScmGroups.has("staged") ? (
-                    <ScmSectionDivider label="Resize staged changes" target="previous" onResize={setScmStagedHeight} />
+                  {stagedSourceControlFiles.length > 0 &&
+                  !collapsedScmGroups.has("staged") ? (
+                    <ScmSectionDivider
+                      label="Resize staged changes"
+                      target="previous"
+                      onResize={setScmStagedHeight}
+                    />
                   ) : null}
                   <ScmChangeGroup
                     activeDiff={
@@ -4633,11 +4731,25 @@ function WorkspaceSidebarContent({
                   aria-valuenow={Math.round(scmHistoryShare)}
                   tabIndex={0}
                   onKeyDown={(event) => {
-                    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+                    if (
+                      !["ArrowUp", "ArrowDown", "Home", "End"].includes(
+                        event.key,
+                      )
+                    )
+                      return;
                     event.preventDefault();
                     setScmHistoryShare((share) =>
-                      event.key === "Home" ? 15 : event.key === "End" ? 85 :
-                        Math.max(15, Math.min(85, share + (event.key === "ArrowUp" ? 5 : -5))),
+                      event.key === "Home"
+                        ? 15
+                        : event.key === "End"
+                          ? 85
+                          : Math.max(
+                              15,
+                              Math.min(
+                                85,
+                                share + (event.key === "ArrowUp" ? 5 : -5),
+                              ),
+                            ),
                     );
                   }}
                   onPointerDown={(event) => {
@@ -4647,11 +4759,14 @@ function WorkspaceSidebarContent({
                     const history = divider.nextElementSibling;
                     if (!changes || !history) return;
                     event.preventDefault();
-                    const height = changes.getBoundingClientRect().height + history.getBoundingClientRect().height;
+                    const height =
+                      changes.getBoundingClientRect().height +
+                      history.getBoundingClientRect().height;
                     if (height <= 0) return;
                     scmHistoryDrag.current = {
                       y: event.clientY,
-                      share: history.getBoundingClientRect().height / height * 100,
+                      share:
+                        (history.getBoundingClientRect().height / height) * 100,
                       height,
                     };
                     divider.setPointerCapture(event.pointerId);
@@ -4659,18 +4774,33 @@ function WorkspaceSidebarContent({
                   onPointerMove={(event) => {
                     const drag = scmHistoryDrag.current;
                     if (!drag) return;
-                    setScmHistoryShare(Math.max(15, Math.min(85,
-                      drag.share - (event.clientY - drag.y) / drag.height * 100,
-                    )));
+                    setScmHistoryShare(
+                      Math.max(
+                        15,
+                        Math.min(
+                          85,
+                          drag.share -
+                            ((event.clientY - drag.y) / drag.height) * 100,
+                        ),
+                      ),
+                    );
                   }}
                   onPointerUp={(event) => {
                     scmHistoryDrag.current = undefined;
-                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    if (
+                      event.currentTarget.hasPointerCapture(event.pointerId)
+                    ) {
+                      event.currentTarget.releasePointerCapture(
+                        event.pointerId,
+                      );
                     }
                   }}
-                  onPointerCancel={() => { scmHistoryDrag.current = undefined; }}
-                  onLostPointerCapture={() => { scmHistoryDrag.current = undefined; }}
+                  onPointerCancel={() => {
+                    scmHistoryDrag.current = undefined;
+                  }}
+                  onLostPointerCapture={() => {
+                    scmHistoryDrag.current = undefined;
+                  }}
                 />
                 <details
                   className="gyro-scm-history"
@@ -4708,9 +4838,11 @@ function WorkspaceSidebarContent({
                               .filter(Boolean)
                               .join(" ")}
                             key={commit.hash}
-                            style={{
-                              "--gyro-scm-graph-width": `${scmHistoryRailWidth}px`,
-                            } as CSSProperties}
+                            style={
+                              {
+                                "--gyro-scm-graph-width": `${scmHistoryRailWidth}px`,
+                              } as CSSProperties
+                            }
                             title={`${commit.subject}\n${commit.author} · ${commit.relativeDate}\n${commit.shortHash}${commit.refs ? `\n${commit.refs}` : ""}`}
                           >
                             <span
@@ -4780,8 +4912,19 @@ function WorkspaceSidebarContent({
                     )}
                   </div>
                 </details>
-                <ScmSectionDivider label="Resize GitHub section" target="next" onResize={setScmGithubHeight} />
-                <div className="gyro-scm-github-section" style={scmGithubHeight === undefined ? undefined : { height: scmGithubHeight, maxHeight: "none" }}>
+                <ScmSectionDivider
+                  label="Resize GitHub section"
+                  target="next"
+                  onResize={setScmGithubHeight}
+                />
+                <div
+                  className="gyro-scm-github-section"
+                  style={
+                    scmGithubHeight === undefined
+                      ? undefined
+                      : { height: scmGithubHeight, maxHeight: "none" }
+                  }
+                >
                   <GithubSidebarPanel
                     github={ide?.github}
                     branch={ide?.sourceControl.branch}
@@ -5416,47 +5559,18 @@ function WorkspaceSidebarContent({
                       finishProjectDrag();
                     }}
                   >
-                    <SidebarProjectRow
-                      onOpenTerminal={() => onAddTerminalPane?.({ folderPath: project.key })}
-                      draggable
-                      icon={
-                        project.hasWorkspace
-                          ? isCollapsed
-                            ? Folder
-                            : FolderOpen
-                          : HardDrive
+                    <SidebarProjectCard
+                      path={project.key}
+                      name={project.label}
+                      taskCount={project.items.length}
+                      activeCount={
+                        project.items.filter((session) =>
+                          sendingSessionIds.includes(session.id),
+                        ).length
                       }
-                      isDragging={draggedProjectKey === project.key}
-                      isCollapsed={isCollapsed}
-                      label={project.label}
-                      onDragEnd={finishProjectDrag}
-                      onDragStart={(event) => {
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", project.key);
-                        setDraggedProjectKey(project.key);
-                      }}
-                      onKeyDown={(event) => {
-                        if (!event.altKey) {
-                          return;
-                        }
-                        if (event.key === "ArrowUp" && projectIndex > 0) {
-                          event.preventDefault();
-                          const previous = projectGroups[projectIndex - 1];
-                          if (previous) {
-                            moveProject(project.key, previous.key, "before");
-                          }
-                        } else if (
-                          event.key === "ArrowDown" &&
-                          projectIndex < projectGroups.length - 1
-                        ) {
-                          event.preventDefault();
-                          const next = projectGroups[projectIndex + 1];
-                          if (next) {
-                            moveProject(project.key, next.key, "after");
-                          }
-                        }
-                      }}
-                      onClick={() => toggleProject(project.key)}
+                      settings={
+                        project.hasWorkspace ? projectSettings : undefined
+                      }
                       onRemove={
                         project.hasWorkspace
                           ? () =>
@@ -5466,7 +5580,49 @@ function WorkspaceSidebarContent({
                               })
                           : undefined
                       }
-                    />
+                    >
+                      <SidebarProjectRow
+                        draggable
+                        icon={
+                          project.hasWorkspace
+                            ? isCollapsed
+                              ? Folder
+                              : FolderOpen
+                            : HardDrive
+                        }
+                        isDragging={draggedProjectKey === project.key}
+                        isCollapsed={isCollapsed}
+                        label={project.label}
+                        onDragEnd={finishProjectDrag}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", project.key);
+                          setDraggedProjectKey(project.key);
+                        }}
+                        onKeyDown={(event) => {
+                          if (!event.altKey) {
+                            return;
+                          }
+                          if (event.key === "ArrowUp" && projectIndex > 0) {
+                            event.preventDefault();
+                            const previous = projectGroups[projectIndex - 1];
+                            if (previous) {
+                              moveProject(project.key, previous.key, "before");
+                            }
+                          } else if (
+                            event.key === "ArrowDown" &&
+                            projectIndex < projectGroups.length - 1
+                          ) {
+                            event.preventDefault();
+                            const next = projectGroups[projectIndex + 1];
+                            if (next) {
+                              moveProject(project.key, next.key, "after");
+                            }
+                          }
+                        }}
+                        onClick={() => toggleProject(project.key)}
+                      />
+                    </SidebarProjectCard>
                     {!isCollapsed ? (
                       <>
                         {visibleProjectSessions.length > 0 ? (
@@ -5629,7 +5785,6 @@ function SidebarProjectRow({
   onDragStart,
   onKeyDown,
   onRemove,
-  onOpenTerminal,
 }: {
   draggable?: boolean;
   icon: IconComponent;
@@ -5642,7 +5797,6 @@ function SidebarProjectRow({
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onRemove?: () => void;
-  onOpenTerminal?: () => void;
 }) {
   return (
     <div
@@ -5680,9 +5834,6 @@ function SidebarProjectRow({
         <span>{label}</span>
         {isCollapsed === undefined ? meta ? <small>{meta}</small> : null : null}
       </button>
-      {onOpenTerminal ? (
-        <button className="gyro-sidebar-project-terminal" aria-label={`Open terminal in ${label}`} title="Open terminal here" onClick={onOpenTerminal} type="button"><Terminal size={13} /></button>
-      ) : null}
       {onRemove ? (
         <button
           aria-label={`Remove ${label} from Gyro app`}
@@ -7820,6 +7971,7 @@ export function ChatSurface({
     [transcriptEvents],
   );
   const { looseEvents, turns } = transcriptState;
+  const isEmptyStart = turns.length === 0 && looseEvents.length === 0;
   const activeRailPanel =
     activeChatPanel ?? (isEnvironmentRailOpen ? "environment" : undefined);
   useEffect(() => {
@@ -8018,11 +8170,10 @@ export function ChatSurface({
       onCloseCompanionDock();
       return;
     }
-    if (railPanel === "browser") {
-      onToggleBrowserPanel?.();
-      return;
-    }
-    onToggleEnvironmentRail?.();
+    // Without a dock handler the rail can only be holding the legacy browser.
+    // Nothing else needs closing: the Environment is what shows once the rail
+    // is free, so withdrawing it here would be the opposite of the intent.
+    if (railPanel === "browser") onToggleBrowserPanel?.();
   };
   const openTabs: ChatCompanionTabId[] =
     companionTabs && companionTabs.length
@@ -8034,7 +8185,7 @@ export function ChatSurface({
     branchName ??
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
   const isEnvironmentPopoverOpen =
-    activeRailPanel === "environment" && !isCompanionPanel;
+    !isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel;
   const legacySidePanel =
     activeRailPanel && railPanel !== "tools" && railPanel !== "environment" ? (
       <ChatSidePanel
@@ -8158,7 +8309,7 @@ export function ChatSurface({
       workspacePath={workspacePath}
     />
   ) : null;
-  if (turns.length === 0 && looseEvents.length === 0) {
+  if (isEmptyStart) {
     return (
       <div
         className={[
@@ -8293,7 +8444,6 @@ export function ChatSurface({
             onSelectStep={onSetOnboardingStep}
           />
         </section>
-        {environmentPopover}
         {sidePanel}
       </div>
     );
@@ -8430,6 +8580,14 @@ export function ChatSurface({
               <ArrowDown aria-hidden="true" size={20} strokeWidth={1.8} />
             </button>
           ) : null}
+          {/* Live changes lead the dock: the running turn's file count is the
+              one line here that keeps changing, so it stays put at the top
+              rather than sliding down each time a message is queued or the
+              plan card appears beneath it. */}
+          <div
+            className="gyro-composer-live-changes"
+            ref={setLiveChangesTarget}
+          />
           {queuedMessages.length > 0 ? (
             <div className="gyro-chat-message-queue-wrap">
               <ChatMessageQueue
@@ -8448,10 +8606,6 @@ export function ChatSurface({
               plan={sessionPlan}
             />
           ) : null}
-          <div
-            className="gyro-composer-live-changes"
-            ref={setLiveChangesTarget}
-          />
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -9340,6 +9494,7 @@ function ChatSidePanel({
         <DiffReviewSurface
           compact
           diffReview={diffReview}
+          workspacePath={workspacePath}
           onAcceptAll={railDiffTools?.onAcceptAll}
           onAcceptFile={railDiffTools?.onAcceptFile}
           onComment={railDiffTools?.onComment}
@@ -10664,7 +10819,6 @@ function ChatEnvironmentPopover({
 }) {
   const [showBranches, setShowBranches] = useState(false);
   const branchMenuId = useId();
-  const changedFiles = sourceControl?.files.length ?? 0;
   const runningProcesses = (terminalPanes ?? []).filter(
     terminalPaneHasActiveWork,
   ).length;
@@ -10675,11 +10829,15 @@ function ChatEnvironmentPopover({
     onClose?.();
     onOpenTab?.(tab);
   };
-  const changesDetail = sourceControl
-    ? changedFiles
-      ? `${sourceControl.additions >= 0 ? "+" : ""}${sourceControl.additions} −${sourceControl.deletions}`
-      : "Clean"
-    : "Unavailable";
+  // Same resolver as the Workspace sidebar's Source control heading: this row
+  // used to print the working tree while that heading printed the branch, so
+  // the two disagreed on screen at the same moment.
+  const changeTotals = sourceControlTotals(sourceControl);
+  const hasChangeTotals =
+    changeTotals.kind === "branch" || changeTotals.kind === "working-tree";
+  const changesDetail = hasChangeTotals
+    ? `+${changeTotals.additions} −${changeTotals.deletions}`
+    : sourceControlTotalsLabel(changeTotals);
 
   return (
     <aside aria-label="Environment" className="gyro-chat-environment-popover">
@@ -10735,17 +10893,20 @@ function ChatEnvironmentPopover({
         <button
           aria-label={`Open changes, ${changesDetail}`}
           onClick={() => openCompanionTab("review")}
+          title={sourceControlTotalsScope(changeTotals)}
           type="button"
         >
           <FileDiff size={14} />
           <span>Changes</span>
-          <strong className={changedFiles ? "is-changed" : undefined}>
-            {sourceControl && changedFiles ? (
+          <strong className={hasChangeTotals ? "is-changed" : undefined}>
+            {hasChangeTotals ? (
               <>
-                <span className="is-added">+{sourceControl.additions}</span>{" "}
-                <span className="is-removed">−{sourceControl.deletions}</span>
+                <span className="is-added">+{changeTotals.additions}</span>{" "}
+                <span className="is-removed">−{changeTotals.deletions}</span>
               </>
-            ) : changesDetail}
+            ) : (
+              changesDetail
+            )}
           </strong>
           <ChevronRight aria-hidden="true" size={13} />
         </button>
@@ -11337,6 +11498,33 @@ function workspaceSettingsList(value: string) {
     .filter(Boolean);
 }
 
+// Keep incomplete text (commas, spaces, or the first digit) until editing ends.
+// Normalizing every keystroke makes lists and bounded numbers impossible to type.
+function SettingsDraftInput({ value, onCommit, ...props }: Omit<React.ComponentProps<"input">, "value" | "onChange"> & {
+  value: string | number;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  return <input {...props} value={draft}
+    onChange={(event) => setDraft(event.target.value)}
+    onBlur={() => {
+      const next = props.type === "number" && draft.trim() && Number.isFinite(Number(draft))
+        ? String(Math.min(Number(props.max ?? Infinity), Math.max(Number(props.min ?? -Infinity), Math.round(Number(draft)))))
+        : draft;
+      setDraft(next);
+      onCommit(next);
+    }}
+    onKeyDown={(event) => {
+      if (event.key === "Enter") event.currentTarget.blur();
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setDraft(String(value));
+      }
+    }}
+  />;
+}
+
 function WorkspaceSettingsEditor({
   activeWorkspaceRoot,
   folderSettings = {},
@@ -11410,6 +11598,12 @@ function WorkspaceSettingsEditor({
   const update = (next: WorkspaceScopedSettings) =>
     onChange?.(scope, path, next);
   const inheritedLabel = scope === "user" ? "Use default" : "Inherit";
+  const inherited = resolvedWorkspaceSettings(
+    scope === "user" ? {} : userSettings,
+    scope === "folder" ? workspaceSettings : {},
+    {},
+    workspacePath,
+  );
 
   return (
     <section
@@ -11482,14 +11676,15 @@ function WorkspaceSettingsEditor({
                 <strong>Files: Exclude</strong>
                 <small>Comma-separated globs hidden from Explorer.</small>
               </span>
-              <input
-                onChange={(event) =>
+              <SettingsDraftInput
+                key={`files-${scope}-${path}`}
+                onCommit={(value) =>
                   update({
                     ...settings,
-                    filesExclude: workspaceSettingsList(event.target.value),
+                    filesExclude: value.trim() ? workspaceSettingsList(value) : undefined,
                   })
                 }
-                placeholder={`${inheritedLabel}: .git/**, node_modules/**`}
+                placeholder={`${inheritedLabel}: ${inherited.filesExclude.join(", ")}`}
                 value={(settings.filesExclude ?? []).join(", ")}
               />
             </label>
@@ -11500,14 +11695,15 @@ function WorkspaceSettingsEditor({
                   Comma-separated globs skipped by workspace search.
                 </small>
               </span>
-              <input
-                onChange={(event) =>
+              <SettingsDraftInput
+                key={`search-${scope}-${path}`}
+                onCommit={(value) =>
                   update({
                     ...settings,
-                    searchExclude: workspaceSettingsList(event.target.value),
+                    searchExclude: value.trim() ? workspaceSettingsList(value) : undefined,
                   })
                 }
-                placeholder={`${inheritedLabel}: .git/**, dist/**`}
+                placeholder={`${inheritedLabel}: ${inherited.searchExclude.join(", ")}`}
                 value={(settings.searchExclude ?? []).join(", ")}
               />
             </label>
@@ -11516,11 +11712,12 @@ function WorkspaceSettingsEditor({
                 <strong>Search: Maximum Results</strong>
                 <small>Caps results between 10 and 1,000.</small>
               </span>
-              <input
+              <SettingsDraftInput
+                key={`max-${scope}-${path}`}
                 max={1000}
                 min={10}
-                onChange={(event) => {
-                  const value = event.target.valueAsNumber;
+                onCommit={(draft) => {
+                  const value = draft.trim() ? Number(draft) : NaN;
                   update({
                     ...settings,
                     searchMaxResults: Number.isFinite(value)
@@ -11528,7 +11725,7 @@ function WorkspaceSettingsEditor({
                       : undefined,
                   });
                 }}
-                placeholder={inheritedLabel}
+                placeholder={`${inheritedLabel}: ${inherited.searchMaxResults}`}
                 type="number"
                 value={settings.searchMaxResults ?? ""}
               />
@@ -11558,7 +11755,7 @@ function WorkspaceSettingsEditor({
                       : "off"
                 }
               >
-                <option value="inherit">{inheritedLabel}</option>
+                <option value="inherit">{inheritedLabel} ({inherited.editorMinimapEnabled ? "On" : "Off"})</option>
                 <option value="on">On</option>
                 <option value="off">Off</option>
               </select>
@@ -12381,9 +12578,7 @@ function EditorGroupPane({
   groupCount,
   isActive,
   activePath,
-  breadcrumbPath,
   activeBuffer,
-  selection,
   revealTarget,
   fileContent,
   fileError,
@@ -12391,7 +12586,6 @@ function EditorGroupPane({
   fileLoadState,
   filesAvailable,
   minimapEnabled,
-  browserFocusEmpty = false,
   onActivate,
   onSelectFile,
   onMoveTab,
@@ -12403,15 +12597,12 @@ function EditorGroupPane({
   onEditorSave,
   onEditorRevert,
   onEditorSelectionChange,
-  onAssistantAction,
   renderEditor,
 }: EditorGroupPaneProps) {
   const review = group.tabs.find(
     (tab) => tab.path === activePath,
   )?.sourceControlDiff;
-  const displayPath = review?.path ?? breadcrumbPath ?? activePath;
   const canSave = !review && activeBuffer?.status === "dirty";
-  const selectedText = selection?.text.trim();
   const [actionMenu, setActionMenu] = useState<{
     kind: "split" | "file";
     path?: string;
@@ -12426,12 +12617,19 @@ function EditorGroupPane({
   );
   useEffect(() => {
     if (!actionMenu) return;
-    actionMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    actionMenuRef.current
+      ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.focus();
     const dismiss = () => setActionMenu(undefined);
     window.addEventListener("resize", dismiss);
     return () => window.removeEventListener("resize", dismiss);
   }, [actionMenu, actionMenuRef]);
-  const openFileMenu = (target: HTMLElement, path: string, x: number, y: number) => {
+  const openFileMenu = (
+    target: HTMLElement,
+    path: string,
+    x: number,
+    y: number,
+  ) => {
     actionTriggerRef.current = target;
     onSelectFile(path);
     setActionMenu({ kind: "file", path, x, y });
@@ -12440,7 +12638,6 @@ function EditorGroupPane({
     setActionMenu(undefined);
     action();
   };
-
 
   return (
     <section
@@ -12492,13 +12689,27 @@ function EditorGroupPane({
               onClick={() => onSelectFile(tab.path)}
               onContextMenu={(event) => {
                 event.preventDefault();
-                openFileMenu(event.currentTarget, tab.path, event.clientX, event.clientY);
+                openFileMenu(
+                  event.currentTarget,
+                  tab.path,
+                  event.clientX,
+                  event.clientY,
+                );
               }}
               onKeyDown={(event) => {
-                if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+                if (
+                  event.key !== "ContextMenu" &&
+                  !(event.shiftKey && event.key === "F10")
+                )
+                  return;
                 event.preventDefault();
                 const rect = event.currentTarget.getBoundingClientRect();
-                openFileMenu(event.currentTarget, tab.path, rect.left, rect.bottom);
+                openFileMenu(
+                  event.currentTarget,
+                  tab.path,
+                  rect.left,
+                  rect.bottom,
+                );
               }}
               title={`${tab.path} · Right-click for file actions`}
               onDoubleClick={() => onPinTab?.(tab.path)}
@@ -12558,9 +12769,15 @@ function EditorGroupPane({
             onClick={(event) => {
               actionTriggerRef.current = event.currentTarget;
               const rect = event.currentTarget.getBoundingClientRect();
-              setActionMenu((current) => current?.kind === "split" ? undefined : {
-                kind: "split", x: rect.right - 200, y: rect.bottom + 5,
-              });
+              setActionMenu((current) =>
+                current?.kind === "split"
+                  ? undefined
+                  : {
+                      kind: "split",
+                      x: rect.right - 200,
+                      y: rect.bottom + 5,
+                    },
+              );
             }}
             title="Split editor"
             type="button"
@@ -12588,142 +12805,96 @@ function EditorGroupPane({
           ) : null}
         </div>
       </div>
-      {actionMenu ? createPortal(
-        <div
-          className="gyro-session-menu gyro-editor-action-menu"
-          ref={actionMenuRef}
-          role="menu"
-          aria-label={actionMenu.kind === "split" ? "Split editor" : "File actions"}
-          style={{
-            position: "fixed", right: "auto", width: 200, zIndex: 180,
-            left: Math.max(8, Math.min(actionMenu.x, window.innerWidth - 216)),
-            top: Math.max(8, Math.min(actionMenu.y, window.innerHeight - 120)),
-          }}
-        >
-          {actionMenu.kind === "split" ? (
-            <>
-              <button role="menuitem" type="button" onClick={() => runMenuAction(() => onSplitEditorGroup?.("right"))}>
-                <PanelRight size={14} /> Split right
-              </button>
-              <button role="menuitem" type="button" onClick={() => runMenuAction(() => onSplitEditorGroup?.("down"))}>
-                <PanelBottom size={14} /> Split down
-              </button>
-            </>
-          ) : (
-            <>
-              <button role="menuitem" type="button" disabled={!canSave || actionMenu.path !== activePath} onClick={() => runMenuAction(() => actionMenu.path && onEditorSave?.(actionMenu.path))}>
-                <Check size={14} /> Save file
-              </button>
-              <button role="menuitem" type="button" disabled={!canSave || actionMenu.path !== activePath} onClick={() => runMenuAction(() => actionMenu.path && onEditorRevert?.(actionMenu.path))}>
-                <RotateCcw size={14} /> Revert unsaved changes
-              </button>
-              <button role="menuitem" type="button" onClick={() => runMenuAction(() => actionMenu.path && onCloseTab?.(actionMenu.path))}>
-                <X size={14} /> Close file
-              </button>
-            </>
-          )}
-        </div>,
-        document.body,
-      ) : null}
-      <div className="gyro-editor-contextbar">
-        <div className="gyro-breadcrumb-row">
-          {activePath ? (
-            <>
-              {parentSegments(displayPath ?? activePath).map((segment) => (
-                <span key={segment}>{segment}</span>
-              ))}
-              {parentSegments(displayPath ?? activePath).length > 0 ? (
-                <ChevronRight size={13} />
-              ) : null}
-              <strong>{workspaceName(displayPath ?? activePath)}</strong>
-            </>
-          ) : (
-            <strong className="gyro-editor-empty-hint">
-              {browserFocusEmpty
-                ? "Previewing — open a file to edit alongside"
-                : emptyPrompt}
-            </strong>
-          )}
-        </div>
-        <div
-          className={["gyro-editor-ai-bar", !activePath ? "is-file-empty" : ""]
-            .filter(Boolean)
-            .join(" ")}
-          aria-label="Editor AI actions"
-          hidden={browserFocusEmpty || !activePath || !!review}
-        >
-          <button
-            disabled={!activePath}
-            onClick={() =>
-              onAssistantAction?.(
-                "ask-about-file",
-                `Explain ${activePath ?? "this file"} in this workspace.`,
-              )
-            }
-            title="Ask about file"
-            type="button"
-          >
-            <Sparkles size={13} />
-            <span>Ask</span>
-          </button>
-          <button
-            disabled={!selectedText}
-            onClick={() =>
-              onAssistantAction?.(
-                "explain-selection",
-                "Explain the selected code and call out important dependencies.",
-              )
-            }
-            title="Explain selection"
-            type="button"
-          >
-            <Sparkles size={13} />
-            <span>Explain</span>
-          </button>
-          <button
-            disabled={!selectedText}
-            onClick={() =>
-              onAssistantAction?.(
-                "fix-selection",
-                "Fix the selected code and propose a diff for review.",
-              )
-            }
-            title="Fix selection"
-            type="button"
-          >
-            <Edit3 size={13} />
-            <span>Fix</span>
-          </button>
-          <button
-            disabled={!activePath}
-            onClick={() =>
-              onAssistantAction?.(
-                "refactor-file",
-                "Refactor this file conservatively and propose a diff.",
-              )
-            }
-            title="Refactor file"
-            type="button"
-          >
-            <FileCode2 size={13} />
-            <span>Refactor</span>
-          </button>
-          <button
-            disabled={!activePath}
-            onClick={() =>
-              onAssistantAction?.(
-                "generate-tests",
-                "Generate or update focused tests for this file.",
-              )
-            }
-            title="Generate tests"
-            type="button"
-          >
-            <ListChecks size={13} />
-            <span>Tests</span>
-          </button>
-        </div>
-      </div>
+      {actionMenu
+        ? createPortal(
+            <div
+              className="gyro-session-menu gyro-editor-action-menu"
+              ref={actionMenuRef}
+              role="menu"
+              aria-label={
+                actionMenu.kind === "split" ? "Split editor" : "File actions"
+              }
+              style={{
+                position: "fixed",
+                right: "auto",
+                width: 200,
+                zIndex: 180,
+                left: Math.max(
+                  8,
+                  Math.min(actionMenu.x, window.innerWidth - 216),
+                ),
+                top: Math.max(
+                  8,
+                  Math.min(actionMenu.y, window.innerHeight - 120),
+                ),
+              }}
+            >
+              {actionMenu.kind === "split" ? (
+                <>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() =>
+                      runMenuAction(() => onSplitEditorGroup?.("right"))
+                    }
+                  >
+                    <PanelRight size={14} /> Split right
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() =>
+                      runMenuAction(() => onSplitEditorGroup?.("down"))
+                    }
+                  >
+                    <PanelBottom size={14} /> Split down
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    disabled={!canSave || actionMenu.path !== activePath}
+                    onClick={() =>
+                      runMenuAction(
+                        () =>
+                          actionMenu.path && onEditorSave?.(actionMenu.path),
+                      )
+                    }
+                  >
+                    <Check size={14} /> Save file
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    disabled={!canSave || actionMenu.path !== activePath}
+                    onClick={() =>
+                      runMenuAction(
+                        () =>
+                          actionMenu.path && onEditorRevert?.(actionMenu.path),
+                      )
+                    }
+                  >
+                    <RotateCcw size={14} /> Revert unsaved changes
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() =>
+                      runMenuAction(
+                        () => actionMenu.path && onCloseTab?.(actionMenu.path),
+                      )
+                    }
+                  >
+                    <X size={14} /> Close file
+                  </button>
+                </>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
       <div className="gyro-code-surface" role="region" aria-label="Code editor">
         {renderEditor && activePath ? (
           renderEditor({
@@ -12969,6 +13140,8 @@ type TerminalLaunchOptions = {
 };
 
 type TerminalPanelProps = {
+  panelActions?: ReactNode;
+  onSelectPanel?: (tab: WorkbenchPaneTab) => void;
   profiles: CommandProfile[];
   activeProfileId: string;
   cliLaunchPreset?: CliLaunchPreset;
@@ -13213,6 +13386,7 @@ function TerminalActionsMenu({
   onSetLayout?: (paneId: string, layout: TerminalPaneLayout) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
     setIsOpen(false),
   );
@@ -13229,14 +13403,32 @@ function TerminalActionsMenu({
         aria-haspopup="menu"
         aria-label="More terminal actions"
         disabled={!paneId}
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const above = rect.top > window.innerHeight - rect.bottom;
+          setMenuStyle({
+            position: "fixed",
+            right: Math.max(8, window.innerWidth - rect.right),
+            top: above ? "auto" : rect.bottom + 6,
+            bottom: above ? window.innerHeight - rect.top + 6 : "auto",
+            maxHeight: Math.max(
+              80,
+              (above ? rect.top : window.innerHeight - rect.bottom) - 14,
+            ),
+          });
+          setIsOpen((current) => !current);
+        }}
         title="Terminal actions"
         type="button"
       >
         <MoreHorizontal size={15} />
       </button>
       {isOpen && paneId ? (
-        <div className="gyro-terminal-actions-menu" role="menu">
+        <div
+          className="gyro-terminal-actions-menu"
+          role="menu"
+          style={menuStyle}
+        >
           {extraActions.map(({ label, icon: Icon, onClick, disabled }) => (
             <button
               key={label}
@@ -13323,6 +13515,8 @@ function TerminalActionsMenu({
 }
 
 export function TerminalPanel({
+  panelActions,
+  onSelectPanel,
   profiles,
   activeProfileId,
   cliLaunchPreset = defaultCliLaunchPreset(),
@@ -13357,6 +13551,15 @@ export function TerminalPanel({
   const hasPanes = panes.length > 0;
   const activePaneId = selectedTerminalPaneId ?? panes[0]?.id;
   const activePane = panes.find((pane) => pane.id === activePaneId);
+  const autoRestartedPaneIds = useRef(new Set<string>());
+  const activePaneStatus = activePane?.status;
+  useEffect(() => {
+    if (!activePaneId || !onRestartTerminalPane) return;
+    if (activePaneStatus !== "restored") return;
+    if (autoRestartedPaneIds.current.has(activePaneId)) return;
+    autoRestartedPaneIds.current.add(activePaneId);
+    onRestartTerminalPane(activePaneId);
+  }, [activePaneId, activePaneStatus, onRestartTerminalPane]);
   const activePaneIndex = panes.findIndex((pane) => pane.id === activePaneId);
   const activePaneIsWide = Boolean(
     activePane &&
@@ -13510,7 +13713,7 @@ export function TerminalPanel({
                 title={`${pane.title} · ${pane.status} · ${pane.workingDirectory || pane.projectPath || "Terminal"} · Drag to split; Alt+arrow to place`}
                 type="button"
               >
-                <Terminal size={15} aria-hidden="true" />
+                <SquareTerminal size={15} aria-hidden="true" />
                 <span>{pane.title}</span>
                 <GripVertical
                   className="gyro-terminal-tab-grip"
@@ -13554,10 +13757,23 @@ export function TerminalPanel({
         {hasPanes ? (
           <TerminalActionsMenu
             extraActions={[
+              ...(onSelectPanel
+                ? paneTabs
+                    .filter((tab) => tab.id !== "terminal")
+                    .map((tab) => ({
+                      label: `Show ${tab.label}`,
+                      icon: tab.icon,
+                      onClick: () => onSelectPanel(tab.id),
+                    }))
+                : []),
               {
                 label: "Open terminal in folder…",
                 icon: FolderOpen,
-                onClick: () => onAddTerminalPane?.({ ...launchOptions, directory: "choose" }),
+                onClick: () =>
+                  onAddTerminalPane?.({
+                    ...launchOptions,
+                    directory: "choose",
+                  }),
               },
               {
                 label: "Split terminal",
@@ -13613,6 +13829,7 @@ export function TerminalPanel({
             paneIsWide={activePaneIsWide}
           />
         ) : null}
+        {panelActions}
       </div>
       <div
         className="gyro-terminal-grid"
@@ -13646,11 +13863,18 @@ export function TerminalPanel({
               onDrop={finishTerminalDrag}
               onMoveBackward={() => movePaneByKeyboard(pane.id, -1)}
               onMoveForward={() => movePaneByKeyboard(pane.id, 1)}
-              onRemoveFromSplit={visibleIds.length > 1 ? () => {
-                const remaining = visibleIds.filter((id) => id !== pane.id);
-                setSplitLayout({ ...splitLayout, ids: remaining });
-                if (pane.id === activePaneId && remaining[0]) onSelectTerminalPane?.(remaining[0]);
-              } : undefined}
+              onRemoveFromSplit={
+                visibleIds.length > 1
+                  ? () => {
+                      const remaining = visibleIds.filter(
+                        (id) => id !== pane.id,
+                      );
+                      setSplitLayout({ ...splitLayout, ids: remaining });
+                      if (pane.id === activePaneId && remaining[0])
+                        onSelectTerminalPane?.(remaining[0]);
+                    }
+                  : undefined
+              }
               onClose={() => onCloseTerminalPane?.(pane.id)}
               onSelect={() => onSelectTerminalPane?.(pane.id)}
               output={pane.output}
@@ -13674,11 +13898,22 @@ export function TerminalPanel({
               <p>Open a shell in your home folder, or choose where to work.</p>
               {onAddTerminalPane ? (
                 <div className="gyro-terminal-empty-actions">
-                  <button onClick={() => onAddTerminalPane(launchOptions)} type="button">
+                  <button
+                    onClick={() => onAddTerminalPane(launchOptions)}
+                    type="button"
+                  >
                     <Plus aria-hidden="true" size={15} />
                     New terminal
                   </button>
-                  <button onClick={() => onAddTerminalPane({ ...launchOptions, directory: "choose" })} type="button">
+                  <button
+                    onClick={() =>
+                      onAddTerminalPane({
+                        ...launchOptions,
+                        directory: "choose",
+                      })
+                    }
+                    type="button"
+                  >
                     <FolderOpen aria-hidden="true" size={15} />
                     Open in folder…
                   </button>
@@ -13701,13 +13936,19 @@ export function TerminalPanel({
                           onProfileChange(profile.id);
                           onRunCommandProfile(profile.id, launchOptions);
                         }}
-                        title={profile.launchUnavailableReason ? `${profile.displayName} · ${profile.launchUnavailableReason}` : [profile.command, ...profile.args].join(" ")}
+                        title={
+                          profile.launchUnavailableReason
+                            ? `${profile.displayName} · ${profile.launchUnavailableReason}`
+                            : [profile.command, ...profile.args].join(" ")
+                        }
                         type="button"
                       >
                         <Terminal aria-hidden="true" size={15} />
                         <span>{profile.displayName}</span>
                         {profile.readiness === "blocked" ? (
-                          <small>{profile.launchUnavailableReason ?? "Not connected"}</small>
+                          <small>
+                            {profile.launchUnavailableReason ?? "Not connected"}
+                          </small>
                         ) : profile.readiness === "waiting" ? (
                           <small>Not connected</small>
                         ) : (
@@ -13819,6 +14060,8 @@ function WorkbenchPaneTabs({
 }
 
 function WorkbenchPaneContent({
+  terminalPanelActions,
+  onSelectTerminalPanel,
   activePaneTab,
   profiles,
   activeProfileId,
@@ -13828,6 +14071,7 @@ function WorkbenchPaneContent({
   terminalPanes,
   terminalTemplate,
   diffReview,
+  workspacePath,
   browserPreview,
   ide,
   terminalOutput,
@@ -13874,6 +14118,8 @@ function WorkbenchPaneContent({
   browserNativeHost = false,
   browserOverlayOccluded = false,
 }: {
+  terminalPanelActions?: ReactNode;
+  onSelectTerminalPanel?: (tab: WorkbenchPaneTab) => void;
   activePaneTab: WorkbenchPaneTab;
   profiles: CommandProfile[];
   activeProfileId: string;
@@ -13883,6 +14129,7 @@ function WorkbenchPaneContent({
   terminalPanes?: TerminalPane[];
   terminalTemplate?: TerminalTemplate;
   diffReview?: DiffReview;
+  workspacePath?: string;
   browserPreview?: BrowserPreview;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
@@ -13943,6 +14190,7 @@ function WorkbenchPaneContent({
       <DiffReviewSurface
         compact
         diffReview={diffReview}
+        workspacePath={workspacePath}
         onAcceptAll={onAcceptAllDiffs}
         onAcceptFile={onAcceptDiffFile}
         onComment={onCommentDiff}
@@ -14090,6 +14338,8 @@ function WorkbenchPaneContent({
 
   return (
     <TerminalPanel
+      panelActions={terminalPanelActions}
+      onSelectPanel={onSelectTerminalPanel}
       activeProfileId={activeProfileId}
       cliLaunchPreset={cliLaunchPreset}
       isLaunchingCliPreset={isLaunchingCliPreset}
@@ -14147,6 +14397,7 @@ type WorkspaceToolPanelProps = {
   terminalPanes?: TerminalPane[];
   terminalTemplate?: TerminalTemplate;
   diffReview?: DiffReview;
+  workspacePath?: string;
   browserPreview?: BrowserPreview;
   ide?: IdeState;
   terminalOutput: string;
@@ -14221,6 +14472,7 @@ export function WorkspaceToolPanel({
   terminalPanes,
   terminalTemplate,
   diffReview,
+  workspacePath,
   browserPreview,
   browserNativeHost = false,
   browserOverlayOccluded = false,
@@ -14384,8 +14636,40 @@ export function WorkspaceToolPanel({
     onHeightChange(maxToolPanelHeight());
   };
 
+  const compactTerminal =
+    !isPrimary &&
+    effectivePaneTab === "terminal" &&
+    Boolean(terminalPanes?.length);
+  const panelControls = (
+    <>
+      {canResize ? (
+        <button
+          aria-label={
+            isNearFull ? "Restore tool panel height" : "Maximize tool panel"
+          }
+          className="gyro-icon-button is-subtle"
+          onClick={togglePanelMaximize}
+          title={isNearFull ? "Restore height" : "Maximize panel"}
+          type="button"
+        >
+          {isNearFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
+      ) : null}
+      <button
+        aria-label="Close tool panel"
+        className="gyro-icon-button is-subtle"
+        onClick={onClose}
+        title="Close"
+        type="button"
+      >
+        <X size={15} />
+      </button>
+    </>
+  );
+
   const panelClassName = [
     "gyro-workspace-tool-panel",
+    compactTerminal ? "is-compact-terminal" : "",
     isPrimary ? "is-primary" : "",
     canResize ? "is-resizable" : "",
     isResizing ? "is-resizing" : "",
@@ -14432,7 +14716,7 @@ export function WorkspaceToolPanel({
           <span />
         </button>
       ) : null}
-      {!isPrimary ? (
+      {!isPrimary && !compactTerminal ? (
         <div className="gyro-workspace-tool-panel-head">
           <WorkbenchPaneTabs
             activeTab={effectivePaneTab}
@@ -14441,36 +14725,20 @@ export function WorkspaceToolPanel({
             terminalTitle={activeTerminalPane?.title}
             terminalOnly={terminalOnly}
           />
-          {canResize ? (
-            <button
-              aria-label={
-                isNearFull ? "Restore tool panel height" : "Maximize tool panel"
-              }
-              className="gyro-icon-button is-subtle"
-              onClick={togglePanelMaximize}
-              title={isNearFull ? "Restore height" : "Maximize panel"}
-              type="button"
-            >
-              {isNearFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-          ) : null}
-          <button
-            aria-label="Close tool panel"
-            className="gyro-icon-button is-subtle"
-            onClick={onClose}
-            title="Close"
-            type="button"
-          >
-            <X size={15} />
-          </button>
+          {panelControls}
         </div>
       ) : null}
       <WorkbenchPaneContent
+        terminalPanelActions={compactTerminal ? panelControls : undefined}
+        onSelectTerminalPanel={
+          compactTerminal && !terminalOnly ? onPaneTabChange : undefined
+        }
         activePaneTab={effectivePaneTab}
         activeProfileId={activeProfileId}
         browserPreview={browserPreview}
         cliLaunchPreset={cliLaunchPreset}
         diffReview={diffReview}
+        workspacePath={workspacePath}
         ide={ide}
         isLaunchingCliPreset={isLaunchingCliPreset}
         isTerminalSourceControlLoading={isTerminalSourceControlLoading}
@@ -15497,6 +15765,7 @@ export function ProvidersSurface({
 export function DiffReviewSurface({
   compact = false,
   diffReview,
+  workspacePath,
   onSelectFile,
   onToggleDirectory,
   onAcceptFile,
@@ -15510,6 +15779,7 @@ export function DiffReviewSurface({
 }: {
   compact?: boolean;
   diffReview?: DiffReview;
+  workspacePath?: string;
   onSelectFile?: (path: string) => void;
   onToggleDirectory?: (directory: string) => void;
   onAcceptFile?: (path: string) => void;
@@ -15558,8 +15828,11 @@ export function DiffReviewSurface({
   const additions = review.files.reduce((sum, file) => sum + file.additions, 0);
   const deletions = review.files.reduce((sum, file) => sum + file.deletions, 0);
   const collapsedDirectories = new Set(review.collapsedDirectories);
-  const diffTree = buildDiffFileTree(review.files);
+  const diffTree = buildDiffFileTree(review.files, workspacePath);
   const hasFiles = review.files.length > 0;
+  const selectedDisplayPath = selectedFile
+    ? workspaceRelativeFilePath(selectedFile.path, workspacePath)
+    : "No file selected";
 
   return (
     <div
@@ -15603,7 +15876,7 @@ export function DiffReviewSurface({
         {hasFiles ? (
           <div className="gyro-diff-review-toolbar">
             <div>
-              <strong>{selectedFile?.path ?? "No file selected"}</strong>
+              <strong title={selectedFile?.path}>{selectedDisplayPath}</strong>
               {selectedFile ? (
                 <span>
                   Safety: {selectedFile.source} · {review.approvalState} ·{" "}
@@ -15803,7 +16076,10 @@ function scmBranchMenuStyle(trigger: HTMLElement): CSSProperties {
   const rect = trigger.getBoundingClientRect();
   const padding = 8;
   const minWidth = Math.max(rect.width, 260);
-  const width = Math.min(minWidth, Math.max(160, window.innerWidth - padding * 2));
+  const width = Math.min(
+    minWidth,
+    Math.max(160, window.innerWidth - padding * 2),
+  );
   const spaceBelow = window.innerHeight - rect.bottom - padding;
   const spaceAbove = rect.top - padding;
   const openUp = spaceBelow < 148 && spaceAbove > spaceBelow;
@@ -15852,8 +16128,9 @@ function ScmBranchPicker({
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(open, () =>
-    setOpen(false),
+  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
+    open,
+    () => setOpen(false),
     triggerRef,
   );
   const branches = branchCatalog?.branches ?? [];
@@ -15964,7 +16241,9 @@ function ScmBranchPicker({
                     >
                       <GitBranch size={12} aria-hidden="true" />
                       <span>{branch}</span>
-                      {isCurrent ? <Check size={12} aria-hidden="true" /> : null}
+                      {isCurrent ? (
+                        <Check size={12} aria-hidden="true" />
+                      ) : null}
                     </button>
                   );
                 })
@@ -16214,13 +16493,17 @@ type DiffTreeFileNode = {
   file: DiffFile;
 };
 
-function buildDiffFileTree(files: DiffFile[]): DiffTreeNode[] {
+function buildDiffFileTree(
+  files: DiffFile[],
+  workspacePath?: string,
+): DiffTreeNode[] {
   const root: DiffTreeNode[] = [];
   const directories = new Map<string, DiffTreeDirectoryNode>();
 
   for (const file of files) {
-    const parts = file.path.split("/").filter(Boolean);
-    const fileName = parts.at(-1) ?? file.path;
+    const displayPath = workspaceRelativeFilePath(file.path, workspacePath);
+    const parts = displayPath.split("/").filter(Boolean);
+    const fileName = parts.at(-1) ?? displayPath;
     const directoriesForFile = parts.slice(0, -1);
     let children = root;
 
@@ -16252,8 +16535,32 @@ function buildDiffFileTree(files: DiffFile[]): DiffTreeNode[] {
     });
   }
 
-  aggregateDiffTree(root);
-  return root;
+  const compacted = compactDiffTree(root);
+  aggregateDiffTree(compacted);
+  return compacted;
+}
+
+function compactDiffTree(nodes: DiffTreeNode[]): DiffTreeNode[] {
+  return nodes.map((node) => {
+    if (node.kind !== "directory") {
+      return node;
+    }
+    let current: DiffTreeDirectoryNode = {
+      ...node,
+      children: compactDiffTree(node.children),
+    };
+    while (
+      current.children.length === 1 &&
+      current.children[0]?.kind === "directory"
+    ) {
+      const only = current.children[0];
+      current = {
+        ...only,
+        name: `${current.name}/${only.name}`,
+      };
+    }
+    return current;
+  });
 }
 
 function aggregateDiffTree(nodes: DiffTreeNode[]) {
@@ -16330,7 +16637,7 @@ function renderDiffTreeNode({
         type="button"
       >
         <FileText size={14} />
-        <span>{node.name}</span>
+        <span title={node.name}>{node.name}</span>
         <small>
           +{file.additions} -{file.deletions} · {file.state}
         </small>
@@ -16352,7 +16659,7 @@ function renderDiffTreeNode({
       >
         {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <Folder size={14} />
-        <span>{node.name}</span>
+        <span title={node.name}>{node.name}</span>
         <small>
           {node.changedFiles} · +{node.additions} -{node.deletions}
           {node.pendingFiles > 0 ? ` · ${node.pendingFiles} pending` : ""}
@@ -18756,6 +19063,44 @@ export function SettingsSurface({
     enabledProviders[0] ??
     providerConfigs[0];
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const resetDialogRef = useRef<HTMLElement>(null);
+  const [copyStatus, setCopyStatus] = useState("");
+  const copySettingsPath = async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopyStatus(`Copied ${path}`);
+    } catch {
+      setCopyStatus("Could not copy. Select and copy the displayed path manually.");
+    }
+  };
+  useEffect(() => {
+    if (!isResetConfirmOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = resetDialogRef.current;
+    dialog?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsResetConfirmOpen(false);
+      }
+      if (event.key === "Tab") {
+        const buttons = dialog?.querySelectorAll<HTMLButtonElement>("button");
+        if (!buttons?.length) return;
+        const first = buttons[0];
+        const last = buttons[buttons.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  }, [isResetConfirmOpen]);
 
   return (
     <div className="gyro-settings-surface">
@@ -18769,18 +19114,18 @@ export function SettingsSurface({
             <SettingsGroup label="Startup">
               <SettingsRow
                 label="Startup behavior"
-                value="Open last workspace"
+                value="Restore saved workspace"
                 detail="Gyro keeps local sessions available across app and CLI."
               />
               <SettingsRow
                 label="Default workspace"
-                value="Ask on launch"
+                value="Choose per chat"
                 detail="Choose a folder only when the session needs filesystem access."
               />
               <SettingsRow
                 label="Default surface"
-                value="Sessions"
-                detail="Chat and CLI sessions share one destination; Workspace remains one click away."
+                value="Last used"
+                detail="Gyro restores your saved view. Switch between Sessions and Workspace in the sidebar."
               />
               <SettingsRow
                 label="Menu bar"
@@ -18796,7 +19141,7 @@ export function SettingsSurface({
             <SettingsGroup label="Model activity">
               <SettingsRow
                 label="When the model opens a workspace surface"
-                detail="Peek keeps you in the thread and shows a strip above the composer. Follow lets the model switch the app to what it opened."
+                detail="Off hides model activity previews. Peek shows a preview above the composer. Follow switches to the editor, terminal, or browser the model opens."
               >
                 <SettingsSegmented
                   label="Model activity behavior"
@@ -18831,7 +19176,7 @@ export function SettingsSurface({
             title="Appearance"
             description="Choose the interface mode used by every Gyro surface."
           >
-            <SettingsGroup label="Interface">
+            <SettingsGroup label="Theme">
               <div
                 className="gyro-theme-picker"
                 data-setting-key="theme"
@@ -18839,37 +19184,31 @@ export function SettingsSurface({
                 aria-label="Theme"
                 tabIndex={-1}
               >
-                <button
-                  aria-pressed={themeMode === "system"}
-                  className={`is-system${themeMode === "system" ? " is-active" : ""}`}
-                  onClick={() => onThemeChange("system")}
-                  type="button"
-                >
-                  <Monitor size={17} />
-                  <span>System</span>
-                  <small>Matches macOS</small>
-                </button>
-                <button
-                  aria-pressed={themeMode === "dark"}
-                  className={`is-dark${themeMode === "dark" ? " is-active" : ""}`}
-                  onClick={() => onThemeChange("dark")}
-                  type="button"
-                >
-                  <Moon size={17} />
-                  <span>Dark</span>
-                  <small>Always dark</small>
-                </button>
-                <button
-                  aria-pressed={themeMode === "light"}
-                  className={`is-light${themeMode === "light" ? " is-active" : ""}`}
-                  onClick={() => onThemeChange("light")}
-                  type="button"
-                >
-                  <Sun size={17} />
-                  <span>Light</span>
-                  <small>Always light</small>
-                </button>
+                {(
+                  [
+                    {
+                      mode: "system",
+                      label: "System",
+                      image: themePreviewSystem,
+                    },
+                    { mode: "light", label: "Light", image: themePreviewLight },
+                    { mode: "dark", label: "Dark", image: themePreviewDark },
+                  ] as const
+                ).map(({ mode, label, image }) => (
+                  <button
+                    key={mode}
+                    aria-pressed={themeMode === mode}
+                    className={`is-${mode}${themeMode === mode ? " is-active" : ""}`}
+                    onClick={() => onThemeChange(mode)}
+                    type="button"
+                  >
+                    <img src={image} alt="" draggable={false} />
+                    <span>{label}</span>
+                  </button>
+                ))}
               </div>
+            </SettingsGroup>
+            <SettingsGroup label="Interface">
               <SettingsRow
                 label="Density"
                 detail="Compact fits more sessions, tools, and editor chrome; Comfortable gives rows and controls more breathing room."
@@ -19196,7 +19535,7 @@ export function SettingsSurface({
               </SettingsRow>
               <SettingsRow
                 label="Daily pace warning"
-                detail="Warn when a day's spend reaches ~14% of the weekly/100% limit."
+                detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
               >
                 <SettingsSwitch
                   checked={dailyPaceWarning}
@@ -19237,8 +19576,8 @@ export function SettingsSurface({
               />
               <SettingsRow
                 label="Approval budget"
-                value="Strict"
-                detail="File edits and command escalation remain gated by default."
+                value={config.fullAccess ? "Full access" : config.requireCommandApproval || config.requireFileEditApproval ? "Ask first" : "Auto approve"}
+                detail="Approval behavior follows Permissions and the chat’s selected approval mode."
               />
             </SettingsGroup>
           </SettingsSection>
@@ -19494,7 +19833,7 @@ export function SettingsSurface({
           <SettingsSection
             icon={Terminal}
             title="CLI Profiles"
-            description="Built-in and custom commands that can run in workbench panes."
+            description="Choose which saved command profiles open with New Terminal, and how many panes to create."
           >
             <SettingsGroup label="Launch preset">
               <CliLaunchPresetEditor
@@ -19505,7 +19844,7 @@ export function SettingsSurface({
             </SettingsGroup>
             <SettingsGroup label="Saved profiles">
               <div className="gyro-cli-profile-list">
-                {commandProfiles.slice(0, 7).map((profile) => (
+                {commandProfiles.map((profile) => (
                   <div className="gyro-provider-row" key={profile.id}>
                     <div>
                       <strong>{profile.displayName}</strong>
@@ -19607,18 +19946,18 @@ export function SettingsSurface({
               </SettingsRow>
               <SettingsRow
                 label="Workspace boundary"
-                value="Current folder"
-                detail="Agents need approval before reading outside the opened workspace."
+                value="Provider-dependent"
+                detail="File access depends on the provider and approval mode. Full access can allow work outside the project folder."
               />
               <SettingsRow
                 label="Network access"
-                value="Ask"
-                detail="External calls can be gated per provider or CLI profile."
+                value="Provider-dependent"
+                detail="Network restrictions depend on the provider and CLI profile; these approval switches do not guarantee that network access is blocked."
               />
               <SettingsRow
                 label="Secrets redaction"
                 value="On"
-                detail="Detected secrets are masked in prompts, logs, and diagnostics."
+                detail="Gyro masks recognized secret patterns in diagnostics and supported output. Review exported files before sharing."
               />
             </SettingsGroup>
             <SettingsGroup label="System notifications">
@@ -19774,25 +20113,28 @@ export function SettingsSurface({
                 {
                   label: "Navigation",
                   items: [
-                    ["Command palette", "Cmd+K"],
+                    ["Command palette", "Cmd+Shift+P"],
+                    ["Search everything", "Cmd+K"],
+                    ["Find files", "Cmd+P"],
                     ["Open settings", "Cmd+,"],
                   ],
                 },
                 {
                   label: "Sessions",
                   items: [
-                    ["New session", "Cmd+N"],
-                    ["Switch panes", "Cmd+1-9"],
+                    ["New chat", "Cmd+N"],
+                    ["Show chats", "Cmd+1"],
+                    ["Show terminals", "Cmd+2"],
+                    ["Show Workspace", "Cmd+3"],
                   ],
                 },
                 {
                   label: "Terminal",
                   items: [
                     ["New terminal", "Cmd+T"],
-                    ["Split terminal", "Cmd+\\"],
                   ],
                 },
-                { label: "Search", items: [["Search", "Cmd+F"]] },
+
               ] as Array<{ label: string; items: Array<[string, string]> }>
             ).map((group) => (
               <SettingsGroup key={group.label} label={group.label}>
@@ -19819,8 +20161,8 @@ export function SettingsSurface({
             <SettingsGroup label="Local runtime">
               <SettingsRow
                 label="Local socket"
-                value="ready"
-                detail="CLI agents can attach to the desktop app through the local bridge."
+                value="Desktop app only"
+                detail="The desktop app provides a local bridge for CLI agents. This row does not run a connection check."
               />
             </SettingsGroup>
             <SettingsGroup label="Storage and diagnostics">
@@ -19831,13 +20173,13 @@ export function SettingsSurface({
                 <button
                   className="gyro-copy-value"
                   onClick={() =>
-                    void navigator.clipboard?.writeText(
-                      "Application Support/Gyro",
+                    void copySettingsPath(
+                      "~/Library/Application Support/Gyro",
                     )
                   }
                   type="button"
                 >
-                  <code>Application Support/Gyro</code>
+                  <code>~/Library/Application Support/Gyro</code>
                   <Copy size={13} />
                 </button>
               </SettingsRow>
@@ -19848,11 +20190,11 @@ export function SettingsSurface({
                 <button
                   className="gyro-copy-value"
                   onClick={() =>
-                    void navigator.clipboard?.writeText("Logs/Gyro")
+                    void copySettingsPath("~/Library/Application Support/Gyro/logs")
                   }
                   type="button"
                 >
-                  <code>Logs/Gyro</code>
+                  <code>~/Library/Application Support/Gyro/logs</code>
                   <Copy size={13} />
                 </button>
               </SettingsRow>
@@ -19870,6 +20212,7 @@ export function SettingsSurface({
               </SettingsRow>
             </SettingsGroup>
             <SettingsGroup label="Reset">
+              {copyStatus ? <p role="status">{copyStatus}</p> : null}
               <SettingsRow
                 label="Reset UI state"
                 detail="Clears layout preferences without touching workspace files or provider credentials."
@@ -19912,6 +20255,7 @@ export function SettingsSurface({
           <section
             aria-label="Reset UI state"
             aria-modal="true"
+            ref={resetDialogRef}
             role="alertdialog"
           >
             <h2>Reset UI state?</h2>
@@ -19973,7 +20317,7 @@ function updateSettingsDetail(state?: UpdateState) {
     return "Gyro is up to date.";
   }
   if (state.status === "failed") {
-    return state.error ?? "The update check failed. Select this row to retry.";
+    return state.error ?? "The update check failed. Click Check for updates to retry.";
   }
   if (state.status === "ready") {
     return "The downloaded update passed signature verification.";
@@ -20032,15 +20376,17 @@ function WorkspaceKeyboardSettings({
     binding?: WorkspaceKeybinding | null,
   ) => void;
 }) {
+  const [bindingError, setBindingError] = useState("");
   return (
     <section className="gyro-workspace-keybindings">
       <header>
         <div>
           <h2>Keyboard shortcuts</h2>
-          <p>Focus a shortcut and press the key combination to reassign it.</p>
+          <p>Focus a shortcut and press a combination with Cmd or Ctrl. Backspace clears it; the reset button restores its default.</p>
         </div>
         <kbd>{isMacPlatform() ? "⌘" : "Ctrl"}</kbd>
       </header>
+      {bindingError ? <p role="alert">{bindingError}</p> : null}
       <div>
         {workspaceCommandRegistry.map((command) => {
           const hasOverride = command.id in keybindings;
@@ -20078,6 +20424,7 @@ function WorkspaceKeyboardSettings({
                   if (event.key === "Tab") return;
                   event.preventDefault();
                   event.stopPropagation();
+                  setBindingError("");
                   if (event.key === "Escape") {
                     event.currentTarget.blur();
                     return;
@@ -20088,13 +20435,21 @@ function WorkspaceKeyboardSettings({
                     !event.ctrlKey &&
                     !event.altKey
                   ) {
-                    onKeybindingChange?.(command.id, undefined);
+                    onKeybindingChange?.(command.id, null);
                     return;
                   }
                   if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) {
                     return;
                   }
                   const mac = isMacPlatform();
+                  if (!event.metaKey && !event.ctrlKey) {
+                    setBindingError("Include Cmd or Ctrl so the shortcut does not interfere with typing.");
+                    return;
+                  }
+                  if ((mac ? event.metaKey : event.ctrlKey) && ["k", "p", "s"].includes(event.key.toLowerCase())) {
+                    setBindingError("That combination is reserved for search, the command palette, or saving. Choose another shortcut.");
+                    return;
+                  }
                   onKeybindingChange?.(command.id, {
                     key: event.key.toLowerCase(),
                     primary: mac ? event.metaKey : event.ctrlKey,
@@ -20110,7 +20465,7 @@ function WorkspaceKeyboardSettings({
               {hasOverride ? (
                 <button
                   aria-label={`Reset keybinding for ${command.label}`}
-                  onClick={() => onKeybindingChange?.(command.id, undefined)}
+                  onClick={() => { setBindingError(""); onKeybindingChange?.(command.id, undefined); }}
                   title="Reset to default"
                   type="button"
                 >
@@ -23066,13 +23421,6 @@ function Composer({
                         : "Unavailable"}
                     </small>
                   )}
-                  {/* A row of em dashes says a limit is unknown but not why.
-                      The provider's own reason usually names the fix — an
-                      expired sign-in, a CLI that is not installed — so it
-                      belongs beside the windows it explains. */}
-                  {providerUsage?.status === "error" && providerUsage.error ? (
-                    <small>{providerUsage.error}</small>
-                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -23132,12 +23480,6 @@ function Composer({
                 0,
                 effortItems.findIndex((item) => item.active),
               )}
-              defaultIndex={Math.max(
-                0,
-                (effortSourceModel?.supportedReasoningEfforts ?? []).indexOf(
-                  effortSourceModel?.defaultReasoningEffort ?? "medium",
-                ),
-              )}
               placement={providerPopoverPlacement}
               onSelect={(index) => {
                 const action = effortItems[index]?.action;
@@ -23148,10 +23490,6 @@ function Composer({
                   currentModelItems.length ? "model" : "provider",
                 )
               }
-              onSettings={() => {
-                setIsModelMenuAdvancedOpen(true);
-                setModelMenuPane("settings");
-              }}
             />
           ) : activePopover === "provider" ? (
             <ComposerPopover
@@ -26156,8 +26494,13 @@ function TerminalPaneView({
   } = pane;
   const paneRef = useRef<HTMLElement>(null);
   const [closeMenuOpen, setCloseMenuOpen] = useState(false);
-  const closeMenuRef = useOutsidePointerDismiss<HTMLDivElement>(closeMenuOpen, () => setCloseMenuOpen(false));
-  useEffect(() => { if (hidden) setCloseMenuOpen(false); }, [hidden]);
+  const closeMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
+    closeMenuOpen,
+    () => setCloseMenuOpen(false),
+  );
+  useEffect(() => {
+    if (hidden) setCloseMenuOpen(false);
+  }, [hidden]);
   useEffect(() => {
     if (isActive)
       paneRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -26255,29 +26598,78 @@ function TerminalPaneView({
         </div>
       </header>
       {onClose ? (
-        <div className={`gyro-terminal-corner ${closeMenuOpen ? "is-open" : ""}`} ref={closeMenuRef}
+        <div
+          className={`gyro-terminal-corner ${closeMenuOpen ? "is-open" : ""}`}
+          ref={closeMenuRef}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
-              event.preventDefault(); event.stopPropagation(); setCloseMenuOpen(false);
-              closeMenuRef.current?.querySelector<HTMLButtonElement>(".gyro-terminal-corner-trigger")?.focus();
+              event.preventDefault();
+              event.stopPropagation();
+              setCloseMenuOpen(false);
+              closeMenuRef.current
+                ?.querySelector<HTMLButtonElement>(
+                  ".gyro-terminal-corner-trigger",
+                )
+                ?.focus();
             }
           }}
         >
-          <button className="gyro-terminal-corner-trigger" aria-label={`Close options for ${title}`} aria-haspopup="menu" aria-expanded={closeMenuOpen}
-            onClick={() => setCloseMenuOpen((open) => !open)} type="button" title="Close options">
+          <button
+            className="gyro-terminal-corner-trigger"
+            aria-label={`Close options for ${title}`}
+            aria-haspopup="menu"
+            aria-expanded={closeMenuOpen}
+            onClick={() => setCloseMenuOpen((open) => !open)}
+            type="button"
+            title="Close options"
+          >
             <X size={15} />
           </button>
           {closeMenuOpen ? (
-            <div className="gyro-terminal-corner-menu" role="menu" aria-label={`${title} close options`}>
-              {terminalPaneHasActiveWork(pane) ? <p role="note">This terminal may still be doing active work. Terminating it will stop its process.</p> : null}
+            <div
+              className="gyro-terminal-corner-menu"
+              role="menu"
+              aria-label={`${title} close options`}
+            >
+              {terminalPaneHasActiveWork(pane) ? (
+                <p role="note">
+                  This terminal may still be doing active work. Terminating it
+                  will stop its process.
+                </p>
+              ) : null}
               {onRemoveFromSplit ? (
-                <button role="menuitem" autoFocus onClick={() => { setCloseMenuOpen(false); onRemoveFromSplit(); }} type="button">
-                  <Minimize2 size={14} /><span>Remove from split<small>Keep the terminal open in its tab</small></span>
+                <button
+                  role="menuitem"
+                  autoFocus
+                  onClick={() => {
+                    setCloseMenuOpen(false);
+                    onRemoveFromSplit();
+                  }}
+                  type="button"
+                >
+                  <Minimize2 size={14} />
+                  <span>
+                    Remove from split
+                    <small>Keep the terminal open in its tab</small>
+                  </span>
                 </button>
               ) : null}
-              <button role="menuitem" autoFocus={!onRemoveFromSplit} className="is-danger" onClick={() => { setCloseMenuOpen(false); onClose(); }} type="button">
-                <X size={14} /><span>Terminate terminal<small>Stop the process and close its tab</small></span>
+              <button
+                role="menuitem"
+                autoFocus={!onRemoveFromSplit}
+                className="is-danger"
+                onClick={() => {
+                  setCloseMenuOpen(false);
+                  onClose();
+                }}
+                type="button"
+              >
+                <X size={14} />
+                <span>
+                  Terminate terminal
+                  <small>Stop the process and close its tab</small>
+                </span>
               </button>
             </div>
           ) : null}

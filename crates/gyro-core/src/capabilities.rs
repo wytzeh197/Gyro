@@ -33,6 +33,7 @@ pub enum CapabilityId {
     IdeOpenPanel,
     TerminalOpen,
     TerminalRead,
+    TerminalWait,
     TerminalStop,
     BrowserOpen,
     BrowserInspect,
@@ -78,6 +79,7 @@ impl CapabilityId {
             Self::IdeOpenPanel => "ide.open_panel",
             Self::TerminalOpen => "terminal.open",
             Self::TerminalRead => "terminal.read",
+            Self::TerminalWait => "terminal.wait",
             Self::TerminalStop => "terminal.stop",
             Self::BrowserOpen => "browser.open",
             Self::BrowserInspect => "browser.inspect",
@@ -123,6 +125,7 @@ impl CapabilityId {
             Self::IdeOpenPanel => "gyro_ide_open_panel",
             Self::TerminalOpen => "gyro_terminal_open",
             Self::TerminalRead => "gyro_terminal_read",
+            Self::TerminalWait => "gyro_terminal_wait",
             Self::TerminalStop => "gyro_terminal_stop",
             Self::BrowserOpen => "gyro_browser_open",
             Self::BrowserInspect => "gyro_browser_inspect",
@@ -669,12 +672,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::TerminalOpen,
         class: CapabilityClass::TerminalExecute,
-        description: "Open one visible, model-owned long-running process in Gyro Terminal.",
+        description: "Open one visible, model-owned long-running process in Gyro Terminal. For builds and other finite commands, use gyro_terminal_wait with the returned resource.id to await completion and then continue the task.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalRead,
         class: CapabilityClass::TerminalObserve,
         description: "Read bounded output from this chat's model-owned terminal.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::TerminalWait,
+        class: CapabilityClass::TerminalObserve,
+        description: "Wait for this chat’s model-owned command to finish, without restarting it or repeatedly reading output. Pass the resource.id returned by terminal_open or a background workspace task. Returns completed, exitCode, and bounded output, or still running after timeoutMs (default/max 60000). If still running, call this tool again; when completed, inspect exitCode and continue the user’s task. For remote CI builds, start a watcher such as gh run watch RUN_ID --exit-status in terminal_open, then wait here. A timeout does not stop the command. Do not finish the task merely because a wait timed out.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalStop,

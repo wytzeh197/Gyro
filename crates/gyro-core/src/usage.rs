@@ -934,9 +934,19 @@ pub fn record_provider_rate_limits(
              on conflict(provider_id, window_id) do update set
                label = excluded.label,
                status = excluded.status,
-               used_percent = excluded.used_percent,
+               used_percent = case
+                 when excluded.used_percent is null
+                   and strftime('%s', excluded.resets_at) = strftime('%s', provider_rate_limits.resets_at)
+                 then provider_rate_limits.used_percent
+                 else excluded.used_percent end,
                resets_at = excluded.resets_at,
-               observed_at = excluded.observed_at",
+               observed_at = case
+                 when excluded.used_percent is null
+                   and provider_rate_limits.used_percent is not null
+                   and strftime('%s', excluded.resets_at) = strftime('%s', provider_rate_limits.resets_at)
+                 then provider_rate_limits.observed_at
+                 else excluded.observed_at end
+             where julianday(excluded.observed_at) >= julianday(provider_rate_limits.observed_at)",
             params![
                 provider_id,
                 window.window_id,
@@ -1646,6 +1656,59 @@ mod tests {
         let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].status, "exhausted");
+    }
+
+    #[test]
+    fn status_only_events_preserve_measurements_only_in_the_same_window() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let reset = now + chrono::Duration::hours(3);
+        let mut measured = window("five-hour", "ok", Some(&reset.to_rfc3339()));
+        measured.used_percent = Some(93);
+        measured.observed_at = (now - chrono::Duration::minutes(1)).to_rfc3339();
+        record_provider_rate_limits(&conn, "anthropic", &[measured.clone()]).unwrap();
+        // OAuth includes fractional seconds; stream resets are whole seconds.
+        let stream_reset = reset.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("five-hour", "warning", Some(&stream_reset))],
+        )
+        .unwrap();
+        let stored = provider_rate_limits(&conn, "anthropic", now).unwrap();
+        assert_eq!(stored[0].used_percent, Some(93));
+        assert_eq!(stored[0].observed_at, measured.observed_at);
+        assert_eq!(stored[0].status, "warning");
+
+        // A genuine new measurement still replaces the previous percentage.
+        let mut updated = measured.clone();
+        updated.used_percent = Some(95);
+        updated.observed_at = now.to_rfc3339();
+        record_provider_rate_limits(&conn, "anthropic", &[updated]).unwrap();
+        assert_eq!(
+            provider_rate_limits(&conn, "anthropic", now).unwrap()[0].used_percent,
+            Some(95)
+        );
+
+        // A coalesced poll cannot overwrite a newer stream measurement.
+        record_provider_rate_limits(&conn, "anthropic", &[measured]).unwrap();
+        assert_eq!(
+            provider_rate_limits(&conn, "anthropic", now).unwrap()[0].used_percent,
+            Some(95)
+        );
+
+        // A new window cannot inherit the old allowance's percentage.
+        let next_reset = (reset + chrono::Duration::hours(5)).to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[window("five-hour", "ok", Some(&next_reset))],
+        )
+        .unwrap();
+        assert_eq!(
+            provider_rate_limits(&conn, "anthropic", now).unwrap()[0].used_percent,
+            None
+        );
     }
 
     #[test]

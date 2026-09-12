@@ -15,8 +15,11 @@ import {
   chatCompanionReducer,
   clampBrowserCompanionWidth,
   clampChatCompanionWidth,
+  chatEnvironmentPaneKey,
   createInitialChatCompanionState,
+  defaultChatEnvironmentVisible,
   discardedSideChatSessionIds,
+  resolveChatRailPanel,
   keyboardChatCompanionWidth,
   staleSideChatSessionIds,
   withoutSideChatSessions,
@@ -444,6 +447,71 @@ assert.equal(
     withoutSideChatSessions(sessions, []),
     sessions,
     "with nothing to hide the original list is returned untouched",
+  );
+}
+
+// --- The Environment under the rail ----------------------------------------
+// The Environment is the rail's resting state, not a peer of the tools, so the
+// three rules below are what a chat's right edge means: a single chat shows it,
+// a split does not, and anything the user put on the rail covers it.
+
+{
+  assert.equal(
+    defaultChatEnvironmentVisible(false),
+    true,
+    "a single chat opens with the Environment showing",
+  );
+  assert.equal(
+    defaultChatEnvironmentVisible(true),
+    false,
+    "a tiled pane has no width to spare, so it opens without one",
+  );
+  assert.notEqual(
+    chatEnvironmentPaneKey(PANE_A, false),
+    chatEnvironmentPaneKey(PANE_A, true),
+    "the remembered choice is per layout, so opening it solo cannot leak into a split",
+  );
+}
+
+{
+  assert.equal(
+    resolveChatRailPanel({ isEnvironmentVisible: true }),
+    "environment",
+    "with nothing on the rail the Environment shows",
+  );
+  assert.equal(
+    resolveChatRailPanel({ isEnvironmentVisible: false }),
+    undefined,
+    "withdrawing it leaves the rail empty rather than falling through to a tool",
+  );
+}
+
+{
+  // Opening a right-hand panel hides the Environment for as long as it is up,
+  // and closing it uncovers the Environment rather than blanking the rail.
+  const docked = reduce(focused(), { type: "open-tab", tab: "review" });
+  const withDock = {
+    companionPanel: activeChatCompanionPanel(docked, PANE_A),
+    isEnvironmentVisible: true,
+  };
+  assert.equal(
+    resolveChatRailPanel(withDock),
+    "review",
+    "an open companion tab outranks the Environment",
+  );
+  assert.equal(
+    resolveChatRailPanel({ ...withDock, legacyPanel: "plan" }),
+    "plan",
+    "the plan document outranks both",
+  );
+  const closed = reduce(docked, { type: "close-dock" });
+  assert.equal(
+    resolveChatRailPanel({
+      companionPanel: activeChatCompanionPanel(closed, PANE_A),
+      isEnvironmentVisible: true,
+    }),
+    "environment",
+    "closing the dock hands the rail back to the Environment",
   );
 }
 

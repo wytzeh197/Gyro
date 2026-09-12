@@ -804,6 +804,8 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  // Deterministic folder choice for exercising project editing in browser QA.
+  if (command === "plugin:dialog|open") return "/Users/dev/Projects/components";
   if (command === "timing_diagnostics_enabled") return false;
   if (parameters.get("edge") === "lazy-explorer") {
     const rootFiles = workspaceTree.filter(

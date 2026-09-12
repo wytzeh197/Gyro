@@ -54,16 +54,21 @@ export function normalizedWorkspaceFolderPath(path: string) {
 export function workspaceFolderPaths(
   primaryPath: string | undefined,
   foldersByWorkspace: Readonly<Record<string, readonly string[]>> | undefined,
+  preferredPrimary?: string,
 ) {
   if (!primaryPath) return [];
   const primary = normalizedWorkspaceFolderPath(primaryPath);
   const configured = foldersByWorkspace?.[primary] ?? [];
-  return [primary, ...configured]
+  const roots = [primary, ...configured]
     .map(normalizedWorkspaceFolderPath)
     .filter(
       (path, index, paths) => Boolean(path) && paths.indexOf(path) === index,
     )
     .slice(0, MAX_WORKSPACE_FOLDERS);
+  const preferred = preferredPrimary ? normalizedWorkspaceFolderPath(preferredPrimary) : undefined;
+  return preferred && roots.includes(preferred)
+    ? [preferred, ...roots.filter(root => root !== preferred)]
+    : roots;
 }
 
 export function workspaceRootForPath(
@@ -79,6 +84,33 @@ export function workspaceRootForPath(
       (root) =>
         normalizedPath === root || normalizedPath.startsWith(`${root}/`),
     );
+}
+
+/**
+ * Path the review tree and editor chrome should show.
+ *
+ * Agent events often carry an absolute workspace file. Splitting that on `/`
+ * turns `/Users/…/Gyro/README.md` into four nested folders whose names collapse
+ * to "U.." in the changed-files column. Strip the owning root so the tree
+ * starts at the project, the way Explorer already does.
+ */
+export function workspaceRelativeFilePath(
+  path: string,
+  workspacePath?: string,
+) {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
+  if (!normalized || !workspacePath) {
+    return normalized;
+  }
+  const root = normalizedWorkspaceFolderPath(workspacePath);
+  const file = normalizedWorkspaceFolderPath(normalized);
+  if (file === root) {
+    return file.split("/").filter(Boolean).at(-1) ?? file;
+  }
+  if (file.startsWith(`${root}/`)) {
+    return file.slice(root.length + 1);
+  }
+  return normalized;
 }
 
 export function absoluteWorkspaceFilePath(root: string, path: string) {

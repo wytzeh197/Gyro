@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { selectQueuedMessageDelivery } from "../packages/ui/src/chat-message-queue.ts";
+import {
+  promoteQueuedMessage,
+  selectQueuedMessageDelivery,
+} from "../packages/ui/src/chat-message-queue.ts";
 
 const message = (id, options = {}) => ({
   id,
@@ -58,6 +61,25 @@ assert.deepEqual(
   ),
   { kind: "waiting", retryAt: 500 },
   "the scheduler should wake at the queue's next retry time",
+);
+
+assert.deepEqual(
+  promoteQueuedMessage(
+    [message("first"), message("second"), message("third")],
+    "second",
+  )?.map((item) => item.id),
+  ["second", "first", "third"],
+  "Steer should move the chosen queued message to the head",
+);
+assert.deepEqual(
+  promoteQueuedMessage([message("only")], "only")?.map((item) => item.id),
+  ["only"],
+  "Retrying the queue head should keep it first",
+);
+assert.equal(
+  promoteQueuedMessage([message("only")], "missing"),
+  undefined,
+  "an unknown queued id must not invent a queue",
 );
 
 console.log("chat message queue checks passed");

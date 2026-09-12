@@ -19,6 +19,22 @@ export type QueuedDeliverySelection<T extends QueuedMessageDelivery> =
  * Select a queue head without tying delivery to the currently visible chat.
  * A failed head intentionally keeps later messages in the same chat in order.
  */
+/**
+ * Move `messageId` to the head of the queue so Steer/Retry send it next.
+ * Returns undefined when the id is not in this chat's queue.
+ */
+export function promoteQueuedMessage<T extends { id: string }>(
+  messages: readonly T[],
+  messageId: string,
+): T[] | undefined {
+  const index = messages.findIndex((item) => item.id === messageId);
+  if (index < 0) return undefined;
+  const selected = messages[index];
+  if (!selected) return undefined;
+  if (index === 0) return [...messages];
+  return [selected, ...messages.slice(0, index), ...messages.slice(index + 1)];
+}
+
 export function selectQueuedMessageDelivery<T extends QueuedMessageDelivery>(
   queues: Record<string, T[]>,
   options: {

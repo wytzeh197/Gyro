@@ -49,6 +49,7 @@ import {
   serializeGyroWorkspaceFile,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  workspaceRelativeFilePath,
   workspaceRootForPath,
 } from "../packages/ui/src/workspace-project.ts";
 import {
@@ -94,6 +95,26 @@ function expect(condition, message) {
   if (!condition) {
     failures.push(message);
   }
+}
+
+// Resetting presentation must never erase open work or behavioral preferences.
+{
+  const before = createInitialWorkbenchState();
+  before.preferences.mainColor = "#ff0000";
+  before.preferences.workspaceTrust = { "/project": "trusted" };
+  before.preferences.workspaceKeybindings = { "workspace.open": null };
+  before.preferences.missionSessionIds = ["active-mission"];
+  const after = workbenchReducer(before, { type: "reset-ui-preferences" });
+  expect(after.preferences.mainColor === "#0874df", "UI reset restores the default palette.");
+  expect(after.terminalPanes === before.terminalPanes && after.ide === before.ide && after.providerSessions === before.providerSessions && after.tasks === before.tasks,
+    "UI reset preserves open terminal panes, editor state, provider sessions, and tasks.");
+  expect(after.preferences.workspaceTrust === before.preferences.workspaceTrust &&
+    after.preferences.workspaceKeybindings === before.preferences.workspaceKeybindings &&
+    after.preferences.missionSessionIds === before.preferences.missionSessionIds,
+    "UI reset preserves workspace trust, keyboard overrides, and mission ownership.");
+  const cleared = workbenchReducer(before, { type: "set-workspace-keybinding", commandId: "terminal.split", keybinding: null });
+  expect(cleared.preferences.workspaceKeybindings["terminal.split"] === null,
+    "Clearing a keybinding persists an explicit unassigned override.");
 }
 
 function readRepoFile(path) {
@@ -339,6 +360,7 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = readRepoFile("packages/ui/src/surfaces.tsx");
+const scmFileActionsSource = readRepoFile("packages/ui/src/scm-file-actions.tsx");
 const inlineApprovalSource = readRepoFile(
   "packages/ui/src/inline-approval-card.tsx",
 );
@@ -549,7 +571,7 @@ expect(
     surfaceSource.includes("gyro-sidebar-scm-directory") &&
     surfaceSource.includes("gyro-sidebar-scm-state is-") &&
     surfaceSource.includes('className="gyro-sidebar-scm-stage"') &&
-    surfaceSource.includes('className="gyro-sidebar-scm-discard"') &&
+    scmFileActionsSource.includes('className="gyro-scm-file-actions-trigger"') &&
     surfaceSource.includes("function workspaceParentFolder") &&
     cssRules(styleSource, ".gyro-sidebar-scm-row").some(
       (rule) =>
@@ -557,7 +579,7 @@ expect(
           "grid-template-columns: 16px minmax(0, 1fr) 24px 24px 18px",
         ) && rule.includes("min-height: 30px"),
     ) &&
-    cssRules(styleSource, ".gyro-sidebar-scm-discard").some((rule) =>
+    cssRules(styleSource, ".gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger").some((rule) =>
       rule.includes("opacity: 0"),
     ) &&
     !cssRules(styleSource, ".gyro-sidebar-scm-row > button").some((rule) =>
@@ -1632,8 +1654,8 @@ expect(
   "Workspace sidebar should start visible at its responsive default width.",
 );
 expect(
-  initialState.preferences.chatEnvironmentRailOpen === false,
-  "Chat environment rail should start closed for standard chat layout.",
+  initialState.preferences.chatEnvironmentRailOpen === true,
+  "Chat environment is the rail's resting state, so a fresh chat shows it.",
 );
 expect(
   initialState.preferences.mainColor === "#0874df" &&
@@ -1792,6 +1814,11 @@ state = workbenchReducer(state, {
   workspacePath: "/Users/example/Gyro/",
   path: "/Users/example/Shared",
 });
+expect(
+  JSON.stringify(workspaceFolderPaths("/project", { "/project": ["/extra"] }, "/extra")) === JSON.stringify(["/extra", "/project"]) &&
+    JSON.stringify(workspaceFolderPaths("/project", { "/project": ["/extra"] }, "/removed")) === JSON.stringify(["/project", "/extra"]),
+  "Primary folder selection should lead workspace actions and safely fall back when removed.",
+);
 const testedWorkspaceRoots = workspaceFolderPaths(
   "/Users/example/Gyro",
   state.preferences.workspaceFolders,
@@ -1831,6 +1858,18 @@ expect(
       testedWorkspaceRoots,
       "/Users/example/Shared/src/index.ts",
     ) === "/Users/example/Shared" &&
+    workspaceRelativeFilePath(
+      "/Users/example/Gyro/README.md",
+      "/Users/example/Gyro",
+    ) === "README.md" &&
+    workspaceRelativeFilePath(
+      "/Users/example/Gyro/packages/ui/src/surfaces.tsx",
+      "/Users/example/Gyro",
+    ) === "packages/ui/src/surfaces.tsx" &&
+    workspaceRelativeFilePath(
+      "packages/ui/src/surfaces.tsx",
+      "/Users/example/Gyro",
+    ) === "packages/ui/src/surfaces.tsx" &&
     testedMergedFiles.filter((file) => file.isWorkspaceRoot).length === 2 &&
     testedMergedFiles.some(
       (file) =>
@@ -1980,17 +2019,17 @@ expect(
 );
 state = workbenchReducer(state, { type: "toggle-chat-environment-rail" });
 expect(
-  state.preferences.chatEnvironmentRailOpen === true &&
-    state.preferences.activeChatPanel === "environment" &&
-    state.isToolPanelOpen === false,
-  "Chat environment rail toggle should open only the right-side panel.",
-);
-state = workbenchReducer(state, { type: "toggle-chat-environment-rail" });
-expect(
   state.preferences.chatEnvironmentRailOpen === false &&
     state.preferences.activeChatPanel === undefined &&
     state.isToolPanelOpen === false,
-  "Chat environment rail toggle should close only the right-side panel.",
+  "Chat environment rail toggle should withdraw only the right-side panel.",
+);
+state = workbenchReducer(state, { type: "toggle-chat-environment-rail" });
+expect(
+  state.preferences.chatEnvironmentRailOpen === true &&
+    state.preferences.activeChatPanel === undefined &&
+    state.isToolPanelOpen === false,
+  "Chat environment rail toggle should restore only the right-side panel.",
 );
 state = workbenchReducer(state, {
   type: "set-chat-environment-rail",
@@ -2005,9 +2044,32 @@ expect(
 state = workbenchReducer(state, { type: "toggle-chat-plan" });
 expect(
   state.preferences.activeChatPanel === "plan" &&
-    state.preferences.chatEnvironmentRailOpen === true &&
+    state.preferences.chatEnvironmentRailOpen === false &&
     state.isToolPanelOpen === false,
-  "Chat plan toggle should expand the checklist inside the environment rail without opening the bottom drawer.",
+  "Chat plan toggle should take the rail without opening the bottom drawer, and without reviving a withdrawn Environment.",
+);
+// A panel on the rail hides the Environment; asking for the Environment back
+// clears the panel in the same action rather than leaving both claiming it.
+state = workbenchReducer(state, {
+  type: "set-chat-environment-rail",
+  open: true,
+});
+expect(
+  state.preferences.activeChatPanel === undefined &&
+    state.preferences.chatEnvironmentRailOpen === true,
+  "Showing the Environment must hand the rail back from the panel holding it.",
+);
+state = workbenchReducer(state, { type: "toggle-chat-plan" });
+expect(
+  state.preferences.activeChatPanel === "plan" &&
+    state.preferences.chatEnvironmentRailOpen === true,
+  "Opening a panel hides the Environment without withdrawing it.",
+);
+state = workbenchReducer(state, { type: "toggle-chat-plan" });
+expect(
+  state.preferences.activeChatPanel === undefined &&
+    state.preferences.chatEnvironmentRailOpen === true,
+  "Closing the panel uncovers the Environment again rather than blanking the rail.",
 );
 state = workbenchReducer(
   { ...state, activeWorkspaceLayout: "thread", isToolPanelOpen: true },
@@ -3663,9 +3725,10 @@ expect(
     appSource.includes("const isLiveTurnStreaming = activeSessionId") &&
     appSource.includes("const deferredEventsForTurn = isLiveTurnStreaming") &&
     appSource.includes("const derivedActiveTurn = useMemo") &&
-    appSource.includes(
-      "deriveActiveTurn(deferredEventsForTurn, activeSession?.title)",
-    ) &&
+    appSource.includes("deriveActiveTurn(") &&
+    appSource.includes("deferredEventsForTurn,") &&
+    appSource.includes("activeSession?.title,") &&
+    appSource.includes("activeSession?.workspacePath ?? workspacePath") &&
     // Stream flushes stay high priority so concurrent React work cannot starve
     // the live token stream.
     appSource.includes(
@@ -3813,7 +3876,10 @@ expect(
     appSource.includes("const editQueuedChatMessage") &&
     appSource.includes("onEditQueuedMessage={editQueuedChatMessage}") &&
     appSource.includes("const steerQueuedChatMessage") &&
-    appSource.includes("removeQueuedChatMessage(messageId)") &&
+    appSource.includes("promoteQueuedMessage") &&
+    appSource.includes("steeringChatSessionsRef") &&
+    appSource.includes("stopChatSession(sessionId, { pauseQueue: false })") &&
+    appSource.includes("steeringChatSessionsRef.current.add(sessionId)") &&
     !appSource.includes('"Steering next"') &&
     styleSource.includes(".gyro-chat-message-queue-menu") &&
     styleSource.includes(".gyro-chat-message-queue-wrap") &&
@@ -4440,7 +4506,15 @@ expect(
   appSource.includes("Previous output · process is no longer running") &&
     appSource.includes("Start again") &&
     appSource.includes("macOptionIsMeta") &&
-    appSource.includes("rightClickSelectsWord"),
+    appSource.includes("rightClickSelectsWord") &&
+    appSource.includes(
+      "startingOutput: `Reconnecting ${profile.displayName}",
+    ) &&
+    /reveal: false,\n        \}\);/.test(appSource) &&
+    surfaceSource.includes('if (activePaneStatus !== "restored") return') &&
+    styleSource.includes(
+      ".gyro-xterm-host .xterm-helpers {\n  overflow: visible !important;",
+    ),
   "Live terminal panes should expose real-terminal behavior and a restored-pane reconnect path.",
 );
 expect(
@@ -4931,7 +5005,7 @@ expect(
     surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
     surfaceSource.includes("gyro-settings-back-button") &&
     surfaceSource.includes("<h2>{label}</h2>") &&
-    surfaceSource.includes('aria-pressed={themeMode === "dark"}') &&
+    surfaceSource.includes("aria-pressed={themeMode === mode}") &&
     surfaceSource.includes('onOpenSettingsSection("general")') &&
     surfaceSource.includes('activeDestination !== "settings"') &&
     surfaceSource.includes("General") &&
@@ -5041,6 +5115,7 @@ expect(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
     surfaceSource.includes("const isEnvironmentPopoverOpen =") &&
+    surfaceSource.includes("!isEmptyStart &&") &&
     surfaceSource.includes("const environmentPopover =") &&
     surfaceSource.includes("{sidePanel}") &&
     surfaceSource.includes('"Reopen goal"') &&
@@ -5394,12 +5469,12 @@ expect(
 );
 expect(
   reducerSource.includes("activeChatPanel: panel") &&
-    reducerSource.includes("chatEnvironmentRailOpen: panel !== undefined") &&
+    !reducerSource.includes("chatEnvironmentRailOpen: panel !== undefined") &&
     appSource.includes('dispatchWorkbench({ type: "set-chat-panel" });') &&
     !appSource.includes(
       'panel: "environment" });\n        dispatchWorkbench({\n          type: "select-workspace-layout"',
     ),
-  "Opening or selecting a chat should use the standard clean thread layout, not the Environment panel.",
+  "Opening or selecting a chat should use the standard clean thread layout; the panel on the rail must not decide whether the Environment is withdrawn.",
 );
 expect(
   packageSource.includes('"desktop:bundle"') &&
@@ -6480,7 +6555,7 @@ expect(
     ) &&
     styleSource.includes(".gyro-chat-grid.has-multiple-panes") &&
     styleSource.includes(
-      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout:has(\n    .gyro-chat-grid.has-multiple-panes\n  )\n  > .gyro-sidebar-restore-cluster",
+      ".gyro-app-shell.is-sidebar-hidden.is-thread-layout\n  > .gyro-sidebar-restore-cluster",
     ) &&
     styleSource.includes("padding: 6px 8px 4px") &&
     styleSource.includes("text-align: left") &&
@@ -6503,9 +6578,14 @@ expect(
     appSource.includes("onCreateSession={startNewChat}") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
     surfaceSource.includes(
-      "if (turns.length === 0 && looseEvents.length === 0)",
+      "const isEmptyStart = turns.length === 0 && looseEvents.length === 0",
     ) &&
-    surfaceSource.includes('aria-label="New Chat"'),
+    surfaceSource.includes("if (isEmptyStart)") &&
+    surfaceSource.includes('aria-label="New Chat"') &&
+    surfaceSource.includes("!isEmptyStart &&") &&
+    surfaceSource.includes(
+      '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
+    ),
   "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
 );
 expect(
@@ -6531,8 +6611,8 @@ expect(
     appSource.includes("keepCurrentModel") &&
     appSource.includes("function disposeEditorModels") &&
     surfaceSource.includes("renderEditor") &&
-    surfaceSource.includes("gyro-editor-ai-bar") &&
-    surfaceSource.includes("gyro-editor-contextbar") &&
+    !surfaceSource.includes("gyro-editor-ai-bar") &&
+    !surfaceSource.includes("gyro-editor-contextbar") &&
     !surfaceSource.includes("gyro-editor-workbench-row"),
   "IDE and terminal panels should not seed fake activity or skip real file previews.",
 );
@@ -6547,7 +6627,7 @@ expect(
     surfaceSource.includes('aria-label="New file"') &&
     surfaceSource.includes('aria-label="Source control message"') &&
     surfaceSource.includes('aria-label="Debug adapter command"') &&
-    surfaceSource.includes("Discard all local changes in") &&
+    scmFileActionsSource.includes("Discard all local changes in") &&
     surfaceSource.includes("task.id === test.id") &&
     appSource.includes("const createWorkspacePath = useCallback") &&
     appSource.includes("const renameWorkspacePath = useCallback") &&
@@ -6614,6 +6694,26 @@ for (const surface of [
     `Standalone surface should not be routed: ${surface}`,
   );
 }
+
+expect(
+  surfaceSource.includes(
+    "workspaceRelativeFilePath(file.path, workspacePath)",
+  ) &&
+    surfaceSource.includes("compactDiffTree(root)") &&
+    surfaceSource.includes(
+      "<strong title={selectedFile?.path}>{selectedDisplayPath}</strong>",
+    ) &&
+    styleSource.includes(
+      ".gyro-diff-file-list .gyro-diff-tree-directory {\n  grid-template-columns: 13px 16px minmax(0, 1fr);",
+    ) &&
+    styleSource.includes(
+      ".gyro-diff-file-list .gyro-diff-tree-directory > small",
+    ) &&
+    styleSource.includes("flex: 0 0 auto;\n  white-space: nowrap;") &&
+    appSource.includes("workspaceRelativeFilePath(rawPath, workspacePath)") &&
+    appSource.includes("pathFromSessionEvent(\n            event,"),
+  "Diff review should show workspace-relative paths, keep directory names on the name column, and not wrap action labels.",
+);
 
 for (const className of [
   "gyro-terminal-pane",
@@ -6687,7 +6787,7 @@ expect(
   appSource.includes('activeWorkspaceLayout === "terminal-grid"') &&
     appSource.includes("renderWorkspaceToolPanel(true)") &&
     surfaceSource.includes('aria-label="Workspace tools"') &&
-    surfaceSource.includes("{!isPrimary ? (") &&
+    surfaceSource.includes("{!isPrimary && !compactTerminal ? (") &&
     styleSource.includes(
       ".gyro-workspace-tool-panel.is-primary {\n  border-top: 0;\n  grid-template-rows: minmax(0, 1fr);",
     ),
@@ -6999,8 +7099,10 @@ expect(
   appSource.includes("theme={resolvedTheme}") &&
     appSource.includes('themePreference === "system"') &&
     appSource.includes("function storedThemeMode") &&
-    surfaceSource.includes("Matches macOS") &&
-    surfaceSource.includes('onThemeChange("system")') &&
+    /mode:\s*"system",\s*label:\s*"System"/.test(surfaceSource) &&
+    surfaceSource.includes('mode: "light", label: "Light"') &&
+    surfaceSource.includes('mode: "dark", label: "Dark"') &&
+    surfaceSource.includes("onThemeChange(mode)") &&
     appSource.includes("function terminalThemeFor") &&
     appSource.includes("terminal.options.theme = terminalThemeFor(theme)") &&
     appSource.includes('background: "#ffffff"') &&
@@ -7224,17 +7326,21 @@ expect(
   "Usage settings should select a provider, switch bars or wheels, and represent unsupported provider quotas honestly.",
 );
 
+const usageHookSource = readRepoFile("apps/desktop/src/use-provider-usage.ts");
 expect(
-  appSource.includes(
+  usageHookSource.includes(
     'invoke<ProviderUsageSnapshot>(\n          "get_provider_usage"',
   ) &&
     appSource.includes("refreshProviderUsage(selectedUsageProviderId)") &&
-    appSource.includes("PROVIDER_USAGE_REFRESH_INTERVAL_MS") &&
-    appSource.includes("refreshInBackground") &&
-    appSource.includes('window.addEventListener("focus"') &&
-    appSource.includes('document.addEventListener("visibilitychange"') &&
-    appSource.includes("providerUsageInFlightRef") &&
-    appSource.includes('status: hasCachedWindows ? "available" : "error"') &&
+    usageHookSource.includes("PROVIDER_USAGE_REFRESH_INTERVAL_MS") &&
+    usageHookSource.includes("refreshInBackground") &&
+    usageHookSource.includes('window.addEventListener("focus"') &&
+    usageHookSource.includes('document.addEventListener("visibilitychange"') &&
+    usageHookSource.includes("providerUsageInFlightRef") &&
+    usageHookSource.includes("providerUsageAfterError(") &&
+    readRepoFile("apps/desktop/src/provider-usage-state.ts").includes(
+      'status: hasCachedWindows ? "available" : "error"',
+    ) &&
     appSource.includes("providerUsageByProvider={providerUsageByProvider}") &&
     tauriSource.includes('"account/rateLimits/read"') &&
     tauriSource.includes("CODEX_USAGE_TIMEOUT") &&
@@ -7504,9 +7610,9 @@ expect(
     ) &&
     surfaceSource.includes("function LiveFileChanges") &&
     surfaceSource.includes("gyro-composer-live-changes") &&
-    surfaceSource.indexOf('className="gyro-composer-live-changes"') >
+    surfaceSource.indexOf('className="gyro-composer-live-changes"') <
       surfaceSource.indexOf("{queuedMessages.length > 0 ?") &&
-    surfaceSource.indexOf('className="gyro-composer-live-changes"') >
+    surfaceSource.indexOf('className="gyro-composer-live-changes"') <
       surfaceSource.indexOf("{isPlanReadyForDecision && sessionPlan ?") &&
     cssRules(styleSource, ".gyro-chat-message-queue-wrap").every(
       (rule) => !/margin-bottom:\s*-/.test(rule),
@@ -7521,7 +7627,7 @@ expect(
     styleSource.includes(".gyro-session-goal-status") &&
     styleSource.includes(".gyro-chat-run-change-summary-trigger") &&
     styleSource.includes(".gyro-change-summary-details"),
-  "Live file changes should sit below queued turns without negative-margin overlap, and completed edits should retain their file review card.",
+  "Live file changes lead the composer dock — above queued turns and the plan card, so the running count holds its place instead of sliding down — without negative-margin overlap, and completed edits retain their file review card.",
 );
 
 console.log(`Workbench smoke viewports: ${requiredViewports.join(", ")}`);

@@ -299,6 +299,19 @@ expect(
 );
 
 expect(
+  /const restartTerminalPane = useCallback\([\s\S]{0,2200}?launchTerminalPane\(\{[\s\S]{0,500}?reveal: false/.test(
+    app,
+  ) &&
+    surfaces.includes('if (activePaneStatus !== "restored") return') &&
+    surfaces.includes("onRestartTerminalPane(activePaneId)") &&
+    app.includes('statusRef.current === "restored"') &&
+    styles.includes(
+      ".gyro-xterm-host .xterm-helpers {\n  overflow: visible !important;",
+    ),
+  "A restored companion terminal must reconnect in place: Start again cannot open the workspace drawer, and xterm's helper textarea must stay focusable.",
+);
+
+expect(
   styles.includes(
     ".gyro-chat-companion\n  .gyro-environment-rail.is-tool.is-chromeless\n  .gyro-terminal-toolbar",
   ) &&

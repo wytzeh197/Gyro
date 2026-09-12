@@ -1288,6 +1288,7 @@ function appendOutputLines(
 
 export type WorkbenchAction =
   | { type: "reset-state"; state?: WorkbenchState }
+  | { type: "reset-ui-preferences" }
   | { type: "select-destination"; destination: AppDestination }
   | { type: "select-surface"; surface: SurfaceId }
   | { type: "select-sessions" }
@@ -1315,6 +1316,7 @@ export type WorkbenchAction =
       decision: "trusted" | "restricted";
     }
   | { type: "add-workspace-folder"; workspacePath: string; path: string }
+  | { type: "set-project-details"; path: string; name: string; pinned: boolean; primaryFolder?: string }
   | { type: "set-workspace-folders"; workspacePath: string; paths: string[] }
   | { type: "remove-workspace-folder"; workspacePath: string; path: string }
   | {
@@ -1690,6 +1692,30 @@ export function workbenchReducer(
   switch (action.type) {
     case "reset-state":
       return action.state ?? createInitialWorkbenchState();
+    case "reset-ui-preferences": {
+      const defaults = normalizeWorkbenchPreferences(undefined);
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          theme: defaults.theme,
+          mainColor: defaults.mainColor,
+          secondaryColor: defaults.secondaryColor,
+          density: defaults.density,
+          showQuickActions: defaults.showQuickActions,
+          sidebarChatsCollapsed: defaults.sidebarChatsCollapsed,
+          chatEnvironmentRailOpen: defaults.chatEnvironmentRailOpen,
+          activeChatPanel: defaults.activeChatPanel,
+          chatCompanionWidth: defaults.chatCompanionWidth,
+          browserCompanionWidth: defaults.browserCompanionWidth,
+          chatPanelWidth: defaults.chatPanelWidth,
+          usageVisualization: defaults.usageVisualization,
+          workspaceSidebarHidden: defaults.workspaceSidebarHidden,
+          workspaceSidebarWidth: defaults.workspaceSidebarWidth,
+          workspacePanelHeight: defaults.workspacePanelHeight,
+        },
+      };
+    }
     case "select-destination":
       return { ...state, activeDestination: action.destination };
     case "select-surface": {
@@ -1869,6 +1895,22 @@ export function workbenchReducer(
               0,
               MAX_WORKSPACE_FOLDERS - 1,
             ),
+          },
+        },
+      };
+    }
+    case "set-project-details": {
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          projectDetails: {
+            ...state.preferences.projectDetails,
+            [action.path]: {
+              name: action.name.trim().slice(0, 120),
+              pinned: action.pinned,
+              primaryFolder: action.primaryFolder,
+            },
           },
         },
       };
@@ -2075,16 +2117,16 @@ export function workbenchReducer(
         },
       };
     case "toggle-chat-environment-rail":
-      return chatPanelState(
+      return chatEnvironmentState(
         state,
-        state.preferences.activeChatPanel ? undefined : "environment",
+        !state.preferences.chatEnvironmentRailOpen,
       );
     case "set-chat-environment-rail":
-      return chatPanelState(state, action.open ? "environment" : undefined);
+      return chatEnvironmentState(state, action.open);
     case "toggle-chat-plan":
       return chatPanelState(
         state,
-        state.preferences.activeChatPanel === "plan" ? "environment" : "plan",
+        state.preferences.activeChatPanel === "plan" ? undefined : "plan",
       );
     case "toggle-chat-browser":
       return chatPanelState(
@@ -4243,7 +4285,9 @@ function normalizeWorkbenchPreferences(
 ): WorkbenchPreferences {
   return {
     activeChatPanel: preferences?.activeChatPanel,
-    chatEnvironmentRailOpen: preferences?.chatEnvironmentRailOpen === true,
+    // The Environment is the chat rail's resting state, so it is on unless it
+    // was explicitly withdrawn.
+    chatEnvironmentRailOpen: preferences?.chatEnvironmentRailOpen !== false,
     cliLaunchPreset: normalizeCliLaunchPreset(preferences?.cliLaunchPreset),
     commandPaletteRecents: Array.isArray(preferences?.commandPaletteRecents)
       ? preferences.commandPaletteRecents.filter(
@@ -4351,6 +4395,20 @@ function normalizeWorkbenchPreferences(
               ]),
           )
         : {},
+    projectDetails: Object.fromEntries(
+      Object.entries(preferences?.projectDetails ?? {})
+        .filter(
+          ([path, detail]) =>
+            path.length > 0 &&
+            detail &&
+            typeof detail.name === "string" &&
+            typeof detail.pinned === "boolean",
+        )
+        .map(([path, detail]) => [
+          path,
+          { name: detail.name.slice(0, 120), pinned: detail.pinned, primaryFolder: typeof detail.primaryFolder === "string" ? detail.primaryFolder : undefined },
+        ]),
+    ),
     workspaceFolders:
       preferences?.workspaceFolders &&
       typeof preferences.workspaceFolders === "object" &&
@@ -4970,7 +5028,6 @@ function browserRevealState(state: WorkbenchState): Partial<WorkbenchState> {
       preferences: {
         ...state.preferences,
         activeChatPanel: "browser",
-        chatEnvironmentRailOpen: true,
       },
     };
   }
@@ -4981,6 +5038,11 @@ function browserRevealState(state: WorkbenchState): Partial<WorkbenchState> {
   };
 }
 
+/**
+ * The rail's occupant, which the Environment is not: it sits underneath as the
+ * resting state, so closing a panel here uncovers it again rather than leaving
+ * the rail blank. See `resolveChatRailPanel`.
+ */
 function chatPanelState(
   state: WorkbenchState,
   panel?: ChatSidePanelId,
@@ -4990,7 +5052,25 @@ function chatPanelState(
     preferences: {
       ...state.preferences,
       activeChatPanel: panel,
-      chatEnvironmentRailOpen: panel !== undefined,
+    },
+  };
+}
+
+/**
+ * Showing the Environment means handing the rail back, so the panel holding it
+ * clears with the same action. Hiding it only withdraws the resting state and
+ * leaves whatever else is on the rail alone.
+ */
+function chatEnvironmentState(
+  state: WorkbenchState,
+  open: boolean,
+): WorkbenchState {
+  return {
+    ...state,
+    preferences: {
+      ...state.preferences,
+      activeChatPanel: open ? undefined : state.preferences.activeChatPanel,
+      chatEnvironmentRailOpen: open,
     },
   };
 }
