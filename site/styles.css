@@ -788,10 +788,6 @@ pre {
   letter-spacing: 0.04em;
 }
 
-.stage-caption-detail {
-  color: var(--muted);
-}
-
 .product-section,
 .help-section {
   padding: 76px 0;
@@ -2822,10 +2818,6 @@ pre {
     margin-top: 14px;
   }
 
-  .stage-caption-detail {
-    display: none;
-  }
-
   .surface-card {
     padding: 34px 0 34px 38px;
   }
@@ -3257,16 +3249,11 @@ summary:focus-visible {
 }
 .home-page .product-stage figcaption {
   display: flex;
-  justify-content: space-between;
   padding: 17px 0;
   font-family: var(--sans);
   font-size: 13px;
   color: var(--quiet);
   letter-spacing: 0;
-}
-.caption-separator {
-  padding-inline: 12px;
-  opacity: 0.4;
 }
 .home-page .hero-copy > *,
 .home-page .product-stage {
@@ -3811,9 +3798,6 @@ summary:focus-visible {
     padding-block: 12px;
     font-size: 13px;
   }
-  .stage-caption-detail {
-    display: none;
-  }
   .home-page .agents-section {
     padding: 48px 0 56px;
   }
@@ -4068,9 +4052,6 @@ summary:focus-visible {
 @media (max-width: 720px) {
   .home-page .product-stage figcaption {
     align-items: center;
-  }
-  .stage-caption-detail {
-    display: none;
   }
   .motion-toggle {
     flex-shrink: 0;

@@ -9,6 +9,7 @@ import {
   mergeProviderResponseEvents,
   orderProviderChatStreamEvent,
   sameTimelineEvent,
+  endsStreamedTextBlock,
   separateStreamedTextBlock,
 } from "../apps/desktop/src/provider-stream-events.ts";
 import { structuredCommentaryBlocks } from "../packages/ui/src/chat-commentary.ts";
@@ -640,6 +641,55 @@ assert.deepEqual(
     .payload.segments.map((segment) => segment.start),
   [0, 23],
   "completion should keep the block marks the stream recorded",
+);
+
+// An activity frame can land between two deltas of the same word. Opening a
+// block there wrote the separator into the middle of "pad|ding" and marked a
+// segment at the seam, so the rail drew half a sentence and the answer body
+// opened on the other half.
+assert.equal(endsStreamedTextBlock("the literal old pad"), false);
+assert.equal(endsStreamedTextBlock("(it's"), false);
+assert.equal(endsStreamedTextBlock("Fixed."), true);
+assert.equal(endsStreamedTextBlock("**Fixed.**"), true);
+assert.equal(endsStreamedTextBlock("Running the UI smoke checks:"), true);
+assert.equal(endsStreamedTextBlock("A list:\n"), true);
+
+blockEvents = [];
+blockEventsRef.current.set("session-1", []);
+streamBlockDelta(1, "That failure is the smoke suite pinning the literal old pad");
+applyProviderChatStreamActivity(blockEventsRef, setBlockEvents, {
+  sessionId: "session-1",
+  turnId: "turn-blocks",
+  providerId: "anthropic",
+  eventId: "midword-activity",
+  sequence: 2,
+  activitySequence: 2,
+  phase: "activity",
+  activityId: "read-2",
+  activityKind: "tool",
+  activityLabel: "Read styles.css",
+  activityStatus: "done",
+});
+streamBlockDelta(3, "ding value. ");
+streamBlockDelta(4, "Updating the assertion to match the new one:");
+const midWordAssistant = blockEventsRef.current
+  .get("session-1")
+  .find((event) => event.kind === "assistant-message");
+assert.equal(
+  midWordAssistant.message,
+  "That failure is the smoke suite pinning the literal old padding value. " +
+    "Updating the assertion to match the new one:",
+  "a tool landing mid-word must not break the word in the durable message",
+);
+assert.deepEqual(
+  midWordAssistant.payload.segments.map((segment) => segment.start),
+  [0, 71],
+  "the block should wait for the sentence to close rather than open at the seam",
+);
+assert.equal(
+  midWordAssistant.message.slice(71),
+  "Updating the assertion to match the new one:",
+  "the deferred mark should land on a whole block, not half a word",
 );
 
 // An unsequenced event stays behind the event it followed instead of being

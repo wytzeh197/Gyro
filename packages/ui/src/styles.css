@@ -13182,7 +13182,7 @@ textarea:focus-visible {
 .gyro-sidebar-window-actions {
   align-items: center;
   display: inline-flex;
-  gap: 8px;
+  gap: 4px;
   position: relative;
   z-index: 1;
 }
@@ -28586,7 +28586,7 @@ button.gyro-account-menu-row:hover,
   }
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
-  min-height: 44px;
+  min-height: 52px;
   padding-right: 18px;
 }
 .gyro-chat-surface.is-tiled .gyro-thread-pills {
@@ -28719,20 +28719,25 @@ button.gyro-account-menu-row:hover,
     padding-inline: 10px;
   }
 }
-/* Keep chat navigation closer to the macOS window controls. */
+/* Keep chat navigation closer to the macOS window controls. The traffic lights
+   sit at x 16 and end at 69; 82px of padding leaves the same 20px gap the
+   circles keep between themselves. The 6px bottom padding lifts the row 3px so
+   the glyph centres land on the traffic-light centre rather than the bar's. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   box-sizing: border-box;
   height: 52px;
   margin-bottom: 0;
   min-height: 52px;
-  padding-left: 93px;
+  padding-bottom: 6px;
+  padding-left: 82px;
 }
 
 .gyro-sidebar-windowbar.is-settings {
   box-sizing: border-box;
   height: 52px;
   min-height: 52px;
-  padding-left: 93px;
+  padding-bottom: 6px;
+  padding-left: 82px;
 }
 
 /* New Chat uses one uninterrupted canvas; thread chrome introduces the divider. */
@@ -29570,7 +29575,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
-  min-height: 38px;
+  min-height: 52px;
 }
 
 /* Workspace shell foundation: an animated Activity Rail beside shared navigation. */
@@ -30099,11 +30104,14 @@ button.gyro-account-menu-row:hover,
 
 /* -- Topbar --------------------------------------------------------------- */
 
+/* A tiled pane shares the 52px title row its single-chat sibling uses. Pinning
+   this to 38px left the divider high with 14px of dead pane background beneath
+   it, so two chats side by side read as having a shorter header than one. */
 .gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   box-sizing: border-box;
-  height: 38px;
-  min-height: 38px;
+  height: 52px;
+  min-height: 52px;
   padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
 }
 
@@ -30668,12 +30676,13 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   box-sizing: border-box;
   display: flex;
-  gap: 8px;
+  gap: 4px;
   height: 52px;
   left: 0;
   min-height: 0;
   min-width: 0;
-  padding-left: 93px;
+  padding-bottom: 6px;
+  padding-left: 82px;
   pointer-events: none;
   position: fixed;
   top: 0;
@@ -30716,6 +30725,11 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-text);
 }
 
+/* The restore control is the hidden-sidebar twin of the windowbar toggle. */
+.gyro-sidebar-restore-cluster .gyro-sidebar-restore-button {
+  color: var(--gyro-muted);
+}
+
 /* Workspace activity rail is 44px; keep the restore control clear of traffic lights. */
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
   .gyro-sidebar-restore-cluster {
@@ -30735,21 +30749,23 @@ button.gyro-account-menu-row:hover,
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #1f2328;
+  color: var(--gyro-premium-muted);
 }
 
 :root[data-theme="light"] .gyro-sidebar-restore-button:hover {
   background: transparent;
 }
 
-/* Sidebar visibility controls stay icon-only in both shown and hidden states. */
+/* Sidebar visibility controls stay icon-only in both shown and hidden states,
+   and the toggle carries the same muted ink as the back/forward arrows beside
+   it instead of reading as the one near-black glyph in the titlebar. */
 .gyro-sidebar-window-actions button,
 .gyro-sidebar-window-actions .gyro-sidebar-toggle-button {
   background: transparent;
   border: 0;
   border-radius: 8px;
   box-shadow: none;
-  color: var(--gyro-text);
+  color: var(--gyro-muted);
   height: 28px;
   width: 28px;
 }
@@ -30766,7 +30782,7 @@ button.gyro-account-menu-row:hover,
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #1f2328;
+  color: var(--gyro-premium-muted);
 }
 
 :root[data-theme="light"]

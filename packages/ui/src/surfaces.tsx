@@ -1845,13 +1845,13 @@ export function AppChrome({
               title="Show sidebar"
               type="button"
             >
-              <PanelLeft size={16} />
+              <PanelLeft size={16} strokeWidth={1.5} />
             </button>
             <button aria-label="Back" disabled type="button">
-              <ArrowLeft size={16} />
+              <ArrowLeft size={18} strokeWidth={1.5} />
             </button>
             <button aria-label="Forward" disabled type="button">
-              <ArrowRight size={16} />
+              <ArrowRight size={18} strokeWidth={1.5} />
             </button>
           </div>
           <WorkspacePreparationControl
@@ -2485,7 +2485,7 @@ function SettingsSidebarContent({
               onClick={onToggleSidebar}
               type="button"
             >
-              <PanelLeft size={14} />
+              <PanelLeft size={16} strokeWidth={1.5} />
             </button>
             <button
               aria-label={`Back to ${backLabel}`}
@@ -3757,14 +3757,14 @@ function WorkspaceSidebarContent({
                 onClick={onToggleSidebar}
                 type="button"
               >
-                <PanelLeft size={16} />
+                <PanelLeft size={16} strokeWidth={1.5} />
               </button>
             ) : null}
             <button aria-label="Back" disabled type="button">
-              <ArrowLeft size={16} />
+              <ArrowLeft size={18} strokeWidth={1.5} />
             </button>
             <button aria-label="Forward" disabled type="button">
-              <ArrowRight size={16} />
+              <ArrowRight size={18} strokeWidth={1.5} />
             </button>
           </div>
           <div

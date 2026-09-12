@@ -973,8 +973,8 @@ expect(
     ".gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar",
   ).some(
     (rule) =>
-      rule.includes("height: 38px") &&
-      rule.includes("min-height: 38px") &&
+      rule.includes("height: 52px") &&
+      rule.includes("min-height: 52px") &&
       rule.includes("padding-inline: max(") &&
       rule.includes("var(--gyro-chat-content-width)"),
   ) &&
@@ -983,7 +983,7 @@ expect(
       ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
     ).some((rule) => rule.includes("border: 0")) &&
     !styleSource.includes("padding-right: 96px;"),
-  "Grid chat headers should share the compact row, align to the conversation column, and meet at one clean seam.",
+  "Grid chat headers should share the 52px title row, align to the conversation column, and meet at one clean seam.",
 );
 
 const emittedComposerActions = new Set([
@@ -6420,7 +6420,7 @@ expect(
       'className="gyro-sidebar-persistent-header is-settings"',
     ) &&
     cssRules(styleSource, ".gyro-sidebar-windowbar.is-settings").some((rule) =>
-      rule.includes("padding-left: 93px"),
+      rule.includes("padding-left: 82px"),
     ) &&
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-surface.is-empty) .gyro-sidebar-windowbar",
@@ -6466,7 +6466,7 @@ expect(
     cssRules(styleSource, ".gyro-sidebar-restore-cluster").some(
       (rule) =>
         rule.includes("height: 52px") &&
-        rule.includes("padding-left: 93px") &&
+        rule.includes("padding-left: 82px") &&
         rule.includes("position: fixed"),
     ) &&
     cssRules(styleSource, ".gyro-sidebar-restore-button").some(

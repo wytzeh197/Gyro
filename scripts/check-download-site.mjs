@@ -254,6 +254,11 @@ check(
   "Homepage hero must not include the removed subtitle",
 );
 check(
+  !pages.home.includes("Sample project") &&
+    !pages.home.includes("Sample session"),
+  "Homepage must not include the removed hero caption detail",
+);
+check(
   !pages.home.includes("Move Gyro to Applications."),
   "Homepage must not contain the full first-launch guide",
 );
