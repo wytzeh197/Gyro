@@ -15,7 +15,18 @@ const GLUED_BLOCK_BOUNDARY =
  * out of the final response body.
  */
 const PREAMBLE_BLOCK =
-  /^(?:I['’]ll|I will|I['’]m going to|I need to|Let me|Looking|Checking|Searching|Reading|First[,]?|Next[,]?|Now[,]?|Got it|Sure|Okay|OK)\b/i;
+  /^(?:I['\u2019]ll|I will|I['\u2019]m going to|I need to|Let me|Looking|Checking|Searching|Reading|First[,]?|Next[,]?|Now[,]?|Got it|Sure|Okay|OK)\b/i;
+
+/**
+ * Narration that names the work as a gerund and hands off with a colon —
+ * "Running the UI smoke checks:", "Updating the assertion to match the new
+ * one:". The opener alone is not enough to tell these from an answer, because
+ * a gerund also opens an ordinary noun phrase ("Running totals are stored in
+ * the ledger…"); the colon is what makes the block an introduction to the work
+ * that follows rather than a statement about it.
+ */
+const INTRODUCES_WORK_WITH_COLON =
+  /^(?:Running|Rerunning|Re-running|Updating|Adding|Applying|Fixing|Rebuilding|Patching|Wiring|Verifying|Measuring|Inspecting|Tracing|Looking|Checking|Searching|Reading)\b[^\n]{0,120}:$/i;
 
 /**
  * The assistant announcing its own next move ("Let me find where that's
@@ -157,7 +168,7 @@ function announcesOwnNextStep(value: string): boolean {
  * "Now" ("Now you can run it.") is not swept up.
  */
 const OWN_NEXT_STEP_SENTENCE =
-  /^(?:(?:so|then|and|but|first|next|now|okay|ok)[,]?\s+)?(?:I['’]ll\b|I will\b|I['’]m going to\b|I need to\b|let me\b(?!\s+know)|looking\b|checking\b|searching\b|reading\b)/i;
+  /^(?:(?:so|then|and|but|first|next|now|okay|ok)[,]?\s+)?(?:I['\u2019]ll\b|I will\b|I['\u2019]m going to\b|I need to\b|let me\b(?!\s+know)|looking\b|checking\b|searching\b|reading\b)/i;
 const OWN_NEXT_STEP_CLAUSE =
   /\b(?:so|then|and|but|first|next|now)\s+(?:I['’]ll\b|I will\b|I['’]m going to\b|I need to\b|let me\b(?!\s+know))/i;
 
@@ -201,7 +212,11 @@ export function isAssistantPreambleBlock(value: string): boolean {
   ) {
     return false;
   }
-  return PREAMBLE_BLOCK.test(trimmed) || closingSentenceIntroducesWork(trimmed);
+  return (
+    PREAMBLE_BLOCK.test(trimmed) ||
+    INTRODUCES_WORK_WITH_COLON.test(trimmed) ||
+    closingSentenceIntroducesWork(trimmed)
+  );
 }
 
 export function structuredCommentaryBlocks(value: string) {

@@ -4369,7 +4369,7 @@ button.gyro-account-menu-row:hover {
 
 .gyro-editor-pane {
   display: grid;
-  grid-template-rows: 39px 34px minmax(0, 1fr) 28px;
+  grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
 }
 
 .gyro-editor-tabs,
@@ -4575,6 +4575,33 @@ button.gyro-account-menu-row:hover {
 
 .gyro-diff-tree-file {
   grid-template-columns: 16px minmax(0, 1fr);
+}
+
+/*
+ * `.gyro-diff-file-list button` is more specific than the rules above, so it
+ * flattened directories onto the two-column file grid. The chevron and folder
+ * icon took the first row; the name landed in the 16px icon column and
+ * collapsed to "U.." while the stats occupied the rest of the row.
+ */
+.gyro-diff-file-list .gyro-diff-tree-directory {
+  grid-template-columns: 13px 16px minmax(0, 1fr);
+}
+
+.gyro-diff-file-list .gyro-diff-tree-file {
+  grid-template-columns: 16px minmax(0, 1fr);
+}
+
+.gyro-diff-file-list .gyro-diff-tree-directory > small {
+  grid-column: 3;
+}
+
+.gyro-diff-file-list .gyro-diff-tree-file > small {
+  grid-column: 2;
+}
+
+.gyro-diff-actions > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .gyro-diff-file-list button.is-active,
@@ -8163,7 +8190,7 @@ textarea:focus-visible {
   border: 0;
   border-radius: 0;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -10680,9 +10707,7 @@ textarea:focus-visible {
 }
 
 .gyro-editor-pane {
-  grid-template-rows:
-    var(--gyro-ide-tab-height)
-    var(--gyro-ide-context-height) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
 }
 
 .gyro-editor-tabs {
@@ -13182,7 +13207,7 @@ textarea:focus-visible {
 .gyro-sidebar-window-actions {
   align-items: center;
   display: inline-flex;
-  gap: 8px;
+  gap: 4px;
   position: relative;
   z-index: 1;
 }
@@ -15699,11 +15724,6 @@ body {
 }
 
 .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
-  .gyro-terminal-toolbar {
-  display: none;
-}
-
-.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-workspace {
   background: #08090b;
   grid-template-rows: minmax(0, 1fr);
@@ -15725,11 +15745,6 @@ body {
   box-shadow: none;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
-}
-
-.gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
-  .gyro-terminal-pane:not(.is-active) {
-  display: none;
 }
 
 .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
@@ -16137,11 +16152,19 @@ body {
 
 .gyro-xterm-host .xterm,
 .gyro-xterm-host .xterm-viewport,
-.gyro-xterm-host .xterm-screen,
-.gyro-xterm-host .xterm-helpers {
+.gyro-xterm-host .xterm-screen {
   max-height: 100%;
   max-width: 100%;
   overflow: hidden !important;
+}
+
+/*
+ * xterm keeps the focused textarea in `.xterm-helpers` and parks it on the
+ * cursor. Clipping that box is what made a newly opened terminal look live
+ * (blinking cursor) while swallowing every key.
+ */
+.gyro-xterm-host .xterm-helpers {
+  overflow: visible !important;
 }
 
 .gyro-terminal-reconnect {
@@ -19606,7 +19629,7 @@ textarea:focus-visible,
   background: var(--gyro-pane);
   border: 0;
   display: grid;
-  grid-template-rows: 34px 28px 25px 34px minmax(0, 1fr);
+  grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -19837,7 +19860,7 @@ textarea:focus-visible,
   }
 
   .gyro-editor-pane {
-    grid-template-rows: 34px 28px 25px 34px minmax(0, 1fr);
+    grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
   }
 
   .gyro-chat-composer-dock .gyro-composer-shell,
@@ -20699,7 +20722,6 @@ textarea:focus-visible,
   box-shadow: none;
   color: var(--gyro-accent);
 }
-
 
 .gyro-ide-assistant {
   background: var(--gyro-premium-panel);
@@ -25461,9 +25483,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-editor-pane {
-  grid-template-rows:
-    var(--gyro-ide-tab-height)
-    var(--gyro-ide-context-height) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-ide-tab-height, 34px) minmax(0, 1fr);
 }
 
 .gyro-editor-tabs {
@@ -28586,7 +28606,7 @@ button.gyro-account-menu-row:hover,
   }
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
-  min-height: 44px;
+  min-height: 52px;
   padding-right: 18px;
 }
 .gyro-chat-surface.is-tiled .gyro-thread-pills {
@@ -28719,20 +28739,22 @@ button.gyro-account-menu-row:hover,
     padding-inline: 10px;
   }
 }
-/* Keep chat navigation closer to the macOS window controls. */
+/* Keep navigation aligned with the macOS controls in a compact titlebar. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   box-sizing: border-box;
-  height: 52px;
+  height: 48px;
   margin-bottom: 0;
-  min-height: 52px;
-  padding-left: 93px;
+  min-height: 48px;
+  padding-bottom: 2px;
+  padding-left: 82px;
 }
 
 .gyro-sidebar-windowbar.is-settings {
   box-sizing: border-box;
   height: 52px;
   min-height: 52px;
-  padding-left: 93px;
+  padding-bottom: 6px;
+  padding-left: 82px;
 }
 
 /* New Chat uses one uninterrupted canvas; thread chrome introduces the divider. */
@@ -29570,7 +29592,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
-  min-height: 38px;
+  min-height: 52px;
 }
 
 /* Workspace shell foundation: an animated Activity Rail beside shared navigation. */
@@ -30099,11 +30121,14 @@ button.gyro-account-menu-row:hover,
 
 /* -- Topbar --------------------------------------------------------------- */
 
+/* A tiled pane shares the 52px title row its single-chat sibling uses. Pinning
+   this to 38px left the divider high with 14px of dead pane background beneath
+   it, so two chats side by side read as having a shorter header than one. */
 .gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   box-sizing: border-box;
-  height: 38px;
-  min-height: 38px;
+  height: 52px;
+  min-height: 52px;
   padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
 }
 
@@ -30668,12 +30693,13 @@ button.gyro-account-menu-row:hover,
   align-items: center;
   box-sizing: border-box;
   display: flex;
-  gap: 8px;
+  gap: 4px;
   height: 52px;
   left: 0;
   min-height: 0;
   min-width: 0;
-  padding-left: 93px;
+  padding-bottom: 6px;
+  padding-left: 82px;
   pointer-events: none;
   position: fixed;
   top: 0;
@@ -30704,16 +30730,22 @@ button.gyro-account-menu-row:hover,
   z-index: 120;
 }
 
-.gyro-app-shell.is-sidebar-hidden.is-thread-layout:has(
-    .gyro-chat-grid.has-multiple-panes
-  )
+/* With the sidebar hidden, align navigation to the chat header rather than
+   the sidebar's traffic-light offset. Both single and tiled headers are 52px. */
+.gyro-app-shell.is-sidebar-hidden.is-thread-layout
   > .gyro-sidebar-restore-cluster {
   height: 52px;
+  padding-bottom: 0;
 }
 
 .gyro-sidebar-restore-button:hover {
   background: transparent;
   color: var(--gyro-text);
+}
+
+/* The restore control is the hidden-sidebar twin of the windowbar toggle. */
+.gyro-sidebar-restore-cluster .gyro-sidebar-restore-button {
+  color: var(--gyro-muted);
 }
 
 /* Workspace activity rail is 44px; keep the restore control clear of traffic lights. */
@@ -30735,21 +30767,23 @@ button.gyro-account-menu-row:hover,
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #1f2328;
+  color: var(--gyro-premium-muted);
 }
 
 :root[data-theme="light"] .gyro-sidebar-restore-button:hover {
   background: transparent;
 }
 
-/* Sidebar visibility controls stay icon-only in both shown and hidden states. */
+/* Sidebar visibility controls stay icon-only in both shown and hidden states,
+   and the toggle carries the same muted ink as the back/forward arrows beside
+   it instead of reading as the one near-black glyph in the titlebar. */
 .gyro-sidebar-window-actions button,
 .gyro-sidebar-window-actions .gyro-sidebar-toggle-button {
   background: transparent;
   border: 0;
   border-radius: 8px;
   box-shadow: none;
-  color: var(--gyro-text);
+  color: var(--gyro-muted);
   height: 28px;
   width: 28px;
 }
@@ -30766,7 +30800,7 @@ button.gyro-account-menu-row:hover,
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #1f2328;
+  color: var(--gyro-premium-muted);
 }
 
 :root[data-theme="light"]
@@ -34894,7 +34928,8 @@ button.gyro-account-menu-row:hover,
 :root[data-theme="light"]
   .gyro-app-shell.is-chat-shell
   .gyro-sidebar-mode-group {
-  margin-top: 6px;
+  margin-top: 4px;
+  margin-bottom: 8px;
   box-sizing: border-box;
   max-width: 100%;
   background: var(--gyro-sidebar-mode-track);
@@ -34911,16 +34946,32 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-mode-group > .gyro-sidebar-mode-row,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group > .gyro-sidebar-mode-row {
+.gyro-app-shell.is-chat-shell
+  .gyro-sidebar-mode-group
+  > .gyro-sidebar-mode-row {
   box-sizing: border-box;
   border: 1px solid transparent;
 }
 
 .gyro-sidebar-mode-group > .gyro-sidebar-mode-row.is-active,
-.gyro-app-shell.is-chat-shell .gyro-sidebar-mode-group > .gyro-sidebar-mode-row.is-active {
+.gyro-app-shell.is-chat-shell
+  .gyro-sidebar-mode-group
+  > .gyro-sidebar-mode-row.is-active {
   background: var(--gyro-sidebar-mode-active);
   border-color: var(--gyro-sidebar-mode-active-border);
   box-shadow: 0 1px 2px var(--gyro-sidebar-mode-active-shadow);
+}
+
+/* Keep session actions and the project list close to the surface selector. */
+.gyro-sidebar-persistent-header + .gyro-sidebar-actions:has(.gyro-sidebar-new-session) {
+  gap: 2px;
+  padding-bottom: 12px;
+}
+
+.gyro-sidebar-persistent-header + .gyro-sidebar-actions:has(.gyro-sidebar-new-session)
+  .gyro-sidebar-action {
+  min-height: 30px;
+  padding-block: 4px;
 }
 
 /* Folderless chats remain findable without being represented as a synthetic
@@ -34997,13 +35048,6 @@ button.gyro-account-menu-row:hover,
   white-space: nowrap;
 }
 
-
-
-
-
-
-
-
 .gyro-terminal-workspace.is-empty {
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -35069,8 +35113,6 @@ button.gyro-account-menu-row:hover,
   .gyro-terminal-awareness {
     justify-content: flex-end;
   }
-
-
 }
 
 @media (max-width: 520px) {
@@ -35079,8 +35121,6 @@ button.gyro-account-menu-row:hover,
     grid-template-columns: auto auto minmax(0, 1fr);
     padding-inline: 8px;
   }
-
-
 }
 
 /* --------------------------------------------------------------------------
@@ -36131,40 +36171,6 @@ textarea:focus-visible,
   top: auto;
 }
 
-.gyro-sidebar-scm-row > .gyro-provider-details {
-  opacity: 0;
-}
-
-.gyro-sidebar-scm-row:hover > .gyro-provider-details,
-.gyro-sidebar-scm-row:focus-within > .gyro-provider-details,
-.gyro-sidebar-scm-row > .gyro-provider-details[open] {
-  opacity: 1;
-}
-
-.gyro-sidebar-scm-row > .gyro-provider-details > summary {
-  width: 28px;
-  height: 28px;
-}
-
-.gyro-sidebar-scm-row .gyro-provider-details > div {
-  position: fixed;
-  left: auto;
-  right: auto;
-  z-index: 120;
-  min-width: 200px;
-}
-
-.gyro-sidebar-scm-row .gyro-provider-details .gyro-sidebar-scm-discard {
-  width: auto;
-  height: 28px;
-  opacity: 1;
-}
-
-.gyro-sidebar-scm-row .gyro-provider-details .gyro-sidebar-scm-discard::after {
-  content: "Discard changes";
-  margin-left: 8px;
-}
-
 .gyro-composer-bar {
   column-gap: 8px;
 }
@@ -36959,7 +36965,9 @@ textarea:focus-visible,
 }
 
 .gyro-chat-companion .gyro-chat-companion-tab > .gyro-chat-companion-tab-close,
-.gyro-chat-companion .gyro-chat-companion-tab.is-active > .gyro-chat-companion-tab-close {
+.gyro-chat-companion
+  .gyro-chat-companion-tab.is-active
+  > .gyro-chat-companion-tab-close {
   opacity: 0.7;
   gap: 0;
   flex: 0 0 20px;
@@ -37207,7 +37215,7 @@ textarea:focus-visible,
   .gyro-sidebar-scm-row:is(:hover, :focus-within),
 .gyro-sidebar-section
   .gyro-scm-panel
-  .gyro-sidebar-scm-row:has(.gyro-provider-details[open]) {
+  .gyro-sidebar-scm-row:has(.gyro-scm-file-actions-trigger[aria-expanded="true"]) {
   grid-template-columns: minmax(0, 1fr) 20px 20px 12px;
 }
 .gyro-sidebar-section
@@ -37508,7 +37516,7 @@ textarea:focus-visible,
 }
 .gyro-effort-slider-header {
   display: grid;
-  grid-template-columns: 22.8px minmax(0, 1fr) 22.8px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 5.7px;
   margin-bottom: 15.2px;
@@ -37520,14 +37528,6 @@ textarea:focus-visible,
   font: inherit;
   cursor: pointer;
   padding: 0;
-}
-.gyro-effort-slider-header .gyro-effort-icon-button {
-  display: grid;
-  place-items: center;
-  width: 22.8px;
-  height: 22.8px;
-  color: var(--gyro-muted);
-  border-radius: 5.7px;
 }
 .gyro-effort-slider-heading {
   display: flex;
@@ -38199,9 +38199,14 @@ textarea:focus-visible,
 }
 .gyro-scm-history-resizer:hover::after,
 .gyro-scm-history-resizer:focus-visible::after {
-  background: color-mix(in srgb, var(--gyro-accent) 45%, var(--gyro-border-soft));
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 45%,
+    var(--gyro-border-soft)
+  );
 }
-.gyro-scm-panel:has(.gyro-scm-history:not([open])) .gyro-scm-history-resizer:not(.gyro-scm-section-resizer) {
+.gyro-scm-panel:has(.gyro-scm-history:not([open]))
+  .gyro-scm-history-resizer:not(.gyro-scm-section-resizer) {
   display: none;
 }
 .gyro-scm-panel .gyro-scm-history:not([open]) {
@@ -38211,7 +38216,8 @@ textarea:focus-visible,
 }
 
 /* Closed sections form a footer stack without losing expanded drag sizes. */
-.gyro-scm-panel .gyro-scm-github-section:has(.is-github button[aria-expanded="false"]) {
+.gyro-scm-panel
+  .gyro-scm-github-section:has(.is-github button[aria-expanded="false"]) {
   height: auto !important;
   max-height: none;
   flex: 0 0 auto;
@@ -38223,10 +38229,14 @@ textarea:focus-visible,
   .gyro-scm-github-section:has(.is-github button[aria-expanded="false"]) {
   margin-top: 0;
 }
-.gyro-scm-section-resizer:has(+ .gyro-scm-github-section .is-github button[aria-expanded="false"]) {
+.gyro-scm-section-resizer:has(
+  + .gyro-scm-github-section .is-github button[aria-expanded="false"]
+) {
   display: none;
 }
-.gyro-scm-section-resizer:has(+ .gyro-scm-change-list:not(:has(button[aria-expanded="true"]))) {
+.gyro-scm-section-resizer:has(
+  + .gyro-scm-change-list:not(:has(button[aria-expanded="true"]))
+) {
   display: none;
 }
 .gyro-scm-panel .gyro-scm-change-list:not(:has(button[aria-expanded="true"])) {
@@ -38235,7 +38245,8 @@ textarea:focus-visible,
   order: 0;
   margin-top: 0;
 }
-.gyro-scm-change-list:not(:has(button[aria-expanded="true"])) + .gyro-scm-history-resizer {
+.gyro-scm-change-list:not(:has(button[aria-expanded="true"]))
+  + .gyro-scm-history-resizer {
   display: none;
 }
 .gyro-scm-panel .gyro-scm-history[open] {
@@ -38682,10 +38693,14 @@ textarea:focus-visible,
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
 }
-:root[data-theme] .gyro-terminal-grid[data-focused="true"] > .gyro-terminal-pane:not(.is-active) {
+:root[data-theme]
+  .gyro-terminal-grid[data-focused="true"]
+  > .gyro-terminal-pane:not(.is-active) {
   display: none;
 }
-:root[data-theme] .gyro-terminal-grid[data-focused="true"] > .gyro-terminal-pane.is-active {
+:root[data-theme]
+  .gyro-terminal-grid[data-focused="true"]
+  > .gyro-terminal-pane.is-active {
   grid-column: 1 / -1;
   grid-row: 1;
 }
@@ -38733,8 +38748,14 @@ textarea:focus-visible,
 }
 
 /* Shared terminal chrome: quiet tabs and a neutral terminal canvas. */
-:root[data-theme="light"] { --gyro-terminal-canvas: #fff; --gyro-terminal-tab: #f3f3f3; }
-:root[data-theme="dark"] { --gyro-terminal-canvas: #0c0c0c; --gyro-terminal-tab: #222; }
+:root[data-theme="light"] {
+  --gyro-terminal-canvas: #fff;
+  --gyro-terminal-tab: #f3f3f3;
+}
+:root[data-theme="dark"] {
+  --gyro-terminal-canvas: #0c0c0c;
+  --gyro-terminal-tab: #222;
+}
 :root[data-theme] .gyro-terminal-pane,
 :root[data-theme] .gyro-terminal-live-body,
 :root[data-theme] .gyro-xterm-frame,
@@ -38775,12 +38796,17 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 :root[data-theme] .gyro-terminal-pane-title strong,
-:root[data-theme] .gyro-terminal-pane.is-active .gyro-terminal-pane-title strong {
+:root[data-theme]
+  .gyro-terminal-pane.is-active
+  .gyro-terminal-pane-title
+  strong {
   font-size: 12px;
   font-weight: 500;
   color: inherit;
 }
-:root[data-theme] .gyro-terminal-pane-title > svg { flex-shrink: 0; }
+:root[data-theme] .gyro-terminal-pane-title > svg {
+  flex-shrink: 0;
+}
 :root[data-theme] .gyro-terminal-pane .gyro-terminal-pane-close {
   display: inline-flex;
   align-items: center;
@@ -38796,7 +38822,9 @@ textarea:focus-visible,
   overflow: hidden;
 }
 :root[data-theme] .gyro-terminal-pane:hover .gyro-terminal-drag-handle,
-:root[data-theme] .gyro-terminal-drag-handle:focus-visible { width: 14px; }
+:root[data-theme] .gyro-terminal-drag-handle:focus-visible {
+  width: 14px;
+}
 :root[data-theme] .gyro-terminal-grid,
 :root[data-theme] .gyro-workspace-tool-panel.is-primary .gyro-terminal-grid {
   gap: 1px;
@@ -38853,7 +38881,10 @@ textarea:focus-visible,
   border-radius: 11px;
   color: var(--gyro-muted);
 }
-:root[data-theme] .gyro-terminal-tab.is-active { background: var(--gyro-terminal-tab); color: var(--gyro-text); }
+:root[data-theme] .gyro-terminal-tab.is-active {
+  background: var(--gyro-terminal-tab);
+  color: var(--gyro-text);
+}
 :root[data-theme] .gyro-terminal-tab > button {
   display: flex;
   align-items: center;
@@ -38868,32 +38899,87 @@ textarea:focus-visible,
   font-size: 13px;
   color: inherit;
 }
-:root[data-theme] .gyro-terminal-tab > button[role="tab"] { cursor: grab; }
-:root[data-theme] .gyro-terminal-tab > button[role="tab"]:active { cursor: grabbing; }
-:root[data-theme] .gyro-terminal-tab > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 155px; }
-:root[data-theme] .gyro-terminal-tab > button > svg { flex-shrink: 0; }
-:root[data-theme] .gyro-terminal-tab .gyro-terminal-tab-close { padding: 0 8px; margin-right: 3px; color: var(--gyro-muted); }
-:root[data-theme] .gyro-terminal-tab-grip { opacity: 0; }
+:root[data-theme] .gyro-terminal-tab > button[role="tab"] {
+  cursor: grab;
+}
+:root[data-theme] .gyro-terminal-tab > button[role="tab"]:active {
+  cursor: grabbing;
+}
+:root[data-theme] .gyro-terminal-tab > button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 155px;
+}
+:root[data-theme] .gyro-terminal-tab > button > svg {
+  flex-shrink: 0;
+}
+:root[data-theme] .gyro-terminal-tab .gyro-terminal-tab-close {
+  padding: 0 8px;
+  margin-right: 3px;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-tab-grip {
+  opacity: 0;
+}
 :root[data-theme] .gyro-terminal-tab:hover .gyro-terminal-tab-grip,
-:root[data-theme] .gyro-terminal-tab:focus-within .gyro-terminal-tab-grip { opacity: 1; }
-:root[data-theme] .gyro-terminal-tab-close:hover { background: var(--gyro-control-hover); }
-:root[data-theme] .gyro-terminal-toolbar { gap: 8px; padding: 6px 12px; }
-:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher { flex-shrink: 0; }
-:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher-button { border: 0; background: transparent; }
-:root[data-theme] .gyro-terminal-grid[data-terminal-count] { position: relative; }
+:root[data-theme] .gyro-terminal-tab:focus-within .gyro-terminal-tab-grip {
+  opacity: 1;
+}
+:root[data-theme] .gyro-terminal-tab-close:hover {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme] .gyro-terminal-toolbar {
+  gap: 8px;
+  padding: 6px 12px;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher {
+  flex-shrink: 0;
+}
+:root[data-theme] .gyro-terminal-toolbar .gyro-agent-launcher-button {
+  border: 0;
+  background: transparent;
+}
+:root[data-theme] .gyro-terminal-grid[data-terminal-count] {
+  position: relative;
+}
 :root[data-theme] .gyro-terminal-grid[data-terminal-count="1"],
-:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="vertical"] { grid-template-columns: minmax(0, 1fr); }
-:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="horizontal"],
+:root[data-theme]
+  .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="vertical"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+:root[data-theme]
+  .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="horizontal"],
 :root[data-theme] .gyro-terminal-grid[data-terminal-count="3"],
-:root[data-theme] .gyro-terminal-grid[data-terminal-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 :root[data-theme] .gyro-terminal-grid[data-terminal-count="1"],
-:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="horizontal"] { grid-template-rows: minmax(0, 1fr); }
-:root[data-theme] .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="vertical"],
+:root[data-theme]
+  .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="horizontal"] {
+  grid-template-rows: minmax(0, 1fr);
+}
+:root[data-theme]
+  .gyro-terminal-grid[data-terminal-count="2"][data-terminal-axis="vertical"],
 :root[data-theme] .gyro-terminal-grid[data-terminal-count="3"],
-:root[data-theme] .gyro-terminal-grid[data-terminal-count="4"] { grid-template-rows: repeat(2, minmax(0, 1fr)); }
-:root[data-theme] .gyro-terminal-grid[data-terminal-count] > .gyro-terminal-pane { grid-template-rows: minmax(0, 1fr); min-height: 0; }
-:root[data-theme] .gyro-terminal-grid[data-terminal-count] > .gyro-terminal-pane > header { display: none; }
-:root[data-theme] .gyro-terminal-pane[data-terminal-hidden="true"] { display: none; }
+:root[data-theme] .gyro-terminal-grid[data-terminal-count="4"] {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+:root[data-theme]
+  .gyro-terminal-grid[data-terminal-count]
+  > .gyro-terminal-pane {
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+:root[data-theme]
+  .gyro-terminal-grid[data-terminal-count]
+  > .gyro-terminal-pane
+  > header {
+  display: none;
+}
+:root[data-theme] .gyro-terminal-pane[data-terminal-hidden="true"] {
+  display: none;
+}
 :root[data-theme] .gyro-terminal-drop-zones {
   position: absolute;
   inset: 8px;
@@ -38936,23 +39022,48 @@ textarea:focus-visible,
   justify-content: center;
 }
 :root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button > span,
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-agent-button > svg:last-child { display: none; }
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-agent-button
+  > svg:last-child {
+  display: none;
+}
 
 /* Hover belongs to the complete tab, not a second pill around its label. */
 :root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab:hover {
-  background: color-mix(in srgb, var(--gyro-text) 6%, var(--gyro-terminal-canvas));
+  background: color-mix(
+    in srgb,
+    var(--gyro-text) 6%,
+    var(--gyro-terminal-canvas)
+  );
 }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab > button[role="tab"],
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab > button[role="tab"]:hover,
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab > button[role="tab"]:active {
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-tab
+  > button[role="tab"],
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-tab
+  > button[role="tab"]:hover,
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-tab
+  > button[role="tab"]:active {
   background: transparent;
   box-shadow: none;
   color: inherit;
 }
-:root[data-theme] .gyro-terminal-tab-grip { color: var(--gyro-muted); }
+:root[data-theme] .gyro-terminal-tab-grip {
+  color: var(--gyro-muted);
+}
 :root[data-theme] .gyro-terminal-tab:hover .gyro-terminal-tab-grip,
-:root[data-theme] .gyro-terminal-tab:focus-within .gyro-terminal-tab-grip { opacity: 0.5; }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab .gyro-terminal-tab-close {
+:root[data-theme] .gyro-terminal-tab:focus-within .gyro-terminal-tab-grip {
+  opacity: 0.5;
+}
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-tab
+  .gyro-terminal-tab-close {
   height: 24px;
   width: 24px;
   padding: 0;
@@ -38961,16 +39072,25 @@ textarea:focus-visible,
   border-radius: 6px;
   background: transparent;
 }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-tab .gyro-terminal-tab-close:hover {
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-tab
+  .gyro-terminal-tab-close:hover {
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
   color: var(--gyro-text);
 }
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-theme] .gyro-terminal-tab { transition: background-color 120ms ease; }
-  :root[data-theme] .gyro-terminal-tab-grip { transition: opacity 120ms ease; }
+  :root[data-theme] .gyro-terminal-tab {
+    transition: background-color 120ms ease;
+  }
+  :root[data-theme] .gyro-terminal-tab-grip {
+    transition: opacity 120ms ease;
+  }
 }
 
-:root[data-theme] .gyro-terminal-pane { position: relative; }
+:root[data-theme] .gyro-terminal-pane {
+  position: relative;
+}
 :root[data-theme] .gyro-terminal-corner {
   position: absolute;
   top: 0;
@@ -39031,35 +39151,27 @@ textarea:focus-visible,
   font-size: 12px;
   color: var(--gyro-text);
 }
-:root[data-theme] .gyro-terminal-corner-menu button svg { flex-shrink: 0; margin-top: 1px; }
-:root[data-theme] .gyro-terminal-corner-menu button:hover { background: var(--gyro-control-hover); }
-:root[data-theme] .gyro-terminal-corner-menu button.is-danger { color: var(--gyro-danger, #b42318); }
-:root[data-theme] .gyro-terminal-corner-menu small { display: block; margin-top: 3px; font-size: 11px; color: var(--gyro-muted); }
-@media (hover: none) { :root[data-theme] .gyro-terminal-corner-trigger { opacity: 1; } }
-.gyro-sidebar-project-terminal {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
+:root[data-theme] .gyro-terminal-corner-menu button svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+:root[data-theme] .gyro-terminal-corner-menu button:hover {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme] .gyro-terminal-corner-menu button.is-danger {
+  color: var(--gyro-danger, #b42318);
+}
+:root[data-theme] .gyro-terminal-corner-menu small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
   color: var(--gyro-muted);
-  opacity: 0;
 }
-.gyro-sidebar-project-row:hover .gyro-sidebar-project-terminal,
-.gyro-sidebar-project-terminal:focus-visible { opacity: 1; }
-.gyro-sidebar-project-terminal:hover { background: var(--gyro-control-hover); color: var(--gyro-text); }
-:root[data-theme] .gyro-sidebar-project-row:has(.gyro-sidebar-project-terminal) {
-  grid-template-columns: minmax(0, 1fr) 24px;
+@media (hover: none) {
+  :root[data-theme] .gyro-terminal-corner-trigger {
+    opacity: 1;
+  }
 }
-:root[data-theme] .gyro-sidebar-project-row.has-remove:has(.gyro-sidebar-project-terminal) {
-  grid-template-columns: minmax(0, 1fr) 24px 24px;
-}
-
 /* Terminal overflow menu: compact native-style rows, not stacked buttons. */
 :root[data-theme] .gyro-terminal-actions-menu {
   width: 252px;
@@ -39072,7 +39184,9 @@ textarea:focus-visible,
   border: 1px solid var(--gyro-border-soft);
   border-radius: 10px;
   background: var(--gyro-pane);
-  box-shadow: 0 8px 28px #00000014, 0 2px 6px #00000008;
+  box-shadow:
+    0 8px 28px #00000014,
+    0 2px 6px #00000008;
 }
 :root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button {
   display: flex;
@@ -39097,27 +39211,49 @@ textarea:focus-visible,
   white-space: nowrap;
   color: var(--gyro-text);
 }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button > svg {
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-actions-menu
+  > button
+  > svg {
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
   color: var(--gyro-muted);
 }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button:hover:not(:disabled),
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button:focus-visible {
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-actions-menu
+  > button:hover:not(:disabled),
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-actions-menu
+  > button:focus-visible {
   background: var(--gyro-control-hover);
   box-shadow: none;
 }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button:disabled {
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-actions-menu
+  > button:disabled {
   opacity: 0.4;
   background: transparent;
   cursor: default;
 }
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button.is-danger,
-:root[data-theme] .gyro-terminal-toolbar .gyro-terminal-actions-menu > button.is-danger > svg {
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-actions-menu
+  > button.is-danger,
+:root[data-theme]
+  .gyro-terminal-toolbar
+  .gyro-terminal-actions-menu
+  > button.is-danger
+  > svg {
   color: var(--gyro-danger, #b42318);
 }
-:root[data-theme] .gyro-terminal-actions-menu > .gyro-terminal-actions-separator {
+:root[data-theme]
+  .gyro-terminal-actions-menu
+  > .gyro-terminal-actions-separator {
   height: 1px;
   min-height: 1px;
   margin: 5px 4px;
@@ -39148,37 +39284,98 @@ textarea:focus-visible,
   gap: 28px;
   background: transparent;
 }
-.gyro-terminal-empty-intro { width: 100%; text-align: center; }
-.gyro-terminal-empty-intro > svg { color: var(--gyro-muted); margin-bottom: 12px; }
-.gyro-terminal-empty-intro h2 { margin: 0; font-size: 20px; font-weight: 550; letter-spacing: -0.4px; color: var(--gyro-text); }
-.gyro-terminal-empty-intro p { margin: 8px 0 20px; font-size: 13px; line-height: 1.5; color: var(--gyro-muted); }
-.gyro-terminal-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-:root[data-theme] .gyro-terminal-empty-actions > button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  min-height: 34px; padding: 0 12px; border: 1px solid var(--gyro-border-soft);
-  border-radius: 7px; background: transparent; color: var(--gyro-text);
-  font: inherit; font-size: 12px; box-shadow: none;
+.gyro-terminal-empty-intro {
+  width: 100%;
+  text-align: center;
 }
-:root[data-theme] .gyro-terminal-empty-actions > button:first-child { background: var(--gyro-terminal-tab); border-color: transparent; }
-:root[data-theme] .gyro-terminal-empty-actions > button:hover { background: var(--gyro-control-hover); }
+.gyro-terminal-empty-intro > svg {
+  color: var(--gyro-muted);
+  margin-bottom: 12px;
+}
+.gyro-terminal-empty-intro h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 550;
+  letter-spacing: -0.4px;
+  color: var(--gyro-text);
+}
+.gyro-terminal-empty-intro p {
+  margin: 8px 0 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--gyro-muted);
+}
+.gyro-terminal-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+:root[data-theme] .gyro-terminal-empty-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 12px;
+  box-shadow: none;
+}
+:root[data-theme] .gyro-terminal-empty-actions > button:first-child {
+  background: var(--gyro-terminal-tab);
+  border-color: transparent;
+}
+:root[data-theme] .gyro-terminal-empty-actions > button:hover {
+  background: var(--gyro-control-hover);
+}
 :root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher {
-  width: 100%; gap: 2px 12px; padding-top: 18px;
+  width: 100%;
+  gap: 2px 12px;
+  padding-top: 18px;
   border-top: 1px solid var(--gyro-border-soft);
   grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
 }
 .gyro-terminal-launcher-label {
-  grid-column: 1 / -1; margin: 0 8px 8px; text-align: left;
-  font-size: 11px; font-weight: 500; color: var(--gyro-muted);
+  grid-column: 1 / -1;
+  margin: 0 8px 8px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gyro-muted);
 }
 :root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button {
-  min-height: 36px; border: 0; background: transparent; box-shadow: none; padding: 0 8px;
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 8px;
 }
-:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button:hover:not(:disabled) { background: var(--gyro-control-hover); }
-:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button > span { font-size: 12px; }
-:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button > small { font-size: 10px; }
+:root[data-theme]
+  .gyro-terminal-empty
+  .gyro-terminal-launcher
+  > button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme] .gyro-terminal-empty .gyro-terminal-launcher > button > span {
+  font-size: 12px;
+}
+:root[data-theme]
+  .gyro-terminal-empty
+  .gyro-terminal-launcher
+  > button
+  > small {
+  font-size: 10px;
+}
 
 /* Working-tree totals share the source-control heading's type scale. */
-:root[data-theme] .gyro-sidebar-section:has(.gyro-scm-panel) > .gyro-sidebar-section-heading {
+:root[data-theme]
+  .gyro-sidebar-section:has(.gyro-scm-panel)
+  > .gyro-sidebar-section-heading {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -39189,7 +39386,10 @@ textarea:focus-visible,
   min-height: 0;
   font-size: 12px;
 }
-:root[data-theme] .gyro-sidebar-section:has(.gyro-scm-panel) > .gyro-sidebar-section-heading > .gyro-nav-label {
+:root[data-theme]
+  .gyro-sidebar-section:has(.gyro-scm-panel)
+  > .gyro-sidebar-section-heading
+  > .gyro-nav-label {
   margin: 0;
   font-size: inherit;
   font-weight: 560;
@@ -39203,8 +39403,12 @@ textarea:focus-visible,
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.gyro-scm-heading-totals .is-added { color: var(--gyro-success); }
-.gyro-scm-heading-totals .is-removed { color: var(--gyro-danger); }
+.gyro-scm-heading-totals .is-added {
+  color: var(--gyro-success);
+}
+.gyro-scm-heading-totals .is-removed {
+  color: var(--gyro-danger);
+}
 .gyro-scm-heading-unavailable {
   color: var(--gyro-muted);
   font-size: 11px;
@@ -39239,7 +39443,11 @@ textarea:focus-visible,
   .gyro-chat-composer-dock
   .gyro-composer-chip.is-warning:hover {
   background: color-mix(in srgb, var(--gyro-permission-full) 12%, transparent);
-  border-color: color-mix(in srgb, var(--gyro-permission-full) 24%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-permission-full) 24%,
+    transparent
+  );
   color: var(--gyro-permission-full);
 }
 
@@ -39459,3 +39667,475 @@ textarea:focus-visible,
 .gyro-editor-action-menu button:disabled {
   opacity: 0.45;
 }
+
+/* The terminal drawer has one tab strip, flush with its output canvas. */
+:root[data-theme] .gyro-workspace-tool-panel.is-compact-terminal {
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--gyro-terminal-canvas);
+  border-top: 1px solid var(--gyro-border-soft);
+  box-shadow: none;
+}
+:root[data-theme] .gyro-terminal-workspace:not(.is-empty) {
+  grid-template-rows: 42px minmax(0, 1fr);
+  background: var(--gyro-terminal-canvas);
+}
+:root[data-theme] .gyro-terminal-toolbar:not(.is-empty) {
+  height: 42px;
+  min-height: 42px;
+  padding: 5px 8px;
+  gap: 4px;
+  border: 0;
+  background: var(--gyro-terminal-canvas);
+}
+:root[data-theme] .gyro-terminal-tab {
+  height: 30px;
+  min-width: 160px;
+  padding: 0;
+  gap: 0;
+  border-radius: 9px;
+}
+:root[data-theme] .gyro-terminal-tab > button[role="tab"] {
+  flex: 1 1 auto;
+  height: 30px;
+  gap: 8px;
+}
+:root[data-theme] .gyro-terminal-tab-grip {
+  display: none;
+}
+:root[data-theme] .gyro-terminal-toolbar > .gyro-icon-button {
+  flex-shrink: 0;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  box-shadow: none;
+}
+:root[data-theme] .gyro-terminal-toolbar > .gyro-icon-button:hover {
+  background: var(--gyro-terminal-tab);
+  color: var(--gyro-text);
+}
+@media (max-width: 600px) {
+  :root[data-theme] .gyro-terminal-tab {
+    min-width: 110px;
+    max-width: 180px;
+  }
+}
+:root[data-theme] .gyro-terminal-tab > button[role="tab"] {
+  justify-content: flex-start;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-compact-terminal
+  > .gyro-tool-panel-resize-handle
+  > span {
+  opacity: 0;
+}
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-compact-terminal
+  > .gyro-tool-panel-resize-handle:hover
+  > span,
+:root[data-theme]
+  .gyro-workspace-tool-panel.is-compact-terminal
+  > .gyro-tool-panel-resize-handle:focus-visible
+  > span {
+  opacity: 1;
+}
+
+/* Appearance uses visual theme samples with labels outside the selection ring. */
+.gyro-settings-section[data-setting-key="appearance"] > header h1 {
+  font-weight: 400;
+}
+.gyro-settings-section[data-setting-key="appearance"] > header h1 > svg,
+.gyro-settings-section[data-setting-key="appearance"] > header span {
+  display: none;
+}
+.gyro-settings-section[data-setting-key="appearance"] > header {
+  padding-bottom: 42px;
+}
+.gyro-settings-group:has(.gyro-theme-picker) {
+  gap: 16px;
+}
+.gyro-settings-group:has(.gyro-theme-picker) > h2 {
+  padding: 0;
+  color: var(--gyro-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+.gyro-settings-group:has(.gyro-theme-picker) > .gyro-settings-group-rows {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.gyro-theme-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+}
+.gyro-theme-picker button,
+.gyro-theme-picker button:hover,
+.gyro-theme-picker button.is-active {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+}
+.gyro-theme-picker button::before {
+  display: none;
+  content: none;
+}
+.gyro-theme-picker button > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1.42;
+  object-fit: cover;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+.gyro-theme-picker button:hover > img {
+  border-color: var(--gyro-muted);
+}
+.gyro-theme-picker button.is-active > img {
+  border-color: var(--gyro-text);
+}
+.gyro-theme-picker button > span {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+.gyro-theme-picker button.is-active > span {
+  color: var(--gyro-text);
+}
+.gyro-theme-picker button:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
+.gyro-settings-group-rows > .gyro-theme-picker:first-child {
+  border: 0;
+}
+
+/* Project details: delayed sidebar card and draft-based editor. */
+.gyro-project-card-anchor {
+  position: relative;
+}
+.gyro-project-hover-card {
+  position: fixed;
+  z-index: 500;
+  width: min(270px, calc(100vw - 16px));
+  padding: 8px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xl);
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+  box-shadow: 0 8px 24px var(--gyro-premium-shadow-soft);
+  font-size: 13px;
+}
+.gyro-project-hover-card button,
+.gyro-project-edit-dialog button {
+  cursor: pointer;
+  font: inherit;
+}
+.gyro-project-card-heading,
+.gyro-project-card-count,
+.gyro-project-card-path,
+.gyro-project-card-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 27px;
+  padding: 3px 0;
+}
+.gyro-project-card-heading strong {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-project-card-heading button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-muted);
+}
+.gyro-project-hover-card svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+.gyro-project-card-count > svg,
+.gyro-project-card-path > svg,
+.gyro-project-card-edit > svg,
+.gyro-project-count-dot {
+  color: var(--gyro-muted);
+}
+.gyro-project-card-path {
+  margin-top: 5px;
+  padding: 7px 0;
+  border-block: 1px solid var(--gyro-border);
+}
+.gyro-project-card-path span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-project-card-edit {
+  margin-top: 4px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.gyro-project-hover-card button:hover,
+.gyro-project-edit-dialog button:hover {
+  background: var(--gyro-surface-soft);
+}
+.gyro-project-edit-dialog {
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  padding: 20px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xl);
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+  box-shadow: 0 16px 48px var(--gyro-premium-shadow);
+  font-family: var(--gyro-font-sans);
+  font-size: 13px;
+}
+.gyro-project-edit-dialog::backdrop {
+  background: #0003;
+}
+.gyro-project-edit-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.gyro-project-edit-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.gyro-project-edit-dialog header button,
+.gyro-project-folder button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  padding: 5px;
+  border-radius: var(--gyro-radius-xs);
+}
+.gyro-project-name-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  overflow: hidden;
+}
+.gyro-project-name-input > svg {
+  box-sizing: content-box;
+  padding: 12px;
+  border-right: 1px solid var(--gyro-border);
+  flex-shrink: 0;
+}
+.gyro-project-name-input input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline-offset: -3px;
+}
+.gyro-project-folders-label {
+  display: block;
+  margin: 15px 0 10px;
+}
+.gyro-project-folders {
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  overflow: hidden;
+}
+.gyro-project-folder,
+.gyro-project-add-folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 42px;
+  box-sizing: border-box;
+}
+.gyro-project-folder {
+  border-bottom: 1px solid var(--gyro-border);
+}
+.gyro-project-folder > svg,
+.gyro-project-add-folder > svg {
+  color: var(--gyro-muted);
+  flex-shrink: 0;
+}
+.gyro-project-folder span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-project-add-folder {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.gyro-project-edit-dialog footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 21px;
+}
+.gyro-project-edit-dialog footer > div {
+  display: flex;
+  gap: 10px;
+}
+.gyro-project-edit-dialog footer button {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  color: var(--gyro-muted);
+}
+.gyro-project-edit-dialog footer .gyro-project-remove {
+  background: color-mix(in srgb, var(--gyro-danger) 9%, transparent);
+  color: var(--gyro-danger);
+}
+.gyro-project-edit-dialog footer .gyro-project-save {
+  background: var(--gyro-text);
+  color: var(--gyro-surface);
+}
+.gyro-project-edit-dialog button:disabled,
+.gyro-project-hover-card button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@media (max-width: 480px) {
+  .gyro-project-edit-dialog footer {
+    flex-wrap: wrap;
+  }
+  .gyro-project-edit-dialog footer > div {
+    margin-left: auto;
+  }
+}
+
+.gyro-project-folder .gyro-project-primary-badge {
+  flex-shrink: 0;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  padding: 5px 10px;
+  color: var(--gyro-muted);
+  font: inherit;
+  line-height: 1.3;
+}
+.gyro-project-folder .gyro-project-make-primary {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+  line-height: 1.3;
+}
+
+.gyro-project-hover-card { font-family: var(--gyro-font-sans); line-height: 1.4; }
+.gyro-project-edit-dialog :is(button, input):focus-visible,
+.gyro-project-hover-card button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-project-edit-dialog .gyro-project-name-input:focus-within {
+  border-color: var(--gyro-accent);
+}
+.gyro-project-edit-dialog .gyro-project-name-input input:focus-visible { outline: none; }
+.gyro-project-edit-dialog .gyro-project-folders-label { font-weight: 500; }
+.gyro-project-edit-dialog .gyro-project-folder > button:last-child { width: 26px; height: 26px; }
+.gyro-project-edit-dialog .gyro-project-folder button:disabled { opacity: .3; }
+.gyro-project-edit-dialog footer button { min-height: 32px; }
+.gyro-project-edit-dialog footer .gyro-project-save:hover:not(:disabled) { opacity: .85; }
+
+
+/* Changed-file actions are anchored to their trigger, outside scroll clipping. */
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  min-width: 0;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
+  color: var(--gyro-muted);
+  opacity: 0;
+}
+.gyro-sidebar-scm-row:is(:hover, :focus-within) > .gyro-scm-file-actions-trigger,
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] { opacity: 1; }
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger:hover,
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] { background: var(--gyro-surface-soft); }
+.gyro-scm-file-actions-menu {
+  position: fixed;
+  z-index: 500;
+  box-sizing: border-box;
+  width: 196px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface);
+  box-shadow: 0 6px 20px var(--gyro-premium-shadow-soft);
+  font: 12px/1.4 var(--gyro-font-sans);
+}
+.gyro-scm-file-actions-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
+  color: var(--gyro-danger);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-scm-file-actions-menu > button:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--gyro-danger) 9%, transparent); }
+.gyro-scm-file-actions-menu > button:focus-visible { outline: 1px solid var(--gyro-focus-ring); outline-offset: -1px; }
+.gyro-scm-file-actions-menu > button:disabled { opacity: .45; cursor: default; }

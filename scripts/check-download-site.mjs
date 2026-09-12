@@ -201,7 +201,6 @@ containsAll(pages.home, "Homepage", [
   "workspace-switcher",
   "ownership-title",
   "Public alpha",
-  "Think, build, and ship in one place.",
   "Public alpha",
   "Three surfaces.<br />One task.",
   "Direct work.",
@@ -252,6 +251,19 @@ check(
     "Your agents, terminal, and code review. Together on your Mac.",
   ),
   "Homepage hero must not include the removed subtitle",
+);
+check(
+  !pages.home.includes("Sample project") &&
+    !pages.home.includes("Sample session"),
+  "Homepage must not include the removed hero caption detail",
+);
+check(
+  !pages.home.includes("Product preview"),
+  "Product mockups must not be labeled as previews",
+);
+check(
+  pages.home.indexOf('id="product"') < pages.home.indexOf('id="agents"'),
+  "Product demonstration must appear before the agent roster",
 );
 check(
   !pages.home.includes("Move Gyro to Applications."),

@@ -983,6 +983,7 @@ function humanizeCapabilityId(capabilityId: string): string {
     "ide-open-panel": "Open panel",
     "terminal-open": "Open terminal",
     "terminal-read": "Read terminal",
+    "terminal-wait": "Wait for command",
     "terminal-stop": "Stop terminal",
     "browser-open": "Open browser",
     "browser-inspect": "Inspect browser",
@@ -1399,6 +1400,7 @@ function humanizeCapabilityTool(value: string): string {
   // Known short labels for the tools users see every turn.
   const known: Record<string, string> = {
     workspace_get_context: "Workspace context",
+    terminal_wait: "Wait for command",
     workspace_search: "Workspace search",
     workspace_read_file: "Read file",
     workspace_list: "List workspace",

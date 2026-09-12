@@ -362,17 +362,16 @@ pre {
 
 .site-header .nav-download {
   margin-left: 6px;
-  border: 1px solid var(--text);
-  background: var(--text);
-  color: var(--bg) !important;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text);
 }
 
-/* The background is restated because `.site-header nav a:hover` matches this
- * link too, and would otherwise repaint the solid pill as a quiet nav item. */
 .site-header .nav-download:hover {
-  background: var(--text);
-  box-shadow: 0 8px 20px var(--shadow-lift);
-  transform: translateY(-1px);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+  transform: none;
 }
 
 .github-link img {
@@ -786,10 +785,6 @@ pre {
   font-family: var(--mono);
   font-size: 13px;
   letter-spacing: 0.04em;
-}
-
-.stage-caption-detail {
-  color: var(--muted);
 }
 
 .product-section,
@@ -2822,10 +2817,6 @@ pre {
     margin-top: 14px;
   }
 
-  .stage-caption-detail {
-    display: none;
-  }
-
   .surface-card {
     padding: 34px 0 34px 38px;
   }
@@ -3011,57 +3002,47 @@ pre {
   }
 }
 
-/* The decorative canvas must never occupy document layout space. */
+/* Decorative pointer field stays off: the product is the visual. */
 body {
   isolation: isolate;
 }
 .pointer-dots {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
   display: none;
 }
-@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .pointer-dots {
-    display: block;
-  }
-}
 
-/* Calm Power website system. The existing Inter families, neutral surfaces,
-   lavender focus, and compact product controls connect the site to the app.
-   The broad product stage carries the visual weight; surrounding content stays quiet. */
+/*
+ * Quiet shell around a dense product. Cool near-white, no marketing purple,
+ * accent equals text so color stays semantic (diffs, agent dots, status).
+ */
 :root {
-  --bg: #111214;
-  --surface: #1a1b1f;
-  --surface-raised: #232429;
-  --surface-soft: #27282e;
-  --text: #f3f3f5;
-  --muted: #aaaab4;
-  --quiet: #9797a2;
-  --orange: #c3c0ef;
-  --orange-soft: #d4d2f7;
-  --orange-dark: #aaa5dc;
-  --stage: #33333f;
-  --header-bg: rgba(17, 18, 20, 0.94);
+  --bg: #111110;
+  --surface: #181816;
+  --surface-raised: #1f1f1c;
+  --surface-soft: #242421;
+  --text: #f2f1ec;
+  --muted: #a3a29b;
+  --quiet: #8a8982;
+  --accent: var(--text);
+  --stage: #2a2a26;
+  --header-bg: rgba(17, 17, 16, 0.92);
   --shell: min(1320px, calc(100% - 96px));
   --header-height: 60px;
+  --shadow-card: rgba(0, 0, 0, 0.18);
 }
 :root[data-theme="light"] {
-  --bg: #fbfbfd;
-  --surface: #f0f0f5;
-  --surface-raised: #fff;
-  --surface-soft: #e8e8ef;
-  --text: #202127;
-  --muted: #62636e;
-  --quiet: #696a76;
-  --orange: #51499b;
-  --orange-soft: #6158ae;
-  --orange-dark: #403884;
-  --stage: #d9d8e6;
-  --header-bg: rgba(251, 251, 253, 0.94);
+  --bg: #f7f7f7;
+  --surface: #efefef;
+  --surface-raised: #ffffff;
+  --surface-soft: #e8e8e8;
+  --text: #1a1a1a;
+  --muted: #5c5c5c;
+  --quiet: #8a8a8a;
+  --accent: var(--text);
+  --stage: #ececec;
+  --header-bg: rgba(247, 247, 247, 0.92);
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.14);
+  --shadow-card: rgba(0, 0, 0, 0.04);
 }
 .site-header {
   top: 0;
@@ -3095,7 +3076,7 @@ body {
   font-weight: 500;
 }
 .site-header .nav-download {
-  border-radius: 8px;
+  border-radius: 6px;
   min-height: 34px;
 }
 .kicker {
@@ -3174,10 +3155,11 @@ summary:focus-visible {
   flex-wrap: wrap;
 }
 .home-page .hero-actions .button {
-  min-height: 46px;
-  padding: 12px 17px;
-  border-radius: 8px;
+  min-height: 40px;
+  padding: 10px 14px;
+  border-radius: 6px;
   font-size: 13px;
+  font-weight: 500;
 }
 .home-page .button-primary {
   color: var(--bg);
@@ -3217,7 +3199,7 @@ summary:focus-visible {
 .home-page .product-stage-frame {
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--stage);
   box-shadow: none;
   overflow: hidden;
@@ -3231,10 +3213,10 @@ summary:focus-visible {
 .home-page .hero-shot-frame {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--line);
   border-bottom: 0;
-  border-radius: 10px 10px 0 0;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.24);
+  border-radius: 7px 7px 0 0;
+  box-shadow: none;
   background: var(--surface);
 }
 .home-page .hero-shot-frame picture {
@@ -3257,16 +3239,11 @@ summary:focus-visible {
 }
 .home-page .product-stage figcaption {
   display: flex;
-  justify-content: space-between;
   padding: 17px 0;
   font-family: var(--sans);
   font-size: 13px;
   color: var(--quiet);
   letter-spacing: 0;
-}
-.caption-separator {
-  padding-inline: 12px;
-  opacity: 0.4;
 }
 .home-page .hero-copy > *,
 .home-page .product-stage {
@@ -3276,8 +3253,8 @@ summary:focus-visible {
   overflow-anchor: none;
 }
 .home-page .agents-section {
-  padding: 78px 0 82px;
-  border: 0;
+  padding: 88px 0;
+  border-top: 1px solid var(--line);
 }
 .home-page .agents-section .section-heading {
   display: block;
@@ -3335,8 +3312,8 @@ summary:focus-visible {
   align-items: start;
   column-gap: 48px;
   row-gap: 36px;
-  padding: 92px 0;
-  border-top: 1px solid var(--line);
+  padding: 120px 0 100px;
+  border-top: 0;
 }
 .home-page .product-section > .section-heading {
   display: flex;
@@ -3462,9 +3439,9 @@ summary:focus-visible {
 }
 .home-page .surface-visual {
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  box-shadow: 0 16px 48px var(--shadow-card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: none;
 }
 .showcase-toolbar {
   display: flex;
@@ -3563,7 +3540,7 @@ summary:focus-visible {
   justify-content: space-between;
   align-items: end;
   gap: 48px;
-  margin-bottom: 48px;
+  margin-bottom: 20px;
 }
 .ownership-heading h2 {
   margin: 0;
@@ -3574,44 +3551,15 @@ summary:focus-visible {
   font-size: 16px;
   line-height: 1.7;
   margin: 0 0 4px;
+  max-width: 36ch;
 }
-.ownership-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  padding: 0;
+.ownership-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
   margin: 0;
-  list-style: none;
 }
-.ownership-grid li {
-  min-height: 260px;
-  padding: 30px;
-  background: var(--surface);
-  border-radius: 10px;
-}
-.ownership-grid svg {
-  display: block;
-  margin-bottom: 42px;
-  color: var(--accent);
-}
-.ownership-grid h3 {
-  margin: 0 0 10px;
-  font-size: 18px;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-}
-.ownership-grid p {
-  margin: 0;
-  max-width: 30ch;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.65;
-}
-.ownership-grid .text-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  margin-top: 12px;
+.ownership-links .text-link {
   font-size: 13px;
 }
 .home-page .download-section {
@@ -3657,8 +3605,8 @@ summary:focus-visible {
 }
 .home-page .macos-card {
   padding: 28px;
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: var(--bg);
   box-shadow: none;
 }
@@ -3717,12 +3665,12 @@ summary:focus-visible {
   justify-content: space-between;
   align-items: end;
   gap: 24px;
-  padding: 10px 0 34px;
+  padding: 28px 0 40px;
   font-family: var(--display);
-  font-weight: 550;
-  font-size: clamp(90px, 15vw, 210px);
-  letter-spacing: -0.065em;
-  line-height: 0.95;
+  font-weight: 500;
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: -0.04em;
+  line-height: 1.1;
   color: var(--text);
 }
 .footer-signature span {
@@ -3810,9 +3758,6 @@ summary:focus-visible {
   .home-page .product-stage figcaption {
     padding-block: 12px;
     font-size: 13px;
-  }
-  .stage-caption-detail {
-    display: none;
   }
   .home-page .agents-section {
     padding: 48px 0 56px;
@@ -3930,20 +3875,6 @@ summary:focus-visible {
   .ownership-heading > p {
     margin-top: 20px;
     font-size: 15px;
-  }
-  .ownership-grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-  .ownership-grid li {
-    min-height: 0;
-    padding: 24px;
-  }
-  .ownership-grid svg {
-    margin-bottom: 24px;
-  }
-  .ownership-grid p {
-    max-width: 40ch;
   }
   .home-page .download-shell,
   .home-page .help-section {
@@ -4068,9 +3999,6 @@ summary:focus-visible {
 @media (max-width: 720px) {
   .home-page .product-stage figcaption {
     align-items: center;
-  }
-  .stage-caption-detail {
-    display: none;
   }
   .motion-toggle {
     flex-shrink: 0;

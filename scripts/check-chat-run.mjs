@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  isAssistantPreambleBlock,
   isOrphanAssistantFragment,
   isTransientStatusGreeting,
   peelAssistantPreambleBlocks,
@@ -21,6 +22,11 @@ import {
 } from "../packages/ui/src/chat-run.ts";
 
 let sequence = 0;
+assert.deepEqual(
+  splitToolName("gyro_capabilities__gyro_terminal_wait"),
+  { tool: "Wait for command" },
+  "command waits should have a readable chat activity label",
+);
 const at = (minutes) =>
   new Date(
     Date.parse("2026-08-02T09:00:00.000Z") + minutes * 60_000,
@@ -1059,4 +1065,30 @@ assert.equal(
   }).phase.recoveryKind,
   "cancelled",
   "a stored cancellation must remain a neutral stop even with legacy recovery metadata",
+);
+
+// Narration that names the work and hands off with a colon belongs on the rail,
+// not in the answer body. The opener alone cannot carry this: a gerund also
+// opens an ordinary noun phrase, so the colon is the part that decides.
+assert.equal(
+  isAssistantPreambleBlock("Running the UI smoke checks:"),
+  true,
+  "a gerund handoff ending in a colon is narration",
+);
+assert.equal(
+  isAssistantPreambleBlock("Updating the assertion to match the new one:"),
+  true,
+  "the same holds for an edit the assistant is about to make",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    "Running totals are stored in the ledger and reconciled nightly, so the figure you saw is expected.",
+  ),
+  false,
+  "a gerund that opens a noun phrase is still an answer",
+);
+assert.equal(
+  isAssistantPreambleBlock("Here are the results:"),
+  false,
+  "a colon alone does not make a block narration",
 );

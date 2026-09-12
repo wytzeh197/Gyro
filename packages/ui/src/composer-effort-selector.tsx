@@ -1,4 +1,4 @@
-import { ChevronRight, RotateCcw, Zap } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -13,21 +13,17 @@ export function ComposerEffortSelector({
   modelLabel,
   labels,
   selectedIndex,
-  defaultIndex,
   placement,
   onSelect,
   onModels,
-  onSettings,
 }: {
   id: string;
   modelLabel: string;
   labels: string[];
   selectedIndex: number;
-  defaultIndex: number;
   placement: "up" | "down";
   onSelect: (index: number) => void;
   onModels: () => void;
-  onSettings: () => void;
 }) {
   const [index, setIndex] = useState(selectedIndex);
   const committedIndex = useRef(selectedIndex);
@@ -75,15 +71,6 @@ export function ComposerEffortSelector({
       role="dialog"
     >
       <div className="gyro-effort-slider-header">
-        <button
-          aria-label="Advanced model settings"
-          title="Advanced model settings"
-          className="gyro-effort-icon-button"
-          onClick={onSettings}
-          type="button"
-        >
-          <Zap size={17} />
-        </button>
         <div className="gyro-effort-slider-heading">
           <button
             className="gyro-effort-value-button"
@@ -103,15 +90,6 @@ export function ComposerEffortSelector({
             {modelLabel}
           </button>
         </div>
-        <button
-          aria-label={`Reset effort to ${labels[defaultIndex]}`}
-          title={`Reset effort to ${labels[defaultIndex]}`}
-          className="gyro-effort-icon-button"
-          onClick={() => commit(defaultIndex)}
-          type="button"
-        >
-          <RotateCcw size={17} />
-        </button>
       </div>
       <div
         className="gyro-effort-slider"

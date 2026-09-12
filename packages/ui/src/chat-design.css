@@ -309,7 +309,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-composer-dock
   .gyro-composer-shell:focus-within {
-  border-color: var(--gyro-accent);
+  border-color: var(--gyro-border);
   box-shadow: none;
 }
 :root[data-theme]

@@ -1,6 +1,7 @@
 #[cfg(debug_assertions)]
 mod performance_benchmark;
 mod turn_timing;
+mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 mod browser_knowledge;
 mod command_file_changes;
@@ -80,6 +81,8 @@ mod menu_bar;
 mod session_browser;
 mod source_control_review;
 mod system_access;
+mod terminal_capability;
+mod terminal_wait;
 mod workspace_capability_read;
 
 #[cfg(test)]
@@ -1349,6 +1352,7 @@ struct TerminalPaneSnapshot {
     command: String,
     output: Option<String>,
     output_revision: u64,
+    output_complete: bool,
     status: String,
     has_foreground_job: Option<bool>,
     exit_code: Option<i32>,
@@ -1915,6 +1919,8 @@ struct ProviderUsageSnapshot {
     provider_id: String,
     windows: Vec<ProviderRateLimitWindow>,
     fetched_at: String,
+    stale: bool,
+    error: Option<String>,
 }
 
 /// One of a provider's plan limits, however Gyro came to hear about it.
@@ -2026,6 +2032,7 @@ struct TerminalProcess {
 struct TerminalOutputBuffer {
     bytes: VecDeque<u8>,
     revision: u64,
+    reader_finished: bool,
 }
 
 impl Drop for TerminalProcess {
@@ -6060,6 +6067,7 @@ fn provider_context_message_with_capabilities(
             context.push(check.briefing_with_signals(diagnostics, test_failures));
         }
         context.push("Gyro Workspace tools are available throughout this turn. A compact workspace check is attached when available. Use gyro_workspace_check to refresh folder, project, and Git facts, gyro_workspace_get_context for diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy. If context is unavailable or stale, continue with bounded Workspace tools and describe the evidence you found, never internal workspace mechanics.".into());
+        context.push("For long-running builds or release checks, start a finite command with gyro_terminal_open (or a background Workspace task), then call gyro_terminal_wait with its returned resource.id. A wait returning completed: false is still running: wait again rather than ending the task or restarting the command. When it finishes, inspect exitCode and output, fix failures when authorized, and continue the original task. For remote CI, a command such as gh run watch RUN_ID --exit-status waits for all jobs, including Intel and Apple Silicon builds. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
         if user_requests_gyro_browser(&request.message) {
             context.push("Requested surface: Gyro Browser. Follow the shared browser guide and current capability contract for this live task.".into());
         }
@@ -12560,77 +12568,41 @@ async fn get_provider_usage(provider_id: String) -> Result<ProviderUsageSnapshot
 ///
 /// Gemini has no usage source here; use the ledger for spend.
 fn get_provider_usage_blocking(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
-    let mut live_error: Option<String> = None;
-    let mut windows = if provider_id == "openai" {
-        match fetch_codex_provider_usage(provider_id) {
-            Ok(snapshot) => {
-                // A poll is the freshest reading there is, so it is worth keeping
-                // for the next session to open with rather than re-polling from blank.
-                remember_provider_rate_limits(provider_id, &snapshot.windows);
-                snapshot.windows
-            }
-            Err(error) => {
-                live_error = Some(error);
-                stored_provider_usage(provider_id)?.windows
-            }
-        }
-    } else if provider_id == "xai" {
-        match fetch_xai_provider_usage(provider_id) {
-            Ok(snapshot) => {
-                remember_provider_rate_limits(provider_id, &snapshot.windows);
-                snapshot.windows
-            }
-            Err(error) => {
-                live_error = Some(error);
-                stored_provider_usage(provider_id)?.windows
-            }
-        }
-    } else if provider_id == "anthropic" {
-        match fetch_anthropic_provider_usage(provider_id) {
-            Ok(snapshot) => {
-                remember_provider_rate_limits(provider_id, &snapshot.windows);
-                snapshot.windows
-            }
-            Err(error) => {
-                live_error = Some(error);
-                // The stream still names the window and its reset, so a failed
-                // poll degrades to "5-hour limit, resets in 2 hr" rather than
-                // to nothing at all.
-                stored_provider_usage(provider_id)?.windows
-            }
-        }
-    } else if provider_id == "kimi" {
-        match fetch_kimi_provider_usage(provider_id) {
-            Ok(snapshot) => {
-                remember_provider_rate_limits(provider_id, &snapshot.windows);
-                snapshot.windows
-            }
-            Err(error) => {
-                live_error = Some(error);
-                stored_provider_usage(provider_id)?.windows
-            }
-        }
-    } else {
-        Vec::new()
+    let live = match provider_id {
+        "openai" => fetch_codex_provider_usage(provider_id),
+        "xai" => fetch_xai_provider_usage(provider_id),
+        "anthropic" => fetch_anthropic_provider_usage(provider_id),
+        "kimi" => fetch_kimi_provider_usage(provider_id),
+        _ => return stored_provider_usage(provider_id),
     };
-
-    windows.sort_by_key(|window| match window.id.as_str() {
-        "five-hour" => 0,
-        "weekly" => 1,
-        _ => 2,
-    });
-
-    if windows.is_empty() {
-        if let Some(error) = live_error {
-            return Err(error);
+    let mut snapshot = match live {
+        Ok(snapshot) => {
+            remember_provider_rate_limits(provider_id, &snapshot.windows, &snapshot.fetched_at);
+            snapshot
         }
-    }
+        Err(error) => usage_refresh_fallback(stored_provider_usage(provider_id)?, error)?,
+    };
+    snapshot
+        .windows
+        .sort_by_key(|window| match window.id.as_str() {
+            "five-hour" => 0,
+            "weekly" => 1,
+            _ => 2,
+        });
+    Ok(snapshot)
+}
 
-    Ok(ProviderUsageSnapshot {
-        provider_id: provider_id.into(),
-        fetched_at: chrono::Utc::now().to_rfc3339(),
-        windows,
-    })
+fn usage_refresh_fallback(
+    mut cached: ProviderUsageSnapshot,
+    error: String,
+) -> Result<ProviderUsageSnapshot, String> {
+    if cached.windows.is_empty() {
+        return Err(error);
+    }
+    // Preserve the observation time and explain why the reading is stale.
+    cached.stale = true;
+    cached.error = Some(error);
+    Ok(cached)
 }
 
 /// Ask Grok Build for the real plan window (weekly credit usage + reset).
@@ -12721,6 +12693,8 @@ fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, 
             return Err("Grok billing did not report a plan usage window".into());
         }
         Ok(ProviderUsageSnapshot {
+            stale: false,
+            error: None,
             provider_id: provider_id.into(),
             windows,
             fetched_at: chrono::Utc::now().to_rfc3339(),
@@ -12833,6 +12807,8 @@ fn fetch_kimi_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot,
         return Err("Kimi did not report a plan usage window".into());
     }
     Ok(ProviderUsageSnapshot {
+        stale: false,
+        error: None,
         provider_id: provider_id.into(),
         windows,
         fetched_at: chrono::Utc::now().to_rfc3339(),
@@ -13265,6 +13241,20 @@ fn claude_credentials_json() -> Option<String> {
 /// composer sat on two em dashes. `/api/oauth/usage` is the same endpoint the
 /// CLI's own `/usage` reads, and it answers with a percentage per window.
 fn fetch_anthropic_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, String> {
+    static POLL: OnceLock<Mutex<usage_poll::UsagePoll<ProviderUsageSnapshot>>> = OnceLock::new();
+    let mut poll = POLL
+        .get_or_init(|| Mutex::new(usage_poll::UsagePoll::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    poll.read(Instant::now(), |cooldown| {
+        fetch_anthropic_provider_usage_once(provider_id, cooldown)
+    })
+}
+
+fn fetch_anthropic_provider_usage_once(
+    provider_id: &str,
+    cooldown: &mut Duration,
+) -> Result<ProviderUsageSnapshot, String> {
     let token = claude_oauth_access_token()?;
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(5))
@@ -13285,6 +13275,12 @@ fn fetch_anthropic_provider_usage(provider_id: &str) -> Result<ProviderUsageSnap
                 "Claude Code sign-in was rejected. Run `claude auth login` to read your plan usage."
                     .to_string()
             }
+            ureq::Error::Status(429, response) => {
+                if let Some(retry) = usage_poll::retry_after(response.header("Retry-After"), chrono::Utc::now()) {
+                    *cooldown = (*cooldown).max(retry);
+                }
+                format!("Claude usage checks are temporarily rate-limited. Gyro will retry automatically after {} seconds.", cooldown.as_secs())
+            }
             ureq::Error::Status(status, _) => {
                 format!("Anthropic usage request failed (HTTP {status}).")
             }
@@ -13300,6 +13296,8 @@ fn fetch_anthropic_provider_usage(provider_id: &str) -> Result<ProviderUsageSnap
         return Err("Anthropic reported no plan usage window for this account.".into());
     }
     Ok(ProviderUsageSnapshot {
+        stale: false,
+        error: None,
         provider_id: provider_id.into(),
         windows,
         fetched_at: chrono::Utc::now().to_rfc3339(),
@@ -13353,6 +13351,8 @@ fn stored_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, Str
         .provider_rate_limits(provider_id, chrono::Utc::now())
         .map_err(to_string)?;
     Ok(ProviderUsageSnapshot {
+        stale: false,
+        error: None,
         provider_id: provider_id.into(),
         fetched_at: windows
             .iter()
@@ -13380,7 +13380,11 @@ fn stored_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, Str
 ///
 /// Best-effort by design: a limit Gyro could not write down must never be the
 /// reason a provider call or its usage row fails.
-fn remember_provider_rate_limits(provider_id: &str, windows: &[ProviderRateLimitWindow]) {
+fn remember_provider_rate_limits(
+    provider_id: &str,
+    windows: &[ProviderRateLimitWindow],
+    observed_at: &str,
+) {
     if windows.is_empty() {
         return;
     }
@@ -13393,7 +13397,7 @@ fn remember_provider_rate_limits(provider_id: &str, windows: &[ProviderRateLimit
     };
     if let Err(error) = store.replace_provider_rate_limits(
         provider_id,
-        &provider_rate_limit_records(windows, &chrono::Utc::now().to_rfc3339()),
+        &provider_rate_limit_records(windows, observed_at),
     ) {
         warn_unrecorded_rate_limits(&error.to_string());
     }
@@ -13498,6 +13502,8 @@ fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot
         let response: CodexRateLimitsResponse = serde_json::from_value(payload)
             .map_err(|error| format!("Codex returned an unsupported usage response: {error}"))?;
         Ok(ProviderUsageSnapshot {
+            stale: false,
+            error: None,
             provider_id: provider_id.into(),
             windows: provider_usage_windows_from_codex(&response.rate_limits),
             fetched_at: chrono::Utc::now().to_rfc3339(),
@@ -20020,10 +20026,10 @@ fn claude_rate_limit_used_percent(info: &serde_json::Value) -> Option<i32> {
         "percentUsed",
         "percent_used",
     ] {
-        let value = info.get(key)?;
+        let Some(value) = info.get(key) else { continue };
         if let Some(number) = value.as_f64() {
             // Claude has sent both 0–1 fractions and 0–100 percentages.
-            let percent = if (0.0..=1.0).contains(&number) {
+            let percent = if key == "utilization" && (0.0..=1.0).contains(&number) {
                 (number * 100.0).round()
             } else {
                 number.round()
@@ -21103,6 +21109,9 @@ where
                 Err(_) => break,
             }
         }
+        if let Ok(mut output) = output.lock() {
+            output.reader_finished = true;
+        }
     });
 }
 
@@ -21158,11 +21167,14 @@ fn snapshot_terminal_process(
         }
     }
 
-    let (output, output_revision) = process
+    let (output, output_revision, output_complete) = process
         .output
         .lock()
-        .map(|value| snapshot_terminal_output(&value, known_output_revision))
-        .unwrap_or((None, 0));
+        .map(|value| {
+            let (output, revision) = snapshot_terminal_output(&value, known_output_revision);
+            (output, revision, value.reader_finished)
+        })
+        .unwrap_or((None, 0, false));
     let has_foreground_job = terminal_process_has_foreground_job(process);
     TerminalPaneSnapshot {
         pane_id: process.request.pane_id.clone(),
@@ -21174,6 +21186,7 @@ fn snapshot_terminal_process(
             .join(" "),
         output,
         output_revision,
+        output_complete,
         status: process.status.clone(),
         has_foreground_job,
         exit_code: process.exit_code,
@@ -21805,15 +21818,18 @@ fn claim_model_terminal(
         .terminals
         .lock()
         .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?;
-    terminals.retain(|_, owned| {
+    let is_running = |owned: &ModelTerminalResource| {
         app.state::<TerminalProcessManager>()
             .read(&owned.pane_id, None)
             .is_ok_and(|snapshot| snapshot.status == "running")
-    });
-    if terminals.contains_key(&bound.session_id) {
+    };
+    // Keep completed resources readable until their owning chat replaces them.
+    // Another chat starting a command must not erase a waiter's final result.
+    if terminals.get(&bound.session_id).is_some_and(is_running) {
         anyhow::bail!("this chat already owns a live model terminal");
     }
-    if terminals.len() >= MAX_MODEL_TERMINAL_PROCESSES {
+    if terminals.values().filter(|owned| is_running(owned)).count() >= MAX_MODEL_TERMINAL_PROCESSES
+    {
         anyhow::bail!("model terminal limit reached");
     }
     let resource_id = Uuid::new_v4().to_string();
@@ -22295,52 +22311,8 @@ fn execute_provider_capability(
                 Some(resource),
             )
         }
-        CapabilityId::TerminalRead | CapabilityId::TerminalStop => {
-            let resources = app.state::<ProviderCapabilityResourceManager>();
-            let owned = resources
-                .terminals
-                .lock()
-                .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?
-                .get(&bound.session_id)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("this chat has no model-owned terminal"))?;
-            if owned.workspace_key != bound.workspace_key || owned.session_id != bound.session_id {
-                anyhow::bail!("terminal resource ownership changed");
-            }
-            let snapshot = if request.capability_id == CapabilityId::TerminalRead {
-                app.state::<TerminalProcessManager>()
-                    .read(&owned.pane_id, None)?
-            } else {
-                let snapshot = app.state::<TerminalProcessManager>().stop(&owned.pane_id)?;
-                resources
-                    .terminals
-                    .lock()
-                    .ok()
-                    .map(|mut terminals| terminals.remove(&bound.session_id));
-                snapshot
-            };
-            let resource = CapabilityResourceRef {
-                id: owned.resource_id,
-                kind: "terminal".into(),
-                label: snapshot.title.clone(),
-            };
-            (
-                if request.capability_id == CapabilityId::TerminalRead {
-                    "Read model terminal output".into()
-                } else {
-                    "Stopped model terminal".into()
-                },
-                serde_json::json!({
-                    "pane": snapshot,
-                    "owner": {
-                        "kind": "model",
-                        "sessionId": owned.session_id,
-                        "turnId": owned.turn_id,
-                        "callId": owned.call_id,
-                    }
-                }),
-                Some(resource),
-            )
+        CapabilityId::TerminalRead | CapabilityId::TerminalWait | CapabilityId::TerminalStop => {
+            terminal_capability::execute(app, bound, request)?
         }
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => {
             let url =
@@ -23142,7 +23114,11 @@ fn handle_desktop_provider_capability_request(
         request.context.call_id,
         request.capability_id,
         CapabilityStatus::Running,
-        &format!("Running {}", request.capability_id),
+        &if request.capability_id == CapabilityId::TerminalWait {
+            "Waiting for command to finish".into()
+        } else {
+            format!("Running {}", request.capability_id)
+        },
         None,
     );
     match execute_provider_capability(app, &bound, &request) {
@@ -23180,16 +23156,29 @@ fn handle_desktop_provider_capability_request(
         }
         Err(error) => {
             let message = gyro_core::sanitize_capability_summary(&error.to_string());
+            let cancelled = request.capability_id == CapabilityId::TerminalWait
+                && message.contains("command wait cancelled");
             let _ = capability_event(
                 app,
                 &bound,
                 request.context.call_id,
                 request.capability_id,
-                CapabilityStatus::Failed,
+                if cancelled {
+                    CapabilityStatus::Cancelled
+                } else {
+                    CapabilityStatus::Failed
+                },
                 &message,
                 None,
             );
-            fail("execution-failed", message)
+            fail(
+                if cancelled {
+                    "cancelled"
+                } else {
+                    "execution-failed"
+                },
+                message,
+            )
         }
     }
 }
@@ -23400,7 +23389,7 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
             "taskId": { "type": "string" },
             "background": {
                 "type": "boolean",
-                "description": "Start the task in this chat's terminal and return immediately instead of waiting for it to exit. Use for dev servers, watchers, and other long-running commands, then read output with gyro_terminal_read and end it with gyro_terminal_stop."
+                "description": "Start the task in this chat's terminal and return immediately instead of waiting for it to exit. Use for dev servers, watchers, and other long-running commands, then wait for finite commands with gyro_terminal_wait, read output with gyro_terminal_read, or end it with gyro_terminal_stop."
             }
         }),
         CapabilityId::IdeOpenPanel => serde_json::json!({
@@ -23413,6 +23402,10 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
             "program": { "type": "string" },
             "args": { "type": "array", "items": { "type": "string" } },
             "cwd": { "type": "string" }
+        }),
+        CapabilityId::TerminalWait => serde_json::json!({
+            "resourceId": { "type": "string", "description": "resource.id returned when this chat started the command" },
+            "timeoutMs": { "type": "integer", "minimum": 0, "maximum": 60000, "default": 60000, "description": "Maximum wait per call. A running command keeps running; call wait again if needed." }
         }),
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => serde_json::json!({
             "url": { "type": "string" }
@@ -23479,6 +23472,7 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => vec!["taskId"],
         CapabilityId::IdeOpenPanel => vec!["panel"],
         CapabilityId::TerminalOpen => vec!["program"],
+        CapabilityId::TerminalWait => vec!["resourceId"],
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => vec!["url"],
         CapabilityId::BrowserClick => vec!["ref"],
         CapabilityId::BrowserType => vec!["text"],
@@ -25783,7 +25777,7 @@ mod tests {
     #[test]
     #[ignore = "requires a locally signed-in Claude Code CLI"]
     fn live_anthropic_provider_usage_reads_the_current_account() {
-        let snapshot = get_provider_usage_blocking("anthropic").unwrap();
+        let snapshot = fetch_anthropic_provider_usage("anthropic").unwrap();
 
         assert_eq!(snapshot.provider_id, "anthropic");
         assert!(!snapshot.windows.is_empty());

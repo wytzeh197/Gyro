@@ -4,6 +4,11 @@ import {
   sanitizeStoredIdeState,
   workbenchReducer,
 } from "../packages/ui/src/workbench-state.ts";
+import {
+  sourceControlTotals,
+  sourceControlTotalsLabel,
+  sourceControlTotalsScope,
+} from "../packages/ui/src/source-control-stats.ts";
 
 const reduce = (state, ...actions) => actions.reduce(workbenchReducer, state);
 const initial = createInitialWorkbenchState();
@@ -74,4 +79,81 @@ assert.ok(
     group.tabs.every((tab) => !tab.path.startsWith("gyro-diff:")),
   ),
 );
+// --- One +/- pair per repository -------------------------------------------
+// The Workspace sidebar and the chat Environment print the same slot. They used
+// to fill it from different quantities — the branch against main, and the
+// uncommitted working tree — and showed +487 -390 beside +335 -338 for the same
+// repository at the same moment. Both resolve it here now.
+
+const repo = (overrides) => ({
+  provider: "git",
+  available: true,
+  ahead: 0,
+  behind: 0,
+  additions: 335,
+  deletions: 338,
+  statsPartial: false,
+  files: [],
+  ...overrides,
+});
+
+assert.deepEqual(
+  sourceControlTotals(
+    repo({
+      comparedToMain: { additions: 487, deletions: 390, partial: false },
+    }),
+  ),
+  { kind: "branch", additions: 487, deletions: 390 },
+  "the branch against main is the headline figure, not the working tree",
+);
+
+assert.deepEqual(
+  sourceControlTotals(repo({ comparedToMain: undefined })),
+  { kind: "working-tree", additions: 335, deletions: 338 },
+  "without a comparison the working tree stands in",
+);
+assert.equal(
+  sourceControlTotalsScope(
+    sourceControlTotals(repo({ comparedToMain: undefined })),
+  ).includes("Uncommitted"),
+  true,
+  "and the fallback says what it measured rather than borrowing the branch's meaning",
+);
+
+assert.deepEqual(
+  sourceControlTotals(
+    repo({ comparedToMain: { additions: 487, deletions: 390, partial: true } }),
+  ),
+  { kind: "working-tree", additions: 335, deletions: 338 },
+  "a partial comparison is not the branch total",
+);
+assert.deepEqual(
+  sourceControlTotals(
+    repo({
+      statsPartial: true,
+      comparedToMain: { additions: 0, deletions: 0, partial: true },
+    }),
+  ),
+  { kind: "unavailable" },
+  "with neither number complete the row admits it has no count",
+);
+
+assert.deepEqual(
+  sourceControlTotals(
+    repo({
+      additions: 12,
+      deletions: 3,
+      comparedToMain: { additions: 0, deletions: 0, partial: false },
+    }),
+  ),
+  { kind: "clean" },
+  "Clean means the branch matches main, even with edits still in the working tree",
+);
+assert.deepEqual(
+  sourceControlTotals(repo({ available: false })),
+  { kind: "unavailable" },
+  "a repository Gyro cannot read has no count to show",
+);
+assert.equal(sourceControlTotalsLabel({ kind: "clean" }), "Clean");
+
 console.log("Source-control review tab lifecycle checks passed.");

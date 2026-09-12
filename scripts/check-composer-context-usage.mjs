@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import {
+  providerUsageFromSnapshot,
+  providerUsageAfterError,
+} from "../apps/desktop/src/provider-usage-state.ts";
 
 import {
   composerLimitWindows,
@@ -412,3 +416,92 @@ assert.deepEqual(
 );
 
 console.log("Composer context usage checks passed.");
+
+// A partial stream event must not hide another still-active window.
+const windowReset = new Date(now + 3_600_000).toISOString();
+const separateWindows = [
+  event("20", "assistant-message", "", {
+    providerId: "anthropic",
+    rateLimits: [
+      {
+        id: "weekly",
+        label: "Weekly limit",
+        usedPercent: 12,
+        resetsAt: windowReset,
+      },
+    ],
+  }),
+  event("21", "assistant-message", "", {
+    providerId: "anthropic",
+    rateLimits: [
+      {
+        id: "five-hour",
+        label: "5-hour limit",
+        usedPercent: 93,
+        resetsAt: windowReset,
+      },
+    ],
+  }),
+];
+const retained = composerLimitWindows(
+  separateWindows,
+  { providerId: "anthropic" },
+  [{ id: "five-hour", label: "5-hour limit", resetsAt: windowReset }],
+  now,
+);
+assert.deepEqual(
+  retained.map((window) => window.percent),
+  [93, 12],
+);
+const expired = composerLimitWindows(
+  separateWindows,
+  { providerId: "anthropic" },
+  [],
+  now + 3_600_001,
+);
+assert.deepEqual(
+  expired.map((window) => window.percent),
+  [undefined, undefined],
+);
+const newWindow = composerLimitWindows(
+  separateWindows,
+  { providerId: "anthropic" },
+  [
+    {
+      id: "five-hour",
+      label: "5-hour limit",
+      resetsAt: new Date(now + 7_200_000).toISOString(),
+    },
+  ],
+  now,
+);
+assert.equal(newWindow[0].percent, undefined);
+
+// Cached backend fallbacks must reach the visible state with their real age
+// and explanation, even though they still have usable windows.
+const cachedState = providerUsageFromSnapshot({
+  providerId: "anthropic",
+  windows: [{ id: "five-hour", label: "5-hour limit", usedPercent: 93 }],
+  fetchedAt: "2026-09-12T13:00:00Z",
+  stale: true,
+  error: "Rate limited",
+});
+assert.equal(cachedState.status, "available");
+assert.equal(cachedState.stale, true);
+assert.equal(cachedState.error, "Rate limited");
+const offlineState = providerUsageAfterError(
+  "anthropic",
+  cachedState,
+  "Offline",
+);
+assert.equal(offlineState.windows[0].usedPercent, 93);
+assert.equal(offlineState.fetchedAt, cachedState.fetchedAt);
+assert.equal(offlineState.error, "Offline");
+const recoveredState = providerUsageFromSnapshot({
+  providerId: "anthropic",
+  windows: [{ id: "five-hour", label: "5-hour limit", usedPercent: 94 }],
+  fetchedAt: "2026-09-12T13:02:00Z",
+  stale: false,
+});
+assert.equal(recoveredState.error, undefined);
+assert.equal(recoveredState.stale, false);

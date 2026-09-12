@@ -444,11 +444,25 @@ export function composerLimitWindows(
         resetsAt: stringValue(record, "resetsAt"),
       });
     }
-    break;
   }
 
   for (const window of polledWindows) {
-    byId.set(window.id, window);
+    const previous = byId.get(window.id);
+    const sameReset =
+      window.resetsAt &&
+      previous?.resetsAt &&
+      Math.floor(Date.parse(window.resetsAt) / 1000) ===
+        Math.floor(Date.parse(previous.resetsAt) / 1000);
+    byId.set(window.id, {
+      ...window,
+      usedPercent:
+        window.usedPercent ?? (sameReset ? previous?.usedPercent : undefined),
+    });
+  }
+
+  // Cached readings and thread events must not survive their allowance reset.
+  for (const [id, window] of byId) {
+    if (window.resetsAt && Date.parse(window.resetsAt) <= now) byId.delete(id);
   }
 
   // A provider that names windows Gyro does not model is describing its own

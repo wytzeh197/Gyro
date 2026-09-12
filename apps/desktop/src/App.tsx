@@ -1,3 +1,4 @@
+import { useProviderUsage } from "./use-provider-usage";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import { terminalOutputUpdate } from "./terminal-output";
@@ -48,6 +49,7 @@ import {
   createInitialWorkbenchState,
   discardedSideChatSessionIds,
   isChatCompanionTabId,
+  resolveChatRailPanel,
   staleSideChatSessionIds,
   withoutSideChatSessions,
   createNotification,
@@ -64,6 +66,7 @@ import {
   normalizedWorkspaceTrustPath,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  workspaceRelativeFilePath,
   workspaceRootForPath,
   workspacePathExcluded,
   normalizedConfig,
@@ -83,6 +86,7 @@ import {
   providersForConfig,
   resolveCleanMachinePath,
   resolvedWorkspaceSettings,
+  promoteQueuedMessage,
   selectQueuedMessageDelivery,
   persistableChatGridState,
   sanitizeStoredIdeState,
@@ -142,7 +146,6 @@ import {
   type ProviderCapabilitySupport,
   type ProjectCapabilityPolicy,
   type ProviderId,
-  type ProviderUsageState,
   type SessionUsageTotals,
   type UsageSafetySnapshot,
   type ProviderLedgerSummary,
@@ -222,6 +225,11 @@ import {
   type ProviderStreamOrderState,
   upsertStreamingAssistantEvent,
 } from "./provider-stream-events";
+import {
+  chatPaneEnvironmentControls,
+  useChatEnvironmentVisibility,
+  useSoloChatEnvironmentControls,
+} from "./chat-environment-rail";
 import { useWorkspaceExplorerFiles } from "./workspace-explorer";
 import { useGyroUpdater } from "./update-controller";
 import {
@@ -509,7 +517,6 @@ const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
 const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const NEW_CHAT_DRAFT_KEY = "new";
 const PROVIDER_STREAM_FLUSH_MS = 80;
-const PROVIDER_USAGE_REFRESH_INTERVAL_MS = 60_000;
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
@@ -521,12 +528,6 @@ type BrowserPreviewCheck = {
   diagnostics: BrowserPreviewDiagnostic[];
   diagnosticsSupported: boolean;
   diagnosticsCaptured: boolean;
-};
-
-type ProviderUsageSnapshot = {
-  providerId: ProviderId;
-  windows: ProviderUsageState["windows"];
-  fetchedAt: string;
 };
 
 type OllamaDiscovery = {
@@ -898,9 +899,6 @@ export function App() {
   const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>([]);
   const [isCheckingSystemAccess, setIsCheckingSystemAccess] = useState(false);
   const systemAccessBootstrapRef = useRef(false);
-  const [providerUsageByProvider, setProviderUsageByProvider] = useState<
-    Partial<Record<ProviderId, ProviderUsageState>>
-  >({});
   // What each chat has spent, read from Gyro's usage ledger. Unlike the
   // provider quota windows above, this covers every provider, including the
   // ones whose CLIs report no token counts at all.
@@ -915,10 +913,6 @@ export function App() {
     Partial<Record<ProviderId, ProviderLedgerSummary>>
   >({});
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const providerUsageRequestRef = useRef<Partial<Record<ProviderId, number>>>(
-    {},
-  );
-  const providerUsageInFlightRef = useRef(new Set<ProviderId>());
   const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
   const providerStreamOrderRef = useRef<ProviderStreamOrderState>(new Map());
   const providerStreamFlushTimerRef = useRef<number>();
@@ -965,6 +959,7 @@ export function App() {
   const latestMenuBarOutcomeIdRef = useRef<string>();
   const queuedChatDispatchesRef = useRef(new Set<string>());
   const stoppedChatSessionsRef = useRef(new Set<string>());
+  const steeringChatSessionsRef = useRef(new Set<string>());
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
@@ -977,11 +972,18 @@ export function App() {
   // whichever pane has focus. The solo chat surfaces (workspace AI view, empty
   // grid, onboarding) all share one pane key, since only one of them is ever on
   // screen at a time.
-  // Plan and Environment are not companion tabs — they still take a pane's rail
-  // on their own, so each pane keeps its own toggle alongside the dock.
+  // Plan is not a companion tab — it still takes a pane's rail on its own, so
+  // each pane keeps its own toggle alongside the dock.
   const [paneLegacyPanelByPaneId, setPaneLegacyPanelByPaneId] = useState<
     Record<string, ChatSidePanelId | undefined>
   >({});
+  const paneEnvironment = useChatEnvironmentVisibility();
+  const clearPaneLegacyPanel = useCallback((paneId: string) => {
+    setPaneLegacyPanelByPaneId((current) => ({
+      ...current,
+      [paneId]: undefined,
+    }));
+  }, []);
   const [companion, dispatchCompanion] = useReducer(
     chatCompanionReducer,
     {
@@ -1131,18 +1133,26 @@ export function App() {
         .map((provider) => provider.id),
     [config],
   );
-  // Plan and Environment are not companion tabs: they still take the rail on
-  // their own, and take precedence while open so the toggle that opened them
-  // has a visible effect. Closing one hands the rail back to the dock.
+  // Plan is not a companion tab: it still takes the rail on its own, and takes
+  // precedence while open so the toggle that opened it has a visible effect.
+  // Closing it hands the rail back to the dock, and the dock's absence hands it
+  // back to the Environment.
   const legacyRailPanel: ChatSidePanelId | undefined =
     workbench.preferences.activeChatPanel &&
+    workbench.preferences.activeChatPanel !== "environment" &&
     !isChatCompanionTabId(workbench.preferences.activeChatPanel)
       ? workbench.preferences.activeChatPanel
-      : workbench.preferences.chatEnvironmentRailOpen
-        ? "environment"
-        : undefined;
-  const activeChatPanel: ChatSidePanelId | undefined =
-    legacyRailPanel ?? activeChatCompanionPanel(companion, SOLO_CHAT_PANE_ID);
+      : undefined;
+  const soloCompanionPanel = activeChatCompanionPanel(
+    companion,
+    SOLO_CHAT_PANE_ID,
+  );
+  const activeChatPanel: ChatSidePanelId | undefined = resolveChatRailPanel({
+    companionPanel: soloCompanionPanel,
+    // A solo chat is never tiled, so the Environment is on unless withdrawn.
+    isEnvironmentVisible: workbench.preferences.chatEnvironmentRailOpen,
+    legacyPanel: legacyRailPanel,
+  });
   const commandProfiles = terminalLaunchProfiles(
     config.commandProfiles,
     providersForConfig(config),
@@ -1163,12 +1173,12 @@ export function App() {
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
   const workspaceRoots = useMemo(
-    () =>
-      workspaceFolderPaths(
-        activeWorkspaceRoot,
-        workbench.preferences.workspaceFolders,
-      ),
-    [activeWorkspaceRoot, workbench.preferences.workspaceFolders],
+    () => workspaceFolderPaths(
+      activeWorkspaceRoot,
+      workbench.preferences.workspaceFolders,
+      activeWorkspaceRoot ? workbench.preferences.projectDetails?.[activeWorkspaceRoot]?.primaryFolder : undefined,
+    ),
+    [activeWorkspaceRoot, workbench.preferences.workspaceFolders, workbench.preferences.projectDetails],
   );
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
@@ -1239,6 +1249,13 @@ export function App() {
   const closeLegacyRail = useCallback(() => {
     dispatchWorkbench({ type: "set-chat-panel" });
   }, []);
+  const soloEnvironment = useSoloChatEnvironmentControls({
+    companionPanel: soloCompanionPanel,
+    dispatchCompanion,
+    dispatchWorkbench,
+    legacyPanel: legacyRailPanel,
+    paneId: SOLO_CHAT_PANE_ID,
+  });
   const setCompanionWidth = useCallback((width: number) => {
     dispatchCompanion({ type: "resize-panel", width });
     dispatchWorkbench({ type: "set-chat-panel-width", width });
@@ -1406,28 +1423,30 @@ export function App() {
           message,
           turnId,
         });
-        const response = await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
-          "run_provider_chat",
-          {
-            request: {
-              sessionId,
-              message,
-              turnId,
-              providerId: sessionModel.providerId ?? config.selectedProviderId,
-              providerLabel: sessionModel.providerLabel,
-              modelId: sessionModel.modelId,
-              modelLabel: sessionModel.modelLabel,
-              reasoningEffort: sessionModel.reasoningEffort,
-              requireCommandApproval: config.requireCommandApproval,
-              requireFileEditApproval: config.requireFileEditApproval,
-              fullAccess: Boolean(config.fullAccess),
-              mode: "normal",
-              attachments: [],
-              suggestTitle: false,
-              workspacePath: parent?.workspacePath ?? workspacePath ?? "",
+        const response =
+          await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
+            "run_provider_chat",
+            {
+              request: {
+                sessionId,
+                message,
+                turnId,
+                providerId:
+                  sessionModel.providerId ?? config.selectedProviderId,
+                providerLabel: sessionModel.providerLabel,
+                modelId: sessionModel.modelId,
+                modelLabel: sessionModel.modelLabel,
+                reasoningEffort: sessionModel.reasoningEffort,
+                requireCommandApproval: config.requireCommandApproval,
+                requireFileEditApproval: config.requireFileEditApproval,
+                fullAccess: Boolean(config.fullAccess),
+                mode: "normal",
+                attachments: [],
+                suggestTitle: false,
+                workspacePath: parent?.workspacePath ?? workspacePath ?? "",
+              },
             },
-          },
-        );
+          );
         setSideChatThreads((current) => ({
           ...current,
           [paneId]: {
@@ -1492,6 +1511,10 @@ export function App() {
   };
   const selectSoloChatPanel = useCallback(
     (panel?: ChatSidePanelId) => {
+      if (panel === "environment") {
+        soloEnvironment.show();
+        return;
+      }
       if (panel && isChatCompanionTabId(panel)) {
         dispatchWorkbench({ type: "set-chat-panel" });
         openCompanionTab(panel, SOLO_CHAT_PANE_ID);
@@ -1499,7 +1522,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "set-chat-panel", panel });
     },
-    [openCompanionTab],
+    [openCompanionTab, soloEnvironment],
   );
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
@@ -1681,8 +1704,18 @@ export function App() {
     setIsGoalComposerActive(false);
   }, [activeSessionId]);
   const derivedActiveTurn = useMemo(
-    () => deriveActiveTurn(deferredEventsForTurn, activeSession?.title),
-    [activeSession?.title, deferredEventsForTurn],
+    () =>
+      deriveActiveTurn(
+        deferredEventsForTurn,
+        activeSession?.title,
+        activeSession?.workspacePath ?? workspacePath,
+      ),
+    [
+      activeSession?.title,
+      activeSession?.workspacePath,
+      deferredEventsForTurn,
+      workspacePath,
+    ],
   );
   const activeSessionHasTranscriptEvents = useMemo(
     () =>
@@ -2110,148 +2143,12 @@ export function App() {
     checkSystemAccess,
     workbench.preferences.lastSettingsSection,
   ]);
-  const refreshProviderUsage = useCallback(
-    async (providerId: ProviderId, showFailureNotification = false) => {
-      if (providerUsageInFlightRef.current.has(providerId)) return;
-      const request = (providerUsageRequestRef.current[providerId] ?? 0) + 1;
-      providerUsageRequestRef.current[providerId] = request;
-      setProviderUsageByProvider((current) => ({
-        ...current,
-        [providerId]: {
-          providerId,
-          status: current[providerId]?.windows.length ? "available" : "loading",
-          windows: current[providerId]?.windows ?? [],
-          fetchedAt: current[providerId]?.fetchedAt,
-          stale: current[providerId]?.stale,
-        },
-      }));
-
-      if (!providerSupportsUsage(providerId)) {
-        setProviderUsageByProvider((current) => ({
-          ...current,
-          [providerId]: {
-            providerId,
-            status: "unavailable",
-            windows: [],
-            // No plan windows (5h/weekly) on this account type — spend is the ledger.
-            error: undefined,
-          },
-        }));
-        return;
-      }
-
-      if (!isTauriRuntime()) {
-        setProviderUsageByProvider((current) => ({
-          ...current,
-          [providerId]: {
-            providerId,
-            status: "unavailable",
-            windows: [],
-            error: "Live account usage is available in the Gyro desktop app.",
-          },
-        }));
-        return;
-      }
-
-      providerUsageInFlightRef.current.add(providerId);
-      try {
-        const snapshot = await invoke<ProviderUsageSnapshot>(
-          "get_provider_usage",
-          { providerId },
-        );
-        if (request !== providerUsageRequestRef.current[providerId]) return;
-        const hasWindows = snapshot.windows.length > 0;
-        const hasMeasured = snapshot.windows.some(
-          (window) =>
-            typeof window.usedPercent === "number" &&
-            Number.isFinite(window.usedPercent),
-        );
-        setProviderUsageByProvider((current) => ({
-          ...current,
-          [providerId]: {
-            providerId,
-            status: hasWindows ? "available" : "unavailable",
-            windows: snapshot.windows,
-            fetchedAt: snapshot.fetchedAt,
-            error: hasWindows
-              ? undefined
-              : providerId === "openai"
-                ? "Codex did not report an active rolling usage window."
-                : hasMeasured
-                  ? undefined
-                  : "No usage recorded yet for this provider. Send a message to start the ledger.",
-          },
-        }));
-      } catch (error) {
-        if (request !== providerUsageRequestRef.current[providerId]) return;
-        const detail = String(error);
-        setProviderUsageByProvider((current) => {
-          const previous = current[providerId];
-          const hasCachedWindows = Boolean(previous?.windows.length);
-          return {
-            ...current,
-            [providerId]: {
-              providerId,
-              status: hasCachedWindows ? "available" : "error",
-              windows: previous?.windows ?? [],
-              fetchedAt: previous?.fetchedAt,
-              stale: hasCachedWindows,
-              error: detail,
-            },
-          };
-        });
-        if (showFailureNotification) {
-          notify(
-            "command-failed",
-            "Provider usage could not be loaded",
-            detail,
-          );
-        }
-      } finally {
-        providerUsageInFlightRef.current.delete(providerId);
-      }
-    },
-    [notify],
-  );
-
-  useEffect(() => {
-    if (
-      backgroundUsageProviderIds.length === 0 &&
-      backgroundLedgerProviderIds.length === 0
-    ) {
-      return undefined;
-    }
-    const refreshInBackground = () => {
-      for (const providerId of backgroundUsageProviderIds) {
-        void refreshProviderUsage(providerId);
-      }
-      for (const providerId of backgroundLedgerProviderIds) {
-        void refreshProviderLedger(providerId);
-      }
-    };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") {
-        refreshInBackground();
-      }
-    };
-    refreshInBackground();
-    const interval = window.setInterval(
-      refreshInBackground,
-      PROVIDER_USAGE_REFRESH_INTERVAL_MS,
-    );
-    window.addEventListener("focus", refreshInBackground);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshInBackground);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [
-    backgroundLedgerProviderIds,
+  const { providerUsageByProvider, refreshProviderUsage } = useProviderUsage({
+    notify,
     backgroundUsageProviderIds,
+    backgroundLedgerProviderIds,
     refreshProviderLedger,
-    refreshProviderUsage,
-  ]);
+  });
 
   useEffect(() => {
     if (
@@ -10028,34 +9925,36 @@ export function App() {
             );
             applyCouncilChatResponse(persistedSession.id, councilResponse);
           } else {
-            const providerResponse = await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
-              "run_provider_chat",
-              {
-                request: {
-                  sessionId: persistedSession.id,
-                  message,
-                  turnId,
-                  providerId:
-                    sessionModel.providerId ??
-                    selectedProvider?.id ??
-                    config.selectedProviderId,
-                  providerLabel:
-                    sessionModel.providerLabel ?? selectedProvider?.displayName,
-                  modelId: sessionModel.modelId,
-                  modelLabel: sessionModel.modelLabel,
-                  reasoningEffort: sessionModel.reasoningEffort,
-                  requireCommandApproval,
-                  requireFileEditApproval,
-                  fullAccess,
-                  mode: turnMode,
-                  goal: turnGoal?.text ? turnGoal : undefined,
-                  plan: turnPlan.items.length ? turnPlan : undefined,
-                  attachments: persistedTurnAttachments,
-                  suggestTitle: shouldSuggestTitle,
-                  workspacePath: persistedSession.workspacePath,
+            const providerResponse =
+              await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
+                "run_provider_chat",
+                {
+                  request: {
+                    sessionId: persistedSession.id,
+                    message,
+                    turnId,
+                    providerId:
+                      sessionModel.providerId ??
+                      selectedProvider?.id ??
+                      config.selectedProviderId,
+                    providerLabel:
+                      sessionModel.providerLabel ??
+                      selectedProvider?.displayName,
+                    modelId: sessionModel.modelId,
+                    modelLabel: sessionModel.modelLabel,
+                    reasoningEffort: sessionModel.reasoningEffort,
+                    requireCommandApproval,
+                    requireFileEditApproval,
+                    fullAccess,
+                    mode: turnMode,
+                    goal: turnGoal?.text ? turnGoal : undefined,
+                    plan: turnPlan.items.length ? turnPlan : undefined,
+                    attachments: persistedTurnAttachments,
+                    suggestTitle: shouldSuggestTitle,
+                    workspacePath: persistedSession.workspacePath,
+                  },
                 },
-              },
-            );
+              );
             applyProviderChatResponse(persistedSession.id, providerResponse);
           }
           didDeliverProviderResponse = true;
@@ -10077,7 +9976,10 @@ export function App() {
         } catch (error) {
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
-          if (wasCancelled) {
+          if (
+            wasCancelled &&
+            !steeringChatSessionsRef.current.delete(optimisticSessionId)
+          ) {
             stoppedChatSessionsRef.current.add(optimisticSessionId);
           }
           if (!wasCancelled)
@@ -10225,34 +10127,35 @@ export function App() {
           );
           applyCouncilChatResponse(targetSessionId, councilResponse);
         } else {
-          const providerResponse = await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
-            "run_provider_chat",
-            {
-              request: {
-                sessionId: targetSessionId,
-                message,
-                turnId,
-                providerId:
-                  sessionModel.providerId ??
-                  selectedProvider?.id ??
-                  config.selectedProviderId,
-                providerLabel:
-                  sessionModel.providerLabel ?? selectedProvider?.displayName,
-                modelId: sessionModel.modelId,
-                modelLabel: sessionModel.modelLabel,
-                reasoningEffort: sessionModel.reasoningEffort,
-                requireCommandApproval,
-                requireFileEditApproval,
-                fullAccess,
-                mode: turnMode,
-                goal: turnGoal?.text ? turnGoal : undefined,
-                plan: turnPlan.items.length ? turnPlan : undefined,
-                attachments: turnAttachments,
-                suggestTitle: shouldSuggestTitle,
-                workspacePath: chatWorkspacePath,
+          const providerResponse =
+            await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
+              "run_provider_chat",
+              {
+                request: {
+                  sessionId: targetSessionId,
+                  message,
+                  turnId,
+                  providerId:
+                    sessionModel.providerId ??
+                    selectedProvider?.id ??
+                    config.selectedProviderId,
+                  providerLabel:
+                    sessionModel.providerLabel ?? selectedProvider?.displayName,
+                  modelId: sessionModel.modelId,
+                  modelLabel: sessionModel.modelLabel,
+                  reasoningEffort: sessionModel.reasoningEffort,
+                  requireCommandApproval,
+                  requireFileEditApproval,
+                  fullAccess,
+                  mode: turnMode,
+                  goal: turnGoal?.text ? turnGoal : undefined,
+                  plan: turnPlan.items.length ? turnPlan : undefined,
+                  attachments: turnAttachments,
+                  suggestTitle: shouldSuggestTitle,
+                  workspacePath: chatWorkspacePath,
+                },
               },
-            },
-          );
+            );
           applyProviderChatResponse(targetSessionId, providerResponse);
         }
         didDeliverProviderResponse = true;
@@ -10268,7 +10171,12 @@ export function App() {
       } catch (error) {
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
-        if (wasCancelled) stoppedChatSessionsRef.current.add(targetSessionId);
+        if (
+          wasCancelled &&
+          !steeringChatSessionsRef.current.delete(targetSessionId)
+        ) {
+          stoppedChatSessionsRef.current.add(targetSessionId);
+        }
         if (!wasCancelled)
           dispatchWorkbench({
             type: "set-provider-readiness",
@@ -11083,11 +10991,17 @@ export function App() {
   );
 
   const stopChatSession = useCallback(
-    (sessionId: string) => {
+    (sessionId: string, options?: { pauseQueue?: boolean }) => {
       // Pause synchronously, before cancellation releases the sender.
-      stoppedChatSessionsRef.current.add(sessionId);
+      // Steer skips this so the promoted queued turn can send once Stop
+      // finishes; a plain Stop still holds the rest of the queue.
+      if (options?.pauseQueue !== false) {
+        stoppedChatSessionsRef.current.add(sessionId);
+      }
       void invoke("stop_provider_chat", { sessionId }).catch((error) => {
-        stoppedChatSessionsRef.current.delete(sessionId);
+        if (options?.pauseQueue !== false) {
+          stoppedChatSessionsRef.current.delete(sessionId);
+        }
         setQueueRetryTick((current) => current + 1);
         notify("command-failed", "Stop failed", String(error));
       });
@@ -11107,11 +11021,63 @@ export function App() {
 
   const steerQueuedChatMessage = useCallback(
     (messageId: string) => {
-      // Queued turns are context from an earlier moment. Dismissing one must
-      // not promote it into a fresh send (or leave a ghost row in the queue).
-      removeQueuedChatMessage(messageId);
+      const sessionId = Object.entries(chatMessageQueues).find(([, queued]) =>
+        queued.some((item) => item.id === messageId),
+      )?.[0];
+      if (!sessionId) {
+        return;
+      }
+      if (
+        queuedChatDispatchMessageIdsRef.current.get(sessionId) === messageId
+      ) {
+        notify(
+          "terminal",
+          "Message already sending",
+          "Stop the active response if you do not want this queued turn to continue.",
+        );
+        return;
+      }
+      const selected = (chatMessageQueues[sessionId] ?? []).find(
+        (item) => item.id === messageId,
+      );
+      if (!selected) {
+        return;
+      }
+      setChatMessageQueues((current) => {
+        const promoted = promoteQueuedMessage(
+          current[sessionId] ?? [],
+          messageId,
+        );
+        if (!promoted) {
+          return current;
+        }
+        const [head, ...rest] = promoted;
+        if (!head) {
+          return current;
+        }
+        return {
+          ...current,
+          [sessionId]: [
+            {
+              ...head,
+              deliveryAttempts: 0,
+              retryAt: undefined,
+              status: "waiting",
+            },
+            ...rest,
+          ],
+        };
+      });
+      // Keep the queue live: Stop would otherwise park it until a manual send.
+      steeringChatSessionsRef.current.add(sessionId);
+      stoppedChatSessionsRef.current.delete(sessionId);
+      if (sendingSessionIdsRef.current.has(sessionId)) {
+        stopChatSession(sessionId, { pauseQueue: false });
+        return;
+      }
+      setQueueRetryTick((current) => current + 1);
     },
-    [removeQueuedChatMessage],
+    [chatMessageQueues, notify, stopChatSession],
   );
 
   const appendPlanEvent = useCallback(
@@ -12327,6 +12293,10 @@ export function App() {
           paneId,
           profile,
           startingOutput: `Reconnecting ${profile.displayName}: ${process.displayCommand}`,
+          // Restart is in-place: the user is already looking at this pane
+          // (companion or drawer). Revealing the workspace drawer is what
+          // stacked a second Shell under the chat companion on "Start again".
+          reveal: false,
         });
         if (!started) {
           dispatchWorkbench({
@@ -14194,11 +14164,7 @@ export function App() {
       250,
     );
     return () => window.clearTimeout(timeout);
-  }, [
-    refreshIdeSourceControl,
-    workspaceActionRoot,
-    workspaceChangeGeneration,
-  ]);
+  }, [refreshIdeSourceControl, workspaceActionRoot, workspaceChangeGeneration]);
 
   useEffect(() => {
     const root =
@@ -14733,7 +14699,10 @@ export function App() {
       if (event.kind === "file-edit-proposed") {
         dispatchWorkbench({
           type: "sync-diff-event",
-          path: pathFromSessionEvent(event),
+          path: pathFromSessionEvent(
+            event,
+            activeSession?.workspacePath ?? workspacePath,
+          ),
           message: event.message,
           source: "agent-generated",
           turnId: eventTurnId,
@@ -14744,10 +14713,12 @@ export function App() {
       }
     });
   }, [
+    activeSession?.workspacePath,
     derivedActiveTurn?.id,
     deferredEventsForTurn,
     notify,
     workbench.activeTurn?.id,
+    workspacePath,
   ]);
 
   useEffect(() => {
@@ -14798,6 +14769,7 @@ export function App() {
       browserOverlayOccluded={browserOverlayOccluded}
       cliLaunchPreset={workbench.preferences.cliLaunchPreset}
       diffReview={workbench.diffReview}
+      workspacePath={activeSession?.workspacePath ?? workspacePath}
       terminalSourceControl={selectedTerminalSourceControl}
       isTerminalSourceControlLoading={
         terminalSourceControlLoadingPaneId === selectedTerminalPane?.id
@@ -14925,7 +14897,7 @@ export function App() {
       profiles={commandProfiles}
       renderTerminalPaneBody={(pane) => (
         <LiveTerminalPaneBody
-          isActive={pane.id === workbench.selectedTerminalPaneId}
+          isActive={pane.id === selectedTerminalPane?.id}
           onBell={(paneId) => {
             if (paneId !== selectedTerminalPaneIdRef.current) {
               dispatchWorkbench({
@@ -15038,7 +15010,7 @@ export function App() {
     profiles: commandProfiles,
     renderTerminalPaneBody: (pane) => (
       <LiveTerminalPaneBody
-        isActive={pane.id === workbench.selectedTerminalPaneId}
+        isActive={pane.id === selectedTerminalPane?.id}
         onBell={(paneId) => {
           if (paneId !== selectedTerminalPaneIdRef.current) {
             dispatchWorkbench({
@@ -15253,11 +15225,19 @@ export function App() {
       pane.kind === "session" ? deriveChatMode(paneEvents) : pendingNewChatMode;
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
-    // Plan and Environment still take the rail on their own; the dock's tab
-    // shows through whenever neither is open.
+    // Plan still takes the rail on its own; the dock's tab shows through when
+    // it is closed, and the Environment shows through when both are.
     const paneLegacyPanel = paneLegacyPanelByPaneId[pane.paneId];
-    const panePanel: ChatSidePanelId | undefined =
-      paneLegacyPanel ?? activeChatCompanionPanel(companion, pane.paneId);
+    const paneCompanionPanel = activeChatCompanionPanel(companion, pane.paneId);
+    const paneEnvironmentVisible = paneEnvironment.isVisible(
+      pane.paneId,
+      options.isTiled,
+    );
+    const panePanel: ChatSidePanelId | undefined = resolveChatRailPanel({
+      companionPanel: paneCompanionPanel,
+      isEnvironmentVisible: paneEnvironmentVisible,
+      legacyPanel: paneLegacyPanel,
+    });
     const isFocused = pane.paneId === activeChatLayout?.focusedPaneId;
     const queue =
       pane.kind === "session" ? (chatMessageQueues[pane.sessionId] ?? []) : [];
@@ -15279,13 +15259,26 @@ export function App() {
         [pane.paneId]: current[pane.paneId] === panel ? undefined : panel,
       }));
     };
+    const paneEnvironmentControls = chatPaneEnvironmentControls({
+      clearLegacyPanel: () => clearPaneLegacyPanel(pane.paneId),
+      closeDock: () =>
+        dispatchCompanion({ type: "close-dock", paneId: pane.paneId }),
+      companionPanel: paneCompanionPanel,
+      focusPane: () => focusChatPane(pane),
+      isTiled: options.isTiled,
+      isVisible: paneEnvironmentVisible,
+      legacyPanel: paneLegacyPanel,
+      paneId: pane.paneId,
+      visibility: paneEnvironment,
+    });
     const selectPanePanel = (panel: ChatSidePanelId) => {
+      if (panel === "environment") {
+        paneEnvironmentControls.show();
+        return;
+      }
       focusChatPane(pane);
       if (isChatCompanionTabId(panel)) {
-        setPaneLegacyPanelByPaneId((current) => ({
-          ...current,
-          [pane.paneId]: undefined,
-        }));
+        clearPaneLegacyPanel(pane.paneId);
         openCompanionTab(panel, pane.paneId);
         return;
       }
@@ -15298,26 +15291,17 @@ export function App() {
       ...companionSurfaceProps(pane.paneId),
       onOpenCompanionTab: (tab: ChatCompanionTabId) => {
         focusChatPane(pane);
-        setPaneLegacyPanelByPaneId((current) => ({
-          ...current,
-          [pane.paneId]: undefined,
-        }));
+        clearPaneLegacyPanel(pane.paneId);
         openCompanionTab(tab, pane.paneId);
       },
       onReopenCompanionDock: () => {
         focusChatPane(pane);
-        setPaneLegacyPanelByPaneId((current) => ({
-          ...current,
-          [pane.paneId]: undefined,
-        }));
+        clearPaneLegacyPanel(pane.paneId);
         dispatchCompanion({ type: "reopen-dock", paneId: pane.paneId });
       },
       onShowCompanionLauncher: () => {
         focusChatPane(pane);
-        setPaneLegacyPanelByPaneId((current) => ({
-          ...current,
-          [pane.paneId]: undefined,
-        }));
+        clearPaneLegacyPanel(pane.paneId);
         dispatchCompanion({ type: "show-launcher", paneId: pane.paneId });
       },
     };
@@ -15529,7 +15513,7 @@ export function App() {
         onSetOnboardingStep={(step) =>
           dispatchWorkbench({ type: "set-onboarding-step", step })
         }
-        onToggleEnvironmentRail={() => togglePanePanel("environment")}
+        onToggleEnvironmentRail={paneEnvironmentControls.toggle}
         onTogglePlanPanel={() => togglePanePanel("plan")}
         providerReadiness={workbench.providerReadiness}
         providerStatuses={workbench.providerStatuses}
@@ -15688,11 +15672,7 @@ export function App() {
       onProviderApprovalAction={handleProviderApprovalAction}
       onProviderStatusAction={handleProviderStatusAction}
       onSend={sendDraft}
-      onToggleEnvironmentRail={() =>
-        dispatchWorkbench({
-          type: "toggle-chat-environment-rail",
-        })
-      }
+      onToggleEnvironmentRail={soloEnvironment.toggle}
       onTogglePlanPanel={() => dispatchWorkbench({ type: "toggle-chat-plan" })}
       providerReadiness={workbench.providerReadiness}
       providerStatuses={workbench.providerStatuses}
@@ -15831,6 +15811,34 @@ export function App() {
       onToggleSourceControlFile={stageSourceControlFile}
       onPinSession={pinSession}
       onRenameSession={renameSession}
+      projectSettings={{
+        details: workbench.preferences.projectDetails ?? {},
+        folders: workbench.preferences.workspaceFolders,
+        pickFolder: async () => {
+          if (!isTauriRuntime()) return "/preview/Components";
+          const chosen = await open({
+            directory: true,
+            multiple: false,
+            title: "Add source folder",
+          });
+          return typeof chosen === "string" ? chosen : null;
+        },
+        save: (path, name, pinned, folders, primaryFolder) => {
+          dispatchWorkbench({
+            type: "set-project-details",
+            path,
+            name,
+            pinned,
+            primaryFolder,
+          });
+          dispatchWorkbench({
+            type: "set-workspace-folders",
+            workspacePath: path,
+            paths: folders,
+          });
+          if (path === activeWorkspaceRoot) setSelectedWorkspaceRoot(primaryFolder ?? path);
+        },
+      }}
       onRemoveProject={requestRemoveProject}
       onSelectDestination={selectDestination}
       onAddSessionToGrid={addSessionToChatGrid}
@@ -16042,11 +16050,7 @@ export function App() {
                     onSetOnboardingStep={(step) =>
                       dispatchWorkbench({ type: "set-onboarding-step", step })
                     }
-                    onToggleEnvironmentRail={() =>
-                      dispatchWorkbench({
-                        type: "toggle-chat-environment-rail",
-                      })
-                    }
+                    onToggleEnvironmentRail={soloEnvironment.toggle}
                     onTogglePlanPanel={() =>
                       dispatchWorkbench({ type: "toggle-chat-plan" })
                     }
@@ -16453,7 +16457,7 @@ export function App() {
           onOpenSystemAccessSettings={(scope: SystemAccessScopeId) =>
             void openSystemAccessSettings(scope)
           }
-          onResetUiState={() => dispatchWorkbench({ type: "reset-state" })}
+          onResetUiState={() => dispatchWorkbench({ type: "reset-ui-preferences" })}
           onSectionChange={(section: SettingsSectionId) =>
             dispatchWorkbench({ type: "set-settings-section", section })
           }
@@ -16701,9 +16705,7 @@ export function App() {
               : chatDraftModels[activeDraftKey]
           }
           workspaceMode={workbench.workspaceMode}
-          onToggleEnvironmentRail={() =>
-            dispatchWorkbench({ type: "toggle-chat-environment-rail" })
-          }
+          onToggleEnvironmentRail={soloEnvironment.toggle}
           onTogglePlanPanel={() =>
             dispatchWorkbench({ type: "toggle-chat-plan" })
           }
@@ -16940,7 +16942,9 @@ function loadInitialWorkbenchState(): WorkbenchState {
         ...base.preferences,
         ...parsed.preferences,
         activeChatPanel: undefined,
-        chatEnvironmentRailOpen: false,
+        // A restart returns the chat to its resting state: no panel on the
+        // rail, and the Environment showing beneath where one was.
+        chatEnvironmentRailOpen: true,
         theme:
           legacyTheme ??
           storedThemeMode(parsed.preferences?.theme) ??
@@ -17395,6 +17399,13 @@ function LiveTerminalPaneBody({
         onClick={(event) => {
           event.stopPropagation();
           onSelect(pane.id);
+          if (
+            statusRef.current === "restored" ||
+            statusRef.current === "failed"
+          ) {
+            onReconnect(pane.id);
+            return;
+          }
           terminalRef.current?.focus();
         }}
         ref={hostRef}
@@ -18362,21 +18373,27 @@ function terminalSizeForTemplate(template: TerminalTemplate) {
   return { cols: 80, rows: 20 };
 }
 
-function pathFromSessionEvent(event: SessionEvent): string {
+function pathFromSessionEvent(
+  event: SessionEvent,
+  workspacePath?: string,
+): string {
   const payload = recordFromUnknown(event.payload);
   const directPath = stringFromRecord(payload, "path");
   const dataPath = stringFromRecord(recordFromUnknown(payload?.data), "path");
-  if (directPath || dataPath) {
-    return directPath ?? dataPath ?? "packages/ui/src/surfaces.tsx";
-  }
-  const explicitPath = event.message.match(/(?:file|path):\s*([^\s]+)/i)?.[1];
-  if (explicitPath) {
-    return explicitPath;
-  }
-  return (
-    event.message.match(/[\w./-]+\.(?:css|json|md|rs|ts|tsx)/)?.[0] ??
-    "packages/ui/src/surfaces.tsx"
-  );
+  const rawPath = (() => {
+    if (directPath || dataPath) {
+      return directPath ?? dataPath ?? "packages/ui/src/surfaces.tsx";
+    }
+    const explicitPath = event.message.match(/(?:file|path):\s*([^\s]+)/i)?.[1];
+    if (explicitPath) {
+      return explicitPath;
+    }
+    return (
+      event.message.match(/[\w./-]+\.(?:css|json|md|rs|ts|tsx)/)?.[0] ??
+      "packages/ui/src/surfaces.tsx"
+    );
+  })();
+  return workspaceRelativeFilePath(rawPath, workspacePath);
 }
 
 function turnIdFromSessionEvent(event: SessionEvent): string | undefined {
@@ -18397,6 +18414,7 @@ function turnIdFromSessionEvent(event: SessionEvent): string | undefined {
 function deriveActiveTurn(
   events: SessionEvent[],
   sessionTitle = "Desktop session",
+  workspacePath?: string,
 ): WorkbenchTurn | undefined {
   let latestUserEvent: SessionEvent | undefined;
   let latestUserIndex = -1;
@@ -18445,7 +18463,7 @@ function deriveActiveTurn(
     }
     lastEvent = event;
     if (event.kind === "file-edit-proposed") {
-      changedFiles.add(pathFromSessionEvent(event));
+      changedFiles.add(pathFromSessionEvent(event, workspacePath));
     } else if (event.kind === "approval-requested") {
       const payload = recordFromUnknown(event.payload);
       const proposalId = stringFromRecord(payload, "proposalId");

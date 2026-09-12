@@ -811,6 +811,7 @@ export function upsertStreamingAssistantEvent(
     // the answer, instead of gluing an entire turn into one bubble.
     const startsBlock =
       existing.message.length > 0 &&
+      endsStreamedTextBlock(existing.message) &&
       hasActivityAfter(events, existingIndex, turnId);
     // Mirror the Rust stream separator: a text block that resumes after tools
     // must not glue onto the previous sentence when the provider omits a
@@ -914,6 +915,26 @@ export function appendChatResponseDelta(message: string, textDelta: string) {
     return message;
   }
   return truncateChatResponse(`${message}${textDelta}`);
+}
+
+/**
+ * Where a new text block is allowed to open.
+ *
+ * A block used to open on the sole question of whether a tool had run since the
+ * last delta. But an activity frame can land between two deltas of the same
+ * word, and then that test says yes in the middle of "pad|ding": the separator
+ * went into the durable message and a segment mark was recorded at the seam, so
+ * the rail drew half a sentence and the answer body opened on the other half.
+ *
+ * A boundary is a break the provider already emitted, a fenced block just
+ * closed, or sentence-ending punctuation — trailing quotes, brackets and
+ * markdown emphasis included, since providers close those after the period.
+ * Anything else is mid-thought, and the delta continues the block it is in.
+ */
+const TEXT_BLOCK_END = /(?:[.!?:]["\u2019\u201d')\]]*[*_]{0,2}|```|\n)[ \t]*$/;
+
+export function endsStreamedTextBlock(value: string) {
+  return value.length > 0 && TEXT_BLOCK_END.test(value);
 }
 
 /** Paragraph-separate a new text block when the provider omitted a leading break. */
