@@ -117,9 +117,11 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  createContext,
   Fragment,
   memo,
   useCallback,
+  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -137,12 +139,13 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { browserCapabilityText } from "./chat-run.ts";
 import themePreviewSystem from "./assets/theme-preview-system.png";
 import themePreviewLight from "./assets/theme-preview-light.png";
 import themePreviewDark from "./assets/theme-preview-dark.png";
 import gyroLogoTransparentDark from "./assets/gyro-logo-transparent-dark.png";
 import gyroLogoTransparentLight from "./assets/gyro-logo-transparent.png";
-import { structuredCommentaryBlocks } from "./chat-commentary";
+import { finalAssistantResponseText } from "./chat-commentary";
 import { buildRunModel, elapsedMsBetween, formatRunDuration } from "./chat-run";
 import {
   askAboutFilePrompt,
@@ -3759,7 +3762,6 @@ function WorkspaceSidebarContent({
       isActive={session.id === activeSessionId}
       isSending={sendingSessionIds.includes(session.id)}
       isUnreadComplete={completedSessionIds.includes(session.id)}
-      hasModelTerminal={modelTerminalSessionIds.includes(session.id)}
       isNested={isNested}
       isMenuOpen={openSessionMenuId === session.id}
       isPinned={pinnedSessionIds.includes(session.id)}
@@ -5854,7 +5856,6 @@ function SessionSidebarRow({
   isActive,
   isSending,
   isUnreadComplete = false,
-  hasModelTerminal = false,
   isNested,
   isPinned,
   isOpen,
@@ -5874,7 +5875,6 @@ function SessionSidebarRow({
   isActive: boolean;
   isSending: boolean;
   isUnreadComplete?: boolean;
-  hasModelTerminal?: boolean;
   isNested?: boolean;
   isPinned: boolean;
   isOpen?: boolean;
@@ -5982,17 +5982,12 @@ function SessionSidebarRow({
               ? "Chat working"
               : isUnreadComplete
                 ? "Chat completed, unread"
-                : hasModelTerminal
-                  ? "Model terminal running"
-                  : undefined
+                : undefined
           }
           className={[
             "gyro-session-time",
             isSending ? "is-working" : "",
             !isSending && isUnreadComplete ? "is-complete" : "",
-            !isSending && !isUnreadComplete && hasModelTerminal
-              ? "is-model-terminal"
-              : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -6001,17 +5996,13 @@ function SessionSidebarRow({
               ? "Chat working in the background"
               : isUnreadComplete
                 ? "Chat completed — open to view"
-                : hasModelTerminal
-                  ? "Model-owned terminal is still running"
-                  : undefined
+                : undefined
           }
         >
           {isSending ? (
             <CircleDashed aria-hidden="true" size={13} />
           ) : isUnreadComplete ? (
             <span aria-hidden="true" className="gyro-session-complete-dot" />
-          ) : hasModelTerminal ? (
-            <Terminal aria-hidden="true" size={12} />
           ) : (
             relativeSessionTime(session.updatedAt)
           )}
@@ -6885,13 +6876,37 @@ export function ChatGridSurface({
           finishDrag();
         }
       }}
-      onDragOver={(event) => {
+      onDragOverCapture={(event) => {
         const source = chatDragSource(event.dataTransfer);
         if (source) {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
           setDragSource(source);
         }
+      }}
+      onDropCapture={(event) => {
+        if (!chatDragSource(event.dataTransfer)) return;
+        // Own the entire grid drop, including floating panels and the gaps
+        // between tiles. A child must not swallow a valid chat drop.
+        const targets = event.currentTarget.querySelectorAll<HTMLElement>(
+          ".gyro-chat-grid-drop-zone",
+        );
+        let nearest: ChatGridDropZone | undefined;
+        let distance = Infinity;
+        targets.forEach((target) => {
+          const bounds = target.getBoundingClientRect();
+          const dx = Math.max(bounds.left - event.clientX, 0, event.clientX - bounds.right);
+          const dy = Math.max(bounds.top - event.clientY, 0, event.clientY - bounds.bottom);
+          const candidateDistance = dx * dx + dy * dy;
+          const zone = dropZones.find((item) => item.position === target.dataset.position);
+          if (zone && candidateDistance < distance) {
+            nearest = zone;
+            distance = candidateDistance;
+          }
+        });
+        const zone = nearest ?? dropZones.find((item) => item.id === dropTargetId);
+        if (zone) handleDrop(event, zone);
+        else finishDrag();
       }}
     >
       {occupiedCount === 0 && children ? (
@@ -7652,7 +7667,7 @@ export function ChatSurface({
    * reader is left behind again a moment later. This holds the pin until the
    * reader scrolls up themselves.
    */
-  const isFollowingTranscriptBottomRef = useRef(false);
+  const isFollowingTranscriptBottomRef = useRef(true);
   /** Previous offset, so a scroll up can be told from content growing below. */
   const lastTranscriptScrollTopRef = useRef(0);
   const autoOpenedPlanDecisionKeyRef = useRef<string>();
@@ -7745,7 +7760,8 @@ export function ChatSurface({
   const handleMediaDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
       if (
-        Array.from(event.dataTransfer.items).some(
+        dataTransferHasType(event.dataTransfer, "Files") ||
+        Array.from(event.dataTransfer.items ?? []).some(
           (item) => item.kind === "file",
         )
       ) {
@@ -7766,6 +7782,7 @@ export function ChatSurface({
         return;
       }
       event.preventDefault();
+      event.stopPropagation();
       onAttachMediaFiles?.(files);
     },
     [onAttachMediaFiles],
@@ -7862,6 +7879,15 @@ export function ChatSurface({
       top: transcript.scrollHeight,
     });
   }, []);
+  const transcriptSessionId = transcriptEvents[0]?.sessionId;
+  useLayoutEffect(() => {
+    // Reused chat surfaces must not inherit another chat's scroll position.
+    // Use the rendered events so deferred history loads are seated as well.
+    isFollowingTranscriptBottomRef.current = true;
+    lastTranscriptScrollTopRef.current = 0;
+    pinTranscriptToBottom();
+    updateTranscriptScrollPosition();
+  }, [transcriptSessionId, pinTranscriptToBottom, updateTranscriptScrollPosition]);
   useEffect(() => {
     const animationFrame = window.requestAnimationFrame(() => {
       pinTranscriptToBottom();
@@ -7888,10 +7914,23 @@ export function ChatSurface({
       updateTranscriptScrollPosition();
     };
     updateDockClearance();
-    const observer = new ResizeObserver(updateDockClearance);
+    // Resize notifications run during layout. Batch the resulting scroll/style
+    // writes into the next frame so composer growth cannot feed the observer
+    // recursively while a reply is streaming.
+    let resizeFrame: number | undefined;
+    const observer = new ResizeObserver(() => {
+      if (resizeFrame !== undefined) return;
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        updateDockClearance();
+      });
+    });
     observer.observe(transcript);
     if (dock) observer.observe(dock);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame);
+    };
   }, [
     liveChangesTarget,
     pinTranscriptToBottom,
@@ -8196,6 +8235,8 @@ export function ChatSurface({
         browserOverlayOccluded={browserOverlayOccluded}
         capabilityActivities={capabilityActivities}
         capabilityPolicy={capabilityPolicy}
+        isAgentRunning={isComposerSending === true}
+        onStopAgent={onStopChat}
         diffReview={diffReview}
         sourceControl={sourceControl}
         onPlanItemStatusChange={onPlanItemStatusChange}
@@ -8324,8 +8365,8 @@ export function ChatSurface({
         ]
           .filter(Boolean)
           .join(" ")}
-        onDragOver={handleMediaDragOver}
-        onDrop={handleMediaDrop}
+        onDragOverCapture={handleMediaDragOver}
+        onDropCapture={handleMediaDrop}
       >
         <div
           aria-hidden="true"
@@ -8465,8 +8506,8 @@ export function ChatSurface({
       ]
         .filter(Boolean)
         .join(" ")}
-      onDragOver={handleMediaDragOver}
-      onDrop={handleMediaDrop}
+      onDragOverCapture={handleMediaDragOver}
+      onDropCapture={handleMediaDrop}
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
@@ -9284,6 +9325,8 @@ function ChatSidePanel({
   browserNativeHost = false,
   browserOverlayOccluded = false,
   capabilityActivities = [],
+  isAgentRunning = false,
+  onStopAgent,
   capabilityPolicy,
   diffReview,
   sourceControl,
@@ -9324,6 +9367,9 @@ function ChatSidePanel({
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
   capabilityActivities?: CapabilityActivity[];
+  /** A run is live in this chat; the browser shows the agent's presence. */
+  isAgentRunning?: boolean;
+  onStopAgent?: () => void;
   capabilityPolicy?: ProjectCapabilityPolicy;
   diffReview?: DiffReview;
   sourceControl?: SourceControlState;
@@ -9537,7 +9583,10 @@ function ChatSidePanel({
   if (activePanel === "browser") {
     return (
       <ResizableBrowserRail
+        capabilityActivities={capabilityActivities}
         chromeless={chromeless}
+        isAgentRunning={isAgentRunning}
+        onStopAgent={onStopAgent}
         browserNativeHost={browserNativeHost}
         browserOverlayOccluded={browserOverlayOccluded}
         browserPreview={browserPreview}
@@ -10027,6 +10076,69 @@ function ChatSidePanel({
  * and closing it returns the chat to an uninterrupted canvas without discarding
  * the tabs that were open.
  */
+/**
+ * With the browser as the dock's only tab, the tab row and the address row say
+ * the same thing twice. The dock lends its header to the browser toolbar
+ * instead, so the page gets that height back.
+ */
+const CompanionAddressSlotContext = createContext<HTMLElement | null>(null);
+
+function withinSlot(
+  slot: HTMLElement | null,
+  node: ReactNode,
+  /** Scoped styles follow a portal only if the wrapper carries their scope. */
+  wrapperClassName?: string,
+) {
+  if (!slot) return node;
+  return createPortal(
+    wrapperClassName ? <div className={wrapperClassName}>{node}</div> : node,
+    slot,
+  );
+}
+
+/** How long the presence strip lingers after the agent's last browser action. */
+const BROWSER_AGENT_PRESENCE_MS = 6_000;
+
+/**
+ * The agent's latest browser action while a run is live and the action is
+ * recent, worded like its rail row. Browser calls are fast, so a strip that
+ * only showed while a call was running would flicker rather than inform.
+ */
+function useBrowserAgentPresence(
+  activities: CapabilityActivity[],
+  isRunning: boolean,
+) {
+  const latest = useMemo(() => {
+    let found: CapabilityActivity | undefined;
+    for (const activity of activities) {
+      if (!activity.capabilityId.startsWith("browser-")) continue;
+      if (!found || activity.createdAt >= found.createdAt) found = activity;
+    }
+    return found;
+  }, [activities]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => setNow(Date.now()), [latest]);
+  const startedAt = latest ? Date.parse(latest.createdAt) : Number.NaN;
+  const isCallRunning = latest?.status === "running";
+  const remaining = Number.isFinite(startedAt)
+    ? startedAt + BROWSER_AGENT_PRESENCE_MS - now
+    : -1;
+  useEffect(() => {
+    if (!isRunning || isCallRunning || remaining <= 0) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), remaining + 50);
+    return () => window.clearTimeout(timer);
+  }, [isCallRunning, isRunning, remaining]);
+  if (!isRunning || !latest || (!isCallRunning && remaining <= 0)) {
+    return undefined;
+  }
+  const text = browserCapabilityText(
+    latest.capabilityId,
+    latest.status,
+    latest.target,
+  );
+  return text.description ? `${text.label} ${text.description}` : text.label;
+}
+
 function ChatCompanionDock({
   activeTab,
   browserTabLabel,
@@ -10059,6 +10171,8 @@ function ChatCompanionDock({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isBrowserFocus = activeTab === "browser";
+  const isBrowserAddress = isBrowserFocus && openTabs.length === 1;
+  const [addressSlot, setAddressSlot] = useState<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLElement | null>(null);
   const {
     beginResize,
@@ -10104,6 +10218,7 @@ function ChatCompanionDock({
         "gyro-chat-companion",
         isResizing ? "is-resizing" : "",
         isBrowserFocus ? "is-browser-focus" : "",
+        isBrowserAddress ? "is-browser-address" : "",
         isExpanded ? "is-expanded" : "",
         activeTab ? `is-${activeTab}` : "is-launcher",
       ]
@@ -10127,6 +10242,9 @@ function ChatCompanionDock({
         type="button"
       />
       <header className="gyro-chat-companion-tabs">
+        {isBrowserAddress ? (
+          <div className="gyro-chat-companion-address" ref={setAddressSlot} />
+        ) : null}
         <div className="gyro-chat-companion-tab-list" role="tablist">
           {openTabs.map((id) => {
             const Icon = chatCompanionTabIcons[id];
@@ -10220,7 +10338,11 @@ function ChatCompanionDock({
         role="tabpanel"
       >
         {activeTab ? (
-          children
+          <CompanionAddressSlotContext.Provider
+            value={isBrowserAddress ? addressSlot : null}
+          >
+            {children}
+          </CompanionAddressSlotContext.Provider>
         ) : (
           <nav className="gyro-companion-launcher" aria-label="Companion tools">
             {chatCompanionTabs.map(({ icon: Icon, id, label }) => (
@@ -13036,6 +13158,7 @@ export function FileTree({ files, selectedPath, onSelectFile }: FileTreeProps) {
 }
 
 type ChatThreadProps = {
+  isSending?: boolean;
   events: SessionEvent[];
   draft: string;
   onDraftChange: (value: string) => void;
@@ -13043,6 +13166,7 @@ type ChatThreadProps = {
 };
 
 export function ChatThread({
+  isSending = false,
   events,
   draft,
   onDraftChange,
@@ -13050,6 +13174,7 @@ export function ChatThread({
 }: ChatThreadProps) {
   return (
     <ChatSurface
+      isComposerSending={isSending}
       config={{
         commandProfiles: [],
         modelProviders: [],
@@ -15791,36 +15916,13 @@ export function DiffReviewSurface({
   onOpenInEditor?: (path: string) => void;
   onRunGitAction?: (actionId: GitReviewActionId) => void;
 }) {
-  const review = diffReview ?? {
-    files: [
-      {
-        path: "packages/ui/src/surfaces.tsx",
-        additions: 312,
-        deletions: 64,
-        source: "agent-generated" as const,
-        state: "pending" as const,
-        comments: 0,
-        lines: [
-          { number: 118, kind: "context" as const, content: "return (" },
-          {
-            number: 119,
-            kind: "removed" as const,
-            content: '<div className="gyro-static-pane">',
-          },
-          {
-            number: 119,
-            kind: "added" as const,
-            content: "<DiffReviewSurface compact />",
-          },
-        ],
-      },
-    ],
-    selectedPath: "packages/ui/src/surfaces.tsx",
-    approvalState: "pending" as const,
-    commitMessage: "Upgrade Gyro agent workbench UI surfaces",
+  const review: DiffReview = diffReview ?? {
+    files: [],
+    selectedPath: "",
+    approvalState: "pending",
+    commitMessage: "",
     collapsedDirectories: [],
     gitActions: [],
-    lastAction: "waiting for review",
   };
   const selectedFile =
     review.files.find((file) => file.path === review.selectedPath) ??
@@ -15879,8 +15981,9 @@ export function DiffReviewSurface({
               <strong title={selectedFile?.path}>{selectedDisplayPath}</strong>
               {selectedFile ? (
                 <span>
-                  Safety: {selectedFile.source} · {review.approvalState} ·{" "}
-                  {review.lastAction}
+                  <span className="gyro-diff-added-count">+{selectedFile.additions} added</span>
+                  {" · "}
+                  <span className="gyro-diff-removed-count">−{selectedFile.deletions} removed</span>
                 </span>
               ) : (
                 <span>No changes proposed</span>
@@ -15935,10 +16038,16 @@ export function DiffReviewSurface({
         <div className="gyro-inline-diff">
           {selectedFile ? (
             <>
+              {selectedFile.lines.length === 0 ? (
+                <div className="gyro-diff-tree-empty">No text preview available for this file.</div>
+              ) : null}
               {selectedFile.lines.map((line, index) => (
                 <div className={`gyro-diff-line is-${line.kind}`} key={index}>
-                  <span>{line.number}</span>
-                  <code>{line.content}</code>
+                  <span className="gyro-diff-line-number">{line.number}</span>
+                  <span className="gyro-diff-line-marker" aria-label={line.kind}>
+                    {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}
+                  </span>
+                  <code>{line.content || " "}</code>
                 </div>
               ))}
               <button
@@ -16708,7 +16817,10 @@ function readBrowserRailWidth(): number {
  * or narrow it (into the transcript), not to free-float the panel.
  */
 function ResizableBrowserRail({
+  capabilityActivities = [],
   chromeless = false,
+  isAgentRunning = false,
+  onStopAgent,
   browserPreview,
   browserNativeHost,
   browserOverlayOccluded,
@@ -16729,6 +16841,9 @@ function ResizableBrowserRail({
    * so the rail drops its own handle and title row and simply fills its slot.
    */
   chromeless?: boolean;
+  capabilityActivities?: CapabilityActivity[];
+  isAgentRunning?: boolean;
+  onStopAgent?: () => void;
   browserPreview?: BrowserPreview;
   browserNativeHost?: boolean;
   browserOverlayOccluded?: boolean;
@@ -16747,6 +16862,10 @@ function ResizableBrowserRail({
   ) => void;
 }) {
   const railRef = useRef<HTMLElement | null>(null);
+  const agentActivity = useBrowserAgentPresence(
+    capabilityActivities,
+    isAgentRunning,
+  );
   const [width, setWidth] = useState(readBrowserRailWidth);
   const [isResizing, setIsResizing] = useState(false);
   const resizeRef = useRef<{
@@ -16959,6 +17078,8 @@ function ResizableBrowserRail({
         onReload={onBrowserReload}
         onScreenshot={onBrowserScreenshot}
         onUrlChange={onBrowserUrlChange}
+        agentActivity={agentActivity}
+        onStopAgent={isAgentRunning ? onStopAgent : undefined}
       />
     </aside>
   );
@@ -16979,6 +17100,8 @@ export function BrowserPreviewSurface({
   onScreenshot,
   onOpenExternal,
   onHostBoundsChange,
+  agentActivity,
+  onStopAgent,
 }: {
   compact?: boolean;
   /** Chat rail uses a lighter chrome; workbench keeps full diagnostics chrome. */
@@ -16999,7 +17122,11 @@ export function BrowserPreviewSurface({
   onHostBoundsChange?: (
     bounds: { x: number; y: number; width: number; height: number } | null,
   ) => void;
+  /** What the agent is doing to this page right now, worded like its rail row. */
+  agentActivity?: string;
+  onStopAgent?: () => void;
 }) {
+  const addressSlot = useContext(CompanionAddressSlotContext);
   const preview =
     browserPreview ??
     ({
@@ -17157,24 +17284,30 @@ export function BrowserPreviewSurface({
         ? "gyro-ring is-done"
         : "gyro-ring is-idle";
 
+  const previewClassName = [
+    "gyro-browser-preview",
+    compact ? "is-compact" : "",
+    isChat ? "is-chat" : "is-workbench",
+    isBlank ? "is-blank" : "",
+    useNativeHost ? "is-native-host" : "",
+    overlayOccluded ? "is-occluded" : "",
+    isLoading ? "is-loading" : "",
+    isCapturing ? "is-capturing-frame" : "",
+    isLive ? "is-live" : "",
+    showingCapture ? "is-capture-view" : "",
+    `is-device-${preview.device}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div
-      className={[
-        "gyro-browser-preview",
-        compact ? "is-compact" : "",
-        isChat ? "is-chat" : "is-workbench",
-        isBlank ? "is-blank" : "",
-        useNativeHost ? "is-native-host" : "",
-        overlayOccluded ? "is-occluded" : "",
-        isLoading ? "is-loading" : "",
-        isCapturing ? "is-capturing-frame" : "",
-        isLive ? "is-live" : "",
-        showingCapture ? "is-capture-view" : "",
-        `is-device-${preview.device}`,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
+    <div className={previewClassName}>
+      {/* One grid row holds the toolbar and the presence strip, whether or not
+          the toolbar has moved into the dock header, so the frame keeps the
+          flexible row and the status bar keeps the last. */}
+      <div className="gyro-browser-preview-head">
+      {withinSlot(
+        isChat ? addressSlot : null,
       <div className="gyro-browser-preview-toolbar" ref={browserToolbarRef}>
         <div
           className="gyro-browser-nav-group"
@@ -17355,6 +17488,27 @@ export function BrowserPreviewSurface({
             <Globe2 size={14} />
           </button>
         </div>
+      </div>,
+        `${previewClassName} is-address-slot`,
+      )}
+      {isChat && agentActivity ? (
+        <div className="gyro-browser-agent-strip" role="status">
+          <span aria-hidden="true" className="gyro-browser-agent-dot" />
+          <span className="gyro-browser-agent-text">
+            <strong>Gyro is using this page</strong>
+            <span>{agentActivity}</span>
+          </span>
+          {onStopAgent ? (
+            <button
+              className="gyro-browser-agent-stop"
+              onClick={onStopAgent}
+              type="button"
+            >
+              Stop
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       </div>
       <div className="gyro-browser-frame">
         <div
@@ -20966,7 +21120,7 @@ function PlanUsageNotification({
   const detail = isDailyPace
     ? notice.windowId === "day"
       ? `Today is ${notice.percent}% of the weekly/100% limit (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
-      : `${notice.windowLabel} is ${notice.percent}% used — about one day's share of the weekly/100% limit.`
+      : `${notice.windowLabel} is ${notice.percent}% used — more than a day ahead of an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
     : `${notice.windowLabel} is ${notice.percent}% used.${
         notice.threshold >= 90 ? " Consider wrapping up this window." : ""
       }`;
@@ -25414,9 +25568,9 @@ function AssistantResponse({
   const council = useMemo(() => councilResponseFromEvent(event), [event]);
   // Repair glued stream blocks (`repo.Gyro is…`) so the final answer reads as
   // separate paragraphs rather than one thick run-on line.
-  const visibleMessage = structuredCommentaryBlocks(
+  const visibleMessage = finalAssistantResponseText(
     stripHiddenSessionTitleMarker(event.message),
-  ).join("\n\n");
+  );
   const artifacts = useMemo(
     () =>
       chatArtifactsFromEvent(event).filter(

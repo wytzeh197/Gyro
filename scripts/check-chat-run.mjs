@@ -954,6 +954,25 @@ assert.equal(
   "the session title marker should be dropped",
 );
 
+// Live streamed text still carries the marker until the turn settles; a block
+// holding only the marker must not draw as a narration row.
+assert.equal(
+  buildRunModel(
+    [
+      event(
+        "assistant-message",
+        "GYRO_SESSION_TITLE: Fix daily pace warning",
+        {},
+        0,
+      ),
+      activity("command", "pnpm test", {}, 1),
+    ],
+    { isRunning: true },
+  ).steps.length,
+  1,
+  "a streamed session title marker should be dropped",
+);
+
 assert.equal(
   buildRunModel([
     activity("commentary", 'GYRO_ARTIFACTS: {"items":[]}', {}, 0),
@@ -961,6 +980,94 @@ assert.equal(
   ]).steps.length,
   1,
   "the artifact marker should be dropped",
+);
+
+// A reply saved without block marks still keeps its opening narration out of
+// the answer when that opener reports checking in progress.
+{
+  const leaked = buildRunModel([
+    activity("command", "pnpm test", {}, 0),
+    event(
+      "assistant-message",
+      "I'll verify it in the real app as far as I can. First I'm checking whether the dev server is running, whether any existing fixtures can render the browser panel, and what the native browser smoke test covers.\n\nVerified. All four browser changes work in rendered UI.",
+      { kind: "provider-response", status: "done", timelineSequence: 1 },
+      1,
+    ),
+  ]);
+  assert.equal(
+    leaked.response?.message,
+    "Verified. All four browser changes work in rendered UI.",
+    "an in-progress opener should not lead the final answer",
+  );
+  const answerFirst = buildRunModel([
+    activity("command", "pnpm test", {}, 0),
+    event(
+      "assistant-message",
+      "The fix is in and the checks pass. Nothing else changed in the chat surface.\n\nI'm checking nothing further unless you ask.",
+      { kind: "provider-response", status: "done", timelineSequence: 1 },
+      1,
+    ),
+  ]);
+  assert.match(
+    answerFirst.response?.message ?? "",
+    /^The fix is in/,
+    "an answer that opens with its result must stay whole",
+  );
+}
+
+// Browser work names the verb and what it touched, in its own phase.
+const capabilityCall = (capabilityId, extra = {}, minutes = 0) =>
+  event(
+    "system-event",
+    capabilityId,
+    {
+      schema: "gyro.capability.v1",
+      kind: "capability-call",
+      capabilityId,
+      status: "completed",
+      ...extra,
+    },
+    minutes,
+  );
+const page = {
+  id: "browser-1",
+  kind: "browser",
+  label: "http://127.0.0.1:1437/chat-hardening.html?turn=1",
+};
+const clicked = workItemFromEvent(
+  capabilityCall("browser-click", { target: "Save", resource: page }),
+);
+assert.deepEqual(
+  clicked && runRowText({ kind: "work", id: "click", at: at(0), item: clicked }),
+  { label: "Clicked", description: "Save" },
+  "a browser click should name the element it touched",
+);
+const opened = workItemFromEvent(
+  capabilityCall("browser-open", { resource: page }),
+);
+assert.deepEqual(
+  opened && runRowText({ kind: "work", id: "open", at: at(0), item: opened }),
+  { label: "Opened page", description: "127.0.0.1:1437/chat-hardening.html" },
+  "a page action should show a compact page address",
+);
+const providerClick = workItemFromEvent(
+  activity("tool", "mcp__gyro_capabilities__gyro_browser_click", {
+    tool: "mcp__gyro_capabilities__gyro_browser_click",
+  }),
+);
+assert.equal(providerClick?.kind, "browser");
+assert.equal(providerClick?.action, "click");
+assert.deepEqual(
+  groupRunSteps(
+    buildRunModel([
+      capabilityCall("browser-read-page", { resource: page }, 0),
+      capabilityCall("browser-screenshot", { resource: page }, 1),
+    ]).steps,
+  ).map((step) =>
+    step.kind === "work-group" ? [step.groupKind, step.steps.length] : step.kind,
+  ),
+  [["browser", 2]],
+  "browser reads and captures should group as browser work, not workspace review",
 );
 
 // A non-activity system event becomes an approval beat rather than being lost.

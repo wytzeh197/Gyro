@@ -78,12 +78,19 @@ use walkdir::WalkDir;
 mod browser_smoke;
 mod git_line_counts;
 mod menu_bar;
+mod reply_segments;
+use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
 mod session_browser;
 mod source_control_review;
 mod system_access;
 mod terminal_capability;
 mod terminal_wait;
 mod workspace_capability_read;
+mod workspace_mutations;
+use workspace_mutations::{
+    create_file_mutation_proposal_impl, create_file_mutation_proposal_in_store,
+    resolve_file_mutation_proposal_impl,
+};
 
 #[cfg(test)]
 use gyro_core::{
@@ -1853,6 +1860,9 @@ struct ProviderRunnerOutput {
     retry_count: u32,
     resumed: bool,
     output_summary: Option<String>,
+    /// The stream's raw text and block starts, when the runner streamed text.
+    /// Saving the reply records where each block sits on the timeline.
+    streamed_text: Option<StreamedText>,
 }
 
 /// What a turn consumed of the model's context window.
@@ -5215,6 +5225,15 @@ fn run_provider_chat_blocking(
             "timelineSequence".into(),
             serde_json::Value::from(runner_output.activities.len() as u64),
         );
+        if let Some(segments) = runner_output.streamed_text.as_ref().and_then(|streamed| {
+            persisted_text_segments(
+                &artifact_extraction.message,
+                streamed,
+                &runner_output.activities,
+            )
+        }) {
+            object.insert("segments".into(), segments);
+        }
         if !artifact_extraction.items.is_empty() {
             object.insert(
                 "artifacts".into(),
@@ -10043,110 +10062,6 @@ fn write_workspace_file_impl(
     )
 }
 
-fn create_file_mutation_proposal_impl(
-    request: FileMutationProposalRequest,
-) -> anyhow::Result<MutationProposal> {
-    let store = SessionStore::open(GyroPaths::for_current_user()?)?;
-    let session_id = Uuid::parse_str(&request.session_id)?;
-    let turn_id = request
-        .turn_id
-        .as_deref()
-        .map(Uuid::parse_str)
-        .transpose()?;
-    let session = store
-        .get_session(session_id)?
-        .ok_or_else(|| anyhow::anyhow!("unknown session {session_id}"))?;
-    let root = session.workspace_path.canonicalize()?;
-    let candidate = validated_workspace_file_target(&root, &request.path)?;
-    if candidate.is_dir() {
-        anyhow::bail!("mutation proposal path is a directory");
-    }
-    let content_bytes = request.content.as_bytes();
-    if content_bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
-        anyhow::bail!("mutation proposal is too large");
-    }
-    if content_bytes.contains(&0) {
-        anyhow::bail!("binary mutation proposals are not supported");
-    }
-    let base_exists = candidate.exists();
-    let expected_hash = if base_exists {
-        let (current, _) =
-            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
-        if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
-            anyhow::bail!("workspace file is too large to edit in Gyro");
-        }
-        if current.contains(&0) {
-            anyhow::bail!("binary workspace files cannot be edited");
-        }
-        let current_hash = content_hash(&current);
-        if let Some(expected) = request.expected_hash.as_deref() {
-            if current_hash != expected {
-                anyhow::bail!("file changed on disk; reload before proposing an edit");
-            }
-        }
-        Some(current_hash)
-    } else {
-        if request.expected_hash.is_some() {
-            anyhow::bail!("cannot use an expected hash for a file that does not exist");
-        }
-        None
-    };
-    let proposal = store.create_mutation_proposal(
-        session_id,
-        turn_id,
-        &request.path,
-        request.content,
-        expected_hash,
-        base_exists,
-    )?;
-    let payload = mutation_approval_payload(&proposal, None);
-    store.append_event_with_turn_id(
-        session_id,
-        SessionEventKind::FileEditProposed,
-        format!("Proposed {}", proposal.path),
-        payload.clone(),
-        turn_id,
-    )?;
-    store.append_event_with_turn_id(
-        session_id,
-        SessionEventKind::ApprovalRequested,
-        format!("Review changes to {}", proposal.path),
-        payload,
-        turn_id,
-    )?;
-    let _ = store.mark_mutation_proposal_surfaced(proposal.id);
-    Ok(proposal)
-}
-
-fn resolve_file_mutation_proposal_impl(
-    request: FileMutationDecisionRequest,
-) -> anyhow::Result<FileMutationDecisionResult> {
-    let store = SessionStore::open(GyroPaths::for_current_user()?)?;
-    let proposal_id = Uuid::parse_str(&request.proposal_id)?;
-    let decision = match request.decision.as_str() {
-        "approve" => MutationDecision::Approve,
-        "reject" => MutationDecision::Reject,
-        _ => anyhow::bail!("mutation decision must be approve or reject"),
-    };
-    let result = decide_mutation_proposal(&store, proposal_id, decision)?;
-    let file = result
-        .changed_path
-        .as_ref()
-        .map(|_| {
-            read_workspace_file_with_limit(
-                &result.proposal.workspace_path.to_string_lossy(),
-                &result.proposal.path,
-                MAX_WORKSPACE_FILE_EDIT_BYTES,
-            )
-        })
-        .transpose()?;
-    Ok(FileMutationDecisionResult {
-        proposal: result.proposal,
-        event: result.event,
-        file,
-    })
-}
-
 fn validated_workspace_file_target(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
     let candidate = gyro_core::security::assert_path_inside_workspace(root, Path::new(path))?;
     let parent = candidate
@@ -14821,6 +14736,7 @@ fn run_ollama_chat(
             resume_cursor: None,
             retry_count: 0,
             resumed: false,
+            streamed_text: None,
             output_summary: Some(provider_output_summary(
                 "ollama-api",
                 "completed",
@@ -15214,6 +15130,7 @@ fn run_kimi_acp_chat(
         }),
         retry_count: 0,
         resumed: output.resumed,
+        streamed_text: None,
         output_summary: Some(provider_output_summary(
             runtime.runner,
             &output.stop_reason,
@@ -15354,6 +15271,7 @@ fn run_openai_codex_chat(
                     }),
                 retry_count: 0,
                 resumed: resume_cursor.is_some(),
+                streamed_text: None,
                 output_summary: Some(provider_output_summary(
                     "codex-cli",
                     output.status_label.as_str(),
@@ -15380,6 +15298,7 @@ fn run_openai_codex_chat(
                     }),
                 retry_count: 0,
                 resumed: resume_cursor.is_some(),
+                streamed_text: None,
                 output_summary: Some(provider_output_summary(
                     "codex-cli",
                     output.status_label.as_str(),
@@ -15411,6 +15330,7 @@ fn run_openai_codex_chat(
                 }),
             retry_count: 0,
             resumed: resume_cursor.is_some(),
+            streamed_text: None,
             output_summary: Some(provider_output_summary(
                 "codex-cli",
                 &format!(
@@ -15948,6 +15868,7 @@ fn run_openai_codex_app_server_chat(
             }),
             retry_count: 0,
             resumed: resume_id.is_some(),
+            streamed_text: None,
             output_summary: Some(provider_output_summary(
                 "codex-app-server",
                 "completed",
@@ -17229,6 +17150,10 @@ fn run_anthropic_claude_chat(
             }),
             retry_count: 0,
             resumed: resume_cursor.is_some(),
+            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
+                text,
+                blocks: output.text_blocks.clone(),
+            }),
             output_summary: Some(provider_output_summary(
                 "claude-code",
                 output.status_label.as_str(),
@@ -17262,6 +17187,10 @@ fn run_anthropic_claude_chat(
             }),
             retry_count: 0,
             resumed: resume_cursor.is_some(),
+            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
+                text,
+                blocks: output.text_blocks.clone(),
+            }),
             output_summary: Some(provider_output_summary(
                 "claude-code",
                 &format!(
@@ -19095,6 +19024,7 @@ struct StreamingCommandOutput {
     stdout: String,
     stderr: String,
     assistant_text: Option<String>,
+    text_blocks: Vec<StreamedTextBlock>,
     parsed_stream_json: bool,
     provider_session_id: Option<String>,
 }
@@ -19138,6 +19068,8 @@ struct StreamingCommandState {
     /// the assistant has already spoken. Without it, Claude's next block starts
     /// mid-stream with no leading newline and glues onto the previous sentence.
     text_block_separator_pending: bool,
+    /// Where each text block began, in `assistant_text` byte offsets.
+    text_blocks: Vec<StreamedTextBlock>,
     pending_delta_chunks: Vec<String>,
     pending_delta_chars: usize,
     provider_session_id: Option<String>,
@@ -19167,6 +19099,7 @@ impl StreamingCommandState {
             assistant_text_chars: 0,
             assistant_text_truncated: false,
             text_block_separator_pending: false,
+            text_blocks: Vec::new(),
             pending_delta_chunks: Vec::new(),
             pending_delta_chars: 0,
             provider_session_id: None,
@@ -19362,6 +19295,12 @@ impl StreamingCommandState {
     fn push_assistant_delta(&mut self, delta: &str) {
         if self.assistant_text_truncated {
             return;
+        }
+        if self.assistant_text.is_empty() || self.text_block_separator_pending {
+            self.text_blocks.push(StreamedTextBlock {
+                start: self.assistant_text.len(),
+                after_activity_id: self.activities.last().map(|activity| activity.id.clone()),
+            });
         }
         let separated = if self.text_block_separator_pending {
             self.text_block_separator_pending = false;
@@ -19589,6 +19528,7 @@ fn run_streaming_command(
         stderr: outcome.stderr,
         assistant_text: (!stream_state.assistant_text.trim().is_empty())
             .then_some(stream_state.assistant_text),
+        text_blocks: stream_state.text_blocks,
         parsed_stream_json: stream_state.parsed_stream_json,
         provider_session_id: stream_state.provider_session_id,
     })
@@ -19760,6 +19700,9 @@ fn handle_provider_stdout_line(
         merge_provider_rate_limit(&mut stream_state.rate_limits, rate_limit);
     }
     if provider_stream_opens_text_content_block(&value) {
+        // A new block means the previous one closed, so a title marker that
+        // ended it without a newline is complete.
+        publish_streamed_session_title(app, request, &stream_state.assistant_text, true);
         stream_state.note_new_text_content_block();
     }
     if let Some(commentary) = extract_provider_commentary_activity(&value) {
@@ -19774,6 +19717,10 @@ fn handle_provider_stdout_line(
     }
     let activities = extract_provider_activities(&value);
     if !activities.is_empty() {
+        // Tools only start after the text block before them closed. Without
+        // this, a marker line followed straight by a tool call left the
+        // session untitled until the next text arrived, often minutes later.
+        publish_streamed_session_title(app, request, &stream_state.assistant_text, true);
         for activity in activities {
             if let Some(activity) = stream_state.push_activity(activity) {
                 let activity_sequence = stream_state.activity_sequence(&activity);
@@ -21652,6 +21599,32 @@ fn capability_event(
     summary: &str,
     resource: Option<CapabilityResourceRef>,
 ) -> anyhow::Result<SessionEvent> {
+    capability_event_with_target(
+        app,
+        bound,
+        call_id,
+        capability_id,
+        status,
+        summary,
+        resource,
+        None,
+    )
+}
+
+/// `target` names what a browser action touched ("Save", "Search") so the run
+/// rail can say "Clicked Save" rather than an element ref. It is page content:
+/// untrusted, sanitized, and only ever displayed.
+#[allow(clippy::too_many_arguments)]
+fn capability_event_with_target(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    call_id: Uuid,
+    capability_id: CapabilityId,
+    status: CapabilityStatus,
+    summary: &str,
+    resource: Option<CapabilityResourceRef>,
+    target: Option<&str>,
+) -> anyhow::Result<SessionEvent> {
     let event = CapabilityCallEvent {
         schema: CAPABILITY_SCHEMA_V1.into(),
         kind: "capability-call".into(),
@@ -21665,7 +21638,13 @@ fn capability_event(
     };
     let store = open_store().map_err(anyhow::Error::msg)?;
     let session_id = Uuid::parse_str(&bound.session_id)?;
-    let payload = serde_json::to_value(event)?;
+    let mut payload = serde_json::to_value(event)?;
+    if let Some(target) = target
+        .map(gyro_core::sanitize_capability_summary)
+        .filter(|target| !target.is_empty())
+    {
+        payload["target"] = serde_json::json!(target);
+    }
     let stored = if let Some(turn_id) = bound.turn_id.as_deref() {
         store.append_event_with_turn_id(
             session_id,
@@ -22045,13 +22024,21 @@ fn execute_provider_capability(
                     "expectedHash is required when proposing changes to an existing file"
                 );
             }
-            let proposal = create_file_mutation_proposal_impl(FileMutationProposalRequest {
-                session_id: bound.session_id.clone(),
-                turn_id: bound.turn_id.clone(),
-                path: path.clone(),
-                content,
-                expected_hash,
-            })?;
+            let config = load_config_blocking().map_err(anyhow::Error::msg)?;
+            let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
+                && capability_full_access_enabled(&config);
+            let store = open_store().map_err(anyhow::Error::msg)?;
+            let proposal = create_file_mutation_proposal_in_store(
+                &store,
+                FileMutationProposalRequest {
+                    session_id: bound.session_id.clone(),
+                    turn_id: bound.turn_id.clone(),
+                    path: path.clone(),
+                    content,
+                    expected_hash,
+                },
+                apply_immediately,
+            )?;
             let proposal_id = proposal.id.to_string();
             if let Ok(store) = open_store() {
                 if let Ok(session_id) = Uuid::parse_str(&bound.session_id) {
@@ -22074,7 +22061,11 @@ fn execute_provider_capability(
                 label: path.clone(),
             };
             (
-                format!("Proposed changes to {path} for Workspace review"),
+                if apply_immediately {
+                    format!("Applied changes to {path}")
+                } else {
+                    format!("Proposed changes to {path} for Workspace review")
+                },
                 serde_json::to_value(proposal)?,
                 Some(resource),
             )
@@ -22326,7 +22317,8 @@ fn execute_provider_capability(
                     workspace_key: bound.workspace_key.clone(),
                     url: url.clone(),
                     bounds: None,
-                    visible: Some(true),
+                    // Navigation must not resurrect a closed or background host.
+                    visible: None,
                 },
             )
             .map_err(anyhow::Error::msg)?;
@@ -22456,6 +22448,13 @@ fn execute_provider_capability(
                     "title": "",
                 })
             });
+            // A fading action highlight would read as page UI to a model.
+            let _ = session_browser::call_agent(
+                app,
+                &bound.session_id,
+                "clearHighlight",
+                serde_json::json!({}),
+            );
             let snapshot = session_browser::capture_session_browser_png(app, &bound.session_id)
                 .map_err(anyhow::Error::msg)?;
             let paths = GyroPaths::for_current_user().map_err(anyhow::Error::msg)?;
@@ -23123,7 +23122,7 @@ fn handle_desktop_provider_capability_request(
     );
     match execute_provider_capability(app, &bound, &request) {
         Ok(result) => {
-            let _ = capability_event(
+            let _ = capability_event_with_target(
                 app,
                 &bound,
                 request.context.call_id,
@@ -23131,6 +23130,7 @@ fn handle_desktop_provider_capability_request(
                 CapabilityStatus::Completed,
                 &result.summary,
                 result.resource.clone(),
+                session_browser::browser_action_target(&result).as_deref(),
             );
             if let Some(resource) = result.resource.clone() {
                 let live_data = match resource.kind.as_str() {
@@ -25103,6 +25103,7 @@ mod tests {
                 resume_cursor: None,
                 retry_count: 0,
                 resumed: false,
+                streamed_text: None,
                 output_summary: None,
             })
         })
@@ -28073,6 +28074,7 @@ while True:
                 stdout: stdout.into(),
                 stderr: "tool failed after the answer".into(),
                 assistant_text: assistant.map(str::to_string),
+                text_blocks: Vec::new(),
                 parsed_stream_json: parsed_json,
                 provider_session_id: Some("sess-1".into()),
             };
@@ -29018,6 +29020,7 @@ while True:
                     resume_cursor: None,
                     retry_count: 0,
                     resumed: false,
+                    streamed_text: None,
                     output_summary: None,
                 })
             },
@@ -29136,6 +29139,7 @@ while True:
                     resume_cursor: None,
                     retry_count: 0,
                     resumed: false,
+                    streamed_text: None,
                     output_summary: None,
                 })
             },

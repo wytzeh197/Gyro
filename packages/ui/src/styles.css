@@ -26687,14 +26687,14 @@ button.gyro-account-menu-row:hover,
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
   .gyro-chat-surface.is-thread:not(.is-tiled) {
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
 }
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
   .gyro-chat-surface.is-thread:not(.is-tiled)
   > .gyro-chat-thread-topbar {
   box-sizing: border-box;
-  min-height: 52px;
+  min-height: 48px;
   padding-left: 212px;
 }
 
@@ -28459,6 +28459,7 @@ button.gyro-account-menu-row:hover,
   grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 .gyro-chat-grid-slot {
+  isolation: isolate;
   background: var(--gyro-app);
   border: 1px solid transparent;
   min-height: 0;
@@ -28606,7 +28607,7 @@ button.gyro-account-menu-row:hover,
   }
 }
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
-  min-height: 52px;
+  min-height: 48px;
   padding-right: 18px;
 }
 .gyro-chat-surface.is-tiled .gyro-thread-pills {
@@ -29484,16 +29485,16 @@ button.gyro-account-menu-row:hover,
   max-width: 76px;
 }
 
-/* Codex-style title bar: one tall row shared with the sidebar window controls. */
+/* The chat title row matches the 48px sidebar window controls. */
 .gyro-chat-surface.is-thread {
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
   row-gap: 0;
 }
 
 .gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
   box-sizing: border-box;
   gap: 8px;
-  min-height: 52px;
+  min-height: 48px;
   padding-inline: 16px;
 }
 
@@ -29592,7 +29593,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-surface.is-tiled .gyro-chat-thread-topbar {
-  min-height: 52px;
+  min-height: 48px;
 }
 
 /* Workspace shell foundation: an animated Activity Rail beside shared navigation. */
@@ -30121,14 +30122,12 @@ button.gyro-account-menu-row:hover,
 
 /* -- Topbar --------------------------------------------------------------- */
 
-/* A tiled pane shares the 52px title row its single-chat sibling uses. Pinning
-   this to 38px left the divider high with 14px of dead pane background beneath
-   it, so two chats side by side read as having a shorter header than one. */
+/* Tiled and single chats share the same compact title row and divider. */
 .gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
   box-sizing: border-box;
-  height: 52px;
-  min-height: 52px;
+  height: 48px;
+  min-height: 48px;
   padding-inline: max(14px, calc((100% - var(--gyro-chat-content-width)) / 2));
 }
 
@@ -36441,7 +36440,7 @@ textarea:focus-visible,
       > .gyro-chat-companion
     ) {
     grid-template-columns: minmax(320px, 1fr) auto;
-    grid-template-rows: 52px minmax(0, 1fr);
+    grid-template-rows: 48px minmax(0, 1fr);
   }
 
   .gyro-chat-surface.is-thread.has-environment.has-companion:not(.is-tiled)
@@ -36483,8 +36482,8 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--gyro-border-soft);
   box-sizing: border-box;
   gap: 8px;
-  height: 52px;
-  min-height: 52px;
+  height: 48px;
+  min-height: 48px;
   min-width: 0;
   padding: 0 12px 0 16px;
 }
@@ -40139,3 +40138,219 @@ textarea:focus-visible,
 .gyro-scm-file-actions-menu > button:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--gyro-danger) 9%, transparent); }
 .gyro-scm-file-actions-menu > button:focus-visible { outline: 1px solid var(--gyro-focus-ring); outline-offset: -1px; }
 .gyro-scm-file-actions-menu > button:disabled { opacity: .45; cursor: default; }
+
+/* Match the regular app's title row, not the dev window's higher traffic lights.
+   Center 28px navigation buttons in the 47px area above the header divider. */
+.gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings),
+.gyro-sidebar-windowbar.is-settings,
+.gyro-sidebar-restore-cluster {
+  align-items: flex-start;
+  box-sizing: border-box;
+  height: 48px;
+  min-height: 48px;
+  padding-top: 9.5px;
+  padding-bottom: 0;
+}
+
+/* Keep chat titles and actions on the same centerline as window navigation. */
+.gyro-chat-surface.is-thread > .gyro-chat-thread-topbar,
+.gyro-chat-surface.is-thread.has-companion > .gyro-chat-thread-topbar {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Gyro Browser: the agent's presence on the page it is using. */
+.gyro-browser-agent-strip {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-accent) 8%, var(--gyro-pane));
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-text);
+  display: flex;
+  flex-shrink: 0;
+  font-size: 12px;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 8px 4px 12px;
+}
+
+.gyro-browser-agent-dot {
+  animation: gyro-browser-agent-pulse 1.4s ease-in-out infinite;
+  background: var(--gyro-accent);
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 7px;
+  width: 7px;
+}
+
+.gyro-browser-agent-text {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.gyro-browser-agent-text strong {
+  font-weight: 600;
+}
+
+.gyro-browser-agent-text span {
+  color: var(--gyro-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gyro-browser-agent-stop {
+  background: transparent;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-text);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  height: 24px;
+  padding: 0 10px;
+}
+
+.gyro-browser-agent-stop:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+@keyframes gyro-browser-agent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-browser-agent-dot {
+    animation: none;
+  }
+}
+
+/* Browser as the dock's only tab: its toolbar takes the dock header, so the
+   tab row and the address row stop repeating each other. */
+.gyro-chat-companion-address {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gyro-chat-companion.is-browser-address .gyro-chat-companion-tab-list {
+  flex: 0 0 auto;
+}
+
+.gyro-chat-companion.is-browser-address .gyro-chat-companion-tab {
+  display: none;
+}
+
+.gyro-chat-companion.is-browser-address
+  .gyro-chat-companion-address
+  .gyro-browser-preview-toolbar {
+  background: transparent;
+  border-bottom: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+}
+
+/* The first row sizes to its head: the 44px toolbar, the toolbar plus the
+   presence strip, or nothing once the toolbar has moved into the header. */
+.gyro-chat-companion .gyro-browser-preview.is-chat {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+/* Toolbar and presence strip share the preview's first grid row. */
+.gyro-browser-preview-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The moved toolbar keeps the preview's classes so its chat styles still
+   apply; this wrapper only borrows them and must not lay out like a preview. */
+.gyro-chat-companion .gyro-browser-preview.is-chat.is-address-slot {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex: 1 1 auto;
+  grid-template-rows: none;
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.gyro-chat-companion.is-browser-address
+  .gyro-browser-preview.is-address-slot
+  .gyro-browser-preview-toolbar {
+  background: transparent;
+  border-bottom: 0;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-height: 0;
+  padding: 0;
+}
+
+/* Keep the complete patch legible in both the narrow Review rail and editor. */
+.gyro-diff-line {
+  grid-template-columns: 44px 18px minmax(0, 1fr);
+}
+.gyro-diff-line code {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-overflow: clip;
+  padding-right: 8px;
+  tab-size: 2;
+}
+.gyro-diff-line .gyro-diff-line-marker {
+  color: inherit;
+  padding-right: 0;
+  text-align: center;
+  font-weight: 600;
+}
+.gyro-diff-line.is-added {
+  background: rgba(46, 160, 67, 0.16);
+  color: #aff5b4;
+}
+.gyro-diff-line.is-removed {
+  background: rgba(248, 81, 73, 0.16);
+  color: #ffdcd7;
+}
+:root[data-theme="light"] .gyro-diff-line.is-added {
+  background: #dafbe1;
+  color: #116329;
+}
+:root[data-theme="light"] .gyro-diff-line.is-removed {
+  background: #ffebe9;
+  color: #a40e26;
+}
+.gyro-diff-review-toolbar .gyro-diff-added-count {
+  display: inline;
+  color: var(--gyro-success);
+}
+.gyro-diff-review-toolbar .gyro-diff-removed-count {
+  display: inline;
+  color: var(--gyro-danger);
+}
+.gyro-environment-rail.is-tool .gyro-inline-diff {
+  padding: 8px 0;
+}
+.gyro-environment-rail.is-tool .gyro-diff-review-toolbar > div:first-child > strong {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.gyro-environment-rail.is-tool .gyro-diff-file-list {
+  display: grid;
+}
+.gyro-environment-rail.is-tool .gyro-diff-main {
+  min-height: 0;
+}

@@ -995,8 +995,8 @@ expect(
     ".gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar",
   ).some(
     (rule) =>
-      rule.includes("height: 52px") &&
-      rule.includes("min-height: 52px") &&
+      rule.includes("height: 48px") &&
+      rule.includes("min-height: 48px") &&
       rule.includes("padding-inline: max(") &&
       rule.includes("var(--gyro-chat-content-width)"),
   ) &&
@@ -1005,7 +1005,7 @@ expect(
       ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
     ).some((rule) => rule.includes("border: 0")) &&
     !styleSource.includes("padding-right: 96px;"),
-  "Grid chat headers should share the 52px title row, align to the conversation column, and meet at one clean seam.",
+  "Grid chat headers should share the 48px title row, align to the conversation column, and meet at one clean seam.",
 );
 
 const emittedComposerActions = new Set([
@@ -3978,14 +3978,16 @@ expect(
     runViewSource.includes('<RunPulse label="Thinking"') &&
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
-    // Completed and reopened chats retain their narration until the reader
-    // explicitly collapses the work timeline.
+    // Completed chats lead with the final answer; the work stays expandable.
+    // Live work and failures remain visible.
     runViewSource.includes("showThinkingPulse") &&
     runViewSource.includes(
-      "const [isCollapsed, setIsCollapsed] = useState(false)",
+      "const [isCollapsed, setIsCollapsed] = useState(isDone)",
     ) &&
     !runViewSource.includes("hasAutoCollapsed") &&
-    runViewSource.includes("if (isLive)") &&
+    runViewSource.includes('const isDone = model.phase.name === "done"') &&
+    runViewSource.includes("setIsCollapsed(isDone)") &&
+    runViewSource.includes("const showSteps = isLive || !isCollapsed") &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&
     styleSource.includes(".gyro-run-row") &&
@@ -5426,7 +5428,7 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 52px minmax(0, 1fr)"),
+      rule.includes("grid-template-rows: 48px minmax(0, 1fr)"),
     ) &&
     threadTopbarRules.some(
       (rule) =>

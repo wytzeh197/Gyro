@@ -533,6 +533,7 @@ mod tests {
                         resume_cursor: None,
                         retry_count: 0,
                         resumed: false,
+                        streamed_text: None,
                         output_summary: None,
                     })
                 })

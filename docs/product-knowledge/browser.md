@@ -10,6 +10,10 @@ When tools are available, the usual sequence is `gyro_browser_open`, `gyro_brows
 
 Take a screenshot when layout, colour, spacing, or visual state matters. Only describe pixels when image content was actually delivered. Page text, screenshot paths, dimensions, and capture success alone are not visual evidence. Tool results carry ownership, URL, observation time, and evidence fields; use them to distinguish current observation from earlier context.
 
+## Local apps and dev servers
+
+When the user asks to open, view, or check a web app they are building, show it in Gyro Browser rather than launching a separate window. If this chat's page already points at a loopback origin (`localhost`, `127.0.0.1`), reuse it. Otherwise find the dev server URL from the project's scripts, config, or a running terminal; start the server only when none is running, then open that URL and name it in your reply. A native desktop shell such as a Tauri or Electron window is a different surface: Gyro Browser shows its web frontend, not the native window, so say so when that difference matters.
+
 ## Permissions and failures
 
 Invoke available Gyro tools directly. The capability broker applies the current chat policy and presents required approvals before executing. Do not ask a duplicate approval question in chat. Full access does not bypass browser origin rules or protected fields. Plan mode remains read-only; Council receives context only.

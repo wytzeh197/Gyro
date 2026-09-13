@@ -2,6 +2,7 @@ import {
   assistantMessageBlockStarts,
   isOrphanAssistantFragment,
   peelAssistantPreambleBlocks,
+  stripHiddenControlMarkers,
   structuredCommentaryBlocks,
 } from "./chat-commentary.ts";
 import type { SessionEvent } from "./types.ts";
@@ -63,9 +64,23 @@ export type AssistantMessageSegment = {
   start: number;
   sequence?: number;
   createdAt?: string;
+  /**
+   * The tool this block followed, or `null` when it was spoken before any tool.
+   * Saved replies number tools differently from a live stream, so placing a
+   * block by the tool itself keeps it right in both.
+   */
+  afterActivityId?: string | null;
 };
 
 const ASSISTANT_SEGMENT_ID_SEPARATOR = "#segment-";
+
+/** A final provider reply can legitimately be a single letter, digit or symbol. */
+export function isDurableAssistantResponse(event: SessionEvent): boolean {
+  return (
+    event.kind === "assistant-message" &&
+    eventPayload(event)?.kind === "provider-response"
+  );
+}
 
 /**
  * A provider streams every text block of a turn into one assistant event, so
@@ -90,7 +105,10 @@ function assistantMessageSegments(
         // list that would slice at the wrong characters.
         break;
       }
-      const { start, sequence, createdAt } = entry as Record<string, unknown>;
+      const { start, sequence, createdAt, afterActivityId } = entry as Record<
+        string,
+        unknown
+      >;
       const previous = segments.at(-1);
       if (
         typeof start !== "number" ||
@@ -108,9 +126,13 @@ function assistantMessageSegments(
             ? sequence
             : undefined,
         createdAt: typeof createdAt === "string" ? createdAt : undefined,
+        afterActivityId:
+          typeof afterActivityId === "string" || afterActivityId === null
+            ? afterActivityId
+            : undefined,
       });
     }
-    if (segments.length >= 2 && segments[0]?.start === 0) {
+    if (segments.length === raw.length && segments[0]?.start === 0) {
       return segments;
     }
   }
@@ -136,17 +158,23 @@ function recoveredAssistantMessageSegments(
  * can interleave with the tools that ran between them.
  */
 export function expandAssistantMessageSegments(events: SessionEvent[]) {
+  const activitySequences = providerActivitySequencesByTurn(events);
   return events.flatMap((event) => {
     if (event.kind !== "assistant-message") {
       return [event];
     }
     const segments = assistantMessageSegments(event);
     if (!segments) {
-      const trimmed = event.message.trim();
-      if (!trimmed || isOrphanAssistantFragment(trimmed)) {
+      const message = stripHiddenControlMarkers(event.message);
+      const trimmed = message.trim();
+      if (
+        !trimmed ||
+        (!isDurableAssistantResponse(event) &&
+          isOrphanAssistantFragment(trimmed))
+      ) {
         return [];
       }
-      return [event];
+      return [message === event.message ? event : { ...event, message }];
     }
     const payload = eventPayload(event) ?? {};
     return segments
@@ -157,16 +185,27 @@ export function expandAssistantMessageSegments(events: SessionEvent[]) {
           ...event,
           id: `${event.id}${ASSISTANT_SEGMENT_ID_SEPARATOR}${index}`,
           createdAt: segment.createdAt ?? event.createdAt,
-          message: event.message.slice(segment.start, end),
-          payload:
-            segment.sequence === undefined
+          message: stripHiddenControlMarkers(
+            event.message.slice(segment.start, end),
+          ),
+          payload: (() => {
+            const placed = placeSegment(
+              segment,
+              activitySequences.get(event.turnId ?? ""),
+            );
+            return placed === undefined
               ? rest
-              : { ...rest, timelineSequence: segment.sequence },
+              : { ...rest, timelineSequence: placed };
+          })(),
         };
       })
       .filter((segment) => {
         const trimmed = segment.message.trim();
-        return trimmed.length > 0 && !isOrphanAssistantFragment(trimmed);
+        return (
+          trimmed.length > 0 &&
+          (isDurableAssistantResponse(segment) ||
+            !isOrphanAssistantFragment(trimmed))
+        );
       });
   });
 }
@@ -330,10 +369,55 @@ export function interleavedChatTimelineItems(events: SessionEvent[]) {
   return items;
 }
 
+/**
+ * A segment's place among its turn's tools. Half steps sit a block just after
+ * the tool it followed (or just before the first) whatever order the events
+ * arrived in, so a tie with a tool never depends on array position.
+ */
+function placeSegment(
+  segment: AssistantMessageSegment,
+  turnActivities: Map<string, number> | undefined,
+) {
+  if (turnActivities && typeof segment.afterActivityId === "string") {
+    const after = turnActivities.get(segment.afterActivityId);
+    if (after !== undefined) return after + 0.5;
+  }
+  if (
+    turnActivities &&
+    turnActivities.size > 0 &&
+    segment.afterActivityId === null
+  ) {
+    return Math.min(...turnActivities.values()) - 0.5;
+  }
+  return segment.sequence;
+}
+
+function providerActivitySequencesByTurn(events: SessionEvent[]) {
+  const byTurn = new Map<string, Map<string, number>>();
+  for (const event of events) {
+    const payload = eventPayload(event);
+    if (event.kind !== "system-event" || payload?.kind !== "provider-activity") {
+      continue;
+    }
+    const activityId = payload.activityId;
+    const sequence = timelineSequence(event);
+    if (typeof activityId !== "string" || sequence === undefined) continue;
+    const turn = event.turnId ?? "";
+    let activities = byTurn.get(turn);
+    if (!activities) {
+      activities = new Map();
+      byTurn.set(turn, activities);
+    }
+    if (!activities.has(activityId)) activities.set(activityId, sequence);
+  }
+  return byTurn;
+}
+
 function timelineSequence(event: SessionEvent) {
   const payload = eventPayload(event);
   const sequence = payload?.timelineSequence;
-  if (typeof sequence === "number" && Number.isSafeInteger(sequence)) {
+  // Finite rather than integer: placed segments use half steps.
+  if (typeof sequence === "number" && Number.isFinite(sequence)) {
     return sequence;
   }
   const providerSequence = payload?.providerSequence;

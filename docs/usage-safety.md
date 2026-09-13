@@ -114,9 +114,12 @@ one cliff:
 | 100% — stop    | New provider calls are refused with a clear reason and a one-click override. In-flight work finishes.  |
 
 A **daily pace warning** (Settings → Usage Limits, on by default) is separate
-from those stop thresholds. It is informational: Gyro warns when a day's spend
-reaches one day's even share of the weekly/100% window (`100 ÷ 7`, rounded to
-**14%**). It does not add a hard stop. A pause still outranks the warning.
+from those stop thresholds. It is informational: one day's even share of the
+weekly/100% window is `100 ÷ 7`, rounded to **14%**. When the provider measures
+its weekly window, Gyro warns only when usage is at least that share ahead of an
+even pace for the time already elapsed. Otherwise (or with a budget set) it
+warns when the last 24 hours of local spend reach 14% of the weekly limit. It
+does not add a hard stop. A pause still outranks the warning.
 
 Defaults should be derived, not invented: when a provider reports its own
 window (Codex) the budget tracks that window. When it reports only a reset time
