@@ -97,19 +97,31 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     // A second read used to clear the map but retain invalid refs on elements.
     wait_page("Browser observation ready")?;
     let button = find("#change-state")?;
-    call("click", json!({"ref":button}))?;
+    let clicked = call("click", json!({"ref":button}))?;
+    if clicked["name"] != "Change visible state" {
+        return Err(format!("click did not name its element: {clicked}"));
+    }
+    // The action highlight is for the person watching; capture it, then clear.
+    let highlighted = capture_session_browser_png(app, session)?;
+    std::fs::write(output.join("browser-smoke-highlight.png"), highlighted.png)
+        .map_err(|e| e.to_string())?;
+    call("clearHighlight", json!({}))?;
     let page = wait_page("Clicks: 1")?;
     if page.to_string().contains("Clicks: 2") {
         return Err("click fired twice".into());
     }
     steps.push("repeat read/find/click exactly once/read changed state".into());
     let input = find("#project-name")?;
-    call(
+    let typed = call(
         "type",
         json!({"ref":input,"text":"Native smoke","submit":true}),
     )?;
+    if typed["name"] != "Project name" {
+        return Err(format!("type did not name its element: {typed}"));
+    }
     wait_page("Form: saved Native smoke")?;
     steps.push("type/submit/read saved value".into());
+    steps.push("click/type/formInput name their elements; highlight captured".into());
     let credential = find("#fixture-password")?;
     if call_agent(
         app,
@@ -133,7 +145,10 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     }
     steps.push("credential and stale-ref rejection".into());
     let select = find("#project-kind")?;
-    call("formInput", json!({"ref":select,"value":"app"}))?;
+    let selected = call("formInput", json!({"ref":select,"value":"app"}))?;
+    if selected["name"] != "Project kind" {
+        return Err(format!("formInput did not name its element: {selected}"));
+    }
     let checkbox = find("#project-enabled")?;
     call("formInput", json!({"ref":checkbox,"value":"true"}))?;
     wait_page("Kind: app; enabled: true")?;

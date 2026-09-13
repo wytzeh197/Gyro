@@ -642,7 +642,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceProposeEdit,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Create a hash-guarded file edit proposal for review in Gyro Workspace without writing it directly.",
+        description: "Submit a hash-guarded file edit in Gyro Workspace. Full access applies it immediately through the guarded transaction; otherwise it creates a proposal for review. Read existing files first and supply expectedHash. Check the returned status before claiming the edit was applied.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,

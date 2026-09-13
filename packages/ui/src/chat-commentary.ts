@@ -38,6 +38,15 @@ const INTRODUCES_WORK_WITH_COLON =
 const OWN_NEXT_STEP = /^(?:I['’]ll|I will|I['’]m going to|I need to|Let me)\b/i;
 const OWN_NEXT_STEP_EXCEPTION = /^Let me know\b/i;
 
+/**
+ * The assistant reporting work it is doing right now ("First I'm checking
+ * whether the dev server is running…"). An answer reports what was found; a
+ * closing sentence in the present progressive about its own checking is still
+ * narration, however long the block.
+ */
+const OWN_PROGRESS_SENTENCE =
+  /^(?:(?:so|then|and|but|first|next|now|meanwhile)[,]?\s+)?I['\u2019]m\s+(?:now\s+|first\s+|also\s+|still\s+)?(?:checking|looking|reading|searching|inspecting|verifying|running|testing|tracing|reviewing|pulling|gathering|confirming|investigating)\b/i;
+
 const ONLINE_GREETING = /\bis online and working\b/i;
 
 /** One-line readiness openers models restate every turn — drop entirely. */
@@ -91,6 +100,22 @@ export function assistantMessageBlockStarts(value: string): number[] {
   }
   const sorted = [...starts].sort((a, b) => a - b);
   return sorted.length > 1 ? sorted : [];
+}
+
+/**
+ * Gyro-only control markers (title, artifacts, plan, goal). They are
+ * instructions to the app; the desktop strips them from the settled reply, but
+ * live streamed text still carries them until the turn completes.
+ */
+const HIDDEN_CONTROL_MARKER =
+  /^[ \t]*GYRO_(?:SESSION_TITLE|ARTIFACTS|PLAN_UPDATE|GOAL_UPDATE):[^\n]*/gm;
+
+/** Remove control markers so they never draw as a narration row. */
+export function stripHiddenControlMarkers(value: string): string {
+  if (!value.includes("GYRO_")) {
+    return value;
+  }
+  return value.replace(HIDDEN_CONTROL_MARKER, "").replace(/\n{3,}/g, "\n\n");
 }
 
 /**
@@ -153,7 +178,7 @@ function announcesOwnNextStep(value: string): boolean {
   const closing = lastSentence(value);
   return Boolean(
     closing &&
-    OWN_NEXT_STEP.test(closing) &&
+    (OWN_NEXT_STEP.test(closing) || OWN_PROGRESS_SENTENCE.test(closing)) &&
     !OWN_NEXT_STEP_EXCEPTION.test(closing),
   );
 }
@@ -236,6 +261,12 @@ export function structuredCommentaryBlocks(value: string) {
           !isTransientStatusGreeting(block),
       )
   );
+}
+
+/** Final replies must remain visible even when they are just a digit or symbol. */
+export function finalAssistantResponseText(value: string): string {
+  const blocks = structuredCommentaryBlocks(value);
+  return blocks.length > 0 ? blocks.join("\n\n") : value.trim();
 }
 
 /**

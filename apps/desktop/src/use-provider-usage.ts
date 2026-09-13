@@ -137,10 +137,12 @@ export function useProviderUsage(options: {
       PROVIDER_USAGE_REFRESH_INTERVAL_MS,
     );
     window.addEventListener("focus", refreshInBackground);
+    window.addEventListener("online", refreshInBackground);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshInBackground);
+      window.removeEventListener("online", refreshInBackground);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [

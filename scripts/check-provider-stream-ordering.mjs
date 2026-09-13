@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { buildRunModel, groupRunSteps } from "../packages/ui/src/chat-run.ts";
 
 import {
   applyProviderChatStreamActivity,
@@ -17,6 +18,112 @@ import {
   interleavedChatTimelineItems,
   orderedChatTimelineEvents,
 } from "../packages/ui/src/chat-timeline.ts";
+
+// Compaction starts without an activity ordinal, while commentary and commands
+// carry small durable ordinals. They must all use the same live stream clock.
+{
+  const ref = { current: new Map() };
+  let live = [];
+  const apply = (
+    sequence,
+    activityId,
+    activityKind,
+    activitySequence,
+    status = "done",
+  ) => {
+    applyProviderChatStreamActivity(ref, () => {}, {
+      sessionId: "ordering-session",
+      turnId: "ordering-turn",
+      providerId: "openai",
+      eventId: `frame-${sequence}`,
+      phase: "activity",
+      sequence,
+      activityId,
+      activityKind,
+      activitySequence,
+      activityStatus: status,
+      activityLabel:
+        activityKind === "commentary"
+          ? "I'll update the review panel."
+          : activityId,
+    });
+    live = ref.current.get("ordering-session");
+  };
+  const ids = (events) =>
+    buildRunModel(events, { isRunning: true })
+      .steps.filter((step) => step.kind === "say" || step.kind === "work")
+      .map((step) => step.id);
+  apply(100, "read", "read", 0);
+  apply(110, "compaction", "context", undefined, "running");
+  apply(120, "commentary", "commentary", 2);
+  apply(130, "command", "command", 3, "running");
+  const expected = live.map((event) => event.id);
+  assert.deepEqual(
+    ids(live),
+    expected,
+    "post-compaction work must stay below compaction",
+  );
+  assert.deepEqual(
+    groupRunSteps(buildRunModel(live, { isRunning: true }).steps)
+      .filter((step) => ["work-group", "work", "say"].includes(step.kind))
+      .map((step) => (step.kind === "work" ? step.item.kind : step.kind)),
+    ["work-group", "context", "say", "work-group"],
+    "the visible grouped rail must keep compaction before the later narration and commands",
+  );
+  apply(140, "compaction", "context", 1);
+  apply(150, "command", "command", 3);
+  assert.deepEqual(
+    ids(live),
+    expected,
+    "status updates must not move existing rows",
+  );
+
+  const persisted = live.map((event, index) => ({
+    ...event,
+    id: `saved-${index}`,
+    payload: {
+      ...event.payload,
+      providerSequence: undefined,
+      timelineSequence: index,
+    },
+  }));
+  for (const merged of [
+    mergeProviderResponseEvents(live, persisted),
+    mergePersistedAndOptimisticEvents(persisted, live),
+  ]) {
+    assert.deepEqual(
+      ids(merged),
+      persisted.map((event) => event.id),
+      "durable reconciliation must preserve the observed chronology",
+    );
+  }
+  assert.deepEqual(
+    ids(persisted),
+    persisted.map((event) => event.id),
+    "a cold reload must retain durable activity order",
+  );
+
+  // Other providers stream assistant text separately from activity frames.
+  // Small activity ordinals must not hoist a tool above the text introducing it.
+  applyProviderChatStreamDeltas(ref, () => {}, [
+    {
+      sessionId: "ordering-session",
+      turnId: "ordering-turn",
+      providerId: "anthropic",
+      eventId: "text-160",
+      phase: "delta",
+      sequence: 160,
+      textDelta: "I'll run the final checks.",
+    },
+  ]);
+  apply(170, "final-check", "command", 4);
+  const withText = ref.current.get("ordering-session");
+  assert.deepEqual(
+    ids(withText),
+    withText.map((event) => event.id),
+    "assistant deltas and activities must share the same clock",
+  );
+}
 
 assert.deepEqual(
   structuredCommentaryBlocks(
@@ -325,7 +432,7 @@ applyActivity(
   "I’ll inspect first.Now I’ll update it.",
   "done",
   undefined,
-  2,
+  0,
 );
 assert.deepEqual(
   renderedActivityEvents.slice(1).map((event) => event.message),
@@ -335,7 +442,7 @@ assert.deepEqual(
   renderedActivityEvents
     .slice(1)
     .map((event) => event.payload.timelineSequence),
-  [0, 1, 2],
+  [1, 2, 3],
 );
 const persistedCumulativeCommentary = {
   ...openingCommentary,
@@ -656,7 +763,10 @@ assert.equal(endsStreamedTextBlock("A list:\n"), true);
 
 blockEvents = [];
 blockEventsRef.current.set("session-1", []);
-streamBlockDelta(1, "That failure is the smoke suite pinning the literal old pad");
+streamBlockDelta(
+  1,
+  "That failure is the smoke suite pinning the literal old pad",
+);
 applyProviderChatStreamActivity(blockEventsRef, setBlockEvents, {
   sessionId: "session-1",
   turnId: "turn-blocks",
@@ -808,3 +918,56 @@ for (const probe of timelineProbes) {
 console.log(
   "Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits, streamed text blocks, timeline index equivalence).",
 );
+// A title/preamble can be the only live text before the durable final reply.
+// The final text must not inherit its early position or offsets, even when the
+// live sequence numbers are much larger than the durable activity indices.
+const earlyText = {
+  ...persistedBlockResponse,
+  id: "early-text",
+  message: "GYRO_SESSION_TITLE: Fix warning",
+  payload: {
+    kind: "provider-stream",
+    streaming: true,
+    timelineSequence: 1,
+    segments: [{ start: 0, sequence: 1 }],
+  },
+};
+const lateTool = {
+  ...timelineActivity("late-tool", "command", 200),
+  turnId: earlyText.turnId,
+};
+const finalText = {
+  ...persistedBlockResponse,
+  message: "The warning is fixed.\n\nThe checks pass.",
+  payload: { kind: "provider-response", status: "done", timelineSequence: 2 },
+};
+for (const merge of [
+  (live, saved) => mergeProviderResponseEvents(live, saved),
+  (live, saved) => mergePersistedAndOptimisticEvents(saved, live),
+]) {
+  const repaired = merge(
+    [earlyText, lateTool],
+    [
+      finalText,
+      { ...lateTool, payload: { ...lateTool.payload, timelineSequence: 1 } },
+    ],
+  );
+  const run = buildRunModel(repaired);
+  assert.equal(
+    run.response?.message,
+    finalText.message,
+    "a durable final reply must appear below streamed tools",
+  );
+  assert.equal(
+    run.steps.filter((step) => step.kind === "say").length,
+    0,
+    "the final reply must not also appear as activity narration",
+  );
+  const response = repaired.find((event) => event.kind === "assistant-message");
+  assert.equal(
+    response.payload.segments,
+    undefined,
+    "offsets into replaced text must be discarded",
+  );
+  assert.equal(response.createdAt, finalText.createdAt);
+}

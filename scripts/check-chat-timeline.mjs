@@ -243,3 +243,54 @@ assert.equal(
 );
 
 console.log("chat timeline checks passed");
+
+// A saved reply records which tool each block followed. The live timeline
+// numbers tools with stream counters and the saved one by index, so blocks are
+// placed by the tool itself: the opener stays above the first tool either way.
+for (const [label, toolSequence, replySequence] of [
+  ["live", 7001, 7002],
+  ["reopened", 0, 1],
+]) {
+  const opener =
+    "I'll verify it in the real app as far as I can. First I'm checking whether the dev server is running.";
+  const answer = "Verified. The browser changes work.";
+  const placed = chatTurnTimelineSections([
+    {
+      ...event("assistant-message", "", {}, 0),
+      message: `${opener}\n\n${answer}`,
+      payload: {
+        kind: "provider-response",
+        timelineSequence: replySequence,
+        segments: [
+          { start: 0, sequence: 0, afterActivityId: null },
+          { start: opener.length + 2, sequence: 1, afterActivityId: "tool-1" },
+        ],
+      },
+    },
+    {
+      ...activity("tool", "Ran checks", 0),
+      payload: {
+        kind: "provider-activity",
+        activityId: "tool-1",
+        activityKind: "tool",
+        label: "Ran checks",
+        status: "done",
+        timelineSequence: toolSequence,
+      },
+    },
+  ]);
+  assert.equal(
+    placed.response?.message.trim(),
+    answer,
+    `${label}: only the block after the tool should be the answer`,
+  );
+  assert.deepEqual(
+    placed.work.map((item) =>
+      item.kind === "activity-group"
+        ? `group:${item.events.length}`
+        : `say:${item.event.message.trim().slice(0, 12)}`,
+    ),
+    ["say:I'll verify ", "group:1"],
+    `${label}: the opener should sit above the tool it introduced`,
+  );
+}

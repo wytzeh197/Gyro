@@ -173,13 +173,13 @@ export function mergePersistedAndOptimisticEvents(
           Boolean(event.turnId)
         );
       })
-      .map((event) => event.turnId as string),
+      .map((event) => `${event.sessionId}:${event.turnId}`),
   );
   const merged = limitSessionEventsForUi(persistedEvents).filter(
     (event) =>
       !(
         event.turnId &&
-        segmentedActivityTurnIds.has(event.turnId) &&
+        segmentedActivityTurnIds.has(`${event.sessionId}:${event.turnId}`) &&
         isProviderActivityEvent(event)
       ),
   );
@@ -190,35 +190,41 @@ export function mergePersistedAndOptimisticEvents(
   const assistantTurnIds = new Set<string>();
   const providerActivityKeys = new Set<string>();
   for (const event of merged) {
-    seenEventIds.add(event.id);
+    const scopedId = `${event.sessionId}:${event.id}`;
+    const scopedTurn = `${event.sessionId}:${event.turnId}`;
+    const scopedMessage = `${event.sessionId}:${event.message}`;
+    seenEventIds.add(scopedId);
     if (event.kind === "user-message") {
       if (event.turnId) {
-        userTurnIds.add(event.turnId);
+        userTurnIds.add(scopedTurn);
       }
       if (!event.turnId) {
-        userMessages.add(event.message);
+        userMessages.add(scopedMessage);
       }
     } else if (isProviderStatusEvent(event) && event.turnId) {
-      providerStatusTurnIds.add(event.turnId);
+      providerStatusTurnIds.add(scopedTurn);
     } else if (event.kind === "assistant-message" && event.turnId) {
-      assistantTurnIds.add(event.turnId);
+      assistantTurnIds.add(scopedTurn);
     } else if (isProviderActivityEvent(event)) {
       providerActivityKeys.add(providerActivityKey(event));
     }
   }
   for (const event of optimisticEvents) {
-    const hasSameId = seenEventIds.has(event.id);
+    const scopedId = `${event.sessionId}:${event.id}`;
+    const scopedTurn = `${event.sessionId}:${event.turnId}`;
+    const scopedMessage = `${event.sessionId}:${event.message}`;
+    const hasSameId = seenEventIds.has(scopedId);
     const hasSameTurnUser =
       event.kind === "user-message" &&
       (event.turnId
-        ? userTurnIds.has(event.turnId)
-        : userMessages.has(event.message));
+        ? userTurnIds.has(scopedTurn)
+        : userMessages.has(scopedMessage));
     const hasSameTurnProviderStatus =
       isProviderStatusEvent(event) &&
-      Boolean(event.turnId && providerStatusTurnIds.has(event.turnId));
+      Boolean(event.turnId && providerStatusTurnIds.has(scopedTurn));
     const hasSameTurnAssistant =
       event.kind === "assistant-message" &&
-      Boolean(event.turnId && assistantTurnIds.has(event.turnId));
+      Boolean(event.turnId && assistantTurnIds.has(scopedTurn));
     const hasSameProviderActivity =
       isProviderActivityEvent(event) &&
       providerActivityKeys.has(providerActivityKey(event));
@@ -230,29 +236,30 @@ export function mergePersistedAndOptimisticEvents(
       !hasSameProviderActivity
     ) {
       merged.push(event);
-      seenEventIds.add(event.id);
+      seenEventIds.add(scopedId);
       if (event.kind === "user-message") {
         if (event.turnId) {
-          userTurnIds.add(event.turnId);
+          userTurnIds.add(scopedTurn);
         }
         if (!event.turnId) {
-          userMessages.add(event.message);
+          userMessages.add(scopedMessage);
         }
       } else if (isProviderStatusEvent(event) && event.turnId) {
-        providerStatusTurnIds.add(event.turnId);
+        providerStatusTurnIds.add(scopedTurn);
       } else if (event.kind === "assistant-message" && event.turnId) {
-        assistantTurnIds.add(event.turnId);
+        assistantTurnIds.add(scopedTurn);
       } else if (isProviderActivityEvent(event)) {
         providerActivityKeys.add(providerActivityKey(event));
       }
     }
   }
   const timelineIndex = buildTimelineIndex(optimisticEvents);
+  const timeline = [...merged, ...optimisticEvents];
   return limitSessionEventsForUi(
     merged.map((event) => {
       const optimistic = findTimelineMatch(timelineIndex, event);
       return optimistic
-        ? preserveFirstSeenTimelineMetadata(optimistic, event)
+        ? preserveFirstSeenTimelineMetadata(optimistic, event, timeline)
         : event;
     }),
   );
@@ -282,8 +289,10 @@ export function buildTimelineIndex(events: SessionEvent[]): TimelineIndex {
   const activityByKey = new Map<string, TimelineMatch>();
   events.forEach((event, index) => {
     const match = { event, index };
-    if (!byId.has(event.id)) {
-      byId.set(event.id, match);
+    const scopedId = `${event.sessionId}:${event.id}`;
+    const scopedTurn = `${event.sessionId}:${event.turnId}`;
+    if (!byId.has(scopedId)) {
+      byId.set(scopedId, match);
     }
     // `sameTimelineEvent` requires the candidate's own turn id before it will
     // match on anything but the event id.
@@ -291,8 +300,8 @@ export function buildTimelineIndex(events: SessionEvent[]): TimelineIndex {
       return;
     }
     if (event.kind === "assistant-message") {
-      if (!assistantByTurn.has(event.turnId)) {
-        assistantByTurn.set(event.turnId, match);
+      if (!assistantByTurn.has(scopedTurn)) {
+        assistantByTurn.set(scopedTurn, match);
       }
     } else if (isProviderActivityEvent(event)) {
       const key = providerActivityKey(event);
@@ -305,11 +314,11 @@ export function buildTimelineIndex(events: SessionEvent[]): TimelineIndex {
 }
 
 export function findTimelineMatch(index: TimelineIndex, event: SessionEvent) {
-  let earliest = index.byId.get(event.id);
+  let earliest = index.byId.get(`${event.sessionId}:${event.id}`);
   if (event.turnId) {
     const keyed =
       event.kind === "assistant-message"
-        ? index.assistantByTurn.get(event.turnId)
+        ? index.assistantByTurn.get(`${event.sessionId}:${event.turnId}`)
         : isProviderActivityEvent(event)
           ? index.activityByKey.get(providerActivityKey(event))
           : undefined;
@@ -339,7 +348,9 @@ export function mergeProviderResponseEvents(
   const completedAssistantMessages = new Set(
     responseEvents
       .filter((event) => event.kind === "assistant-message")
-      .map((event) => event.message.trim()),
+      .map((event) =>
+        JSON.stringify([event.sessionId, event.turnId, event.message.trim()]),
+      ),
   );
   let merged = currentEvents.filter((event) => {
     if (!isProviderActivityEvent(event)) {
@@ -348,7 +359,9 @@ export function mergeProviderResponseEvents(
     const payload = recordFromUnknown(event.payload);
     return !(
       payload?.activityKind === "commentary" &&
-      completedAssistantMessages.has(event.message.trim())
+      completedAssistantMessages.has(
+        JSON.stringify([event.sessionId, event.turnId, event.message.trim()]),
+      )
     );
   });
   for (const responseEvent of responseEvents) {
@@ -364,6 +377,7 @@ export function mergeProviderResponseEvents(
         const commentarySegments = merged.filter((event) => {
           const payload = recordFromUnknown(event.payload);
           return (
+            event.sessionId === responseEvent.sessionId &&
             event.turnId === responseEvent.turnId &&
             isProviderActivityEvent(event) &&
             payload?.activityKind === "commentary" &&
@@ -388,10 +402,13 @@ export function mergeProviderResponseEvents(
       }
     }
     const findMatchingEvent = (event: SessionEvent) => {
+      if (event.sessionId !== responseEvent.sessionId) {
+        return false;
+      }
       if (event.id === responseEvent.id) {
         return true;
       }
-      if (event.turnId !== responseEvent.turnId) {
+      if (!event.turnId || event.turnId !== responseEvent.turnId) {
         return false;
       }
       if (isProviderStatusEvent(responseEvent)) {
@@ -423,7 +440,7 @@ export function mergeProviderResponseEvents(
       next[existingIndex] =
         isProviderStatusEvent(existing) && isProviderStatusEvent(responseEvent)
           ? mergeProviderStatusAttemptTiming(existing, responseEvent)
-          : preserveFirstSeenTimelineMetadata(existing, responseEvent);
+          : preserveFirstSeenTimelineMetadata(existing, responseEvent, merged);
       merged = next;
       continue;
     }
@@ -481,7 +498,7 @@ export function isProviderActivityEvent(event: SessionEvent) {
 
 function providerActivityKey(event: SessionEvent) {
   const payload = recordFromUnknown(event.payload);
-  return `${event.turnId ?? "turn"}:${String(payload?.activityId ?? payload?.label ?? event.id)}`;
+  return `${event.sessionId}:${event.turnId ?? "turn"}:${String(payload?.activityId ?? payload?.label ?? event.id)}`;
 }
 
 /// The match rule `buildTimelineIndex` encodes.
@@ -489,6 +506,9 @@ function providerActivityKey(event: SessionEvent) {
 /// Kept as the readable statement of the rule, and exported so the index can be
 /// checked against it directly rather than against a description of it.
 export function sameTimelineEvent(first: SessionEvent, second: SessionEvent) {
+  if (first.sessionId !== second.sessionId) {
+    return false;
+  }
   if (first.id === second.id) {
     return true;
   }
@@ -511,9 +531,54 @@ export function sameTimelineEvent(first: SessionEvent, second: SessionEvent) {
 function preserveFirstSeenTimelineMetadata(
   firstSeen: SessionEvent,
   updated: SessionEvent,
+  timeline: SessionEvent[],
 ): SessionEvent {
   const firstPayload = recordFromUnknown(firstSeen.payload) ?? {};
   const updatedPayload = recordFromUnknown(updated.payload) ?? {};
+  // A durable final reply can replace a title, partial stream, or preamble.
+  // Its text is different, so neither the old offsets nor its early position
+  // describe this answer. Live and durable sequences also use different
+  // counters: place the replacement after this turn's observed work.
+  if (
+    updated.kind === "assistant-message" &&
+    updatedPayload.kind === "provider-response" &&
+    (firstSeen.message !== updated.message ||
+      (!Array.isArray(updatedPayload.segments) &&
+        (!Array.isArray(firstPayload.segments) ||
+          firstPayload.segments.length < 2)))
+  ) {
+    let lastSequence = 0;
+    for (const event of timeline) {
+      if (
+        event.sessionId !== updated.sessionId ||
+        event.turnId !== updated.turnId ||
+        event.kind === "assistant-message"
+      ) {
+        continue;
+      }
+      const payload = recordFromUnknown(event.payload);
+      for (const sequence of [
+        payload?.timelineSequence,
+        payload?.providerSequence,
+      ]) {
+        if (typeof sequence === "number" && Number.isSafeInteger(sequence)) {
+          lastSequence = Math.max(lastSequence, sequence);
+        }
+      }
+    }
+    return {
+      ...updated,
+      payload: {
+        ...updatedPayload,
+        timelineSequence: Math.max(
+          lastSequence + 1,
+          typeof updatedPayload.timelineSequence === "number"
+            ? updatedPayload.timelineSequence
+            : 0,
+        ),
+      },
+    };
+  }
   const timelineSequence =
     typeof firstPayload.timelineSequence === "number"
       ? firstPayload.timelineSequence
@@ -631,7 +696,10 @@ export function applyProviderChatStreamActivity(
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         providerSequence: streamEvent.sequence,
-        timelineSequence: streamEvent.activitySequence ?? streamEvent.sequence,
+        // activitySequence is an index into the durable activity list, not the
+        // stream clock. Mixing it with text/compaction frame sequences puts
+        // later work before compaction. Updates retain this first-seen position.
+        timelineSequence: streamEvent.sequence,
         turnId,
       },
     });
@@ -686,7 +754,7 @@ export function applyProviderChatStreamActivity(
     const next = items.slice();
     const existing = items[existingIndex];
     next[existingIndex] = existing
-      ? preserveFirstSeenTimelineMetadata(existing, nextEvent)
+      ? preserveFirstSeenTimelineMetadata(existing, nextEvent, items)
       : nextEvent;
     return next;
   };

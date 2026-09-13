@@ -259,6 +259,7 @@ export function ledgerWindowsCaption(providerId: string | undefined) {
 }
 
 const WEEK_HOURS = 24 * 7;
+const WEEK_MS = WEEK_HOURS * 60 * 60 * 1000;
 
 /**
  * Token cap for a measured window: a configured budget scaled to the window,
@@ -386,8 +387,14 @@ export function planUsageNotices(
 }
 
 /**
- * Informational warning when today's spend reaches one day's share of the
- * weekly/100% stop (~14%). Not a hard stop. A pause outranks this notice.
+ * Informational warning when usage runs a day's share (~14%) ahead of pace.
+ * Not a hard stop. A pause outranks this notice.
+ *
+ * A provider-measured weekly window is the real plan limit, so it outranks the
+ * local ledger unless the user configured a budget: the ledger's default
+ * reference is a display scale and can read 100% while the plan is barely used.
+ * A weekly window warns only when used% exceeds the even pace for the time
+ * already elapsed by at least one day's share.
  */
 export function dailyPaceNotice(
   providerId: ProviderId,
@@ -401,44 +408,51 @@ export function dailyPaceNotice(
 ): PlanUsageNotice | undefined {
   if (!input.enabled || input.paused) return undefined;
 
+  const now = input.now ?? new Date();
+  const day = now.toISOString().slice(0, 10);
   const ledger = input.ledger;
-  if (ledger?.day) {
-    const weeklyLimit = weeklyLimitTokens(ledger);
-    const percent = Math.min(
-      100,
-      Math.max(0, Math.round((ledger.day.totalTokens / weeklyLimit) * 100)),
-    );
-    if (percent >= DAILY_PACE_NOTICE_PERCENT) {
-      const day = (input.now ?? new Date()).toISOString().slice(0, 10);
-      return {
-        cycleId: `day:${day}`,
-        percent,
-        providerId,
-        threshold: DAILY_PACE_NOTICE_PERCENT,
-        windowId: "day",
-        windowLabel: "Today",
-      };
-    }
-    return undefined;
+  const hasBudget = (ledger?.budget?.maxTokens ?? 0) > 0;
+
+  const weekly = hasBudget
+    ? undefined
+    : (input.windows ?? []).find(
+        (window) =>
+          isWeeklyUsageWindow(window) &&
+          typeof window.usedPercent === "number" &&
+          Number.isFinite(window.usedPercent),
+      );
+  if (weekly) {
+    const resetsAt = weekly.resetsAt ? Date.parse(weekly.resetsAt) : NaN;
+    // Without a reset time the elapsed share of the week is unknown.
+    if (!Number.isFinite(resetsAt)) return undefined;
+    const remaining = Math.min(WEEK_MS, Math.max(0, resetsAt - now.getTime()));
+    const evenPace = ((WEEK_MS - remaining) / WEEK_MS) * 100;
+    const used = weekly.usedPercent!;
+    if (used < evenPace + DAILY_PACE_NOTICE_PERCENT) return undefined;
+    return {
+      cycleId: `day:${day}`,
+      percent: Math.min(100, Math.max(0, Math.round(used))),
+      providerId,
+      threshold: DAILY_PACE_NOTICE_PERCENT,
+      windowId: weekly.id,
+      windowLabel: weekly.label,
+    };
   }
 
-  const weekly = (input.windows ?? []).find((window) => {
-    if (!isWeeklyUsageWindow(window)) return false;
-    const percent = window.usedPercent;
-    return (
-      typeof percent === "number" &&
-      Number.isFinite(percent) &&
-      percent >= DAILY_PACE_NOTICE_PERCENT
-    );
-  });
-  if (!weekly || weekly.usedPercent === undefined) return undefined;
+  if (!ledger?.day) return undefined;
+  const weeklyLimit = weeklyLimitTokens(ledger);
+  const percent = Math.min(
+    100,
+    Math.max(0, Math.round((ledger.day.totalTokens / weeklyLimit) * 100)),
+  );
+  if (percent < DAILY_PACE_NOTICE_PERCENT) return undefined;
   return {
-    cycleId: weekly.resetsAt ?? "rolling",
-    percent: Math.min(100, Math.max(0, Math.round(weekly.usedPercent))),
+    cycleId: `day:${day}`,
+    percent,
     providerId,
     threshold: DAILY_PACE_NOTICE_PERCENT,
-    windowId: weekly.id,
-    windowLabel: weekly.label,
+    windowId: "day",
+    windowLabel: "Today",
   };
 }
 

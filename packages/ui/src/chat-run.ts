@@ -1,4 +1,5 @@
 import {
+  finalAssistantResponseText,
   isAssistantPreambleBlock,
   isOrphanAssistantFragment,
   isTransientStatusGreeting,
@@ -7,6 +8,7 @@ import {
 } from "./chat-commentary.ts";
 import {
   expandAssistantMessageSegments,
+  isDurableAssistantResponse,
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
 import { FILE_REVIEW_SCHEMA } from "./types.ts";
@@ -75,7 +77,8 @@ export type WorkItem =
       kind: "browser";
       id: string;
       status: WorkStatus;
-      action: "browse" | "inspect" | "capture";
+      action: BrowserAction;
+      /** The element an interaction touched, or the page it happened on. */
       target?: string;
     }
   | {
@@ -90,6 +93,24 @@ export type WorkItem =
        */
       note?: string;
     };
+
+/** One Gyro Browser verb, so each row says what the agent did to the page. */
+export type BrowserAction =
+  | "open"
+  | "navigate"
+  | "back"
+  | "forward"
+  | "reload"
+  | "inspect"
+  | "read"
+  | "find"
+  | "console"
+  | "network"
+  | "capture"
+  | "click"
+  | "type"
+  | "scroll"
+  | "form";
 
 /** One exact event in a run. Work is grouped for display below, never discarded. */
 export type RunStep =
@@ -108,7 +129,12 @@ export type RunStep =
   | { kind: "ask"; id: string; at: string; event: SessionEvent };
 
 /** A plain-language phase for a consecutive stretch of work. */
-export type WorkGroupKind = "review" | "change" | "verify" | "command";
+export type WorkGroupKind =
+  | "review"
+  | "change"
+  | "verify"
+  | "command"
+  | "browser";
 
 export type WorkGroup = {
   kind: "work-group";
@@ -185,6 +211,7 @@ export function runWorkGroupText(group: WorkGroup): RunRowText {
       "Check needs attention",
     ],
     command: ["Running commands", "Ran commands", "Command needs attention"],
+    browser: ["Using browser", "Used browser", "Browser needs attention"],
   };
   const [inProgress, complete, problem] = labels[group.groupKind];
   const count = group.steps.length;
@@ -212,7 +239,9 @@ function workGroupKind(item: WorkItem): WorkGroupKind {
         return "verify";
       return item.category === "inspect" ? "review" : "command";
     case "browser":
-      return item.action === "capture" ? "verify" : "review";
+      // Page work is its own phase; filing it under "Reviewed workspace" read
+      // as if the agent had been browsing code.
+      return "browser";
     case "tool": {
       const label = `${item.tool} ${item.note ?? ""}`.toLowerCase();
       if (/(?:edit|write|update|apply|propos)/.test(label)) return "change";
@@ -490,7 +519,11 @@ function partitionClosingResponse(
   let index = end - 1;
   while (index >= 0 && events[index]!.kind === "assistant-message") {
     const text = events[index]!.message.trim();
-    if (text && !isOrphanAssistantFragment(text)) {
+    if (
+      text &&
+      (isDurableAssistantResponse(events[index]!) ||
+        !isOrphanAssistantFragment(text))
+    ) {
       trailing.unshift(events[index]!);
     }
     index -= 1;
@@ -580,6 +613,9 @@ function partitionClosingResponse(
  * blocks at all counts, since what it held was dropped as noise.
  */
 function isNarrationOnly(event: SessionEvent): boolean {
+  if (isDurableAssistantResponse(event)) {
+    return false;
+  }
   return structuredCommentaryBlocks(event.message).every(
     isAssistantPreambleBlock,
   );
@@ -597,8 +633,9 @@ function joinAssistantEvents(events: SessionEvent[]): SessionEvent {
 }
 
 function sanitizeResponseEvent(event: SessionEvent): SessionEvent {
-  const blocks = structuredCommentaryBlocks(event.message);
-  const message = blocks.join("\n\n");
+  const message = isDurableAssistantResponse(event)
+    ? finalAssistantResponseText(event.message)
+    : structuredCommentaryBlocks(event.message).join("\n\n");
   return message === event.message ? event : { ...event, message };
 }
 
@@ -641,9 +678,7 @@ function runPhase(
         ? status.message?.trim() || "Stopped"
         : (status.message ?? status.error ?? "The run stopped early"),
       // Normalize so the header and problem tone can tell user-stop from crash.
-      recoveryKind: cancelled
-        ? "cancelled"
-        : status.recoveryKind,
+      recoveryKind: cancelled ? "cancelled" : status.recoveryKind,
       recoveryMessage: status.recoveryMessage,
     };
   }
@@ -781,14 +816,31 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
       // Commentary is prose, not work. It reaches the rail as a `say` step via
       // the assistant-message path, so it must not become a row here.
       return undefined;
-    case "tool":
+    case "tool": {
+      const raw = text(payload, "tool") ?? detail ?? label;
+      // A provider calling Gyro's browser directly is still a browser beat.
+      const browserTool = /(?:^|__)gyro_browser_([a-z_]+)$/i.exec(raw.trim());
+      if (browserTool) {
+        const note = text(payload, "note");
+        return {
+          kind: "browser",
+          id,
+          status,
+          action: browserActionFromName(browserTool[1]!.toLowerCase()),
+          target:
+            note && /^https?:\/\//i.test(note)
+              ? browserPageLabel(note)
+              : undefined,
+        };
+      }
       return {
         kind: "tool",
         id,
         status,
-        ...splitToolName(text(payload, "tool") ?? detail ?? label),
+        ...splitToolName(raw),
         note: text(payload, "note"),
       };
+    }
     // ACP providers (Grok/Kimi/Gemini) report native kinds that are not yet
     // renamed on the wire. Map them so the rail can show real verbs.
     case "read": {
@@ -924,22 +976,14 @@ function workItemFromCapabilityCall(
   }
 
   if (capabilityId.startsWith("browser-")) {
-    const action =
-      capabilityId === "browser-screenshot"
-        ? "capture"
-        : capabilityId === "browser-inspect" ||
-            capabilityId === "browser-read-page" ||
-            capabilityId === "browser-find" ||
-            capabilityId === "browser-console" ||
-            capabilityId === "browser-network"
-          ? "inspect"
-          : "browse";
     return {
       kind: "browser",
       id,
       status,
-      action,
-      target: resourceLabel ?? summary,
+      action: browserActionFromName(capabilityId.slice("browser-".length)),
+      target:
+        text(payload, "target") ??
+        (resourceLabel ? browserPageLabel(resourceLabel) : undefined),
     };
   }
 
@@ -1165,22 +1209,13 @@ export function runRowText(step: RunStep): RunRowText {
             ? "Summarizing earlier conversation"
             : "Earlier conversation summarized",
       };
-    case "browser":
+    case "browser": {
+      const [running, done] = BROWSER_ROW_LABELS[item.action];
       return {
-        label:
-          item.status === "running"
-            ? item.action === "capture"
-              ? "Capturing preview"
-              : item.action === "inspect"
-                ? "Inspecting page"
-                : "Browsing"
-            : item.action === "capture"
-              ? "Captured preview"
-              : item.action === "inspect"
-                ? "Inspected page"
-                : "Browsed page",
+        label: item.status === "running" ? running : done,
         description: item.target,
       };
+    }
     case "tool": {
       const toolLabel = item.server
         ? `${item.server} · ${item.tool}`
@@ -1390,6 +1425,77 @@ function extractToolNameFromRaw(raw: string): string {
     return embedded[1];
   }
   return trimmed;
+}
+
+const BROWSER_ACTIONS: Record<string, BrowserAction> = {
+  open: "open",
+  navigate: "navigate",
+  back: "back",
+  forward: "forward",
+  reload: "reload",
+  inspect: "inspect",
+  "read-page": "read",
+  read_page: "read",
+  find: "find",
+  console: "console",
+  network: "network",
+  screenshot: "capture",
+  click: "click",
+  type: "type",
+  scroll: "scroll",
+  "form-input": "form",
+  form_input: "form",
+};
+
+const BROWSER_ROW_LABELS: Record<BrowserAction, [string, string]> = {
+  open: ["Opening page", "Opened page"],
+  navigate: ["Navigating", "Navigated"],
+  back: ["Going back", "Went back"],
+  forward: ["Going forward", "Went forward"],
+  reload: ["Reloading page", "Reloaded page"],
+  inspect: ["Inspecting browser", "Inspected browser"],
+  read: ["Reading page", "Read page"],
+  find: ["Finding on page", "Found on page"],
+  console: ["Reading console", "Read console"],
+  network: ["Reading network", "Read network"],
+  capture: ["Capturing page", "Captured page"],
+  click: ["Clicking", "Clicked"],
+  type: ["Typing", "Typed"],
+  scroll: ["Scrolling", "Scrolled page"],
+  form: ["Filling field", "Filled field"],
+};
+
+/**
+ * Wording for a live browser capability call, so the Browser panel's presence
+ * strip says exactly what the rail row says.
+ */
+export function browserCapabilityText(
+  capabilityId: string,
+  status: string,
+  target?: string,
+): { label: string; description?: string } {
+  const action = browserActionFromName(capabilityId.replace(/^browser-/, ""));
+  const [running, done] = BROWSER_ROW_LABELS[action];
+  return {
+    label: status === "completed" ? done : running,
+    description: target,
+  };
+}
+
+/** `read-page` / `read_page` → `read`; an unknown verb reads as an inspection. */
+function browserActionFromName(name: string): BrowserAction {
+  return BROWSER_ACTIONS[name] ?? "inspect";
+}
+
+/** `http://127.0.0.1:1437/chat.html?x=1` → `127.0.0.1:1437/chat.html` */
+function browserPageLabel(value: string): string {
+  try {
+    const url = new URL(value);
+    const path = url.pathname === "/" ? "" : url.pathname;
+    return url.host ? `${url.host}${path}` : value;
+  } catch {
+    return value;
+  }
 }
 
 /** `gyro_workspace_get_context` → `Workspace context` */

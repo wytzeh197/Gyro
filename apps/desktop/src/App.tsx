@@ -1,3 +1,4 @@
+import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { useProviderUsage } from "./use-provider-usage";
 import * as turnTiming from "./turn-timing";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
@@ -2865,11 +2866,9 @@ export function App() {
                 line: Math.max(1, line),
                 column: Math.max(1, column),
               });
-              // The tab is opened as a preview either way, so the file is
-              // already waiting once the user walks over to Code. Outside
-              // "follow" it lands in the background: no destination change, no
-              // active-tab change, no scroll away from what the user is reading.
-              if (isActiveModelWorkspace) {
+              // File access stays in the background unless the user explicitly
+              // enables Follow model for the active session.
+              if (shouldFollow) {
                 dispatchWorkbench({
                   type: "ide-open-tab",
                   tab: {
@@ -2878,10 +2877,7 @@ export function App() {
                     dirty: false,
                     preview: true,
                   },
-                  background: !shouldFollow,
                 });
-              }
-              if (shouldFollow) {
                 setEditorRevealTarget({
                   path,
                   lineNumber: Math.max(1, line),
@@ -8548,8 +8544,8 @@ export function App() {
       },
     ) => {
       const attachmentDraftKey = target?.draftKey ?? activeDraftKey;
-      const attachmentSessionId = target?.sessionId ?? activeSessionId;
-      const attachmentWorkspacePath = target?.workspacePath ?? workspacePath;
+      const attachmentSessionId = target ? target.sessionId : activeSessionId;
+      const attachmentWorkspacePath = target ? target.workspacePath : workspacePath;
       const existing = chatAttachments[attachmentDraftKey] ?? [];
       const remaining = {
         image: Math.max(
@@ -12443,32 +12439,18 @@ export function App() {
     [activeSessionId, notify, sessionBrowserKey, sessionBrowserWorkspaceKey],
   );
 
+  const [updateBrowserHostVisibility] = useState(() =>
+    createBrowserHostVisibility((command, args) => invoke(command, args)),
+  );
   const handleBrowserHostBoundsChange = useCallback(
-    async (
-      bounds: { x: number; y: number; width: number; height: number } | null,
-    ) => {
+    (bounds: { x: number; y: number; width: number; height: number } | null) => {
       if (!isTauriRuntime()) return;
-      try {
-        if (!bounds || browserOverlayOccluded) {
-          await invoke("session_browser_set_visible", {
-            sessionId: sessionBrowserKey,
-            visible: false,
-          });
-          return;
-        }
-        await invoke("session_browser_set_bounds", {
-          sessionId: sessionBrowserKey,
-          bounds,
-        });
-        await invoke("session_browser_set_visible", {
-          sessionId: sessionBrowserKey,
-          visible: true,
-        });
-      } catch {
-        // Webview may not exist yet until the first navigate/open.
-      }
+      return updateBrowserHostVisibility(
+        sessionBrowserKey,
+        browserOverlayOccluded ? null : bounds,
+      );
     },
-    [browserOverlayOccluded, sessionBrowserKey],
+    [browserOverlayOccluded, sessionBrowserKey, updateBrowserHostVisibility],
   );
 
   const handleBrowserNavigate = useCallback(
@@ -12597,11 +12579,8 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
-    void invoke("session_browser_set_visible", {
-      sessionId: sessionBrowserKey,
-      visible: false,
-    }).catch(() => undefined);
-  }, [browserOverlayOccluded, sessionBrowserKey]);
+    void updateBrowserHostVisibility(sessionBrowserKey, null);
+  }, [browserOverlayOccluded, sessionBrowserKey, updateBrowserHostVisibility]);
 
   const attachBrowserCaptureToChat = useCallback(
     async (capture: BrowserPreviewCapture) => {
@@ -18245,6 +18224,7 @@ function capabilityActivityFromSessionEvent(
     policyRevision,
     summary,
     resource,
+    target: stringFromRecord(payload, "target"),
     sessionId: event.sessionId,
     turnId: event.turnId,
     createdAt: event.createdAt,

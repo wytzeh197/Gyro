@@ -23,3 +23,9 @@ current mode must remain visible in the composer.
 Project capability grants remain separately revisioned. They narrow or approve
 specific Gyro capabilities when Full Access is not active; they do not silently
 change the user's selected top-level mode.
+
+In Full Access, chat Workspace edit submissions apply immediately through the
+guarded file transaction. They return an applied result rather than an approval
+card. Hash conflicts, unsaved editor changes and workspace path checks still
+stop an unsafe replacement. Outside Full Access, the same submission remains a
+review proposal. An explicit editor review action still creates a proposal.

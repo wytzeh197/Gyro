@@ -74,6 +74,7 @@ assert.deepEqual(
         resetsAt: "2026-09-18T00:00:00.000Z",
       },
     ],
+    now: new Date("2026-09-11T00:00:00.000Z"),
   }),
   {
     providerId: "openai",
@@ -81,8 +82,70 @@ assert.deepEqual(
     windowLabel: "Weekly limit",
     percent: 14,
     threshold: 14,
-    cycleId: "2026-09-18T00:00:00.000Z",
+    cycleId: "day:2026-09-11",
   },
+);
+
+// Weekly usage on an even pace is not a warning, however far into the week.
+const midWeek = {
+  now: new Date("2026-09-14T12:00:00.000Z"),
+  resetsAt: "2026-09-18T00:00:00.000Z",
+};
+assert.equal(
+  dailyPaceNotice("openai", {
+    enabled: true,
+    windows: [
+      {
+        id: "weekly",
+        label: "Weekly limit",
+        usedPercent: 60,
+        resetsAt: midWeek.resetsAt,
+      },
+    ],
+    now: midWeek.now,
+  }),
+  undefined,
+);
+assert.equal(
+  dailyPaceNotice("openai", {
+    enabled: true,
+    windows: [
+      {
+        id: "weekly",
+        label: "Weekly limit",
+        usedPercent: 65,
+        resetsAt: midWeek.resetsAt,
+      },
+    ],
+    now: midWeek.now,
+  })?.percent,
+  65,
+);
+
+// A measured weekly window outranks an inflated local reference estimate:
+// 12% used with five hours left must not read as "Today is 100%".
+assert.equal(
+  dailyPaceNotice("anthropic", {
+    enabled: true,
+    ledger: {
+      providerId: "anthropic",
+      dailyReferenceTokens: 2_000_000,
+      fiveHour: totals(),
+      day: totals({ totalTokens: 20_000_000 }),
+      week: totals({ totalTokens: 20_000_000 }),
+    },
+    windows: [
+      { id: "five-hour", label: "5-hour limit", usedPercent: 0 },
+      {
+        id: "weekly",
+        label: "Weekly limit",
+        usedPercent: 12,
+        resetsAt: "2026-09-13T17:00:00.000Z",
+      },
+    ],
+    now: new Date("2026-09-13T11:46:00.000Z"),
+  }),
+  undefined,
 );
 
 const pacedDay = dailyPaceNotice("anthropic", {

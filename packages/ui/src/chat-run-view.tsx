@@ -67,6 +67,7 @@ const WORK_GROUP_ICON = {
   change: Pencil,
   verify: ListChecks,
   command: SquareTerminal,
+  browser: Globe2,
 } as const satisfies Record<WorkGroup["groupKind"], LucideIcon>;
 
 /** A read of an image is still a read, but the eye undersells what happened. */
@@ -114,12 +115,13 @@ export function ChatRun({
   renderSay,
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
-  // Saved narration is part of the conversation. Keep it visible on reopen
-  // and completion; only an explicit reader action collapses the timeline.
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // A finished turn leads with its final response. Work remains available
+  // behind the header; live work and failures stay open for visibility.
+  const isDone = model.phase.name === "done";
+  const [isCollapsed, setIsCollapsed] = useState(isDone);
   useEffect(() => {
-    if (isLive) setIsCollapsed(false);
-  }, [isLive]);
+    setIsCollapsed(isDone);
+  }, [isLive, isDone]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
   const displaySteps = groupRunSteps(model.steps);

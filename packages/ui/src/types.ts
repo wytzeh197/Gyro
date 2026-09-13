@@ -238,6 +238,8 @@ export type CapabilityCallEvent = {
   policyRevision: number;
   summary: string;
   resource?: CapabilityResourceRef;
+  /** What a browser interaction touched, as the page names it. Untrusted. */
+  target?: string;
 };
 
 export type CapabilityApprovalEvent = {

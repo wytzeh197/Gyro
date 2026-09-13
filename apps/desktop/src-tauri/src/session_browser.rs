@@ -489,6 +489,17 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return text.slice(0, 120);
   }};
 
+  // What the person watching would call the element an action touched. Form
+  // controls are usually named by a <label for>, which nameOf does not read.
+  const targetName = (el) => {{
+    const label = el.getAttribute("aria-label")
+      || (el.labels && el.labels.length ? el.labels[0].innerText : "");
+    return (label || nameOf(el) || el.getAttribute("name") || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+  }};
+
   const isCredentialField = (el) => {{
     if (!el || el.nodeType !== 1) return false;
     const tag = el.tagName.toLowerCase();
@@ -618,7 +629,78 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return {{ ok: true }};
   }};
 
+  // Show the person watching which element the agent just touched. An inert
+  // overlay on the root element keeps page layout, focus, hit-testing, and the
+  // body-rooted accessibility read untouched.
+  let highlight = null;
+  let highlightTimer = 0;
+  const clearHighlight = () => {{
+    window.clearTimeout(highlightTimer);
+    if (highlight) highlight.remove();
+    highlight = null;
+  }};
+  const flashTarget = (el) => {{
+    try {{
+      clearHighlight();
+      const rect = el.getBoundingClientRect();
+      if (!rect.width && !rect.height) return;
+      const box = document.createElement("div");
+      box.setAttribute("aria-hidden", "true");
+      box.style.cssText = [
+        "position:fixed",
+        "pointer-events:none",
+        "z-index:2147483647",
+        "left:" + (rect.left - 3) + "px",
+        "top:" + (rect.top - 3) + "px",
+        "width:" + (rect.width + 6) + "px",
+        "height:" + (rect.height + 6) + "px",
+        "box-sizing:border-box",
+        "border:2px solid #0874df",
+        "border-radius:6px",
+        "box-shadow:0 0 0 4px rgba(8,116,223,0.18)",
+        "transition:opacity 180ms ease",
+      ].join(";");
+      // A model cursor is separate from the user's system pointer. Keep it
+      // inert and inside the viewport, even for partially visible targets.
+      const cursor = document.createElement("div");
+      cursor.style.cssText = [
+        "position:fixed", "pointer-events:none", "display:flex",
+        "align-items:center", "gap:4px",
+        "left:" + Math.max(0, Math.min(window.innerWidth - 76, rect.left + rect.width / 2)) + "px",
+        "top:" + Math.max(0, Math.min(window.innerHeight - 32, rect.top + rect.height / 2)) + "px",
+        "font:600 11px system-ui", "color:#fff",
+        "filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))",
+      ].join(";");
+      const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      arrow.setAttribute("width", "24");
+      arrow.setAttribute("height", "28");
+      arrow.setAttribute("viewBox", "0 0 24 28");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", "M2 2 L21 16 L13 17 L9 25 Z");
+      path.setAttribute("fill", "rgb(8, 116, 223)");
+      path.setAttribute("stroke", "white");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linejoin", "round");
+      arrow.appendChild(path);
+      const label = document.createElement("span");
+      label.textContent = "Model";
+      label.style.cssText = "background:#0874df;border-radius:4px;padding:2px 5px";
+      cursor.append(arrow, label);
+      box.appendChild(cursor);
+      document.documentElement.appendChild(box);
+      highlight = box;
+      highlightTimer = window.setTimeout(() => {{
+        box.style.opacity = "0";
+        highlightTimer = window.setTimeout(clearHighlight, 200);
+      }}, 900);
+    }} catch (error) {{}}
+  }};
+
   window.__gyroBrowserAgent = {{
+    clearHighlight() {{
+      clearHighlight();
+      return {{ ok: true }};
+    }},
     readPage(options) {{
       refMap.clear();
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
@@ -662,12 +744,15 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
       clickEl(el);
-      return {{ ok: true, ref: options.ref }};
+      flashTarget(el);
+      return {{ ok: true, ref: options.ref, name: targetName(el) }};
     }},
     type(options) {{
       const el = options && options.ref ? resolveRef(options.ref) : document.activeElement;
       if (!el) return {{ ok: false, error: "no target element" }};
-      return Object.assign({{ ref: el.__gyroRef || null }}, typeInto(el, options && options.text, !!(options && options.submit)));
+      const typed = Object.assign({{ ref: el.__gyroRef || null, name: targetName(el) }}, typeInto(el, options && options.text, !!(options && options.submit)));
+      if (typed.ok) flashTarget(el);
+      return typed;
     }},
     formInput(options) {{
       const el = resolveRef(options && options.ref);
@@ -675,12 +760,14 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       if (isCredentialField(el)) {{
         return {{ ok: false, error: "credential fields are not writable by the model" }};
       }}
+      const name = targetName(el);
+      flashTarget(el);
       const value = String((options && options.value) ?? "");
       if (el.tagName.toLowerCase() === "select") {{
         el.value = value;
         dispatch(el, "input");
         dispatch(el, "change");
-        return {{ ok: true, ref: options.ref }};
+        return {{ ok: true, ref: options.ref, name }};
       }}
       if (el.tagName.toLowerCase() === "input") {{
         const type = (el.getAttribute("type") || "text").toLowerCase();
@@ -688,10 +775,10 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
           el.checked = value === "true" || value === "1" || value === "on" || value === "checked";
           dispatch(el, "input");
           dispatch(el, "change");
-          return {{ ok: true, ref: options.ref }};
+          return {{ ok: true, ref: options.ref, name }};
         }}
       }}
-      return Object.assign({{ ref: options.ref }}, typeInto(el, value, false));
+      return Object.assign({{ ref: options.ref, name }}, typeInto(el, value, false));
     }},
     scroll(options) {{
       const dx = Number((options && options.dx) || 0);
@@ -896,7 +983,7 @@ pub fn open_session_browser<R: Runtime>(
             if let Some(bounds) = request.bounds.as_ref() {
                 apply_bounds(&webview, bounds)?;
             }
-            let visible = request.visible.unwrap_or(true);
+            let visible = request.visible.unwrap_or(existing.visible);
             if visible {
                 let _ = webview.show();
             } else {
@@ -1006,10 +1093,8 @@ pub fn set_session_browser_bounds<R: Runtime>(
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
     apply_bounds(&webview, &bounds)?;
-    if bounds.width >= 2.0 && bounds.height >= 2.0 {
-        manager.set_visible_flag(session_id, true)?;
-        let _ = webview.show();
-    }
+    // Positioning is independent of visibility: only the mounted UI host may
+    // reveal the child, after confirming its bounds report is still current.
     Ok(())
 }
 
@@ -1345,6 +1430,20 @@ pub async fn session_browser_snapshot(
 ) -> Result<Option<SessionBrowserSnapshot>, String> {
     app.state::<SessionBrowserManager>()
         .get_snapshot(&session_id)
+}
+
+/// The element a browser interaction touched, as the page names it.
+pub(crate) fn browser_action_target(result: &gyro_core::CapabilityResult) -> Option<String> {
+    if !matches!(
+        result.capability_id,
+        gyro_core::CapabilityId::BrowserClick
+            | gyro_core::CapabilityId::BrowserType
+            | gyro_core::CapabilityId::BrowserFormInput
+    ) {
+        return None;
+    }
+    let name = result.data.pointer("/data/name")?.as_str()?.trim();
+    (!name.is_empty()).then(|| name.chars().take(80).collect())
 }
 
 #[cfg(test)]
