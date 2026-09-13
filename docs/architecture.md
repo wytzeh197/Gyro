@@ -127,7 +127,7 @@ secrets or full message bodies.
 ## Architecture artifact status
 
 - This document describes current, normative architecture.
-- `Gyro-goals-and-features.md` is current product direction, not runtime proof.
+- `docs/vision.md` defines product principles, not runtime proof.
 - `docs/roadmap.md` is forward-looking and may contain unshipped work.
 - `docs/releases/` records historical release behavior.
 - `docs/internal/` contains local planning and is not a public architecture

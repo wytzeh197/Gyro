@@ -27,14 +27,6 @@ coding loop.
 - Approval before mutation: commands, file edits, and sensitive context expansion should be visible before they change local state.
 - Worktree safety: risky or parallel tasks should be easy to isolate without forcing the user to hand-manage Git plumbing.
 
-## Why This Is Hard to Copy
-
-No single provider—Anthropic, OpenAI, or an IDE vendor—has an incentive to
-build a neutral cockpit across providers and interfaces; each benefits when the
-developer stays inside its own CLI or IDE. Gyro's durable position is the
-provider-agnostic, local-first layer above them all. That is a structural moat,
-not merely a UI moat.
-
 ## Design Principles
 
 - Calm command center: Gyro should feel focused, quiet, and operational, with the agent's state easier to scan than the decoration around it.
@@ -56,52 +48,18 @@ The product should be judged by whether a developer can open a repo, start or
 attach an agent run, understand what the agent wants to do, approve or reject
 changes, and keep moving without losing context.
 
-## CLI missions (direction)
-
-CLI should not stop at a provider launcher (open Shell / Claude Code / Codex).
-Over time it becomes **mission control** for coding agents:
-
-1. The user opens one **goal chat** (a mission) and states the goal.
-2. An orchestrator **plans and partitions** work into tasks.
-3. Gyro **spawns multiple CLI workers** — often the **same** runtime (for
-   example several Grok Build sessions), each with a different task.
-4. The goal chat remains the control plane: status, replan, stop or reassign,
-   and integrate.
-5. Workspace, diffs, and approvals stay the shared inspection and trust layer.
-
-**Orchestration is not multi-model.** Multi-provider is optional power. The
-default fan-out is same CLI × N tasks. Opening a single raw CLI profile remains
-a power path for terminal-native workflows.
-
-Council (multi-seat deliberation) is a separate, frozen concept. Missions are
-multi-worker **execution**, not parallel answers in one chat.
-
-Alpha priority remains a dependable single-agent loop. Mission shell and
-manual multi-worker grouping come before plan-approve-spawn automation. See
-[cli-missions.md](./cli-missions.md).
-
 ## Open Core, and What Stays Free
 
 The unification itself—chat, CLI, and IDE in one local session—is never
-paywalled. Everything chargeable must sit around that experience, not inside it.
-If a future feature cannot be described that way, it does not belong on the
-paid list. Local usage must remain fully functional without a Gyro-hosted
+paywalled. Local usage must remain fully functional without a Gyro-hosted
 service.
 
-Potential paid areas, in priority order:
+The open-source core includes provider integrations, local sessions, files,
+terminals, browser tools, diffs, approvals, worktrees, local automations, and
+basic local usage and cost visibility. Users should be able to inspect the
+code that operates on their projects and enforces local permissions.
 
-1. **Cross-device and cross-machine session continuity.** Start a session on one
-   Mac, resume it on another, or check its status remotely through light hosted
-   infrastructure.
-2. **Unified provider usage and cost dashboard.** Aggregate and visualize usage
-   and spend across Codex, Claude Code, Kimi, and other supported providers in
-   one place.
-3. **Team sync and shared sessions.** Add collaboration only after real teams of
-   two or more are using Gyro; do not build it ahead of demonstrated demand.
-4. **Organization policy controls and audit exports.** Enforce approval policy
-   and export compliance logs across a team as a later, enterprise-only layer.
-5. **Hosted model credits.** Keep this as a possible, low-priority convenience,
-   not a near-term plan or product differentiator; it is commoditized and
-   low-margin.
-6. **Priority support and onboarding.** Offer this as a small later add-on, not
-   as a primary revenue driver at this stage.
+Optional paid services may sit around this experience. They must preserve a
+complete local workflow and its permission boundaries.
+
+See the [public roadmap](roadmap.md) for contributor priorities.
