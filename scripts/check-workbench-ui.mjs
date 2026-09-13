@@ -4582,7 +4582,7 @@ expect(
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 20 &&
+    tauriConfig.app.windows[0].trafficLightPosition.y === 16 &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('aria-label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
@@ -6497,7 +6497,7 @@ expect(
       'className="gyro-sidebar-persistent-header is-settings"',
     ) &&
     cssRules(styleSource, ".gyro-sidebar-windowbar.is-settings").some((rule) =>
-      rule.includes("padding-left: 82px"),
+      rule.includes("padding-left: 90px"),
     ) &&
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-surface.is-empty) .gyro-sidebar-windowbar",
@@ -6517,7 +6517,11 @@ expect(
       styleSource,
       ':root[data-theme="light"][data-window-active="false"]\n  .gyro-sidebar-persistent-header::after',
     ).some(
-      (rule) => rule.includes("left: 8px") && rule.includes("top: 18px"),
+      (rule) =>
+        rule.includes("left: 16px") &&
+        rule.includes("top: 16px") &&
+        rule.includes("height: 14px") &&
+        rule.includes("width: 58px"),
     ) &&
     surfaceSource.includes('className="gyro-composer-branch-picker"') &&
     cssRules(styleSource, ".gyro-composer-branch-picker").some(
@@ -6543,7 +6547,7 @@ expect(
     cssRules(styleSource, ".gyro-sidebar-restore-cluster").some(
       (rule) =>
         rule.includes("height: 52px") &&
-        rule.includes("padding-left: 82px") &&
+        rule.includes("padding-left: 90px") &&
         rule.includes("position: fixed"),
     ) &&
     cssRules(styleSource, ".gyro-sidebar-restore-button").some(

@@ -18575,6 +18575,14 @@ function deriveSessionPlan(
   sessionId?: string,
 ): SessionPlan {
   const assistantContentByTurnId = new Map<string, string>();
+  const normalTurnIds = new Set<string>();
+  for (const event of events) {
+    const payload = recordFromUnknown(event.payload);
+    const turnId = turnIdFromSessionEvent(event);
+    if (turnId && stringFromRecord(payload, "chatMode") === "normal") {
+      normalTurnIds.add(turnId);
+    }
+  }
   for (const event of events) {
     if (event.kind !== "assistant-message" || !event.message.trim()) {
       continue;
@@ -18594,13 +18602,24 @@ function deriveSessionPlan(
     if (event.kind !== "plan-updated") {
       continue;
     }
-    if (!plan.createdAt) {
-      plan = { ...plan, createdAt: event.createdAt };
-    }
     const payload = recordFromUnknown(event.payload);
     const action = stringFromRecord(payload, "action") ?? "replace";
     const sourceTurnId =
       turnIdFromSessionEvent(event) ?? stringFromRecord(payload, "turnId");
+    // Older ACP runs persisted execution checklists as plan replacements.
+    // Do not turn their entire normal-mode response into a Plan document.
+    if (
+      action === "replace" &&
+      sourceTurnId &&
+      normalTurnIds.has(sourceTurnId) &&
+      !stringFromRecord(payload, "content") &&
+      !stringFromRecord(payload, "markdown")
+    ) {
+      continue;
+    }
+    if (!plan.createdAt) {
+      plan = { ...plan, createdAt: event.createdAt };
+    }
     const providerId = stringFromRecord(payload, "providerId");
     const title = stringFromRecord(payload, "title");
     const content =

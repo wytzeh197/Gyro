@@ -5293,11 +5293,17 @@ fn run_provider_chat_blocking(
         .payload
         .clone()
         .or_else(|| {
-            runner_output
-                .activities
-                .iter()
-                .rev()
-                .find_map(kimi_acp_plan_payload)
+            // ACP checklists track execution too; only planning turns should
+            // promote them into a user-facing Plan document.
+            (request.mode == ChatMode::Plan)
+                .then(|| {
+                    runner_output
+                        .activities
+                        .iter()
+                        .rev()
+                        .find_map(kimi_acp_plan_payload)
+                })
+                .flatten()
         })
         // The Plan document is a product guarantee, not something that should
         // disappear because one provider omitted the hidden checklist line.

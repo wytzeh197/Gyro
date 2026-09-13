@@ -28740,14 +28740,16 @@ button.gyro-account-menu-row:hover,
     padding-inline: 10px;
   }
 }
-/* Keep navigation aligned with the macOS controls in a compact titlebar. */
+/* Keep navigation aligned with the macOS controls. Native traffic lights are
+   14px dots at (16, 16); 90px of padding leaves the same gutter Synara uses
+   from the cluster's trailing edge to the sidebar toggle. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   box-sizing: border-box;
   height: 48px;
   margin-bottom: 0;
   min-height: 48px;
   padding-bottom: 2px;
-  padding-left: 82px;
+  padding-left: 90px;
 }
 
 .gyro-sidebar-windowbar.is-settings {
@@ -28755,7 +28757,7 @@ button.gyro-account-menu-row:hover,
   height: 52px;
   min-height: 52px;
   padding-bottom: 6px;
-  padding-left: 82px;
+  padding-left: 90px;
 }
 
 /* New Chat uses one uninterrupted canvas; thread chrome introduces the divider. */
@@ -28768,35 +28770,36 @@ button.gyro-account-menu-row:hover,
   border-bottom-color: var(--gyro-premium-hairline-soft);
 }
 
-/* Preserve a quiet outline behind macOS traffic lights when Light mode is inactive. */
+/* Preserve a quiet outline behind macOS traffic lights when Light mode is inactive.
+   Concentric with the native 14px dots at trafficLightPosition (16, 16). */
 :root[data-theme="light"][data-window-active="false"]
   .gyro-sidebar-persistent-header::after {
   background:
     radial-gradient(
-      circle at 6px 6px,
-      rgba(82, 92, 104, 0.2) 0 5px,
-      rgba(82, 92, 104, 0.3) 5.25px 5.75px,
-      transparent 6px
+      circle at 7px 7px,
+      rgba(82, 92, 104, 0.2) 0 6px,
+      rgba(82, 92, 104, 0.3) 6.25px 6.75px,
+      transparent 7px
     ),
     radial-gradient(
-      circle at 26px 6px,
-      rgba(82, 92, 104, 0.2) 0 5px,
-      rgba(82, 92, 104, 0.3) 5.25px 5.75px,
-      transparent 6px
+      circle at 29px 7px,
+      rgba(82, 92, 104, 0.2) 0 6px,
+      rgba(82, 92, 104, 0.3) 6.25px 6.75px,
+      transparent 7px
     ),
     radial-gradient(
-      circle at 46px 6px,
-      rgba(82, 92, 104, 0.2) 0 5px,
-      rgba(82, 92, 104, 0.3) 5.25px 5.75px,
-      transparent 6px
+      circle at 51px 7px,
+      rgba(82, 92, 104, 0.2) 0 6px,
+      rgba(82, 92, 104, 0.3) 6.25px 6.75px,
+      transparent 7px
     );
   content: "";
-  height: 12px;
-  left: 8px;
+  height: 14px;
+  left: 16px;
   pointer-events: none;
   position: absolute;
-  top: 18px;
-  width: 52px;
+  top: 16px;
+  width: 58px;
   z-index: 0;
 }
 
@@ -30698,7 +30701,7 @@ button.gyro-account-menu-row:hover,
   min-height: 0;
   min-width: 0;
   padding-bottom: 6px;
-  padding-left: 82px;
+  padding-left: 90px;
   pointer-events: none;
   position: fixed;
   top: 0;
@@ -40139,8 +40142,8 @@ textarea:focus-visible,
 .gyro-scm-file-actions-menu > button:focus-visible { outline: 1px solid var(--gyro-focus-ring); outline-offset: -1px; }
 .gyro-scm-file-actions-menu > button:disabled { opacity: .45; cursor: default; }
 
-/* Match the regular app's title row, not the dev window's higher traffic lights.
-   Center 28px navigation buttons in the 47px area above the header divider. */
+/* Native 14px traffic lights sit at y 16, so their centre is at 23px. Pad 28px
+   navigation buttons by 9px so they share that centreline. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings),
 .gyro-sidebar-windowbar.is-settings,
 .gyro-sidebar-restore-cluster {
@@ -40148,7 +40151,7 @@ textarea:focus-visible,
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
-  padding-top: 9.5px;
+  padding-top: 9px;
   padding-bottom: 0;
 }
 
