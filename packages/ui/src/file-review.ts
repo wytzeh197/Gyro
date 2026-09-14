@@ -139,6 +139,73 @@ export function diffPreviewLines(
   return { lines, truncated: raw.length > limit };
 }
 
+export type DiffHunk = {
+  header: string;
+  lines: DiffPreviewLine[];
+};
+
+/**
+ * Group a unified diff into hunks the fallback reader can page through.
+ * File headers are dropped so each page is actual change content.
+ */
+export function diffHunks(diff: string): DiffHunk[] {
+  const raw = diff.replace(/\r\n?/g, "\n").split("\n");
+  while (raw.length && !raw[raw.length - 1]?.trim()) raw.pop();
+  const hunks: DiffHunk[] = [];
+  let current: DiffHunk | undefined;
+  for (const text of raw) {
+    if (text.startsWith("@@")) {
+      current = { header: text, lines: [] };
+      hunks.push(current);
+      continue;
+    }
+    if (!current) continue;
+    current.lines.push({ text, kind: diffLineKind(text) });
+  }
+  if (hunks.length === 0) {
+    const body = raw.filter(
+      (line) => line.startsWith("+") || line.startsWith("-") || line.startsWith(" "),
+    );
+    if (body.length) {
+      return [
+        {
+          header: "@@",
+          lines: body.map((text) => ({ text, kind: diffLineKind(text) })),
+        },
+      ];
+    }
+  }
+  return hunks;
+}
+
+export const PLAIN_DIFF_BYTE_LIMIT = 512 * 1024;
+export const PLAIN_DIFF_LINE_LIMIT = 8000;
+
+/** Files past these limits should not be sent through the rich diff editor. */
+export function shouldUsePlainDiff(original: string, modified: string) {
+  const size = Math.max(original.length, modified.length);
+  if (size > PLAIN_DIFF_BYTE_LIMIT) return true;
+  const originalLines = lineCount(original);
+  const modifiedLines = lineCount(modified);
+  if (Math.max(originalLines, modifiedLines) > PLAIN_DIFF_LINE_LIMIT) {
+    return true;
+  }
+  const sample = original.length >= modified.length ? original : modified;
+  return sample
+    .slice(0, 131072)
+    .split("\n")
+    .some((line) => line.length > 20000);
+}
+
+function lineCount(value: string) {
+  if (!value) return 0;
+  let count = 1;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) === 10) count += 1;
+  }
+  return count;
+}
+
 function diffLineKind(line: string): DiffPreviewKind {
   if (line.startsWith("@@")) return "hunk";
   // `+++`/`---` are file headers, not content, and are checked before the

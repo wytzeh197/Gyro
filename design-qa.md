@@ -74,3 +74,31 @@ Typography and spacing: 13px body, 18px heading, 480px dialog, compact folder co
 Browser verified: add folder (deterministic native-picker fixture), Make primary, Save, reopen with selected primary retained. Unit coverage checks primary-first workspace order and fallback for removed folders; desktop typecheck and workbench checks passed. Real OS folder-picker interaction was not automated.
 
 final result: passed
+
+---
+
+# New session menu design QA
+
+final result: passed
+
+Source: /Users/wytze/.codex/generated_images/01a09ec1-c210-7920-9f52-5cb223371992/exec-e17119e9-34e5-4bdc-869e-5d7fdee0f765.png (option 1, 1036 x 1518 pixels).
+Implementation: /private/tmp/gyro-session-menu-light.png (933 x 894 pixels); focused capture /private/tmp/gyro-session-menu-detail.png (240 x 445 pixels).
+
+Compared the source and rendered implementation together in the same tool result. The source is an enlarged component concept, not a full desktop viewport. Compared component hierarchy at normal UI scale, preserving the existing responsive sidebar: the tested 933 x 894 CSS viewport gives a 170px menu. No pixel-exact equivalence claimed. State: light theme, open root menu, six ready tools and three blocked tools. The concept shows a hovered Claude row; captured root is neutral. A temporary fixture rendered the real AppChrome with controlled readiness and callback feedback; the fixture was removed after verification.
+
+## Findings
+No actionable P0/P1/P2 visual findings for the selected compact-menu scope.
+
+- Typography: existing system font retained, 13px action labels and 12px secondary labels, sentence-case heading. No wrapping or clipping of tool names.
+- Layout: New Chat leads; two hairline separators group CLI sessions and More tools; 32px CLI rows and 8px group spacing reduce the default height. Existing responsive width and scroll containment retained.
+- Colors: existing light/dark surface, foreground, muted and border tokens retained. Dark preview also inspected with no project and all provider tools blocked.
+- Assets: original provider logos and existing Lucide icons retained; Box used for generic More tools rather than the mock's provider-like cube.
+- Copy: ready list matches the concept; count derives from blocked profiles. Expanded blocked tools remain disabled, preserving existing setup behavior without repeated labels.
+
+## Interaction evidence
+More tools expands to Gemini CLI, Cursor, and OpenCode, all disabled. Home reaches New Chat; End reaches More tools; Enter toggles; Escape closes and restores New Session focus. Claude callback produced `claude launched in /preview/Gyro` and closed the menu. New Chat callback produced `New chat created` and closed the menu. UI typecheck and workbench/token smoke checks passed.
+
+Browser logs had two duplicate-createRoot warnings from editing the temporary fixture under HMR. Reloading the fixture produced no new errors. These were fixture lifecycle warnings, not production-menu errors.
+
+## Comparison history and limits
+First visual comparison passed; no visual fix loop needed. Focused capture supports the full-view comparison. Installed native app was inspected and still uses its older bundle; it was not rebuilt or installed. Callback checks are UI-level evidence, not a claim that a real CLI process was launched. No backend changes.

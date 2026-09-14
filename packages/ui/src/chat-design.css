@@ -46,13 +46,13 @@
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-transcript {
-  padding-top: 32px;
+  padding-top: 20px;
   text-align: left;
 }
 
 :root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-chat-turn {
   animation: none;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
 }
 
 :root[data-theme]
@@ -60,7 +60,7 @@
   .gyro-chat-turn
   > .gyro-message.is-user {
   justify-content: stretch;
-  margin-bottom: 28px;
+  margin-bottom: 16px;
 }
 
 :root[data-theme]
@@ -90,15 +90,15 @@
 :root[data-theme="light"]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-user-message-bubble {
-  background: #000;
-  border-color: transparent;
-  color: #fff;
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-user-message-bubble p {
-  color: #fff;
+  color: var(--gyro-text);
 }
 
 :root[data-theme]
@@ -265,8 +265,8 @@
   > header {
   background: transparent;
   grid-template-columns: 24px minmax(0, 1fr) auto;
-  min-height: 58px;
-  padding: 12px 14px;
+  min-height: 44px;
+  padding: 8px 12px;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -321,8 +321,8 @@
   .gyro-chat-composer-dock
   .gyro-composer-shell
   > textarea {
-  min-height: 58px;
-  padding: 15px 16px 8px;
+  min-height: 48px;
+  padding: 10px 12px 6px;
   background: transparent;
   color: var(--gyro-text);
   font: 14px/1.5 var(--gyro-font-sans);
@@ -336,7 +336,7 @@
   .gyro-chat-composer-dock
   .gyro-composer-shell
   > .gyro-composer-bar {
-  padding: 4px 12px 10px;
+  padding: 2px 10px 8px;
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -353,7 +353,9 @@
   background: transparent;
   border: 0;
   box-shadow: none;
-  padding-top: 0;
+  align-items: center;
+  flex-grow: 1;
+  padding-block: 5px;
   color: var(--gyro-faint);
 }
 :root[data-theme]

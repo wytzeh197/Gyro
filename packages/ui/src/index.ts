@@ -229,12 +229,17 @@ export { FILE_REVIEW_SCHEMA } from "./types";
 export {
   askAboutFilePrompt,
   changeSummaryLine,
+  diffHunks,
   diffPreviewLines,
   fileReviewDecisions,
   isKeptCurrent,
   latestFileReviewTurn,
+  PLAIN_DIFF_BYTE_LIMIT,
+  PLAIN_DIFF_LINE_LIMIT,
+  shouldUsePlainDiff,
 } from "./file-review";
 export type {
+  DiffHunk,
   DiffPreviewKind,
   DiffPreviewLine,
   FileReviewFile,
@@ -242,6 +247,18 @@ export type {
   FileReviewRecord,
   FileReviewTurn,
 } from "./file-review";
+export { PlainDiffView } from "./plain-diff-view";
+export { GitComparisonReview } from "./git-comparison-review";
+export type { ComparisonDiffResult } from "./git-comparison-review";
+export {
+  filesForReviewScope,
+  reviewComparisonForScope,
+  reviewScopeEmptyCopy,
+  reviewScopeFromSourceControl,
+  reviewScopeFromTotals,
+  reviewScopeTitle,
+} from "./review-scope";
+export type { ReviewFile, ReviewScope, ReviewScopeListing } from "./review-scope";
 export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
 export {
   createInitialWorkbenchState,
@@ -280,6 +297,7 @@ export {
   CHAT_COMPANION_MAX_WIDTH,
   CHAT_COMPANION_MIN_WIDTH,
   CHAT_COMPANION_OVERLAY_BELOW,
+  shouldOverlayChatCompanion,
   chatCompanionPane,
   chatCompanionReducer,
   chatCompanionTabIds,
@@ -307,6 +325,7 @@ export type {
 } from "./chat-companion";
 export {
   sourceControlTotals,
+  sourceControlTotalsBadge,
   sourceControlTotalsLabel,
   sourceControlTotalsScope,
 } from "./source-control-stats";
@@ -501,7 +520,10 @@ export type {
   SideChatState,
 } from "./surfaces";
 
-export { ScmReviewToolbar } from "./source-control-review";
+export {
+  comparisonScopeLabel,
+  ScmReviewToolbar,
+} from "./source-control-review";
 
 export {
   languages,

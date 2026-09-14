@@ -330,9 +330,9 @@
 .gyro-composer-attachment > img,
 .gyro-transcript-attachment > img {
   border-radius: 4px;
-  height: 32px;
+  height: 72px;
   object-fit: cover;
-  width: 32px;
+  width: 96px;
 }
 
 .gyro-composer-attachment.is-image > img {
@@ -1512,12 +1512,12 @@ button {
   display: grid;
   gap: 8px;
   grid-template-columns: minmax(0, 1fr);
-  min-height: 30px;
-  padding: 5px 7px;
+  min-height: 28px;
+  padding: 4px 7px;
   text-align: left;
   transition: padding-right var(--gyro-premium-motion) var(--gyro-premium-ease);
   width: 100%;
-  padding-right: 56px;
+  padding-right: 44px;
 }
 
 .gyro-sidebar-thread-main.has-model-logo {
@@ -25912,8 +25912,8 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-user-message-bubble {
-  background: #000;
-  color: #fff;
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-user-message-meta,
@@ -26852,16 +26852,16 @@ button.gyro-account-menu-row:hover,
 
 .gyro-plan-usage-notice {
   align-items: flex-start;
-  background: color-mix(in srgb, var(--gyro-accent) 10%, var(--gyro-surface));
+  background: color-mix(in srgb, var(--gyro-accent) 6%, var(--gyro-surface));
   border: 1px solid
-    color-mix(in srgb, var(--gyro-accent) 34%, var(--gyro-border));
-  border-radius: 10px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+    color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border-soft));
+  border-radius: 8px;
+  box-shadow: none;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  margin: 0 0 10px;
-  padding: 11px 12px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
 }
 
 .gyro-plan-usage-notice > svg {
@@ -27214,7 +27214,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-new-session-menu.is-root {
-  gap: 12px;
+  gap: 8px;
   padding: 8px;
 }
 
@@ -27262,9 +27262,9 @@ button.gyro-account-menu-row:hover,
 .gyro-sidebar-session-group-label {
   color: var(--gyro-premium-muted);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .gyro-sidebar-new-session-menu > button.is-back {
@@ -27285,7 +27285,35 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-sidebar-session-group.is-chat > button {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  min-height: 38px;
+}
+
+.gyro-sidebar-new-session-menu
+  .gyro-sidebar-session-group
+  + .gyro-sidebar-session-group {
+  border-top: 1px solid var(--gyro-premium-hairline-soft);
+  padding-top: 8px;
+}
+
+.gyro-sidebar-new-session-menu .gyro-sidebar-session-group-label {
+  padding-bottom: 4px;
+}
+
+.gyro-sidebar-new-session-menu button strong {
+  font-size: 13px;
+}
+
+.gyro-sidebar-new-session-menu .gyro-sidebar-cli-profiles button {
+  min-height: 32px;
+}
+
+.gyro-sidebar-new-session-menu button:focus-visible {
+  outline: 2px solid var(--gyro-premium-muted);
+  outline-offset: -2px;
+}
+
+.gyro-sidebar-session-group.is-more > button > svg {
+  color: var(--gyro-premium-muted);
 }
 
 .gyro-sidebar-session-group.is-chat > button > svg {
@@ -28740,14 +28768,16 @@ button.gyro-account-menu-row:hover,
     padding-inline: 10px;
   }
 }
-/* Keep navigation aligned with the macOS controls in a compact titlebar. */
+/* Keep navigation aligned with the macOS controls. Native traffic lights are
+   14px dots at (16, 16); 90px of padding leaves the same gutter Synara uses
+   from the cluster's trailing edge to the sidebar toggle. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   box-sizing: border-box;
   height: 48px;
   margin-bottom: 0;
   min-height: 48px;
   padding-bottom: 2px;
-  padding-left: 82px;
+  padding-left: 90px;
 }
 
 .gyro-sidebar-windowbar.is-settings {
@@ -28755,7 +28785,7 @@ button.gyro-account-menu-row:hover,
   height: 52px;
   min-height: 52px;
   padding-bottom: 6px;
-  padding-left: 82px;
+  padding-left: 90px;
 }
 
 /* New Chat uses one uninterrupted canvas; thread chrome introduces the divider. */
@@ -28768,35 +28798,36 @@ button.gyro-account-menu-row:hover,
   border-bottom-color: var(--gyro-premium-hairline-soft);
 }
 
-/* Preserve a quiet outline behind macOS traffic lights when Light mode is inactive. */
+/* Preserve a quiet outline behind macOS traffic lights when Light mode is inactive.
+   Concentric with the native 14px dots at trafficLightPosition (16, 16). */
 :root[data-theme="light"][data-window-active="false"]
   .gyro-sidebar-persistent-header::after {
   background:
     radial-gradient(
-      circle at 6px 6px,
-      rgba(82, 92, 104, 0.2) 0 5px,
-      rgba(82, 92, 104, 0.3) 5.25px 5.75px,
-      transparent 6px
+      circle at 7px 7px,
+      rgba(82, 92, 104, 0.2) 0 6px,
+      rgba(82, 92, 104, 0.3) 6.25px 6.75px,
+      transparent 7px
     ),
     radial-gradient(
-      circle at 26px 6px,
-      rgba(82, 92, 104, 0.2) 0 5px,
-      rgba(82, 92, 104, 0.3) 5.25px 5.75px,
-      transparent 6px
+      circle at 29px 7px,
+      rgba(82, 92, 104, 0.2) 0 6px,
+      rgba(82, 92, 104, 0.3) 6.25px 6.75px,
+      transparent 7px
     ),
     radial-gradient(
-      circle at 46px 6px,
-      rgba(82, 92, 104, 0.2) 0 5px,
-      rgba(82, 92, 104, 0.3) 5.25px 5.75px,
-      transparent 6px
+      circle at 51px 7px,
+      rgba(82, 92, 104, 0.2) 0 6px,
+      rgba(82, 92, 104, 0.3) 6.25px 6.75px,
+      transparent 7px
     );
   content: "";
-  height: 12px;
-  left: 8px;
+  height: 14px;
+  left: 16px;
   pointer-events: none;
   position: absolute;
-  top: 18px;
-  width: 52px;
+  top: 16px;
+  width: 58px;
   z-index: 0;
 }
 
@@ -30698,7 +30729,7 @@ button.gyro-account-menu-row:hover,
   min-height: 0;
   min-width: 0;
   padding-bottom: 6px;
-  padding-left: 82px;
+  padding-left: 90px;
   pointer-events: none;
   position: fixed;
   top: 0;
@@ -33876,7 +33907,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-environment-rail.is-tool .gyro-diff-review.is-empty {
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 /*
@@ -34638,16 +34669,16 @@ button.gyro-account-menu-row:hover,
 .gyro-chat-environment-popover {
   background: var(--gyro-pane);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 10px;
-  box-shadow: 0 10px 28px rgba(15, 18, 24, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 18, 24, 0.08);
   color: var(--gyro-text);
-  max-height: min(440px, calc(100% - 72px));
+  max-height: min(380px, calc(100% - 72px));
   overflow: auto;
-  padding: 8px;
+  padding: 6px;
   position: absolute;
   right: 14px;
   top: 56px;
-  width: min(306px, calc(100% - 28px));
+  width: min(280px, calc(100% - 28px));
   z-index: 100;
 }
 
@@ -34962,12 +34993,14 @@ button.gyro-account-menu-row:hover,
 }
 
 /* Keep session actions and the project list close to the surface selector. */
-.gyro-sidebar-persistent-header + .gyro-sidebar-actions:has(.gyro-sidebar-new-session) {
+.gyro-sidebar-persistent-header
+  + .gyro-sidebar-actions:has(.gyro-sidebar-new-session) {
   gap: 2px;
   padding-bottom: 12px;
 }
 
-.gyro-sidebar-persistent-header + .gyro-sidebar-actions:has(.gyro-sidebar-new-session)
+.gyro-sidebar-persistent-header
+  + .gyro-sidebar-actions:has(.gyro-sidebar-new-session)
   .gyro-sidebar-action {
   min-height: 30px;
   padding-block: 4px;
@@ -34976,7 +35009,7 @@ button.gyro-account-menu-row:hover,
 /* Folderless chats remain findable without being represented as a synthetic
    project. Keep the section light so real project context stays primary. */
 .gyro-sidebar-recents {
-  margin-top: 18px;
+  margin-top: 10px;
 }
 
 .gyro-sidebar-recents-empty {
@@ -36555,11 +36588,11 @@ textarea:focus-visible,
 }
 
 .gyro-chat-surface.has-companion .gyro-user-message-bubble {
-  background: color-mix(in srgb, var(--gyro-text) 7%, var(--gyro-pane));
-  border: 0;
-  border-radius: 18px;
+  background: color-mix(in srgb, var(--gyro-text) 6%, var(--gyro-pane));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-text);
-  padding: 12px 16px;
+  padding: 8px 12px;
 }
 
 .gyro-chat-surface.has-companion .gyro-user-message-bubble p {
@@ -37214,7 +37247,9 @@ textarea:focus-visible,
   .gyro-sidebar-scm-row:is(:hover, :focus-within),
 .gyro-sidebar-section
   .gyro-scm-panel
-  .gyro-sidebar-scm-row:has(.gyro-scm-file-actions-trigger[aria-expanded="true"]) {
+  .gyro-sidebar-scm-row:has(
+    .gyro-scm-file-actions-trigger[aria-expanded="true"]
+  ) {
   grid-template-columns: minmax(0, 1fr) 20px 20px 12px;
 }
 .gyro-sidebar-section
@@ -37289,7 +37324,15 @@ textarea:focus-visible,
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: 29px minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.gyro-source-control-review-editor {
+  min-height: 0;
+  height: 100%;
+}
+.gyro-source-control-review-editor .monaco-editor,
+.gyro-source-control-review-editor .monaco-diff-editor {
+  height: 100%;
 }
 .gyro-review-toolbar {
   display: flex;
@@ -38117,7 +38160,7 @@ textarea:focus-visible,
 }
 .gyro-sidebar-section .gyro-scm-panel {
   flex: 1;
-  min-height: 440px;
+  min-height: 0;
   padding-bottom: 0;
   gap: 0;
 }
@@ -38211,7 +38254,7 @@ textarea:focus-visible,
 .gyro-scm-panel .gyro-scm-history:not([open]) {
   flex: 0 0 auto !important;
   order: 10;
-  margin-top: auto;
+  margin-top: 0;
 }
 
 /* Closed sections form a footer stack without losing expanded drag sizes. */
@@ -40072,7 +40115,10 @@ textarea:focus-visible,
   line-height: 1.3;
 }
 
-.gyro-project-hover-card { font-family: var(--gyro-font-sans); line-height: 1.4; }
+.gyro-project-hover-card {
+  font-family: var(--gyro-font-sans);
+  line-height: 1.4;
+}
 .gyro-project-edit-dialog :is(button, input):focus-visible,
 .gyro-project-hover-card button:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
@@ -40081,13 +40127,25 @@ textarea:focus-visible,
 .gyro-project-edit-dialog .gyro-project-name-input:focus-within {
   border-color: var(--gyro-accent);
 }
-.gyro-project-edit-dialog .gyro-project-name-input input:focus-visible { outline: none; }
-.gyro-project-edit-dialog .gyro-project-folders-label { font-weight: 500; }
-.gyro-project-edit-dialog .gyro-project-folder > button:last-child { width: 26px; height: 26px; }
-.gyro-project-edit-dialog .gyro-project-folder button:disabled { opacity: .3; }
-.gyro-project-edit-dialog footer button { min-height: 32px; }
-.gyro-project-edit-dialog footer .gyro-project-save:hover:not(:disabled) { opacity: .85; }
-
+.gyro-project-edit-dialog .gyro-project-name-input input:focus-visible {
+  outline: none;
+}
+.gyro-project-edit-dialog .gyro-project-folders-label {
+  font-weight: 500;
+}
+.gyro-project-edit-dialog .gyro-project-folder > button:last-child {
+  width: 26px;
+  height: 26px;
+}
+.gyro-project-edit-dialog .gyro-project-folder button:disabled {
+  opacity: 0.3;
+}
+.gyro-project-edit-dialog footer button {
+  min-height: 32px;
+}
+.gyro-project-edit-dialog footer .gyro-project-save:hover:not(:disabled) {
+  opacity: 0.85;
+}
 
 /* Changed-file actions are anchored to their trigger, outside scroll clipping. */
 .gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger {
@@ -40103,10 +40161,15 @@ textarea:focus-visible,
   color: var(--gyro-muted);
   opacity: 0;
 }
-.gyro-sidebar-scm-row:is(:hover, :focus-within) > .gyro-scm-file-actions-trigger,
-.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] { opacity: 1; }
+.gyro-sidebar-scm-row:is(:hover, :focus-within)
+  > .gyro-scm-file-actions-trigger,
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] {
+  opacity: 1;
+}
 .gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger:hover,
-.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] { background: var(--gyro-surface-soft); }
+.gyro-sidebar-scm-row > .gyro-scm-file-actions-trigger[aria-expanded="true"] {
+  background: var(--gyro-surface-soft);
+}
 .gyro-scm-file-actions-menu {
   position: fixed;
   z-index: 500;
@@ -40135,12 +40198,20 @@ textarea:focus-visible,
   text-align: left;
   cursor: pointer;
 }
-.gyro-scm-file-actions-menu > button:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--gyro-danger) 9%, transparent); }
-.gyro-scm-file-actions-menu > button:focus-visible { outline: 1px solid var(--gyro-focus-ring); outline-offset: -1px; }
-.gyro-scm-file-actions-menu > button:disabled { opacity: .45; cursor: default; }
+.gyro-scm-file-actions-menu > button:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--gyro-danger) 9%, transparent);
+}
+.gyro-scm-file-actions-menu > button:focus-visible {
+  outline: 1px solid var(--gyro-focus-ring);
+  outline-offset: -1px;
+}
+.gyro-scm-file-actions-menu > button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
-/* Match the regular app's title row, not the dev window's higher traffic lights.
-   Center 28px navigation buttons in the 47px area above the header divider. */
+/* Native 14px traffic lights sit at y 16, so their centre is at 23px. Pad 28px
+   navigation buttons by 9px so they share that centreline. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings),
 .gyro-sidebar-windowbar.is-settings,
 .gyro-sidebar-restore-cluster {
@@ -40148,7 +40219,7 @@ textarea:focus-visible,
   box-sizing: border-box;
   height: 48px;
   min-height: 48px;
-  padding-top: 9.5px;
+  padding-top: 9px;
   padding-bottom: 0;
 }
 
@@ -40344,7 +40415,10 @@ textarea:focus-visible,
 .gyro-environment-rail.is-tool .gyro-inline-diff {
   padding: 8px 0;
 }
-.gyro-environment-rail.is-tool .gyro-diff-review-toolbar > div:first-child > strong {
+.gyro-environment-rail.is-tool
+  .gyro-diff-review-toolbar
+  > div:first-child
+  > strong {
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -40353,4 +40427,162 @@ textarea:focus-visible,
 }
 .gyro-environment-rail.is-tool .gyro-diff-main {
   min-height: 0;
+}
+
+.gyro-review-scope-badge {
+  color: var(--gyro-faint);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.gyro-scm-heading-totals > small {
+  color: var(--gyro-faint);
+  font-size: 10px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.gyro-review-scope {
+  align-items: baseline;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 6px 10px;
+}
+
+.gyro-review-scope > strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.gyro-review-scope > span {
+  color: var(--gyro-muted);
+  font-size: 11px;
+}
+
+.gyro-git-comparison-review,
+.gyro-diff-review:has(> .gyro-review-scope) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.gyro-git-comparison-review > .gyro-review-scope,
+.gyro-diff-review > .gyro-review-scope {
+  grid-column: 1 / -1;
+}
+
+.gyro-comparison-diff-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.gyro-plain-diff {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gyro-plain-diff.is-empty,
+.gyro-code-empty {
+  align-content: start;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.gyro-plain-diff-notice,
+.gyro-syntax-notice {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-muted);
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
+.gyro-plain-diff-toolbar {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: 11px;
+  justify-content: space-between;
+  padding: 4px 10px;
+}
+
+.gyro-plain-diff-pager,
+.gyro-plain-diff-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.gyro-plain-diff-pager > button,
+.gyro-plain-diff-actions > button,
+.gyro-code-empty button {
+  background: transparent;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 6px;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: 11px;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.gyro-plain-diff-hunks {
+  min-height: 0;
+  overflow: auto;
+}
+
+.gyro-plain-diff-hunk > header {
+  background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
+  color: var(--gyro-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.gyro-plain-diff .gyro-diff-line {
+  grid-template-columns: 18px minmax(0, 1fr);
+  padding-inline: 8px;
+}
+
+.gyro-attachment-size {
+  color: var(--gyro-faint);
+  font-size: 10px;
+}
+
+.gyro-user-message-bubble .gyro-transcript-attachment.is-image {
+  align-items: stretch;
+  flex-direction: column;
+  max-width: 180px;
+  padding: 0;
+}
+
+.gyro-user-message-bubble .gyro-transcript-attachment.is-image img,
+.gyro-user-message-bubble .gyro-transcript-image-preview img {
+  height: 96px;
+  object-fit: cover;
+  width: 100%;
+}
+
+.gyro-user-message-bubble
+  .gyro-transcript-attachment.is-image
+  .gyro-attachment-size {
+  display: none;
+}
+
+.gyro-chat-environment-popover-rows > button {
+  min-height: 28px;
+  padding: 4px 6px;
+}
+
+.gyro-run-group-disclosure {
+  color: var(--gyro-faint);
+}
+
+.gyro-run-row-label {
+  font-weight: 450;
 }

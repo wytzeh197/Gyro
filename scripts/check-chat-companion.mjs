@@ -22,6 +22,7 @@ import {
   resolveChatRailPanel,
   keyboardChatCompanionWidth,
   staleSideChatSessionIds,
+  shouldOverlayChatCompanion,
   withoutSideChatSessions,
 } from "../packages/ui/src/chat-companion.ts";
 
@@ -298,6 +299,18 @@ assert.equal(
   420,
   "a known container leaves the transcript its readable 480px minimum",
 );
+assert.equal(
+  clampChatCompanionWidth(880, 960),
+  480,
+  "a 960px chat keeps 480px for the conversation when Review opens",
+);
+assert.equal(
+  shouldOverlayChatCompanion(719),
+  true,
+  "below 720px the dock fills the surface instead of squeezing the transcript",
+);
+assert.equal(shouldOverlayChatCompanion(720), false);
+assert.equal(shouldOverlayChatCompanion(1200), false);
 assert.equal(
   clampChatCompanionWidth(800, 400),
   CHAT_COMPANION_MIN_WIDTH,

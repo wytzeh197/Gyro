@@ -104,6 +104,13 @@ const BROWSER_TRANSCRIPT_MIN_WIDTH = 360;
  */
 export const CHAT_COMPANION_OVERLAY_BELOW = 720;
 
+/** Split only when the transcript and the dock can both stay readable. */
+export function shouldOverlayChatCompanion(availableWidth?: number) {
+  return (
+    availableWidth !== undefined && availableWidth < CHAT_COMPANION_OVERLAY_BELOW
+  );
+}
+
 export type ChatCompanionAction =
   | { type: "focus-pane"; paneId?: string }
   /** Opens the tool, or focuses it when the pane already has that tab. */

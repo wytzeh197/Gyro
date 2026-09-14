@@ -77,6 +77,7 @@ use walkdir::WalkDir;
 #[cfg(debug_assertions)]
 mod browser_smoke;
 mod git_line_counts;
+mod git_main_comparison;
 mod menu_bar;
 mod reply_segments;
 use reply_segments::{persisted_text_segments, StreamedText, StreamedTextBlock};
@@ -916,6 +917,7 @@ struct MainComparisonStats {
     additions: usize,
     deletions: usize,
     partial: bool,
+    files: Vec<SourceControlFile>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -5293,11 +5295,17 @@ fn run_provider_chat_blocking(
         .payload
         .clone()
         .or_else(|| {
-            runner_output
-                .activities
-                .iter()
-                .rev()
-                .find_map(kimi_acp_plan_payload)
+            // ACP checklists track execution too; only planning turns should
+            // promote them into a user-facing Plan document.
+            (request.mode == ChatMode::Plan)
+                .then(|| {
+                    runner_output
+                        .activities
+                        .iter()
+                        .rev()
+                        .find_map(kimi_acp_plan_payload)
+                })
+                .flatten()
         })
         // The Plan document is a product guarantee, not something that should
         // disappear because one provider omitted the hidden checklist line.
@@ -10395,6 +10403,8 @@ fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlS
 
 fn git_status_stamp(repo_root: &Path, porcelain: &str, files: &[SourceControlFile]) -> String {
     let mut material = format!("{}\n{}", repo_root.display(), porcelain);
+    // Resolve the base even in linked worktrees and when refs are packed.
+    material.push_str(&git_main_comparison_base(repo_root).unwrap_or_default());
     for path in [
         Some(".git/HEAD"),
         Some(".git/packed-refs"),
@@ -10700,46 +10710,21 @@ fn apply_git_diff_stats(repo_root: &Path, status: &mut SourceControlStatus) {
         untracked_additions = untracked_additions.saturating_add(additions);
         status.additions = status.additions.saturating_add(additions);
     }
-    status.compared_to_main =
-        git_main_comparison(repo_root, untracked_additions, status.stats_partial);
+    let untracked: Vec<SourceControlFile> = status
+        .files
+        .iter()
+        .filter(|file| file.state == "untracked")
+        .cloned()
+        .collect();
+    status.compared_to_main = git_main_comparison::git_main_comparison(
+        repo_root,
+        &untracked,
+        untracked_additions,
+        status.stats_partial,
+    );
 }
 
-fn git_main_comparison(
-    repo_root: &Path,
-    untracked_additions: usize,
-    partial: bool,
-) -> Option<MainComparisonStats> {
-    let mut command = git_command();
-    command.arg("-C").arg(repo_root).args([
-        "diff",
-        "--numstat",
-        "--no-renames",
-        "refs/heads/main",
-        "--",
-    ]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(15),
-        Some(Duration::from_secs(10)),
-        4 * 1024 * 1024,
-        64 * 1024,
-    )
-    .ok()?;
-    if !output.succeeded() {
-        return None;
-    }
-    let (stats, parse_partial) = parse_git_numstat(&output.stdout);
-    let mut result = MainComparisonStats {
-        additions: untracked_additions,
-        deletions: 0,
-        partial: partial || parse_partial || output.stdout_truncated,
-    };
-    for (additions, deletions) in stats.values() {
-        result.additions = result.additions.saturating_add(*additions);
-        result.deletions = result.deletions.saturating_add(*deletions);
-    }
-    Some(result)
-}
+pub(crate) use git_main_comparison::git_main_comparison_base;
 
 fn git_numstat(repo_root: &Path) -> (HashMap<String, (usize, usize)>, bool) {
     let mut command = git_command();
@@ -31546,29 +31531,6 @@ while True:
         assert!(comparison.partial);
         let (_, malformed) = parse_git_numstat("invalid\t1\tfile.txt");
         assert!(malformed);
-    }
-
-    #[test]
-    fn source_control_main_comparison_includes_committed_and_untracked_changes() {
-        let repo = tempfile::tempdir().unwrap();
-        init_git_repo(repo.path());
-        std::fs::write(repo.path().join("file.txt"), "base\n").unwrap();
-        run_git(repo.path(), &["add", "."]);
-        run_git(repo.path(), &["commit", "-m", "base"]);
-        run_git(repo.path(), &["checkout", "-b", "feature"]);
-        std::fs::write(repo.path().join("file.txt"), "base\ncommitted\n").unwrap();
-        run_git(repo.path(), &["commit", "-am", "feature"]);
-        std::fs::write(repo.path().join("file.txt"), "base\ncommitted\nworking\n").unwrap();
-        std::fs::write(repo.path().join("new.txt"), "new\n").unwrap();
-        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
-        assert_eq!(status.additions, 2);
-        let comparison = status.compared_to_main.unwrap();
-        assert_eq!((comparison.additions, comparison.deletions), (3, 0));
-        assert!(!comparison.partial);
-        run_git(repo.path(), &["branch", "-D", "main"]);
-        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
-        assert!(status.compared_to_main.is_none());
-        assert_eq!(status.additions, 2);
     }
 
     fn init_git_repo(repo: &Path) {

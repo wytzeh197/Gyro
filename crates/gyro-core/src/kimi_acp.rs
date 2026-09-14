@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 const ACP_PROTOCOL_VERSION: u64 = 1;
 const ACP_MAX_FRAME_BYTES: usize = 1024 * 1024;
+// Outgoing prompts include up to 64 MiB of attachments plus base64/JSON
+// encoding and context. Keep the untrusted incoming frame limit independent.
+const ACP_MAX_REQUEST_BYTES: usize = 128 * 1024 * 1024;
 const ACP_MAX_MESSAGES: usize = 50_000;
 const ACP_MAX_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 const ACP_MAX_STDERR_CHARS: usize = 64 * 1024;
@@ -295,7 +298,7 @@ impl KimiAcpConnection {
 
     fn send(&mut self, value: Value) -> Result<()> {
         let bytes = serde_json::to_vec(&value)?;
-        if bytes.len() > ACP_MAX_FRAME_BYTES {
+        if bytes.len() > ACP_MAX_REQUEST_BYTES {
             anyhow::bail!(
                 "{} ACP request exceeded its size limit",
                 self.provider_label
@@ -1637,6 +1640,37 @@ while IFS= read -r line; do
 done
 "#
         ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn screenshot_prompt_can_exceed_incoming_frame_limit() {
+        let (temp, program) = completion_fixture(
+            r#"{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}"#,
+            false,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().into(),
+            CancellationToken::default(),
+            None,
+        );
+        // The reported 1,081,323-byte PNG occupies 1,441,764 base64 bytes.
+        request.prompt.push(json!({
+            "type": "image", "mimeType": "image/png", "data": "A".repeat(1_441_764),
+        }));
+        request.timeout = Duration::from_secs(15);
+        request.inactivity_timeout = Duration::from_secs(15);
+        let output = run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::AllowOnce),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(output.stop_reason, "end_turn");
+        assert_eq!(output.response, "The terminal button opens a terminal.");
     }
 
     #[cfg(unix)]
