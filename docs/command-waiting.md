@@ -24,7 +24,11 @@ terminal. It completes after all jobs in that workflow, including both build
 architectures. If architectures use separate workflow runs, watch both run IDs.
 Use a finite watcher command rather than an interactive shell that never exits.
 
-Each call waits up to 60 seconds and is cancellable. Waiting itself is an
+Each call waits 60 seconds by default and up to 5 minutes (`timeoutMs: 300000`),
+and is cancellable. Every wait call re-sends the model's context, so one long
+wait on a build costs far less than many short ones. Claude runs have native
+background shells disabled: `--print` exits when the reply ends and would take
+them down, so long work always goes through the model-owned terminal. Waiting itself is an
 observation; starting a command still uses the existing command approval policy.
 Resource IDs bind the wait to the original command in this chat and workspace,
 so it cannot silently switch to a newer command or another chat's process.
@@ -34,6 +38,11 @@ This runs within an active provider turn while Gyro is open. It is not a
 scheduled wakeup or a promise to resume after quitting the app. Existing provider
 turn/runtime/usage limits still apply (including Ollama's tool-round limit).
 Publishing remains subject to the user's original authorization.
+
+Processes that should stay up after the reply — dev servers, watchers, local
+services — are not waited on. Gyro watches them under the final message and
+relaunches the same command if they exit without the user or model stopping
+them. See `docs/process-keep-alive.md`.
 
 Validation: 23 desktop terminal tests (including five new wait tests), ten core
 capability tests, the provider manifest check, the chat activity check, and

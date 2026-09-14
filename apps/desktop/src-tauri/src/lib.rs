@@ -112,14 +112,16 @@ const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CHAT_IMAGES: usize = 10;
-const MAX_CHAT_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
+// Screen recordings routinely exceed 50 MB; videos reach providers as file
+// references, so the cap only bounds local copies.
+const MAX_CHAT_VIDEO_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_CHAT_VIDEOS: usize = 2;
 const MAX_CHAT_ATTACHMENTS: usize = 16;
 const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
-const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 16;
-const MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION: u64 = 256 * 1024 * 1024;
+const MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION: u64 = 1024 * 1024 * 1024;
 const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS: usize = 400;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS: usize = 8_000;
@@ -1638,9 +1640,10 @@ where
             let mut bytes = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(limit));
             while let Some(byte) = sequence.next_element::<u8>()? {
                 if bytes.len() >= limit {
-                    return Err(serde::de::Error::custom(
-                        "media attachment exceeds the 50 MB limit",
-                    ));
+                    return Err(serde::de::Error::custom(format!(
+                        "media attachment exceeds the {} MB limit",
+                        MAX_CHAT_VIDEO_BYTES / (1024 * 1024)
+                    )));
                 }
                 bytes.push(byte);
             }
@@ -3036,7 +3039,6 @@ where
     }
     Ok(recovered)
 }
-
 #[cfg(test)]
 fn run_automation_scheduler_once_with<F>(
     paths: &GyroPaths,
@@ -5785,13 +5787,24 @@ fn validate_chat_context(request: &ProviderChatRequest) -> Result<(), String> {
             .checked_add(metadata.len())
             .ok_or_else(|| "attachment size overflow".to_string())?;
         if total_bytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES {
-            return Err("attachments exceed the 64 MB per-turn limit".into());
+            return Err(format!(
+                "attachments exceed the {} MB per-turn limit",
+                MAX_CHAT_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)
+            ));
         }
         if attachment.kind == "image" && metadata.len() > MAX_CHAT_IMAGE_BYTES {
-            return Err(format!("{} exceeds the 10 MB image limit", attachment.name));
+            return Err(format!(
+                "{} exceeds the {} MB image limit",
+                attachment.name,
+                MAX_CHAT_IMAGE_BYTES / (1024 * 1024)
+            ));
         }
         if attachment.kind == "video" && metadata.len() > MAX_CHAT_VIDEO_BYTES {
-            return Err(format!("{} exceeds the 50 MB video limit", attachment.name));
+            return Err(format!(
+                "{} exceeds the {} MB video limit",
+                attachment.name,
+                MAX_CHAT_VIDEO_BYTES / (1024 * 1024)
+            ));
         }
         if attachment.kind == "image" || attachment.kind == "video" {
             let expected_hash = attachment
@@ -6017,13 +6030,36 @@ fn provider_context_message_with_history(
     request: &ProviderChatRequest,
     conversation_history: Option<&str>,
 ) -> String {
-    provider_context_message_with_tool_support(
+    provider_context_message_for_turn(request, conversation_history, PromptTurn::default())
+}
+
+/// What the provider thread already holds, so a resumed turn does not pay
+/// again for guidance that sits earlier in the same thread.
+#[derive(Clone, Copy, Default)]
+struct PromptTurn {
+    /// The provider resumes its own session, which already carries the
+    /// standing guidance from the turn that opened it.
+    resumed: bool,
+    /// The runner delivers approval policy out of band (Codex developer
+    /// instructions), so repeating it in the prompt is pure cost.
+    approvals_sent_separately: bool,
+}
+
+fn provider_context_message_for_turn(
+    request: &ProviderChatRequest,
+    conversation_history: Option<&str>,
+    turn: PromptTurn,
+) -> String {
+    provider_context_message_with_capabilities_for_turn(
         request,
         conversation_history,
         gyro_core::provider_capability_support(&request.provider_id).available,
+        provider_descriptor(&request.provider_id).is_some_and(|provider| provider.supports_images),
+        turn,
     )
 }
 
+#[cfg(test)]
 fn provider_context_message_with_tool_support(
     request: &ProviderChatRequest,
     conversation_history: Option<&str>,
@@ -6043,22 +6079,42 @@ fn provider_context_message_with_capabilities(
     supports_tools: bool,
     supports_images: bool,
 ) -> String {
-    let mut context = Vec::new();
-    context.push(browser_knowledge::context(
+    provider_context_message_with_capabilities_for_turn(
+        request,
+        conversation_history,
         supports_tools,
         supports_images,
-        match request.mode {
-            ChatMode::Plan => "plan",
-            ChatMode::Council => "council",
-            ChatMode::Normal => "normal",
-        },
-        (user_requests_gyro_browser(&request.message)
-            || request.message.to_lowercase().contains("browser"))
-            || request
-                .attachments
-                .iter()
-                .any(|item| item.kind == "browser-snapshot"),
-    ));
+        PromptTurn::default(),
+    )
+}
+
+fn provider_context_message_with_capabilities_for_turn(
+    request: &ProviderChatRequest,
+    conversation_history: Option<&str>,
+    supports_tools: bool,
+    supports_images: bool,
+    turn: PromptTurn,
+) -> String {
+    let mut context = Vec::new();
+    // The full guide and contract cost ~3K tokens, so they travel with an
+    // actual browse request or captured page, not every mention of "browser".
+    let browser_task = user_requests_gyro_browser(&request.message)
+        || request
+            .attachments
+            .iter()
+            .any(|item| item.kind == "browser-snapshot");
+    if browser_task || !turn.resumed {
+        context.push(browser_knowledge::context(
+            supports_tools,
+            supports_images,
+            match request.mode {
+                ChatMode::Plan => "plan",
+                ChatMode::Council => "council",
+                ChatMode::Normal => "normal",
+            },
+            browser_task,
+        ));
+    }
     context.push(format!(
         "Gyro chat mode: {}.",
         match request.mode {
@@ -6093,17 +6149,24 @@ fn provider_context_message_with_capabilities(
                 .unwrap_or(0);
             context.push(check.briefing_with_signals(diagnostics, test_failures));
         }
-        context.push("Gyro Workspace tools are available throughout this turn. A compact workspace check is attached when available. Use gyro_workspace_check to refresh folder, project, and Git facts, gyro_workspace_get_context for diagnostics, failing tests, and the active output channel, then use the bounded Workspace, IDE, proposal, task, test, terminal, and browser tools as needed. Prefer these tools over assuming file or UI state; every result is tied to this chat, turn, project, and policy. If context is unavailable or stale, continue with bounded Workspace tools and describe the evidence you found, never internal workspace mechanics.".into());
-        context.push("For long-running builds or release checks, start a finite command with gyro_terminal_open (or a background Workspace task), then call gyro_terminal_wait with its returned resource.id. A wait returning completed: false is still running: wait again rather than ending the task or restarting the command. When it finishes, inspect exitCode and output, fix failures when authorized, and continue the original task. For remote CI, a command such as gh run watch RUN_ID --exit-status waits for all jobs, including Intel and Apple Silicon builds. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
+        if !turn.resumed {
+            // Stated once per provider thread. Telling the model to refresh the
+            // attached check made Codex open every turn with tool discovery and
+            // context calls, roughly doubling model calls per turn.
+            context.push("Gyro Workspace tools are available, alongside IDE, proposal, task, test, terminal, and browser tools. A compact workspace check is attached to each turn and is current: rely on it, and call gyro_workspace_check, gyro_workspace_get_context, or other Workspace tools only when the task needs fresher facts, file contents, diagnostics, or an action. Every result is tied to this chat, turn, project, and policy; describe the evidence you found, never internal workspace mechanics.".into());
+            context.push("For long-running builds or release checks, start a finite command with gyro_terminal_open (or a background Workspace task), then call gyro_terminal_wait with its returned resource.id. A wait returning completed: false is still running: wait again rather than ending the task or restarting the command. When it finishes, inspect exitCode and output, fix failures when authorized, and continue the original task. Your turn ends the moment you reply without a tool call, and nothing reports back afterwards: never end with a promise to report later — stay in the turn, prefer one long wait over many short ones, and reply once the result is in. For remote CI, a command such as gh run watch RUN_ID --exit-status waits for all jobs, including Intel and Apple Silicon builds. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
+        }
         if user_requests_gyro_browser(&request.message) {
             context.push("Requested surface: Gyro Browser. Follow the shared browser guide and current capability contract for this live task.".into());
         }
         // The file the user happens to have open in Workspace is not context.
         // Only what the user attaches from the composer, or names in the
         // message, puts a file in front of the model.
-        context.push(
-            "Gyro does not attach the user's open editor file, tab list, selection, or unsaved buffer to the turn. Work from the message and its attachments, and read files with the Workspace tools when you need them.".into(),
-        );
+        if !turn.resumed {
+            context.push(
+                "Gyro does not attach the user's open editor file, tab list, selection, or unsaved buffer to the turn. Work from the message and its attachments, and read files with the Workspace tools when you need them.".into(),
+            );
+        }
     }
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
@@ -6114,11 +6177,14 @@ fn provider_context_message_with_capabilities(
         // checklist sat at all-todo through the whole implementation turn.
         context.push("The Gyro plan below is live while you work. As you finish or block steps, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"update-items\",\"items\":[{\"id\":\"step-id\",\"status\":\"complete\"}]}. Reuse the ids shown in the checklist, list every step whose status changed this turn, keep the JSON on one line, and use only todo, in-progress, complete, or blocked.".into());
     }
-    context.extend(
-        provider_approval_instructions(request)
-            .into_iter()
-            .map(str::to_string),
-    );
+    // Policy can change between turns, so it is resent even on resume — once.
+    if !turn.approvals_sent_separately {
+        context.extend(
+            provider_approval_instructions(request)
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
     if let Some(goal) = request.goal.as_ref() {
         let text = goal.text.trim();
         if !text.is_empty() {
@@ -6409,6 +6475,68 @@ async fn prepare_chat_attachment(
         .map_err(|error| format!("attachment worker failed: {error}"))?
 }
 
+/// Dropped and pasted media arrive as a raw IPC body. Encoding a video as a
+/// JSON number array inflates it several times over and stalls the webview.
+#[tauri::command]
+async fn prepare_chat_media_upload(
+    request: tauri::ipc::Request<'_>,
+) -> Result<PreparedChatAttachment, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("media uploads must be sent as raw bytes".into());
+    };
+    if body.len() as u64 > MAX_CHAT_VIDEO_BYTES {
+        return Err(format!(
+            "videos must be {} MB or smaller",
+            MAX_CHAT_VIDEO_BYTES / (1024 * 1024)
+        ));
+    }
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+    };
+    let decode = |value: String| {
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(|| "media upload header is invalid".to_string())
+    };
+    let kind = header("x-gyro-kind").unwrap_or_default();
+    if kind != "image" && kind != "video" {
+        return Err("only image and video uploads are supported".into());
+    }
+    let upload = PrepareChatAttachmentRequest {
+        session_id: header("x-gyro-session-id")
+            .ok_or_else(|| "media upload has no session".to_string())?,
+        path: String::new(),
+        workspace_path: header("x-gyro-workspace").map(decode).transpose()?,
+        kind,
+        bytes: Some(body.clone()),
+        name: Some(
+            header("x-gyro-name")
+                .map(decode)
+                .transpose()?
+                .ok_or_else(|| "media upload has no name".to_string())?,
+        ),
+        relative_path: None,
+    };
+    tauri::async_runtime::spawn_blocking(move || prepare_chat_attachment_blocking(upload))
+        .await
+        .map_err(|error| format!("attachment worker failed: {error}"))?
+}
+
+/// QuickTime files written before the ISO base format may open with a movie,
+/// data, or padding atom instead of `ftyp`.
+fn is_quicktime_container(bytes: &[u8]) -> bool {
+    matches!(
+        bytes.get(4..8),
+        Some(b"ftyp" | b"moov" | b"mdat" | b"wide" | b"free" | b"skip" | b"pnot")
+    )
+}
+
 fn validated_chat_media_type(
     name: &str,
     is_video: bool,
@@ -6428,7 +6556,7 @@ fn validated_chat_media_type(
             Ok(("image/webp", "webp"))
         }
         "mp4" | "m4v" if is_video && bytes.get(4..8) == Some(b"ftyp") => Ok(("video/mp4", "mp4")),
-        "mov" if is_video && bytes.get(4..8) == Some(b"ftyp") => Ok(("video/quicktime", "mov")),
+        "mov" if is_video && is_quicktime_container(bytes) => Ok(("video/quicktime", "mov")),
         "webm" if is_video && bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) => {
             Ok(("video/webm", "webm"))
         }
@@ -15183,7 +15311,14 @@ fn run_openai_codex_chat(
     } else {
         local_conversation_history_for_request(request)
     };
-    let contextual_message = provider_context_message_with_history(request, history.as_deref());
+    let contextual_message = provider_context_message_for_turn(
+        request,
+        history.as_deref(),
+        PromptTurn {
+            resumed: can_resume,
+            approvals_sent_separately: false,
+        },
+    );
     let prompt = openai_codex_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
@@ -15192,6 +15327,7 @@ fn run_openai_codex_chat(
         request.mode == ChatMode::Normal
             && !request.require_command_approval
             && !request.require_file_edit_approval,
+        can_resume,
     );
 
     let mut process = command_with_gui_path("codex");
@@ -15366,13 +15502,22 @@ fn run_openai_codex_app_server_chat(
     } else {
         local_conversation_history_for_request(request)
     };
-    let contextual_message = provider_context_message_with_history(request, history.as_deref());
+    // Approval policy rides in developerInstructions on thread start/resume.
+    let contextual_message = provider_context_message_for_turn(
+        request,
+        history.as_deref(),
+        PromptTurn {
+            resumed: can_resume,
+            approvals_sent_separately: true,
+        },
+    );
     let prompt = openai_codex_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
         request.model_label.as_deref(),
         request.suggest_title,
         request.mode == ChatMode::Normal,
+        can_resume,
     );
     let mut process = command_with_gui_path("codex");
     let capability_args = codex_capability_mcp_config_args(app, request)?;
@@ -15777,6 +15922,17 @@ fn run_openai_codex_app_server_chat(
                                     .and_then(serde_json::Value::as_str)
                                     .and_then(|item_id| patches.get(item_id));
                                 for activity in codex_file_change_activities(item, patch) {
+                                    record_codex_app_server_activity(
+                                        app,
+                                        request,
+                                        &mut activities,
+                                        &mut completed_activity_ids,
+                                        activity,
+                                    );
+                                }
+                            }
+                            Some("reasoning") => {
+                                if let Some(activity) = codex_reasoning_activity(item) {
                                     record_codex_app_server_activity(
                                         app,
                                         request,
@@ -16389,6 +16545,45 @@ fn codex_context_compaction_activity(params: &serde_json::Value, status: &str) -
         note: None,
         status: status.into(),
     }
+}
+
+/// The headline of a Codex reasoning summary, as a muted status beat.
+///
+/// Codex writes each summary part as a bold headline over prose
+/// (`**Checking file sizes**\n\n…`). Only the headline reaches the rail: it says
+/// what the model is doing, while the prose underneath is its reasoning and
+/// stays out of the transcript. An empty summary — most items when summaries
+/// are off — produces nothing rather than a blank row.
+fn codex_reasoning_activity(item: &serde_json::Value) -> Option<ProviderActivity> {
+    let summary = item.get("summary")?.as_array()?;
+    let label = summary.iter().rev().find_map(|part| {
+        part.as_str()
+            .or_else(|| part.get("text").and_then(serde_json::Value::as_str))
+            .and_then(reasoning_summary_headline)
+    })?;
+    let id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("reasoning");
+    Some(ProviderActivity {
+        id: format!("reasoning-{id}"),
+        kind: "reasoning".into(),
+        label,
+        detail: None,
+        note: None,
+        status: "done".into(),
+    })
+}
+
+fn reasoning_summary_headline(text: &str) -> Option<String> {
+    let first = text.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let headline = first
+        .trim_start_matches("**")
+        .split("**")
+        .next()
+        .unwrap_or(first)
+        .trim();
+    (!headline.is_empty()).then(|| headline.chars().take(80).collect())
 }
 
 fn record_codex_app_server_activity(
@@ -17025,12 +17220,20 @@ fn run_anthropic_claude_chat(
     } else {
         local_conversation_history_for_request(request)
     };
-    let contextual_message = provider_context_message_with_history(request, history.as_deref());
+    let contextual_message = provider_context_message_for_turn(
+        request,
+        history.as_deref(),
+        PromptTurn {
+            resumed: can_resume,
+            approvals_sent_separately: false,
+        },
+    );
     let prompt = claude_chat_prompt(
         &contextual_message,
         request.workspace_path.as_deref(),
         request.suggest_title,
         request.mode != ChatMode::Plan,
+        can_resume,
     );
     let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
     let capability_context = active_provider_capability_context(app, &request.session_id)?;
@@ -17044,6 +17247,13 @@ fn run_anthropic_claude_chat(
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let mut process = command_with_gui_path("claude");
     process.current_dir(cwd);
+    // `--print` exits when the reply ends, and takes native background shells
+    // and monitors with it: a dev build started that way died mid-compile and
+    // the chat stalled on "I'll report when it finishes". Long work goes
+    // through Gyro's model terminal instead, which outlives the process.
+    process
+        .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")
+        .env("CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND", "1");
     let mut args = claude_chat_args(
         resume_cursor
             .filter(|cursor| cursor.kind == "claude-session")
@@ -17488,6 +17698,10 @@ fn codex_capability_mcp_config_args(
         "mcp_servers.gyro_capabilities.args=[\"provider-capability-server\"]".into(),
         "-c".into(),
         "mcp_servers.gyro_capabilities.required=true".into(),
+        // Codex's default 60 s MCP tool timeout would cut off a long
+        // gyro_terminal_wait; one long wait is far cheaper than many short ones.
+        "-c".into(),
+        "mcp_servers.gyro_capabilities.tool_timeout_sec=330".into(),
     ];
     for (name, value) in capability_mcp_env(&bound, &approval_nonce) {
         args.push("-c".into());
@@ -17784,6 +17998,7 @@ fn openai_codex_chat_prompt(
     model_label: Option<&str>,
     suggest_title: bool,
     allow_mutations: bool,
+    resumed: bool,
 ) -> String {
     let workspace = workspace_path
         .map(str::trim)
@@ -17803,6 +18018,17 @@ fn openai_codex_chat_prompt(
     } else {
         "Do not edit files, start servers, commit, push, or make destructive changes in this chat run."
     };
+    if resumed {
+        // The resumed thread already holds the style and marker guide from its
+        // opening turn; resend only what can change between turns.
+        return format!(
+            "Your selected model label is: {model_label}.\n\
+             {title_instruction}\
+             {mutation_instruction}\n\
+             Selected workspace: {workspace}\n\n\
+             User message:\n{message}"
+        );
+    }
     let artifact_instruction = r#"When a decision, command, completion receipt, workspace file set, preview, table, diagram, or memory proposal would be materially more useful as an interactive card, put one hidden line before the visible answer: GYRO_ARTIFACTS: {"items":[{"id":"stable-id","kind":"decision","title":"Choose an option","options":[{"id":"one","label":"Option one"}]}]}. Supported kinds are decision, command, completion, workspace, preview, table, diagram, and memory. Keep it valid JSON on one line, use at most 8 items, and omit it for ordinary prose."#;
     format!(
         "Answer as Gyro's chat model.\n\
@@ -17827,6 +18053,7 @@ fn claude_chat_prompt(
     workspace_path: Option<&str>,
     suggest_title: bool,
     allow_actions: bool,
+    resumed: bool,
 ) -> String {
     let workspace = workspace_path
         .map(str::trim)
@@ -17842,6 +18069,13 @@ fn claude_chat_prompt(
     } else {
         "Stay in planning mode. Do not edit files, run mutating commands, start servers, commit, push, or make destructive changes.\n"
     };
+    if resumed {
+        // The resumed session already holds the style and marker guide from its
+        // opening turn; resend only what can change between turns.
+        return format!(
+            "{title_instruction}{action_instruction}Selected workspace: {workspace}\n\nUser message:\n{message}"
+        );
+    }
     let artifact_instruction = r#"When a decision, command, completion receipt, workspace file set, preview, table, diagram, or memory proposal would be materially more useful as an interactive card, put one hidden line before the visible answer: GYRO_ARTIFACTS: {"items":[{"id":"stable-id","kind":"decision","title":"Choose an option","options":[{"id":"one","label":"Option one"}]}]}. Supported kinds are decision, command, completion, workspace, preview, table, diagram, and memory. Keep it valid JSON on one line, use at most 8 items, and omit it for ordinary prose."#;
     format!(
         "Answer as Gyro's chat model.\n\
@@ -20613,7 +20847,7 @@ fn emit_provider_activity_event(
     activity_sequence: Option<u64>,
 ) {
     timing::mark(TimingStage::FirstActivity);
-    if activity.kind != "commentary" {
+    if !matches!(activity.kind.as_str(), "commentary" | "reasoning") {
         timing::tool(&activity.id, &activity.status);
     }
     let payload = ProviderChatStreamEvent {
@@ -23390,7 +23624,7 @@ fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
         }),
         CapabilityId::TerminalWait => serde_json::json!({
             "resourceId": { "type": "string", "description": "resource.id returned when this chat started the command" },
-            "timeoutMs": { "type": "integer", "minimum": 0, "maximum": 60000, "default": 60000, "description": "Maximum wait per call. A running command keeps running; call wait again if needed." }
+            "timeoutMs": { "type": "integer", "minimum": 0, "maximum": 300000, "default": 60000, "description": "Maximum wait per call, up to 5 minutes. Prefer a long wait for builds. A running command keeps running; call wait again if needed." }
         }),
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => serde_json::json!({
             "url": { "type": "string" }
@@ -23870,6 +24104,19 @@ pub fn run() {
         .on_window_event(|window, event| {
             menu_bar::handle_window_event(window, event);
             #[cfg(target_os = "macos")]
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. }
+                        | tauri::WindowEvent::ThemeChanged(_)
+                )
+            {
+                if let Some(main) = window.app_handle().get_webview_window("main") {
+                    apply_macos_traffic_light_position(&main);
+                }
+            }
+            #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 if let Err(error) = window.hide() {
@@ -23967,6 +24214,7 @@ pub fn run() {
             read_terminal_output,
             read_session_events,
             prepare_chat_attachment,
+            prepare_chat_media_upload,
             prepare_browser_attachment,
             prepare_workspace,
             restart_app,
@@ -24096,9 +24344,75 @@ fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
     matches!(event, tauri::RunEvent::Resumed)
 }
 
+/// Overlay traffic-light origin matching `tauri.conf.json` and the sidebar
+/// titlebar CSS. Native 14px controls at this inset share a 23px centreline
+/// with the 28px window-navigation buttons.
+const MAIN_TRAFFIC_LIGHT_X: f64 = 16.0;
+const MAIN_TRAFFIC_LIGHT_Y: f64 = 16.0;
+
+/// Tauri's `unstable` feature hosts the main webview as a child, which leaves
+/// `trafficLightPosition` stuck at (0, 0) (tauri-apps/tauri#14072). Tauri 2.11
+/// also does not expose `set_traffic_light_position` on `WebviewWindow`, so
+/// apply wry's NSWindow inset after the window exists.
+#[cfg(target_os = "macos")]
+pub(crate) fn apply_macos_traffic_light_position<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) {
+    match window.ns_window() {
+        Ok(ptr) if !ptr.is_null() => unsafe {
+            inset_macos_traffic_lights(ptr, MAIN_TRAFFIC_LIGHT_X, MAIN_TRAFFIC_LIGHT_Y);
+        },
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("could not position macOS window controls: {error}");
+        }
+    }
+}
+
+/// Mirrors wry's `inset_traffic_lights`: grow the titlebar container to the
+/// requested top inset, then place close/miniaturize/zoom from the left inset.
+#[cfg(target_os = "macos")]
+unsafe fn inset_macos_traffic_lights(ns_window: *mut std::ffi::c_void, x: f64, y: f64) {
+    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
+
+    let window = &*ns_window.cast::<NSWindow>();
+    let Some(close) = window.standardWindowButton(NSWindowButton::CloseButton) else {
+        return;
+    };
+    let Some(miniaturize) = window.standardWindowButton(NSWindowButton::MiniaturizeButton) else {
+        return;
+    };
+    let zoom = window.standardWindowButton(NSWindowButton::ZoomButton);
+    let Some(title_bar_container_view) = close
+        .superview()
+        .and_then(|superview| superview.superview())
+    else {
+        return;
+    };
+
+    let close_rect = NSView::frame(&close);
+    let title_bar_frame_height = close_rect.size.height + y;
+    let mut title_bar_rect = NSView::frame(&title_bar_container_view);
+    title_bar_rect.size.height = title_bar_frame_height;
+    title_bar_rect.origin.y = window.frame().size.height - title_bar_frame_height;
+    title_bar_container_view.setFrame(title_bar_rect);
+
+    let space_between = NSView::frame(&miniaturize).origin.x - close_rect.origin.x;
+    let mut window_buttons = vec![close, miniaturize];
+    if let Some(zoom) = zoom {
+        window_buttons.push(zoom);
+    }
+    for (index, button) in window_buttons.into_iter().enumerate() {
+        let mut rect = NSView::frame(&button);
+        rect.origin.x = x + (index as f64 * space_between);
+        button.setFrameOrigin(rect.origin);
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
+        apply_macos_traffic_light_position(&window);
         window.unminimize()?;
         window.show()?;
         window.set_focus()?;
@@ -24112,6 +24426,7 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
         .first()
         .context("Gyro has no configured main window")?;
     let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
+    apply_macos_traffic_light_position(&window);
     window.show()?;
     window.set_focus()?;
     Ok(())
@@ -24459,6 +24774,12 @@ fn write_bounded_json_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_window_traffic_lights_use_overlay_inset() {
+        assert_eq!(MAIN_TRAFFIC_LIGHT_X, 16.0);
+        assert_eq!(MAIN_TRAFFIC_LIGHT_Y, 16.0);
+    }
 
     #[test]
     fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
@@ -25108,13 +25429,13 @@ mod tests {
 
     #[test]
     fn desktop_claude_prompt_allows_approved_actions_but_plan_mode_stays_read_only() {
-        let actionable = claude_chat_prompt("edit it", Some("/tmp/project"), false, true);
+        let actionable = claude_chat_prompt("edit it", Some("/tmp/project"), false, true, false);
         assert!(actionable.contains("must follow Gyro's permission decisions"));
         assert!(actionable.contains("do not retry the write"));
         assert!(actionable.contains("GYRO_ARTIFACTS:"));
         assert!(!actionable.contains("Stay in planning mode"));
 
-        let plan = claude_chat_prompt("plan it", Some("/tmp/project"), false, false);
+        let plan = claude_chat_prompt("plan it", Some("/tmp/project"), false, false, false);
         assert!(plan.contains("Stay in planning mode"));
         assert!(plan.contains("Do not edit files"));
     }
@@ -26831,6 +27152,20 @@ while True:
             .unwrap_err()
             .contains("do not match"));
         assert!(validated_chat_media_type("image.png", true, b"\x89PNG\r\n\x1a\n").is_err());
+
+        // macOS screen recordings use the `qt  ` brand; legacy QuickTime files
+        // may lead with a `wide` padding atom.
+        let screen_recording = b"\0\0\0\x14ftypqt  \0\0\0\0";
+        let legacy_mov = b"\0\0\0\x08wide\0\0\0\0mdat";
+        assert_eq!(
+            validated_chat_media_type("Screen Recording.mov", true, screen_recording).unwrap(),
+            ("video/quicktime", "mov")
+        );
+        assert_eq!(
+            validated_chat_media_type("legacy.MOV", true, legacy_mov).unwrap(),
+            ("video/quicktime", "mov")
+        );
+        assert!(validated_chat_media_type("fake.mov", true, b"\0\0\0\x08junkjunk").is_err());
     }
 
     #[test]
@@ -26912,6 +27247,7 @@ while True:
             Some("GPT-5.6 Sol"),
             true,
             false,
+            false,
         );
 
         assert!(prompt.contains("polished, scannable Markdown"));
@@ -26927,11 +27263,53 @@ while True:
         assert!(prompt.contains("Do not edit files"));
 
         let full_access_prompt =
-            openai_codex_chat_prompt("fix it", Some("/workspace"), None, false, true);
+            openai_codex_chat_prompt("fix it", Some("/workspace"), None, false, true, false);
         assert!(full_access_prompt.contains(
             "You may edit files, run commands, and complete requested workspace changes directly."
         ));
         assert!(!full_access_prompt.contains("Do not edit files"));
+    }
+
+    #[test]
+    fn resumed_turns_skip_standing_guidance_but_keep_turn_state() {
+        let mut request = anthropic_provider_request();
+        request.message = "Rename the browser module".into();
+        let opening = provider_context_message_for_turn(&request, None, PromptTurn::default());
+        let resumed = provider_context_message_for_turn(
+            &request,
+            None,
+            PromptTurn {
+                resumed: true,
+                approvals_sent_separately: false,
+            },
+        );
+        assert!(opening.len() > resumed.len());
+        assert!(opening.contains("Gyro Browser is chat-owned"));
+        assert!(!resumed.contains("Gyro Browser is chat-owned"));
+        assert!(!resumed.contains("For long-running builds"));
+        assert!(resumed.contains("configured approval policy"));
+        assert!(resumed.ends_with("User message:\nRename the browser module"));
+        // Naming browser code is not a browse request.
+        assert!(!opening.contains(browser_knowledge::GUIDE));
+
+        let codex = provider_context_message_for_turn(
+            &request,
+            None,
+            PromptTurn {
+                resumed: true,
+                approvals_sent_separately: true,
+            },
+        );
+        assert!(!codex.contains("configured approval policy"));
+
+        let claude_resumed = claude_chat_prompt("next", Some("/tmp/project"), false, true, true);
+        assert!(!claude_resumed.contains("GYRO_ARTIFACTS:"));
+        assert!(claude_resumed.contains("must follow Gyro's permission decisions"));
+        let codex_resumed =
+            openai_codex_chat_prompt("next", Some("/workspace"), Some("GPT"), false, false, true);
+        assert!(!codex_resumed.contains("polished, scannable Markdown"));
+        assert!(codex_resumed.contains("Do not edit files"));
+        assert!(codex_resumed.contains("selected model label is: GPT"));
     }
 
     #[test]
@@ -27506,6 +27884,24 @@ while True:
         assert_eq!(started_compaction.id, completed_compaction.id);
         assert_eq!(started_compaction.label, "Compacting context");
         assert_eq!(completed_compaction.label, "Compacted context");
+
+        let reasoning = codex_reasoning_activity(&serde_json::json!({
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": [
+                { "type": "summary_text", "text": "**Inspecting the repo**\n\nFirst look." },
+                "**Checking file sizes**\n\nThe largest assets are screenshots."
+            ]
+        }))
+        .expect("reasoning activity");
+        assert_eq!(reasoning.kind, "reasoning");
+        assert_eq!(reasoning.label, "Checking file sizes");
+        assert!(codex_reasoning_activity(&serde_json::json!({
+            "id": "rs_2",
+            "type": "reasoning",
+            "summary": []
+        }))
+        .is_none());
 
         let commentary = extract_provider_commentary_activity(&serde_json::json!({
             "type": "item.completed",

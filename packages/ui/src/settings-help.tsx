@@ -33,24 +33,24 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
     label: "Permissions and approvals",
     articles: [
       {
-        title: "What does Ask first allow?",
+        title: "What does Ask for approval allow?",
         answer:
           "The agent asks before commands and file edits. Review approval requests in the chat before allowing the action.",
       },
       {
-        title: "What does Auto Approve allow?",
+        title: "What does Approve for me allow?",
         answer:
           "Runs commands and edits without asking each time. With OpenAI, the project sandbox remains in place: network access, writes outside the project, or restricted tools can still require approval. Other providers follow their own permission boundaries, and separate Gyro tool permissions can still require approval.",
       },
       {
         title: "What does Full access allow?",
         answer:
-          "Allows commands and edits without the usual approval gates and bypasses the provider sandbox where supported. The agent can use Git, network access, and user tools directly. Choose this only for work you trust to run with that access.",
+          "Unrestricted access to the internet and any file on your computer. Allows commands and edits without the usual approval gates and bypasses the provider sandbox where supported. Choose this only for work you trust to run with that access.",
       },
       {
         title: "Where can I change permissions?",
         answer:
-          "Use the shield menu in the composer to choose a mode. Open Settings → Permissions for individual controls. Provider restrictions and operating-system permissions can still apply.",
+          "Use the approval menu in the composer to choose a mode. Open Settings → Permissions for individual controls. Provider restrictions and operating-system permissions can still apply.",
         section: "permissions",
       },
     ],

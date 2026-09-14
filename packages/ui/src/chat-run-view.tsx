@@ -24,10 +24,15 @@ import {
   groupRunSteps,
   isCancelledRunPhase,
   isRunPhaseLive,
+  liveWindow,
+  runCallText,
   runHeaderLabel,
   runRetryText,
   runRowText,
   runWorkGroupText,
+  segmentRunSteps,
+  segmentWorkSteps,
+  summarizeSegment,
 } from "./chat-run";
 import type {
   RunModel,
@@ -99,7 +104,19 @@ export type ChatRunProps = {
   renderAsk?: (event: SessionEvent) => ReactNode;
   /** How to draw narration, so inline code and links survive the rail. */
   renderSay?: (text: string) => ReactNode;
+  /**
+   * `segments` (default) reads as narration with each stretch of work under it,
+   * folded to a one-line summary once the agent moves on. `groups` is the older
+   * phase view ("Reviewed workspace") for surfaces that want the coarser story.
+   */
+  layout?: "segments" | "groups";
 };
+
+type WorkStep = Extract<RunStep, { kind: "work" }>;
+type FileStats = { additions: number; deletions: number };
+
+/** Newest calls kept on screen while a stretch of work is still running. */
+const LIVE_CALL_WINDOW = 4;
 
 export function ChatRun({
   model,
@@ -113,6 +130,7 @@ export function ChatRun({
   headerActions,
   renderAsk,
   renderSay,
+  layout = "segments",
 }: ChatRunProps) {
   const isLive = isRunPhaseLive(model.phase);
   // A finished turn leads with its final response. Work remains available
@@ -124,10 +142,19 @@ export function ChatRun({
   }, [isLive, isDone]);
   const canCollapse = !isLive && model.steps.length > 0;
   const showSteps = isLive || !isCollapsed;
-  const displaySteps = groupRunSteps(model.steps);
-  // The header names the currently live phase when there is one. It keeps the
-  // elapsed time, but no longer makes the person translate a generic “Working”
-  // label into what Gyro is actually doing.
+  const isSegments = layout === "segments";
+  // Reasoning headlines only ever speak at the live tail, so the phase view
+  // never sees them.
+  const displaySteps = groupRunSteps(
+    model.steps.filter((step) => step.kind !== "status"),
+  );
+  const segments = segmentRunSteps(model.steps);
+  const tailSegment = segments.at(-1);
+  const lastStep = model.steps.at(-1);
+  const tailStatus = lastStep?.kind === "status" ? lastStep.text : undefined;
+  // The phase view names the currently live phase in the header. The segment
+  // view does not need to: the live call is already on screen under it, and
+  // the header stays the steady "Working for 21s".
   const activeGroup = displaySteps.findLast(
     (step): step is WorkGroup =>
       step.kind === "work-group" && step.status === "running",
@@ -138,11 +165,13 @@ export function ChatRun({
       step.item.kind === "context" &&
       step.item.status === "running",
   );
-  const activeLabel = activeContextStep
-    ? runRowText(activeContextStep).label
-    : activeGroup
-      ? runWorkGroupText(activeGroup).label
-      : undefined;
+  const activeLabel = isSegments
+    ? undefined
+    : activeContextStep
+      ? runRowText(activeContextStep).label
+      : activeGroup
+        ? runWorkGroupText(activeGroup).label
+        : undefined;
   // Keep a thinking beat while the model is quiet between tools, not only at
   // the empty start of a run — otherwise the rail freezes on the last Done row.
   const hasRunningWork = model.steps.some(
@@ -166,6 +195,7 @@ export function ChatRun({
 
   const shellClass = [
     "gyro-run",
+    isSegments ? "is-segments" : "is-groups",
     isLive
       ? model.phase.name === "retrying"
         ? "is-retrying"
@@ -192,7 +222,65 @@ export function ChatRun({
       />
       {showRail ? (
         <ol aria-label="Work timeline" className="gyro-run-rail">
-          {showSteps
+          {showSteps && isSegments
+            ? segments.map((segment) => {
+                if (segment.kind === "say") {
+                  return (
+                    <li
+                      className="gyro-run-row-item gyro-run-say-item"
+                      key={segment.id}
+                    >
+                      <RunRow renderSay={renderSay} step={segment.step} />
+                    </li>
+                  );
+                }
+                if (segment.kind === "ask") {
+                  return (
+                    <li
+                      className={
+                        renderAsk
+                          ? "gyro-run-row-item gyro-run-approval-item"
+                          : "gyro-run-row-item"
+                      }
+                      key={segment.id}
+                    >
+                      {renderAsk ? (
+                        renderAsk(segment.step.event)
+                      ) : (
+                        <RunRow step={segment.step} />
+                      )}
+                    </li>
+                  );
+                }
+                const calls = segmentWorkSteps(segment.steps);
+                if (calls.length === 0) {
+                  return null;
+                }
+                const isTail = isLive && segment === tailSegment;
+                return (
+                  <li
+                    className="gyro-run-row-item gyro-run-segment-item"
+                    key={segment.id}
+                  >
+                    {isTail || calls.length === 1 ? (
+                      <RunCalls
+                        aggregateFileStats={aggregateFileStats}
+                        calls={calls}
+                        onOpenChanges={onOpenChanges}
+                        windowed={isTail}
+                      />
+                    ) : (
+                      <RunSegmentSummary
+                        aggregateFileStats={aggregateFileStats}
+                        calls={calls}
+                        onOpenChanges={onOpenChanges}
+                      />
+                    )}
+                  </li>
+                );
+              })
+            : null}
+          {showSteps && !isSegments
             ? displaySteps.map((step) => {
                 if (step.kind === "work-group") {
                   return (
@@ -238,7 +326,13 @@ export function ChatRun({
           ) : null}
           {showThinkingPulse ? (
             <li className="gyro-run-row-item">
-              <RunPulse label="Thinking" />
+              {/* A reasoning headline, when the provider sent one, is the more
+                  honest version of "Thinking": it says what about. */}
+              {isSegments && tailStatus ? (
+                <RunPulse label={tailStatus} />
+              ) : (
+                <RunPulse label="Thinking" />
+              )}
             </li>
           ) : null}
           {retryPhase ? (
@@ -339,6 +433,211 @@ function RunWorkGroup({
   );
 }
 
+/**
+ * A finished stretch of work as one line — "Ran 3 commands, Read 1 file ›" —
+ * that opens onto the exact calls behind it.
+ */
+function RunSegmentSummary({
+  aggregateFileStats,
+  calls,
+  onOpenChanges,
+}: {
+  aggregateFileStats?: FileStats;
+  calls: WorkStep[];
+  onOpenChanges?: () => void;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const failed = calls.some((step) => step.item.status === "failed");
+  const className = [
+    "gyro-run-segment",
+    isExpanded ? "is-expanded" : "",
+    failed ? "is-failed" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div className={className}>
+      <button
+        aria-expanded={isExpanded}
+        className="gyro-run-segment-toggle"
+        onClick={() => setIsExpanded((current) => !current)}
+        type="button"
+      >
+        <span className="gyro-run-segment-label">
+          {summarizeSegment(calls)}
+        </span>
+        <ChevronRight
+          aria-hidden="true"
+          className="gyro-run-segment-chevron"
+          size={12}
+        />
+      </button>
+      {isExpanded ? (
+        <RunCalls
+          aggregateFileStats={aggregateFileStats}
+          calls={calls}
+          onOpenChanges={onOpenChanges}
+          windowed={false}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The exact calls of a stretch. While the stretch is live only the newest few
+ * stay on screen, so a long run of reads scrolls under a "+N more" line rather
+ * than pushing the narration out of view.
+ */
+function RunCalls({
+  aggregateFileStats,
+  calls,
+  onOpenChanges,
+  windowed,
+}: {
+  aggregateFileStats?: FileStats;
+  calls: WorkStep[];
+  onOpenChanges?: () => void;
+  windowed: boolean;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const now = useNow(calls.some((step) => step.item.status === "running"));
+  const { visible, hiddenCount } =
+    windowed && !showAll
+      ? liveWindow(calls, LIVE_CALL_WINDOW)
+      : { visible: calls, hiddenCount: 0 };
+  return (
+    <ol aria-label="Tool calls" className="gyro-run-calls">
+      {hiddenCount > 0 ? (
+        <li>
+          <button
+            className="gyro-run-calls-more"
+            onClick={() => setShowAll(true)}
+            type="button"
+          >
+            +{hiddenCount} more tool {hiddenCount === 1 ? "call" : "calls"}
+          </button>
+        </li>
+      ) : null}
+      {visible.map((step) => (
+        <li key={step.id}>
+          <RunCallRow
+            aggregateFileStats={aggregateFileStats}
+            now={now}
+            onOpenChanges={onOpenChanges}
+            step={step}
+          />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** One call, as one muted line: icon, "Ran git status", then its state. */
+function RunCallRow({
+  aggregateFileStats,
+  now,
+  onOpenChanges,
+  step,
+}: {
+  aggregateFileStats?: FileStats;
+  now: number;
+  onOpenChanges?: () => void;
+  step: WorkStep;
+}) {
+  const item = step.item;
+  const text = runCallText(step);
+  const Icon = workIcon(item);
+  const repeat = step.repeat ?? 1;
+  const file = item.kind === "file" ? item : undefined;
+  const lineStats = fileLineStats(file, aggregateFileStats);
+  const startedAt = Date.parse(step.at);
+  const elapsed =
+    item.status === "running" && Number.isFinite(startedAt)
+      ? formatRunDuration(Math.max(0, Math.round((now - startedAt) / 1_000)))
+      : undefined;
+  const className = [
+    "gyro-run-call",
+    `is-${item.kind}`,
+    item.status === "running" ? "is-running" : "",
+    item.status === "failed" ? "is-failed" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const body = (
+    <>
+      <span aria-hidden="true" className="gyro-run-row-icon">
+        <Icon size={14} />
+      </span>
+      <span className="gyro-run-call-text">
+        <span className="gyro-run-call-verb">{text.label}</span>
+        {text.description ? (
+          <span className="gyro-run-call-target">{text.description}</span>
+        ) : null}
+      </span>
+      {repeat > 1 ? (
+        <span className="gyro-run-row-repeat">×{repeat}</span>
+      ) : null}
+      {lineStats ? (
+        <span className="gyro-run-row-stat">
+          {lineStats.additions > 0 ? (
+            <em className="is-added">+{lineStats.additions}</em>
+          ) : null}
+          {lineStats.deletions > 0 ? (
+            <em className="is-removed">-{lineStats.deletions}</em>
+          ) : null}
+        </span>
+      ) : null}
+      {elapsed ? (
+        <span className="gyro-run-call-meta">
+          · Active now · {elapsed} elapsed
+        </span>
+      ) : null}
+      {item.status === "failed" ? (
+        <span className="gyro-run-call-meta is-failed">· Failed</span>
+      ) : null}
+    </>
+  );
+
+  if (file && onOpenChanges) {
+    return (
+      <button
+        className={`${className} is-actionable`}
+        onClick={onOpenChanges}
+        title={file.path}
+        type="button"
+      >
+        {body}
+        <ChevronRight
+          aria-hidden="true"
+          className="gyro-run-call-chevron"
+          size={12}
+        />
+      </button>
+    );
+  }
+  return (
+    <div className={className} title={text.description}>
+      {body}
+    </div>
+  );
+}
+
+/** A clock for "Ns elapsed", ticking only while something is running. */
+function useNow(isTicking: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isTicking) {
+      return;
+    }
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [isTicking]);
+  return now;
+}
+
 function RunHeader({
   activeLabel,
   statusLabel,
@@ -394,7 +693,7 @@ function RunRow({
   renderSay,
   step,
 }: {
-  aggregateFileStats?: { additions: number; deletions: number };
+  aggregateFileStats?: FileStats;
   onOpenChanges?: () => void;
   renderSay?: (text: string) => ReactNode;
   step: RunStep;

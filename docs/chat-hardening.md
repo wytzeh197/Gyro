@@ -36,9 +36,16 @@ Run `pnpm --filter @gyro-dev/desktop dev --port 1437` and open
 This development fixture renders the real ChatThread with synthetic events;
 it does not call a provider or change saved sessions.
 
-1. Start turn, then Complete turn: live work is expanded; completion collapses it and keeps the final response visible. Click Worked to reopen the details.
+1. Start turn, then Complete turn: live work is expanded; completion collapses it and keeps the final response visible. Click "Worked for …" to reopen the details.
 2. Reload saved turn: repeated clicks keep its content and placement stable.
 3. Short answer: the final response displays 7.
+4. Long work: narration splits the work into stretches. The earlier stretch
+   collapses to one summary line ("Ran 2 commands, Read 1 file, 1 other tool
+   call ›"). The live tail shows its newest four calls under "+N more tool
+   calls", with the running command marked "Active now". The failed command
+   reads "Failed". No row appears for the reasoning headline.
+5. Keep-alive: a completed turn shows a compact watch under the final reply
+   for a chat-owned dev server that should stay running.
 
 The browser replay was checked in Gyro Browser. Full Access writes were tested
 against temporary workspaces through the real guarded mutation code. The pass

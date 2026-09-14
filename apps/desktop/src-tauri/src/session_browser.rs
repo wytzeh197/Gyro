@@ -1012,6 +1012,8 @@ pub fn open_session_browser<R: Runtime>(
     let window = get_main_window(app)?;
     let session_for_title = session_id.clone();
     let app_for_title = app.clone();
+    let session_for_load = session_id.clone();
+    let app_for_load = app.clone();
     let bounds = request.bounds.clone().unwrap_or(SessionBrowserBounds {
         x: 0.0,
         y: 0.0,
@@ -1027,6 +1029,21 @@ pub fn open_session_browser<R: Runtime>(
         .incognito(true)
         .devtools(false)
         .on_navigation(browser_url_is_navigable)
+        .on_page_load(move |_webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                let url = payload.url().as_str();
+                let manager = app_for_load.state::<SessionBrowserManager>();
+                let _ = manager.set_url(&session_for_load, url);
+                let _ = app_for_load.emit(
+                    "session-browser-event",
+                    serde_json::json!({
+                        "sessionId": session_for_load,
+                        "kind": "loaded",
+                        "url": url,
+                    }),
+                );
+            }
+        })
         .on_document_title_changed(move |_webview, title| {
             let manager = app_for_title.state::<SessionBrowserManager>();
             let _ = manager.set_title(&session_for_title, &sanitize_text(&title));
@@ -1047,6 +1064,13 @@ pub fn open_session_browser<R: Runtime>(
             LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
         )
         .map_err(|error| format!("could not create session browser webview: {error}"))?;
+
+    // Child webviews are the unstable-path trigger that leaves native window
+    // controls at (0, 0). Re-apply the overlay inset on the parent window.
+    #[cfg(target_os = "macos")]
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        crate::apply_macos_traffic_light_position(&main);
+    }
 
     if !visible {
         let _ = webview.hide();

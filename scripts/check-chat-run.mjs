@@ -14,10 +14,14 @@ import {
   groupRunSteps,
   isGenericProviderToolLabel,
   isRunPhaseLive,
+  liveWindow,
+  runCallText,
   runHeaderLabel,
   runRetryText,
   runRowText,
+  segmentRunSteps,
   splitToolName,
+  summarizeSegment,
   workItemFromEvent,
 } from "../packages/ui/src/chat-run.ts";
 
@@ -1087,11 +1091,11 @@ assert.equal(
 assert.equal(formatRunDuration(3_600), "1h", "whole hours drop empty places");
 assert.equal(formatRunDuration(3_661), "1h 1m 1s");
 
-assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working · 12s");
-assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working · 1s");
+assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working for 12s");
+assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working for 1s");
 assert.equal(
   runHeaderLabel({ name: "done", durationMs: 231_000 }, "3m 51s"),
-  "Worked · 3m 51s",
+  "Worked for 3m 51s",
 );
 
 // A failed or interrupted turn has no recorded end, so the header must not
@@ -1198,4 +1202,126 @@ assert.equal(
   isAssistantPreambleBlock("Here are the results:"),
   false,
   "a colon alone does not make a block narration",
+);
+
+// --- segments: narration splits work into stretches ---------------------------
+
+const call = (id, item, repeat) => ({
+  kind: "work",
+  id,
+  at: at(0),
+  item: { status: "done", ...item },
+  ...(repeat ? { repeat } : {}),
+});
+
+assert.deepEqual(
+  segmentRunSteps([
+    { kind: "status", id: "r1", at: at(0), text: "Planning" },
+    call("c1", { kind: "command", command: "git status" }),
+    call("c2", { kind: "read", path: "a.ts" }),
+    { kind: "say", id: "s1", at: at(1), text: "Now editing." },
+    call("c3", { kind: "file", path: "a.ts" }),
+  ]).map((segment) =>
+    segment.kind === "work"
+      ? `${segment.id}:${segment.steps.length}`
+      : `${segment.kind}:${segment.id}`,
+  ),
+  ["segment-r1:3", "say:s1", "segment-c3:1"],
+  "narration should close a stretch; work and reasoning beats should share one",
+);
+
+assert.equal(
+  summarizeSegment([
+    call("a", { kind: "command", command: "git remote -v" }),
+    call("b", { kind: "read", path: "a.ts" }),
+    call("c", { kind: "command", command: "pnpm test" }, 2),
+    call("d", { kind: "read", path: "a.ts" }),
+    call("e", { kind: "tool", name: "Skill" }),
+  ]),
+  "Ran 3 commands, Read 1 file, 1 other tool call",
+  "kinds keep first-seen order, reads count distinct paths, repeats count calls",
+);
+assert.equal(
+  summarizeSegment([
+    call("a", { kind: "command", command: "ls" }),
+    call("b", { kind: "read", path: "a.ts" }),
+    call("c", { kind: "file", path: "a.ts" }),
+    call("d", { kind: "search", query: "todo" }),
+    call("e", { kind: "tool", name: "Skill", status: "failed" }),
+  ]),
+  "Ran 1 command, Read 1 file, Edited 1 file, 2 other tool calls, 1 failed",
+  "a fourth kind should fold into other calls and a failure should be named",
+);
+assert.equal(
+  summarizeSegment([call("a", { kind: "tool", name: "Skill" }, 2)]),
+  "Used 2 tools",
+  "a stretch of only unnamed tools should not read as 'other'",
+);
+
+assert.deepEqual(
+  liveWindow([1, 2, 3, 4, 5, 6], 4),
+  { visible: [3, 4, 5, 6], hiddenCount: 2 },
+  "the live window should keep the newest calls",
+);
+assert.deepEqual(liveWindow([1, 2], 4), { visible: [1, 2], hiddenCount: 0 });
+
+assert.deepEqual(
+  runCallText(
+    call("a", {
+      kind: "command",
+      command: "/bin/zsh -lc 'cd /repo && git remote -v'",
+      status: "running",
+    }),
+  ),
+  { label: "Running", description: "git remote -v" },
+  "a call row should show the command as typed, without shell wrapper or cd",
+);
+assert.deepEqual(
+  runCallText(call("a", { kind: "search", query: "useNow" })),
+  { label: "Searched for", description: "useNow" },
+);
+
+// Reasoning headlines are a live status, never a tool row or a reply.
+const reasoningEvents = [
+  activity("reasoning", "**Checking file sizes**", {}, 0),
+];
+const thinking = buildRunModel(reasoningEvents, { isRunning: true });
+assert.deepEqual(
+  thinking.steps.map((step) => [step.kind, step.text]),
+  [["status", "Checking file sizes"]],
+  "a reasoning summary should become a status beat with its markdown stripped",
+);
+assert.equal(
+  thinking.phase.name,
+  "thinking",
+  "a run with only reasoning should still read as thinking",
+);
+const reasonedEvents = [
+  ...reasoningEvents,
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  say("All checks pass.", 2),
+];
+const reasoned = buildRunModel(reasonedEvents, { isRunning: false });
+assert.equal(
+  reasoned.response?.message,
+  "All checks pass.",
+  "reasoning should not stop the closing message from being the answer",
+);
+assert.deepEqual(
+  buildRunModel(reasonedEvents, { isRunning: false }).steps.map(
+    (step) => step.id,
+  ),
+  reasoned.steps.map((step) => step.id),
+  "replaying the same events should produce the same steps",
+);
+assert.equal(
+  buildRunModel(
+    [
+      activity("reasoning", "**Checking file sizes**", {}, 0),
+      activity("reasoning", "Checking file sizes", {}, 0),
+    ],
+    { isRunning: true },
+  ).steps.length,
+  1,
+  "a re-sent reasoning headline should stay one beat",
 );

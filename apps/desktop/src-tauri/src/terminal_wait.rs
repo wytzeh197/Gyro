@@ -1,13 +1,19 @@
 use super::{CancellationToken, TerminalPaneSnapshot};
 use std::time::{Duration, Instant};
 
+/// Longest single wait. Every wait call re-sends the model's whole context, so
+/// one five-minute wait on a build is far cheaper than five one-minute polls.
+pub(super) const MAX_WAIT_MS: u64 = 300_000;
+
 pub(super) fn timeout(arguments: &serde_json::Value) -> anyhow::Result<Duration> {
     let millis = match arguments.get("timeoutMs") {
         None => 60_000,
         Some(value) => value
             .as_u64()
-            .filter(|value| *value <= 60_000)
-            .ok_or_else(|| anyhow::anyhow!("timeoutMs must be an integer from 0 to 60000"))?,
+            .filter(|value| *value <= MAX_WAIT_MS)
+            .ok_or_else(|| {
+                anyhow::anyhow!("timeoutMs must be an integer from 0 to {MAX_WAIT_MS}")
+            })?,
     };
     Ok(Duration::from_millis(millis))
 }
@@ -121,9 +127,13 @@ mod tests {
             timeout(&serde_json::json!({"timeoutMs": 0})).unwrap(),
             Duration::ZERO
         );
+        assert_eq!(
+            timeout(&serde_json::json!({"timeoutMs": MAX_WAIT_MS})).unwrap(),
+            Duration::from_secs(300)
+        );
         for value in [
             serde_json::json!(-1),
-            serde_json::json!(60001),
+            serde_json::json!(MAX_WAIT_MS + 1),
             serde_json::json!(1.5),
             serde_json::json!("1000"),
         ] {
@@ -131,7 +141,7 @@ mod tests {
         }
         let schema = desktop_capability_tool_schema(CapabilityId::TerminalWait);
         assert_eq!(schema["required"], serde_json::json!(["resourceId"]));
-        assert_eq!(schema["properties"]["timeoutMs"]["maximum"], 60000);
+        assert_eq!(schema["properties"]["timeoutMs"]["maximum"], MAX_WAIT_MS);
         assert_eq!(
             CapabilityId::from_provider_tool_name("gyro_terminal_wait"),
             Some(CapabilityId::TerminalWait)

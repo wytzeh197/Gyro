@@ -1,8 +1,8 @@
 # Roadmap to v1.0
 
 Gyro is a public macOS alpha. This roadmap describes intended work, not
-verified runtime behavior or release commitments. See [release notes](releases/v0.1.0-alpha.48.1.md)
-for the alpha.48.1 changes and [GitHub Releases](https://github.com/wytzeh197/Gyro/releases)
+verified runtime behavior or release commitments. See [release notes](releases/v0.1.0-alpha.48.2.md)
+for the alpha.48.2 changes and [GitHub Releases](https://github.com/wytzeh197/Gyro/releases)
 for published versions. The [vision](vision.md) defines the product principles
 and the free local core.
 
