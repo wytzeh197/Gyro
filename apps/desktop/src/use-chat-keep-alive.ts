@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { decideKeepAlive } from "@gyro-dev/ui";
+import { decideKeepAlive, isKeepAliveCommand } from "@gyro-dev/ui";
 import type { TerminalPane, WorkbenchAction } from "@gyro-dev/ui";
 
 /**
@@ -26,7 +26,7 @@ export function useChatKeepAliveSupervisor({
     const now = new Date().toISOString();
     const liveIds = new Set<string>();
     for (const pane of panes) {
-      if (!pane.owner) continue;
+      if (!pane.owner || !isKeepAliveCommand(pane.command)) continue;
       liveIds.add(pane.id);
       const decision = decideKeepAlive({
         command: pane.command,
@@ -55,6 +55,17 @@ export function useChatKeepAliveSupervisor({
       if (timersRef.current.has(pane.id)) continue;
       const timer = window.setTimeout(() => {
         timersRef.current.delete(pane.id);
+        const current = panesRef.current.find((item) => item.id === pane.id);
+        if (
+          !current?.owner ||
+          current.owner.turnId !== pane.owner?.turnId ||
+          current.command !== pane.command ||
+          !isKeepAliveCommand(current.command) ||
+          current.keepAlive?.phase !== "relaunching" ||
+          current.keepAlive.stopOrigin ||
+          (current.status !== "done" && current.status !== "failed")
+        )
+          return;
         void restartRef.current(pane.id);
       }, decision.delayMs);
       timersRef.current.set(pane.id, timer);

@@ -91,6 +91,7 @@ import {
   resolvedWorkspaceSettings,
   promoteQueuedMessage,
   selectQueuedMessageDelivery,
+  updateSendingSessions,
   persistableChatGridState,
   sanitizeStoredIdeState,
   sanitizeStoredChatGridState,
@@ -955,6 +956,7 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
   const [unreadCompletedSessionIds, setUnreadCompletedSessionIds] = useState<
     string[]
   >([]);
@@ -2198,15 +2200,12 @@ export function App() {
             : current,
         );
       } else {
+        if (sendingSessionIdsRef.current.has(sessionId)) {
+          queuedDeliveryNotBeforeRef.current.set(sessionId, Date.now() + 3_000);
+        }
         sendingSessionIdsRef.current.delete(sessionId);
       }
-      setSendingSessionIds((current) => {
-        const hasSession = current.includes(sessionId);
-        if (isSending) {
-          return hasSession ? current : [...current, sessionId];
-        }
-        return hasSession ? current.filter((id) => id !== sessionId) : current;
-      });
+      setSendingSessionIds((current) => updateSendingSessions(current, sessionId, isSending));
     },
     [],
   );
@@ -10488,6 +10487,7 @@ export function App() {
     // message instead of waiting for the user to navigate back to that chat.
     const now = Date.now();
     const next = selectQueuedMessageDelivery(chatMessageQueues, {
+      deliveryNotBefore: queuedDeliveryNotBeforeRef.current,
       dispatchingSessionIds: queuedChatDispatchesRef.current,
       pausedSessionIds: stoppedChatSessionsRef.current,
       now,

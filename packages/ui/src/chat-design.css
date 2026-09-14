@@ -323,6 +323,7 @@
   .gyro-run.is-segments
   .gyro-run-row.is-say {
   display: block;
+  overflow-wrap: anywhere;
   padding: 0;
 }
 :root[data-theme]
@@ -355,9 +356,13 @@
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-calls {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   list-style: none;
   margin: 0;
   padding: 0;
+}
+:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-calls > li {
+  min-width: 0;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -373,6 +378,7 @@
   letter-spacing: -0.005em;
   max-width: 100%;
   min-height: 25px;
+  min-width: 0;
   padding: 0;
   text-align: left;
 }
@@ -407,6 +413,7 @@
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-text {
   display: flex;
+  flex: 1 1 auto;
   gap: 0.3em;
   min-width: 0;
 }

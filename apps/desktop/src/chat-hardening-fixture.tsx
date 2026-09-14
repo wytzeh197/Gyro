@@ -91,10 +91,17 @@ const longWork = [
   user,
   activity("think-1", "reasoning", "**Inspecting the chat run**"),
   activity("c1", "command", "git remote -v", { command: "git remote -v" }),
-  activity("c2", "read", "Read chat-run.ts", { path: "packages/ui/src/chat-run.ts" }),
-  activity("c3", "command", "git status --short", { command: "git status --short" }),
+  activity("c2", "read", "Read chat-run.ts", {
+    path: "packages/ui/src/chat-run.ts",
+  }),
+  activity("c3", "command", "git status --short", {
+    command: "git status --short",
+  }),
   activity("c4", "tool", "Used Skill", { tool: "Skill", note: "review" }),
-  narrate("say-1", "I found where the rail is built. Next I'll check the styles."),
+  narrate(
+    "say-1",
+    "I found where the rail is built. Next I'll check the styles.",
+  ),
   ...[
     "rg gyro-run packages/ui/src",
     "pnpm typecheck",
@@ -107,13 +114,18 @@ const longWork = [
       ...(index === 2 ? { status: "failed" } : {}),
     }),
   ),
-  activity("t5", "read", "Read styles.css", { path: "packages/ui/src/styles.css" }),
+  activity("t5", "read", "Read styles.css", {
+    path: "packages/ui/src/styles.css",
+  }),
   activity("t6", "file", "Edited chat-design.css", {
     path: "packages/ui/src/chat-design.css",
     additions: 120,
     deletions: 4,
   }),
-  activity("t7", "command", "pnpm test", { command: "pnpm test", status: "running" }),
+  activity("t7", "command", "pnpm test", {
+    command: "pnpm test",
+    status: "running",
+  }),
   { ...status, payload: { kind: "provider-status", status: "running" } },
 ];
 
@@ -200,6 +212,14 @@ function Fixture() {
           }}
         >
           Short answer
+        </button>
+        <button
+          onClick={() => {
+            setKeepAlivePanes([]);
+            setEvents([user, answer, tool, status]);
+          }}
+        >
+          Late activity after answer
         </button>
         <button
           onClick={() => {

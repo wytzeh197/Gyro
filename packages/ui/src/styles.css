@@ -30765,8 +30765,8 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-chat-surface.is-thread .gyro-chat-thread-canvas > .gyro-chat-transcript {
-  padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 18px);
-  scroll-padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 18px);
+  padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 82px);
+  scroll-padding-bottom: calc(var(--gyro-composer-dock-height, 160px) + 82px);
   scrollbar-width: none;
 }
 
@@ -32459,12 +32459,14 @@ button.gyro-account-menu-row:hover,
 
 .gyro-run-rail {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .gyro-run-row-item {
+  min-width: 0;
   position: relative;
 }
 

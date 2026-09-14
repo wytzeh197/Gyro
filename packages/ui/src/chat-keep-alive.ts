@@ -1,4 +1,9 @@
-import type { TerminalKeepAlive, TerminalPane, TerminalPaneStatus } from "./types.ts";
+import type {
+  TerminalKeepAlive,
+  TerminalPane,
+  TerminalPaneStatus,
+} from "./types.ts";
+import { persistentProcessKind } from "./chat-process-command.ts";
 
 /** Auto-relaunch budget for one supervised process. */
 export const KEEP_ALIVE_MAX_RESTARTS = 3;
@@ -28,35 +33,15 @@ export type KeepAliveDecision =
   | { type: "set"; keepAlive: TerminalKeepAlive }
   | { type: "relaunch"; keepAlive: TerminalKeepAlive; delayMs: number };
 
-const KEEP_ALIVE_PATTERN =
-  /\b(dev|serve|server|start|watch|storybook|nodemon|vite|next|nuxt|remix|astro|uvicorn|runserver|watchexec|foreman|honcho|overmind|webpack-dev-server|parcel|turbo)\b/i;
-const WATCHER_PATTERN =
-  /\b(watch|nodemon|watchexec|cargo\s+watch)\b|--watch\b|watch:/i;
-const DEV_SERVER_PATTERN =
-  /\b(dev|serve|server|start|storybook|vite|next|nuxt|remix|astro|uvicorn|runserver|webpack-dev-server|parcel)\b/i;
-const FINITE_WAITER_PATTERN = /\bgh\s+run\s+watch\b/i;
-const FINITE_COMMAND_PATTERN =
-  /\b(test|lint|typecheck|tsc|build|compile|install|ci|publish|deploy|fmt|format|check)\b/i;
-
 /**
- * A command the model started so it would stay up: a dev server, a watcher,
- * or any other chat-owned process that is not a one-shot build/test/wait.
+ * Supervise explicit servers/watchers only; unknown commands are finite by default.
  */
 export function isKeepAliveCommand(command: string): boolean {
-  const text = command.trim();
-  if (!text) return false;
-  if (FINITE_WAITER_PATTERN.test(text)) return false;
-  if (KEEP_ALIVE_PATTERN.test(text) || /--watch\b/.test(text)) return true;
-  if (FINITE_COMMAND_PATTERN.test(text)) return false;
-  return true;
+  return persistentProcessKind(command) !== undefined;
 }
 
 export function keepAliveKind(command: string): KeepAliveKind {
-  if (WATCHER_PATTERN.test(command) && !DEV_SERVER_PATTERN.test(command)) {
-    return "watcher";
-  }
-  if (DEV_SERVER_PATTERN.test(command)) return "dev-server";
-  return "service";
+  return persistentProcessKind(command) ?? "service";
 }
 
 export function keepAliveTitle(input: {
@@ -76,7 +61,9 @@ export function keepAliveTitle(input: {
   }
 }
 
-export function keepAliveStatusLabel(watch: Pick<KeepAliveWatch, "phase" | "restartCount">): string {
+export function keepAliveStatusLabel(
+  watch: Pick<KeepAliveWatch, "phase" | "restartCount">,
+): string {
   switch (watch.phase) {
     case "relaunching":
       return "Relaunching";
@@ -117,7 +104,9 @@ function isFinishedStatus(status: TerminalPaneStatus): boolean {
 }
 
 function wasUserInterrupt(exitCode: number | null | undefined): boolean {
-  return typeof exitCode === "number" && USER_INTERRUPT_EXIT_CODES.has(exitCode);
+  return (
+    typeof exitCode === "number" && USER_INTERRUPT_EXIT_CODES.has(exitCode)
+  );
 }
 
 /**
@@ -148,25 +137,34 @@ export function decideKeepAlive(input: {
         phase: "watching",
         lastRelaunchedAt: input.now ?? input.keepAlive.lastRelaunchedAt,
       };
-      return sameKeepAlive(input.keepAlive, next) ? { type: "noop" } : { type: "set", keepAlive: next };
+      return sameKeepAlive(input.keepAlive, next)
+        ? { type: "noop" }
+        : { type: "set", keepAlive: next };
     }
     const next: TerminalKeepAlive = {
       turnId,
       restartCount:
-        input.keepAlive?.turnId === turnId ? (input.keepAlive.restartCount ?? 0) : 0,
+        input.keepAlive?.turnId === turnId
+          ? (input.keepAlive.restartCount ?? 0)
+          : 0,
       phase: "watching",
       lastRelaunchedAt:
         input.keepAlive?.turnId === turnId
           ? input.keepAlive.lastRelaunchedAt
           : undefined,
     };
-    return sameKeepAlive(input.keepAlive, next) ? { type: "noop" } : { type: "set", keepAlive: next };
+    return sameKeepAlive(input.keepAlive, next)
+      ? { type: "noop" }
+      : { type: "set", keepAlive: next };
   }
 
   if (!isFinishedStatus(input.paneStatus) || !input.keepAlive) {
     return { type: "noop" };
   }
-  if (input.keepAlive.phase === "stopped" || input.keepAlive.phase === "exited") {
+  if (
+    input.keepAlive.phase === "stopped" ||
+    input.keepAlive.phase === "exited"
+  ) {
     return { type: "noop" };
   }
   if (input.keepAlive.phase === "relaunching") {
@@ -183,12 +181,16 @@ export function decideKeepAlive(input: {
       phase: "stopped",
       stopOrigin: input.keepAlive.stopOrigin ?? "user",
     };
-    return sameKeepAlive(input.keepAlive, next) ? { type: "noop" } : { type: "set", keepAlive: next };
+    return sameKeepAlive(input.keepAlive, next)
+      ? { type: "noop" }
+      : { type: "set", keepAlive: next };
   }
 
   if (input.keepAlive.restartCount >= KEEP_ALIVE_MAX_RESTARTS) {
     const next: TerminalKeepAlive = { ...input.keepAlive, phase: "exited" };
-    return sameKeepAlive(input.keepAlive, next) ? { type: "noop" } : { type: "set", keepAlive: next };
+    return sameKeepAlive(input.keepAlive, next)
+      ? { type: "noop" }
+      : { type: "set", keepAlive: next };
   }
 
   const restartCount = input.keepAlive.restartCount + 1;
@@ -217,7 +219,8 @@ export function keepAliveWatchesFromPanes(
 ): KeepAliveWatch[] {
   const watches: KeepAliveWatch[] = [];
   for (const pane of panes) {
-    if (!pane.owner || !pane.keepAlive) continue;
+    if (!pane.owner || !pane.keepAlive || !isKeepAliveCommand(pane.command))
+      continue;
     watches.push({
       paneId: pane.id,
       sessionId: pane.owner.sessionId,

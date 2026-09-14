@@ -15,8 +15,8 @@ assert.equal(isKeepAliveCommand("pnpm --filter @gyro-dev/desktop dev"), true);
 assert.equal(isKeepAliveCommand("npm run dev"), true);
 assert.equal(isKeepAliveCommand("cargo watch -x run"), true);
 assert.equal(isKeepAliveCommand("pnpm test --watch"), true);
-assert.equal(isKeepAliveCommand("python app.py"), true);
-assert.equal(isKeepAliveCommand("go run ."), true);
+assert.equal(isKeepAliveCommand("python app.py"), false);
+assert.equal(isKeepAliveCommand("go run ."), false);
 assert.equal(isKeepAliveCommand("gh run watch 123 --exit-status"), false);
 assert.equal(isKeepAliveCommand("pnpm test"), false);
 assert.equal(isKeepAliveCommand("cargo build"), false);
@@ -26,10 +26,7 @@ assert.equal(keepAliveKind("pnpm dev"), "dev-server");
 assert.equal(keepAliveKind("cargo watch -x test"), "watcher");
 assert.equal(keepAliveKind("python app.py"), "service");
 assert.equal(keepAliveTitle({ command: "pnpm dev" }), "Dev server");
-assert.equal(
-  keepAliveTitle({ command: "python app.py", title: "API" }),
-  "API",
-);
+assert.equal(keepAliveTitle({ command: "python app.py", title: "API" }), "API");
 assert.equal(
   keepAliveTitle({ command: "pnpm dev", taskTitle: "Desktop" }),
   "Desktop",
@@ -71,7 +68,10 @@ const crashed = decideKeepAlive({
   keepAlive: { turnId: "turn-1", restartCount: 0, phase: "watching" },
 });
 assert.equal(crashed.type, "relaunch");
-assert.equal(crashed.type === "relaunch" && crashed.keepAlive.phase, "relaunching");
+assert.equal(
+  crashed.type === "relaunch" && crashed.keepAlive.phase,
+  "relaunching",
+);
 assert.equal(crashed.type === "relaunch" && crashed.keepAlive.restartCount, 1);
 
 const userStop = decideKeepAlive({
@@ -95,7 +95,7 @@ assert.equal(ctrlC.type, "set");
 assert.equal(ctrlC.type === "set" && ctrlC.keepAlive.phase, "stopped");
 
 const modelStop = decideKeepAlive({
-  command: "python app.py",
+  command: "python -m http.server",
   paneStatus: "failed",
   ownerTurnId: "turn-1",
   keepAlive: {
@@ -145,7 +145,12 @@ const watches = keepAliveWatchesFromPanes([
     id: "model:ses_1",
     title: "Desktop",
     command: "pnpm --filter @gyro-dev/desktop dev",
-    owner: { kind: "model", sessionId: "ses_1", turnId: "turn-1", callId: "c1" },
+    owner: {
+      kind: "model",
+      sessionId: "ses_1",
+      turnId: "turn-1",
+      callId: "c1",
+    },
     keepAlive: { turnId: "turn-1", restartCount: 0, phase: "watching" },
   },
   {
@@ -163,3 +168,73 @@ assert.equal(
 );
 
 console.log("chat keep-alive checks passed");
+
+// Real failures: package names and test paths must never turn checks into servers.
+const finiteCommands = [
+  "/bin/zsh -lc CI=1 pnpm --filter @gyro-dev/ui typecheck && node scripts/check-workbench-ui.mjs && node --experimental-strip-types scripts/check-composer-context-usage.mjs",
+  "/bin/zsh -lc set -e; export CI=1; pnpm doctor; pnpm check; pnpm test; pnpm smoke:workbench; pnpm site:check; pnpm --filter @gyro-dev/desktop build; cargo fmt --all -- --check; cargo test --workspace; cargo run -p gyro-cli -- --version; pnpm release:cli:check",
+  "pnpm --filter @gyro-dev/desktop build",
+  "pnpm exec vite build",
+  "node scripts/dev-server-check.mjs",
+  "rg 'pnpm dev; npm start' packages/ui/src",
+  "echo 'vite --watch'",
+  "gh run watch 123 --exit-status",
+  "git status",
+  "python app.py",
+  "go run .",
+  "npm install",
+  "pnpm dev --help",
+  "pnpm exec vite --version",
+  "pnpm build && pnpm dev",
+  "pnpm dev | tee log",
+  "unknown-service",
+  "pnpm 'dev",
+  "",
+];
+for (const command of finiteCommands) {
+  assert.equal(isKeepAliveCommand(command), false, command);
+  assert.deepEqual(
+    decideKeepAlive({
+      command,
+      paneStatus: "done",
+      ownerTurnId: "old",
+      exitCode: 0,
+      keepAlive: { turnId: "old", restartCount: 1, phase: "watching" },
+    }),
+    { type: "noop" },
+    `must not restart stale false match: ${command}`,
+  );
+  assert.deepEqual(
+    keepAliveWatchesFromPanes([
+      {
+        id: "stale",
+        title: "Dev server",
+        command,
+        owner: { kind: "model", sessionId: "s", turnId: "old", callId: "c" },
+        keepAlive: { turnId: "old", restartCount: 3, phase: "exited" },
+      },
+    ]),
+    [],
+    `must hide stale false match: ${command}`,
+  );
+}
+for (const [command, kind] of [
+  ["pnpm --filter @gyro-dev/desktop dev", "dev-server"],
+  ["pnpm --filter=@gyro-dev/desktop run dev", "dev-server"],
+  ['/bin/zsh -lc "cd /tmp; pnpm dev"', "dev-server"],
+  ["/bin/zsh -lc set -e; export CI=1; pnpm dev", "dev-server"],
+  ["env PORT=3000 npm run start", "dev-server"],
+  ["pnpm exec vite --host 127.0.0.1", "dev-server"],
+  ["python3 -m http.server 8000", "dev-server"],
+  ["uvicorn app:app --reload", "dev-server"],
+  ["cargo watch -x test", "watcher"],
+  ["pnpm --filter @gyro-dev/ui test --watch", "watcher"],
+  ["npx tsc --watch", "watcher"],
+  ["npm run test:watch", "watcher"],
+]) {
+  assert.equal(isKeepAliveCommand(command), true, command);
+  assert.equal(keepAliveKind(command), kind, command);
+}
+console.log(
+  "conservative process classification and stale-card regressions passed",
+);

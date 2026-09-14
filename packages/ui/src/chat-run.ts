@@ -136,11 +136,7 @@ export type RunStep =
 
 /** A plain-language phase for a consecutive stretch of work. */
 export type WorkGroupKind =
-  | "review"
-  | "change"
-  | "verify"
-  | "command"
-  | "browser";
+  "review" | "change" | "verify" | "command" | "browser";
 
 export type WorkGroup = {
   kind: "work-group";
@@ -278,12 +274,7 @@ export function segmentWorkSteps(
 }
 
 type SegmentCountKey =
-  | "command"
-  | "read"
-  | "file"
-  | "search"
-  | "browser"
-  | "other";
+  "command" | "read" | "file" | "search" | "browser" | "other";
 
 const SEGMENT_PHRASES = {
   command: (n) => `Ran ${n} ${n === 1 ? "command" : "commands"}`,
@@ -440,9 +431,8 @@ export function runCallText(
  * put around it: `/bin/zsh -lc 'cd /repo && git status'` → `git status`.
  */
 function displayCommand(command: string): string {
-  const wrapped = /^\s*(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(['"])([\s\S]*)\1\s*$/.exec(
-    command,
-  );
+  const wrapped =
+    /^\s*(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(['"])([\s\S]*)\1\s*$/.exec(command);
   const inner = wrapped ? wrapped[2]! : command;
   return (
     inner.replace(/^\s*(?:cd\s+[^;&|]+\s*(?:&&|;)\s*)+/i, "").trim() || inner
@@ -756,6 +746,22 @@ function partitionClosingResponse(
   events: SessionEvent[],
   isRunning: boolean,
 ): ClosingResponse | undefined {
+  // A saved provider response is the conclusion even when late capability
+  // events or live sequence numbers place work after it. Keep its segments
+  // together without promoting commentary or a previous attempt's answer.
+  const durable = events.findLast(isDurableAssistantResponse);
+  if (durable) {
+    const responseId = durable.id.split("#segment-")[0];
+    const belongsToResponse = (event: SessionEvent) =>
+      isDurableAssistantResponse(event) &&
+      event.id.split("#segment-")[0] === responseId &&
+      event.sessionId === durable.sessionId &&
+      event.turnId === durable.turnId;
+    events = [
+      ...events.filter((event) => !belongsToResponse(event)),
+      ...events.filter(belongsToResponse),
+    ];
+  }
   let end = events.length;
   while (end > 0 && workItemFromEvent(events[end - 1]!)?.kind === "file") {
     end -= 1;
@@ -763,7 +769,13 @@ function partitionClosingResponse(
 
   const trailing: SessionEvent[] = [];
   let index = end - 1;
-  while (index >= 0 && events[index]!.kind === "assistant-message") {
+  while (
+    index >= 0 &&
+    events[index]!.kind === "assistant-message" &&
+    (!durable ||
+      events[index]!.id.split("#segment-")[0] ===
+        durable.id.split("#segment-")[0])
+  ) {
     const text = events[index]!.message.trim();
     if (
       text &&
