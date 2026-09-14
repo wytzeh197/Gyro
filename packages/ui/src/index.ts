@@ -405,6 +405,7 @@ export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
 export {
   promoteQueuedMessage,
   selectQueuedMessageDelivery,
+  updateSendingSessions,
 } from "./chat-message-queue";
 export type {
   QueuedDeliverySelection,

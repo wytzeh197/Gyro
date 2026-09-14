@@ -161,3 +161,54 @@ for (const message of ["A", "7", "✓", "👍"]) {
 console.log(
   "Chat hardening checks passed: turn isolation, final reply placement, idempotent refresh, corrupt segments, short replies.",
 );
+
+// A durable conclusion must survive later work, regardless of stream order.
+for (const late of [
+  tool,
+  event("late-read", "system-event", "Read complete", {
+    kind: "capability-call",
+    capabilityId: "workspace-read",
+    callId: "read",
+    status: "done",
+    timelineSequence: 101,
+  }),
+  commentary("turn-1"),
+]) {
+  for (const isRunning of [true, false]) {
+    const final = { ...answer, message: "**Fixed.**\n\nTests passed." };
+    const run = buildRunModel([final, late], { isRunning });
+    assert.equal(
+      run.response?.message,
+      final.message,
+      "late work must not hide the final reply",
+    );
+    assert.ok(
+      !run.steps.some((s) => s.kind === "say" && s.text.includes("**Fixed.**")),
+      "the final answer must not also appear inside the collapsed rail",
+    );
+  }
+}
+const previousAnswer = {
+  ...answer,
+  id: "previous",
+  message: "Earlier attempt.",
+  payload: {
+    ...answer.payload,
+    timelineSequence: 1,
+  },
+};
+assert.equal(
+  buildRunModel([previousAnswer, answer]).response?.message,
+  answer.message,
+  "a previous answer must not be concatenated into the latest conclusion",
+);
+const streamOnly = {
+  ...answer,
+  payload: { kind: "provider-stream", streaming: true, timelineSequence: 1 },
+};
+assert.equal(
+  buildRunModel([streamOnly, tool], { isRunning: true }).response,
+  undefined,
+  "live commentary must not be promoted to a durable conclusion",
+);
+console.log("late-activity final-response regressions passed");

@@ -4608,10 +4608,10 @@ expect(
     tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
     tauriConfig.app.windows[0].trafficLightPosition.y === 16 &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
-    desktopRustSource.includes("inset_macos_traffic_lights") &&
-    desktopRustSource.includes("standardWindowButton") &&
-    desktopRustSource.includes("MAIN_TRAFFIC_LIGHT_X") &&
-    desktopRustSource.includes("MAIN_TRAFFIC_LIGHT_Y") &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("inset_macos_traffic_lights") &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("standardWindowButton") &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("MAIN_TRAFFIC_LIGHT_X") &&
+    readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes("MAIN_TRAFFIC_LIGHT_Y") &&
     desktopRustSource.includes("apply_macos_traffic_light_position(&window)") &&
     desktopRustSource.includes("apply_macos_traffic_light_position(&main)") &&
     readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
@@ -7538,7 +7538,7 @@ expect(
     surfaceSource.includes("displayedContextUsage") &&
     surfaceSource.includes("displayedContextUsage.remainingLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
-    surfaceSource.includes("${preview.remainingLabel} remaining") &&
+    !surfaceSource.includes("${preview.remainingLabel} remaining") &&
     styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(

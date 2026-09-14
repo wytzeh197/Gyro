@@ -8097,7 +8097,7 @@ export function ChatSurface({
         )}px`;
         transcript.style.setProperty(
           "--gyro-composer-dock-height",
-          composerHeight,
+          `${Math.ceil(dockBounds.height)}px`,
         );
         dock.style.setProperty("--gyro-composer-solid-height", composerHeight);
       }
@@ -22434,21 +22434,11 @@ function composerModelPickerItem(
   providerId: ProviderId,
   model: { id: string; displayName: string; contextWindowTokens?: number },
   activeModelId: string | undefined,
-  contextUsage?: ComposerContextUsage,
 ): ComposerPopoverItem {
-  const preview = contextUsage
-    ? composerContextUsageForModel(contextUsage, {
-        providerId,
-        modelId: model.id,
-        modelLabel: model.displayName,
-        contextWindowTokens: model.contextWindowTokens,
-      })
-    : undefined;
   return {
     action: `select-provider-model:${providerId}:${model.id}`,
     active: model.id === activeModelId,
     contextWindowTokens: model.contextWindowTokens,
-    detail: preview ? `${preview.remainingLabel} remaining` : undefined,
     hideIcon: true,
     icon: Sparkles,
     kind: "model",
@@ -22889,7 +22879,6 @@ function Composer({
               modelPickerProvider.id === effectiveProviderId
                 ? activeModelIdForPicker
                 : undefined,
-              contextUsage,
             ),
           ),
         ]
@@ -22915,7 +22904,6 @@ function Composer({
           displayProvider.id,
           model,
           effectiveModelId,
-          contextUsage,
         ),
       )
     : [];

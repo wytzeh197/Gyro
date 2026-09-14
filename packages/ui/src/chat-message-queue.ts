@@ -1,4 +1,10 @@
 /** A queued turn's delivery state, shared by the desktop scheduler and tests. */
+export function updateSendingSessions(current: string[], sessionId: string, isSending: boolean): string[] {
+  const hasSession = current.includes(sessionId);
+  if (isSending) return hasSession ? current : [...current, sessionId];
+  return hasSession ? current.filter((id) => id !== sessionId) : current;
+}
+
 export type QueuedMessageDelivery = {
   retryAt?: number;
   status: "failed" | "waiting" | "sending";
@@ -42,6 +48,7 @@ export function selectQueuedMessageDelivery<T extends QueuedMessageDelivery>(
     now: number;
     pausedSessionIds?: ReadonlySet<string>;
     sendingSessionIds: ReadonlySet<string>;
+    deliveryNotBefore?: ReadonlyMap<string, number>;
   },
 ): QueuedDeliverySelection<T> | undefined {
   const candidates = Object.entries(queues)
@@ -56,15 +63,18 @@ export function selectQueuedMessageDelivery<T extends QueuedMessageDelivery>(
         !options.sendingSessionIds.has(candidate.sessionId) &&
         !options.dispatchingSessionIds.has(candidate.sessionId),
     );
+  const readyAt = ({ sessionId, message }: { sessionId: string; message: T }) =>
+    Math.max(
+      message.retryAt ?? 0,
+      options.deliveryNotBefore?.get(sessionId) ?? 0,
+    );
   const ready = candidates.find(
-    ({ message }) => (message.retryAt ?? 0) <= options.now,
+    (candidate) => readyAt(candidate) <= options.now,
   );
   if (ready) return { kind: "ready", ...ready };
   if (candidates.length === 0) return undefined;
   return {
     kind: "waiting",
-    retryAt: Math.min(
-      ...candidates.map(({ message }) => message.retryAt ?? options.now),
-    ),
+    retryAt: Math.min(...candidates.map(readyAt)),
   };
 }

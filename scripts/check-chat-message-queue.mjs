@@ -11,6 +11,41 @@ const message = (id, options = {}) => ({
   ...options,
 });
 
+const cooldownOptions = {
+  dispatchingSessionIds: new Set(),
+  sendingSessionIds: new Set(),
+  deliveryNotBefore: new Map([["chat", 3000]]),
+  now: 2999,
+};
+assert.deepEqual(
+  selectQueuedMessageDelivery({ chat: [message("next")] }, cooldownOptions),
+  { kind: "waiting", retryAt: 3000 },
+  "automatic delivery must leave time for the completed reply to appear",
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { chat: [message("next")] },
+    { ...cooldownOptions, now: 3000 },
+  )?.kind,
+  "ready",
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { chat: [message("next")], other: [message("ready")] },
+    cooldownOptions,
+  )?.sessionId,
+  "other",
+  "a completion pause must not delay other chats",
+);
+assert.deepEqual(
+  selectQueuedMessageDelivery(
+    { chat: [message("retry", { retryAt: 4500 })] },
+    cooldownOptions,
+  ),
+  { kind: "waiting", retryAt: 4500 },
+  "completion pauses must preserve a longer retry delay",
+);
+
 // A session can finish while the user is reading another chat. Its queue must
 // continue without requiring focus to return to the finished session.
 assert.deepEqual(
